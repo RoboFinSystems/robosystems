@@ -27,6 +27,7 @@ from robosystems.models.api.extensions.reports import (
   FinancialStatementAnalysisRequest,
 )
 from robosystems.models.api.views import CreateViewRequest
+from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
 from robosystems.routers.extensions.roboledger.views import (
   build_fact_grid_op,
   financial_statement_analysis_op,
@@ -44,6 +45,7 @@ def _make_create_view_request(
   entity=None,
   entities=None,
   include_summary=False,
+  limit=DEFAULT_FACT_LIMIT,
 ):
   """Build a real CreateViewRequest matching the route signature."""
   return CreateViewRequest(
@@ -54,6 +56,7 @@ def _make_create_view_request(
     entity=entity,
     entities=entities or [],
     include_summary=include_summary,
+    limit=limit,
   )
 
 
@@ -100,7 +103,7 @@ class TestBuildFactGridOperation:
     with patch(
       f"{MODULE}.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ) as mock_query:
       envelope = await build_fact_grid_op(
         body=body,
@@ -153,7 +156,7 @@ class TestBuildFactGridOperation:
     with patch(
       f"{MODULE}.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ):
       envelope = await build_fact_grid_op(
         body=body,
@@ -178,7 +181,7 @@ class TestBuildFactGridOperation:
     with patch(
       f"{MODULE}.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=_make_facts(),
+      return_value=(_make_facts(), False),
     ) as mock_query:
       await build_fact_grid_op(
         body=body,
@@ -256,7 +259,7 @@ class TestBuildFactGridOperation:
     with patch(
       f"{MODULE}.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ):
       envelope = await build_fact_grid_op(
         body=body,
@@ -270,6 +273,91 @@ class TestBuildFactGridOperation:
     assert summary["us-gaap:Revenues"]["count"] == 2
     assert summary["us-gaap:Revenues"]["total"] == 3000.0
     assert summary["us-gaap:CostOfRevenue"]["total"] == 500.0
+
+  @pytest.mark.unit
+  async def test_shared_repo_without_entity_raises_400(self):
+    """Shared repos host thousands of filers; an unscoped query there returns
+    an arbitrary slice of arbitrary companies."""
+    body = _make_create_view_request()
+
+    with patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True):
+      with pytest.raises(HTTPException) as exc_info:
+        await build_fact_grid_op(
+          body=body,
+          graph_id="sec",
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "entity" in exc_info.value.detail.lower()
+
+  @pytest.mark.unit
+  async def test_shared_repo_with_entity_allowed(self):
+    body = _make_create_view_request(entity="NVDA")
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=(_make_facts(), False),
+      ),
+    ):
+      envelope = await build_fact_grid_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "completed"
+
+  @pytest.mark.unit
+  async def test_tenant_graph_without_entity_allowed(self):
+    """A tenant graph is already entity-scoped by its URL, and its entity is
+    often a private company with no ticker or CIK to filter on."""
+    body = _make_create_view_request()
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False),
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=(_make_facts(), False),
+      ),
+    ):
+      envelope = await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "completed"
+
+  @pytest.mark.unit
+  async def test_limit_threads_through_and_truncation_surfaces(self):
+    body = _make_create_view_request(limit=2)
+
+    with patch(
+      f"{MODULE}.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=(_make_facts(count=2), True),
+    ) as mock_query:
+      envelope = await build_fact_grid_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert mock_query.call_args.kwargs["limit"] == 2
+    assert envelope.result["metadata"]["truncated"] is True  # type: ignore[index]
 
   @pytest.mark.unit
   async def test_internal_error_audited_and_propagated(self):

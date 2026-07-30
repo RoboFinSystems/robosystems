@@ -14,6 +14,13 @@ the same LadybugDB-specific optimizations:
   so ``f.has_dimensions = false`` stays in WHERE.
 - **``DISTINCT`` + ``ORDER BY`` together returns empty results**, so
   we run without either clause in Cypher and do dedup + sort in Python.
+- **``ORDER BY`` + ``LIMIT`` is not a cheap top-N.** Ordering forces a
+  full materialize-then-sort: over the ~269k ``us-gaap:Assets`` facts on
+  the SEC repository, ``ORDER BY p.end_date DESC LIMIT 5`` times out at
+  25s while a bare ``count(f)`` on the same anchored pattern returns
+  promptly. ``limit`` is therefore applied in Python after dedup + sort,
+  where it bounds the *payload* deterministically (most recent first).
+  Bounding the *query* is the job of anchoring and the caller's filters.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import re
 from typing import Any
 
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
 
 # Pre-compiled patterns for inline Cypher node filter sanitization.
 _SAFE_STR_RE = re.compile(r"[\w:\-]+")
@@ -113,26 +121,23 @@ def _build_entity_match(
   )
 
 
-def _deduplicate_fact_rows(
-  rows: list[dict[str, Any]], *, has_entity: bool
-) -> list[dict[str, Any]]:
-  """Dedup by ``(element, period, [entity])`` keeping the first occurrence,
+def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+  """Dedup by ``(element, period, entity)`` keeping the first occurrence,
   then sort by ``period_end`` DESC.
 
   DISTINCT + ORDER BY returns empty results in LadybugDB, so the query
-  omits both and we handle dedup + sort here.
+  omits both and we handle dedup + sort here. Entity is always part of the
+  key — without it two filers reporting the same element for the same
+  period collapse into one row.
   """
   seen: set[tuple] = set()
   deduped: list[dict[str, Any]] = []
   for row in rows:
-    if has_entity:
-      key = (
-        row.get("element_id", ""),
-        row.get("period_end", ""),
-        row.get("entity_ticker") or row.get("entity_name", ""),
-      )
-    else:
-      key = (row.get("element_id", ""), row.get("period_end", ""))
+    key = (
+      row.get("element_id", ""),
+      row.get("period_end", ""),
+      row.get("entity_ticker") or row.get("entity_name", ""),
+    )
     if key not in seen:
       seen.add(key)
       deduped.append(row)
@@ -151,7 +156,8 @@ async def query_fact_grid(
   fiscal_year: int | None = None,
   fiscal_period: str | None = None,
   period_type: str | None = None,
-) -> list[dict[str, Any]]:
+  limit: int = DEFAULT_FACT_LIMIT,
+) -> tuple[list[dict[str, Any]], bool]:
   """Query deduplicated facts for the roboledger XBRL hypercube.
 
   Shared by REST (`build-fact-grid`) and MCP (`BuildFactGridTool`). See
@@ -168,12 +174,16 @@ async def query_fact_grid(
       fiscal_year: Fiscal year filter.
       fiscal_period: Fiscal period filter (e.g., ``'FY'``, ``'Q1'``).
       period_type: ``'annual'``, ``'quarterly'``, or ``'instant'``.
+      limit: Maximum fact records to return, applied after dedup + sort so
+          truncation keeps the most recent periods.
 
   Returns:
-      Fact records with keys ``element_id``, ``element_name``, ``period_end``,
-      ``value``, ``unit``, and — only when entity filters are used —
-      ``entity_ticker`` and ``entity_name``. Deduplicated and sorted by
-      ``period_end`` descending.
+      ``(facts, truncated)``. Each fact carries ``element_id``,
+      ``element_name``, ``period_end``, ``value``, ``unit``,
+      ``entity_ticker`` and ``entity_name`` — entity identity is always
+      returned, since without it facts from different filers are
+      indistinguishable. Deduplicated and sorted by ``period_end``
+      descending. ``truncated`` is True when ``limit`` dropped rows.
   """
   parameters: dict[str, Any] = {}
 
@@ -181,26 +191,26 @@ async def query_fact_grid(
     elements, canonical_concepts, parameters
   )
   entity_list = entities if entities else ([entity] if entity else None)
-  entity_pattern, entity_where = _build_entity_match(entity_list, parameters)
+  entity_filter, entity_where = _build_entity_match(entity_list, parameters)
+  entity_pattern = entity_filter or "(ent:Entity)"
 
-  # Anchor the traversal on the Entity when an entity filter is present so the
-  # planner seeds from the ~thousands of Entity nodes (single tickers are
-  # inline-anchored to one) and never full-scans the 100M+ Fact nodes that
-  # leading with (f:Fact) forces. Multi-entity / CIK / name comparisons lost
-  # the single-ticker inline anchor and degraded to a full Fact scan (25s+
-  # timeout) before this; leading with Entity keeps them sub-second.
-  if entity_pattern:
-    match_parts = [
-      f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
-      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
-      "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
-    ]
+  # Lead the MATCH with whichever pattern is selective, never with (f:Fact) —
+  # that forces a full scan of the 100M+ Fact nodes. With an entity filter the
+  # planner seeds from the ~thousands of Entity nodes (a single ticker is
+  # inline-anchored to one); without one it seeds from the Element, which for
+  # a specific qname is a single node. Multi-entity / CIK / name comparisons
+  # lost the single-ticker inline anchor and degraded to a full Fact scan
+  # (25s+ timeout) before this.
+  if entity_filter:
+    lead = f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}"
   else:
-    match_parts = [
-      f"(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
-      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
-      "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
-    ]
+    lead = f"{element_pattern}<-[:FACT_HAS_ELEMENT]-(f:Fact)-[:FACT_HAS_ENTITY]->{entity_pattern}"
+
+  match_parts = [
+    lead,
+    "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+    "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
+  ]
 
   where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
 
@@ -228,27 +238,21 @@ async def query_fact_grid(
       parameters["fiscal_period"] = fiscal_period
 
   # Omit DISTINCT + ORDER BY — both broken together in LadybugDB; dedup
-  # and sort happen in Python below.
-  if entity_pattern:
-    return_clause = (
-      "\n      RETURN\n"
-      "        el.qname as element_id,\n"
-      "        el.name as element_name,\n"
-      "        p.end_date as period_end,\n"
-      "        f.numeric_value as value,\n"
-      "        u.value as unit,\n"
-      "        ent.ticker as entity_ticker,\n"
-      "        ent.name as entity_name\n      "
-    )
-  else:
-    return_clause = (
-      "\n      RETURN\n"
-      "        el.qname as element_id,\n"
-      "        el.name as element_name,\n"
-      "        p.end_date as period_end,\n"
-      "        f.numeric_value as value,\n"
-      "        u.value as unit\n      "
-    )
+  # and sort happen in Python below. Entity columns are always returned:
+  # every Fact carries a FACT_HAS_ENTITY edge (verified on SEC — the
+  # us-gaap:Assets fact count is identical with and without the traversal,
+  # and materialize.py builds the edge for native and shared facts alike),
+  # so the join drops nothing and the caller can always tell filers apart.
+  return_clause = (
+    "\n      RETURN\n"
+    "        el.qname as element_id,\n"
+    "        el.name as element_name,\n"
+    "        p.end_date as period_end,\n"
+    "        f.numeric_value as value,\n"
+    "        u.value as unit,\n"
+    "        ent.ticker as entity_ticker,\n"
+    "        ent.name as entity_name\n      "
+  )
 
   query = "MATCH " + ", ".join(match_parts)
   query += "\nWHERE " + "\n  AND ".join(where_clauses)
@@ -261,6 +265,9 @@ async def query_fact_grid(
   results = await repository.execute_query(query, parameters)
 
   if not results:
-    return []
+    return [], False
 
-  return _deduplicate_fact_rows(results, has_entity=bool(entity_pattern))
+  deduped = _deduplicate_fact_rows(results)
+  if len(deduped) > limit:
+    return deduped[:limit], True
+  return deduped, False

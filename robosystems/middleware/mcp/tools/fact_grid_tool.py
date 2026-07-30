@@ -17,8 +17,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import logger
 from robosystems.models.api.views import ViewAxisConfig, ViewConfig
+from robosystems.models.api.views.view_config import (
+  DEFAULT_FACT_LIMIT,
+  MAX_FACT_LIMIT,
+)
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
   query_fact_grid,
@@ -58,12 +63,12 @@ class BuildFactGridTool:
 - fiscal_year/fiscal_period: Filter by report fiscal context
 
 **RETURNS:**
-- Deduplicated facts with element qnames, names, values, periods, and units — one record per fact, not a pivot table
-- Entity ticker and name ONLY when an entity filter is used
+- Deduplicated facts with element qnames, names, values, periods, units, and entity ticker/name — one record per fact, not a pivot table
 - Only consolidated totals (dimensional breakdowns excluded)
+- `truncated: true` when more facts matched than `limit` allowed; the ones returned are the most recent by period
 
 **IMPORTANT:**
-Always pass entity or entities. Without an entity filter the response carries no entity identity at all, so facts from different filers are indistinguishable — and the query degrades to a full scan of the fact table, which is slow on large repositories like SEC.
+On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
 
 **TIP:**
 For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.""",
@@ -126,6 +131,11 @@ For income statement items (revenue, net income), always specify period_type='an
             "description": "Include summary statistics (count, total, avg, min, max) by element",
             "default": False,
           },
+          "limit": {
+            "type": "integer",
+            "description": f"Maximum facts to return (default {DEFAULT_FACT_LIMIT}, max {MAX_FACT_LIMIT}). Applied after dedup and sort, so truncation keeps the most recent periods.",
+            "default": DEFAULT_FACT_LIMIT,
+          },
         },
         "required": [],
       },
@@ -145,6 +155,7 @@ For income statement items (revenue, net income), always specify period_type='an
     rows = arguments.get("rows", [])
     columns = arguments.get("columns", [])
     include_summary = arguments.get("include_summary", False)
+    limit = arguments.get("limit", DEFAULT_FACT_LIMIT)
 
     if not elements and not canonical_concepts:
       return {
@@ -156,6 +167,28 @@ For income statement items (revenue, net income), always specify period_type='an
       return {
         "error": "missing_period_filter",
         "message": "Provide periods, period_type, or fiscal_year to scope the query",
+      }
+
+    # Shared repos host thousands of filers; an entity-less query there
+    # returns an arbitrary slice of arbitrary companies. Tenant graphs are
+    # already entity-scoped by the graph itself. Mirrors the REST route.
+    if (
+      is_shared_repository_or_subgraph(self.client.graph_id)
+      and not entity
+      and not entities
+    ):
+      return {
+        "error": "missing_entity_filter",
+        "message": (
+          "entity or entities is required on shared-repository graphs "
+          "(e.g. SEC). Pass a ticker, CIK, or company name."
+        ),
+      }
+
+    if not isinstance(limit, int) or limit < 1 or limit > MAX_FACT_LIMIT:
+      return {
+        "error": "invalid_limit",
+        "message": f"limit must be an integer between 1 and {MAX_FACT_LIMIT}",
       }
 
     if rows and not isinstance(rows, list):
@@ -178,7 +211,7 @@ For income statement items (revenue, net income), always specify period_type='an
 
     start_time = time.time()
 
-    fact_data = await query_fact_grid(
+    fact_data, truncated = await query_fact_grid(
       graph_id=self.client.graph_id,
       elements=elements or None,
       canonical_concepts=canonical_concepts or None,
@@ -189,6 +222,7 @@ For income statement items (revenue, net income), always specify period_type='an
       fiscal_year=fiscal_year,
       fiscal_period=fiscal_period,
       period_type=period_type,
+      limit=limit,
     )
 
     row_configs = [ViewAxisConfig(**r) for r in rows] if rows else []
@@ -224,8 +258,16 @@ For income statement items (revenue, net income), always specify period_type='an
         for d in fact_grid.dimensions
       ],
       "data": fact_grid.facts,
+      "truncated": truncated,
       "construction_time_ms": elapsed_ms,
-      "message": f"Built fact grid with {fact_grid.metadata.fact_count} facts",
+      "message": (
+        f"Built fact grid with {fact_grid.metadata.fact_count} facts"
+        + (
+          f" (truncated at limit={limit}; narrow the filters or raise limit)"
+          if truncated
+          else ""
+        )
+      ),
     }
 
     if include_summary and fact_grid.facts:

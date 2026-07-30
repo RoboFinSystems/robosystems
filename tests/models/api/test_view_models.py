@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from robosystems.models.api.views.view_config import (
+  DEFAULT_FACT_LIMIT,
+  MAX_FACT_LIMIT,
   CreateViewRequest,
   ViewAxisConfig,
   ViewConfig,
@@ -127,6 +129,26 @@ class TestCreateViewRequest:
     assert model.form == "10-K"
     assert model.fiscal_year == 2024
     assert model.fiscal_period == "FY"
+
+  def test_limit_defaults(self):
+    model = CreateViewRequest(elements=["us-gaap:Assets"], period_type="instant")
+    assert model.limit == DEFAULT_FACT_LIMIT
+
+  def test_limit_above_max_rejected(self):
+    with pytest.raises(ValidationError):
+      CreateViewRequest(
+        elements=["us-gaap:Assets"],
+        period_type="instant",
+        limit=MAX_FACT_LIMIT + 1,
+      )
+
+  def test_limit_below_one_rejected(self):
+    with pytest.raises(ValidationError):
+      CreateViewRequest(
+        elements=["us-gaap:Assets"],
+        period_type="instant",
+        limit=0,
+      )
 
   def test_invalid_period_type(self):
     with pytest.raises(ValidationError):

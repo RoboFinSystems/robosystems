@@ -480,7 +480,7 @@ class TestGraphMCPTools:
     with patch(
       "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ):
       result = await tools.call_tool(
         "build-fact-grid",

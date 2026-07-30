@@ -1,5 +1,12 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Payload bounds, shared with the ops-layer query and the MCP tool. A single
+# common element spans hundreds of thousands of facts on the SEC repository,
+# so an unbounded response is never useful and routinely exceeds an MCP
+# caller's token budget.
+DEFAULT_FACT_LIMIT = 250
+MAX_FACT_LIMIT = 5000
+
 
 class ViewAxisConfig(BaseModel):
   """Scoping configuration for one aspect of the fact query.
@@ -122,6 +129,16 @@ class CreateViewRequest(BaseModel):
   include_summary: bool = Field(
     default=False,
     description="Include summary statistics per element",
+  )
+  limit: int = Field(
+    default=DEFAULT_FACT_LIMIT,
+    ge=1,
+    le=MAX_FACT_LIMIT,
+    description=(
+      "Maximum facts to return. Applied after deduplication and sorting, so "
+      "truncation keeps the most recent periods. Check `metadata.truncated` "
+      "to see whether more facts matched."
+    ),
   )
   view_config: ViewConfig = Field(
     default_factory=ViewConfig, description="Aspect scoping configuration"

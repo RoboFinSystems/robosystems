@@ -51,7 +51,7 @@ class TestBuildFactGridTool:
     with patch(
       "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ):
       result = await tool.execute(
         {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
@@ -61,6 +61,99 @@ class TestBuildFactGridTool:
     assert result["fact_count"] == 1
     assert result["dimension_count"] == 2
     assert result["data"] == facts
+    assert result["truncated"] is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_shared_repo_requires_entity(self, mock_graph_client):
+    """SEC hosts thousands of filers; an unscoped query returns an arbitrary
+    slice of arbitrary companies."""
+    mock_graph_client.graph_id = "sec"
+    tool = BuildFactGridTool(mock_graph_client)
+
+    result = await tool.execute(
+      {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
+    )
+
+    assert result["error"] == "missing_entity_filter"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_shared_repo_with_entity_proceeds(self, mock_graph_client):
+    mock_graph_client.graph_id = "sec"
+    tool = BuildFactGridTool(mock_graph_client)
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=([], False),
+    ):
+      result = await tool.execute(
+        {
+          "elements": ["us-gaap:Assets"],
+          "periods": ["2023-12-31"],
+          "entity": "NVDA",
+        }
+      )
+
+    assert result["success"] is True
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_tenant_graph_does_not_require_entity(self, mock_graph_client):
+    tool = BuildFactGridTool(mock_graph_client)
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=([], False),
+    ):
+      result = await tool.execute(
+        {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
+      )
+
+    assert result["success"] is True
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_limit_out_of_range_rejected(self, mock_graph_client):
+    tool = BuildFactGridTool(mock_graph_client)
+
+    result = await tool.execute(
+      {
+        "elements": ["us-gaap:Assets"],
+        "periods": ["2023-12-31"],
+        "limit": 999999,
+      }
+    )
+
+    assert result["error"] == "invalid_limit"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_truncation_is_surfaced_in_message(self, mock_graph_client):
+    tool = BuildFactGridTool(mock_graph_client)
+    facts = [
+      {
+        "element_id": "us-gaap:Assets",
+        "element_name": "Assets",
+        "period_end": "2023-12-31",
+        "value": 1000.0,
+        "unit": "USD",
+      }
+    ]
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=(facts, True),
+    ):
+      result = await tool.execute(
+        {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"], "limit": 1}
+      )
+
+    assert result["truncated"] is True
+    assert "truncated" in result["message"]
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -153,7 +246,7 @@ class TestBuildFactGridTool:
     with patch(
       "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=facts,
+      return_value=(facts, False),
     ):
       result = await tool.execute(
         {

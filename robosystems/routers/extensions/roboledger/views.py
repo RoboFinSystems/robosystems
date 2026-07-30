@@ -17,9 +17,10 @@ that gated only on `FACT_GRID_ENABLED`.
 **Why still under `/extensions/roboledger/`?**
 Because the fact-grid is roboledger-schema-specific. It doesn't fit on
 the platform graph surface (which is schema-agnostic) and it doesn't
-fit on GraphQL (which can't represent multi-dimensional pivot tables
-naturally). The operations dispatcher is the right home — we just
-gate the mount on `FACT_GRID_ENABLED` independently.
+fit on GraphQL (whose typed field selection can't express an arbitrary
+slice across element, period, and entity). The operations dispatcher is
+the right home — we just gate the mount on `FACT_GRID_ENABLED`
+independently.
 
 **Idempotency + audit:**
 Because this is a real operation in the dispatcher, it gets the
@@ -125,9 +126,23 @@ async def build_fact_grid_op(
       detail="Provide periods, period_type, or fiscal_year to scope the query",
     )
 
+  # Shared repositories host thousands of filers, so an entity-less query
+  # returns an arbitrary slice of facts from arbitrary companies. A tenant
+  # graph is already scoped to its entity by the URL — and that entity is
+  # often a private company with no ticker or CIK to filter on — so the
+  # requirement applies only to shared repos. Mirrors the asymmetry in
+  # financial-statement-analysis below.
+  if (
+    is_shared_repository_or_subgraph(graph_id) and not body.entity and not body.entities
+  ):
+    raise HTTPException(
+      status_code=400,
+      detail=("entity or entities is required on shared-repository graphs (e.g. SEC)."),
+    )
+
   async def _runner():
     start_time = time.time()
-    fact_data = await query_fact_grid(
+    fact_data, truncated = await query_fact_grid(
       graph_id=graph_id,
       elements=body.elements or None,
       canonical_concepts=body.canonical_concepts or None,
@@ -138,6 +153,7 @@ async def build_fact_grid_op(
       fiscal_year=body.fiscal_year,
       fiscal_period=body.fiscal_period,
       period_type=body.period_type,
+      limit=body.limit,
     )
 
     builder = FactGridBuilder()
@@ -151,6 +167,7 @@ async def build_fact_grid_op(
       facts_processed=fact_grid.metadata.fact_count,
       construction_time_ms=construction_time_ms,
       source="fact_grid",
+      truncated=truncated,
     )
 
     summary = None
