@@ -45,6 +45,7 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
         # Mock ConnectionService to prevent database access in case route matching fails
         with patch(
@@ -72,6 +73,7 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -101,6 +103,7 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -128,6 +131,7 @@ class TestConnectionFeatureFlags:
         # Configure mock env
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -158,6 +162,7 @@ class TestConnectionFeatureFlags:
         # Configure mock env - SEC and QuickBooks enabled
         mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -184,6 +189,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
       assert len(registry._providers) == 0
@@ -193,6 +199,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
       assert "sec" in registry._providers
@@ -203,6 +210,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
       assert "sec" not in registry._providers
@@ -213,6 +221,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -226,6 +235,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -239,6 +249,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -253,6 +264,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
       mock_db = MagicMock(spec=Session)
@@ -275,6 +287,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 
@@ -301,6 +314,7 @@ class TestProviderRegistry:
     with patch("robosystems.operations.providers.registry.env") as mock_env:
       mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 

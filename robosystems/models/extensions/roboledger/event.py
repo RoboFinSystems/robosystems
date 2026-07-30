@@ -131,15 +131,14 @@ class Event(ExtensionsBase):
       "resource_type IN ('goods', 'services', 'money', 'right', 'obligation', 'information', 'labor') OR resource_type IS NULL",
       name="check_event_resource_type",
     ),
-    # source enumerates where the event came from. Adapter-driven sources
-    # (quickbooks, xero, plaid) emit events from incoming data; native
-    # sources (manual, schedule, system) emit events from inside the
-    # platform. Adding a new source means widening this CHECK and updating
-    # the adapter that emits it.
-    CheckConstraint(
-      "source IN ('manual', 'system', 'schedule', 'quickbooks', 'xero', 'plaid')",
-      name="check_event_source",
-    ),
+    # source names where the event came from. Platform-emitted values
+    # (manual, system, schedule) are always valid; adapter and external
+    # sources validate at the ops layer against the graph's registered
+    # platform Connections (create_event_block's `_validate_event_source`)
+    # — a registration opens a source name, not a schema change. The old
+    # closed-list CHECK was dropped in extensions migration 0025; new
+    # tenant schemas provision from this metadata, so no constraint here
+    # is what keeps it dropped.
     CheckConstraint(_EVENT_ACTION_CHECK, name="check_event_action"),
     Index(
       "idx_events_action",

@@ -1437,6 +1437,9 @@ create_event_block_op = _registrar.register(
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
+    # Source validation resolves the graph's registered Connections
+    # (platform DB) — the tenant session alone doesn't carry the graph id.
+    requires_graph_id=True,
   )
 )
 

@@ -24,7 +24,7 @@ def _make_body(**overrides) -> CreateEventBlockRequest:
   defaults = {
     "event_type": "asset_disposed",
     "event_category": "adjustment",
-    "source": "native",
+    "source": "manual",
     "occurred_at": datetime(2026, 3, 31, tzinfo=UTC),
     "metadata": {"schedule_id": "struct_schedule"},
     "apply_handlers": True,
@@ -65,7 +65,9 @@ class TestCreateEventBlockPythonHandlerPath:
         "robosystems.operations.event_block.commands.resolve_handler"
       ) as dsl_resolver,
     ):
-      envelope = create_event_block(session, body, created_by="usr_test")
+      envelope = create_event_block(
+        session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+      )
 
     dsl_resolver.assert_not_called()
     python_handler.dispatch.assert_called_once()
@@ -107,7 +109,9 @@ class TestCreateEventBlockPythonHandlerPath:
       return_value=python_handler,
     ):
       with pytest.raises(HandlerMetadataValidationError):
-        create_event_block(session, body, created_by="usr_test")
+        create_event_block(
+          session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+        )
 
     # Nothing persisted
     session.add.assert_not_called()
@@ -128,7 +132,9 @@ class TestCreateEventBlockPythonHandlerPath:
       return_value=python_handler,
     ):
       with pytest.raises(RuntimeError, match="boom"):
-        create_event_block(session, body, created_by="usr_test")
+        create_event_block(
+          session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+        )
 
     session.commit.assert_not_called()
 
@@ -311,7 +317,9 @@ class TestDslHandlerResolution:
       ) as resolver,
       patch("robosystems.operations.event_block.commands.apply_handler"),
     ):
-      envelope = create_event_block(session, body, created_by="usr_test")
+      envelope = create_event_block(
+        session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+      )
 
     assert resolver.call_args.kwargs["agent_type"] == "customer"
     assert envelope.id == "evt_test"
@@ -366,7 +374,9 @@ class TestCreateDualityFields:
     session = self._session_with_event_id()
     body = _make_body(apply_handlers=False, metadata={})
 
-    envelope = create_event_block(session, body, created_by="usr_test")
+    envelope = create_event_block(
+      session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+    )
 
     added_event = session.add.call_args.args[0]
     assert added_event.event_class == "economic"
@@ -381,7 +391,9 @@ class TestCreateDualityFields:
       obligated_by_event_id="evt_asset_acquired",
     )
 
-    envelope = create_event_block(session, body, created_by="usr_test")
+    envelope = create_event_block(
+      session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+    )
 
     added_event = session.add.call_args.args[0]
     assert added_event.obligated_by_event_id == "evt_asset_acquired"
@@ -396,7 +408,9 @@ class TestCreateDualityFields:
       discharges_event_id="evt_invoice_issued",
     )
 
-    envelope = create_event_block(session, body, created_by="usr_test")
+    envelope = create_event_block(
+      session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+    )
 
     added_event = session.add.call_args.args[0]
     assert added_event.discharges_event_id == "evt_invoice_issued"
@@ -413,7 +427,9 @@ class TestCreateDualityFields:
       metadata={},
     )
 
-    envelope = create_event_block(session, body, created_by="usr_test")
+    envelope = create_event_block(
+      session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+    )
 
     added_event = session.add.call_args.args[0]
     assert added_event.event_class == "support"

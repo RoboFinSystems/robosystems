@@ -6,7 +6,23 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
-ProviderType = Literal["sec", "quickbooks"]
+ProviderType = Literal["sec", "quickbooks", "external"]
+
+# Source names an external connection can never claim: platform-emitted
+# values, platform adapter providers (current and reserved), and the
+# provider discriminators themselves.
+RESERVED_SOURCE_NAMES = frozenset(
+  {
+    "manual",
+    "system",
+    "schedule",
+    "quickbooks",
+    "xero",
+    "plaid",
+    "sec",
+    "external",
+  }
+)
 
 
 class ConnectionBase(BaseModel):
@@ -49,11 +65,48 @@ class QuickBooksConnectionConfig(BaseModel):
   refresh_token: str | None = Field(None, description="OAuth refresh token")
 
 
+class ExternalConnectionConfig(BaseModel):
+  """External-integration connection configuration.
+
+  Registers a source namespace for an integration the platform does not
+  run: the connection is registration + telemetry, not execution config.
+  The platform holds no credentials for the external source — the
+  integration authenticates to its own source and writes here through
+  the public API, stamping ``source_name`` on everything it emits.
+  """
+
+  source_name: str = Field(
+    ...,
+    min_length=2,
+    max_length=64,
+    pattern=r"^[a-z][a-z0-9_-]{1,63}$",
+    description=(
+      "Source slug the integration stamps on the events it emits "
+      "(lowercase letters, digits, '-', '_'; must start with a letter). "
+      "Unique per graph among live connections."
+    ),
+  )
+  display_name: str | None = Field(
+    None, max_length=128, description="Human-readable label for the connections UI."
+  )
+
+  @field_validator("source_name")
+  @classmethod
+  def validate_not_reserved(cls, v: str) -> str:
+    if v in RESERVED_SOURCE_NAMES:
+      raise ValueError(
+        f"source_name {v!r} is reserved (platform sources and providers: "
+        f"{sorted(RESERVED_SOURCE_NAMES)})"
+      )
+    return v
+
+
 class CreateConnectionRequest(ConnectionBase):
   """Request to create a new connection."""
 
   sec_config: SECConnectionConfig | None = None
   quickbooks_config: QuickBooksConnectionConfig | None = None
+  external_config: ExternalConnectionConfig | None = None
 
   @field_validator("entity_id")
   @classmethod
@@ -66,13 +119,18 @@ class CreateConnectionRequest(ConnectionBase):
       raise ValueError("entity_id is required for QuickBooks connections")
     return v
 
-  @field_validator("sec_config", "quickbooks_config")
+  @field_validator("sec_config", "quickbooks_config", "external_config")
   @classmethod
   def validate_provider_config(
     cls,
-    v: SECConnectionConfig | QuickBooksConnectionConfig | None,
+    v: SECConnectionConfig
+    | QuickBooksConnectionConfig
+    | ExternalConnectionConfig
+    | None,
     info: ValidationInfo,
-  ) -> SECConnectionConfig | QuickBooksConnectionConfig | None:
+  ) -> (
+    SECConnectionConfig | QuickBooksConnectionConfig | ExternalConnectionConfig | None
+  ):
     """Ensure only the matching provider config is provided."""
     provider = info.data.get("provider")
     field_name = info.field_name
@@ -83,6 +141,7 @@ class CreateConnectionRequest(ConnectionBase):
     field_to_provider = {
       "sec_config": "sec",
       "quickbooks_config": "quickbooks",
+      "external_config": "external",
     }
 
     expected_provider = field_to_provider.get(field_name)
@@ -116,6 +175,14 @@ class ConnectionResponse(BaseModel):
       "no outbound write-back) or 'qb_authoritative' (QuickBooks is "
       "authoritative; RoboSystems-originated entries publish to QB). "
       "Set via the write-policy endpoint."
+    ),
+  )
+  source_name: str | None = Field(
+    None,
+    description=(
+      "External-provider registered source slug — the value the "
+      "integration stamps on the events it emits. Null for platform "
+      "providers."
     ),
   )
   metadata: dict[str, object] = Field(..., description="Provider-specific metadata")

@@ -665,6 +665,13 @@ class EnvConfig:
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
+  # External provider: registers a source namespace for integrations that
+  # run outside the platform and write through the public API (the
+  # event-source registry). No credentials, no sync — registration only.
+  CONNECTION_EXTERNAL_ENABLED = get_bool_env(
+    "CONNECTION_EXTERNAL_ENABLED",
+    get_parameter_value("CONNECTION_EXTERNAL_ENABLED", "true").lower() == "true",
+  )
 
   # Routes QB Reports API calls (JournalReport — our live GL posting source)
   # through Intuit's modernized "v2" reporting service via the

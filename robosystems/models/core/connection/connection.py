@@ -101,6 +101,15 @@ class Connection(Model):
       "realm_id",
       postgresql_where="deleted_at IS NOT NULL",
     ),
+    # One live external source name per graph — the event-source registry's
+    # uniqueness guarantee (advisory pre-checks race; this doesn't).
+    Index(
+      "uq_connections_graph_source_name",
+      "graph_id",
+      "source_name",
+      unique=True,
+      postgresql_where="source_name IS NOT NULL AND deleted_at IS NULL",
+    ),
   )
 
   id = Column(
@@ -108,7 +117,7 @@ class Connection(Model):
   )
   graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False)
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
-  provider = Column(String, nullable=False)  # quickbooks, sec
+  provider = Column(String, nullable=False)  # quickbooks, sec, external
   status = Column(String, default=ConnectionStatus.PENDING_OAUTH, nullable=False)
 
   # Provider-specific metadata
@@ -117,6 +126,11 @@ class Connection(Model):
   cik = Column(String, nullable=True)  # SEC Central Index Key
   entity_name = Column(String, nullable=True)
   institution_name = Column(String, nullable=True)
+  # External-provider registered source slug — the value the integration
+  # stamps on everything it writes (Event.source). The registration IS the
+  # allow-list entry the event-source validation reads; the platform runs
+  # nothing and holds no credentials for external sources.
+  source_name = Column(String, nullable=True)
 
   # Sync tracking
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
@@ -171,6 +185,7 @@ class Connection(Model):
     cik: str | None = None,
     entity_name: str | None = None,
     institution_name: str | None = None,
+    source_name: str | None = None,
     auto_sync_enabled: bool = True,
     write_policy: str | None = None,
   ) -> "Connection":
@@ -189,6 +204,7 @@ class Connection(Model):
       cik=cik,
       entity_name=entity_name,
       institution_name=institution_name,
+      source_name=source_name,
       auto_sync_enabled=auto_sync_enabled,
       write_policy=(
         write_policy
@@ -455,12 +471,14 @@ class Connection(Model):
       "graph_id": self.graph_id,
       "user_id": self.user_id,
       "write_policy": self.write_policy,
+      "source_name": self.source_name,
       "metadata": {
         "realm_id": self.realm_id,
         "item_id": self.item_id,
         "cik": self.cik,
         "entity_name": self.entity_name,
         "institution_name": self.institution_name,
+        "source_name": self.source_name,
         "auto_sync_enabled": self.auto_sync_enabled,
         "last_sync": self.last_sync.isoformat() if self.last_sync else None,
       },

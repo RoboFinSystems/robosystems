@@ -68,6 +68,7 @@ class ConnectionService:
         cik=metadata.get("cik"),
         entity_name=metadata.get("entity_name"),
         institution_name=metadata.get("institution_name"),
+        source_name=metadata.get("source_name"),
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 

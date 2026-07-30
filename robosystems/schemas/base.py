@@ -330,7 +330,7 @@ BASE_NODES = [
       ),  # status NOT IN ('voided','superseded') — safe default for counts/sums
       Property(
         name="source", type="STRING"
-      ),  # manual|system|schedule|quickbooks|xero|plaid
+      ),  # manual|system|schedule | connected provider | registered external source_name
       Property(name="external_id", type="STRING"),
       Property(name="external_url", type="STRING"),
       Property(name="amount", type="DOUBLE"),  # currency-major; OLTP cents / 100

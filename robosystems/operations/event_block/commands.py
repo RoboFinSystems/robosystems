@@ -92,6 +92,54 @@ def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
   return agent.agent_type
 
 
+# Platform-emitted sources — always valid, no registration involved. Adapter
+# and external sources validate against the graph's registered Connections
+# instead: the registry replaced the events-table CHECK constraint (dropped in
+# extensions migration 0025), so registration is what opens a source name.
+_STATIC_EVENT_SOURCES = frozenset({"manual", "system", "schedule"})
+
+
+def _validate_event_source(source: str, graph_id: str) -> None:
+  """A source is valid iff it's platform-emitted or registered on the graph.
+
+  Registered means a live platform Connection whose ``provider`` matches
+  (adapter sources: quickbooks/xero/plaid) or an ``external`` connection
+  whose ``source_name`` matches. Static sources short-circuit before any
+  platform-DB access. A platform-DB fault here surfaces through the
+  registrar's generic error path, not as a validation failure.
+  """
+  if source in _STATIC_EVENT_SOURCES:
+    return
+
+  # Platform-DB lookup — local imports for the same reason as
+  # `execute_event_block`: capture/preview callers shouldn't pull the
+  # platform DB into their import graph.
+  from robosystems.database import SessionFactory as _PlatformSessionFactory
+  from robosystems.models.core.connection.connection import Connection
+
+  with _PlatformSessionFactory() as platform_session:
+    connections = Connection.get_all_for_graph(graph_id, platform_session)
+    for connection in connections:
+      if connection.provider == source or (
+        connection.provider == "external" and connection.source_name == source
+      ):
+        return
+    registered = sorted(
+      {
+        c.source_name if c.provider == "external" else c.provider
+        for c in connections
+        if c.provider != "external" or c.source_name
+      }
+    )
+  raise ValueError(
+    f"Unknown event source {source!r}. Valid sources are "
+    f"{sorted(_STATIC_EVENT_SOURCES)} plus this graph's registered "
+    f"connections ({registered or 'none registered'}). Register an external "
+    "source via POST /v1/graphs/{graph_id}/connections with "
+    "provider='external'."
+  )
+
+
 def _build_event_row(
   body: CreateEventBlockRequest,
   created_by: str,
@@ -126,6 +174,8 @@ def create_event_block(
   session: Session,
   body: CreateEventBlockRequest,
   created_by: str,
+  *,
+  graph_id: str,
 ) -> EventBlockEnvelope:
   """Persist an event block, optionally firing the handler engine.
 
@@ -138,10 +188,15 @@ def create_event_block(
     1. Python registry (hub-defined complex workflows, e.g., asset_disposed)
     2. DSL registry (event_handlers table, tenant-configurable simple templates)
 
+  ``body.source`` must be platform-emitted or registered on the graph
+  (``_validate_event_source``) — validated before anything is persisted.
+
   On validation failure (no handler, ambiguous, template error, engine error)
   nothing is persisted — the exception propagates and the caller's session
   rolls back.
   """
+  _validate_event_source(body.source, graph_id)
+
   if body.apply_handlers:
     # 1. Python registry wins over DSL registry
     python_handler = get_python_handler(body.event_type)

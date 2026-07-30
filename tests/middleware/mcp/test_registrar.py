@@ -402,6 +402,31 @@ class TestRegistrarToolExecute:
     stale.assert_called_once_with("kg_stale", "demo_changed")
 
   @pytest.mark.asyncio
+  async def test_requires_graph_id_passes_client_graph_id_kwarg(self) -> None:
+    """`requires_graph_id=True` must reach the MCP invocation site too —
+    the adapter passes the client's graph_id, mirroring the REST runner."""
+    seen: dict[str, Any] = {}
+
+    def _command(session, body: _Request, created_by: str, *, graph_id: str):
+      seen["created_by"] = created_by
+      seen["graph_id"] = graph_id
+      return _Response(id=body.id, echoed=body.value)
+
+    tool = _RegistrarMCPTool(
+      client=_client(graph_id="kg_gid", user_id="usr_42"),
+      spec=_spec(command=_command, requires_graph_id=True),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 3})
+
+    assert result == {"id": "x", "echoed": 3}
+    assert seen == {"created_by": "usr_42", "graph_id": "kg_gid"}
+
+  @pytest.mark.asyncio
   async def test_gate_rejection_short_circuits_before_validation(self) -> None:
     """A gate error must return the code/message envelope and skip
     Pydantic validation (so an otherwise invalid body still produces the

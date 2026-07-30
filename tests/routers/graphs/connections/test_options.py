@@ -27,11 +27,16 @@ def _make_mock_user(user_id: str = USER_ID):
 def _make_mock_env(
   sec_enabled: bool = True,
   quickbooks_enabled: bool = True,
+  external_enabled: bool = False,
 ):
-  """Create a mock env object with connection feature flags."""
+  """Create a mock env object with connection feature flags.
+
+  ``external_enabled`` defaults False so the pre-external assertions
+  about provider counts stay literal; external-specific tests opt in."""
   mock_env = MagicMock()
   mock_env.CONNECTION_SEC_ENABLED = sec_enabled
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
+  mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   return mock_env
 
 
@@ -67,7 +72,9 @@ class TestGetConnectionOptions:
   async def test_all_providers_disabled_returns_empty_list(self):
     """All providers disabled → empty providers list."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    mock_env = _make_mock_env(
+      sec_enabled=False, quickbooks_enabled=False, external_enabled=False
+    )
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -315,3 +322,24 @@ class TestGetConnectionOptions:
 
     for provider in result.providers:
       assert provider.sync_frequency is not None
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_external_provider_listed_when_enabled(self):
+    """External provider appears with source_name as required config."""
+    mock_user = _make_mock_user()
+    mock_env = _make_mock_env(
+      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
+    )
+
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID,
+        current_user=mock_user,
+        _rate_limit=None,
+      )
+
+    assert result.total_providers == 3
+    external = next(p for p in result.providers if p.provider == "external")
+    assert external.auth_type == "none"
+    assert external.required_config == ["source_name"]
