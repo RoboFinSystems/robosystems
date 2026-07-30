@@ -56,6 +56,8 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.api.views import (
   CreateViewRequest,
+  ElementSummary,
+  FactRecord,
   ViewMetadata,
   ViewResponse,
 )
@@ -68,6 +70,7 @@ from robosystems.operations.roboledger.views import (
   deduplicate_facts,
   query_fact_grid,
   query_financial_statement,
+  summarize_by_element,
 )
 
 # Import _dispatch from the sibling operations module so error
@@ -85,7 +88,7 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
   response_model=OperationEnvelope[ViewResponse],
   operation_id="buildFactGrid",
   summary="Build Fact Grid",
-  description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns a deduplicated pivot table. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
+  description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns deduplicated facts plus the aspects they span — arranging them into a table is the consumer's job, since collapsing cells safely requires the full aspect signature. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -141,7 +144,6 @@ async def build_fact_grid_op(
     fact_grid = builder.build(
       fact_data=fact_data, view_config=body.view_config, source="fact_grid"
     )
-    pivot_table = builder.generate_pivot_table(fact_grid, body.view_config)
 
     construction_time_ms = (time.time() - start_time) * 1000
     metadata = ViewMetadata(
@@ -151,29 +153,19 @@ async def build_fact_grid_op(
       source="fact_grid",
     )
 
-    presentations: dict[str, object] = {"pivot_table": pivot_table}
+    summary = None
+    if body.include_summary and fact_grid.facts:
+      summary = {
+        element: ElementSummary(**stats)
+        for element, stats in summarize_by_element(fact_grid.facts).items()
+      }
 
-    # Optional inline summary stats — element-keyed aggregates, only
-    # computed when the caller asks for them.
-    if (
-      body.include_summary
-      and fact_grid.facts_df is not None
-      and not fact_grid.facts_df.empty
-    ):
-      df = fact_grid.facts_df
-      if "element_name" in df.columns and "value" in df.columns:
-        summary: dict[str, dict[str, float]] = {}
-        for element_name in df["element_name"].unique():
-          element_data = df[df["element_name"] == element_name]
-          summary[element_name] = {
-            "count": len(element_data),
-            "total": float(element_data["value"].sum()),
-            "average": float(element_data["value"].mean()),
-            "min": float(element_data["value"].min()),
-            "max": float(element_data["value"].max()),
-          }
-        presentations["summary"] = summary
-    return ViewResponse(metadata=metadata, presentations=presentations)
+    return ViewResponse(
+      metadata=metadata,
+      dimensions=fact_grid.dimensions,
+      facts=[FactRecord(**fact) for fact in fact_grid.facts],
+      summary=summary,
+    )
 
   return await _dispatch(ctx, _runner, cache)
 

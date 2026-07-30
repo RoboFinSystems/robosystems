@@ -14,7 +14,6 @@ response shape.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pandas as pd
 import pytest
 
 from robosystems.middleware.mcp.tools.fact_grid_tool import BuildFactGridTool
@@ -39,26 +38,20 @@ class TestBuildFactGridTool:
     """Happy path: delegates to query_fact_grid + FactGridBuilder."""
     tool = BuildFactGridTool(mock_graph_client)
 
-    mock_grid = MagicMock()
-    mock_grid.metadata.fact_count = 1
-    mock_grid.metadata.dimension_count = 2
-    mock_grid.metadata.construction_time_ms = 50
-    mock_grid.dimensions = []
-    mock_grid.facts_df = None
+    facts = [
+      {
+        "element_id": "us-gaap:Assets",
+        "element_name": "Assets",
+        "period_end": "2023-12-31",
+        "value": 1000.0,
+        "unit": "USD",
+      }
+    ]
 
-    mock_builder = MagicMock()
-    mock_builder.build.return_value = mock_grid
-
-    with (
-      patch(
-        "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
-        new_callable=AsyncMock,
-        return_value=pd.DataFrame(),
-      ),
-      patch(
-        "robosystems.middleware.mcp.tools.fact_grid_tool.FactGridBuilder",
-        return_value=mock_builder,
-      ),
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=facts,
     ):
       result = await tool.execute(
         {"elements": ["us-gaap:Assets"], "periods": ["2023-12-31"]}
@@ -67,6 +60,7 @@ class TestBuildFactGridTool:
     assert result["success"] is True
     assert result["fact_count"] == 1
     assert result["dimension_count"] == 2
+    assert result["data"] == facts
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -132,31 +126,34 @@ class TestBuildFactGridTool:
     """include_summary=true emits per-element stats."""
     tool = BuildFactGridTool(mock_graph_client)
 
-    mock_grid = MagicMock()
-    mock_grid.metadata.fact_count = 3
-    mock_grid.metadata.dimension_count = 1
-    mock_grid.metadata.construction_time_ms = 10
-    mock_grid.dimensions = []
-    mock_grid.facts_df = pd.DataFrame(
+    facts = [
       {
-        "element_name": ["Revenue", "Revenue", "Cost"],
-        "value": [1000.0, 2000.0, 500.0],
-      }
-    )
+        "element_id": "us-gaap:Revenues",
+        "element_name": "Revenues",
+        "period_end": "2024-12-31",
+        "value": 1000.0,
+        "unit": "USD",
+      },
+      {
+        "element_id": "us-gaap:Revenues",
+        "element_name": "Revenues",
+        "period_end": "2023-12-31",
+        "value": 2000.0,
+        "unit": "USD",
+      },
+      {
+        "element_id": "us-gaap:CostOfRevenue",
+        "element_name": "CostOfRevenue",
+        "period_end": "2024-12-31",
+        "value": 500.0,
+        "unit": "USD",
+      },
+    ]
 
-    mock_builder = MagicMock()
-    mock_builder.build.return_value = mock_grid
-
-    with (
-      patch(
-        "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
-        new_callable=AsyncMock,
-        return_value=pd.DataFrame(),
-      ),
-      patch(
-        "robosystems.middleware.mcp.tools.fact_grid_tool.FactGridBuilder",
-        return_value=mock_builder,
-      ),
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=facts,
     ):
       result = await tool.execute(
         {
@@ -167,6 +164,6 @@ class TestBuildFactGridTool:
       )
 
     assert "summary" in result
-    assert result["summary"]["Revenue"]["count"] == 2
-    assert result["summary"]["Revenue"]["total"] == 3000.0
-    assert result["summary"]["Cost"]["total"] == 500.0
+    assert result["summary"]["us-gaap:Revenues"]["count"] == 2
+    assert result["summary"]["us-gaap:Revenues"]["total"] == 3000.0
+    assert result["summary"]["us-gaap:CostOfRevenue"]["total"] == 500.0

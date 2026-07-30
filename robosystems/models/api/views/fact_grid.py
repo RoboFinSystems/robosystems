@@ -1,7 +1,6 @@
 from enum import Enum
 from typing import Any
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 
@@ -9,7 +8,6 @@ class DimensionType(str, Enum):
   ELEMENT = "element"
   PERIOD = "period"
   ENTITY = "entity"
-  DIMENSION_AXIS = "dimension_axis"
 
 
 class Dimension(BaseModel):
@@ -39,22 +37,16 @@ class FactGridMetadata(BaseModel):
 
 
 class FactGrid(BaseModel):
+  """A scoped, deduplicated set of facts plus the aspects they span.
+
+  Deliberately *not* a pivot: cells are not collapsed and nothing is
+  aggregated. Arranging facts into a table is the consumer's job — see
+  ``@robosystems/report-components``, whose pivot engine keys cells on a
+  fact's full aspect signature rather than on ``(element, period)``.
+  """
+
   dimensions: list[Dimension] = Field(..., description="Dimensions in the grid")
-  facts_df: Any | None = Field(
-    None,
-    description="Pandas DataFrame with fact data (not serialized, internal use only)",
-    exclude=True,
+  facts: list[dict[str, Any]] = Field(
+    default_factory=list, description="Deduplicated fact records"
   )
   metadata: FactGridMetadata = Field(..., description="Metadata about the grid")
-
-  class Config:
-    arbitrary_types_allowed = True
-
-  def as_pivot_table(self, config: dict[str, Any] | None = None) -> pd.DataFrame:
-    if self.facts_df is None:
-      return pd.DataFrame()
-
-    if config is None:
-      return self.facts_df
-
-    return self.facts_df

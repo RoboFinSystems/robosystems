@@ -1,7 +1,16 @@
+"""Assemble queried facts into a `FactGrid`.
+
+Scoping and aspect extraction only — **no pivoting**. Collapsing facts into
+cells is a rendering decision that depends on the full aspect signature
+(element · period · entity · unit), and getting it wrong is silent: summing
+across entities or across two taxonomies whose elements share a local name
+produces a number that looks authoritative and is meaningless. That
+arrangement belongs to the consumer — `@robosystems/report-components` keys
+cells on the whole signature — so this layer hands back the facts as queried.
+"""
+
 import time
 from typing import Any
-
-import pandas as pd
 
 from robosystems.models.api.views import (
   Dimension,
@@ -11,157 +20,173 @@ from robosystems.models.api.views import (
   ViewConfig,
 )
 
+# Aspect name (ViewAxisConfig.type) → the key `query_fact_grid` returns it under.
+_AXIS_COLUMNS = {
+  "element": "element_id",
+  "period": "period_end",
+  "entity": "entity_ticker",
+}
+
+
+def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+  """Per-element aggregates over the returned facts.
+
+  Shared by the REST and MCP surfaces so both report the same numbers.
+  `total` sums across every returned period — meaningful for duration facts,
+  not for instants (summing a balance across time is not a balance).
+  """
+  summary: dict[str, dict[str, float]] = {}
+
+  by_element: dict[str, list[float]] = {}
+  for fact in facts:
+    element = fact.get("element_id")
+    value = fact.get("value")
+    if element is None or value is None:
+      continue
+    by_element.setdefault(str(element), []).append(float(value))
+
+  for element, values in by_element.items():
+    summary[element] = {
+      "count": len(values),
+      "total": sum(values),
+      "average": sum(values) / len(values),
+      "min": min(values),
+      "max": max(values),
+    }
+
+  return summary
+
 
 class FactGridBuilder:
-  """
-  Build FactGrid from fact data (unified for both modes).
-
-  Works with:
-  - Mode 1: Trial balance data from transaction aggregation
-  - Mode 2: Existing facts queried from graph
-  """
+  """Build a FactGrid from queried fact records."""
 
   def build(
     self,
-    fact_data: pd.DataFrame,
+    fact_data: list[dict[str, Any]],
     view_config: ViewConfig,
     source: str,
   ) -> FactGrid:
-    """
-    Build FactGrid from fact data.
+    """Build FactGrid from fact records.
 
     Args:
-        fact_data: DataFrame with fact data (from either mode)
-        view_config: User-specified view configuration
-        source: Source identifier for metadata
+        fact_data: Fact records from `query_fact_grid`.
+        view_config: Caller-specified aspect scoping.
+        source: Source identifier for metadata.
 
     Returns:
-        FactGrid ready for presentation generation
+        FactGrid carrying the scoped facts and the aspects they span.
     """
     start_time = time.time()
 
-    if fact_data.empty:
+    if not fact_data:
       return self._build_empty_grid(source)
 
-    df = fact_data.copy()
-
+    facts = fact_data
     if view_config.rows or view_config.columns:
-      df = self._apply_aspect_filtering(df, view_config)
+      facts = self._apply_aspect_filtering(facts, view_config)
 
-    dimensions = self._extract_dimensions(df)
+    dimensions = self._extract_dimensions(facts)
 
     metadata = FactGridMetadata(
-      fact_count=len(df),
+      fact_count=len(facts),
       dimension_count=len(dimensions),
       construction_time_ms=(time.time() - start_time) * 1000,
       source=source,
       lineage={
         "original_fact_count": len(fact_data),
-        "filtered_fact_count": len(df),
-        "columns": list(df.columns),
+        "filtered_fact_count": len(facts),
       },
     )
 
     return FactGrid(
       dimensions=dimensions,
-      facts_df=df,
+      facts=facts,
       metadata=metadata,
     )
 
   def _apply_aspect_filtering(
-    self, df: pd.DataFrame, view_config: ViewConfig
-  ) -> pd.DataFrame:
+    self, facts: list[dict[str, Any]], view_config: ViewConfig
+  ) -> list[dict[str, Any]]:
+    """Restrict facts to each axis's `selected_members`.
+
+    A fact whose aspect value is absent is dropped unless the axis sets
+    `include_null_dimension`.
     """
-    Apply aspect filtering based on ViewAxisConfig.selected_members.
+    result = facts
 
-    Filters DataFrame to only include rows where axis values match selected members.
-    """
-    result = df.copy()
-
-    all_axes = (view_config.rows or []) + (view_config.columns or [])
-
-    for axis in all_axes:
+    for axis in (view_config.rows or []) + (view_config.columns or []):
       if not axis.selected_members:
         continue
 
-      column_map = {
-        "element": "element_id",
-        "period": "period_end",
-        "entity": "entity_id",
-        "dimension": "dimension_member",
-      }
-
-      column_name = column_map.get(axis.type)
-      if not column_name or column_name not in result.columns:
+      key = _AXIS_COLUMNS.get(axis.type)
+      if not key:
         continue
 
-      mask = result[column_name].isin(axis.selected_members)
-      if not axis.include_null_dimension:
-        mask = mask | result[column_name].isna()
-
-      result = result[mask]
+      selected = set(axis.selected_members)
+      keep_null = axis.include_null_dimension
+      result = [
+        fact
+        for fact in result
+        if (fact.get(key) in selected) or (keep_null and fact.get(key) in (None, ""))
+      ]
 
     return result
 
-  def _extract_dimensions(self, fact_data: pd.DataFrame) -> list[Dimension]:
-    """Extract dimensions from fact data."""
+  def _extract_dimensions(self, facts: list[dict[str, Any]]) -> list[Dimension]:
+    """Extract the aspects the facts span, in a stable order."""
     dimensions = []
 
-    if "element_name" in fact_data.columns:
-      unique_elements = fact_data["element_name"].dropna().unique().tolist()
+    elements = self._unique(facts, "element_id")
+    if elements:
       dimensions.append(
         Dimension(
           name="Element",
           type=DimensionType.ELEMENT,
-          members=unique_elements,
+          members=elements,
         )
       )
 
-    if "period_start" in fact_data.columns or "period_end" in fact_data.columns:
-      period_members = []
-      if "period_start" in fact_data.columns:
-        period_members.extend(fact_data["period_start"].dropna().unique().tolist())
-      if "period_end" in fact_data.columns:
-        period_members.extend(fact_data["period_end"].dropna().unique().tolist())
-      unique_periods = sorted(set(period_members))
-
+    periods = self._unique(facts, "period_end")
+    if periods:
       dimensions.append(
         Dimension(
           name="Period",
           type=DimensionType.PERIOD,
-          members=unique_periods,
+          members=sorted(periods),
         )
       )
 
-    if "entity_id" in fact_data.columns:
-      unique_entities = fact_data["entity_id"].dropna().unique().tolist()
-      if unique_entities:
-        dimensions.append(
-          Dimension(
-            name="Entity",
-            type=DimensionType.ENTITY,
-            members=unique_entities,
-          )
+    # entity_ticker/entity_name are only returned when an entity filter was
+    # applied; a ticker can be null for CIK- or name-matched entities.
+    entities = self._unique(facts, "entity_ticker") or self._unique(
+      facts, "entity_name"
+    )
+    if entities:
+      dimensions.append(
+        Dimension(
+          name="Entity",
+          type=DimensionType.ENTITY,
+          members=entities,
         )
-
-    if "dimension_axis" in fact_data.columns:
-      unique_axes = fact_data["dimension_axis"].dropna().unique().tolist()
-      if unique_axes:
-        dimensions.append(
-          Dimension(
-            name="DimensionAxis",
-            type=DimensionType.DIMENSION_AXIS,
-            members=unique_axes,
-          )
-        )
+      )
 
     return dimensions
+
+  @staticmethod
+  def _unique(facts: list[dict[str, Any]], key: str) -> list[str]:
+    """Distinct non-null values for `key`, in first-seen order."""
+    seen: dict[str, None] = {}
+    for fact in facts:
+      value = fact.get(key)
+      if value is not None and value != "":
+        seen.setdefault(str(value), None)
+    return list(seen)
 
   def _build_empty_grid(self, source: str) -> FactGrid:
     """Build empty FactGrid when no facts found."""
     return FactGrid(
       dimensions=[],
-      facts_df=pd.DataFrame(),
+      facts=[],
       metadata=FactGridMetadata(
         fact_count=0,
         dimension_count=0,
@@ -170,138 +195,3 @@ class FactGridBuilder:
         lineage=None,
       ),
     )
-
-  def generate_pivot_table(
-    self, fact_grid: FactGrid, view_config: ViewConfig | None = None
-  ) -> dict[str, Any]:
-    """
-    Generate pivot table presentation from FactGrid.
-
-    Supports:
-    - Element hierarchies with subtotals
-    - Custom member ordering and labels
-    - ViewConfig-driven axis configuration
-
-    Memory Warning:
-    Creates DataFrame copies for pivot operations. For datasets > 100k rows,
-    consider streaming or batching approaches to avoid memory pressure.
-    Memory usage scales approximately O(rows * columns) for the pivot table.
-    """
-    if fact_grid.facts_df is None or fact_grid.facts_df.empty:
-      return {
-        "index": [],
-        "columns": [],
-        "data": [],
-        "metadata": {"row_count": 0, "column_count": 0},
-      }
-
-    df = fact_grid.facts_df.copy()
-
-    element_col = "element_label" if "element_label" in df.columns else "element_name"
-    if element_col not in df.columns:
-      element_col = None
-
-    value_col = "numeric_value" if "numeric_value" in df.columns else "net_balance"
-
-    if not element_col or value_col not in df.columns:
-      return {
-        "index": list(df.index),
-        "columns": list(df.columns),
-        "data": df.values.tolist(),
-        "metadata": {
-          "row_count": len(df),
-          "column_count": len(df.columns),
-        },
-      }
-
-    period_col = None
-    for col in ["period_end", "period_start"]:
-      if col in df.columns and not df[col].isna().all():
-        period_col = col
-        break
-
-    period_axis = None
-    if view_config:
-      for axis in (view_config.rows or []) + (view_config.columns or []):
-        if axis.type == "period":
-          period_axis = axis
-          break
-
-    if period_col:
-      pivot = df.pivot_table(
-        index=[element_col],
-        columns=[period_col],
-        values=value_col,
-        aggfunc="sum",
-        fill_value=0.0,
-      )
-
-      if period_axis and period_axis.member_order:
-        available_cols = [c for c in period_axis.member_order if c in pivot.columns]
-        pivot = pivot[available_cols]
-
-      if period_axis and period_axis.member_labels:
-        pivot = pivot.rename(columns=period_axis.member_labels)
-    else:
-      pivot = df[[element_col, value_col]].copy()
-      pivot = pivot.groupby(element_col)[value_col].sum()
-
-    element_axis = None
-    if view_config:
-      for axis in (view_config.rows or []) + (view_config.columns or []):
-        if axis.type == "element":
-          element_axis = axis
-          break
-
-    if element_axis and element_axis.element_order and isinstance(pivot, pd.DataFrame):
-      element_id_to_name = {}
-      if "element_id" in df.columns and element_col in df.columns:
-        mapping_df = df[["element_id", element_col]].drop_duplicates()
-        element_id_to_name = dict(
-          zip(mapping_df["element_id"], mapping_df[element_col], strict=False)
-        )
-
-      if element_id_to_name:
-        ordered_names = [
-          element_id_to_name.get(eid, eid)
-          for eid in element_axis.element_order
-          if element_id_to_name.get(eid, eid) in pivot.index
-        ]
-        if ordered_names:
-          pivot = pivot.reindex(ordered_names)
-      else:
-        available_elements = [e for e in element_axis.element_order if e in pivot.index]
-        if available_elements:
-          pivot = pivot.reindex(available_elements)
-
-    if element_axis and element_axis.element_labels and isinstance(pivot, pd.DataFrame):
-      pivot = pivot.rename(index=element_axis.element_labels)
-
-    index_values = (
-      [[idx] for idx in pivot.index]
-      if isinstance(pivot.index, pd.Index)
-      else pivot.index.tolist()
-    )
-
-    if isinstance(pivot, pd.DataFrame):
-      column_values = (
-        [[col] for col in pivot.columns]
-        if isinstance(pivot.columns, pd.Index)
-        else pivot.columns.tolist()
-      )
-      data_values = pivot.values.tolist()
-    else:
-      column_values = [["Total"]]
-      data_values = [[val] for val in pivot.values.tolist()]
-
-    return {
-      "index": index_values,
-      "columns": column_values,
-      "data": data_values,
-      "metadata": {
-        "row_count": len(index_values),
-        "column_count": len(column_values),
-        "has_periods": period_col is not None,
-        "has_hierarchy": "element_depth" in df.columns,
-      },
-    }

@@ -2,44 +2,32 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ViewAxisConfig(BaseModel):
-  type: str = Field(
-    ..., description="Axis type: 'element', 'period', 'dimension', 'entity'"
-  )
+  """Scoping configuration for one aspect of the fact query.
 
-  dimension_axis: str | None = Field(
-    default=None, description="Dimension axis name for dimension-type axes"
-  )
+  Filtering only. Ordering and labelling are presentation concerns and
+  belong to the consumer that arranges the facts into a table.
+  """
+
+  type: str = Field(..., description="Axis type: 'element', 'period', 'entity'")
+
   include_null_dimension: bool = Field(
     default=False,
-    description="Include facts where this dimension is NULL (default: false)",
+    description="Include facts where this aspect is absent (default: false)",
   )
 
   selected_members: list[str] | None = Field(
     default=None,
     description="Specific members to include (e.g., ['2024-12-31', '2023-12-31'])",
   )
-  member_order: list[str] | None = Field(
-    default=None, description="Explicit ordering of members (overrides default sort)"
-  )
-  member_labels: dict[str, str] | None = Field(
-    default=None,
-    description="Custom labels for members (e.g., {'2024-12-31': 'Current Year'})",
-  )
-
-  element_order: list[str] | None = Field(
-    default=None,
-    description="Element ordering for hierarchy display (e.g., ['us-gaap:Assets', 'us-gaap:Cash', ...])",
-  )
-  element_labels: dict[str, str] | None = Field(
-    default=None,
-    description="Custom labels for elements (e.g., {'us-gaap:Cash': 'Cash and Cash Equivalents'})",
-  )
 
   @field_validator("type")
   @classmethod
   def validate_axis_type(cls, v: str) -> str:
-    allowed = ["element", "period", "dimension", "entity"]
+    allowed = ["element", "period", "entity"]
     if v not in allowed:
+      # 'dimension' is deliberately absent: the fact query filters on
+      # `has_dimensions = false`, so dimensional facts never reach the
+      # response and a dimension axis could only ever be a silent no-op.
       raise ValueError(f"Axis type must be one of {allowed}, got: {v}")
     return v
 
@@ -51,14 +39,6 @@ class ViewConfig(BaseModel):
   columns: list[ViewAxisConfig] = Field(
     default_factory=list, description="Column axis configuration"
   )
-  values: str = Field(
-    default="numeric_value",
-    description="Field to use for values (default: numeric_value)",
-  )
-  aggregation_function: str = Field(
-    default="sum", description="Aggregation function: sum, average, count"
-  )
-  fill_value: float = Field(default=0.0, description="Value to use for missing data")
 
 
 class CreateViewRequest(BaseModel):
@@ -77,7 +57,6 @@ class CreateViewRequest(BaseModel):
           "form": "10-K",
           "fiscal_period": "FY",
           "view_config": {
-            "rows": [{"type": "entity"}],
             "columns": [
               {
                 "type": "period",
@@ -86,15 +65,8 @@ class CreateViewRequest(BaseModel):
                   "2023-12-31",
                   "2024-12-31",
                 ],
-                "member_labels": {
-                  "2022-12-31": "FY22",
-                  "2023-12-31": "FY23",
-                  "2024-12-31": "FY24",
-                },
               }
             ],
-            "values": "numeric_value",
-            "aggregation_function": "sum",
           },
         },
         {
@@ -106,25 +78,6 @@ class CreateViewRequest(BaseModel):
           "periods": ["2026-03-31"],
           "period_type": "instant",
           "include_summary": True,
-        },
-        {
-          "canonical_concepts": ["revenue"],
-          "entity": "NVDA",
-          "fiscal_year": 2024,
-          "fiscal_period": "FY",
-          "view_config": {
-            "rows": [{"type": "element"}],
-            "columns": [
-              {
-                "type": "dimension",
-                "dimension_axis": "us-gaap:StatementBusinessSegmentsAxis",
-                "include_null_dimension": True,
-              }
-            ],
-            "values": "numeric_value",
-            "aggregation_function": "sum",
-            "fill_value": 0.0,
-          },
         },
       ]
     }
@@ -171,7 +124,7 @@ class CreateViewRequest(BaseModel):
     description="Include summary statistics per element",
   )
   view_config: ViewConfig = Field(
-    default_factory=ViewConfig, description="View/pivot configuration"
+    default_factory=ViewConfig, description="Aspect scoping configuration"
   )
 
   @field_validator("period_type")

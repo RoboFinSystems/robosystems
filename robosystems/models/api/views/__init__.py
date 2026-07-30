@@ -10,7 +10,8 @@ from robosystems.models.api.views.view_config import (
   ViewConfig,
 )
 from robosystems.models.api.views.view_response import (
-  PivotTablePresentation,
+  ElementSummary,
+  FactRecord,
   ViewMetadata,
   ViewResponse,
 )
@@ -19,9 +20,10 @@ __all__ = [
   "CreateViewRequest",
   "Dimension",
   "DimensionType",
+  "ElementSummary",
   "FactGrid",
   "FactGridMetadata",
-  "PivotTablePresentation",
+  "FactRecord",
   "ViewAxisConfig",
   "ViewConfig",
   "ViewMetadata",

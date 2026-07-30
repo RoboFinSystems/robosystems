@@ -21,8 +21,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pandas as pd
-
 from robosystems.middleware.graph import get_graph_repository
 
 # Pre-compiled patterns for inline Cypher node filter sanitization.
@@ -153,7 +151,7 @@ async def query_fact_grid(
   fiscal_year: int | None = None,
   fiscal_period: str | None = None,
   period_type: str | None = None,
-) -> pd.DataFrame:
+) -> list[dict[str, Any]]:
   """Query deduplicated facts for the roboledger XBRL hypercube.
 
   Shared by REST (`build-fact-grid`) and MCP (`BuildFactGridTool`). See
@@ -172,10 +170,10 @@ async def query_fact_grid(
       period_type: ``'annual'``, ``'quarterly'``, or ``'instant'``.
 
   Returns:
-      DataFrame with columns: ``element_id``, ``element_name``, ``period_end``,
-      ``value``, ``unit``, and optionally ``entity_ticker``, ``entity_name``
-      when entity filters are used. Deduplicated and sorted by ``period_end``
-      descending.
+      Fact records with keys ``element_id``, ``element_name``, ``period_end``,
+      ``value``, ``unit``, and — only when entity filters are used —
+      ``entity_ticker`` and ``entity_name``. Deduplicated and sorted by
+      ``period_end`` descending.
   """
   parameters: dict[str, Any] = {}
 
@@ -262,12 +260,7 @@ async def query_fact_grid(
   repository = await get_graph_repository(graph_id, operation_type="read")
   results = await repository.execute_query(query, parameters)
 
-  base_columns = ["element_id", "element_name", "period_end", "value", "unit"]
-  if entity_list:
-    base_columns.extend(["entity_ticker", "entity_name"])
-
   if not results:
-    return pd.DataFrame(columns=base_columns)
+    return []
 
-  deduped = _deduplicate_fact_rows(results, has_entity=bool(entity_pattern))
-  return pd.DataFrame(deduped)
+  return _deduplicate_fact_rows(results, has_entity=bool(entity_pattern))

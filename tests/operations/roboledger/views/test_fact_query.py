@@ -14,7 +14,6 @@ Covers LadybugDB-specific behaviors:
 
 from unittest.mock import AsyncMock, patch
 
-import pandas as pd
 import pytest
 
 from robosystems.operations.roboledger.views.fact_query import (
@@ -268,15 +267,12 @@ class TestQueryFactGrid:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_empty_results_returns_empty_dataframe(self, mock_repository):
+  async def test_empty_results_returns_empty_list(self, mock_repository):
     mock_repository.execute_query.return_value = []
     with patch(PATCH_REPO, return_value=mock_repository):
       result = await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
 
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 0
-    assert "element_id" in result.columns
-    assert "value" in result.columns
+    assert result == []
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -323,9 +319,9 @@ class TestQueryFactGrid:
       result = await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
     assert len(result) == 2
     # Sorted DESC by period_end
-    assert result.iloc[0]["period_end"] == "2025-12-31"
-    assert result.iloc[0]["value"] == 100.0
-    assert result.iloc[1]["period_end"] == "2024-12-31"
+    assert result[0]["period_end"] == "2025-12-31"
+    assert result[0]["value"] == 100.0
+    assert result[1]["period_end"] == "2024-12-31"
 
 
 class TestDeduplicateFactRows:

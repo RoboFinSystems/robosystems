@@ -467,24 +467,20 @@ class TestGraphMCPTools:
 
     tools = GraphMCPTools(mock_graph_client)
 
-    import pandas as pd
-
-    fact_df = pd.DataFrame(
-      [
-        {
-          "element_id": "test:Element",
-          "element_name": "Cash",
-          "period_end": "2025-01-01",
-          "value": 1000.0,
-          "unit": "USD",
-        }
-      ]
-    )
+    facts = [
+      {
+        "element_id": "test:Element",
+        "element_name": "Cash",
+        "period_end": "2025-01-01",
+        "value": 1000.0,
+        "unit": "USD",
+      }
+    ]
 
     with patch(
       "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
       new_callable=AsyncMock,
-      return_value=fact_df,
+      return_value=facts,
     ):
       result = await tools.call_tool(
         "build-fact-grid",
