@@ -20,9 +20,11 @@ class TestViewAxisConfig:
     model = ViewAxisConfig(type="period")
     assert model.type == "period"
 
-  def test_valid_dimension_axis(self):
-    model = ViewAxisConfig(type="dimension", dimension_axis="Segment")
-    assert model.dimension_axis == "Segment"
+  def test_dimension_axis_rejected(self):
+    """The fact query filters on `has_dimensions = false`, so a dimension
+    axis could only ever be a silent no-op."""
+    with pytest.raises(ValidationError):
+      ViewAxisConfig(type="dimension")
 
   def test_valid_entity_axis(self):
     model = ViewAxisConfig(type="entity")
@@ -45,19 +47,16 @@ class TestViewAxisConfig:
     )
     assert len(model.selected_members) == 2
 
-  def test_member_labels(self):
+  def test_presentation_fields_are_not_accepted(self):
+    """Ordering and labelling belong to whatever renders the facts; the
+    request model carries scoping only."""
     model = ViewAxisConfig(
       type="period",
       member_labels={"2024-12-31": "Current Year"},
+      element_order=["us-gaap:Assets"],
     )
-    assert model.member_labels["2024-12-31"] == "Current Year"
-
-  def test_element_order(self):
-    model = ViewAxisConfig(
-      type="element",
-      element_order=["us-gaap:Assets", "us-gaap:Cash"],
-    )
-    assert len(model.element_order) == 2
+    assert not hasattr(model, "member_labels")
+    assert not hasattr(model, "element_order")
 
 
 @pytest.mark.unit
@@ -66,20 +65,20 @@ class TestViewConfig:
     model = ViewConfig()
     assert model.rows == []
     assert model.columns == []
-    assert model.values == "numeric_value"
-    assert model.aggregation_function == "sum"
-    assert model.fill_value == 0.0
 
   def test_custom_config(self):
     model = ViewConfig(
       rows=[ViewAxisConfig(type="element")],
       columns=[ViewAxisConfig(type="period")],
-      values="numeric_value",
-      aggregation_function="average",
-      fill_value=-1.0,
     )
     assert len(model.rows) == 1
-    assert model.aggregation_function == "average"
+    assert len(model.columns) == 1
+
+  def test_pivot_knobs_are_not_accepted(self):
+    """No server-side pivot means no aggregation function to configure."""
+    model = ViewConfig(values="numeric_value", aggregation_function="average")
+    assert not hasattr(model, "aggregation_function")
+    assert not hasattr(model, "fill_value")
 
 
 @pytest.mark.unit

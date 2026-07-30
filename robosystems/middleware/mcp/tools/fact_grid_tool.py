@@ -14,6 +14,7 @@ The tool's job is:
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from robosystems.logger import logger
@@ -21,6 +22,7 @@ from robosystems.models.api.views import ViewAxisConfig, ViewConfig
 from robosystems.operations.roboledger.views import (
   FactGridBuilder,
   query_fact_grid,
+  summarize_by_element,
 )
 
 
@@ -56,9 +58,12 @@ class BuildFactGridTool:
 - fiscal_year/fiscal_period: Filter by report fiscal context
 
 **RETURNS:**
-- Deduplicated facts with element qnames, names, values, periods, and units
-- Entity ticker and name included when entity filters are used
+- Deduplicated facts with element qnames, names, values, periods, and units — one record per fact, not a pivot table
+- Entity ticker and name ONLY when an entity filter is used
 - Only consolidated totals (dimensional breakdowns excluded)
+
+**IMPORTANT:**
+Always pass entity or entities. Without an entity filter the response carries no entity identity at all, so facts from different filers are indistinguishable — and the query degrades to a full scan of the fact table, which is slow on large repositories like SEC.
 
 **TIP:**
 For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.""",
@@ -106,19 +111,14 @@ For income statement items (revenue, net income), always specify period_type='an
             "description": "Filter by period type: 'annual' (duration facts only), 'quarterly' (duration facts only), 'instant' (point-in-time facts). Default depends on statement type.",
             "enum": ["annual", "quarterly", "instant"],
           },
-          "dimensions": {
-            "type": "object",
-            "description": "Optional dimensional filters (e.g., segment, geography)",
-            "default": {},
-          },
           "rows": {
             "type": "array",
-            "description": "Optional axis configuration for rows",
+            "description": "Optional aspect scoping, e.g. [{'type': 'period', 'selected_members': ['2024-12-31']}]",
             "default": [],
           },
           "columns": {
             "type": "array",
-            "description": "Optional axis configuration for columns",
+            "description": "Optional aspect scoping; same shape as 'rows'. Rows/columns are naming conventions only — both filter.",
             "default": [],
           },
           "include_summary": {
@@ -176,6 +176,8 @@ For income statement items (revenue, net income), always specify period_type='an
           "message": f"Column {i} must be a dictionary with axis configuration",
         }
 
+    start_time = time.time()
+
     fact_data = await query_fact_grid(
       graph_id=self.client.graph_id,
       elements=elements or None,
@@ -198,14 +200,15 @@ For income statement items (revenue, net income), always specify period_type='an
       fact_data=fact_data, view_config=view_config, source="mcp_tool"
     )
 
+    # Query time dominates; timing only the in-memory build reported ~1ms
+    # regardless of how long the graph took.
+    elapsed_ms = (time.time() - start_time) * 1000
+
     logger.info(
       f"Built fact grid with {fact_grid.metadata.fact_count} facts "
-      f"across {fact_grid.metadata.dimension_count} dimensions"
+      f"across {fact_grid.metadata.dimension_count} dimensions "
+      f"in {elapsed_ms:.0f}ms"
     )
-
-    data_records: list[dict[str, Any]] = []
-    if fact_grid.facts_df is not None and not fact_grid.facts_df.empty:
-      data_records = fact_grid.facts_df.to_dict(orient="records")
 
     response: dict[str, Any] = {
       "success": True,
@@ -220,28 +223,12 @@ For income statement items (revenue, net income), always specify period_type='an
         }
         for d in fact_grid.dimensions
       ],
-      "data": data_records,
-      "construction_time_ms": fact_grid.metadata.construction_time_ms,
+      "data": fact_grid.facts,
+      "construction_time_ms": elapsed_ms,
       "message": f"Built fact grid with {fact_grid.metadata.fact_count} facts",
     }
 
-    if (
-      include_summary
-      and fact_grid.facts_df is not None
-      and not fact_grid.facts_df.empty
-    ):
-      df = fact_grid.facts_df
-      if "element_name" in df.columns and "value" in df.columns:
-        summary: dict[str, dict[str, float]] = {}
-        for element_name in df["element_name"].unique():
-          element_data = df[df["element_name"] == element_name]
-          summary[element_name] = {
-            "count": len(element_data),
-            "total": float(element_data["value"].sum()),
-            "average": float(element_data["value"].mean()),
-            "min": float(element_data["value"].min()),
-            "max": float(element_data["value"].max()),
-          }
-        response["summary"] = summary
+    if include_summary and fact_grid.facts:
+      response["summary"] = summarize_by_element(fact_grid.facts)
 
     return response
