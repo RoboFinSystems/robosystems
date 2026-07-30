@@ -217,22 +217,27 @@ For per-user external service integrations (like QuickBooks):
 6. Add tests in `tests/adapters/{service_name}/`
 7. Import pipeline in `dagster/definitions.py` (if pipeline added)
 
-## Fork-Friendly Custom Adapters
+## Custom Data Sources: Integrations First
 
-The adapter directory structure is designed as a **merge boundary** for forks. Custom adapters live in isolated namespaces that upstream never touches, enabling conflict-free updates.
+**The supported route for connecting your own data sources is an integration, not an in-core adapter.** An integration is a program in its own repository that writes through the public API with an API key — start from [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template), and see [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration) for a real one. Integrations survive every platform release, work identically against managed and self-hosted deployments, and hold their own source credentials. The platform's own adapters prove the surface: the QuickBooks adapter writes through the same public event envelope an external integration would use.
+
+The adapter registry in this directory is **maintained exclusively by the platform team** — both classes keep expanding (connection adapters like QuickBooks; shared-repository adapters like SEC), but platform-operated deployments run an unmodified core, so this directory is not a contribution surface for custom sources. Want a source supported natively? Open a [discussion](https://github.com/orgs/RoboFinSystems/discussions).
+
+## Custom Adapters on Self-Hosted Forks
+
+If you fork this repository and operate your **own** deployment in your **own** infrastructure, the adapter directory remains a **merge boundary**: in-core additions live in the `custom_*` namespace, which upstream never touches, so updates merge conflict-free. This pattern applies only to deployments you run yourself.
 
 ```
 adapters/
 ├── sec/                 # ← Upstream maintains, shared repository
 ├── quickbooks/          # ← Upstream maintains, private adapter
 │
-└── custom_*/            # ← Fork namespace (upstream NEVER touches)
+└── custom_*/            # ← Self-hosted-fork namespace (upstream NEVER touches)
     ├── custom_erp/      #    Your custom ERP integration
-    ├── custom_bank/     #    Your bank API integration
-    └── custom_crm/      #    Your CRM integration
+    └── custom_bank/     #    Your bank API integration
 ```
 
-**To add a custom data source in your fork:**
+**To add a custom data source in your self-hosted fork:**
 
 1. Create `adapters/custom_myservice/` following the same client/processors/pipeline structure
 2. Add `pipeline/` with `get_dagster_components()` returning assets, jobs, sensors, schedules
@@ -246,7 +251,7 @@ git fetch upstream
 git merge upstream/main  # Clean merge - your custom_*/ directories untouched
 ```
 
-The `custom_*` namespace convention ensures that `git pull upstream main` never conflicts with your additions.
+Even on a self-hosted deployment, consider the integration route first — it needs no fork at all.
 
 ## Related Documentation
 
