@@ -259,20 +259,44 @@ class TestQueryFactGrid:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_entity_columns_excluded_when_no_filter(self, mock_repository):
+  async def test_entity_columns_included_without_filter(self, mock_repository):
+    """Entity identity is always returned — without it facts from different
+    filers are indistinguishable."""
     with patch(PATCH_REPO, return_value=mock_repository):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
     query = mock_repository.execute_query.call_args[0][0]
-    assert "entity_ticker" not in query
+    assert "entity_ticker" in query
+    assert "entity_name" in query
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_leads_with_element_anchor_without_entity_filter(self, mock_repository):
+    """Never lead with (f:Fact) — that full-scans the fact table."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+    query = mock_repository.execute_query.call_args[0][0]
+    assert query.startswith("MATCH (el:Element {qname: 'us-gaap:Assets'})")
+    assert "MATCH (f:Fact)" not in query
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_leads_with_entity_anchor_when_filtered(self, mock_repository):
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
+    query = mock_repository.execute_query.call_args[0][0]
+    assert query.startswith("MATCH (ent:Entity {ticker: 'NVDA'})")
 
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_empty_results_returns_empty_list(self, mock_repository):
     mock_repository.execute_query.return_value = []
     with patch(PATCH_REPO, return_value=mock_repository):
-      result = await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+      result, truncated = await query_fact_grid(
+        MOCK_GRAPH_ID, elements=["us-gaap:Assets"]
+      )
 
     assert result == []
+    assert truncated is False
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -316,12 +340,48 @@ class TestQueryFactGrid:
       },
     ]
     with patch(PATCH_REPO, return_value=mock_repository):
-      result = await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+      result, truncated = await query_fact_grid(
+        MOCK_GRAPH_ID, elements=["us-gaap:Assets"]
+      )
     assert len(result) == 2
     # Sorted DESC by period_end
     assert result[0]["period_end"] == "2025-12-31"
     assert result[0]["value"] == 100.0
     assert result[1]["period_end"] == "2024-12-31"
+    assert truncated is False
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_limit_truncates_after_sort(self, mock_repository):
+    """Truncation keeps the most recent periods, not an arbitrary slice."""
+    mock_repository.execute_query.return_value = [
+      {
+        "element_id": "us-gaap:Assets",
+        "element_name": "Assets",
+        "period_end": end,
+        "value": 1.0,
+        "unit": "USD",
+        "entity_ticker": "NVDA",
+      }
+      for end in ["2023-12-31", "2025-12-31", "2024-12-31"]
+    ]
+    with patch(PATCH_REPO, return_value=mock_repository):
+      result, truncated = await query_fact_grid(
+        MOCK_GRAPH_ID, elements=["us-gaap:Assets"], limit=2
+      )
+
+    assert truncated is True
+    assert [r["period_end"] for r in result] == ["2025-12-31", "2024-12-31"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_limit_not_applied_in_cypher(self, mock_repository):
+    """ORDER BY + LIMIT forces a full materialize-then-sort in LadybugDB
+    (25s timeout over 269k facts), so the limit is a Python-side bound."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], limit=10)
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "LIMIT" not in query.upper()
 
 
 class TestDeduplicateFactRows:
@@ -332,11 +392,11 @@ class TestDeduplicateFactRows:
       {"element_id": "us-gaap:Assets", "period_end": "2025-12-31", "value": 999},
       {"element_id": "us-gaap:Revenue", "period_end": "2025-12-31", "value": 50},
     ]
-    deduped = _deduplicate_fact_rows(rows, has_entity=False)
+    deduped = _deduplicate_fact_rows(rows)
     assert len(deduped) == 2
 
   @pytest.mark.unit
-  def test_has_entity_key_includes_ticker(self):
+  def test_entity_is_part_of_the_key(self):
     """Same (qname, period) but different tickers should NOT dedup."""
     rows = [
       {
@@ -352,7 +412,7 @@ class TestDeduplicateFactRows:
         "value": 200,
       },
     ]
-    deduped = _deduplicate_fact_rows(rows, has_entity=True)
+    deduped = _deduplicate_fact_rows(rows)
     assert len(deduped) == 2
 
   @pytest.mark.unit
@@ -362,7 +422,7 @@ class TestDeduplicateFactRows:
       {"element_id": "b", "period_end": "2025-06-30", "value": 2},
       {"element_id": "c", "period_end": "2023-12-31", "value": 3},
     ]
-    deduped = _deduplicate_fact_rows(rows, has_entity=False)
+    deduped = _deduplicate_fact_rows(rows)
     assert [r["period_end"] for r in deduped] == [
       "2025-06-30",
       "2024-12-31",

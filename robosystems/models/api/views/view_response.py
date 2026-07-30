@@ -34,6 +34,14 @@ class ViewMetadata(BaseModel):
   source: str = Field(..., description="Data source type")
   period_start: str | None = Field(None, description="Period start date")
   period_end: str | None = Field(None, description="Period end date")
+  truncated: bool = Field(
+    default=False,
+    description=(
+      "True when more facts matched than `limit` allowed. The returned facts "
+      "are the most recent by period; narrow the filters or raise `limit` to "
+      "see the rest."
+    ),
+  )
 
 
 class ViewResponse(BaseModel):
