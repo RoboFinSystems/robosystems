@@ -91,4 +91,33 @@ async def get_connection_options(
       )
     )
 
+  # External integration provider (source-namespace registration)
+  if env.CONNECTION_EXTERNAL_ENABLED:
+    providers.append(
+      ConnectionProviderInfo(
+        provider="external",
+        display_name="External Integration",
+        description=(
+          "Register a source namespace for an integration you run outside "
+          "the platform. The integration writes through the public API, "
+          "stamping its registered source_name on the events it emits."
+        ),
+        auth_type="none",
+        auth_flow=(
+          "No platform-held credentials — the integration authenticates to "
+          "its own source system and calls the API with an API key."
+        ),
+        required_config=["source_name"],
+        optional_config=["display_name"],
+        features=["event_push"],
+        sync_frequency="Push-based — the integration writes on its own schedule",
+        data_types=["Events"],
+        setup_instructions=(
+          "Choose a source_name slug (e.g. 'salesforce'), register it, then "
+          "emit events via create-event-block with source=<source_name>."
+        ),
+        documentation_url=None,
+      )
+    )
+
   return ConnectionOptionsResponse(providers=providers, total_providers=len(providers))

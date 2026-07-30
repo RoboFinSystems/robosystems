@@ -191,7 +191,12 @@ class CreateEventBlockRequest(BaseModel):
   # Provenance
   source: str = Field(
     ...,
-    description="'manual' | 'system' | 'schedule' | 'quickbooks' | 'xero' | 'plaid'",
+    description=(
+      "'manual' | 'system' | 'schedule', a connected provider name "
+      "(e.g. 'quickbooks'), or a source_name registered via an "
+      "'external' connection. Validated against the graph's registered "
+      "connections."
+    ),
   )
   external_id: str | None = Field(
     None,
@@ -321,8 +326,9 @@ class EventBlockEnvelope(BaseModel):
   source: str = Field(
     ...,
     description=(
-      "Capture source (`manual`, `system`, `schedule`, `quickbooks`, "
-      "`xero`, `plaid`). Used for adapter routing."
+      "Capture source: `manual`, `system`, `schedule`, a connected "
+      "provider name (e.g. `quickbooks`), or a registered external "
+      "source_name. Used for adapter routing."
     ),
   )
   external_id: str | None = Field(

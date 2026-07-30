@@ -106,7 +106,7 @@ class ListEventBlocksTool:
 - event_category (optional): 'sales' | 'purchase' | 'financing' | 'payroll' | 'treasury' | 'adjustment' | 'recognition' | 'other'
 - status (optional): 'captured' | 'classified' | 'committed' | 'pending' | 'fulfilled' | 'voided' | 'superseded'
 - agent_id (optional): Filter to a specific counterparty
-- source (optional): 'manual' | 'schedule' | 'system' | 'quickbooks' | 'xero' | 'plaid'
+- source (optional): 'manual' | 'schedule' | 'system', a connected provider name, or a registered external source_name
 - limit (optional, default 50, max 1000)
 - offset (optional, default 0)
 - include_metadata (optional, default false): When false, returns a lean

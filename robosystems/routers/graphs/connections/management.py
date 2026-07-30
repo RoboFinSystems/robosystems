@@ -47,7 +47,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="SEC: provide entity CIK, no auth needed. QuickBooks: returns an OAuth URL — complete the flow to activate. One connection allowed per provider per graph.",
+  description="SEC: provide entity CIK, no auth needed. QuickBooks: returns an OAuth URL — complete the flow to activate. External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -115,25 +115,39 @@ async def create_connection(
       config = request.sec_config
     elif request.provider == "quickbooks":
       config = request.quickbooks_config
+    elif request.provider == "external":
+      config = request.external_config
     # Validate provider is enabled before any database operations
     provider_registry.get_provider(request.provider)
 
-    # Prevent duplicate connections: only one connection per provider per graph
+    # Prevent duplicate connections: one connection per provider per graph —
+    # except 'external', where the identity is the source_name (a graph can
+    # register several external sources; the same source_name early-returns
+    # its existing registration).
     existing_connections = await ConnectionService.list_connections(
       user_id=str(current_user.id),
       graph_id=graph_id,
       provider=request.provider,
     )
+    if request.provider == "external" and request.external_config is not None:
+      existing_connections = [
+        c
+        for c in existing_connections
+        if c.get("source_name") == request.external_config.source_name
+      ]
     if existing_connections:
       existing = existing_connections[0]
       return ConnectionResponse(
-        id=existing["id"],
+        connection_id=existing["connection_id"],
         provider=existing["provider"],
-        status=existing["status"],
-        metadata=existing.get("metadata", {}),
-        graph_id=graph_id,
         entity_id=existing.get("entity_id"),
+        status=existing["status"],
         created_at=existing["created_at"],
+        updated_at=existing.get("updated_at"),
+        last_sync=existing.get("metadata", {}).get("last_sync"),
+        write_policy=existing.get("write_policy"),
+        source_name=existing.get("source_name"),
+        metadata=existing.get("metadata", {}),
       )
 
     # Create connection using provider registry with timeout coordination
@@ -184,6 +198,7 @@ async def create_connection(
       updated_at=connection.get("updated_at"),
       last_sync=connection["metadata"].get("last_sync"),
       write_policy=connection.get("write_policy"),
+      source_name=connection.get("source_name"),
       metadata=connection["metadata"],
     )
 
@@ -295,6 +310,7 @@ async def list_connections(
           updated_at=conn.get("updated_at"),
           last_sync=conn["metadata"].get("last_sync"),
           write_policy=conn.get("write_policy"),
+          source_name=conn.get("source_name"),
           metadata=conn["metadata"],
         )
       )
@@ -347,6 +363,7 @@ async def get_connection(
       updated_at=connection.get("updated_at"),
       last_sync=connection["metadata"].get("last_sync"),
       write_policy=connection.get("write_policy"),
+      source_name=connection.get("source_name"),
       metadata=connection["metadata"],
     )
 
@@ -422,6 +439,7 @@ async def set_connection_write_policy(
       updated_at=connection.get("updated_at"),
       last_sync=connection["metadata"].get("last_sync"),
       write_policy=connection.get("write_policy"),
+      source_name=connection.get("source_name"),
       metadata=connection["metadata"],
     )
 

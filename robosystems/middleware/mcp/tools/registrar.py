@@ -449,10 +449,12 @@ class _RegistrarMCPTool(BaseTool):
 
     try:
       with session_factory(graph_id) as session:
+        kwargs = {}
         if self.spec.requires_created_by:
-          result = command(session, body, created_by=created_by)
-        else:
-          result = command(session, body)
+          kwargs["created_by"] = created_by
+        if self.spec.requires_graph_id:
+          kwargs["graph_id"] = graph_id
+        result = command(session, body, **kwargs)
     except tuple(self.spec.error_map.keys()) as exc:
       return translate_error(exc, self.spec.error_map)
     except Exception as exc:

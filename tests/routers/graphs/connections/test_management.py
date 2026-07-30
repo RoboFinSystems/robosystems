@@ -39,17 +39,20 @@ def _make_connection_dict(
   entity_id: str = GRAPH_ID,
   status: str = "connected",
   last_sync: str | None = None,
+  source_name: str | None = None,
 ) -> dict:
   return {
     "connection_id": connection_id,
     "provider": provider,
     "entity_id": entity_id,
     "status": status,
+    "source_name": source_name,
     "created_at": datetime.now(UTC),
     "updated_at": datetime.now(UTC),
     "metadata": {
       "last_sync": last_sync,
       "realm_id": "123456",
+      "source_name": source_name,
     },
   }
 
@@ -57,9 +60,11 @@ def _make_connection_dict(
 def _make_create_request(
   provider: str = "quickbooks",
   entity_id: str = GRAPH_ID,
+  source_name: str = "salesforce",
 ):
   from robosystems.models.api.graphs.connections import (
     CreateConnectionRequest,
+    ExternalConnectionConfig,
     QuickBooksConnectionConfig,
     SECConnectionConfig,
   )
@@ -75,6 +80,12 @@ def _make_create_request(
       provider="sec",
       entity_id=entity_id,
       sec_config=SECConnectionConfig(cik="0001234567"),
+    )
+  elif provider == "external":
+    return CreateConnectionRequest(
+      provider="external",
+      entity_id=entity_id,
+      external_config=ExternalConnectionConfig(source_name=source_name),
     )
   else:
     raise ValueError(f"Unsupported provider in helper: {provider}")
@@ -186,6 +197,141 @@ class TestCreateConnection:
 
     assert result.connection_id == CONNECTION_ID
     assert result.provider == "sec"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_create_connection_success_external(self):
+    """Happy path: registers an external source namespace."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_create_request(provider="external", source_name="salesforce")
+    connection_dict = _make_connection_dict(
+      provider="external", source_name="salesforce"
+    )
+    components = _make_robustness_components()
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components",
+        return_value=components,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[],
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
+
+      result = await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result.connection_id == CONNECTION_ID
+    assert result.provider == "external"
+    assert result.source_name == "salesforce"
+    mock_registry.create_connection.assert_called_once()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_create_external_second_source_creates_new_connection(self):
+    """A second external source on the graph is NOT deduped away — external
+    connections dedup on source_name, not provider."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_create_request(provider="external", source_name="salesforce")
+    existing = _make_connection_dict(
+      connection_id="conn_other", provider="external", source_name="hubspot"
+    )
+    created = _make_connection_dict(provider="external", source_name="salesforce")
+    components = _make_robustness_components()
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components",
+        return_value=components,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[existing],
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=created,
+      ),
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
+
+      result = await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result.source_name == "salesforce"
+    mock_registry.create_connection.assert_called_once()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_create_external_same_source_early_returns_existing(self):
+    """Re-registering the same source_name returns the existing connection
+    without creating a duplicate."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_create_request(provider="external", source_name="salesforce")
+    existing = _make_connection_dict(
+      connection_id="conn_existing", provider="external", source_name="salesforce"
+    )
+    components = _make_robustness_components()
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components",
+        return_value=components,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[existing],
+      ),
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.create_connection = AsyncMock()
+
+      result = await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result.connection_id == "conn_existing"
+    assert result.source_name == "salesforce"
+    mock_registry.create_connection.assert_not_called()
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -1099,3 +1245,68 @@ class TestSetConnectionWritePolicy:
         )
 
     assert exc_info.value.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# ExternalConnectionConfig validation
+# ---------------------------------------------------------------------------
+
+
+class TestExternalConnectionConfigValidation:
+  """Request-model guards for external source registration."""
+
+  @pytest.mark.unit
+  def test_reserved_source_names_rejected(self):
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.connections import (
+      RESERVED_SOURCE_NAMES,
+      ExternalConnectionConfig,
+    )
+
+    for reserved in RESERVED_SOURCE_NAMES:
+      with pytest.raises(ValidationError, match="reserved"):
+        ExternalConnectionConfig(source_name=reserved)
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    "bad", ["Salesforce", "1crm", "a", "with space", "dot.name", "-lead"]
+  )
+  def test_malformed_source_names_rejected(self, bad: str):
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.connections import ExternalConnectionConfig
+
+    with pytest.raises(ValidationError):
+      ExternalConnectionConfig(source_name=bad)
+
+  @pytest.mark.unit
+  def test_external_config_required_for_external_provider(self):
+    # Explicit None runs the per-field validator (an omitted field applies
+    # the default unvalidated — the same semantics sec/qb configs have).
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.connections import CreateConnectionRequest
+
+    with pytest.raises(ValidationError, match="external_config is required"):
+      CreateConnectionRequest(
+        provider="external", entity_id=GRAPH_ID, external_config=None
+      )
+
+  @pytest.mark.unit
+  def test_external_config_rejected_for_other_providers(self):
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.connections import (
+      CreateConnectionRequest,
+      ExternalConnectionConfig,
+      SECConnectionConfig,
+    )
+
+    with pytest.raises(ValidationError, match="should not be provided"):
+      CreateConnectionRequest(
+        provider="sec",
+        entity_id=GRAPH_ID,
+        sec_config=SECConnectionConfig(cik="0001234567"),
+        external_config=ExternalConnectionConfig(source_name="salesforce"),
+      )

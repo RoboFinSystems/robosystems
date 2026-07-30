@@ -8,8 +8,14 @@ from sqlalchemy.orm import Session
 from ...config import env
 from ...middleware.otel.metrics import get_endpoint_metrics
 from ...models.api.graphs.connections import (
+  ExternalConnectionConfig,
   QuickBooksConnectionConfig,
   SECConnectionConfig,
+)
+from .external_provider import (
+  cleanup_external_connection,
+  create_external_connection,
+  sync_external_connection,
 )
 from .quickbooks_provider import (
   cleanup_quickbooks_connection,
@@ -76,6 +82,15 @@ class ProviderRegistry:
         "config_class": QuickBooksConnectionConfig,
       }
 
+    # Add external provider (source-namespace registration) if enabled
+    if env.CONNECTION_EXTERNAL_ENABLED:
+      self._providers["external"] = {
+        "create": create_external_connection,
+        "sync": sync_external_connection,
+        "cleanup": cleanup_external_connection,
+        "config_class": ExternalConnectionConfig,
+      }
+
   def _record_feature_flag_status(self):
     """Record feature flag status at initialization for monitoring."""
     try:
@@ -84,6 +99,7 @@ class ProviderRegistry:
       for provider, enabled in [
         ("sec", env.CONNECTION_SEC_ENABLED),
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
+        ("external", env.CONNECTION_EXTERNAL_ENABLED),
       ]:
         metrics.record_business_event(
           endpoint="provider_registry",
@@ -120,6 +136,11 @@ class ProviderRegistry:
         self._record_disabled_provider_request(provider_lower)
         raise ValueError(
           "QuickBooks provider is not enabled. Please contact support to enable this connection type."
+        )
+      elif provider_lower == "external" and not env.CONNECTION_EXTERNAL_ENABLED:
+        self._record_disabled_provider_request(provider_lower)
+        raise ValueError(
+          "External provider is not enabled. Please contact support to enable this connection type."
         )
       else:
         raise ValueError(f"Unknown provider type: {provider_type}")

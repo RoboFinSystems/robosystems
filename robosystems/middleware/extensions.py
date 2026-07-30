@@ -102,6 +102,11 @@ class OperationSpec:
       `OperationRegistrar` at mount time).
     requires_created_by: pass `created_by=str(user.id)` to the command.
       True by default.
+    requires_graph_id: pass `graph_id=<path graph_id>` to the command.
+      False by default. For commands that need the graph identity for
+      cross-DB lookups (e.g. the platform Connection registry backing
+      event-source validation) — the tenant session alone doesn't carry
+      it.
     pre_validate: optional sync validator called before the command.
       Receives the parsed body; may raise `HTTPException` to abort
       with a 4xx response. Use for parse/format checks that don't
@@ -134,6 +139,7 @@ class OperationSpec:
   path: str | None = None
   business_event_type: str | None = None
   requires_created_by: bool = True
+  requires_graph_id: bool = False
   pre_validate: Callable[[BaseModel], None] | None = None
   on_fresh_success: Callable | None = None
   mark_stale_reason: str | None = None
@@ -407,6 +413,7 @@ class OperationRegistrar:
     on_fresh_success = spec.on_fresh_success
     mark_stale_reason = spec.mark_stale_reason
     requires_created_by = spec.requires_created_by
+    requires_graph_id = spec.requires_graph_id
     op_name = spec.name
     ctx_builder = self.ctx_builder
     dispatcher = self.dispatcher
@@ -462,9 +469,12 @@ class OperationRegistrar:
         try:
           with _resolve_session_factory()(graph_id) as session:
             try:
+              kwargs = {}
               if requires_created_by:
-                return command(session, body, created_by=str(user.id))
-              return command(session, body)
+                kwargs["created_by"] = str(user.id)
+              if requires_graph_id:
+                kwargs["graph_id"] = graph_id
+              return command(session, body, **kwargs)
             except tuple(error_map.keys()) as exc:
               _raise_mapped(exc, error_map)
               raise AssertionError("unreachable: _raise_mapped always raises")
