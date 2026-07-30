@@ -1843,6 +1843,138 @@ class ComputeMetricsResponse(BaseModel):
   skipped: list[SkippedMetricLite] = Field(default_factory=list)
 
 
+class MetricObservation(BaseModel):
+  """One externally-observed value in an ``assert-metrics`` request."""
+
+  qname: str = Field(
+    ...,
+    min_length=1,
+    description=(
+      "Metric element qname (e.g. rsx:GithubStars). Must resolve to a "
+      "concept on the structure's presentation catalog."
+    ),
+  )
+  value: float = Field(..., description="Observed value.")
+
+
+class AssertedMetricLite(BaseModel):
+  """One metric written by an ``assert-metrics`` run."""
+
+  element_id: str = Field(..., description="Metric element the fact was written for.")
+  element_qname: str = Field(..., description="Metric element qname.")
+  name: str = Field(..., description="Metric display name.")
+  value: float = Field(..., description="Asserted value.")
+  unit: str = Field(
+    ..., description="Fact unit — 'USD' for monetary, 'days' for days, else 'pure'."
+  )
+  period_type: str = Field(..., description="'instant' or 'duration'.")
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Format family from the metric element (monetary | ratio | percent "
+      "| multiple | days). None means untyped; fall back to unit."
+    ),
+  )
+
+
+class AssertMetricsRequest(BaseModel):
+  """Request body for the ``assert-metrics`` operation.
+
+  The observation sibling of ``compute-metrics``: writes externally-
+  observed values (usage counts, marketing numbers, hand-carried
+  figures) into the period's standing ``factset_type='metric'`` FactSet
+  with ``AssertedProvenance``. Re-asserting a period replaces its facts
+  — one standing FactSet per (structure, entity, period_end), the
+  accumulating time series.
+
+  Structures carrying ``Derive`` rules are compute-owned
+  (``compute-metrics``) and rejected — asserted and derived metric
+  series keep disjoint structures. Asserted series are actuals; there
+  is no scenario axis.
+  """
+
+  structure_id: str = Field(
+    ...,
+    description="Metric block structure (block_type='metric') to assert into.",
+  )
+  period_end: date = Field(
+    ...,
+    description=(
+      "Period end the observations are for — instant concepts (a follower "
+      "count at month end) land as of this date; duration concepts (monthly "
+      "downloads) end on it."
+    ),
+  )
+  period_start: date | None = Field(
+    None,
+    description=(
+      "Window start for duration concepts and the standing FactSet's "
+      "period_start. Instant concepts ignore it."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "Entity to assert for. Defaults to the graph's earliest-created "
+      "entity (the primary entity for single-entity graphs)."
+    ),
+  )
+  source_system: str = Field(
+    ...,
+    min_length=1,
+    description=(
+      "Identifier of the asserting system (e.g. 'content-machine') — "
+      "recorded as the AssertedProvenance source_system."
+    ),
+  )
+  basis_note: str | None = Field(
+    None,
+    description="Free-text basis / source reference for the observations.",
+  )
+  observations: list[MetricObservation] = Field(
+    ...,
+    min_length=1,
+    description="Observed values, one per metric concept — duplicates rejected.",
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "structure_id": "str_growth_metrics",
+          "period_start": "2026-07-01",
+          "period_end": "2026-07-31",
+          "source_system": "content-machine",
+          "observations": [
+            {"qname": "rsx:GithubStars", "value": 1240},
+            {"qname": "rsx:NpmDownloads", "value": 3811},
+          ],
+        }
+      ]
+    }
+  )
+
+
+class AssertMetricsResponse(BaseModel):
+  """Response for the ``assert-metrics`` operation."""
+
+  structure_id: str
+  entity_id: str
+  period_end: date
+  fact_set_id: str = Field(
+    ...,
+    description="Standing metric FactSet the observations were written to.",
+  )
+  asserted: list[AssertedMetricLite] = Field(default_factory=list)
+  replaced: bool = Field(
+    False,
+    description=(
+      "True when a prior standing set existed for the period and its "
+      "facts were replaced."
+    ),
+  )
+
+
 class ForecastMonthLite(BaseModel):
   """One computed forward month in a ``compute-forecast`` response."""
 
@@ -1971,6 +2103,9 @@ class ComputeForecastResponse(BaseModel):
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
+  "AssertMetricsRequest",
+  "AssertMetricsResponse",
+  "AssertedMetricLite",
   "ChartLite",
   "ChartPanelLite",
   "ChartSeriesLite",
@@ -1996,6 +2131,7 @@ __all__ = [
   "LeverAssertionLite",
   "LineAssertionLite",
   "MetricMechanics",
+  "MetricObservation",
   "RenderingLite",
   "RenderingPeriodLite",
   "RenderingRowLite",

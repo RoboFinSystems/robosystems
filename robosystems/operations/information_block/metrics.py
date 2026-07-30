@@ -1,13 +1,18 @@
-"""compute-metrics — evaluate Derive rules into a standing metric FactSet.
+"""compute-metrics / assert-metrics — write a standing metric FactSet.
 
-The metric block's compute path (Metrics M-1 + the M-2 grammar).
-``Derive`` rules carry the same ``$Var`` expression grammar as
-verification rules, but are evaluated for a VALUE: the LHS names the
-metric element being computed, the RHS operands bind to the entity's
-persisted facts at the requested ``period_end``, and the result is
-written as a Numeric fact in a standing ``factset_type='metric'``
-FactSet — one per (structure, entity, period_end), so successive runs
-accumulate the time series and re-running a period replaces its values.
+The metric block's two write paths. ``compute-metrics`` (Metrics M-1 +
+the M-2 grammar) evaluates ``Derive`` rules: the same ``$Var``
+expression grammar as verification rules, but evaluated for a VALUE —
+the LHS names the metric element being computed, the RHS operands bind
+to the entity's persisted facts at the requested ``period_end``, and
+the result is written as a Numeric fact in a standing
+``factset_type='metric'`` FactSet — one per (structure, entity,
+period_end), so successive runs accumulate the time series and
+re-running a period replaces its values. ``assert-metrics`` is the
+observation sibling: externally-observed values arrive in the request
+and land on the same standing-set shape with ``AssertedProvenance``;
+structures carrying Derive rules are compute-owned and rejected, so
+asserted and derived series keep disjoint structures.
 
 M-2 grammar:
 
@@ -45,11 +50,18 @@ from datetime import date, timedelta
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
-from robosystems.models.api.fact_provenance import DerivedProvenance
+from robosystems.models.api.fact_provenance import (
+  AssertedProvenance,
+  DerivedProvenance,
+)
 from robosystems.models.api.information_block import (
+  AssertedMetricLite,
+  AssertMetricsRequest,
+  AssertMetricsResponse,
   ComputedMetricLite,
   ComputeMetricsRequest,
   ComputeMetricsResponse,
+  MetricObservation,
   SkippedMetricLite,
 )
 from robosystems.models.extensions import (
@@ -562,4 +574,228 @@ def cmd_compute_metrics(
   )
 
 
-__all__ = ["cmd_compute_metrics"]
+# Mirrors forecast.py's _ASSERTION_BLOCKED_SOURCES — duplicated rather than
+# imported because forecast imports this module, so the reverse import would
+# be circular. Library-computed and lever concepts are never asserted here.
+_ASSERTION_BLOCKED_ELEMENT_SOURCES = {
+  "rs-metric": "rs-metric concepts are computed by compute-metrics, never asserted",
+  "rs-driver": "rs-driver concepts are forecast levers — assert them via `levers`",
+}
+
+
+def cmd_assert_metrics(
+  session: Session,
+  body: AssertMetricsRequest,
+  created_by: str,
+) -> AssertMetricsResponse:
+  """Write externally-observed metric values for one period.
+
+  The observation sibling of ``cmd_compute_metrics``: same standing
+  FactSet upsert (found → all its facts are deleted and provenance is
+  re-stamped; absent → created via the blessed ``create_fact_set``
+  path), but the values arrive in the request and the set is stamped
+  with ``AssertedProvenance``. Structures carrying Derive rules are
+  compute-owned and rejected — asserted and derived metric series keep
+  disjoint structures, which is also what keeps the two writers' full-
+  replace semantics from clobbering each other. ``session.flush()``
+  before returning; the OperationSpec wrapper owns the commit.
+  """
+  structure = session.get(Structure, body.structure_id)
+  if structure is None:
+    raise ValueError(f"Structure not found: {body.structure_id}")
+  if structure.block_type != METRIC_BLOCK_TYPE:
+    raise ValueError(
+      f"assert-metrics targets a block_type='metric' structure; "
+      f"{body.structure_id!r} is {structure.block_type!r}"
+    )
+
+  entity_id = body.entity_id or _default_entity_id(session)
+
+  associations = (
+    session.execute(
+      select(Association).where(Association.structure_id == body.structure_id)
+    )
+    .scalars()
+    .all()
+  )
+  element_ids = {
+    x
+    for x in (
+      {a.from_element_id for a in associations}
+      | {a.to_element_id for a in associations}
+    )
+    if x is not None
+  }
+  order_by_element: dict[str, float] = {}
+  for a in associations:
+    if a.to_element_id is not None and a.order_value is not None:
+      order_by_element.setdefault(a.to_element_id, float(a.order_value))
+
+  rules = _load_derive_rules(session, body.structure_id, list(element_ids))
+  if rules:
+    raise ValueError(
+      f"Structure {body.structure_id!r} carries {len(rules)} Derive rule(s) "
+      "and is compute-owned (compute-metrics); asserted and derived metric "
+      "series keep disjoint structures"
+    )
+
+  seen: set[str] = set()
+  duplicates: set[str] = set()
+  for obs in body.observations:
+    if obs.qname in seen:
+      duplicates.add(obs.qname)
+    seen.add(obs.qname)
+  if duplicates:
+    raise ValueError(
+      f"Duplicate observation qname(s): {sorted(duplicates)!r} — one "
+      "observation per concept per period"
+    )
+
+  qname_cache: dict[str, Element | None] = {}
+
+  def _element_by_qname(qname: str) -> Element | None:
+    if qname not in qname_cache:
+      qname_cache[qname] = session.execute(
+        select(Element).where(Element.qname == qname).limit(1)
+      ).scalar_one_or_none()
+    return qname_cache[qname]
+
+  unknown: list[str] = []
+  abstract: list[str] = []
+  blocked: list[str] = []
+  outside: list[str] = []
+  resolved: list[tuple[MetricObservation, Element]] = []
+  for obs in body.observations:
+    element = _element_by_qname(obs.qname)
+    if element is None:
+      unknown.append(obs.qname)
+      continue
+    if element.is_abstract:
+      abstract.append(obs.qname)
+      continue
+    doctrine = _ASSERTION_BLOCKED_ELEMENT_SOURCES.get(element.source or "")
+    if doctrine is not None:
+      blocked.append(f"{obs.qname} ({doctrine})")
+      continue
+    if element_ids and element.id not in element_ids:
+      # Facts for concepts outside the presentation catalog would persist
+      # but never render in the envelope — reject rather than no-op.
+      outside.append(obs.qname)
+      continue
+    resolved.append((obs, element))
+
+  problems: list[str] = []
+  if unknown:
+    problems.append(f"unknown qname(s): {unknown!r}")
+  if abstract:
+    problems.append(f"abstract concept(s) cannot carry facts: {abstract!r}")
+  if blocked:
+    problems.append(f"blocked concept(s): {blocked!r}")
+  if outside:
+    problems.append(
+      f"concept(s) not on the structure's presentation catalog: {outside!r}"
+    )
+  if problems:
+    raise ValueError("assert-metrics rejected: " + "; ".join(problems))
+
+  resolved.sort(key=lambda pair: order_by_element.get(pair[1].id, float("inf")))
+
+  asserted: list[AssertedMetricLite] = []
+  pending_facts: list[dict] = []
+  for obs, element in resolved:
+    unit = _metric_unit(element)
+    period_type = element.period_type or "instant"
+    fact_period_start = body.period_start if period_type == "duration" else None
+    pending_facts.append(
+      {
+        "element_id": element.id,
+        "value": obs.value,
+        "period_start": fact_period_start,
+        "period_type": period_type,
+        "unit": unit,
+      }
+    )
+    asserted.append(
+      AssertedMetricLite(
+        element_id=element.id,
+        element_qname=obs.qname,
+        name=element.name,
+        value=obs.value,
+        unit=unit,
+        period_type=period_type,
+        item_type=element.item_type,
+      )
+    )
+
+  provenance = AssertedProvenance(
+    source_system=body.source_system,
+    asserted_by=created_by,
+    basis_note=body.basis_note,
+  )
+
+  standing = session.execute(
+    select(FactSet)
+    .where(
+      FactSet.structure_id == body.structure_id,
+      FactSet.factset_type == "metric",
+      FactSet.entity_id == entity_id,
+      FactSet.period_end == body.period_end,
+      # Asserted series are actuals — the scenario axis never applies.
+      FactSet.scenario_id.is_(None),
+    )
+    .order_by(FactSet.created_at.desc())
+    .limit(1)
+  ).scalar_one_or_none()
+
+  replaced = standing is not None
+  if standing is None:
+    standing = create_fact_set(
+      session,
+      structure_id=body.structure_id,
+      period_start=body.period_start,
+      period_end=body.period_end,
+      factset_type="metric",
+      entity_id=entity_id,
+      provenance=provenance,
+      created_by=created_by,
+    )
+    session.flush()
+  else:
+    # Full replace — the period's values are re-asserted state.
+    for fact in (
+      session.execute(select(Fact).where(Fact.fact_set_id == standing.id))
+      .scalars()
+      .all()
+    ):
+      session.delete(fact)
+    standing.provenance = provenance.model_dump(mode="json")
+
+  for pf in pending_facts:
+    session.add(
+      Fact(
+        id=generate_prefixed_ulid("fact"),
+        element_id=pf["element_id"],
+        value=pf["value"],
+        fact_type="Numeric",
+        period_start=pf["period_start"],
+        period_end=body.period_end,
+        period_type=pf["period_type"],
+        unit=pf["unit"],
+        entity_id=entity_id,
+        structure_id=body.structure_id,
+        fact_set_id=standing.id,
+      )
+    )
+  session.flush()
+
+  return AssertMetricsResponse(
+    structure_id=body.structure_id,
+    entity_id=entity_id,
+    period_end=body.period_end,
+    fact_set_id=standing.id,
+    asserted=asserted,
+    replaced=replaced,
+  )
+
+
+__all__ = ["cmd_assert_metrics", "cmd_compute_metrics"]
