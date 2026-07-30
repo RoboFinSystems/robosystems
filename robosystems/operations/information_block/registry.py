@@ -326,10 +326,11 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
   category=METRIC_CATEGORY,
   icon="gauge",
   description=(
-    "Derivative block — computes its facts from one or more source "
-    "blocks at read time. Covenant tests, ratios, KPI trend views. "
-    "Typed mechanics ship today; the derivation evaluator that "
-    "computes facts from source-block FactSets is not yet implemented."
+    "Derivative block — a standing per-period fact series. Covenant "
+    "tests, ratios, KPI trend views. Facts are written by the "
+    "`compute-metrics` operation (Derive-rule evaluation) or the "
+    "`assert-metrics` operation (externally-observed values); metric "
+    "structures are authored via `create-taxonomy-block`."
   ),
   concept_arrangement_default="arithmetic",
   member_arrangement_default=None,
@@ -340,22 +341,24 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
   construction_mode="derivative",
   dispatch_create=make_not_implemented_handler(
     "create-metric-block",
-    "Metric block construction is not yet available — the typed "
-    "`MetricMechanics` arm ships today (so callers can already query "
-    'metric envelopes via `informationBlocks(blockType="metric")`), '
-    "but the derivation evaluator that computes facts from source-block "
-    "FactSets is not yet implemented; no caller-side workaround is "
-    "available.",
+    "Metric blocks are not constructed through this operation — author "
+    "the metric structure (elements, presentation arcs, optional Derive "
+    "rules) via `create-taxonomy-block`, then write facts with "
+    "`compute-metrics` (rule evaluation) or `assert-metrics` "
+    "(externally-observed values). Envelopes are queryable via "
+    '`informationBlocks(blockType="metric")`.',
   ),
   dispatch_update=make_not_implemented_handler(
     "update-metric-block",
-    "Metric block updates are not yet available — pending the "
-    "derivation evaluator. See `create-metric-block` for context.",
+    "Metric block updates are not available through this operation — "
+    "author structure changes via the taxonomy-block operations. See "
+    "`create-metric-block` for context.",
   ),
   dispatch_delete=make_not_implemented_handler(
     "delete-metric-block",
-    "Metric block deletion is not yet available — pending the "
-    "derivation evaluator. See `create-metric-block` for context.",
+    "Metric block deletion is not available through this operation — "
+    "manage the structure via the taxonomy-block operations. See "
+    "`create-metric-block` for context.",
   ),
   dispatch_build_envelope=metric_handlers.build_envelope,
   surfaces_in_library=False,

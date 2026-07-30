@@ -175,6 +175,8 @@ from robosystems.models.api.extensions.text_blocks import (
   BindTextBlockResponse,
 )
 from robosystems.models.api.information_block import (
+  AssertMetricsRequest,
+  AssertMetricsResponse,
   ComputeForecastRequest,
   ComputeForecastResponse,
   ComputeMetricsRequest,
@@ -244,6 +246,7 @@ from robosystems.operations.information_block.forecast_compute import (
   cmd_compute_forecast,
 )
 from robosystems.operations.information_block.metrics import (
+  cmd_assert_metrics,
   cmd_compute_metrics,
 )
 from robosystems.operations.information_block.rules.commands import (
@@ -1230,6 +1233,31 @@ compute_metrics_op = _registrar.register(
     result_type=ComputeMetricsResponse,
     error_map={ValueError: 422},
     mark_stale_reason="metrics_computed",
+    requires_created_by=True,
+  )
+)
+
+assert_metrics_op = _registrar.register(
+  OperationSpec(
+    name="assert-metrics",
+    summary="Assert Metrics for a Metric Block",
+    description=(
+      "Writes externally-observed metric values (usage counts, marketing "
+      "numbers, hand-carried figures) into the period's standing "
+      "factset_type='metric' FactSet with AssertedProvenance — the "
+      "observation sibling of compute-metrics. One standing FactSet per "
+      "(structure, entity, period_end); re-asserting a period replaces "
+      "its facts. Structures carrying Derive rules are compute-owned and "
+      "rejected: asserted and derived metric series keep disjoint "
+      "structures. Observations must resolve to concepts on the "
+      "structure's presentation catalog. Deterministic and non-AI — no "
+      "credits consumed."
+    ),
+    command=cmd_assert_metrics,
+    request_model=AssertMetricsRequest,
+    result_type=AssertMetricsResponse,
+    error_map={ValueError: 422},
+    mark_stale_reason="metrics_asserted",
     requires_created_by=True,
   )
 )
