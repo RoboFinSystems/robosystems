@@ -20,6 +20,31 @@ password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
 
 
 @pytest.fixture(autouse=True)
+def no_retry_backoff(monkeypatch):
+  """Elide `retrying`'s exponential backoff so retry tests don't pay real time.
+
+  Production policies like `_QB_RETRY` wait ~31s across 5 attempts. Tests
+  assert that retries *happen* (call counts, final exception wrapping),
+  never that they are slow, so the wall-clock wait is pure cost.
+
+  Rebinds only the `time` name inside the `retrying` module -- patching
+  `retrying.time.sleep` would mutate the shared `time` module and break
+  tests that depend on real sleeps (e.g. the SEC rate limiter). Retries
+  still execute; `time.time()` stays real because `retrying` uses it to
+  compute `delay_since_first_attempt_ms`.
+  """
+  import time as real_time
+
+  import retrying
+
+  class _NoSleepClock:
+    time = staticmethod(real_time.time)
+    sleep = staticmethod(lambda _seconds: None)
+
+  monkeypatch.setattr(retrying, "time", _NoSleepClock)
+
+
+@pytest.fixture(autouse=True)
 def mock_email_dagster_jobs():
   """Mock Dagster email jobs globally so registration/email-change tests don't need Dagster running.
 
