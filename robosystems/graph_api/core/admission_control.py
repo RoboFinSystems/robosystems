@@ -7,10 +7,26 @@ preventing OOM kills and maintaining service stability.
 
 import time
 from enum import Enum
+from pathlib import Path
 
 import psutil
 
 from robosystems.logger import logger
+
+# Cgroup v2 unified hierarchy as seen from inside the container. Absent on
+# dev machines and bare-metal hosts; tests point this at a fixture directory.
+_CGROUP_DIR = Path("/sys/fs/cgroup")
+
+
+def _read_cgroup_limit_bytes() -> int | None:
+  """Read the container's cgroup v2 memory limit, or None if unlimited/absent."""
+  try:
+    raw = (_CGROUP_DIR / "memory.max").read_text().strip()
+  except (FileNotFoundError, NotADirectoryError):
+    return None
+  if raw == "max":
+    return None
+  return int(raw)
 
 
 class AdmissionDecision(str, Enum):
@@ -48,7 +64,10 @@ class LadybugAdmissionController:
             query working set. See min_available_mb.
         min_available_mb: Reject when free memory falls below this many MB.
             Absolute rather than proportional, so it stays correct when the
-            buffer pool or the instance size changes.
+            buffer pool or the instance size changes. Free memory is the
+            tighter of host-available and headroom under the container's
+            cgroup memory limit, since whichever binds first is the one
+            that kills the process.
         cpu_threshold: Max CPU usage percent before rejecting
         max_connections_per_db: Max concurrent connections per database
         check_interval: Seconds between resource checks (cached)
@@ -63,16 +82,54 @@ class LadybugAdmissionController:
     self._last_check = 0.0
     self._cached_memory = 0.0
     self._cached_available_mb = float("inf")
+    self._cached_cgroup_available_mb: float | None = None
     self._cached_cpu = 0.0
 
     # Connection tracking
     self._connections_per_db: dict[str, int] = {}
 
+    try:
+      limit_bytes = _read_cgroup_limit_bytes()
+    except Exception as e:
+      logger.warning(f"Failed to read cgroup memory limit: {e}")
+      limit_bytes = None
+    self.cgroup_limit_mb = (
+      limit_bytes / (1024 * 1024) if limit_bytes is not None else None
+    )
+
+    cgroup_desc = (
+      f"{self.cgroup_limit_mb:.0f}MB" if self.cgroup_limit_mb is not None else "none"
+    )
     logger.info(
       f"LadybugAdmissionController initialized - Min available: {min_available_mb}MB, "
+      f"Cgroup memory limit: {cgroup_desc}, "
       f"Memory report threshold: {memory_threshold}%, "
       f"CPU: {cpu_threshold}%, Max connections/DB: {max_connections_per_db}"
     )
+
+  def _cgroup_available_mb(self) -> float | None:
+    """Headroom before the container's cgroup memory limit binds.
+
+    psutil reads host /proc, but a Docker container is killed by its own
+    memory cgroup long before the host runs dry, so the gate must measure
+    distance to whichever limit is tighter. Returns None when no cgroup v2
+    memory limit applies (dev machines, unlimited containers).
+
+    File cache counts toward memory.current but the kernel reclaims it
+    before OOM-killing, so it is headroom, not pressure - without adding it
+    back a warm node would latch into rejection just like the old percent
+    gate did.
+    """
+    limit = _read_cgroup_limit_bytes()
+    if limit is None:
+      return None
+    current = int((_CGROUP_DIR / "memory.current").read_text().strip())
+    reclaimable = 0
+    for line in (_CGROUP_DIR / "memory.stat").read_text().splitlines():
+      key, _, value = line.partition(" ")
+      if key in ("inactive_file", "active_file"):
+        reclaimable += int(value)
+    return max(0.0, (limit - current + reclaimable) / (1024 * 1024))
 
   def _update_resource_cache(self) -> None:
     """Update cached resource metrics if stale."""
@@ -80,8 +137,13 @@ class LadybugAdmissionController:
     if now - self._last_check >= self.check_interval:
       try:
         memory = psutil.virtual_memory()
+        available_mb = memory.available / (1024 * 1024)
+        cgroup_available_mb = self._cgroup_available_mb()
+        if cgroup_available_mb is not None:
+          available_mb = min(available_mb, cgroup_available_mb)
         self._cached_memory = memory.percent
-        self._cached_available_mb = memory.available / (1024 * 1024)
+        self._cached_available_mb = available_mb
+        self._cached_cgroup_available_mb = cgroup_available_mb
         self._cached_cpu = psutil.cpu_percent(interval=0.1)
         self._last_check = now
       except Exception as e:
@@ -89,6 +151,7 @@ class LadybugAdmissionController:
         # Fail closed on error: assume no headroom rather than admit blindly
         self._cached_memory = 80.0
         self._cached_available_mb = 0.0
+        self._cached_cgroup_available_mb = 0.0
         self._cached_cpu = 80.0
 
   def check_admission(
@@ -110,7 +173,8 @@ class LadybugAdmissionController:
     # Check free memory headroom. Gated on absolute available memory, not
     # percent used: the buffer pool is a fixed allocation that fills by design,
     # so a warm node legitimately sits high on percent-used while still having
-    # room to serve.
+    # room to serve. Available is the tighter of host memory and the
+    # container's cgroup limit - the memcg cap binds first under Docker.
     if self._cached_available_mb < self.min_available_mb:
       reason = (
         f"Insufficient memory headroom: {self._cached_available_mb:.0f}MB available "
@@ -169,6 +233,8 @@ class LadybugAdmissionController:
     return {
       "memory_percent": self._cached_memory,
       "memory_available_mb": self._cached_available_mb,
+      "cgroup_limit_mb": self.cgroup_limit_mb,
+      "cgroup_available_mb": self._cached_cgroup_available_mb,
       "cpu_percent": self._cached_cpu,
       "memory_threshold": self.memory_threshold,
       "min_available_mb": self.min_available_mb,
