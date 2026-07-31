@@ -11,6 +11,19 @@ from robosystems.graph_api.core.admission_control import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_cgroup(monkeypatch, tmp_path):
+  """Point the cgroup probe at an empty directory.
+
+  Keeps tests hermetic: on a containerized CI runner the real
+  /sys/fs/cgroup/memory.max would otherwise feed into every decision.
+  """
+  monkeypatch.setattr(
+    "robosystems.graph_api.core.admission_control._CGROUP_DIR",
+    tmp_path / "no-cgroup",
+  )
+
+
 @pytest.fixture
 def set_resource_usage(monkeypatch):
   """Helper to patch psutil resource metrics."""
@@ -25,6 +38,32 @@ def set_resource_usage(monkeypatch):
     monkeypatch.setattr(
       "robosystems.graph_api.core.admission_control.psutil.cpu_percent",
       lambda interval=0.1: cpu_percent,
+    )
+
+  return _setter
+
+
+@pytest.fixture
+def set_cgroup_memory(monkeypatch, tmp_path):
+  """Helper to fabricate a cgroup v2 memory hierarchy."""
+
+  def _setter(
+    limit: int | str,
+    current: int = 0,
+    inactive_file: int = 0,
+    active_file: int = 0,
+  ):
+    cgroup_dir = tmp_path / "cgroup"
+    cgroup_dir.mkdir(exist_ok=True)
+    (cgroup_dir / "memory.max").write_text(f"{limit}\n")
+    (cgroup_dir / "memory.current").write_text(f"{current}\n")
+    (cgroup_dir / "memory.stat").write_text(
+      f"anon {max(0, current - inactive_file - active_file)}\n"
+      f"inactive_file {inactive_file}\n"
+      f"active_file {active_file}\n"
+    )
+    monkeypatch.setattr(
+      "robosystems.graph_api.core.admission_control._CGROUP_DIR", cgroup_dir
     )
 
   return _setter
@@ -106,6 +145,90 @@ def test_headroom_gate_is_independent_of_instance_size(set_resource_usage):
   # Large instance at a far lower percentage, but genuinely starved
   set_resource_usage(memory_percent=40.0, cpu_percent=20.0, available_mb=256.0)
   assert controller.check_admission("graph-123")[0] == AdmissionDecision.REJECT_MEMORY
+
+
+GB = 1024 * 1024 * 1024
+
+
+def test_cgroup_limit_binds_before_host_memory(set_resource_usage, set_cgroup_memory):
+  """The memcg cap kills the process while the host still has room.
+
+  Regression: a shared replica was OOM-killed at its 13GB container limit
+  (CONSTRAINT_MEMCG) while the host reported ~2.4GB available, so the
+  host-only gate stayed open right up to the kill.
+  """
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+  set_resource_usage(memory_percent=84.0, cpu_percent=20.0, available_mb=2400.0)
+  # 13GB limit, 12.7GB anonymous (buffer pool + query working set), no cache left
+  set_cgroup_memory(limit=13 * GB, current=int(12.7 * GB))
+
+  decision, reason = controller.check_admission("sec")
+
+  assert decision == AdmissionDecision.REJECT_MEMORY
+  assert reason is not None
+  assert "Insufficient memory headroom" in reason
+
+
+def test_cgroup_file_cache_counts_as_headroom(set_resource_usage, set_cgroup_memory):
+  """Page cache inside the cgroup is reclaimed before an OOM kill.
+
+  memory.current includes file cache, so without adding it back a warm node
+  whose cgroup is full of reclaimable cache would latch into rejection just
+  like the old percent-used gate did.
+  """
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+  set_resource_usage(memory_percent=84.0, cpu_percent=20.0, available_mb=2400.0)
+  # Near the 13GB cap on paper, but 3GB of it is reclaimable file cache
+  set_cgroup_memory(
+    limit=13 * GB,
+    current=int(12.7 * GB),
+    inactive_file=2 * GB,
+    active_file=1 * GB,
+  )
+
+  decision, reason = controller.check_admission("sec")
+
+  assert decision == AdmissionDecision.ACCEPT
+  assert reason is None
+
+
+def test_unlimited_cgroup_falls_back_to_host_gate(
+  set_resource_usage, set_cgroup_memory
+):
+  """A container without a memory limit ('max') gates on host memory alone."""
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+  set_cgroup_memory(limit="max", current=12 * GB)
+
+  set_resource_usage(memory_percent=80.0, cpu_percent=20.0, available_mb=3000.0)
+  assert controller.check_admission("sec")[0] == AdmissionDecision.ACCEPT
+
+  set_resource_usage(memory_percent=97.0, cpu_percent=20.0, available_mb=512.0)
+  assert controller.check_admission("sec")[0] == AdmissionDecision.REJECT_MEMORY
+
+
+def test_host_gate_still_applies_under_a_loose_cgroup(
+  set_resource_usage, set_cgroup_memory
+):
+  """The tighter of the two limits wins in both directions."""
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+  # Plenty of cgroup headroom, but the host itself is starved
+  set_cgroup_memory(limit=13 * GB, current=1 * GB)
+  set_resource_usage(memory_percent=97.0, cpu_percent=20.0, available_mb=512.0)
+
+  assert controller.check_admission("sec")[0] == AdmissionDecision.REJECT_MEMORY
+
+
+def test_get_metrics_reports_cgroup_headroom(set_resource_usage, set_cgroup_memory):
+  """Metrics expose the cgroup limit and cached headroom for observability."""
+  set_cgroup_memory(limit=13 * GB, current=9 * GB, inactive_file=1 * GB)
+  set_resource_usage(memory_percent=60.0, cpu_percent=20.0, available_mb=8192.0)
+  controller = LadybugAdmissionController(min_available_mb=1024.0, check_interval=0.0)
+
+  metrics = controller.get_metrics()
+
+  assert metrics["cgroup_limit_mb"] == pytest.approx(13 * 1024.0)
+  assert metrics["cgroup_available_mb"] == pytest.approx(5 * 1024.0)
+  assert metrics["memory_available_mb"] == pytest.approx(5 * 1024.0)
 
 
 def test_resource_probe_failure_fails_closed(monkeypatch):
