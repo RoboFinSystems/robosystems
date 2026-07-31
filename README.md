@@ -2,6 +2,8 @@
 
 RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
+Open source top to bottom — the accounting ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform: [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
+
 ## Platform
 
 The platform provides the core infrastructure that all extensions build on:
