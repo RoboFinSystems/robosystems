@@ -1627,7 +1627,9 @@ class ScheduleService:
     if overlap and overlap.c:
       raise ValueError(
         f"Cannot truncate: {overlap.c} posted entries exist for periods "
-        f"after {new_end_date}. Reopen those periods first."
+        f"after {new_end_date}. Reopen the affected periods and void those "
+        "entries first — reopening alone leaves entries posted, so it does "
+        "not clear this guard."
       )
 
     # Delete any draft entries that fall past the new end date (they're now stale)

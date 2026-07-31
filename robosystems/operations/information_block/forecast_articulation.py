@@ -392,15 +392,23 @@ def load_articulation_context(
 
 
 def schedule_is_delta(
-  ctx: ArticulationContext, element_id: str, month: str, base_month: str
+  ctx: ArticulationContext, element_id: str, month: str, reference_month: str
 ) -> float:
-  """IS carry adjustment: this month's schedule expense minus the base
-  month's (already inside the carried value). Element-level on purpose —
-  an ended schedule's expense must STOP, not carry."""
+  """IS carry adjustment: this month's schedule expense minus the
+  reference month's. Element-level on purpose — an ended schedule's
+  expense must STOP, not carry.
+
+  The walk passes the PREVIOUS walk month as the reference (the carried
+  value contains that month's schedule contribution, since prior values
+  roll), so successive deltas telescope to ``sched[m] - sched[base]``.
+  Anchoring every month at the base instead re-subtracts the gap
+  cumulatively — the compounding that marched an expense line negative
+  on coherent books (caught live, 2026-07-30). Mirrors
+  ``schedule_instant_movement``'s ``prev_end`` reference."""
   per_month = ctx.schedules.duration_total.get(element_id)
   if not per_month:
     return 0.0
-  return per_month.get(month, 0.0) - per_month.get(base_month, 0.0)
+  return per_month.get(month, 0.0) - per_month.get(reference_month, 0.0)
 
 
 def schedule_instant_movement(
