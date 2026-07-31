@@ -295,6 +295,163 @@ Resources:
       ConfigSnapshotDeliveryProperties:
         DeliveryFrequency: TwentyFour_Hours
 
+  # --- Security alerting: route detective-control signals to the existing
+  # per-env security-alerts SNS topics (owned by api.yaml as
+  # robosystems-<env>-security-alerts, email-subscribed). Account-global
+  # signals (GuardDuty findings, root-credential use) notify the prod topic —
+  # ${Environment} normalizes to prod in the deploy job. The per-env
+  # AuthorizationDenied alarms also live here rather than beside their four
+  # siblings in api.yaml because that template sits at the 51,200-byte
+  # inline-template ceiling and cannot grow.
+  # Precondition: the topic must already exist (api stack deployed with
+  # SNSAlertEmail set), or the topic-policy attachment fails this stack.
+  SecurityAlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # A TopicPolicy replaces the topic's access policy wholesale, so the
+          # SNS default same-account owner statement must be reproduced — the
+          # CloudWatch alarm actions publish through it.
+          - Sid: DefaultOwnerAccess
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - sns:GetTopicAttributes
+              - sns:SetTopicAttributes
+              - sns:AddPermission
+              - sns:RemovePermission
+              - sns:DeleteTopic
+              - sns:Subscribe
+              - sns:ListSubscriptionsByTopic
+              - sns:Publish
+            Resource: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+            Condition:
+              StringEquals:
+                AWS:SourceOwner: !Ref AWS::AccountId
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*
+
+  # GuardDuty findings otherwise sit unseen in the console until the next
+  # manual posture audit. Medium+ (severity >= 4) goes to email; low-severity
+  # recon noise stays out of the inbox and is still visible in the console.
+  GuardDutyFindingsRule:
+    Type: AWS::Events::Rule
+    Condition: GuardDutyOn
+    Properties:
+      Name: robosystems-guardduty-findings
+      Description: Route GuardDuty findings of severity >= 4 (medium and high) to the security-alerts topic
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Finding
+        detail:
+          severity:
+            - numeric: [">=", 4]
+      Targets:
+        - Id: security-alerts-sns
+          Arn: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+          InputTransformer:
+            InputPathsMap:
+              severity: $.detail.severity
+              type: $.detail.type
+              title: $.detail.title
+              description: $.detail.description
+              region: $.region
+              resourceType: $.detail.resource.resourceType
+            InputTemplate: >-
+              "GuardDuty finding (severity <severity>) in <region>: <type>.
+              <title>. <description> [resource: <resourceType>]"
+
+  # Root-credential use should be near-zero in this OIDC-only account; any
+  # occurrence (API call or console sign-in, including failed sign-ins) is
+  # worth an immediate email. Matches only direct root activity — service
+  # events and service-invoked calls are excluded, mirroring the CIS 1.7
+  # filter. Requires the CloudTrail trail (CLOUDTRAIL_ENABLED) to be logging;
+  # global service events (IAM, sign-in) deliver to us-east-1, where this
+  # stack lives.
+  RootAccountActivityRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: robosystems-root-account-activity
+      Description: Alert on any root-credential API call or console sign-in
+      State: ENABLED
+      EventPattern:
+        detail-type:
+          - AWS API Call via CloudTrail
+          - AWS Console Sign In via CloudTrail
+        detail:
+          userIdentity:
+            type:
+              - Root
+            invokedBy:
+              - exists: false
+          eventType:
+            - anything-but: AwsServiceEvent
+      Targets:
+        - Id: security-alerts-sns
+          Arn: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              sourceIP: $.detail.sourceIPAddress
+              eventTime: $.detail.eventTime
+              region: $.region
+            InputTemplate: >-
+              "Root account activity detected: <eventName> from <sourceIP> at
+              <eventTime> (<region>). Root use is unexpected in this account -
+              investigate immediately."
+
+  # Authenticated counterpart of api.yaml's AuthFailureSpikeAlarm: a valid
+  # credential accumulating 403s fast, i.e. cross-tenant probing with a leaked
+  # or over-curious key. Baseline is ~zero, so a modest threshold stays quiet
+  # in normal use. One alarm per environment (see section comment for why they
+  # are here).
+  AuthorizationDeniedAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-prod-api-authorization-denied-spike
+      AlarmDescription: Spike in authorization denials (possible cross-tenant probing with a valid credential)
+      MetricName: AuthorizationDenied
+      Namespace: RoboSystems/Security/prod
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  AuthorizationDeniedAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-staging-api-authorization-denied-spike
+      AlarmDescription: Spike in authorization denials (possible cross-tenant probing with a valid credential)
+      MetricName: AuthorizationDenied
+      Namespace: RoboSystems/Security/staging
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
 Outputs:
   GuardDutyDetectorId:
     Condition: GuardDutyOn
