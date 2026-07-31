@@ -177,10 +177,27 @@ class TestScheduleSemantics:
       duration_total={"dda": {"2026-05": 5.0, "2026-06": 3.0}}
     )
     ctx = _ctx(schedules)
-    # Base month carried 5 inside the IS value; June's schedule says 3.
+    # Reference month carried 5 inside the IS value; June's schedule says 3.
     assert schedule_is_delta(ctx, "dda", "2026-06", "2026-05") == pytest.approx(-2.0)
-    # July: no schedule fact at all — the whole base expense stops.
+    # July vs a May reference: no schedule fact at all — the whole
+    # scheduled expense stops.
     assert schedule_is_delta(ctx, "dda", "2026-07", "2026-05") == pytest.approx(-5.0)
+
+  def test_is_delta_telescopes_through_successive_prev_months(self):
+    # The walk passes the PREVIOUS month as the reference (the carried
+    # value rolls), so successive deltas must telescope to the
+    # base-anchored total — the property that keeps an ended schedule a
+    # one-time step down instead of a cumulative march.
+    schedules = ScheduleProjection(
+      duration_total={"dda": {"2026-05": 5.0, "2026-06": 3.0}}
+    )
+    ctx = _ctx(schedules)
+    jun = schedule_is_delta(ctx, "dda", "2026-06", "2026-05")
+    jul = schedule_is_delta(ctx, "dda", "2026-07", "2026-06")
+    aug = schedule_is_delta(ctx, "dda", "2026-08", "2026-07")
+    assert jun + jul + aug == pytest.approx(
+      schedule_is_delta(ctx, "dda", "2026-08", "2026-05")
+    )
 
 
 class TestRuleDeltaPushDown:

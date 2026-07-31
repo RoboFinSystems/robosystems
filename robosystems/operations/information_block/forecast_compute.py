@@ -495,6 +495,7 @@ def cmd_compute_forecast(
   }
   prior_bs = dict(bs_prior)
   prev_period_end = base_end
+  prev_month = mechanics.base_period
 
   for month_index, month in enumerate(months, start=1):
     month_start, month_end = period_date_range(month)
@@ -506,13 +507,44 @@ def cmd_compute_forecast(
         current[element_id] = prior_values[element_id]
 
     # (a2) Schedule deltas — a schedule's own projection overrides the
-    # carry for its expense lines (an ended schedule's expense stops;
-    # the base month's contribution is already inside the carried value).
+    # carry for its expense lines (an ended schedule's expense stops).
+    # The reference month is the PREVIOUS walk month, not the base: the
+    # carried value already contains the previous month's schedule
+    # contribution (prior_values rolls at (e)), so a base-anchored delta
+    # re-subtracts the base-vs-current gap every month — cumulative
+    # run-off that marches a line negative even on coherent books
+    # (caught live on the first production tenant, 2026-07-30). Mirrors
+    # schedule_instant_movement's prev_end reference on the BS side;
+    # deltas telescope to base + sched[m] - sched[base].
     if ctx is not None:
       for element_id in list(current):
-        delta = schedule_is_delta(ctx, element_id, month, mechanics.base_period)
-        if delta:
-          current[element_id] += delta
+        delta = schedule_is_delta(ctx, element_id, month, prev_month)
+        if not delta:
+          continue
+        before = current[element_id]
+        after = before + delta
+        # Schedule run-off can't take a line below zero. When the base
+        # month's actuals carry less than its schedule facts claim
+        # (stale overlapping vintages; prior-period corrections that
+        # can only land in the GL, never in schedule facts), the full
+        # run-off overshoots the base. Verification can't catch it —
+        # the incoherence is economic, not arithmetic — so clamp at
+        # zero and say so legibly.
+        if delta < 0 and before >= 0 and after < 0:
+          after = 0.0
+          clamped_el = _element(element_id)
+          skipped.append(
+            SkippedForecastLite(
+              rule_id=None,
+              element_qname=clamped_el.qname if clamped_el else element_id,
+              period=month,
+              reason=(
+                "schedule run-off clamped at zero: the schedule projection "
+                "exceeds what the line's base actuals carry"
+              ),
+            )
+          )
+        current[element_id] = after
 
     # (a2b) Line growth — the generic per-line trajectory:
     # line[t] = line[t-1] * (1 + rate[t]), compounding through the
@@ -907,6 +939,7 @@ def cmd_compute_forecast(
       for element, value in bs_facts:
         prior_values[element.id] = value
     prev_period_end = month_end
+    prev_month = month
 
   session.flush()
   return ComputeForecastResponse(

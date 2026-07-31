@@ -717,7 +717,9 @@ def rebuild_schedule(
   if posted_row and posted_row.c:
     raise ValueError(
       f"Cannot rebuild schedule {structure.id!r}: {posted_row.c} posted "
-      "closing entries exist. Reopen those periods first."
+      "closing entries exist. Reopen the affected periods and void those "
+      "entries first — reopening alone leaves entries posted, so it does "
+      "not clear this guard."
     )
 
   # Capture the old originator event id so we can supersede it after the

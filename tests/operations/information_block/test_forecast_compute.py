@@ -28,6 +28,10 @@ from robosystems.models.api.information_block import (
 from robosystems.operations.information_block import (
   forecast_compute as fc,
 )
+from robosystems.operations.information_block.forecast_articulation import (
+  ArticulationContext,
+  ScheduleProjection,
+)
 
 
 def _element(
@@ -251,6 +255,30 @@ def _structure(mechanics: dict) -> SimpleNamespace:
   )
 
 
+def _bare_ctx(schedules: ScheduleProjection) -> ArticulationContext:
+  """Minimal articulation context: schedule projection only, no BS/CF
+  machinery — every anchor None, so the roll and derivation no-op and
+  the walk's (a2) schedule-delta seam is the only ctx consumer."""
+  return ArticulationContext(
+    bs_structure_id="struct_bs",
+    cf_structure_id=None,
+    base_bs_element_ids=[],
+    bs_prior={},
+    cash_element_id=None,
+    re_element_id=None,
+    ni_element_id=None,
+    assets_element_id=None,
+    le_element_id=None,
+    net_change_element_id=None,
+    recon_element_id=None,
+    operating_element_id=None,
+    investing_element_id=None,
+    financing_element_id=None,
+    derivations={},
+    schedules=schedules,
+  )
+
+
 def _run(
   mechanics: dict,
   rules: list[Any],
@@ -261,6 +289,7 @@ def _run(
   assertions: list[LineAssertionLite] | None = None,
   calc_dag: dict | None = None,
   base_is_facts: list[Any] | None = None,
+  schedule_projection: ScheduleProjection | None = None,
 ):
   structure = _structure(mechanics)
   recorder = _Recorder()
@@ -273,16 +302,27 @@ def _run(
   authored_facts = _lever_facts(levers) + _lever_facts(assertions or [])
   facts_by_set = {
     "fs_base_is": base_is_facts if base_is_facts is not None else BASE_IS_FACTS,
+    "fs_base_bs": [],
     "fs_lever": authored_facts,
   }
 
+  def _base_set(session: Any, sid: str, *a: Any, **k: Any) -> Any:
+    if sid == "struct_is":
+      return SimpleNamespace(id="fs_base_is")
+    if sid == "struct_bs" and schedule_projection is not None:
+      # A BS base set exists so the walk builds an articulation context
+      # (patched below to the bare schedule-only shape).
+      return SimpleNamespace(id="fs_base_bs")
+    return None
+
   with (
     patch.object(fc, "newest_actual_structure_id", side_effect=_structures),
+    patch.object(fc, "_actual_set_at", side_effect=_base_set),
     patch.object(
       fc,
-      "_actual_set_at",
-      side_effect=lambda session, sid, *a, **k: (
-        SimpleNamespace(id="fs_base_is") if sid == "struct_is" else None
+      "load_articulation_context",
+      side_effect=lambda *a, **k: _bare_ctx(
+        schedule_projection or ScheduleProjection()
       ),
     ),
     patch.object(
@@ -731,6 +771,77 @@ class TestLineGrowth:
     assert rec.value("struct_is", JUL, "el_cogs") == pytest.approx(68.2)
     # GP = carried revenue 100 - grown COGS 68.2.
     assert rec.value("struct_is", JUL, "el_gp") == pytest.approx(31.8)
+
+
+class TestScheduleDeltaComposition:
+  """(a2) schedule deltas compose with the ROLLED prior: the reference
+  month is the previous walk month, so successive deltas telescope to
+  ``sched[m] - sched[base]``. Anchoring at the base re-subtracted the
+  gap every month — cumulative run-off that marched a line negative on
+  coherent books (the 2026-07-30 production finding)."""
+
+  def test_ended_schedule_steps_down_once_and_holds(self) -> None:
+    # June base: rent 10, of which 5 is scheduled. The schedule runs
+    # July at 5, steps to 3 in August, gone by September. The line must
+    # land at the unscheduled remainder (10 - 5 = 5) and HOLD — the
+    # base-anchored delta gave Sep = 8 + (0 - 5) = 3 and kept marching.
+    projection = ScheduleProjection(
+      duration_total={"el_rent": {"2026-06": 5.0, "2026-07": 5.0, "2026-08": 3.0}}
+    )
+    _, rec = _run(_mechanics([]), [], [], schedule_projection=projection)
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(10.0)
+    assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(8.0)
+    assert rec.value("struct_is", SEP, "el_rent") == pytest.approx(5.0)
+
+  def test_run_off_clamps_at_zero_with_legible_skip(self) -> None:
+    # Base rent actual is 4 but the base month's schedule facts claim 5
+    # (stale overlapping vintage, or a prior-period correction that
+    # could only land in the GL). The schedule ends after June, so the
+    # full run-off overshoots the base: 4 - 5 = -1. Clamp at zero with
+    # one legible skip; later months hold at zero without re-firing.
+    projection = ScheduleProjection(duration_total={"el_rent": {"2026-06": 5.0}})
+    base = [
+      SimpleNamespace(element_id="el_rev", value=100.0),
+      SimpleNamespace(element_id="el_cogs", value=62.0),
+      SimpleNamespace(element_id="el_rent", value=4.0),
+      SimpleNamespace(element_id="el_gp", value=38.0),
+    ]
+    resp, rec = _run(
+      _mechanics([]),
+      [],
+      [],
+      base_is_facts=base,
+      schedule_projection=projection,
+    )
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(0.0)
+    assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(0.0)
+    assert rec.value("struct_is", SEP, "el_rent") == pytest.approx(0.0)
+    clamps = [s for s in resp.skipped if "clamped" in s.reason]
+    assert len(clamps) == 1
+    assert clamps[0].element_qname == "rs-gaap:RentExpense"
+    assert clamps[0].period == "2026-07"
+    assert clamps[0].rule_id is None
+
+  def test_negative_carry_is_not_clamped(self) -> None:
+    # A line already negative at the base (a contra) keeps its
+    # arithmetic — the clamp only guards positive lines driven through
+    # zero by schedule run-off.
+    projection = ScheduleProjection(duration_total={"el_rent": {"2026-06": 1.0}})
+    base = [
+      SimpleNamespace(element_id="el_rev", value=100.0),
+      SimpleNamespace(element_id="el_cogs", value=62.0),
+      SimpleNamespace(element_id="el_rent", value=-2.0),
+      SimpleNamespace(element_id="el_gp", value=38.0),
+    ]
+    resp, rec = _run(
+      _mechanics([]),
+      [],
+      [],
+      base_is_facts=base,
+      schedule_projection=projection,
+    )
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(-3.0)
+    assert not [s for s in resp.skipped if "clamped" in s.reason]
 
 
 class TestUpsertMonthSet:
