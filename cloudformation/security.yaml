@@ -415,6 +415,92 @@ Resources:
               <eventTime> (<region>). Root use is unexpected in this account -
               investigate immediately."
 
+  # A new ACTIVE Access Analyzer finding means something in the account became
+  # reachable from outside it (a bucket policy, a role trust, a KMS grant) —
+  # the same notify gap the GuardDuty rule closes: findings recorded that
+  # nobody is emailed about. ACTIVE-only keeps archive/resolve transitions
+  # quiet; baseline in this account is zero findings.
+  AccessAnalyzerFindingsRule:
+    Type: AWS::Events::Rule
+    Condition: AccessAnalyzerOn
+    Properties:
+      Name: robosystems-access-analyzer-findings
+      Description: Route active IAM Access Analyzer findings (external access) to the security-alerts topic
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.access-analyzer
+        detail-type:
+          - Access Analyzer Finding
+        detail:
+          status:
+            - ACTIVE
+      Targets:
+        - Id: security-alerts-sns
+          Arn: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+          InputTransformer:
+            InputPathsMap:
+              resource: $.detail.resource
+              resourceType: $.detail.resourceType
+              isPublic: $.detail.isPublic
+              region: $.region
+            InputTemplate: >-
+              "Access Analyzer finding in <region>: <resourceType> <resource>
+              is accessible from outside the account (public: <isPublic>).
+              Review, then remediate or archive."
+
+  # The alert chain above depends on CloudTrail (feeds the root rule),
+  # GuardDuty, and the rest of the detective baseline staying on — but
+  # disabling any of them is otherwise silent, and StopLogging is the
+  # canonical first move before doing something worth hiding. Event names are
+  # unique per service, so the flat eventSource x eventName lists cannot
+  # cross-match. Unlike the CIS metric-filter suite (skipped: needs CloudWatch
+  # Logs ingest), EventBridge management events cost nothing; same
+  # CloudTrail-logging precondition as the root rule. UpdateTrail and
+  # UpdateDetector are matched wholesale (CIS 3.5-style) — a legitimate
+  # settings change emails once, acceptable on a tamper surface.
+  DetectiveControlTamperRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: robosystems-detective-control-tamper
+      Description: Alert when CloudTrail, GuardDuty, Security Hub, Config, or Access Analyzer is disabled or deleted
+      State: ENABLED
+      EventPattern:
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - cloudtrail.amazonaws.com
+            - guardduty.amazonaws.com
+            - securityhub.amazonaws.com
+            - config.amazonaws.com
+            - access-analyzer.amazonaws.com
+          eventName:
+            - StopLogging
+            - DeleteTrail
+            - UpdateTrail
+            - DeleteDetector
+            - UpdateDetector
+            - DisableSecurityHub
+            - StopConfigurationRecorder
+            - DeleteConfigurationRecorder
+            - DeleteDeliveryChannel
+            - DeleteAnalyzer
+      Targets:
+        - Id: security-alerts-sns
+          Arn: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+          InputTransformer:
+            InputPathsMap:
+              eventName: $.detail.eventName
+              eventSource: $.detail.eventSource
+              actor: $.detail.userIdentity.arn
+              sourceIP: $.detail.sourceIPAddress
+              eventTime: $.detail.eventTime
+            InputTemplate: >-
+              "Detective-control change: <eventName> (<eventSource>) by <actor>
+              from <sourceIP> at <eventTime>. If this was not a deliberate
+              deploy or teardown, investigate immediately."
+
   # Authenticated counterpart of api.yaml's AuthFailureSpikeAlarm: a valid
   # credential accumulating 403s fast, i.e. cross-tenant probing with a leaked
   # or over-curious key. Baseline is ~zero, so a modest threshold stays quiet
