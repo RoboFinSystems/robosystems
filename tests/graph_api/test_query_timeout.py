@@ -32,15 +32,17 @@ class TestQueryTimeout:
 
     def slow_operation():
       """Simulate a slow database operation."""
-      time.sleep(5)  # Sleep for 5 seconds
+      # Only needs to outlast the timeout below. The executor's __exit__
+      # joins the worker, so this duration is paid in full -- keep it small.
+      time.sleep(1.0)
       return "Should not reach here"
 
     with ThreadPoolExecutor(max_workers=1) as executor:
       future = executor.submit(slow_operation)
 
-      # Try to get result with 1 second timeout
+      # Try to get result with a timeout well under the operation's duration.
       with pytest.raises(FuturesTimeoutError):
-        future.result(timeout=1.0)
+        future.result(timeout=0.2)
 
       # Cancel the future
       future.cancel()
@@ -65,7 +67,7 @@ class TestQueryTimeout:
 
     def slow_execute(*args, **kwargs):
       """Simulate a slow query execution."""
-      time.sleep(3)  # Query takes 3 seconds
+      time.sleep(1.0)  # Comfortably exceeds the 0.5s query timeout above
       return MagicMock()
 
     mock_conn.execute = slow_execute
@@ -111,7 +113,7 @@ class TestQueryTimeout:
       """Operation that tracks execution."""
       try:
         executed.append("started")
-        time.sleep(2)
+        time.sleep(0.8)  # Outlasts the 0.5s timeout below
         executed.append("completed")
         return "success"
       except Exception as e:
@@ -144,7 +146,7 @@ class TestQueryTimeout:
       """Async operation that uses ThreadPoolExecutor for timeout."""
 
       def sync_slow_operation():
-        time.sleep(2)
+        time.sleep(0.8)  # Outlasts the 0.5s timeout below
         return "too slow"
 
       with ThreadPoolExecutor(max_workers=1) as executor:

@@ -164,6 +164,7 @@ class TestBaseGraphClient:
       assert client._should_retry(server_error, 0) is True
       assert client._should_retry(server_error, 1) is True
 
+  @pytest.mark.real_retry_delay
   def test_calculate_retry_delay(self):
     """Test retry delay calculation with exponential backoff."""
     config = GraphClientConfig(

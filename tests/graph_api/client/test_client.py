@@ -937,6 +937,7 @@ class TestGraphClientBaseHelpers:
     error = RuntimeError("Unknown")
     assert client._should_retry(error, 0) is False
 
+  @pytest.mark.real_retry_delay
   def test_calculate_retry_delay(self, mock_env):
     """Retry delay uses exponential backoff."""
     client = GraphClient(base_url="http://localhost:8001")

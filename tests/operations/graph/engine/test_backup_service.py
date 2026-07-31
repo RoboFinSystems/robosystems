@@ -45,7 +45,24 @@ def mock_allocation_manager():
 
 
 @pytest.fixture
-def mock_s3_client():
+def _moto_env(monkeypatch):
+  """Let moto intercept instead of LocalStack.
+
+  `pytest.ini` sets `AWS_ENDPOINT_URL=http://localhost:4566`, which boto3
+  honours at client-construction time -- so clients built inside
+  `mock_aws()` were still addressing LocalStack. CloudWatch isn't among the
+  services LocalStack runs here (CI starts it with `s3,secretsmanager,iam`),
+  so `PutMetricData` returned HTTP 500 and botocore retried it five times
+  with exponential backoff, costing ~10s per test.
+  """
+  monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+  monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+  monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+
+@pytest.fixture
+def mock_s3_client(_moto_env):
   """Mock S3 client for testing."""
   with mock_aws():
     client = boto3.client("s3", region_name="us-east-1")
@@ -55,7 +72,7 @@ def mock_s3_client():
 
 
 @pytest.fixture
-def mock_cloudwatch_client():
+def mock_cloudwatch_client(_moto_env):
   """Mock CloudWatch client for testing."""
   with mock_aws():
     client = boto3.client("cloudwatch", region_name="us-east-1")
