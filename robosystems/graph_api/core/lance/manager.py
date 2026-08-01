@@ -162,6 +162,7 @@ class LanceManager:
     """
     import duckdb
     import lancedb
+    from lancedb.index import IvfPq
 
     if duckdb_path is None:
       from robosystems.config.storage.shared import get_staging_duckdb_path
@@ -244,9 +245,12 @@ class LanceManager:
           f"48 sub-vectors)..."
         )
         table.create_index(
-          metric="cosine",
-          num_partitions=num_partitions,
-          num_sub_vectors=48,
+          "vector",
+          config=IvfPq(
+            distance_type="cosine",
+            num_partitions=num_partitions,
+            num_sub_vectors=48,
+          ),
         )
         logger.info("IVF-PQ index build complete")
       else:

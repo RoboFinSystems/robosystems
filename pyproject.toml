@@ -42,7 +42,7 @@ dependencies = [
     "boto3>=1.42.0,<2.0",
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
-    "lancedb>=0.30.0,<0.31",  # hold: 0.33 routes table.to_pandas() through pylance (beta-only); upgrade separately
+    "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
     "ladybug==0.18.1",
     # OLTP Database (Postgres)
     "alembic>=1.18.5,<2.0",
