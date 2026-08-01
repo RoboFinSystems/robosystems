@@ -55,7 +55,7 @@ dependencies = [
     # Data Orchestration (Dagster)
     "dagster>=1.13.1,<2.0",
     "dagster-webserver>=1.13.3,<2.0",
-    "dagster-postgres>=0.29.0,<1.0",
+    "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.11,<1.0",
     # Data Transformation (dbt)
     "dbt-core>=1.11.0,<2.0",
