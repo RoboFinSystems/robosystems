@@ -141,7 +141,8 @@ class LanceMemoryStore:
       table_dir.mkdir(parents=True, exist_ok=True)
 
     db = lancedb.connect(str(table_dir))
-    if self.MEMORY_TABLE not in db.table_names():
+    # list_tables() returns a ListTablesResponse; membership lives on .tables
+    if self.MEMORY_TABLE not in db.list_tables().tables:
       if not create:
         return db, None
       table = db.create_table(self.MEMORY_TABLE, schema=self._schema())
