@@ -45,7 +45,7 @@ dependencies = [
     "lancedb>=0.30.0,<0.31",  # hold: 0.33 routes table.to_pandas() through pylance (beta-only); upgrade separately
     "ladybug==0.18.1",
     # OLTP Database (Postgres)
-    "alembic>=1.18.0,<2.0",
+    "alembic>=1.18.5,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
     "sqlalchemy>=2.0.0,<3.0",
     # In-Memory Database (Valkey)
