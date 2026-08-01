@@ -31,6 +31,16 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 elasticache_client = boto3.client("elasticache")
 
+# The ElastiCache auth-token modify can take 15-20+ minutes to propagate,
+# which exceeds the maximum Lambda timeout (900s). set_secret therefore only
+# initiates the modify; test_secret polls the connection until the pending
+# token authenticates, and Secrets Manager re-drives the rotation if the
+# budget below is exhausted before propagation completes.
+TOKEN_PROPAGATION_TIMEOUT = (
+  780  # seconds; leaves headroom under the 900s Lambda timeout
+)
+TOKEN_PROPAGATION_INTERVAL = 30
+
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   """
@@ -153,12 +163,80 @@ def create_secret(secret_arn: str, token: str) -> None:
     raise
 
 
+def _get_replication_group() -> dict[str, Any]:
+  """Describe the replication group named by VALKEY_REPLICATION_GROUP_ID."""
+  replication_group_id = os.environ.get("VALKEY_REPLICATION_GROUP_ID")
+  if not replication_group_id:
+    raise ValueError("VALKEY_REPLICATION_GROUP_ID environment variable not set")
+
+  response = elasticache_client.describe_replication_groups(
+    ReplicationGroupId=replication_group_id
+  )
+  if not response["ReplicationGroups"]:
+    raise ValueError(f"Replication group {replication_group_id} not found")
+  return response["ReplicationGroups"][0]
+
+
+def _primary_endpoint(replication_group: dict[str, Any]) -> tuple[str, int]:
+  """Resolve the primary endpoint for a replication group."""
+  if "PrimaryEndpoint" in replication_group:
+    return (
+      replication_group["PrimaryEndpoint"]["Address"],
+      replication_group["PrimaryEndpoint"]["Port"],
+    )
+
+  # Fall back to first node endpoint for single-node setups
+  if not replication_group["NodeGroups"]:
+    raise ValueError("No node groups found in replication group")
+  node_group = replication_group["NodeGroups"][0]
+  if not node_group["NodeGroupMembers"]:
+    raise ValueError("No nodes found in node group")
+  primary_node = next(
+    (
+      node
+      for node in node_group["NodeGroupMembers"]
+      if node["CurrentRole"] == "primary"
+    ),
+    node_group["NodeGroupMembers"][0],
+  )
+  return (
+    primary_node["ReadEndpoint"]["Address"],
+    primary_node["ReadEndpoint"]["Port"],
+  )
+
+
+def _connect(endpoint: str, port: int, auth_token: str) -> redis.Redis:
+  return redis.Redis(
+    host=endpoint,
+    port=port,
+    password=auth_token,
+    ssl=True,  # Use TLS for encrypted connections
+    ssl_cert_reqs=None,  # Don't verify certificates for ElastiCache
+    decode_responses=True,
+    socket_connect_timeout=10,
+    socket_timeout=10,
+  )
+
+
+def _token_authenticates(auth_token: str) -> bool:
+  """True if a connection authenticated with this token can PING."""
+  try:
+    endpoint, port = _primary_endpoint(_get_replication_group())
+    _connect(endpoint, port, auth_token).ping()
+    return True
+  except Exception:
+    return False
+
+
 def set_secret(secret_arn: str, token: str) -> None:
   """
-  Step 2: Update Valkey with the new auth token.
+  Step 2: Apply the new auth token to ElastiCache.
 
-  Updates the ElastiCache Valkey replication group to use the new auth token
-  from the AWSPENDING version of the secret.
+  Initiates the auth-token rotation and returns immediately; propagation can
+  exceed the Lambda timeout, so waiting happens in test_secret via connection
+  retries. Idempotent across Secrets Manager retries: the modify is skipped
+  when the pending token already authenticates or when the replication group
+  is already mid-modification.
   """
   try:
     # Get new auth token from AWSPENDING version
@@ -168,34 +246,32 @@ def set_secret(secret_arn: str, token: str) -> None:
     pending_data = json.loads(pending_secret["SecretString"])
     new_auth_token = pending_data["VALKEY_AUTH_TOKEN"]
 
-    # Get Valkey replication group ID from environment
-    replication_group_id = os.environ.get("VALKEY_REPLICATION_GROUP_ID")
-    if not replication_group_id:
-      raise ValueError("VALKEY_REPLICATION_GROUP_ID environment variable not set")
+    replication_group = _get_replication_group()
+    replication_group_id = replication_group["ReplicationGroupId"]
+
+    if _token_authenticates(new_auth_token):
+      logger.info(
+        f"Pending auth token already accepted by {replication_group_id}; "
+        "skipping modification"
+      )
+      return
+
+    status = replication_group["Status"]
+    if status != "available":
+      logger.info(
+        f"Replication group {replication_group_id} is '{status}'; a modification "
+        "is already in flight - deferring verification to testSecret"
+      )
+      return
 
     logger.info(f"Updating auth token for replication group: {replication_group_id}")
-
-    # Update the replication group with new auth token
     elasticache_client.modify_replication_group(
       ReplicationGroupId=replication_group_id,
       AuthToken=new_auth_token,
       AuthTokenUpdateStrategy="ROTATE",  # Rotate without downtime
       ApplyImmediately=True,
     )
-
     logger.info(f"Initiated auth token rotation for {replication_group_id}")
-
-    # Wait for the modification to complete
-    waiter = elasticache_client.get_waiter("replication_group_available")
-    waiter.wait(
-      ReplicationGroupId=replication_group_id,
-      WaiterConfig={
-        "Delay": 30,
-        "MaxAttempts": 20,  # Wait up to 10 minutes
-      },
-    )
-
-    logger.info("Auth token rotation completed successfully")
 
   except Exception as e:
     error_type = type(e).__name__
@@ -207,8 +283,11 @@ def test_secret(secret_arn: str, token: str) -> None:
   """
   Step 3: Test the new auth token.
 
-  Connects to Valkey using the new auth token from AWSPENDING version
-  to verify it works correctly.
+  Connects to Valkey using the new auth token from AWSPENDING version to
+  verify it works. The modify initiated in set_secret propagates
+  asynchronously, so connection attempts are retried until the token is
+  accepted or the retry budget is exhausted (Secrets Manager re-drives the
+  rotation on failure).
   """
   try:
     # Get new auth token from AWSPENDING version
@@ -218,73 +297,39 @@ def test_secret(secret_arn: str, token: str) -> None:
     pending_data = json.loads(pending_secret["SecretString"])
     new_auth_token = pending_data["VALKEY_AUTH_TOKEN"]
 
-    # Get Valkey endpoint information
-    replication_group_id = os.environ.get("VALKEY_REPLICATION_GROUP_ID")
-    if not replication_group_id:
-      raise ValueError("VALKEY_REPLICATION_GROUP_ID environment variable not set")
-
-    # Get replication group details
-    response = elasticache_client.describe_replication_groups(
-      ReplicationGroupId=replication_group_id
-    )
-
-    if not response["ReplicationGroups"]:
-      raise ValueError(f"Replication group {replication_group_id} not found")
-
-    replication_group = response["ReplicationGroups"][0]
-
-    # Get primary endpoint
-    if "PrimaryEndpoint" in replication_group:
-      endpoint = replication_group["PrimaryEndpoint"]["Address"]
-      port = replication_group["PrimaryEndpoint"]["Port"]
-    else:
-      # Fall back to first node endpoint for single-node setups
-      if not replication_group["NodeGroups"]:
-        raise ValueError("No node groups found in replication group")
-      node_group = replication_group["NodeGroups"][0]
-      if not node_group["NodeGroupMembers"]:
-        raise ValueError("No nodes found in node group")
-      primary_node = next(
-        (
-          node
-          for node in node_group["NodeGroupMembers"]
-          if node["CurrentRole"] == "primary"
-        ),
-        node_group["NodeGroupMembers"][0],
-      )
-      endpoint = primary_node["ReadEndpoint"]["Address"]
-      port = primary_node["ReadEndpoint"]["Port"]
-
+    endpoint, port = _primary_endpoint(_get_replication_group())
     logger.info(f"Testing connection to {endpoint}:{port}")
 
-    # Test connection with new auth token
-    redis_client = redis.Redis(
-      host=endpoint,
-      port=port,
-      password=new_auth_token,
-      ssl=True,  # Use TLS for encrypted connections
-      ssl_cert_reqs=None,  # Don't verify certificates for ElastiCache
-      decode_responses=True,
-      socket_connect_timeout=10,
-      socket_timeout=10,
-    )
+    deadline = time.monotonic() + TOKEN_PROPAGATION_TIMEOUT
+    while True:
+      try:
+        redis_client = _connect(endpoint, port, new_auth_token)
 
-    # Test basic Redis operations
-    test_key = f"rotation_test_{int(time.time())}"
-    redis_client.set(test_key, "test_value", ex=60)  # Expires in 1 minute
-    value = redis_client.get(test_key)
-    redis_client.delete(test_key)
+        # Test basic Redis operations
+        test_key = f"rotation_test_{int(time.time())}"
+        redis_client.set(test_key, "test_value", ex=60)  # Expires in 1 minute
+        value = redis_client.get(test_key)
+        redis_client.delete(test_key)
 
-    if value != "test_value":
-      raise ValueError("Failed to read back test value from Valkey")
+        if value != "test_value":
+          raise ValueError("Failed to read back test value from Valkey")
 
-    # Test additional operations
-    redis_client.ping()
-    info = redis_client.info()
+        # Test additional operations
+        redis_client.ping()
+        info = redis_client.info()
 
-    logger.info(
-      f"Successfully tested new auth token. Valkey version: {info.get('redis_version', 'unknown')}"
-    )
+        logger.info(
+          f"Successfully tested new auth token. Valkey version: {info.get('redis_version', 'unknown')}"
+        )
+        return
+      except Exception as attempt_error:
+        if time.monotonic() >= deadline:
+          raise
+        logger.info(
+          f"Auth token not accepted yet ({type(attempt_error).__name__}); "
+          f"retrying in {TOKEN_PROPAGATION_INTERVAL}s"
+        )
+        time.sleep(TOKEN_PROPAGATION_INTERVAL)
 
   except Exception as e:
     error_type = type(e).__name__

@@ -94,7 +94,7 @@ Parameters:
     ConstraintDescription: Must be a valid ECR image URI
   LambdaRotationTimeout:
     Type: Number
-    Default: 300
+    Default: 900
     MinValue: 60
     MaxValue: 900
     Description: Timeout in seconds for rotation Lambda function
