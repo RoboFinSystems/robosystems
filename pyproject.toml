@@ -72,14 +72,16 @@ dependencies = [
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "stripe>=11.1.0,<12.0",
-    # Observability
-    "opentelemetry-api>=1.41.0,<2.0",
-    "opentelemetry-exporter-otlp>=1.41.0,<2.0",
-    "opentelemetry-sdk>=1.41.0,<2.0",
-    "opentelemetry-instrumentation-aiohttp-client>=0.64b0,<1.0",
-    "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
-    "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
-    "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
+    # Observability — the opentelemetry-* family versions are coupled
+    # (api/sdk/exporters track 1.x, instrumentations track the matching 0.xxb0);
+    # bump all floors together, never one package at a time
+    "opentelemetry-api>=1.44.0,<2.0",
+    "opentelemetry-exporter-otlp>=1.44.0,<2.0",
+    "opentelemetry-sdk>=1.44.0,<2.0",
+    "opentelemetry-instrumentation-aiohttp-client>=0.65b0,<1.0",
+    "opentelemetry-instrumentation-fastapi>=0.65b0,<1.0",
+    "opentelemetry-instrumentation-psycopg2>=0.65b0,<1.0",
+    "opentelemetry-instrumentation-requests>=0.65b0,<1.0",
     # Utilities
     "aiohttp>=3.14.0",
     "bcrypt>=5.0.0,<6.0",
