@@ -1436,14 +1436,14 @@ wheels = [
 
 [[package]]
 name = "holidays"
-version = "0.98"
+version = "0.101"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/a1/63c1a45599a82d91a3b5c7a4de5a6050ca253f8c0e74dd14fade3728e033/holidays-0.98.tar.gz", hash = "sha256:09b078a4695d53a35ea01517b331942f3232b3b7e3877f74f6d5227adbedc76e", size = 913785, upload-time = "2026-06-01T19:17:33.888Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/9c/1b4fbc0757e110704b55d81890b0f7e00d98d6d2e9900b96ba0f3abd4f52/holidays-0.101.tar.gz", hash = "sha256:fbaa802d66e5d24877359ae68c46d00a73437162d3e9a17466fe6cfcce123c3a", size = 956805, upload-time = "2026-07-20T20:44:44.504Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/0c/51baf49265bd6c8f05bea02ae6ebc96a81218ae364fae89dd6a3e3f7d349/holidays-0.98-py3-none-any.whl", hash = "sha256:65c9ba3402f1d10cc715af0510cdc847e60d8854df640515d546748ca4a24e60", size = 1482103, upload-time = "2026-06-01T19:17:32.01Z" },
+    { url = "https://files.pythonhosted.org/packages/db/73/f004ae0e18a87408cef57191eac8d742c2906d9a57316f0c8f69c663093f/holidays-0.101-py3-none-any.whl", hash = "sha256:be1d5bb0b662d709da08dcdfa9b42feb678312df2a5d6280421da71349e4757f", size = 1542496, upload-time = "2026-07-20T20:44:42.079Z" },
 ]
 
 [[package]]
@@ -3656,7 +3656,7 @@ requires-dist = [
     { name = "email-validator", specifier = ">=2.2.0,<3.0" },
     { name = "fastapi", specifier = ">=0.139.0,<1.0" },
     { name = "fastembed", specifier = ">=0.8.0,<1.0" },
-    { name = "holidays", specifier = ">=0.76.0,<1.0" },
+    { name = "holidays", specifier = ">=0.101,<1.0" },
     { name = "httptools", specifier = ">=0.6.0,<1.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },
