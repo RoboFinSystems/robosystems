@@ -52,11 +52,13 @@ dependencies = [
     "redis>=8.0.1,<9.0",
     # Document Search (OpenSearch)
     "opensearch-py>=3.0.0,<4.0",
-    # Data Orchestration (Dagster)
-    "dagster>=1.13.1,<2.0",
-    "dagster-webserver>=1.13.3,<2.0",
-    "dagster-postgres>=0.29.0,<1.0",
-    "dagster-aws>=0.29.11,<1.0",
+    # Data Orchestration (Dagster) — the dagster family is version-coupled
+    # (core/webserver on 1.x.y, libraries on the matching 0.(x+16).y);
+    # bump all floors together, never one package at a time
+    "dagster>=1.13.15,<2.0",
+    "dagster-webserver>=1.13.15,<2.0",
+    "dagster-postgres>=0.29.15,<1.0",
+    "dagster-aws>=0.29.15,<1.0",
     # Data Transformation (dbt)
     "dbt-core>=1.11.0,<2.0",
     "dbt-duckdb>=1.10.0,<2.0",
