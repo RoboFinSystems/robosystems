@@ -21,6 +21,18 @@ updates:
       opentelemetry:
         patterns:
           - "opentelemetry-*"
+      # The dagster family is version-coupled (core/webserver on 1.x.y,
+      # libraries on the matching 0.(x+16).y) and must move in lockstep
+      dagster:
+        patterns:
+          - "dagster"
+          - "dagster-*"
+      # dbt core and its duckdb adapter version independently but must be
+      # compatibility-tested together; propose them as one PR
+      dbt:
+        patterns:
+          - "dbt-core"
+          - "dbt-duckdb"
 
   # Docker — base images in Dockerfiles
   - package-ecosystem: "docker"
