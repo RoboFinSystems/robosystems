@@ -15,6 +15,12 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
+    groups:
+      # The opentelemetry-* family is version-coupled (api/sdk/exporters on
+      # 1.x, instrumentations on the paired 0.xxb0) and must move in lockstep
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"
 
   # Docker — base images in Dockerfiles
   - package-ecosystem: "docker"
