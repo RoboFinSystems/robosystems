@@ -1435,14 +1435,3 @@ Outputs:
     Value: !GetAtt ApiNamespace.Arn
     Export:
       Name: !Sub ${AWS::StackName}-ServiceDiscoveryNamespaceArn
-
-  # ALB dimensions for alarms defined in security.yaml (at inline-size ceiling here)
-  ApiLoadBalancerFullName:
-    Value: !GetAtt ApiALB.LoadBalancerFullName
-    Export:
-      Name: !Sub ${AWS::StackName}-LoadBalancerFullName
-
-  ApiTargetGroupFullName:
-    Value: !GetAtt ApiTargetGroup.TargetGroupFullName
-    Export:
-      Name: !Sub ${AWS::StackName}-TargetGroupFullName

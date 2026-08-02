@@ -365,9 +365,11 @@ rotate_access_key() {
     print_step "Verifying new key (IAM propagation can take ~10s)..."
     VERIFIED=false
     for _ in 1 2 3 4 5 6; do
-        if AWS_ACCESS_KEY_ID="$NEW_ACCESS_KEY_ID" \
+        # env -u, not VAR="": the AWS CLI treats an empty AWS_PROFILE as a
+        # real (empty-named) profile and errors instead of ignoring it
+        if env -u AWS_PROFILE -u AWS_SESSION_TOKEN \
+           AWS_ACCESS_KEY_ID="$NEW_ACCESS_KEY_ID" \
            AWS_SECRET_ACCESS_KEY="$NEW_SECRET_ACCESS_KEY" \
-           AWS_SESSION_TOKEN="" AWS_PROFILE="" \
            aws sts get-caller-identity --output text &>/dev/null; then
             VERIFIED=true
             break
