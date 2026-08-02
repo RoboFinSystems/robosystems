@@ -538,6 +538,210 @@ Resources:
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
 
+  # ── API ALB + operational Lambda alarms ────────────────────────────────────
+  # Placed here (not api.yaml) because api.yaml sits at the 51,200-byte inline
+  # ceiling. ALB dimensions come from exports the API stacks publish, so BOTH
+  # API stacks must be deployed (creating the exports) before the first
+  # security-stack update that includes these alarms.
+  ApiAlbUnhealthyHostsAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-prod-api-alb-unhealthy-hosts
+      AlarmDescription: API ALB target reporting unhealthy
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !ImportValue RoboSystemsAPIProd-TargetGroupFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  ApiAlbHighLatencyAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-prod-api-alb-high-latency
+      AlarmDescription: API ALB target response time is high
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  ApiAlb5xxAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-prod-api-alb-5xx-spike
+      AlarmDescription: Elevated 5xx responses from the API ALB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 25
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  ApiAlbUnhealthyHostsAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-staging-api-alb-unhealthy-hosts
+      AlarmDescription: API ALB target reporting unhealthy
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !ImportValue RoboSystemsAPIStaging-TargetGroupFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  ApiAlbHighLatencyAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-staging-api-alb-high-latency
+      AlarmDescription: API ALB target response time is high
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  ApiAlb5xxAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-staging-api-alb-5xx-spike
+      AlarmDescription: Elevated 5xx responses from the API ALB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 25
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  # Admin-key-rotation Lambdas are defined in api.yaml (same ceiling constraint);
+  # function names are deterministic stack-name prefixes.
+  AdminKeyRotationErrorsAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-prod-admin-key-rotation-errors
+      AlarmDescription: Admin key rotation Lambda reported errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: RoboSystemsAPIProd-admin-key-rotation
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  AdminKeyRotationErrorsAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-staging-admin-key-rotation-errors
+      AlarmDescription: Admin key rotation Lambda reported errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: RoboSystemsAPIStaging-admin-key-rotation
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  # CUR pipeline Lambdas live in the AWS-provided RoboSystemsCUR stack (not in
+  # this repo), so their generated names are literals here. They are stable
+  # unless that stack is recreated — update these two values if it ever is.
+  CurInitializerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-cur-initializer-errors
+      AlarmDescription: CUR Athena initializer Lambda reported errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: RoboSystemsCUR-AWSCURInitializer-dhIFEKWJGt2f
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
+  CurNotificationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-cur-notification-errors
+      AlarmDescription: CUR S3 notification Lambda reported errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: RoboSystemsCUR-AWSS3CURNotification-ZSi5BHYx7O2N
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
 Outputs:
   GuardDutyDetectorId:
     Condition: GuardDutyOn

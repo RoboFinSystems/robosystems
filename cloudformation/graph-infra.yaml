@@ -524,6 +524,169 @@ Resources:
       AlarmActions:
         - !Ref InfraAlertTopic
 
+  # Registry table throttle alarms (tables are on-demand; throttles signal
+  # burst beyond adaptive capacity or a hot key)
+  InstanceRegistryReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-instance-registry-read-throttle
+      MetricName: ReadThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref InstanceRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  InstanceRegistryWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-instance-registry-write-throttle
+      MetricName: WriteThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref InstanceRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  GraphRegistryReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-graph-registry-read-throttle
+      MetricName: ReadThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref GraphRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  GraphRegistryWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-graph-registry-write-throttle
+      MetricName: WriteThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref GraphRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  VolumeRegistryReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-volume-registry-read-throttle
+      MetricName: ReadThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref VolumeRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  VolumeRegistryWriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-volume-registry-write-throttle
+      MetricName: WriteThrottleEvents
+      Namespace: AWS/DynamoDB
+      Dimensions:
+        - Name: TableName
+          Value: !Ref VolumeRegistry
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  # Error alarms for this stack's Lambdas (key generation + secret rotation)
+  ApiKeyGeneratorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-api-key-generator-errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${AWS::StackName}-api-key-generator"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  ApiSecretRotationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-api-secret-rotation-errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${AWS::StackName}-api-secret-rotation"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
   # ===== CloudWatch Log Groups =====
   # Unified log group for all Graph API instances
   # Log streams are partitioned by: {cluster_tier}/{instance_id}/{node_type}

@@ -354,6 +354,29 @@ Resources:
         Timeout: PT10M
         Count: 1
 
+  # CPU alarm: only evaluates while the bastion runs (it auto-stops after
+  # init), so missing data stays OK rather than alarming on a stopped host
+  BastionCpuHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-bastion-${Environment}-cpu-high
+      AlarmDescription: Bastion host CPU is unexpectedly high
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref BastionHostEC2Instance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-${Environment}-security-alerts
+
 Outputs:
   BastionHostId:
     Description: Instance ID of the bastion host (use with SSM)

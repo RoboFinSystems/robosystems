@@ -680,6 +680,70 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  # CloudWatch alarms for instance health (CPU, memory, disk queue)
+  RDSCpuHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-cpu-high
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBInstanceIdentifier
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+
+  RDSFreeableMemoryLowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-memory-low
+      Namespace: AWS/RDS
+      MetricName: FreeableMemory
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBInstanceIdentifier
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 268435456
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+
+  RDSDiskQueueHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-disk-queue-high
+      Namespace: AWS/RDS
+      MetricName: DiskQueueDepth
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBInstanceIdentifier
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 8
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+
   # CloudWatch alarm for low storage space
   RDSStorageLowAlarm:
     Type: AWS::CloudWatch::Alarm
