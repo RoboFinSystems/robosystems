@@ -294,8 +294,9 @@ setup-gha:
     @bin/setup/gha.sh
 
 # Bedrock local development setup (creates IAM user, updates .env)
-setup-bedrock:
-    @bin/setup/bedrock.sh
+# Pass "rotate" to rotate the access key: just setup-bedrock rotate
+setup-bedrock *args:
+    @bin/setup/bedrock.sh {{ args }}
 
 # Apply the operational ECR image lifecycle policy (idempotent reconcile)
 # Single source of truth: bin/setup/ecr-lifecycle-policy.json (also applied by
