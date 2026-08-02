@@ -219,7 +219,9 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub /robosystems/${Environment}/bastion-host
-      RetentionInDays: 30
+      # SSM session activity is security-relevant: retained 365 days, unlike
+      # the 14-90 day operational log groups (audit-tier retention policy).
+      RetentionInDays: 365
       Tags:
         - Key: Name
           Value: !Sub robosystems-bastion-logs-${Environment}
