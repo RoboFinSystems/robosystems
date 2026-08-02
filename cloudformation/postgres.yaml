@@ -443,6 +443,11 @@ Resources:
       Family: postgres16
       Parameters:
         rds.force_ssl: "1"
+        # pgaudit session auditing (DDL + role/privilege changes). The library
+        # list keeps RDS's default pg_stat_statements. shared_preload_libraries
+        # is static: it sits in pending-reboot until the instance is rebooted.
+        shared_preload_libraries: "pg_stat_statements,pgaudit"
+        pgaudit.log: "ddl,role"
       Tags:
         - Key: Name
           Value: !Sub ${DBInstanceName}-${Environment}-paramgroup
