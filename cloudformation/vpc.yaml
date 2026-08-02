@@ -822,6 +822,16 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${VPCFlowLogsBucket.Arn}/*"
+              - !GetAtt VPCFlowLogsBucket.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # VPC Flow Log
   VPCFlowLog:

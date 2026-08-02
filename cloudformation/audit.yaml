@@ -78,6 +78,24 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${AuditBucket.Arn}/*
+              - !GetAtt AuditBucket.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
   # Error/diagnostics stream for the Firehose delivery (short retention).
   FirehoseLogGroup:
     Type: AWS::Logs::LogGroup

@@ -98,6 +98,9 @@ Resources:
             ExpirationInDays: !Ref LogRetentionDays
       VersioningConfiguration:
         Status: Enabled
+      # Object Lock (governance mode) is enabled on the existing bucket via the
+      # S3 API, not here: CloudFormation's ObjectLockEnabled property requires
+      # bucket replacement, which a retained, name-pinned bucket cannot do.
       Tags:
         - Key: Name
           Value: !Sub "${ServiceTag}-cloudtrail-${Environment}"
@@ -133,6 +136,16 @@ Resources:
             Condition:
               StringEquals:
                 "s3:x-amz-acl": bucket-owner-full-control
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${CloudTrailBucket.Arn}/*"
+              - !GetAtt CloudTrailBucket.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # CloudTrail - Minimalistic configuration
   CloudTrail:

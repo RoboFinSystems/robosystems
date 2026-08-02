@@ -95,6 +95,24 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  S3BucketSharedRawPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketSharedRaw
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketSharedRaw.Arn}/*
+              - !GetAtt S3BucketSharedRaw.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
   # Shared Processed Data Bucket (parquet files for graph ingestion)
   S3BucketSharedProcessed:
     Type: AWS::S3::Bucket
@@ -136,6 +154,24 @@ Resources:
           Value: SharedProcessedData
         - Key: CreatedBy
           Value: CloudFormation
+
+  S3BucketSharedProcessedPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketSharedProcessed
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketSharedProcessed.Arn}/*
+              - !GetAtt S3BucketSharedProcessed.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # User Data Bucket (user uploads, staging tables, exports)
   S3BucketUserData:
@@ -219,6 +255,24 @@ Resources:
           Value: UserData
         - Key: CreatedBy
           Value: CloudFormation
+
+  S3BucketUserDataPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketUserData
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketUserData.Arn}/*
+              - !GetAtt S3BucketUserData.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # Public Data Repository Bucket (for all publicly accessible data including SEC textblocks)
   S3BucketPublicData:
@@ -461,6 +515,24 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  S3BucketDeploymentNewPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketDeploymentNew
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketDeploymentNew.Arn}/*
+              - !GetAtt S3BucketDeploymentNew.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
   # Logs Bucket (Dagster compute logs from ECS runs)
   S3BucketLogs:
     Type: AWS::S3::Bucket
@@ -507,6 +579,24 @@ Resources:
           Value: Logs
         - Key: CreatedBy
           Value: CloudFormation
+
+  S3BucketLogsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketLogs
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketLogs.Arn}/*
+              - !GetAtt S3BucketLogs.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
 
   # IAM Managed Policy for Graph Writers (read shared data, write sync buckets)
   GraphWriterS3Policy:
