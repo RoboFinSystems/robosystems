@@ -196,6 +196,12 @@ Resources:
           - BucketKeyEnabled: false
             ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      # Versioning protects user data against accidental delete/overwrite.
+      # With versioning on, the expiration rules below produce delete markers
+      # rather than removing data — the ExpireNoncurrentVersions rule is what
+      # actually reclaims space, so keep them paired.
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
         Rules:
           # User staging data expires after 7 days
@@ -244,6 +250,23 @@ Resources:
             Transitions:
               - TransitionInDays: 30
                 StorageClass: STANDARD_IA
+          # Noncurrent versions are 30-day recovery copies, not an archive;
+          # also purge orphaned delete markers left by the expiration rules.
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            ExpiredObjectDeleteMarker: true
+          # Shared-repository files are platform-derived (rebuilt from source
+          # data), not user data — versioning is bucket-wide so they can't be
+          # excluded, but reclaim their overwritten copies the next day rather
+          # than holding 30-day recovery versions of large database files.
+          # (S3 applies the earliest-deletion rule where prefixes overlap.)
+          - Id: ExpireSharedRepoNoncurrentVersions
+            Status: Enabled
+            Prefix: shared-repositories/
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-${Environment}-user-bucket
