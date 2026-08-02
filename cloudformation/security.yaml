@@ -38,6 +38,23 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Enable Amazon GuardDuty threat detection
 
+  # API ALB alarm dimensions, resolved live from ELB APIs by the deploy job
+  # (never CFN imports: a cross-stack import would deadlock the pipeline —
+  # security failing skips deploy-api, which is what publishes the exports).
+  # Empty values skip the ALB alarms via conditions.
+  ApiAlbFullNameProd:
+    Type: String
+    Default: ""
+  ApiTgFullNameProd:
+    Type: String
+    Default: ""
+  ApiAlbFullNameStaging:
+    Type: String
+    Default: ""
+  ApiTgFullNameStaging:
+    Type: String
+    Default: ""
+
   EnableSecurityHub:
     Type: String
     Default: "true"
@@ -95,6 +112,12 @@ Conditions:
     - !Equals [!Ref EnableCISStandard, "true"]
   AccessAnalyzerOn: !Equals [!Ref EnableAccessAnalyzer, "true"]
   ConfigOn: !Equals [!Ref EnableConfig, "true"]
+  HasApiAlbProd: !And
+    - !Not [!Equals [!Ref ApiAlbFullNameProd, ""]]
+    - !Not [!Equals [!Ref ApiTgFullNameProd, ""]]
+  HasApiAlbStaging: !And
+    - !Not [!Equals [!Ref ApiAlbFullNameStaging, ""]]
+    - !Not [!Equals [!Ref ApiTgFullNameStaging, ""]]
 
 Resources:
   # --- GuardDuty: continuous threat detection over CloudTrail/VPC/DNS telemetry.
@@ -545,6 +568,7 @@ Resources:
   # security-stack update that includes these alarms.
   ApiAlbUnhealthyHostsAlarmProd:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbProd
     Properties:
       AlarmName: robosystems-prod-api-alb-unhealthy-hosts
       AlarmDescription: API ALB target reporting unhealthy
@@ -557,15 +581,16 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameProd
         - Name: TargetGroup
-          Value: !ImportValue RoboSystemsAPIProd-TargetGroupFullName
+          Value: !Ref ApiTgFullNameProd
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
   ApiAlbHighLatencyAlarmProd:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbProd
     Properties:
       AlarmName: robosystems-prod-api-alb-high-latency
       AlarmDescription: API ALB target response time is high
@@ -578,13 +603,14 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameProd
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
   ApiAlb5xxAlarmProd:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbProd
     Properties:
       AlarmName: robosystems-prod-api-alb-5xx-spike
       AlarmDescription: Elevated 5xx responses from the API ALB
@@ -597,13 +623,14 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIProd-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameProd
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
   ApiAlbUnhealthyHostsAlarmStaging:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbStaging
     Properties:
       AlarmName: robosystems-staging-api-alb-unhealthy-hosts
       AlarmDescription: API ALB target reporting unhealthy
@@ -616,15 +643,16 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameStaging
         - Name: TargetGroup
-          Value: !ImportValue RoboSystemsAPIStaging-TargetGroupFullName
+          Value: !Ref ApiTgFullNameStaging
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
 
   ApiAlbHighLatencyAlarmStaging:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbStaging
     Properties:
       AlarmName: robosystems-staging-api-alb-high-latency
       AlarmDescription: API ALB target response time is high
@@ -637,13 +665,14 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameStaging
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
 
   ApiAlb5xxAlarmStaging:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbStaging
     Properties:
       AlarmName: robosystems-staging-api-alb-5xx-spike
       AlarmDescription: Elevated 5xx responses from the API ALB
@@ -656,7 +685,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: LoadBalancer
-          Value: !ImportValue RoboSystemsAPIStaging-LoadBalancerFullName
+          Value: !Ref ApiAlbFullNameStaging
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts

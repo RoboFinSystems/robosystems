@@ -415,8 +415,39 @@ jobs:
             SECURITY_ENV="${{ inputs.environment }}"
           fi
 
+          # Resolve API ALB/TG dimensions live from ELB APIs for the ALB alarms.
+          # Deliberately not CFN exports: a cross-stack import deadlocks the
+          # pipeline (security failure skips deploy-api, which would publish
+          # the exports). Missing ALBs resolve to "" and the alarms are skipped.
+          resolve_alb_dims() {
+            local ALB_ARN TG_ARN
+            ALB_ARN=$(aws elbv2 describe-load-balancers --names "$1" \
+              --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null) || true
+            if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" = "None" ]; then
+              echo ""
+              return 0
+            fi
+            TG_ARN=$(aws elbv2 describe-target-groups --load-balancer-arn "$ALB_ARN" \
+              --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null) || true
+            if [ -z "$TG_ARN" ] || [ "$TG_ARN" = "None" ]; then
+              echo ""
+              return 0
+            fi
+            # LoadBalancerFullName = ARN resource part minus "loadbalancer/";
+            # TargetGroupFullName = ARN resource part as-is
+            echo "$(echo "$ALB_ARN" | cut -d: -f6 | sed 's|^loadbalancer/||') $(echo "$TG_ARN" | cut -d: -f6)"
+          }
+
+          read -r ALB_PROD TG_PROD <<< "$(resolve_alb_dims robosystems-api-prod-alb)" || true
+          read -r ALB_STAGING TG_STAGING <<< "$(resolve_alb_dims robosystems-api-staging-alb)" || true
+          echo "API ALB dims: prod='${ALB_PROD:-}' staging='${ALB_STAGING:-}'"
+
           SECURITY_PARAMS="ParameterKey=Environment,ParameterValue=$SECURITY_ENV \
-                      ParameterKey=EnableConfig,ParameterValue=${{ inputs.security_config_enabled }}"
+                      ParameterKey=EnableConfig,ParameterValue=${{ inputs.security_config_enabled }} \
+                      ParameterKey=ApiAlbFullNameProd,ParameterValue=${ALB_PROD:-} \
+                      ParameterKey=ApiTgFullNameProd,ParameterValue=${TG_PROD:-} \
+                      ParameterKey=ApiAlbFullNameStaging,ParameterValue=${ALB_STAGING:-} \
+                      ParameterKey=ApiTgFullNameStaging,ParameterValue=${TG_STAGING:-}"
 
           echo "AWS Config recorder enabled: ${{ inputs.security_config_enabled }}"
 
