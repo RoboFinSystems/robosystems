@@ -557,7 +557,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ needs.build.outputs.image_tag }}
+      ecr_image_tag: ${{ needs.build.outputs.image_ref }}
       # ECS & Compute Configuration
       cpu: ${{ vars.API_CPU_PROD || '512' }}
       memory: ${{ vars.API_MEMORY_PROD || '1024' }}
@@ -638,7 +638,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ needs.build.outputs.image_tag }}
+      ecr_image_tag: ${{ needs.build.outputs.image_ref }}
       # Fargate Configuration
       daemon_cpu: ${{ vars.DAGSTER_DAEMON_CPU_PROD || '1024' }}
       daemon_memory: ${{ vars.DAGSTER_DAEMON_MEMORY_PROD || '2048' }}
