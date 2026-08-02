@@ -15,6 +15,11 @@ FROM public.ecr.aws/lambda/python:3.13-arm64
 ARG CACHE_DATE
 RUN echo "os-refresh ${CACHE_DATE}" && dnf update -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
 
+# Drop the Runtime Interface Emulator baked into the AWS base image. It only
+# serves local `docker run` emulation — deployed Lambda never executes it —
+# and its vendored Go modules surface in container vulnerability scans.
+RUN rm -f /usr/local/bin/aws-lambda-rie
+
 # Install uv for dependency export
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
