@@ -2,6 +2,8 @@
 
 Security controls implemented at the infrastructure, application, and data levels.
 
+Live compliance posture and audit artifacts are published in the [RoboSystems Trust Center](https://app.vanta.com/robosystems.ai/trust/lzitnsl1mo27b6zahy0ksy).
+
 ## Authentication and Access Control
 
 ### JWT Authentication
@@ -389,6 +391,7 @@ Production environment enforces at startup:
 
 - Security Team: security@robosystems.ai
 - Administrative Team: admin@robosystems.ai
+- Trust Center: https://app.vanta.com/robosystems.ai/trust/lzitnsl1mo27b6zahy0ksy
 
 ### Automated Response
 
