@@ -24,6 +24,9 @@ on:
       image_tag:
         description: "Image tag (git-sha based, use this for deployments)"
         value: ${{ jobs.docker.outputs.image_tag }}
+      image_ref:
+        description: "Digest-pinned reference (tag@sha256:...) — use for ECS task definitions"
+        value: ${{ jobs.docker.outputs.image_ref }}
       version_tag:
         description: "Version tag (v1.2.3) if release, empty otherwise (metadata only)"
         value: ${{ jobs.docker.outputs.version_tag }}
@@ -54,6 +57,7 @@ jobs:
     outputs:
       image: ${{ steps.resolve.outputs.image }}
       image_tag: ${{ steps.resolve.outputs.image_tag }}
+      image_ref: ${{ steps.digest.outputs.image_ref }}
       version_tag: ${{ steps.resolve.outputs.version_tag }}
       ecr_repository_url: ${{ steps.resolve.outputs.ecr_repository_url }}
       is_release: ${{ steps.resolve.outputs.is_release }}
@@ -232,21 +236,21 @@ jobs:
               --image-manifest "$MANIFEST" 2>/dev/null || echo "Tag ${VERSION_TAG} may already exist"
           fi
 
-          # Add latest tag for prod
-          if [[ "${{ inputs.environment }}" == "prod" ]]; then
-            aws ecr put-image \
-              --repository-name "$ECR_REPOSITORY" \
-              --image-tag "latest" \
-              --image-manifest "$MANIFEST" 2>/dev/null || echo "Tag latest may already exist"
-          fi
-
-      - name: Verify image exists
+      - name: Verify image and resolve digest
+        id: digest
         env:
           ECR_REPOSITORY: ${{ inputs.ecr_repository }}
           IMAGE_TAG: ${{ steps.resolve.outputs.image_tag }}
         run: |
-          aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" || exit 1
-          echo "✅ Image verified: ${IMAGE_TAG}"
+          # Digest-pinned reference (tag@sha256:...) for ECS task definitions,
+          # so deployed images are immutable content references.
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text) || exit 1
+          echo "image_ref=${IMAGE_TAG}@${DIGEST}" >> $GITHUB_OUTPUT
+          echo "✅ Image verified: ${IMAGE_TAG}@${DIGEST}"
 
   # Scan Docker image for vulnerabilities
   scan:
