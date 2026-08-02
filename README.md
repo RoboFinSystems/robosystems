@@ -348,6 +348,7 @@ pip install robosystems-client
 
 - **[SECURITY.md](/SECURITY.md)** - Security control catalog with implementation references
 - **[Compliance](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)** - Compliance stacks, toggles, and SOC 2 posture
+- **[Trust Center](https://app.vanta.com/robosystems.ai/trust/lzitnsl1mo27b6zahy0ksy)** - Live compliance posture and audit artifacts
 
 ## API Reference
 
