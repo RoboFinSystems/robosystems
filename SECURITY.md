@@ -2,7 +2,7 @@
 
 Security controls implemented at the infrastructure, application, and data levels.
 
-Live compliance posture and audit artifacts are published in the [RoboSystems Trust Center](https://app.vanta.com/robosystems.ai/trust/lzitnsl1mo27b6zahy0ksy).
+Live compliance posture and audit artifacts are published in the [RoboSystems Trust Center](https://trust.robosystems.ai).
 
 ## Authentication and Access Control
 
@@ -391,7 +391,7 @@ Production environment enforces at startup:
 
 - Security Team: security@robosystems.ai
 - Administrative Team: admin@robosystems.ai
-- Trust Center: https://app.vanta.com/robosystems.ai/trust/lzitnsl1mo27b6zahy0ksy
+- Trust Center: https://trust.robosystems.ai
 
 ### Automated Response
 
