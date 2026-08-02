@@ -499,6 +499,26 @@ Resources:
       AlarmActions:
         - !Ref VolumeAlertTopic
 
+  # Detachment Lambda Errors Alarm
+  VolumeDetachmentErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-detachment-errors"
+      AlarmDescription: Alert on volume detachment Lambda errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub "${AWS::StackName}-volume-detachment"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
   # ========================================
   # LAMBDA LIVENESS ALARMS
   # ========================================

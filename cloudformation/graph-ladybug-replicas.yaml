@@ -778,6 +778,27 @@ Resources:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching
 
+  # 5xx spike alarm: distinguishes replica-side failures from the healthy-host
+  # and latency signals above
+  Replica5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-5xx-spike
+      AlarmDescription: Alert on elevated 5xx responses from the replicas ALB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 25
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ReplicaALB.LoadBalancerFullName
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
 Outputs:
   ALBDNSName:
     Description: DNS name of the shared replicas ALB
