@@ -173,11 +173,6 @@ jobs:
             TAGS="$TAGS -t ${ECR_URL}:${VERSION_TAG}"
           fi
 
-          # Add latest tag for prod environment
-          if [[ "${{ inputs.environment }}" == "prod" ]] && [[ "$IS_RELEASE" == "true" ]]; then
-            TAGS="$TAGS -t ${ECR_URL}:latest"
-          fi
-
           # Docker Hub tags - version pinned for releases
           if [[ "${{ inputs.publish_to_dockerhub }}" == "true" ]] && [[ "$IS_RELEASE" == "true" ]]; then
             echo "🚀 Publishing release to Docker Hub"
