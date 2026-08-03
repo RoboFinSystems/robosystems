@@ -117,13 +117,13 @@ async def get_user_graph_repository(
       detail=f"Access denied to user graph {graph_id}",
     )
 
-  if operation_type == "write":
-    user_graph = GraphUser.get_by_user_and_graph(str(current_user.id), graph_id, db)
-    if user_graph and user_graph.role not in ["admin", "member"]:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"Write access denied. Your role: {user_graph.role}",
-      )
+  if operation_type == "write" and not GraphUser.user_has_write_access(
+    str(current_user.id), graph_id, db
+  ):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Write access denied. Your role is read-only.",
+    )
 
   return await get_graph_repository_dependency(graph_id, current_user, operation_type)
 

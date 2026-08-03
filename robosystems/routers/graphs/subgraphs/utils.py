@@ -62,21 +62,15 @@ def verify_parent_graph_access(
       "Subgraphs are only available for user-owned graphs.",
     )
 
-  # Get GraphUser for role checking
-  user_graph = (
-    session.query(GraphUser)
-    .filter(GraphUser.user_id == current_user.id, GraphUser.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
+  if not GraphUser.user_has_access(current_user.id, graph_id, session):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail=f"Access denied to graph {graph_id}",
     )
 
-  # Check role requirements
-  if required_role == "admin" and user_graph.role != "admin":
+  if required_role == "admin" and not GraphUser.user_has_admin_access(
+    current_user.id, graph_id, session
+  ):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Admin access to parent graph required for this operation",

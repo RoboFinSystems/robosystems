@@ -49,7 +49,7 @@ from robosystems.models.api.user import (
   GraphInfo,
   UserGraphsResponse,
 )
-from robosystems.models.core import GraphUser, OrgLimits, OrgUser, User
+from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUser, User
 
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
@@ -147,6 +147,48 @@ async def get_graphs(
           status=graph_status,
         )
       )
+
+    # Add org-owned graphs the user holds implicitly as org owner/admin
+    # (no explicit GraphUser row — access derives from the org role).
+    explicit_graph_ids = {ug.graph_id for ug in user_graphs}
+    admin_org_ids = [
+      ou.org_id
+      for ou in OrgUser.get_user_orgs(current_user.id, session)
+      if ou.role in (OrgRole.OWNER, OrgRole.ADMIN)
+    ]
+    if admin_org_ids:
+      implicit_graphs = (
+        session.query(Graph)
+        .filter(
+          Graph.org_id.in_(admin_org_ids),
+          Graph.graph_id.notin_(explicit_graph_ids)
+          if explicit_graph_ids
+          else Graph.graph_id.isnot(None),
+        )
+        .all()
+      )
+      for graph in implicit_graphs:
+        graph_status = graph.status or "active"
+        if graph_status == "deprovisioned":
+          continue
+
+        admin_graphs += 1
+        graphs.append(
+          GraphInfo(
+            graphId=graph.graph_id,
+            graphName=graph.graph_name,
+            role="admin",
+            isSelected=False,
+            createdAt=graph.created_at.isoformat(),
+            isRepository=False,
+            repositoryType=None,
+            schemaExtensions=graph.schema_extensions or [],
+            isSubgraph=graph.is_subgraph or False,
+            parentGraphId=graph.parent_graph_id,
+            graphType=graph.graph_type,
+            status=graph_status,
+          )
+        )
 
     # Add repositories (shared repositories cannot be selected)
     for user_repo in user_repositories:

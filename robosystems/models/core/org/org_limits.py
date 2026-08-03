@@ -72,6 +72,26 @@ class OrgLimits(Model):
       limits = cls.create_default_limits(org_id, session)
     return limits
 
+  def _count_org_graphs(self, session: Session) -> int:
+    """Count the org's live top-level graphs.
+
+    Counts graphs owned by the org, not GraphUser access rows — with
+    multi-user graphs, one graph has many access rows and counting them
+    would burn quota on every grant. Subgraphs are governed by per-tier
+    subgraph quotas, not the org graph limit.
+    """
+    from robosystems.models.core.graph.graph import Graph, GraphStatus
+
+    return (
+      session.query(Graph)
+      .filter(
+        Graph.org_id == self.org_id,
+        Graph.status != GraphStatus.DEPROVISIONED.value,
+        Graph.is_subgraph.is_(False),
+      )
+      .count()
+    )
+
   def can_create_graph(self, session: Session) -> tuple[bool, str]:
     """
     Check if org can create another graph (safety check only).
@@ -79,21 +99,10 @@ class OrgLimits(Model):
     Returns:
         tuple: (can_create: bool, reason: str)
     """
-    from robosystems.models.core.graph.graph_user import GraphUser
-
-    from .org_user import OrgUser
-
     if self.max_graphs == -1:
       return True, "Can create graph (unlimited)"
 
-    org_user_ids = [
-      ou.user_id
-      for ou in session.query(OrgUser).filter(OrgUser.org_id == self.org_id).all()
-    ]
-
-    current_count = (
-      session.query(GraphUser).filter(GraphUser.user_id.in_(org_user_ids)).count()
-    )
+    current_count = self._count_org_graphs(session)
 
     if current_count >= self.max_graphs:
       return (
@@ -105,24 +114,7 @@ class OrgLimits(Model):
 
   def get_current_usage(self, session: Session) -> dict:
     """Get current usage statistics for the organization."""
-    from robosystems.models.core.graph.graph import Graph
-    from robosystems.models.core.graph.graph_user import GraphUser
-
-    from .org_user import OrgUser
-
-    org_user_ids = [
-      ou.user_id
-      for ou in session.query(OrgUser).filter(OrgUser.org_id == self.org_id).all()
-    ]
-
-    current_graphs = (
-      session.query(GraphUser).filter(GraphUser.user_id.in_(org_user_ids)).count()
-    )
-
-    # Get actual graphs owned by the org (new model)
-    org_graphs = session.query(Graph).filter(Graph.org_id == self.org_id).count()
-
-    current_count = max(current_graphs, org_graphs)
+    current_count = self._count_org_graphs(session)
     remaining_graphs = max(0, self.max_graphs - current_count)
 
     return {

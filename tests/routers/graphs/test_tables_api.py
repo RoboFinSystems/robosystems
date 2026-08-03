@@ -42,6 +42,9 @@ async def test_list_tables_success(monkeypatch):
     def filter(self, *args, **kwargs):
       return self
 
+    def order_by(self, *args, **kwargs):
+      return self
+
     def first(self):
       return SimpleNamespace(user_id="user-123")
 

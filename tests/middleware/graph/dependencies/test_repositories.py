@@ -253,9 +253,7 @@ class TestGetUserGraphRepository:
       "robosystems.middleware.graph.dependencies.repositories.GraphUser"
     ) as mock_graph_user:
       mock_graph_user.user_has_access.return_value = True
-      mock_user_graph = Mock()
-      mock_user_graph.role = "viewer"  # Not admin or member
-      mock_graph_user.get_by_user_and_graph.return_value = mock_user_graph
+      mock_graph_user.user_has_write_access.return_value = False  # viewer role
 
       with pytest.raises(HTTPException) as exc_info:
         await get_user_graph_repository(

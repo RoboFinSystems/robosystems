@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 from robosystems.config import env
 from robosystems.config.constants import (
   EMAIL_TOKEN_EXPIRY_HOURS,
+  ORG_INVITATION_EXPIRY_DAYS,
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
 )
 from robosystems.logger import logger
@@ -133,6 +134,7 @@ class SESEmailService:
         app_name, user_name, template_data
       ),
       "welcome": self._welcome_template(app_name, user_name, template_data),
+      "org_invitation": self._org_invitation_template(app_name, template_data),
       "capacity_warning": self._capacity_warning_template(
         app_name, user_name, template_data
       ),
@@ -243,6 +245,45 @@ If you didn't request this, no action is needed. Your password will not change.
 Your email has been verified and your account is ready to go.
 
 Visit your dashboard: {url}
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _org_invitation_template(app_name: str, data: dict[str, Any]) -> dict[str, str]:
+    url = data.get("invite_url", "#")
+    inviter_name = data.get("inviter_name", "A teammate")
+    org_name = data.get("org_name", "an organization")
+    expiry_days = data.get("expiry_days", ORG_INVITATION_EXPIRY_DAYS)
+
+    content = (
+      _paragraph("Hi there,")
+      + _paragraph(
+        f"<strong>{inviter_name}</strong> has invited you to join "
+        f"<strong>{org_name}</strong> on {app_name}. "
+        "Accept the invitation to create your account and join the team."
+      )
+      + _button(url, "Accept Invitation")
+      + _muted("Or copy and paste this URL into your browser:")
+      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
+      + _muted(f"This invitation expires in {expiry_days} days.")
+      + _muted(
+        "If you weren't expecting this invitation, you can safely ignore this email."
+      )
+    )
+
+    return {
+      "subject": f"You've been invited to join {org_name} on {app_name}",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi there,
+
+{inviter_name} has invited you to join {org_name} on {app_name}. Accept the invitation to create your account and join the team:
+
+{url}
+
+This invitation expires in {expiry_days} days.
+
+If you weren't expecting this invitation, you can safely ignore this email.
 
 {app_name}""",
     }
@@ -512,6 +553,39 @@ View usage details: {url}
     }
 
     return await self.send_email("welcome", user_email, template_data)
+
+  async def send_org_invitation_email(
+    self,
+    user_email: str,
+    inviter_name: str,
+    org_name: str,
+    token: str,
+    app: str = "robosystems",
+  ) -> bool:
+    """
+    Send an organization invitation email.
+
+    Args:
+        user_email: Invited email address (no account exists yet)
+        inviter_name: Display name of the inviting user
+        org_name: Name of the organization being joined
+        token: Invitation token embedded in the registration link
+        app: App identifier (roboledger, roboinvestor, robosystems)
+
+    Returns:
+        True if email was sent successfully, False otherwise
+    """
+    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
+
+    template_data = {
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      "inviter_name": inviter_name,
+      "org_name": org_name,
+      "invite_url": f"{base_url}/register?invite={token}",
+      "expiry_days": ORG_INVITATION_EXPIRY_DAYS,
+    }
+
+    return await self.send_email("org_invitation", user_email, template_data)
 
   async def send_capacity_warning_email(
     self,

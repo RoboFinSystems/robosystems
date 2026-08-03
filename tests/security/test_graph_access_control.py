@@ -226,49 +226,79 @@ class TestGraphEndpointAccessControl:
 
 @pytest.mark.unit
 class TestGraphUserAccessValidation:
-  """Test GraphUser.user_has_access validation."""
+  """Test GraphUser.user_has_access validation.
 
-  def test_user_has_access_returns_true_for_member(self, test_user, sample_graph):
+  Note: test_user is OWNER of the graph's org and therefore holds implicit
+  graph admin, so negative cases need a user without an org role.
+  """
+
+  @staticmethod
+  def _create_org_member(test_db, test_org, test_user):
+    """Create a plain org MEMBER — no implicit graph access."""
+    import uuid
+
+    from robosystems.models.core import OrgRole, OrgUser, User
+
+    member = User(
+      email=f"plainmember+{uuid.uuid4().hex[:8]}@example.com",
+      name="Plain Member",
+      password_hash=test_user.password_hash,
+    )
+    test_db.add(member)
+    test_db.commit()
+    OrgUser.create(
+      org_id=test_org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+    return member
+
+  def test_user_has_access_returns_true_for_member(
+    self, test_db, test_org, test_user, sample_graph
+  ):
     """Test user_has_access returns True when user is a member."""
+    member = self._create_org_member(test_db, test_org, test_user)
     GraphUser.create(
-      user_id=test_user.id,
+      user_id=member.id,
       graph_id=sample_graph.graph_id,
       role="member",
-      session=session,
+      session=test_db,
     )
 
-    has_access = GraphUser.user_has_access(test_user.id, sample_graph.graph_id, session)
-    assert has_access is True
+    assert GraphUser.user_has_access(member.id, sample_graph.graph_id, test_db)
 
-  def test_user_has_access_returns_false_for_non_member(self, test_user, sample_graph):
-    """Test user_has_access returns False when user is not a member."""
-    has_access = GraphUser.user_has_access(test_user.id, sample_graph.graph_id, session)
-    assert has_access is False
+  def test_user_has_access_returns_false_for_non_member(
+    self, test_db, test_org, test_user, sample_graph
+  ):
+    """No explicit grant and no org owner/admin role → no access."""
+    member = self._create_org_member(test_db, test_org, test_user)
 
-  def test_user_has_admin_access_validates_role(self, test_user, sample_graph):
+    assert not GraphUser.user_has_access(member.id, sample_graph.graph_id, test_db)
+
+  def test_org_owner_has_implicit_access(self, test_db, test_user, sample_graph):
+    """Org OWNER holds implicit graph admin without a GraphUser row."""
+    assert GraphUser.user_has_access(test_user.id, sample_graph.graph_id, test_db)
+    assert GraphUser.user_has_admin_access(test_user.id, sample_graph.graph_id, test_db)
+
+  def test_user_has_admin_access_validates_role(
+    self, test_db, test_org, test_user, sample_graph
+  ):
     """Test user_has_admin_access validates admin role."""
-    # Create as member
+    member = self._create_org_member(test_db, test_org, test_user)
     GraphUser.create(
-      user_id=test_user.id,
+      user_id=member.id,
       graph_id=sample_graph.graph_id,
       role="member",
-      session=session,
+      session=test_db,
     )
 
-    # Should not have admin access
-    has_admin = GraphUser.user_has_admin_access(
-      test_user.id, sample_graph.graph_id, session
+    # Member role should not have admin access
+    assert not GraphUser.user_has_admin_access(
+      member.id, sample_graph.graph_id, test_db
     )
-    assert has_admin is False
 
     # Update to admin
     user_graph = GraphUser.get_by_user_and_graph(
-      test_user.id, sample_graph.graph_id, session
+      member.id, sample_graph.graph_id, test_db
     )
-    user_graph.update_role("admin", session)
+    user_graph.update_role("admin", test_db)
 
-    # Now should have admin access
-    has_admin = GraphUser.user_has_admin_access(
-      test_user.id, sample_graph.graph_id, session
-    )
-    assert has_admin is True
+    assert GraphUser.user_has_admin_access(member.id, sample_graph.graph_id, test_db)

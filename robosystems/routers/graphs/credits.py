@@ -62,8 +62,8 @@ def get_graph_access(
     return user_graph
 
   elif identity.is_user_graph:
-    # Check user graph access
-    if not GraphUser.user_has_access(str(current_user.id), graph_id, db):
+    role, implicit = GraphUser.get_effective_role(str(current_user.id), graph_id, db)
+    if role is None:
       logger.warning(
         f"User {current_user.id} attempted access to user graph {graph_id} without permission"
       )
@@ -72,19 +72,20 @@ def get_graph_access(
         detail=f"Access denied to user graph {graph_id}",
       )
 
-    # Get the actual user graph relationship
     user_graph = (
       db.query(GraphUser)
       .filter(GraphUser.user_id == str(current_user.id), GraphUser.graph_id == graph_id)
       .first()
     )
-    if not user_graph:
-      # This should not happen if user_has_access returned True, but safety check
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Access validation failed",
-      )
+    if user_graph:
+      return user_graph
 
+    # Implicit access (org owner/admin, or parent-graph grant on a subgraph):
+    # synthesize the GraphUser interface the credits system expects.
+    user_graph = GraphUser()
+    user_graph.user_id = str(current_user.id)
+    user_graph.graph_id = graph_id
+    user_graph.role = role.value
     return user_graph
 
   else:

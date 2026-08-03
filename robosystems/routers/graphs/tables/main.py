@@ -76,7 +76,14 @@ async def list_tables(
     from robosystems.operations.graph.table_service import TableService
 
     table_service = TableService(db)
-    user_graph = db.query(GraphUser).filter(GraphUser.graph_id == graph_id).first()
+    # S3 paths are namespaced by the graph creator — the oldest access row.
+    # Ordering matters once a graph has multiple users.
+    user_graph = (
+      db.query(GraphUser)
+      .filter(GraphUser.graph_id == graph_id)
+      .order_by(GraphUser.created_at.asc())
+      .first()
+    )
     user_id = user_graph.user_id if user_graph else "unknown"
 
     tables = [

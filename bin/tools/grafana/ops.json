@@ -11090,8 +11090,8 @@
       {
         "current": {
           "selected": false,
-          "text": "821526227241",
-          "value": "821526227241"
+          "text": "AWSACCOUNT",
+          "value": "AWSACCOUNT"
         },
         "datasource": {
           "type": "cloudwatch",

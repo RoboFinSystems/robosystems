@@ -3,23 +3,20 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...config import env
 from ...database import get_db_session
 from ...logger import get_logger
+from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...models.api.common import (
   RESOURCE_ERROR_RESPONSES,
-  ErrorResponse,
 )
 from ...models.api.orgs import (
-  InviteMemberRequest,
   OrgMemberListResponse,
   OrgMemberResponse,
   UpdateMemberRoleRequest,
 )
-from ...models.core import OrgRole, OrgUser, User
-from ..auth.utils import hash_password
+from ...models.core import Graph, GraphUser, OrgRole, OrgUser, User
 
 logger = get_logger(__name__)
 
@@ -78,129 +75,6 @@ async def list_org_members(
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list organization members",
-    )
-
-
-@router.post(
-  "/orgs/{org_id}/members",
-  response_model=OrgMemberResponse,
-  status_code=status.HTTP_201_CREATED,
-  summary="Invite Member",
-  description="Disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false). Returns 501 when disabled. Requires admin or owner role.",
-  operation_id="inviteOrgMember",
-  responses={
-    **RESOURCE_ERROR_RESPONSES,
-    501: {"model": ErrorResponse, "description": "Feature not enabled"},
-  },
-)
-async def invite_member(
-  org_id: str,
-  request: InviteMemberRequest,
-  current_user: User = Depends(get_current_user),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),
-) -> OrgMemberResponse:
-  if not env.ORG_MEMBER_INVITATIONS_ENABLED:
-    raise HTTPException(
-      status_code=status.HTTP_501_NOT_IMPLEMENTED,
-      detail="Organization member invitations are not enabled",
-    )
-
-  try:
-    # Check if user is an admin or owner of the org
-    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
-    if not membership:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="You are not a member of this organization",
-      )
-
-    if membership.role not in [OrgRole.ADMIN, OrgRole.OWNER]:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Only admins and owners can invite members",
-      )
-
-    # Check if a user with this email already exists
-    existing_user = User.get_by_email(request.email, db)
-
-    if existing_user:
-      # User already exists - they have their own org from signup
-      # Cannot invite existing users to organizations
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-          f"A user with email {request.email} already exists in the system. "
-          "Existing users cannot be invited to organizations since they already have their own. "
-          "To join this organization, they must either: "
-          "1) Change their email address on their existing account to free up this email, or "
-          "2) Use a different email address for this organization."
-        ),
-      )
-
-    # Create a pending user account that will be part of this org
-    import secrets
-
-    # Generate a secure temporary password and hash it properly
-    temp_password = f"pending_{secrets.token_urlsafe(32)}"
-
-    invited_user = User(
-      email=request.email,
-      name=request.email.split("@")[0],  # Default name from email
-      password_hash=hash_password(temp_password),  # Properly hashed temporary password
-      is_active=False,  # Inactive until they activate via email link and set password
-    )
-    db.add(invited_user)
-    db.flush()  # Get the user ID without committing
-
-    # Add the user to the organization
-    new_membership = OrgUser.create(
-      org_id=org_id,
-      user_id=invited_user.id,
-      role=request.role or OrgRole.MEMBER,
-      session=db,
-      auto_commit=False,
-    )
-
-    db.commit()
-    db.refresh(new_membership)
-    db.refresh(invited_user)
-
-    # TODO: Implement invitation email system before enabling this feature
-    # Required:
-    # 1. Generate secure activation token (e.g., JWT or random token stored in DB)
-    # 2. Create invitation email template with activation link
-    # 3. Send email via configured email provider (SES, SendGrid, etc.)
-    # 4. Add activation endpoint to handle token validation and password setup
-    # 5. Token should expire after 7 days
-    #
-    # Example flow:
-    # token = generate_invitation_token(invited_user.id, org_id)
-    # activation_link = f"{env.FRONTEND_URL}/activate?token={token}"
-    # send_email(
-    #   to=invited_user.email,
-    #   subject=f"You've been invited to {org.name}",
-    #   template="org_invitation",
-    #   data={"activation_link": activation_link, "inviter": current_user.name}
-    # )
-
-    return OrgMemberResponse(
-      user_id=invited_user.id,
-      name=invited_user.name,
-      email=invited_user.email,
-      role=new_membership.role,
-      joined_at=new_membership.joined_at,
-      is_active=invited_user.is_active,
-    )
-
-  except HTTPException:
-    raise
-  except Exception as e:
-    db.rollback()
-    logger.error(f"Error inviting member to organization: {e!s}")
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to invite member",
     )
 
 
@@ -291,6 +165,11 @@ async def update_member_role(
     target_membership.role = request.role
     db.commit()
     db.refresh(target_membership)
+
+    # Org owner/admin hold implicit graph admin on org graphs, so a role
+    # change alters graph access — drop the target's cached grants.
+    api_key_cache.invalidate_user_jwt_graph_access(user_id)
+    api_key_cache.invalidate_user_data(user_id)
 
     target_user = target_membership.user
 
@@ -397,9 +276,24 @@ async def remove_member(
         detail="Admins and owners cannot remove themselves",
       )
 
-    # Remove the member
+    # Remove the member, revoking their access to org-owned graphs.
+    # Org membership is what justified the graph grants; without the cascade
+    # a removed member would keep full access to every org graph.
+    org_graph_ids = [
+      row.graph_id
+      for row in db.query(Graph.graph_id).filter(Graph.org_id == org_id).all()
+    ]
+    if org_graph_ids:
+      db.query(GraphUser).filter(
+        GraphUser.user_id == user_id,
+        GraphUser.graph_id.in_(org_graph_ids),
+      ).delete(synchronize_session=False)
+
     db.delete(target_membership)
     db.commit()
+
+    api_key_cache.invalidate_user_jwt_graph_access(user_id)
+    api_key_cache.invalidate_user_data(user_id)
 
     logger.info(f"User {user_id} removed from org {org_id} by user {current_user.id}")
 

@@ -113,16 +113,18 @@ async def get_graph_database(
         )
 
       if required_access == AccessPattern.READ_WRITE:
-        if not GraphUser.user_has_admin_access(str(current_user.id), graph_id, db):
+        if not GraphUser.user_has_write_access(str(current_user.id), graph_id, db):
           raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Admin access required for graph {graph_id}",
+            detail=f"Write access required for graph {graph_id}",
           )
 
     database_name = routing_info["database_name"]
     logger.debug(f"Resolved database for graph {graph_id}: {database_name}")
     return database_name
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Error resolving graph database for {graph_id}: {e}")
     raise HTTPException(
@@ -179,6 +181,14 @@ async def get_graph_repository_with_auth(
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,
           detail=f"Access denied to user graph {graph_id}",
+        )
+
+      if operation_type == "write" and not GraphUser.user_has_write_access(
+        str(current_user.id), graph_id, db
+      ):
+        raise HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail=f"Write access denied to user graph {graph_id}. Your role is read-only.",
         )
 
     SecurityAuditLogger.log_security_event(

@@ -99,12 +99,7 @@ def _verify_admin_on_graph(user, graph_id: str, session) -> dict[str, Any] | Non
   """Check that `user` has an `admin` role on `graph_id`."""
   from robosystems.models.core.graph.graph_user import GraphUser
 
-  gu = (
-    session.query(GraphUser)
-    .filter(GraphUser.user_id == user.id, GraphUser.graph_id == graph_id)
-    .first()
-  )
-  if gu is None or gu.role != "admin":
+  if not GraphUser.user_has_admin_access(user.id, graph_id, session):
     return {
       "error": "insufficient_permissions",
       "message": f"Admin access to graph '{graph_id}' required for this operation.",

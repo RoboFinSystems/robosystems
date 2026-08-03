@@ -104,8 +104,9 @@ class TestGetGraphDatabase:
           db=mock_db_session,
         )
 
-      # Exception is caught and re-raised as 404
-      assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+      # Authorization failures propagate as 403 (no longer masked as 404)
+      assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+      assert "Access denied to user graph" in str(exc_info.value.detail)
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.graph.dependencies.auth.MultiTenantUtils")
@@ -177,8 +178,8 @@ class TestGetGraphDatabase:
           db=mock_db_session,
         )
 
-      # Exception is caught and re-raised as 404
-      assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+      # Authorization failures propagate as 403 (no longer masked as 404)
+      assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
       mock_audit.log_authorization_denied.assert_called_once()
 
   @pytest.mark.asyncio
@@ -214,8 +215,8 @@ class TestGetGraphDatabase:
           db=mock_db_session,
         )
 
-      # Caught and re-raised as 404
-      assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+      # Authorization failures propagate as 403 (no longer masked as 404)
+      assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.graph.dependencies.auth.MultiTenantUtils")
@@ -244,15 +245,15 @@ class TestGetGraphDatabase:
         db=mock_db_session,
       )
 
-    # Exception caught and re-raised as 404
-    assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+    # Authorization failures propagate as 403 (no longer masked as 404)
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.graph.dependencies.auth.MultiTenantUtils")
-  async def test_user_graph_admin_access_required(
+  async def test_user_graph_write_access_required(
     self, mock_utils, mock_user, mock_db_session
   ):
-    """Test admin access requirement for user graph write operations."""
+    """READ_WRITE requires write access (member or admin), not admin."""
     graph_id = "kg1234567890abcdef"
 
     mock_identity = Mock()
@@ -270,7 +271,7 @@ class TestGetGraphDatabase:
       "robosystems.middleware.graph.dependencies.auth.GraphUser"
     ) as mock_graph_user:
       mock_graph_user.user_has_access.return_value = True
-      mock_graph_user.user_has_admin_access.return_value = False
+      mock_graph_user.user_has_write_access.return_value = False
 
       with pytest.raises(HTTPException) as exc_info:
         await get_graph_database(
@@ -280,8 +281,8 @@ class TestGetGraphDatabase:
           db=mock_db_session,
         )
 
-      # Caught and re-raised as 404
-      assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+      assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+      assert "Write access required" in str(exc_info.value.detail)
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.graph.dependencies.auth.MultiTenantUtils")

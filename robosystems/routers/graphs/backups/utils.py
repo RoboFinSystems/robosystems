@@ -32,16 +32,13 @@ def verify_graph_access(current_user: User, graph_id: str, db: Session) -> None:
   Raises:
       HTTPException: If user doesn't have access to the graph
   """
-  user_graphs = GraphUser.get_by_user_id(current_user.id, db)
-  user_graph_ids = [ug.graph_id for ug in user_graphs]
-
-  if graph_id not in user_graph_ids:
+  if not GraphUser.user_has_access(current_user.id, graph_id, db):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this graph"
     )
 
 
-def verify_admin_access(current_user: User, graph_id: str, db: Session) -> GraphUser:
+def verify_admin_access(current_user: User, graph_id: str, db: Session) -> None:
   """
   Verify user has admin access to the specified graph.
 
@@ -50,19 +47,11 @@ def verify_admin_access(current_user: User, graph_id: str, db: Session) -> Graph
       graph_id: Graph identifier to check admin access for
       db: Database session
 
-  Returns:
-      GraphUser object with admin role
-
   Raises:
       HTTPException: If user doesn't have admin access to the graph
   """
-  user_graphs = GraphUser.get_by_user_id(current_user.id, db)
-  user_graph = next((ug for ug in user_graphs if ug.graph_id == graph_id), None)
-
-  if not user_graph or user_graph.role != "admin":
+  if not GraphUser.user_has_admin_access(current_user.id, graph_id, db):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Admin access required for this operation",
     )
-
-  return user_graph

@@ -26,10 +26,6 @@ from robosystems.models.core import (
   User,
 )
 
-# Safety: router expects UsageEventType.AI_OPERATION; create alias if missing.
-if not hasattr(UsageEventType, "AI_OPERATION"):
-  UsageEventType.AI_OPERATION = UsageEventType.AGENT_CALL
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -167,7 +163,7 @@ class TestOrgUsageEndpoints:
       GraphUsage(
         user_id=test_user.id,
         graph_id=graph.graph_id,
-        event_type=UsageEventType.AI_OPERATION.value,
+        event_type=UsageEventType.CREDIT_CONSUMPTION.value,
         graph_tier=graph.graph_tier,
         credits_consumed=Decimal("10.00"),
         recorded_at=previous,

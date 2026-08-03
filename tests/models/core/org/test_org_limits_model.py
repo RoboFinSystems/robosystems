@@ -152,3 +152,80 @@ class TestOrgLimitsModel:
     assert limits.org_id == "test_org"
     mock_session.add.assert_called_once()
     mock_session.commit.assert_called_once()
+
+
+class TestOrgLimitsGraphCounting:
+  """Quota counts org-owned graphs, not per-user access rows."""
+
+  def test_multi_user_graph_counts_once(self, test_db, test_user, test_org):
+    from uuid import uuid4
+
+    from robosystems.models.core import (
+      Graph,
+      GraphUser,
+      OrgLimits,
+      OrgRole,
+      OrgUser,
+      User,
+    )
+
+    limits = OrgLimits.get_or_create_for_org(test_org.id, test_db)
+    limits.max_graphs = 2
+    test_db.commit()
+
+    graph = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=test_org.id,
+      graph_name="Shared Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+
+    second_user = User(
+      id=f"limit-user-{uuid4().hex[:8]}",
+      email=f"limit+{uuid4().hex[:8]}@example.com",
+      name="Second Member",
+      password_hash=test_user.password_hash,
+    )
+    test_db.add(second_user)
+    test_db.commit()
+    OrgUser.create(
+      org_id=test_org.id, user_id=second_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+
+    # Two access rows on one graph must still count as a single graph
+    GraphUser.create(
+      user_id=test_user.id, graph_id=graph.graph_id, role="admin", session=test_db
+    )
+    GraphUser.create(
+      user_id=second_user.id, graph_id=graph.graph_id, role="member", session=test_db
+    )
+
+    can_create, _ = limits.can_create_graph(test_db)
+    assert can_create is True
+    assert limits.get_current_usage(test_db)["graphs"]["current"] == 1
+
+  def test_deprovisioned_graphs_do_not_consume_quota(
+    self, test_db, test_user, test_org
+  ):
+    from uuid import uuid4
+
+    from robosystems.models.core import Graph, GraphStatus, OrgLimits
+
+    limits = OrgLimits.get_or_create_for_org(test_org.id, test_db)
+    limits.max_graphs = 1
+    test_db.commit()
+
+    graph = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=test_org.id,
+      graph_name="Old Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    can_create, _ = limits.can_create_graph(test_db)
+    assert can_create is True
+    assert limits.get_current_usage(test_db)["graphs"]["current"] == 0

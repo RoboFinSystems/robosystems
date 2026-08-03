@@ -5,14 +5,18 @@ Access Control Model:
 - Only users within the organization can be granted access
 - This model tracks which specific users have access to which graphs
 - Roles: admin (full control), member (read/write), viewer (read-only)
+- Org OWNER/ADMIN implicitly hold graph admin on all org-owned graphs;
+  explicit GraphUser rows grant access to everyone else
 """
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import (
   Boolean,
+  CheckConstraint,
   Column,
   DateTime,
   ForeignKey,
@@ -27,6 +31,32 @@ from robosystems.database import Model
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
+class GraphRole(str, Enum):
+  """Ordered per-graph roles: viewer < member < admin."""
+
+  VIEWER = "viewer"
+  MEMBER = "member"
+  ADMIN = "admin"
+
+  @property
+  def rank(self) -> int:
+    return _ROLE_ORDER.index(self)
+
+  def at_least(self, required: "GraphRole") -> bool:
+    """True when this role meets or exceeds the required role."""
+    return self.rank >= required.rank
+
+  @classmethod
+  def coerce(cls, value: "str | GraphRole") -> "GraphRole":
+    """Normalize a role value, raising ValueError for unknown strings."""
+    if isinstance(value, cls):
+      return value
+    return cls(value)
+
+
+_ROLE_ORDER = [GraphRole.VIEWER, GraphRole.MEMBER, GraphRole.ADMIN]
+
+
 class GraphUser(Model):
   """GraphUser model for managing user access to graph databases."""
 
@@ -35,6 +65,9 @@ class GraphUser(Model):
     UniqueConstraint("graph_id", "user_id", name="_graph_user_uc"),
     Index("idx_graph_users_graph_user_id", "graph_id", "user_id"),
     Index("idx_graph_users_user_selected", "user_id", "is_selected"),
+    CheckConstraint(
+      "role IN ('viewer', 'member', 'admin')", name="ck_graph_users_role"
+    ),
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gu"))
@@ -42,7 +75,7 @@ class GraphUser(Model):
   graph_id = Column(
     String, ForeignKey("graphs.graph_id"), nullable=False, index=True
   )  # References graphs table
-  role = Column(String, nullable=False, default="member")  # admin, member, viewer
+  role = Column(String, nullable=False, default=GraphRole.MEMBER.value)
   is_selected = Column(Boolean, default=False, nullable=False)  # Currently active graph
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
@@ -65,7 +98,7 @@ class GraphUser(Model):
     cls,
     user_id: str,
     graph_id: str,
-    role: str = "member",
+    role: str | GraphRole = GraphRole.MEMBER,
     is_selected: bool = False,
     session: Session | None = None,
   ) -> "GraphUser":
@@ -76,7 +109,7 @@ class GraphUser(Model):
     graph_user = cls(
       user_id=user_id,
       graph_id=graph_id,
-      role=role,
+      role=GraphRole.coerce(role).value,
       is_selected=is_selected,
     )
 
@@ -145,25 +178,60 @@ class GraphUser(Model):
       raise
 
   @classmethod
+  def get_effective_role(
+    cls, user_id: str, graph_id: str, session: Session
+  ) -> tuple[GraphRole | None, bool]:
+    """Resolve the user's effective role on a graph.
+
+    Subgraphs resolve to their parent graph (subgraphs inherit permissions).
+    Org OWNER/ADMIN of the owning org hold implicit graph admin — "if they
+    are paying for it, they should be able to manage it" — so the effective
+    role is the max of the explicit row and the implicit org grant.
+
+    Returns:
+        (role, implicit): the effective role (None = no access) and whether
+        it came from org role rather than an explicit GraphUser row.
+    """
+    from robosystems.middleware.graph.types import parse_graph_id
+
+    parent_id, _ = parse_graph_id(graph_id)
+
+    explicit_role: GraphRole | None = None
+    row = (
+      session.query(cls)
+      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
+      .first()
+    )
+    if row is not None:
+      try:
+        explicit_role = GraphRole.coerce(row.role)
+      except ValueError:
+        explicit_role = GraphRole.VIEWER
+
+    if explicit_role == GraphRole.ADMIN:
+      return GraphRole.ADMIN, False
+
+    from robosystems.models.core.graph.graph import Graph
+    from robosystems.models.core.org.org_user import OrgRole, OrgUser
+
+    org_id = session.query(Graph.org_id).filter(Graph.graph_id == parent_id).scalar()
+    if org_id is not None:
+      org_user = OrgUser.get_by_org_and_user(org_id, user_id, session)
+      if org_user is not None and org_user.role in (OrgRole.OWNER, OrgRole.ADMIN):
+        return GraphRole.ADMIN, True
+
+    return explicit_role, False
+
+  @classmethod
   def user_has_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
     """
     Check if a user has access to a specific graph.
 
-    For subgraphs (e.g., 'kg123_dev'), this method checks access to the parent graph ('kg123')
-    since subgraphs inherit permissions from their parent.
+    Access comes from an explicit GraphUser row (on the parent graph for
+    subgraphs) or implicitly from OWNER/ADMIN role in the owning org.
     """
-    from robosystems.middleware.graph.types import parse_graph_id
-
-    # Resolve subgraph to parent graph for permission check
-    # Subgraphs inherit parent's permissions
-    parent_id, _ = parse_graph_id(graph_id)
-
-    return (
-      session.query(cls)
-      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
-      .first()
-      is not None
-    )
+    role, _ = cls.get_effective_role(user_id, graph_id, session)
+    return role is not None
 
   @classmethod
   def user_has_write_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
@@ -171,48 +239,19 @@ class GraphUser(Model):
     Check if a user has write access to a specific graph.
 
     Write access requires the 'admin' or 'member' role; 'viewer' is read-only.
-    For subgraphs (e.g., 'kg123_dev'), this method checks write access to the
-    parent graph ('kg123') since subgraphs inherit permissions from their parent.
     """
-    from robosystems.middleware.graph.types import parse_graph_id
-
-    # Resolve subgraph to parent graph for permission check
-    # Subgraphs inherit parent's permissions
-    parent_id, _ = parse_graph_id(graph_id)
-
-    graph_user = (
-      session.query(cls)
-      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
-      .first()
-    )
-
-    return graph_user is not None and graph_user.role in ("admin", "member")
+    role, _ = cls.get_effective_role(user_id, graph_id, session)
+    return role is not None and role.at_least(GraphRole.MEMBER)
 
   @classmethod
   def user_has_admin_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
-    """
-    Check if a user has admin access to a specific graph.
+    """Check if a user has admin access to a specific graph."""
+    role, _ = cls.get_effective_role(user_id, graph_id, session)
+    return role is not None and role.at_least(GraphRole.ADMIN)
 
-    For subgraphs (e.g., 'kg123_dev'), this method checks admin access to the parent graph ('kg123')
-    since subgraphs inherit permissions from their parent.
-    """
-    from robosystems.middleware.graph.types import parse_graph_id
-
-    # Resolve subgraph to parent graph for permission check
-    # Subgraphs inherit parent's permissions
-    parent_id, _ = parse_graph_id(graph_id)
-
-    graph_user = (
-      session.query(cls)
-      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
-      .first()
-    )
-
-    return graph_user is not None and graph_user.role == "admin"
-
-  def update_role(self, role: str, session: Session) -> None:
+  def update_role(self, role: str | GraphRole, session: Session) -> None:
     """Update the user's role for this graph."""
-    self.role = role
+    self.role = GraphRole.coerce(role).value
     self.updated_at = datetime.now(UTC)
     try:
       session.commit()

@@ -369,7 +369,7 @@ class TestDeprovisionService:
     graph_user = GraphUser(
       graph_id=test_graph.graph_id,
       user_id=test_user.id,
-      role="owner",
+      role="admin",
     )
     db_session.add(graph_user)
 

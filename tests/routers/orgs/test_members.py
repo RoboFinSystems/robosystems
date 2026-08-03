@@ -234,27 +234,6 @@ class TestOrgMembersRouter:
     assert response.status_code == 204
     assert OrgUser.get_by_org_and_user(org.id, teammate.id, test_db) is None
 
-  async def test_invite_member_disabled_returns_501(
-    self, async_client, test_db, test_user
-  ):
-    """Invitation endpoint is feature-flagged off and should return 501."""
-    org = Org.create(
-      name=f"Invite Org {uuid4().hex[:6]}",
-      org_type=OrgType.TEAM,
-      session=test_db,
-    )
-    OrgUser.create(
-      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
-    )
-
-    payload = {"email": "newuser@example.com", "role": OrgRole.MEMBER.value}
-    response = await async_client.post(f"/v1/orgs/{org.id}/members", json=payload)
-
-    assert response.status_code == 501
-    assert (
-      response.json()["detail"] == "Organization member invitations are not enabled"
-    )
-
   async def test_member_can_remove_self(self, async_client, test_db, test_user):
     """Members should be able to remove themselves without admin help."""
     org = Org.create(
@@ -316,3 +295,65 @@ class TestOrgMembersRouter:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Only owners can remove other owners"
+
+  async def test_remove_member_revokes_org_graph_access(
+    self, async_client, test_db, test_user
+  ):
+    """Removing a member also deletes their grants on org-owned graphs,
+    while grants on graphs outside the org are untouched."""
+    from robosystems.models.core import Graph, GraphUser
+
+    org = Org.create(
+      name=f"Cascade Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.ADMIN, session=test_db
+    )
+    member = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+
+    other_org = Org.create(
+      name=f"Other Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+
+    org_graph = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Org Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+    outside_graph = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=other_org.id,
+      graph_name="Outside Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=member.id, graph_id=org_graph.graph_id, role="member", session=test_db
+    )
+    GraphUser.create(
+      user_id=member.id,
+      graph_id=outside_graph.graph_id,
+      role="member",
+      session=test_db,
+    )
+
+    response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is None
+    assert (
+      GraphUser.get_by_user_and_graph(member.id, org_graph.graph_id, test_db) is None
+    )
+    assert (
+      GraphUser.get_by_user_and_graph(member.id, outside_graph.graph_id, test_db)
+      is not None
+    )
