@@ -149,8 +149,12 @@ async def get_org_usage(
       graph_credits_used = sum(
         r.credits_consumed or 0 for r in usage_records if r.credits_consumed
       )
+      # Only AI operations consume credits, so credit-consumption events are
+      # the AI-operation count.
       graph_ai_ops = sum(
-        1 for r in usage_records if r.event_type == UsageEventType.AI_OPERATION
+        1
+        for r in usage_records
+        if r.event_type == UsageEventType.CREDIT_CONSUMPTION.value
       )
       graph_api_calls = len(usage_records)
 
@@ -159,7 +163,7 @@ async def get_org_usage(
         db.query(GraphUsage)
         .filter(
           GraphUsage.graph_id == graph.graph_id,
-          GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT,
+          GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
         )
         .order_by(GraphUsage.recorded_at.desc())
         .first()
