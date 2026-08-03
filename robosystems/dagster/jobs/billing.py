@@ -754,7 +754,10 @@ async def _trigger_resource_provisioning(
   resource_config = subscription.subscription_metadata.get("resource_config", {})
   resource_type = subscription.resource_type
 
-  user_id = subscription.subscription_metadata.get("user_id")
+  # The subscriber column is authoritative; metadata is the legacy copy for
+  # rows created before it existed. The org-owner fallback is last resort —
+  # with more than one member it can provision to the wrong person.
+  user_id = subscription.user_id or subscription.subscription_metadata.get("user_id")
   if not user_id:
     owner = (
       db_session.query(OrgUser)
@@ -771,6 +774,12 @@ async def _trigger_resource_provisioning(
       db_session.commit()
       return
     user_id = owner.user_id
+
+  # Persist whoever we resolved so cancellation and off-boarding can find the
+  # subscriber without re-deriving it from metadata or org roles.
+  if not subscription.user_id:
+    subscription.user_id = user_id
+    db_session.commit()
 
   context.log.info(f"Triggering provisioning for {resource_type}")
 

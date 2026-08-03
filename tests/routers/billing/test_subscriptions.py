@@ -63,6 +63,7 @@ class TestListSubscriptions:
     mock_sub1.id = "sub_1"
     mock_sub1.resource_type = "graph"
     mock_sub1.resource_id = "kg_123"
+    mock_sub1.user_id = None
     mock_sub1.plan_name = "standard"
     mock_sub1.billing_interval = "monthly"
     mock_sub1.status = "active"
@@ -78,6 +79,7 @@ class TestListSubscriptions:
     mock_sub2.id = "sub_2"
     mock_sub2.resource_type = "repository"
     mock_sub2.resource_id = "sec"
+    mock_sub2.user_id = "user_123"
     mock_sub2.plan_name = "starter"
     mock_sub2.billing_interval = "monthly"
     mock_sub2.status = "canceled"
@@ -166,6 +168,7 @@ class TestGetSubscription:
     mock_subscription.id = "sub_123"
     mock_subscription.resource_type = "graph"
     mock_subscription.resource_id = "kg_456"
+    mock_subscription.user_id = None
     mock_subscription.plan_name = "enterprise"
     mock_subscription.billing_interval = "monthly"
     mock_subscription.status = "active"
@@ -225,6 +228,7 @@ class TestGetSubscription:
     mock_subscription.id = "sub_123"
     mock_subscription.resource_type = "graph"
     mock_subscription.resource_id = None
+    mock_subscription.user_id = None
     mock_subscription.plan_name = "standard"
     mock_subscription.billing_interval = "monthly"
     mock_subscription.status = "pending_provisioning"
@@ -293,6 +297,7 @@ class TestCancelSubscription:
     sub.id = "sub_123"
     sub.resource_type = resource_type
     sub.resource_id = resource_id
+    sub.user_id = None
     sub.plan_name = "standard"
     sub.billing_interval = "monthly"
     sub.status = "active"

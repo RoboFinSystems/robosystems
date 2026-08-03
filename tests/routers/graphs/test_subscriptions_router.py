@@ -80,6 +80,7 @@ class TestSubscriptionToResponse:
     subscription.id = "bsub_abc123"
     subscription.resource_type = "graph"
     subscription.resource_id = "kg1a2b3c"
+    subscription.user_id = None
     subscription.plan_name = "ladybug-standard"
     subscription.billing_interval = "monthly"
     subscription.status = "active"
@@ -120,6 +121,7 @@ class TestSubscriptionToResponse:
     subscription.id = "bsub_xyz789"
     subscription.resource_type = "repository"
     subscription.resource_id = "sec"
+    subscription.user_id = "user_123"
     subscription.plan_name = "sec-starter"
     subscription.billing_interval = "monthly"
     subscription.status = "provisioning"
@@ -140,6 +142,7 @@ class TestSubscriptionToResponse:
     assert response.id == "bsub_xyz789"
     assert response.resource_type == "repository"
     assert response.resource_id == "sec"
+    assert response.user_id == "user_123"
     assert response.current_period_start is None
     assert response.current_period_end is None
     assert response.started_at is None
@@ -156,6 +159,8 @@ class TestCancelRepositorySubscription:
     sub.id = "sub_123"
     sub.resource_type = "repository"
     sub.resource_id = "sec"
+    sub.org_id = "org_1"
+    sub.user_id = "user_123"
     sub.plan_name = "starter"
     sub.billing_interval = "monthly"
     sub.status = "active"
@@ -377,11 +382,58 @@ class TestCancelRepositorySubscription:
     assert exc.value.status_code == 404
 
   @pytest.mark.asyncio
-  async def test_rejects_non_owner(self, mock_user):
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_org_admin_can_cancel_another_members_subscription(
+    self, mock_get_sub, _mock_audit, mock_user
+  ):
+    """The org is paying, so an org admin can stop paying for any member."""
     from robosystems.models.core import OrgRole
 
     mock_org = Mock()
+    mock_org.org_id = "org_1"
     mock_org.role = OrgRole.ADMIN
+    mock_org.can_manage_billing = lambda: True
+
+    db = MagicMock()
+    sub = self._build_active_repo_subscription()
+    sub.user_id = "user_456"
+    mock_get_sub.return_value = sub
+
+    with (
+      patch(f"{MODULE}.is_shared_repository", return_value=True),
+      patch(f"{MODULE}.resolve_shared_repository_parent", return_value="sec"),
+      patch(
+        "robosystems.models.core.OrgUser.get_user_orgs",
+        return_value=[mock_org],
+      ),
+      patch(
+        "robosystems.models.core.OrgUser.get_by_org_and_user",
+        return_value=Mock(),
+      ),
+    ):
+      await cancel_repository_subscription(
+        graph_id="sec",
+        body=CancelSubscriptionRequest(user_id="user_456"),
+        current_user=mock_user,
+        db=db,
+        _rate_limit=None,
+      )
+
+    # The target member's subscription was the one looked up and canceled.
+    assert mock_get_sub.call_args.kwargs["user_id"] == "user_456"
+    sub.cancel.assert_called_once_with(db, immediate=False)
+
+  @pytest.mark.asyncio
+  async def test_plain_member_cannot_cancel_another_members_subscription(
+    self, mock_user
+  ):
+    from robosystems.models.core import OrgRole
+
+    mock_org = Mock()
+    mock_org.org_id = "org_1"
+    mock_org.role = OrgRole.MEMBER
+    mock_org.can_manage_billing = lambda: False
 
     with (
       patch(f"{MODULE}.is_shared_repository", return_value=True),
@@ -394,13 +446,14 @@ class TestCancelRepositorySubscription:
       with pytest.raises(HTTPException) as exc:
         await cancel_repository_subscription(
           graph_id="sec",
-          body=CancelSubscriptionRequest(),
+          body=CancelSubscriptionRequest(user_id="user_456"),
           current_user=mock_user,
           db=MagicMock(),
           _rate_limit=None,
         )
+
     assert exc.value.status_code == 403
-    assert "owner" in exc.value.detail.lower()
+    assert "owners and admins" in exc.value.detail.lower()
 
 
 class TestChangeRepositoryPlan:
@@ -411,6 +464,8 @@ class TestChangeRepositoryPlan:
     sub.id = "sub_123"
     sub.resource_type = "repository"
     sub.resource_id = "sec"
+    sub.org_id = "org_1"
+    sub.user_id = "user_123"
     sub.plan_name = "starter"
     sub.billing_interval = "monthly"
     sub.status = "active"
@@ -522,6 +577,8 @@ class TestCancelStripeFailureHandling:
     sub.id = "sub_123"
     sub.resource_type = "repository"
     sub.resource_id = "sec"
+    sub.org_id = "org_1"
+    sub.user_id = "user_123"
     sub.plan_name = "starter"
     sub.billing_interval = "monthly"
     sub.status = "active"
@@ -657,6 +714,8 @@ class TestChangePlanStripeFirst:
     sub.id = "sub_123"
     sub.resource_type = "repository"
     sub.resource_id = "sec"
+    sub.org_id = "org_1"
+    sub.user_id = "user_123"
     sub.plan_name = "starter"
     sub.status = "active"
     sub.base_price_cents = 2900

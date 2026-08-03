@@ -17,6 +17,10 @@ from ...models.api.orgs import (
   UpdateMemberRoleRequest,
 )
 from ...models.core import Graph, GraphUser, OrgRole, OrgUser, User
+from ...operations.billing import (
+  ProviderCancellationError,
+  cancel_user_repository_subscriptions,
+)
 
 logger = get_logger(__name__)
 
@@ -274,6 +278,30 @@ async def remove_member(
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Admins and owners cannot remove themselves",
+      )
+
+    # Cancel before removing: org membership is what justified the org-billed
+    # repository subscriptions, so they end with it. Provider first — if the
+    # payment provider refuses, the removal aborts rather than off-boarding a
+    # member the org keeps paying for.
+    try:
+      canceled = cancel_user_repository_subscriptions(
+        user_id=user_id,
+        session=db,
+        actor_user_id=current_user.id,
+      )
+    except ProviderCancellationError:
+      raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=(
+          "The payment provider could not cancel this member's repository "
+          "subscriptions. No changes were made — please try again."
+        ),
+      )
+    if canceled:
+      logger.info(
+        f"Canceled {len(canceled)} repository subscription(s) while removing "
+        f"user {user_id} from org {org_id}"
       )
 
     # Remove the member, revoking their access to org-owned graphs.

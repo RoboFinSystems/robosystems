@@ -142,6 +142,73 @@ def user_activity(client, user_id):
       console.print(f"  {login['timestamp'][:19]} ({login['type']})")
 
 
+@users.command("delete")
+@click.argument("identifier")
+@click.option(
+  "--dry-run", is_flag=True, help="Show what deletion would do, without doing it"
+)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_obj
+def delete_user(client, identifier, dry_run, yes):
+  """Delete a user account by email or user ID, freeing the email address.
+
+  Refuses while the user's org still has live graphs, subscriptions in force,
+  or active repository access. Billing and audit history is retained.
+  """
+  user_id = identifier
+  if "@" in identifier:
+    matches = client._make_request(
+      "GET", "/admin/v1/users", params={"email": identifier, "limit": 10}
+    )
+    exact = [u for u in matches or [] if u["email"].lower() == identifier.lower()]
+    if not exact:
+      console.print(f"\n[red]No user found with email {identifier}[/red]")
+      raise SystemExit(1)
+    user_id = exact[0]["id"]
+
+  assessment = client._make_request(
+    "DELETE", f"/admin/v1/users/{user_id}", params={"dry_run": True}
+  )
+
+  console.print()
+  console.print(f"[bold]User:[/bold] {assessment['email']} ({assessment['user_id']})")
+
+  removals = assessment.get("removals") or {}
+  if any(removals.values()):
+    console.print("\n[bold]Will remove:[/bold]")
+    for name, count in removals.items():
+      if count:
+        console.print(f"  {name.replace('_', ' ')}: {count}")
+
+  if assessment.get("orgs_deleted"):
+    console.print(
+      f"\n[bold]Organizations deleted:[/bold] {', '.join(assessment['orgs_deleted'])}"
+    )
+  if assessment.get("orgs_retained"):
+    console.print(
+      f"[bold]Organizations retained:[/bold] {', '.join(assessment['orgs_retained'])}"
+    )
+
+  if assessment.get("blockers"):
+    console.print("\n[red]Cannot delete:[/red]")
+    for blocker in assessment["blockers"]:
+      console.print(f"  - {blocker['detail']}")
+    raise SystemExit(1)
+
+  if dry_run:
+    console.print("\n[yellow]Dry run — nothing was deleted.[/yellow]")
+    return
+
+  if not yes:
+    click.confirm(
+      f"\nPermanently delete {assessment['email']}?", abort=True, default=False
+    )
+
+  result = client._make_request("DELETE", f"/admin/v1/users/{user_id}")
+  console.print(f"\n[green]Deleted {result['email']}[/green]")
+  console.print("The email address is now available for registration or invitation.")
+
+
 @click.group()
 def orgs():
   """Manage organizations."""

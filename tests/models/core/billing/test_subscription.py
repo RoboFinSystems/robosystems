@@ -826,3 +826,108 @@ class TestResubscribeLookups:
 
     assert found is not None
     assert found.id == latest.id
+
+
+class TestPerSubscriberLookups:
+  """Repository subscriptions are billed to the org but held per user.
+
+  These pin the fix for the multi-user case: one member's subscription must
+  never resolve as another member's, or member B is refused a subscription
+  (409) while getting neither access nor credits from member A's.
+  """
+
+  def _repo_sub(self, db_session, org_id, user_id, status: str | None = None):
+    sub = BillingSubscription.create_subscription(
+      org_id=org_id,
+      resource_type="repository",
+      resource_id="sec",
+      plan_name="starter",
+      base_price_cents=2900,
+      session=db_session,
+      user_id=user_id,
+    )
+    if status is not None:
+      sub.status = status
+      db_session.commit()
+    return sub
+
+  def _second_member(self, db_session, test_org):
+    from robosystems.models.core import OrgRole, OrgUser
+
+    unique_id = str(uuid.uuid4())[:8]
+    user = User(
+      id=f"test_user_{unique_id}",
+      email=f"second+{unique_id}@example.com",
+      name="Second Member",
+      password_hash="test_hash",
+    )
+    db_session.add(user)
+    db_session.flush()
+    OrgUser.create(
+      org_id=test_org.id, user_id=user.id, role=OrgRole.MEMBER, session=db_session
+    )
+    return user
+
+  def test_lookup_is_scoped_to_the_subscriber(
+    self, db_session: Session, test_user, test_org
+  ):
+    other = self._second_member(db_session, test_org)
+    mine = self._repo_sub(db_session, test_org.id, test_user.id)
+
+    found = BillingSubscription.get_by_resource_and_user(
+      resource_type="repository",
+      resource_id="sec",
+      user_id=test_user.id,
+      session=db_session,
+    )
+    assert found is not None
+    assert found.id == mine.id
+
+    assert (
+      BillingSubscription.get_by_resource_and_user(
+        resource_type="repository",
+        resource_id="sec",
+        user_id=other.id,
+        session=db_session,
+      )
+      is None
+    )
+
+  def test_colleagues_subscription_is_not_a_conflict(
+    self, db_session: Session, test_user, test_org
+  ):
+    """Member B subscribing after member A is the upsell, not a duplicate."""
+    from robosystems.models.core.billing.subscription import (
+      TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    other = self._second_member(db_session, test_org)
+    self._repo_sub(
+      db_session, test_org.id, test_user.id, status=SubscriptionStatus.ACTIVE.value
+    )
+
+    conflict = BillingSubscription.get_by_resource_and_user(
+      resource_type="repository",
+      resource_id="sec",
+      user_id=other.id,
+      session=db_session,
+      exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    assert conflict is None
+
+  def test_live_subscriptions_for_user_excludes_terminal_rows(
+    self, db_session: Session, test_user, test_org
+  ):
+    self._repo_sub(
+      db_session, test_org.id, test_user.id, status=SubscriptionStatus.CANCELED.value
+    )
+    live = self._repo_sub(
+      db_session, test_org.id, test_user.id, status=SubscriptionStatus.ACTIVE.value
+    )
+
+    found = BillingSubscription.get_live_subscriptions_for_user(
+      test_user.id, db_session, resource_type="repository"
+    )
+
+    assert [s.id for s in found] == [live.id]

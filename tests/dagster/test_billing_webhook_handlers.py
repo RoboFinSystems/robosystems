@@ -1817,6 +1817,8 @@ class TestTriggerResourceProvisioning:
     sub.resource_type = "graph"
     sub.resource_id = "kg_01ABC123"
     sub.plan_name = "ladybug-standard"
+    # Legacy row: subscriber recorded only in metadata.
+    sub.user_id = None
     sub.subscription_metadata = {"user_id": "user_01ABC123", "resource_config": {}}
     return sub
 
@@ -1828,6 +1830,7 @@ class TestTriggerResourceProvisioning:
     sub.resource_type = "repository"
     sub.resource_id = None
     sub.plan_name = "starter"
+    sub.user_id = None
     sub.subscription_metadata = {
       "user_id": "user_01ABC123",
       "resource_config": {"repository_name": "sec"},
@@ -1890,6 +1893,30 @@ class TestTriggerResourceProvisioning:
       repository_name="sec",
     )
     mock_db_session.commit.assert_called()
+
+  async def test_subscriber_column_wins_over_metadata(
+    self, mock_db_session, mock_context, repository_subscription
+  ):
+    """With more than one member per org, guessing the subscriber provisions to
+    the wrong person — the column is authoritative."""
+    repository_subscription.user_id = "user_column"
+    repository_subscription.subscription_metadata["user_id"] = "user_stale_metadata"
+
+    with (
+      patch(PATCH_IAM_ORG_USER),
+      patch(PATCH_IAM_ORG_ROLE),
+      patch(PATCH_RUN_GRAPH, new_callable=AsyncMock),
+      patch(
+        PATCH_RUN_REPO, new_callable=AsyncMock, return_value={"repository_name": "sec"}
+      ) as mock_provision,
+    ):
+      from robosystems.dagster.jobs.billing import _trigger_resource_provisioning
+
+      await _trigger_resource_provisioning(
+        repository_subscription, mock_db_session, mock_context
+      )
+
+    assert mock_provision.await_args.kwargs["user_id"] == "user_column"
 
   async def test_falls_back_to_org_owner_when_no_user_id(
     self, mock_db_session, mock_context, graph_subscription

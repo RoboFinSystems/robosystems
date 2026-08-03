@@ -136,9 +136,12 @@ async def create_checkout_session(
       base_price_cents=base_price_cents,
       session=db,
       billing_interval="monthly",
+      user_id=current_user.id,
     )
 
-    # Store resource configuration and user_id in metadata
+    # Resource configuration for the post-payment provisioning step. The
+    # subscriber also stays in metadata for older webhook payloads; the
+    # user_id column is now the authoritative copy.
     subscription.subscription_metadata = {
       "resource_config": request.resource_config,
       "user_id": current_user.id,
