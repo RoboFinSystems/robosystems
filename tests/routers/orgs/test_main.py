@@ -14,6 +14,8 @@ import pytest
 
 from robosystems.models.core import (
   Graph,
+  GraphRole,
+  GraphUser,
   Org,
   OrgLimits,
   OrgRole,
@@ -268,3 +270,146 @@ class TestOrgRouter:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "You are not a member of this organization"
+
+
+class TestOrgGraphVisibility:
+  """Org membership alone grants no graph access, so the org views must not
+  disclose graphs the caller cannot reach.
+
+  Every org had exactly one member (its owner) until multi-user orgs shipped,
+  which made "all org graphs" and "my graphs" the same set and hid this. The
+  second member is what separates them.
+  """
+
+  async def test_member_sees_only_granted_graphs(
+    self, async_client, test_db, test_user
+  ):
+    """A plain member sees graphs they hold a GraphUser row for — not the rest."""
+    owner = _create_member(test_db, test_user.password_hash)
+    org = Org.create(
+      name=f"Visibility Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+
+    granted = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Granted",
+      graph_type="generic",
+      session=test_db,
+    )
+    hidden = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Hidden",
+      graph_type="generic",
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=granted.graph_id,
+      role=GraphRole.MEMBER,
+      session=test_db,
+    )
+
+    response = await async_client.get(f"/v1/orgs/{org.id}")
+
+    assert response.status_code == 200
+    visible = {g["graph_id"] for g in response.json()["graphs"]}
+    assert visible == {granted.graph_id}
+    assert hidden.graph_id not in visible
+
+  async def test_member_without_grants_sees_no_graphs(
+    self, async_client, test_db, test_user
+  ):
+    """An invited member who has not been granted anything sees an empty list."""
+    owner = _create_member(test_db, test_user.password_hash)
+    org = Org.create(
+      name=f"Ungranted Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Owner Only",
+      graph_type="generic",
+      session=test_db,
+    )
+
+    response = await async_client.get(f"/v1/orgs/{org.id}")
+
+    assert response.status_code == 200
+    assert response.json()["graphs"] == []
+
+  async def test_owner_sees_every_org_graph_without_explicit_grants(
+    self, async_client, test_db, test_user
+  ):
+    """Owners are implicit graph admins, so they see the org's graphs with no
+    GraphUser rows of their own."""
+    org = Org.create(
+      name=f"Owner View Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    first = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="First",
+      graph_type="generic",
+      session=test_db,
+    )
+    second = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Second",
+      graph_type="generic",
+      session=test_db,
+    )
+
+    response = await async_client.get(f"/v1/orgs/{org.id}")
+
+    assert response.status_code == 200
+    assert {g["graph_id"] for g in response.json()["graphs"]} == {
+      first.graph_id,
+      second.graph_id,
+    }
+
+  async def test_list_org_graphs_endpoint_applies_the_same_rule(
+    self, async_client, test_db, test_user
+  ):
+    """The dedicated graphs listing must not be a way around the detail view."""
+    owner = _create_member(test_db, test_user.password_hash)
+    org = Org.create(
+      name=f"Listing Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Not Yours",
+      graph_type="generic",
+      session=test_db,
+    )
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/graphs")
+
+    assert response.status_code == 200
+    assert response.json() == []

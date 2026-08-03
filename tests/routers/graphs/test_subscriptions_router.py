@@ -744,3 +744,102 @@ class TestChangePlanStripeFirst:
     assert exc.value.status_code == 502
     sub.update_plan.assert_not_called()
     user_repo.upgrade_tier.assert_not_called()
+
+
+class TestResolveSubscriptionTarget:
+  """Who may act on whose repository subscription.
+
+  Repository access is per-user while billing is org-level, so every
+  subscription endpoint needs to answer "which user is this for?" before doing
+  anything. This helper is that answer, and it now gates create as well as
+  plan-change and cancel.
+  """
+
+  def _user(self, user_id="user_self"):
+    user = Mock()
+    user.id = user_id
+    return user
+
+  def _membership(self, org_id="org_1", can_manage=False):
+    membership = Mock()
+    membership.org_id = org_id
+    membership.can_manage_billing.return_value = can_manage
+    return membership
+
+  @pytest.mark.unit
+  def test_no_target_resolves_to_caller(self):
+    """Omitting user_id means "me" — the default for self-service."""
+    from robosystems.routers.graphs.subscriptions import _resolve_subscription_target
+
+    db = Mock()
+    with patch("robosystems.models.core.OrgUser.get_user_orgs") as get_orgs:
+      get_orgs.return_value = [self._membership()]
+      target, org_id = _resolve_subscription_target(self._user(), None, db)
+
+    assert target == "user_self"
+    assert org_id == "org_1"
+
+  @pytest.mark.unit
+  def test_targeting_yourself_needs_no_billing_role(self):
+    """Passing your own id explicitly must not require owner/admin."""
+    from robosystems.routers.graphs.subscriptions import _resolve_subscription_target
+
+    db = Mock()
+    membership = self._membership(can_manage=False)
+    with patch("robosystems.models.core.OrgUser.get_user_orgs") as get_orgs:
+      get_orgs.return_value = [membership]
+      target, _ = _resolve_subscription_target(self._user(), "user_self", db)
+
+    assert target == "user_self"
+    membership.can_manage_billing.assert_not_called()
+
+  @pytest.mark.unit
+  def test_plain_member_cannot_target_another_user(self):
+    """A member may not subscribe, change, or cancel on someone else's behalf."""
+    from robosystems.routers.graphs.subscriptions import _resolve_subscription_target
+
+    db = Mock()
+    with patch("robosystems.models.core.OrgUser.get_user_orgs") as get_orgs:
+      get_orgs.return_value = [self._membership(can_manage=False)]
+      with pytest.raises(HTTPException) as exc:
+        _resolve_subscription_target(self._user(), "user_other", db)
+
+    assert exc.value.status_code == 403
+
+  @pytest.mark.unit
+  def test_billing_manager_may_target_a_fellow_member(self):
+    """Owners and admins act for members of their own org."""
+    from robosystems.routers.graphs.subscriptions import _resolve_subscription_target
+
+    db = Mock()
+    with (
+      patch("robosystems.models.core.OrgUser.get_user_orgs") as get_orgs,
+      patch("robosystems.models.core.OrgUser.get_by_org_and_user") as get_member,
+    ):
+      get_orgs.return_value = [self._membership(can_manage=True)]
+      get_member.return_value = Mock()
+      target, org_id = _resolve_subscription_target(self._user(), "user_other", db)
+
+    assert target == "user_other"
+    assert org_id == "org_1"
+
+  @pytest.mark.unit
+  def test_target_must_belong_to_the_same_org(self):
+    """Being an owner somewhere does not let you act on an outsider.
+
+    This is the cross-org guard: without it, any org owner could attach a
+    subscription to a user in a different organization.
+    """
+    from robosystems.routers.graphs.subscriptions import _resolve_subscription_target
+
+    db = Mock()
+    with (
+      patch("robosystems.models.core.OrgUser.get_user_orgs") as get_orgs,
+      patch("robosystems.models.core.OrgUser.get_by_org_and_user") as get_member,
+    ):
+      get_orgs.return_value = [self._membership(can_manage=True)]
+      get_member.return_value = None
+      with pytest.raises(HTTPException) as exc:
+        _resolve_subscription_target(self._user(), "user_outsider", db)
+
+    assert exc.value.status_code == 404

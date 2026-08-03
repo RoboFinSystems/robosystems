@@ -194,7 +194,14 @@ async def get_subscription(
   response_model=GraphSubscriptionResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Create Repository Subscription",
-  description="For shared repositories only (sec, industry, etc.). User graph subscriptions are created automatically during provisioning.",
+  description=(
+    "For shared repositories only (sec, industry, etc.). User graph "
+    "subscriptions are created automatically during provisioning. Subscribes "
+    "the caller by default; org owners and admins may subscribe another member "
+    "of their organization by passing `user_id`. Billing is charged to the "
+    "organization either way — repository access is per-user, so the "
+    "subscriber determines who receives access."
+  ),
   operation_id="createRepositorySubscription",
   responses={
     **RESOURCE_ERROR_RESPONSES,
@@ -223,8 +230,18 @@ async def create_repository_subscription(
         ),
       )
 
+    # Repository access is per-user while billing is org-level, so the
+    # subscriber — not the caller — is what determines who gets access. Owners
+    # and admins may subscribe another member of their org; everyone else
+    # resolves to themselves. Same rule (and same helper) as plan changes and
+    # cancellation, which have accepted a target user since Phase 3.
+    target_user_id, org_id = _resolve_subscription_target(
+      current_user, request.user_id, db
+    )
+    subscribing_for_other = target_user_id != current_user.id
+
     parent_repo_id = resolve_shared_repository_parent(graph_id)
-    # Only the caller's own subscription conflicts — repository access is
+    # Only the subscriber's own subscription conflicts — repository access is
     # per user, so a colleague's subscription is an upsell, not a duplicate.
     # And only a subscription still in force conflicts: canceled and failed
     # rows are kept as history, and an unfiltered check here turned one
@@ -232,7 +249,7 @@ async def create_repository_subscription(
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
       resource_id=parent_repo_id,
-      user_id=current_user.id,
+      user_id=target_user_id,
       session=db,
       exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
     )
@@ -240,7 +257,11 @@ async def create_repository_subscription(
     if existing:
       raise HTTPException(
         status_code=409,
-        detail=f"You already have an active subscription to the {graph_id} repository",
+        detail=(
+          f"That user already has an active subscription to the {graph_id} repository"
+          if subscribing_for_other
+          else f"You already have an active subscription to the {graph_id} repository"
+        ),
       )
 
     plan_config = BillingConfig.get_repository_plan(parent_repo_id, request.plan_name)
@@ -250,17 +271,8 @@ async def create_repository_subscription(
         detail=f"Invalid plan '{request.plan_name}' for repository '{graph_id}'",
       )
 
-    from ...models.core import OrgUser
-
-    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-    if not user_orgs:
-      raise HTTPException(
-        status_code=500,
-        detail="User organization not found. Please contact support.",
-      )
-
-    org_id = user_orgs[0].org_id
-
+    # org_id came from _resolve_subscription_target above, which already
+    # verified the caller's org membership and that any target user shares it.
     customer = BillingCustomer.get_or_create(org_id, db)
 
     can_provision, error_message = customer.can_provision_resources(
@@ -286,7 +298,7 @@ async def create_repository_subscription(
       base_price_cents=plan_config["price_cents"],
       session=db,
       billing_interval="monthly",
-      user_id=current_user.id,
+      user_id=target_user_id,
     )
 
     BillingAuditLog.log_event(
@@ -296,12 +308,16 @@ async def create_repository_subscription(
       subscription_id=subscription.id,
       description=f"Created {plan_name} subscription for {graph_id} repository",
       actor_type="user",
+      # The actor is who performed the action; the subscriber is who receives
+      # access. They differ when an owner or admin provisions for a member, and
+      # collapsing them would lose the record of who authorized the charge.
       actor_user_id=current_user.id,
       event_data={
         "resource_type": "repository",
         "resource_id": parent_repo_id,
         "plan_name": plan_name,
         "base_price_cents": plan_config["price_cents"],
+        "subscriber_user_id": target_user_id,
       },
     )
 
@@ -329,7 +345,7 @@ async def create_repository_subscription(
           price_id=stripe_price_id,
           metadata={
             "subscription_id": str(subscription.id),
-            "user_id": current_user.id,
+            "user_id": target_user_id,
             "resource_type": "repository",
             "resource_id": parent_repo_id,
           },
@@ -343,7 +359,8 @@ async def create_repository_subscription(
         logger.info(
           f"Created Stripe subscription for repository {graph_id}",
           extra={
-            "user_id": current_user.id,
+            "user_id": target_user_id,
+            "actor_user_id": current_user.id,
             "subscription_id": subscription.id,
             "stripe_subscription_id": stripe_subscription_id,
           },
@@ -353,7 +370,8 @@ async def create_repository_subscription(
         logger.error(
           f"Failed to create Stripe subscription for repository {graph_id}: {e}",
           extra={
-            "user_id": current_user.id,
+            "user_id": target_user_id,
+            "actor_user_id": current_user.id,
             "subscription_id": subscription.id,
             "plan_name": plan_name,
           },
@@ -366,9 +384,10 @@ async def create_repository_subscription(
           detail="Failed to create payment subscription. Please verify your payment method.",
         )
 
-    # Store IDs before commit detaches the objects
+    # Store IDs before commit detaches the objects. Provisioning grants the
+    # UserRepository row and credit pool, so it must key on the subscriber.
     subscription_id = subscription.id
-    user_id = current_user.id
+    user_id = target_user_id
 
     # Commit so run_user_repository_provisioning can see the subscription
     db.commit()

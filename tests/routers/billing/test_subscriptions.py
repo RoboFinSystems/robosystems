@@ -686,3 +686,61 @@ class TestCancelSubscription:
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "Only organization owners can cancel subscriptions"
+
+
+class TestSubscriptionVisibilityByRole:
+  """Billing is org-scoped but repository access is per-user, so an org-wide
+  listing hands a plain member every colleague's subscription.
+
+  This was invisible while every org had one member: "all org subscriptions"
+  and "my subscriptions" were the same set.
+  """
+
+  @pytest.fixture
+  def mock_user(self):
+    user = Mock(spec=User)
+    user.id = "user_123"
+    return user
+
+  def _membership(self, can_manage: bool):
+    membership = Mock()
+    membership.can_manage_billing.return_value = can_manage
+    return membership
+
+  def _captured_filters(self, mock_db):
+    """The filter expressions handed to the subscription query."""
+    return mock_db.query.return_value.filter.call_args[0]
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_member_listing_is_narrowed_to_their_own_rows(
+    self, mock_get_org_user, mock_user
+  ):
+    """A member who cannot manage billing gets an extra user_id predicate."""
+    mock_get_org_user.return_value = self._membership(can_manage=False)
+
+    mock_db = Mock()
+    mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+    await list_subscriptions("org_123", mock_user, mock_db, None)
+
+    filters = self._captured_filters(mock_db)
+    assert len(filters) == 3, "member listing must add the subscriber predicate"
+    assert "user_id" in str(filters[-1])
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_billing_manager_listing_covers_the_whole_org(
+    self, mock_get_org_user, mock_user
+  ):
+    """Owners and admins manage billing, so they still see every row."""
+    mock_get_org_user.return_value = self._membership(can_manage=True)
+
+    mock_db = Mock()
+    mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+
+    await list_subscriptions("org_123", mock_user, mock_db, None)
+
+    filters = self._captured_filters(mock_db)
+    assert len(filters) == 2, "billing managers must not be narrowed by subscriber"
+    assert all("user_id" not in str(f) for f in filters)

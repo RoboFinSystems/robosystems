@@ -217,6 +217,16 @@ class CreateRepositorySubscriptionRequest(BaseModel):
     description="Plan name for the repository subscription",
     examples=["sec-starter"],
   )
+  user_id: str | None = Field(
+    default=None,
+    description=(
+      "Subscribe this user instead of yourself. Org owners and admins only, "
+      "and the target must belong to the same organization. Omit to subscribe "
+      "yourself. Repository access is per-user while billing is org-level, so "
+      "the subscriber is what determines who gets access."
+    ),
+    examples=["user_01ABC123"],
+  )
 
 
 class UpgradeSubscriptionRequest(BaseModel):
