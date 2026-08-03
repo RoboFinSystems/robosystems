@@ -20,34 +20,6 @@ Parameters:
     Default: Observability
 
 Resources:
-  # SSO setup configuration
-  # Note: SSO resources are not yet supported in CloudFormation.
-  # Complete manual setup required for Grafana SSO access.
-  #
-  # Prerequisites: AWS SSO (Identity Center) must be enabled
-  # Current SSO Instance: arn:aws:sso:::instance/ssoins-7223bc67757c4e04
-  # Current Identity Store: d-906636dda1
-  #
-  # Required manual steps after stack deployment:
-  #
-  # Create SSO user (replace email with actual email):
-  #    aws identitystore create-user --identity-store-id d-906636dda1 \
-  #      --user-name "robosystems-grafana-admin" \
-  #      --display-name "RoboSystems Grafana Admin" \
-  #      --name '{"GivenName":"Grafana","FamilyName":"Admin"}' \
-  #      --emails '[{"Value":"your-email@example.com","Type":"work","Primary":true}]'
-  #
-  # Assign user to Grafana workspace:
-  #    aws grafana associate-license --license-type ENTERPRISE_FREE_TRIAL \
-  #      --workspace-id [WORKSPACE_ID_FROM_OUTPUT]
-  #
-  # Configure SSO authentication in Grafana workspace:
-  #    aws grafana put-workspace-authentication \
-  #      --workspace-id [WORKSPACE_ID_FROM_OUTPUT] \
-  #      --authentication-providers AWS_SSO \
-  #      --saml-configuration roleValueType=ALL \
-  #      idpMetadata='{"url":"https://portal.sso.us-east-1.amazonaws.com/saml/metadata/[SSO_INSTANCE_ID]"}'
-
   # IAM service role for Grafana
   # Grafana Service Role
   GrafanaServiceRole:
