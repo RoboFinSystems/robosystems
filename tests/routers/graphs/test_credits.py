@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.models.core import GraphRole
 from robosystems.routers.graphs import credits as credits_module
 from robosystems.routers.graphs.credits import (
   get_graph_access,
@@ -91,8 +92,8 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
-        return_value=True,
+        "robosystems.models.core.graph.graph_user.GraphUser.get_effective_role",
+        return_value=(GraphRole.MEMBER, False),
       ),
     ):
       result = get_graph_access(
@@ -112,8 +113,8 @@ class TestGetGraphAccess:
         return_value=identity,
       ),
       patch(
-        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
-        return_value=False,
+        "robosystems.models.core.graph.graph_user.GraphUser.get_effective_role",
+        return_value=(None, False),
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:

@@ -16,6 +16,17 @@ class TestGraphInfoEndpoints:
     assert isinstance(data["graphs"], list)
     assert len(data["graphs"]) > 0
 
+  def test_list_includes_org_graphs_held_implicitly(
+    self, client_with_mocked_auth, test_db, test_org, sample_graph
+  ):
+    """Org owners see org graphs as admin without an explicit GraphUser row."""
+    response = client_with_mocked_auth.get("/v1/graphs/")
+    assert response.status_code == 200
+    graphs = {g["graphId"]: g for g in response.json()["graphs"]}
+    # sample_graph is org-owned; the test user (org OWNER) has no GraphUser row
+    assert sample_graph.graph_id in graphs
+    assert graphs[sample_graph.graph_id]["role"] == "admin"
+
   def test_get_graph_info(self, client_with_mocked_auth, test_user_graph, sample_graph):
     """Get info for a specific graph — exercises router + graph client."""
     response = client_with_mocked_auth.get(f"/v1/graphs/{sample_graph.graph_id}/info")

@@ -240,15 +240,7 @@ async def delete_subgraph_op(
   async def _runner():
     subgraph = get_subgraph_by_name(graph_id, body.subgraph_name, db, user)
 
-    user_graph = (
-      db.query(GraphUser)
-      .filter(
-        GraphUser.user_id == user.id,
-        GraphUser.graph_id == subgraph.parent_graph_id,
-      )
-      .first()
-    )
-    if not user_graph or user_graph.role != "admin":
+    if not GraphUser.user_has_admin_access(user.id, subgraph.parent_graph_id, db):
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Admin access to parent graph required to delete subgraphs",
@@ -360,12 +352,7 @@ async def delete_graph_op(
   )
 
   async def _runner():
-    user_graph = (
-      db.query(GraphUser)
-      .filter(GraphUser.user_id == user.id, GraphUser.graph_id == graph_id)
-      .first()
-    )
-    if not user_graph or user_graph.role != "admin":
+    if not GraphUser.user_has_admin_access(user.id, graph_id, db):
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Admin access to the graph required to delete it.",

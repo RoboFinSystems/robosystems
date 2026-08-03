@@ -893,6 +893,44 @@ class TestGetConnection:
 class TestDeleteConnection:
   """Tests for the delete_connection endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _grant_graph_admin(self):
+    """delete_connection requires graph admin; grant it for these tests."""
+    with patch(
+      f"{MANAGEMENT_MODULE}.GraphUser.user_has_admin_access",
+      return_value=True,
+    ):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_delete_connection_requires_admin_role(self):
+    """Non-admin callers are rejected before any deletion work happens."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.GraphUser.user_has_admin_access",
+        return_value=False,
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+      ) as mock_get,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 403
+    mock_get.assert_not_awaited()
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_delete_connection_success(self):

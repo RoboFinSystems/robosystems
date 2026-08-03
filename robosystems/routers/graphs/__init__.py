@@ -16,6 +16,7 @@ from .health import router as health_router
 from .info import router as info_router
 from .limits import router as limits_router
 from .main import router as main_router
+from .members import router as members_router
 from .query import router as query_router
 from .schema import router as schema_router
 from .subgraphs import router as subgraphs_router
@@ -32,6 +33,7 @@ __all__ = [
   "info_router",
   "limits_router",
   "main_router",
+  "members_router",
   "query_router",
   "schema_router",
   "subgraphs_router",

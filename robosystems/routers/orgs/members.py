@@ -166,6 +166,11 @@ async def update_member_role(
     db.commit()
     db.refresh(target_membership)
 
+    # Org owner/admin hold implicit graph admin on org graphs, so a role
+    # change alters graph access — drop the target's cached grants.
+    api_key_cache.invalidate_user_jwt_graph_access(user_id)
+    api_key_cache.invalidate_user_data(user_id)
+
     target_user = target_membership.user
 
     logger.info(

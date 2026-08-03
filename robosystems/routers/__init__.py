@@ -46,6 +46,7 @@ from .graphs import (
   health_router,
   info_router,
   limits_router,
+  members_router,
   query_router,
   schema_router,
   subgraphs_router,
@@ -96,6 +97,7 @@ router.include_router(credits_router)  # Already has /credits prefix
 router.include_router(health_router)  # No prefix - handles /health internally
 router.include_router(info_router)  # No prefix - handles /info internally
 router.include_router(limits_router)  # No prefix - handles /limits internally
+router.include_router(members_router)  # Already has /members prefix
 router.include_router(subgraphs_router, prefix="/subgraphs")
 router.include_router(
   graph_subscriptions_router, prefix="/subscriptions"

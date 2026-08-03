@@ -27,7 +27,7 @@ from robosystems.models.api.graphs.connections import (
   ProviderType,
   SetWritePolicyRequest,
 )
-from robosystems.models.core import User
+from robosystems.models.core import GraphUser, User
 from robosystems.operations.connection_service import ConnectionService
 
 from .utils import (
@@ -472,6 +472,15 @@ async def delete_connection(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   try:
+    # Deleting a connection revokes credentials — enforce the admin role the
+    # endpoint has always documented.
+    if not GraphUser.user_has_admin_access(str(current_user.id), graph_id, db):
+      raise create_error_response(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access to the graph is required to delete connections",
+        code=ErrorCode.FORBIDDEN,
+      )
+
     # Get connection before deletion for cleanup
     connection = await ConnectionService.get_connection(
       connection_id, current_user.id, graph_id=graph_id

@@ -188,17 +188,17 @@ class TestDeleteSubgraphExecute:
   async def test_not_admin_on_parent(self, mock_db: MagicMock) -> None:
     subgraph = MagicMock()
     subgraph.is_subgraph = True
-    # First query(Graph).filter(...).first() → subgraph found
-    # Second query(GraphUser).filter(...).first() → non-admin
-    non_admin = MagicMock()
-    non_admin.role = "member"
     filter_chain = MagicMock()
-    filter_chain.first.side_effect = [subgraph, non_admin]
+    filter_chain.first.side_effect = [subgraph]
     mock_db.query.return_value.filter.return_value = filter_chain
 
-    result = await DeleteSubgraphTool(_client()).execute(
-      {"subgraph_id": f"{GRAPH_ID}_dev"}
-    )
+    with patch(
+      "robosystems.models.core.graph.graph_user.GraphUser.user_has_admin_access",
+      return_value=False,
+    ):
+      result = await DeleteSubgraphTool(_client()).execute(
+        {"subgraph_id": f"{GRAPH_ID}_dev"}
+      )
     assert result["error"] == "insufficient_permissions"
 
   @pytest.mark.asyncio

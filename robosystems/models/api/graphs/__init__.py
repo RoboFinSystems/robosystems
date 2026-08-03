@@ -47,6 +47,12 @@ from .mcp import (
   MCPToolResult,
   MCPToolsResponse,
 )
+from .members import (
+  AddGraphMemberRequest,
+  GraphMemberListResponse,
+  GraphMemberResponse,
+  UpdateGraphMemberRoleRequest,
+)
 from .metrics import (
   GraphMetricsResponse,
   GraphUsageResponse,
@@ -128,6 +134,7 @@ from .tier import (
 __all__ = [
   "DEFAULT_QUERY_TIMEOUT",
   "MAX_QUERY_LENGTH",
+  "AddGraphMemberRequest",
   "AvailableGraphTiersResponse",
   "BackupCreateRequest",
   "BackupDownloadUrlResponse",
@@ -167,6 +174,8 @@ __all__ = [
   "GetFileInfoResponse",
   "GraphCapacityResponse",
   "GraphLimitsResponse",
+  "GraphMemberListResponse",
+  "GraphMemberResponse",
   "GraphMetadata",
   "GraphMetricsResponse",
   "GraphTierBackup",
@@ -225,5 +234,6 @@ __all__ = [
   "TableIngestResult",
   "TableListResponse",
   "TierCapacity",
+  "UpdateGraphMemberRoleRequest",
   "translate_neo4j_to_lbug",
 ]
