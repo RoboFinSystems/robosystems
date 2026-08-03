@@ -56,16 +56,28 @@ async def list_subscriptions(
         detail="You are not a member of this organization",
       )
 
+    filters = [
+      BillingSubscription.org_id == org_id,
+      # Exclude orphaned subscriptions that never completed provisioning
+      ~(
+        BillingSubscription.status.in_(["canceled", "failed"])
+        & BillingSubscription.resource_id.is_(None)
+      ),
+    ]
+
+    # Billing is org-scoped but repository access is per-user, so an org-wide
+    # list hands a plain member every other member's subscriptions. Owners and
+    # admins manage billing and need the whole org; everyone else sees only the
+    # rows attributed to them. `user_id` is set on repository subscriptions and
+    # NULL on graph subscriptions, which are org-level resources rather than
+    # per-person ones — so a plain member sees neither other people's seats nor
+    # the org's graph inventory.
+    if not membership.can_manage_billing():
+      filters.append(BillingSubscription.user_id == current_user.id)
+
     subscriptions = (
       db.query(BillingSubscription)
-      .filter(
-        BillingSubscription.org_id == org_id,
-        # Exclude orphaned subscriptions that never completed provisioning
-        ~(
-          BillingSubscription.status.in_(["canceled", "failed"])
-          & BillingSubscription.resource_id.is_(None)
-        ),
-      )
+      .filter(*filters)
       .order_by(BillingSubscription.created_at.desc())
       .all()
     )
