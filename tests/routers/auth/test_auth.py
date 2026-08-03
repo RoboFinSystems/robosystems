@@ -621,3 +621,81 @@ class TestInvitedRegistration:
 
     assert response.status_code == 400
     assert "invalid or has expired" in response.json()["detail"]
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    False,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_invited_user_can_register_while_registration_is_closed(
+    self, client: TestClient, test_db, test_user
+  ):
+    """Invite-only mode: closing registration stops unsolicited signups, not
+    the people an admin deliberately invited."""
+    from robosystems.models.core import OrgUser
+
+    org, _invitation, raw_token = self._make_invitation(
+      test_db, test_user, "closedreg@example.com"
+    )
+
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Invited User",
+        "email": "closedreg@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": raw_token,
+      },
+    )
+
+    assert response.status_code == 201
+    new_user = User.get_by_email("closedreg@example.com", test_db)
+    assert new_user is not None
+    assert OrgUser.get_user_orgs(new_user.id, test_db)[0].org_id == org.id
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    False,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_uninvited_registration_still_blocked_when_closed(
+    self, client: TestClient, test_db
+  ):
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Walk In",
+        "email": "walkin@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+      },
+    )
+
+    assert response.status_code == 503
+    assert User.get_by_email("walkin@example.com", test_db) is None
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    False,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_bogus_token_does_not_open_closed_registration(
+    self, client: TestClient, test_db
+  ):
+    """A made-up token must not buy passage past the gate — otherwise any
+    string would reach the checks below, including the duplicate-email probe
+    that closed registration exists to deny."""
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Probe",
+        "email": "probe@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": "not-a-real-token",
+      },
+    )
+
+    assert response.status_code == 503
+    assert User.get_by_email("probe@example.com", test_db) is None
