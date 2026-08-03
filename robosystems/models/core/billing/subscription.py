@@ -69,6 +69,12 @@ class BillingSubscription(Base):
 
   org_id = Column(String, ForeignKey("orgs.id"), nullable=False)
 
+  # The member the subscription belongs to. Billing is always the org's, but
+  # repository access and credits are per-user, so the subscriber has to be a
+  # column rather than a value recoverable only from provider metadata.
+  # Nullable because org-level rows (graphs) have no single subscriber.
+  user_id = Column(String, ForeignKey("users.id"), nullable=True)
+
   resource_type = Column(String, nullable=False)
   resource_id = Column(String, nullable=True)
 
@@ -108,6 +114,7 @@ class BillingSubscription(Base):
 
   __table_args__ = (
     Index("idx_billing_sub_org", "org_id"),
+    Index("idx_billing_sub_user", "user_id"),
     Index("idx_billing_sub_resource", "resource_type", "resource_id"),
     Index("idx_billing_sub_status", "status"),
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
@@ -129,12 +136,18 @@ class BillingSubscription(Base):
     session: Session,
     billing_interval: str = "monthly",
     stripe_subscription_id: str | None = None,
+    user_id: str | None = None,
   ) -> "BillingSubscription":
-    """Create a new subscription."""
+    """Create a new subscription.
+
+    Pass `user_id` for per-user resources (repository subscriptions) so access
+    and credits can be provisioned to the right member of the paying org.
+    """
     now = datetime.now(UTC)
 
     subscription = cls(
       org_id=org_id,
+      user_id=user_id,
       resource_type=resource_type,
       resource_id=resource_id,
       plan_name=plan_name,
@@ -210,21 +223,24 @@ class BillingSubscription(Base):
     session: Session,
     exclude_statuses: tuple[str, ...] = (),
   ) -> Optional["BillingSubscription"]:
-    """Get subscription for a specific resource and user (looks up user's org first)."""
-    from robosystems.models.core.org import OrgUser
+    """Get a specific user's subscription to a resource.
 
-    membership = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
-
-    if not membership:
-      return None
-
-    return cls.get_by_resource_and_org(
-      resource_type=resource_type,
-      resource_id=resource_id,
-      org_id=membership.org_id,
-      session=session,
-      exclude_statuses=exclude_statuses,
+    Keyed on the subscriber, not their org: repository access and credits are
+    granted per user, so one member's subscription must never resolve as
+    another member's. Ordering matches `get_by_resource_and_org` — the row
+    still in force wins, then recency.
+    """
+    query = session.query(cls).filter(
+      cls.resource_type == resource_type,
+      cls.resource_id == resource_id,
+      cls.user_id == user_id,
     )
+    if exclude_statuses:
+      query = query.filter(cls.status.notin_(exclude_statuses))
+    return query.order_by(
+      case((cls.status.in_(TERMINAL_SUBSCRIPTION_STATUSES), 1), else_=0),
+      cls.created_at.desc(),
+    ).first()
 
   @classmethod
   def get_active_subscriptions_for_org(
@@ -241,18 +257,22 @@ class BillingSubscription(Base):
     )
 
   @classmethod
-  def get_active_subscriptions_for_user(
-    cls, user_id: str, session: Session
+  def get_live_subscriptions_for_user(
+    cls, user_id: str, session: Session, resource_type: str | None = None
   ) -> list["BillingSubscription"]:
-    """Get all active subscriptions for a user (looks up user's org first)."""
-    from robosystems.models.core.org import OrgUser
+    """Get a user's own subscriptions that are still in force.
 
-    membership = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
-
-    if not membership:
-      return []
-
-    return cls.get_active_subscriptions_for_org(membership.org_id, session)
+    "In force" is everything outside the terminal statuses — a pending or
+    past-due row still bills and still has to be cleaned up when the member
+    is off-boarded or their account is deleted.
+    """
+    query = session.query(cls).filter(
+      cls.user_id == user_id,
+      cls.status.notin_(TERMINAL_SUBSCRIPTION_STATUSES),
+    )
+    if resource_type:
+      query = query.filter(cls.resource_type == resource_type)
+    return query.order_by(cls.created_at.asc()).all()
 
   @classmethod
   def get_by_provider_subscription_id(

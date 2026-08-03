@@ -178,6 +178,13 @@ class GraphSubscriptionResponse(BaseModel):
   id: str = Field(..., description="Subscription ID")
   resource_type: str = Field(..., description="Resource type (graph or repository)")
   resource_id: str = Field(..., description="Resource identifier")
+  user_id: str | None = Field(
+    None,
+    description=(
+      "Organization member the subscription belongs to. Set for repository "
+      "subscriptions, which are billed to the org but granted per user."
+    ),
+  )
   plan_name: str = Field(..., description="Current plan name")
   plan_display_name: str = Field(
     ..., description="Human-readable plan name for UI display"
@@ -218,6 +225,13 @@ class UpgradeSubscriptionRequest(BaseModel):
   new_plan_name: str = Field(
     ..., description="New plan name to change to", examples=["advanced"]
   )
+  user_id: str | None = Field(
+    None,
+    description=(
+      "Organization member whose subscription to change. Defaults to the "
+      "caller; targeting another member requires org owner or admin."
+    ),
+  )
 
 
 class CancelSubscriptionRequest(BaseModel):
@@ -242,5 +256,12 @@ class CancelSubscriptionRequest(BaseModel):
     description=(
       "Required when immediate=True. Must equal the subscription's "
       "resource_id (e.g. graph_id) to confirm intent."
+    ),
+  )
+  user_id: str | None = Field(
+    None,
+    description=(
+      "Organization member whose subscription to cancel. Defaults to the "
+      "caller; canceling another member's requires org owner or admin."
     ),
   )

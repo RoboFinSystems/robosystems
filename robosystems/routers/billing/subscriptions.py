@@ -77,6 +77,7 @@ async def list_subscriptions(
           id=str(sub.id),
           resource_type=sub.resource_type,
           resource_id=sub.resource_id or "",
+          user_id=sub.user_id,
           plan_name=sub.plan_name,
           plan_display_name=_get_plan_display_name(
             sub.plan_name, sub.resource_type, sub.resource_id or ""
@@ -152,6 +153,7 @@ async def get_subscription(
       id=str(subscription.id),
       resource_type=subscription.resource_type,
       resource_id=subscription.resource_id or "",
+      user_id=subscription.user_id,
       plan_name=subscription.plan_name,
       plan_display_name=_get_plan_display_name(
         subscription.plan_name,
@@ -351,6 +353,7 @@ async def cancel_subscription(
       id=str(subscription.id),
       resource_type=subscription.resource_type,
       resource_id=subscription.resource_id or "",
+      user_id=subscription.user_id,
       plan_name=subscription.plan_name,
       plan_display_name=_get_plan_display_name(
         subscription.plan_name,

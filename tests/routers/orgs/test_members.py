@@ -357,3 +357,63 @@ class TestOrgMembersRouter:
       GraphUser.get_by_user_and_graph(member.id, outside_graph.graph_id, test_db)
       is not None
     )
+
+  async def test_remove_member_cancels_their_repository_subscriptions(
+    self, async_client, test_db, test_user
+  ):
+    """The org stops paying for a member's repository access when they leave."""
+    from robosystems.models.core import BillingSubscription, Graph
+    from robosystems.models.core.user.user_repository import (
+      RepositoryAccessLevel,
+      RepositoryType,
+      UserRepository,
+    )
+
+    if Graph.get_by_id("sec", test_db) is None:
+      Graph.create(
+        graph_id="sec",
+        org_id=None,
+        graph_name="SEC",
+        graph_type="repository",
+        session=test_db,
+      )
+
+    org = Org.create(
+      name=f"Billing Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    member = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+
+    subscription = BillingSubscription.create_subscription(
+      org_id=org.id,
+      resource_type="repository",
+      resource_id="sec",
+      plan_name="sec-starter",
+      base_price_cents=4900,
+      session=test_db,
+      user_id=member.id,
+    )
+    subscription.activate(test_db)
+    access = UserRepository.create_access(
+      user_id=member.id,
+      repository_type=RepositoryType.SEC,
+      repository_name="sec",
+      access_level=RepositoryAccessLevel.READ,
+      repository_plan="sec-starter",
+      session=test_db,
+    )
+
+    response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    test_db.refresh(subscription)
+    test_db.refresh(access)
+    assert subscription.status == "canceled"
+    assert access.is_active is False

@@ -47,6 +47,44 @@ def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str)
   return BillingConfig.get_plan_display_name(plan_name, resource_type, resource_id)
 
 
+def _resolve_subscription_target(
+  current_user: User,
+  target_user_id: str | None,
+  db: Session,
+) -> tuple[str, str]:
+  """Resolve whose subscription is being managed, and authorize it.
+
+  Members manage their own subscriptions; org owners and admins manage any
+  member's — the org is paying, so it can stop paying (decision 4). Returns
+  (target_user_id, org_id).
+  """
+  from ...models.core import OrgUser
+
+  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+  if not user_orgs:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of any organization"
+    )
+  membership = user_orgs[0]
+
+  if not target_user_id or target_user_id == current_user.id:
+    return current_user.id, membership.org_id
+
+  if not membership.can_manage_billing():
+    raise HTTPException(
+      status_code=403,
+      detail="Only organization owners and admins can manage another member's subscription",
+    )
+
+  if not OrgUser.get_by_org_and_user(membership.org_id, target_user_id, db):
+    raise HTTPException(
+      status_code=404,
+      detail="User is not a member of this organization",
+    )
+
+  return target_user_id, membership.org_id
+
+
 def subscription_to_response(
   subscription: BillingSubscription,
   operation_id: str | None = None,
@@ -56,6 +94,7 @@ def subscription_to_response(
     id=subscription.id,
     resource_type=subscription.resource_type,
     resource_id=subscription.resource_id,
+    user_id=subscription.user_id,
     plan_name=subscription.plan_name,
     plan_display_name=_get_plan_display_name(
       subscription.plan_name, subscription.resource_type, subscription.resource_id
@@ -185,9 +224,11 @@ async def create_repository_subscription(
       )
 
     parent_repo_id = resolve_shared_repository_parent(graph_id)
-    # Only a subscription still in force conflicts. Canceled and failed rows
-    # are kept as history and must not block resubscribing — an unfiltered
-    # check here turned one declined card into a permanent 409.
+    # Only the caller's own subscription conflicts — repository access is
+    # per user, so a colleague's subscription is an upsell, not a duplicate.
+    # And only a subscription still in force conflicts: canceled and failed
+    # rows are kept as history, and an unfiltered check here turned one
+    # declined card into a permanent 409.
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
       resource_id=parent_repo_id,
@@ -245,6 +286,7 @@ async def create_repository_subscription(
       base_price_cents=plan_config["price_cents"],
       session=db,
       billing_interval="monthly",
+      user_id=current_user.id,
     )
 
     BillingAuditLog.log_event(
@@ -445,28 +487,18 @@ async def _change_repository_plan(
   current_user: User,
   db: Session,
 ) -> GraphSubscriptionResponse:
-  from ...models.core import OrgRole, OrgUser
-  from ...models.core.user.user_repository import UserRepository
   from ...operations.providers.payment_provider import get_payment_provider
 
-  # Verify user is an org owner
-  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-  if not user_orgs:
-    raise HTTPException(
-      status_code=403, detail="You are not a member of any organization"
-    )
-  if user_orgs[0].role != OrgRole.OWNER:
-    raise HTTPException(
-      status_code=403,
-      detail="Only organization owners can change subscription plans",
-    )
+  target_user_id, org_id = _resolve_subscription_target(
+    current_user, request.user_id, db
+  )
 
   # Find existing subscription (subscriptions are on the parent repo)
   parent_repo_id = resolve_shared_repository_parent(graph_id)
   subscription = BillingSubscription.get_by_resource_and_user(
     resource_type="repository",
     resource_id=parent_repo_id,
-    user_id=current_user.id,
+    user_id=target_user_id,
     session=db,
   )
   if not subscription:
@@ -505,13 +537,13 @@ async def _change_repository_plan(
   # subscription mutated with credits and rate limits untouched whenever the
   # record was missing — the partial write this order exists to prevent.
   user_repo = UserRepository.get_by_user_and_repository(
-    current_user.id, parent_repo_id, db
+    target_user_id, parent_repo_id, db
   )
   if not user_repo:
     logger.error(
-      f"No UserRepository record for user {current_user.id} on {parent_repo_id} "
+      f"No UserRepository record for user {target_user_id} on {parent_repo_id} "
       f"during plan change — no changes were made",
-      extra={"user_id": current_user.id, "repository_id": parent_repo_id},
+      extra={"user_id": target_user_id, "repository_id": parent_repo_id},
     )
     raise HTTPException(
       status_code=500,
@@ -564,7 +596,6 @@ async def _change_repository_plan(
   )
 
   # Audit log
-  org_id = user_orgs[0].org_id
   BillingAuditLog.log_event(
     session=db,
     event_type=(
@@ -581,6 +612,7 @@ async def _change_repository_plan(
     event_data={
       "resource_type": "repository",
       "resource_id": parent_repo_id,
+      "subscriber_user_id": target_user_id,
       "old_plan": old_plan,
       "new_plan": new_plan_tier,
       "old_price_cents": subscription.base_price_cents,
@@ -592,7 +624,8 @@ async def _change_repository_plan(
   logger.info(
     f"Changed repository {graph_id} plan: {old_plan} -> {new_plan_tier}",
     extra={
-      "user_id": current_user.id,
+      "user_id": target_user_id,
+      "actor_user_id": current_user.id,
       "repository_id": graph_id,
       "old_plan": old_plan,
       "new_plan": new_plan_tier,
@@ -610,9 +643,10 @@ async def _change_repository_plan(
     "Cancel a shared repository subscription. Two modes via the `immediate` "
     "flag: omit it (default `false`) to cancel at period end (access stays "
     "until the period closes); pass `true` with `confirm=<repo_id>` to stop "
-    "access right away. For user graphs, use "
+    "access right away. Members cancel their own subscription; org owners and "
+    "admins can cancel any member's by passing `user_id`. For user graphs, use "
     "`POST /v1/graphs/{graph_id}/operations/delete-graph` — this endpoint "
-    "rejects user graphs. Requires org owner role."
+    "rejects user graphs."
   ),
   operation_id="cancelRepositorySubscription",
   responses={**RESOURCE_ERROR_RESPONSES},
@@ -628,8 +662,12 @@ async def cancel_repository_subscription(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
-  from ...models.core import OrgRole, OrgUser
-  from ...operations.providers.payment_provider import get_payment_provider
+  from ...operations.billing import (
+    ProviderCancellationError,
+  )
+  from ...operations.billing import (
+    cancel_repository_subscription as cancel_subscription_op,
+  )
 
   if not is_shared_repository(graph_id):
     raise HTTPException(
@@ -643,21 +681,12 @@ async def cancel_repository_subscription(
 
   parent_repo_id = resolve_shared_repository_parent(graph_id)
 
-  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-  if not user_orgs:
-    raise HTTPException(
-      status_code=403, detail="You are not a member of any organization"
-    )
-  if user_orgs[0].role != OrgRole.OWNER:
-    raise HTTPException(
-      status_code=403,
-      detail="Only organization owners can cancel subscriptions",
-    )
+  target_user_id, _org_id = _resolve_subscription_target(current_user, body.user_id, db)
 
   subscription = BillingSubscription.get_by_resource_and_user(
     resource_type="repository",
     resource_id=parent_repo_id,
-    user_id=current_user.id,
+    user_id=target_user_id,
     session=db,
   )
   if not subscription:
@@ -685,76 +714,26 @@ async def cancel_repository_subscription(
         ),
       )
 
-  # Stripe-side: full cancel for immediate, period-end otherwise. Both provider
-  # methods are idempotent (already-canceled/missing counts as success), so a
-  # raise here always means Stripe still has a live subscription that will
-  # keep billing — in which case the local cancel and access revocation must
-  # not proceed, or the customer pays for access they no longer have.
-  # Default cancel does NOT prorate or refund.
-  if subscription.stripe_subscription_id:
-    try:
-      provider = get_payment_provider("stripe")
-      if body.immediate:
-        provider.cancel_subscription(subscription.stripe_subscription_id)
-      else:
-        provider.cancel_subscription_at_period_end(subscription.stripe_subscription_id)
-    except Exception as e:
-      logger.error(
-        f"Failed to cancel Stripe subscription for {graph_id}: {e}",
-        extra={"subscription_id": subscription.id},
-        exc_info=True,
-      )
-      raise HTTPException(
-        status_code=502,
-        detail=(
-          "The payment provider could not cancel the subscription. "
-          "No changes were made — please try again."
-        ),
-      )
-
-  subscription.cancel(db, immediate=body.immediate)
-
-  user_repo = UserRepository.get_by_user_and_repository(
-    user_id=current_user.id,
-    repository_name=parent_repo_id,
-    session=db,
-  )
-  if user_repo:
-    if body.immediate:
-      user_repo.revoke_access(db)
-    else:
-      user_repo.expires_at = subscription.ends_at
-      user_repo.next_billing_at = None
-      user_repo.updated_at = subscription.updated_at
-      db.commit()
-
-  BillingAuditLog.log_event(
-    session=db,
-    event_type=BillingEventType.SUBSCRIPTION_CANCELED,
-    description=(
-      f"Repository subscription {subscription.id} canceled for {graph_id} "
-      f"({'immediate' if body.immediate else 'period_end'})"
-    ),
-    actor_type="user",
-    actor_user_id=current_user.id,
-    org_id=user_orgs[0].org_id,
-    subscription_id=subscription.id,
-    event_data={
-      "immediate": body.immediate,
-      "via": "graph_scoped.subscription_cancel",
-      "resource_type": "repository",
-      "resource_id": parent_repo_id,
-    },
-  )
-
-  logger.info(
-    f"Canceled repository subscription for {graph_id} (immediate={body.immediate})",
-    extra={
-      "user_id": current_user.id,
-      "repository_id": graph_id,
-      "subscription_id": subscription.id,
-      "immediate": body.immediate,
-    },
-  )
+  # Provider first, then local state and access — a provider failure means the
+  # customer is still being billed, so nothing local may change.
+  # Cancellation does NOT prorate or refund.
+  try:
+    cancel_subscription_op(
+      subscription,
+      session=db,
+      actor_user_id=current_user.id,
+      immediate=body.immediate,
+      reason="user_request"
+      if target_user_id == current_user.id
+      else "org_admin_request",
+    )
+  except ProviderCancellationError:
+    raise HTTPException(
+      status_code=502,
+      detail=(
+        "The payment provider could not cancel the subscription. "
+        "No changes were made — please try again."
+      ),
+    )
 
   return subscription_to_response(subscription)
