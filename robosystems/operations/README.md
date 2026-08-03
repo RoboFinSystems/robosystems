@@ -87,6 +87,10 @@ operations/
 │   ├── pricing_service.py               # Pricing calculations
 │   ├── metrics_service.py               # Analytics and performance metrics
 │   └── repository_subscription_service.py
+├── billing/                   # Subscription billing lifecycle (provider + billing row + access)
+│   └── repository_subscriptions.py      # Cancel one/all repo subs; shared by routers and off-boarding
+├── admin/                     # Support-plane actions with no self-serve surface
+│   └── user_deletion.py                 # Guarded account deletion (frees the email; retains audit history)
 ├── extensions/                # OLTP→OLAP materialization (materialize.py, loader.py, staleness.py)
 ├── library/                   # Taxonomy/framework library reads (shared + tenant)
 ├── search/                    # Document search (embeddings, markdown parsing, service)

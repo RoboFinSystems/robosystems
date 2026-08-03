@@ -11,6 +11,8 @@ from ...middleware.auth.admin import require_admin
 from ...models.api.admin import (
   UserActivityResponse,
   UserAPIKeyResponse,
+  UserDeletionBlockerResponse,
+  UserDeletionResponse,
   UserGraphAccessResponse,
   UserRepositoryAccessResponse,
   UserResponse,
@@ -23,6 +25,12 @@ from ...models.core.graph.graph_credits import (
 from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 from ...models.core.user.user_api_key import UserAPIKey
 from ...models.core.user.user_repository import UserRepository
+from ...operations.admin import (
+  UserDeletionBlocked,
+  UserNotFound,
+  execute_user_deletion,
+  plan_user_deletion,
+)
 
 logger = get_logger(__name__)
 
@@ -354,6 +362,73 @@ async def get_user_activity(request: Request, user_id: str):
       repositories_accessed=repositories_accessed,
       credit_usage_month=credit_usage_month,
       storage_usage_gb=storage_usage,
+    )
+  finally:
+    session.close()
+
+
+@router.delete("/{user_id}", response_model=UserDeletionResponse)
+@require_admin(permissions=["users:write"])
+async def delete_user(
+  request: Request,
+  user_id: str,
+  dry_run: bool = Query(False, description="Assess the deletion without performing it"),
+):
+  """Delete a user account, freeing its email address.
+
+  Refuses while the user's organization still holds live graphs, subscriptions
+  in force, or active repository access — those must be resolved first. Billing
+  and audit history is retained with the actor de-referenced.
+  """
+  session = next(get_db_session())
+  try:
+    try:
+      plan = (
+        plan_user_deletion(user_id, session)
+        if dry_run
+        else execute_user_deletion(
+          user_id,
+          session,
+          actor=f"admin:{request.state.admin.get('name', 'unknown')}",
+        )
+      )
+    except UserNotFound:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"User {user_id} not found",
+      )
+    except UserDeletionBlocked as blocked:
+      raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+          "message": "User cannot be deleted yet",
+          "blockers": [{"code": b.code, "detail": b.detail} for b in blocked.blockers],
+        },
+      )
+
+    deleted = not dry_run and plan.can_delete
+
+    logger.info(
+      f"Admin {'assessed' if dry_run else 'deleted'} user {user_id}",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "user_id": user_id,
+        "dry_run": dry_run,
+        "blockers": [b.code for b in plan.blockers],
+      },
+    )
+
+    return UserDeletionResponse(
+      user_id=plan.user_id,
+      email=plan.email,
+      deleted=deleted,
+      dry_run=dry_run,
+      blockers=[
+        UserDeletionBlockerResponse(code=b.code, detail=b.detail) for b in plan.blockers
+      ],
+      removals=plan.removals,
+      orgs_deleted=plan.orgs_to_delete,
+      orgs_retained=plan.orgs_retained,
     )
   finally:
     session.close()

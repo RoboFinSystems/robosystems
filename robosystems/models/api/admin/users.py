@@ -52,6 +52,26 @@ class UserAPIKeyResponse(BaseModel):
   expires_at: datetime | None
 
 
+class UserDeletionBlockerResponse(BaseModel):
+  """One reason a user account cannot be deleted."""
+
+  code: str
+  detail: str
+
+
+class UserDeletionResponse(BaseModel):
+  """Result of a user deletion, or of a dry run that only assessed it."""
+
+  user_id: str
+  email: str
+  deleted: bool
+  dry_run: bool
+  blockers: list[UserDeletionBlockerResponse]
+  removals: dict[str, int]
+  orgs_deleted: list[str]
+  orgs_retained: list[str]
+
+
 class UserActivityResponse(BaseModel):
   """Response with user's recent activity."""
 

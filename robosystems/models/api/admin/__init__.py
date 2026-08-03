@@ -34,6 +34,8 @@ from .subscription import (
 from .users import (
   UserActivityResponse,
   UserAPIKeyResponse,
+  UserDeletionBlockerResponse,
+  UserDeletionResponse,
   UserGraphAccessResponse,
   UserRepositoryAccessResponse,
   UserResponse,
@@ -69,6 +71,8 @@ __all__ = [
   "SubscriptionUpdateRequest",
   "UserAPIKeyResponse",
   "UserActivityResponse",
+  "UserDeletionBlockerResponse",
+  "UserDeletionResponse",
   "UserGraphAccessResponse",
   "UserRepositoryAccessResponse",
   "UserResponse",
