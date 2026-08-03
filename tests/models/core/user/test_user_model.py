@@ -254,8 +254,9 @@ class TestUserModel:
 
     # Delete org-related tables before deleting users
     try:
-      from robosystems.models.core import Org, OrgLimits, OrgUser
+      from robosystems.models.core import Org, OrgInvitation, OrgLimits, OrgUser
 
+      db_session.query(OrgInvitation).delete()
       db_session.query(OrgUser).delete()
       db_session.query(OrgLimits).delete()
       db_session.query(Org).delete()

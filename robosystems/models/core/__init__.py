@@ -38,7 +38,15 @@ from .graph import (
   SourceFile,
   UsageEventType,
 )
-from .org import Org, OrgLimits, OrgRole, OrgType, OrgUser
+from .org import (
+  InvitationStatus,
+  Org,
+  OrgInvitation,
+  OrgLimits,
+  OrgRole,
+  OrgType,
+  OrgUser,
+)
 from .user import (
   RepositoryType,
   User,
@@ -76,8 +84,10 @@ __all__ = [
   "GraphTable",
   "GraphUsage",
   "GraphUser",
+  "InvitationStatus",
   "InvoiceStatus",
   "Org",
+  "OrgInvitation",
   "OrgLimits",
   "OrgRole",
   "OrgType",

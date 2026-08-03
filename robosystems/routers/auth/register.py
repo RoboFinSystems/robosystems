@@ -25,7 +25,7 @@ from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
-from ...models.core import Org, OrgLimits, User, UserToken
+from ...models.core import Org, OrgInvitation, OrgLimits, OrgUser, User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.captcha import captcha_service
@@ -232,6 +232,42 @@ async def register(
       status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
     )
 
+  # Resolve an org invitation before creating anything, so an invalid token
+  # fails the registration outright. Falling back to a personal org would
+  # permanently strand the user outside the inviting org (one org per user).
+  invitation = None
+  invited_org = None
+  if request.invite_token:
+    invitation = OrgInvitation.get_valid_by_token(request.invite_token, session)
+    if invitation is not None:
+      invited_org = Org.get_by_id(invitation.org_id, session)
+
+    if invitation is None or invited_org is None:
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTH_FAILURE,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint="/v1/auth/register",
+        details={
+          "failure_reason": "invalid_invitation_token",
+          "attempted_email": sanitized_email,
+        },
+        risk_level="medium",
+      )
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          "This invitation link is invalid or has expired. "
+          "Ask your organization admin to send a new invitation."
+        ),
+      )
+
+    if invitation.email != sanitized_email.lower():
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="This invitation was issued for a different email address.",
+      )
+
   # Hash the password
   password_hash = hash_password(request.password)
 
@@ -245,8 +281,12 @@ async def register(
       session=session,
     )
 
-    # Set email verification status based on environment
-    if not env.EMAIL_VERIFICATION_ENABLED:
+    if invitation is not None:
+      # Possession of the emailed invitation token proves control of the
+      # invited mailbox, so no separate verification round-trip is needed.
+      user.verify_email(session)
+      logger.info(f"Email verified via invitation token for: {sanitized_email}")
+    elif not env.EMAIL_VERIFICATION_ENABLED:
       # In development, automatically verify emails for convenience
       user.verify_email(session)
       logger.info(
@@ -294,21 +334,42 @@ async def register(
 
       logger.info(f"Queued verification email for new user: {sanitized_email}")
 
-    # Create personal organization for the user
-    # RoboSystems is org-centric: all resources belong to orgs, not users
-    org = Org.create_personal_org_for_user(
-      user_id=user.id,
-      user_name=sanitized_name,
-      session=session,
-    )
-    logger.info(
-      f"Created personal org '{org.name}' ({org.id}) for user {sanitized_email}",
-      extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
-    )
+    if invitation is not None and invited_org is not None:
+      # Join the inviting org at the invited role instead of minting a
+      # personal org; the inviting org already carries limits and billing.
+      OrgUser.create(
+        org_id=invited_org.id,
+        user_id=user.id,
+        role=invitation.role,
+        session=session,
+        auto_commit=False,
+      )
+      invitation.mark_accepted(user.id, session, auto_commit=False)
+      org = invited_org
+      logger.info(
+        f"User {sanitized_email} joined org {org.id} via invitation {invitation.id}",
+        extra={
+          "user_id": user.id,
+          "org_id": org.id,
+          "org_role": invitation.role.value,
+        },
+      )
+    else:
+      # Create personal organization for the user
+      # RoboSystems is org-centric: all resources belong to orgs, not users
+      org = Org.create_personal_org_for_user(
+        user_id=user.id,
+        user_name=sanitized_name,
+        session=session,
+      )
+      logger.info(
+        f"Created personal org '{org.name}' ({org.id}) for user {sanitized_email}",
+        extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
+      )
 
-    # Create default org limits (safety limits for resource provisioning)
-    # Orgs can purchase subscriptions to increase limits
-    OrgLimits.create_default_limits(org.id, session)
+      # Create default org limits (safety limits for resource provisioning)
+      # Orgs can purchase subscriptions to increase limits
+      OrgLimits.create_default_limits(org.id, session)
 
     # Commit the transaction
     session.commit()
@@ -351,6 +412,7 @@ async def register(
       "email_verified": user.email_verified,
       "captcha_required": env.CAPTCHA_ENABLED,
       "captcha_provided": bool(request.captcha_token),
+      "invited": invitation is not None,
       "environment": env.ENVIRONMENT,
     },
     risk_level="low",
@@ -363,9 +425,12 @@ async def register(
     )
 
   # Prepare success message based on email verification requirement
-  message = "User registered successfully"
-  if env.EMAIL_VERIFICATION_ENABLED and not user.email_verified:
-    message += ". Please check your email to verify your account."
+  if invitation is not None:
+    message = f"User registered successfully and joined {org.name}"
+  else:
+    message = "User registered successfully"
+    if env.EMAIL_VERIFICATION_ENABLED and not user.email_verified:
+      message += ". Please check your email to verify your account."
 
   expires_in = int(JWT_EXPIRY_HOURS * 3600)
   refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)

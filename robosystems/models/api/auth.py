@@ -30,6 +30,10 @@ class RegisterRequest(BaseModel):
   captcha_token: str | None = Field(
     None, description="CAPTCHA verification token (required in production)"
   )
+  invite_token: str | None = Field(
+    None,
+    description="Org invitation token from an invitation email. When present, the new user joins the inviting organization at the invited role instead of receiving a personal organization.",
+  )
 
   @field_validator("password")
   def validate_password_strength(cls, v: str, info: ValidationInfo) -> str:

@@ -17,12 +17,14 @@ logger = get_logger(__name__)
 class SendEmailConfig(Config):
   """Configuration for sending an email."""
 
-  email_type: str  # email_verification, password_reset, welcome
+  email_type: str  # email_verification, password_reset, welcome, org_invitation
   to_email: str
   user_name: str
-  token: str | None = None  # For verification/reset emails
+  token: str | None = None  # For verification/reset/invitation emails
   app: str = "roboledger"
   operation_id: str | None = None  # For SSE tracking
+  org_name: str | None = None  # For org_invitation emails
+  inviter_name: str | None = None  # For org_invitation emails
 
 
 class EmailResult:
@@ -109,6 +111,20 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
         ses_service.send_welcome_email(
           user_email=config.to_email,
           user_name=config.user_name,
+          app=config.app,
+        )
+      )
+    elif config.email_type == "org_invitation":
+      if not config.token:
+        raise ValueError("Token required for org_invitation")
+      if not config.org_name:
+        raise ValueError("org_name required for org_invitation")
+      success = loop.run_until_complete(
+        ses_service.send_org_invitation_email(
+          user_email=config.to_email,
+          inviter_name=config.inviter_name or "A teammate",
+          org_name=config.org_name,
+          token=config.token,
           app=config.app,
         )
       )
@@ -205,17 +221,21 @@ def build_email_job_config(
   token: str | None = None,
   app: str = "roboledger",
   operation_id: str | None = None,
+  org_name: str | None = None,
+  inviter_name: str | None = None,
 ) -> dict:
   """
   Build run_config for send_email_job.
 
   Args:
-    email_type: Type of email (email_verification, password_reset, welcome)
+    email_type: Type of email (email_verification, password_reset, welcome, org_invitation)
     to_email: Recipient email address
     user_name: User's display name
-    token: Verification/reset token (required for verification and reset emails)
+    token: Verification/reset/invitation token (required for all but welcome)
     app: App identifier (roboledger, roboinvestor, robosystems)
     operation_id: Optional SSE operation ID for progress tracking
+    org_name: Organization name (required for org_invitation)
+    inviter_name: Inviting user's display name (org_invitation)
 
   Returns:
     run_config dictionary for Dagster
@@ -234,6 +254,12 @@ def build_email_job_config(
 
   if operation_id:
     config["operation_id"] = operation_id
+
+  if org_name:
+    config["org_name"] = org_name
+
+  if inviter_name:
+    config["inviter_name"] = inviter_name
 
   run_config: dict = {
     "ops": {

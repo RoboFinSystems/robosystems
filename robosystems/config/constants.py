@@ -63,6 +63,7 @@ JWT_EXPIRY_HOURS = 0.5  # 30 minutes - used for access token creation
 # Email Token Expiration
 EMAIL_TOKEN_EXPIRY_HOURS = 24  # Email verification token validity
 PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 1  # Password reset token validity
+ORG_INVITATION_EXPIRY_DAYS = 7  # Org invitation link validity
 
 # Authentication Security Constants
 TOKEN_GRACE_PERIOD_MINUTES = 5  # Grace period for expired token refresh

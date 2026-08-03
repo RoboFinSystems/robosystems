@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from .captcha import router as captcha_router
 from .email_verification import router as email_verification_router
+from .invitations import router as invitations_router
 from .login import router as login_router
 from .logout import router as logout_router
 from .password import router as password_router
@@ -27,6 +28,9 @@ router.include_router(session_router)
 
 # Email verification
 router.include_router(email_verification_router)
+
+# Org invitation preview (public, token-gated)
+router.include_router(invitations_router)
 
 # Password management
 router.include_router(password_router)

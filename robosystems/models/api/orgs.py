@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from robosystems.models.core.org import OrgRole, OrgType
 
@@ -30,11 +30,19 @@ class UpdateOrgRequest(BaseModel):
   org_type: OrgType | None = None
 
 
-class InviteMemberRequest(BaseModel):
-  """Request to invite a member to an organization."""
+class CreateInvitationRequest(BaseModel):
+  """Request to invite a new user to an organization by email."""
 
   email: EmailStr
-  role: OrgRole | None = Field(default=OrgRole.MEMBER)
+  role: OrgRole = Field(default=OrgRole.MEMBER)
+
+  @field_validator("role")
+  @classmethod
+  def role_not_owner(cls, v: OrgRole) -> OrgRole:
+    """Ownership is never granted by invitation."""
+    if v == OrgRole.OWNER:
+      raise ValueError("Users cannot be invited as owner")
+    return v
 
 
 class UpdateMemberRoleRequest(BaseModel):
@@ -81,6 +89,38 @@ class OrgMemberListResponse(BaseModel):
   members: list[OrgMemberResponse]
   total: int
   org_id: str
+
+
+class OrgInvitationResponse(BaseModel):
+  """Organization invitation response."""
+
+  id: str
+  org_id: str
+  email: str
+  role: OrgRole
+  status: str
+  invited_by_user_id: str
+  invited_by_name: str | None
+  created_at: datetime
+  expires_at: datetime
+  is_expired: bool
+
+
+class OrgInvitationListResponse(BaseModel):
+  """List of pending organization invitations response."""
+
+  invitations: list[OrgInvitationResponse]
+  total: int
+  org_id: str
+
+
+class InvitationPreviewResponse(BaseModel):
+  """Public preview of an invitation, looked up by its token."""
+
+  org_name: str
+  email: str
+  role: OrgRole
+  expires_at: datetime
 
 
 class OrgDetailResponse(BaseModel):

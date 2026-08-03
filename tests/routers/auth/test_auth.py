@@ -476,3 +476,148 @@ class TestAuthSecurity:
       assert (
         data["user"]["name"] == "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
       )
+
+
+class TestInvitedRegistration:
+  """Registration via an org invitation token joins the org instead of
+  creating a personal org."""
+
+  @staticmethod
+  def _make_invitation(test_db, test_user, email, role=None):
+    from robosystems.models.core import Org, OrgInvitation, OrgRole, OrgType, OrgUser
+
+    org = Org.create(
+      name="Inviting Org",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    invitation, raw_token = OrgInvitation.create_invitation(
+      org_id=org.id,
+      email=email,
+      role=role or OrgRole.MEMBER,
+      invited_by=test_user.id,
+      session=test_db,
+    )
+    return org, invitation, raw_token
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_register_with_invitation_joins_org(
+    self, client: TestClient, test_db, test_user
+  ):
+    from robosystems.models.core import InvitationStatus, OrgRole, OrgUser
+
+    org, invitation, raw_token = self._make_invitation(
+      test_db, test_user, "invited@example.com", role=OrgRole.ADMIN
+    )
+
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Invited User",
+        "email": "invited@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": raw_token,
+      },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["org"]["id"] == org.id
+    assert data["user"]["email_verified"] is True
+    assert "joined" in data["message"]
+
+    new_user = User.get_by_email("invited@example.com", test_db)
+    assert new_user is not None
+
+    memberships = OrgUser.get_user_orgs(new_user.id, test_db)
+    assert len(memberships) == 1
+    assert memberships[0].org_id == org.id
+    assert memberships[0].role == OrgRole.ADMIN
+
+    test_db.refresh(invitation)
+    assert invitation.status == InvitationStatus.ACCEPTED.value
+    assert invitation.accepted_user_id == new_user.id
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_register_with_invitation_email_mismatch(
+    self, client: TestClient, test_db, test_user
+  ):
+    _, _, raw_token = self._make_invitation(test_db, test_user, "intended@example.com")
+
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Wrong Person",
+        "email": "someoneelse@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": raw_token,
+      },
+    )
+
+    assert response.status_code == 400
+    assert "different email address" in response.json()["detail"]
+    assert User.get_by_email("someoneelse@example.com", test_db) is None
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_register_with_invalid_invite_token(self, client: TestClient, test_db):
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "No Invite",
+        "email": "noinvite@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": "bogus-token",
+      },
+    )
+
+    assert response.status_code == 400
+    assert "invalid or has expired" in response.json()["detail"]
+    assert User.get_by_email("noinvite@example.com", test_db) is None
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_register_with_expired_invite_token(
+    self, client: TestClient, test_db, test_user
+  ):
+    from datetime import UTC, datetime, timedelta
+
+    _, invitation, raw_token = self._make_invitation(
+      test_db, test_user, "late@example.com"
+    )
+    invitation.expires_at = datetime.now(UTC) - timedelta(days=1)
+    test_db.commit()
+
+    response = client.post(
+      "/v1/auth/register",
+      json={
+        "name": "Too Late",
+        "email": "late@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+        "invite_token": raw_token,
+      },
+    )
+
+    assert response.status_code == 400
+    assert "invalid or has expired" in response.json()["detail"]
