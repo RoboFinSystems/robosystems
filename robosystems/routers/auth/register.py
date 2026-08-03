@@ -63,28 +63,45 @@ async def register(
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> AuthResponse:
-  # Check if registration is enabled
+  # Check if registration is enabled.
+  #
+  # An invitation is itself the authorization to register, so closing
+  # registration stops *unsolicited* signups without also blocking the people
+  # an org admin deliberately invited. That composition — closed registration
+  # plus invitations — is invite-only mode.
+  #
+  # The token is resolved here rather than trusted as a mere presence check:
+  # otherwise any string would buy an attacker passage to the checks below,
+  # including the duplicate-email probe that closed registration is meant to
+  # deny. It is validated again in full (email match, expiry) further down.
   if not env.USER_REGISTRATION_ENABLED:
-    # Get client details for security logging
-    client_ip = fastapi_request.client.host if fastapi_request.client else None
-    user_agent = fastapi_request.headers.get("user-agent")
-
-    SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.AUTHORIZATION_DENIED,
-      ip_address=client_ip,
-      user_agent=user_agent,
-      endpoint="/v1/auth/register",
-      details={
-        "reason": "registration_disabled",
-        "attempted_email": request.email,
-      },
-      risk_level="low",
+    has_valid_invitation = (
+      request.invite_token is not None
+      and OrgInvitation.get_valid_by_token(request.invite_token, session) is not None
     )
 
-    raise HTTPException(
-      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail="Registration is temporarily disabled. Please check back later or contact support for early access.",
-    )
+    if not has_valid_invitation:
+      # Get client details for security logging
+      client_ip = fastapi_request.client.host if fastapi_request.client else None
+      user_agent = fastapi_request.headers.get("user-agent")
+
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint="/v1/auth/register",
+        details={
+          "reason": "registration_disabled",
+          "attempted_email": request.email,
+          "invitation_presented": request.invite_token is not None,
+        },
+        risk_level="low",
+      )
+
+      raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Registration is temporarily disabled. Please check back later or contact support for early access.",
+      )
 
   # Validate and sanitize input
   if not validate_email(request.email):
