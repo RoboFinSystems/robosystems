@@ -124,6 +124,15 @@ class OperatorSpec:
     default_factory=lambda: {"input": 150000, "output": 8000}
   )
   requires_credits: bool = True
+  read_only: bool = False
+  """Whether this operator only reads from the graph.
+
+  Fail-closed on purpose: the default is `False`, so an operator is treated as
+  write-capable — and gated on the graph write role — unless it declares
+  otherwise. An operator that gains a write tool later inherits the gate, and
+  one that forgets this flag is over-restricted rather than under-protected.
+  Set `True` only where the tool allowlist is provably read-only.
+  """
   execution_profile: dict[OperatorMode, ExecutionProfile] = field(
     default_factory=lambda: {
       OperatorMode.QUICK: ExecutionProfile(
@@ -511,3 +520,33 @@ class BaseOperator(ABC):
       f"name='{self.metadata.name}' "
       f"graph_id='{self.graph_id}'>"
     )
+
+
+def enforce_operator_write_role(
+  operator: Operator, graph_id: str, user_id: str
+) -> None:
+  """Gate a write-capable operator on the caller's graph write role.
+
+  Operators drive MCP tools through a tool-access layer that carries no user
+  identity, so the per-tool write classification the MCP router applies
+  (`validate_mcp_access(..., "write")`) never runs on this path. The role has
+  to be checked once, before the operator starts its tool-use loop.
+
+  Called from the execution adapters rather than the routers so that every
+  entry point inherits it — sync, SSE, queued background, and worker — since
+  two of those bypass the orchestrator and call the adapter directly.
+
+  No-ops for operators whose spec sets `read_only=True`; see
+  :attr:`OperatorSpec.read_only` for why the default is fail-closed.
+
+  Raises:
+      HTTPException: 403 if the user's role on the graph is read-only.
+  """
+  if operator.spec.read_only:
+    return
+
+  # Local import: this module is imported by the operator implementations, and
+  # the auth dependencies pull in the platform DB stack.
+  from robosystems.middleware.auth.dependencies import require_graph_write_role
+
+  require_graph_write_role(user_id, graph_id)

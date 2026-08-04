@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
 from robosystems.operations.operators.ai_client import AIClient
-from robosystems.operations.operators.base import OperatorMode, OperatorResult
+from robosystems.operations.operators.base import (
+  OperatorMode,
+  OperatorResult,
+  enforce_operator_write_role,
+)
 from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import CallbackProgress
@@ -58,6 +62,11 @@ async def run_operator_api(
   Returns:
       OperatorResult with domain content + runtime metadata attached.
   """
+  # Before any tool access is constructed: the tool layer carries no user
+  # identity, so this is the only point at which the caller's graph role can
+  # be checked on this path.
+  enforce_operator_write_role(operator, graph_id, str(user.id))
+
   tools = HttpToolAccess(graph_id)
   ai_client = AIClient()
 
