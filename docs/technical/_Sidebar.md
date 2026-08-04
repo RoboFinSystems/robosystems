@@ -5,6 +5,7 @@
 - [Core Concepts](Core-Concepts)
 - [Architecture Overview](Architecture-Overview)
 - [Bootstrap Guide](Bootstrap-Guide)
+- [Windows Setup (WSL2)](Windows-Setup-with-WSL2)
 - [Security & Compliance](Security-and-Compliance)
 
 ### Demos

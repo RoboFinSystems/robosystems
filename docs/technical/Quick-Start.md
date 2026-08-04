@@ -25,6 +25,8 @@ Before starting, ensure you have:
 - **[jq](https://jqlang.github.io/jq/)** to read your API key out of `.local/config.json`. On macOS: `brew install jq`.
 - A clone of the [robosystems repository](https://github.com/RoboFinSystems/robosystems) and a terminal at its root.
 
+**On Windows?** Set up WSL2 first and clone the repo inside the Linux filesystem — see [Windows Setup (WSL2)](Windows-Setup-with-WSL2). Every command below then works verbatim.
+
 ## Quick Start
 
 The fastest path from a clean checkout to a queryable graph:
