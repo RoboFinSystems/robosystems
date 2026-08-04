@@ -177,7 +177,10 @@ class TestOrgUsageEndpoints:
         graph_id=graph.graph_id,
         event_type=UsageEventType.STORAGE_SNAPSHOT.value,
         graph_tier=graph.graph_tier,
-        storage_gb=Decimal("7.5"),
+        # Float, matching the column type. Seeding a Decimal here was why the
+        # production crash stayed invisible: Decimal += Decimal aggregated
+        # fine, while real rows are floats and raised a TypeError.
+        storage_gb=7.5,
         recorded_at=now,
         billing_year=now.year,
         billing_month=now.month,
@@ -307,3 +310,96 @@ class TestOrgUsageEndpoints:
     assert body["period_days"] == 45
     assert len(body["daily_trend"]) == 30
     assert all(entry["credits_used"] == 0 for entry in body["daily_trend"])
+
+
+class TestOrgUsageVisibility:
+  """Org usage is an org-wide aggregate — per-graph names, credit balances and
+  storage for every graph the org owns — so it is gated like invoices rather
+  than narrowed per caller. A plain member has no accessible view of an
+  org-wide total.
+  """
+
+  async def test_member_cannot_read_org_usage(self, async_client, test_db, test_user):
+    owner = _create_user(test_db, password_hash=test_user.password_hash)
+    org = Org.create(
+      name=f"Usage Gate Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    _create_graph(test_db, org.id, "Not Yours")
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/usage")
+
+    assert response.status_code == 403
+    assert "admins and owners" in response.json()["detail"]
+
+  async def test_admin_can_read_org_usage(self, async_client, test_db, test_user):
+    org = Org.create(
+      name=f"Usage Allowed Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.ADMIN, session=test_db
+    )
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/usage")
+
+    assert response.status_code == 200
+
+
+class TestOrgGraphCountConsistency:
+  """The count on the org card must match what the org detail view lists.
+
+  Counting every org graph left a member reading "2 graphs" and then finding
+  an empty list, since membership alone grants no graph access.
+  """
+
+  async def test_member_count_matches_visible_graphs(
+    self, async_client, test_db, test_user
+  ):
+    owner = _create_user(test_db, password_hash=test_user.password_hash)
+    org = Org.create(
+      name=f"Count Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    granted = _create_graph(test_db, org.id, "Granted")
+    _create_graph(test_db, org.id, "Hidden")
+    GraphUser.create(
+      user_id=test_user.id, graph_id=granted.graph_id, role="member", session=test_db
+    )
+
+    listing = await async_client.get("/v1/orgs")
+    detail = await async_client.get(f"/v1/orgs/{org.id}")
+
+    assert listing.status_code == 200
+    assert detail.status_code == 200
+    entry = next(o for o in listing.json()["orgs"] if o["id"] == org.id)
+    assert entry["graph_count"] == 1
+    assert len(detail.json()["graphs"]) == entry["graph_count"]
+
+  async def test_owner_count_covers_the_org(self, async_client, test_db, test_user):
+    org = Org.create(
+      name=f"Owner Count Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    _create_graph(test_db, org.id, "One")
+    _create_graph(test_db, org.id, "Two")
+
+    listing = await async_client.get("/v1/orgs")
+
+    entry = next(o for o in listing.json()["orgs"] if o["id"] == org.id)
+    assert entry["graph_count"] == 2

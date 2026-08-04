@@ -744,3 +744,52 @@ class TestSubscriptionVisibilityByRole:
     filters = self._captured_filters(mock_db)
     assert len(filters) == 2, "billing managers must not be narrowed by subscriber"
     assert all("user_id" not in str(f) for f in filters)
+
+
+class TestSubscriptionFetchNarrowing:
+  """Fetch-by-id must apply the same narrowing as the listing, or it stays a
+  way around the filtered list for anyone holding an id."""
+
+  @pytest.fixture
+  def mock_user(self):
+    user = Mock(spec=User)
+    user.id = "user_123"
+    return user
+
+  def _membership(self, can_manage: bool):
+    membership = Mock()
+    membership.can_manage_billing.return_value = can_manage
+    return membership
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_member_fetch_is_narrowed_to_their_own(
+    self, mock_get_org_user, mock_user
+  ):
+    mock_get_org_user.return_value = self._membership(can_manage=False)
+    mock_db = Mock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await get_subscription("org_123", "bsub_other", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 404
+    filters = mock_db.query.return_value.filter.call_args[0]
+    assert len(filters) == 3
+    assert "user_id" in str(filters[-1])
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_billing_manager_fetch_is_not_narrowed(
+    self, mock_get_org_user, mock_user
+  ):
+    mock_get_org_user.return_value = self._membership(can_manage=True)
+    mock_db = Mock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+
+    with pytest.raises(HTTPException):
+      await get_subscription("org_123", "bsub_any", mock_user, mock_db, None)
+
+    filters = mock_db.query.return_value.filter.call_args[0]
+    assert len(filters) == 2
+    assert all("user_id" not in str(f) for f in filters)
