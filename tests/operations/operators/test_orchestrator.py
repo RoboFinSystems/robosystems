@@ -401,27 +401,39 @@ class TestOperatorOrchestrator:
 
   @pytest.mark.asyncio
   async def test_credit_check_insufficient(self, mock_user):
+    """The orchestrator renders a refusal raised by the adapter.
+
+    The pre-flight itself moved into the execution adapters, because the SSE
+    and background-queue strategies bypass the orchestrator entirely. What
+    remains here is the sync path's graceful rendering — a body with an
+    INSUFFICIENT_CREDITS code rather than an error status. That the adapter
+    actually raises is asserted in
+    `tests/operations/operators/test_credit_preflight.py`.
+    """
+    from robosystems.operations.operators.credit_preflight import (
+      InsufficientOperatorCreditsError,
+    )
+
     mock_db = Mock()
     orchestrator = OperatorOrchestrator("test-graph", mock_user, mock_db)
 
     with patch(
-      "robosystems.operations.graph.credit_service.CreditService"
-    ) as mock_credit_service:
-      mock_instance = Mock()
-      mock_credit_service.return_value = mock_instance
-      mock_instance.check_credit_balance.return_value = {
-        "has_sufficient_credits": False,
-        "estimated_credits": 10.0,
-        "available_credits": 5.0,
-      }
-
+      "robosystems.operations.operators.orchestrator.run_operator_api",
+      side_effect=InsufficientOperatorCreditsError(
+        operator_name="financial",
+        estimated_credits=10.0,
+        available_credits=5.0,
+      ),
+    ):
       agent = FinancialOperator()
       response = await orchestrator._execute_operator(
         agent, "test query", OperatorMode.STANDARD, None, {}
       )
 
-      assert "Insufficient credits" in response.content
-      assert response.error_details["code"] == "INSUFFICIENT_CREDITS"
+    assert "Insufficient credits" in response.content
+    assert response.error_details["code"] == "INSUFFICIENT_CREDITS"
+    assert response.error_details["required_credits"] == 10.0
+    assert response.error_details["available_credits"] == 5.0
 
   @pytest.mark.asyncio
   async def test_credit_check_passes(self, mock_user):

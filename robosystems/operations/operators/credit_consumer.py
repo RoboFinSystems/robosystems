@@ -12,7 +12,15 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from robosystems.logger import logger
+
+class CreditConsumptionError(Exception):
+  """Raised when credits for a completed AI call could not be recorded.
+
+  Distinguishes "billing failed" from "billed, and the cost rounded to zero" —
+  the implementations previously returned 0.0 for both, which made an unbounded
+  billing failure indistinguishable from a cheap call and impossible for the
+  caller to act on.
+  """
 
 
 @runtime_checkable
@@ -28,7 +36,11 @@ class CreditConsumer(Protocol):
     model: str,
     operation_description: str,
   ) -> float:
-    """Consume credits for an AI call. Returns credits consumed."""
+    """Consume credits for an AI call. Returns credits consumed.
+
+    Raises:
+        CreditConsumptionError: if the consumption could not be recorded.
+    """
 
 
 class SessionCreditConsumer:
@@ -65,8 +77,7 @@ class SessionCreditConsumer:
     if result.get("success"):
       return float(result.get("credits_consumed", 0))
 
-    logger.warning(f"Credit consumption failed: {result.get('error', 'Unknown')}")
-    return 0.0
+    raise CreditConsumptionError(str(result.get("error", "Unknown")))
 
 
 class FactoryCreditConsumer:
@@ -103,13 +114,11 @@ class FactoryCreditConsumer:
       if result.get("success"):
         return float(result.get("credits_consumed", 0))
 
-      logger.warning(
-        f"Credit consumption failed (worker): {result.get('error', 'Unknown')}"
-      )
-      return 0.0
+      raise CreditConsumptionError(str(result.get("error", "Unknown")))
+    except CreditConsumptionError:
+      raise
     except Exception as e:
-      logger.warning(f"Credit consumption failed (worker): {e}")
-      return 0.0
+      raise CreditConsumptionError(str(e)) from e
     finally:
       session.close()
 
