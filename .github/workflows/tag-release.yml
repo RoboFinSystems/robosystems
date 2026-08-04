@@ -60,6 +60,25 @@ jobs:
             echo "Tag v${{ steps.get-version.outputs.version }} does not exist yet"
           fi
 
+      - name: Check for curated release notes
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        id: curated-notes
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+        run: |
+          # Milestone releases ship hand-written notes committed at
+          # .github/release-notes/v<version>.md; when present they replace
+          # the generated delta changelog below.
+          NOTES_FILE=".github/release-notes/v${VERSION}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "path=$NOTES_FILE" >> $GITHUB_OUTPUT
+            echo "📝 Curated release notes found: $NOTES_FILE"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No curated notes at $NOTES_FILE — generating changelog from changes since last tag"
+          fi
+
       - name: Analyze changes since last release
         if: steps.check-tag.outputs.tag_exists == 'false'
         id: analyze-changes
@@ -125,7 +144,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Generate changelog with Claude
-        if: steps.check-tag.outputs.tag_exists == 'false'
+        if: steps.check-tag.outputs.tag_exists == 'false' && steps.curated-notes.outputs.found != 'true'
         id: generate-changelog
         # Untrusted inputs (commit messages, changed filenames) reach the shell
         # only through env vars, never ${{ }} interpolation. In the unquoted
@@ -181,7 +200,7 @@ jobs:
           echo "✅ Changelog prompt created"
 
       - name: Call Claude API for changelog
-        if: steps.check-tag.outputs.tag_exists == 'false'
+        if: steps.check-tag.outputs.tag_exists == 'false' && steps.curated-notes.outputs.found != 'true'
         id: claude-changelog
         run: |
           # Check if ANTHROPIC_API_KEY is available
@@ -254,6 +273,58 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
+      - name: Compose release body
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        # The changelog (Claude-generated or curated) is untrusted relative to
+        # the shell — emit it with printf/cat from env vars and files, never by
+        # splicing ${{ ... }} into the script.
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+          CURATED_FOUND: ${{ steps.curated-notes.outputs.found }}
+          CURATED_PATH: ${{ steps.curated-notes.outputs.path }}
+          CHANGELOG: ${{ steps.claude-changelog.outputs.changelog }}
+          LAST_TAG: ${{ steps.analyze-changes.outputs.last_tag }}
+          COMMITS_COUNT: ${{ steps.analyze-changes.outputs.commits_count }}
+          FILES_CHANGED: ${{ steps.analyze-changes.outputs.files_changed }}
+          ADDITIONS: ${{ steps.analyze-changes.outputs.additions }}
+          DELETIONS: ${{ steps.analyze-changes.outputs.deletions }}
+        run: |
+          if [ "$CURATED_FOUND" = "true" ]; then
+            cp "$CURATED_PATH" /tmp/release_changelog.md
+          else
+            printf '%s\n' "$CHANGELOG" > /tmp/release_changelog.md
+          fi
+
+          {
+            echo "# RoboSystems Service v${VERSION}"
+            echo ""
+            cat /tmp/release_changelog.md
+            echo ""
+            echo "---"
+            echo ""
+            if [ "$CURATED_FOUND" != "true" ]; then
+              echo "## 📊 Release Statistics"
+              echo ""
+              echo "- **Commits:** ${COMMITS_COUNT}"
+              echo "- **Files Changed:** ${FILES_CHANGED}"
+              echo "- **Lines Added:** ${ADDITIONS}"
+              echo "- **Lines Deleted:** ${DELETIONS}"
+              echo "- **Previous Release:** ${LAST_TAG}"
+              echo ""
+            fi
+            echo "## 🔗 Links"
+            echo ""
+            echo "- **Full Changelog:** [${LAST_TAG}...v${VERSION}](https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${VERSION})"
+            echo "- **All Releases:** [View all releases](https://github.com/${{ github.repository }}/releases)"
+            if [ "$CURATED_FOUND" != "true" ]; then
+              echo ""
+              echo "---"
+              echo "🤖 Generated with [Claude Code](https://claude.ai/code)"
+            fi
+          } > /tmp/release_body.md
+
+          echo "✅ Release body composed ($([ "$CURATED_FOUND" = "true" ] && echo "curated notes" || echo "generated changelog"))"
+
       - name: Create Release Tag
         if: steps.check-tag.outputs.tag_exists == 'false'
         run: |
@@ -268,28 +339,7 @@ jobs:
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
           name: Release v${{ steps.get-version.outputs.version }}
-          body: |
-            # RoboSystems Service v${{ steps.get-version.outputs.version }}
-
-            ${{ steps.claude-changelog.outputs.changelog }}
-
-            ---
-
-            ## 📊 Release Statistics
-
-            - **Commits:** ${{ steps.analyze-changes.outputs.commits_count }}
-            - **Files Changed:** ${{ steps.analyze-changes.outputs.files_changed }}
-            - **Lines Added:** ${{ steps.analyze-changes.outputs.additions }}
-            - **Lines Deleted:** ${{ steps.analyze-changes.outputs.deletions }}
-            - **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}
-
-            ## 🔗 Links
-
-            - **Full Changelog:** [${{ steps.analyze-changes.outputs.last_tag }}...v${{ steps.get-version.outputs.version }}](https://github.com/${{ github.repository }}/compare/${{ steps.analyze-changes.outputs.last_tag }}...v${{ steps.get-version.outputs.version }})
-            - **All Releases:** [View all releases](https://github.com/${{ github.repository }}/releases)
-
-            ---
-            🤖 Generated with [Claude Code](https://claude.ai/code)
+          body_path: /tmp/release_body.md
           draft: false
           prerelease: false
         env:
@@ -298,11 +348,9 @@ jobs:
 
       - name: Create release summary
         if: steps.check-tag.outputs.tag_exists == 'false'
-        # CHANGELOG is Claude-generated from the untrusted commit/file inputs, so
-        # route it through env — its markdown must not break out of the echo into
-        # the shell (same reason the prompt inputs use env above).
-        env:
-          CHANGELOG: ${{ steps.claude-changelog.outputs.changelog }}
+        # The changelog (Claude-generated or curated) is untrusted, so it is read
+        # from the file written by the compose step — its markdown must not break
+        # out into the shell (same reason the prompt inputs use env above).
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
 
@@ -317,8 +365,8 @@ jobs:
           echo "- **Lines Deleted:** ${{ steps.analyze-changes.outputs.deletions }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🤖 Claude-Generated Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "$CHANGELOG" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Changelog" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/release_changelog.md >> $GITHUB_STEP_SUMMARY
 
       - name: Set outputs
         id: set-outputs
