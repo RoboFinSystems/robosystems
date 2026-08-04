@@ -75,7 +75,10 @@ from sqlalchemy.orm import Session
 from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
 from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_graph,
+  require_graph_write_role,
+)
 from robosystems.middleware.extensions import (
   GraphExtensionContext,
   OperationRegistrar,
@@ -524,6 +527,26 @@ _registrar = OperationRegistrar(
 _require_roboledger = require_graph_extension("roboledger")
 
 
+def _require_roboledger_write(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+) -> User:
+  """Membership + provisioning + write role for the hand-written ops below.
+
+  Every `@router.post` in this file is a command. `get_current_user_with_graph`
+  proves graph *membership* and `_require_roboledger` proves *provisioning* —
+  neither consults the graph role, so a read-only `viewer` cleared both. The
+  registrar applies `require_graph_write_role` to every op it mounts
+  (`middleware/extensions.py`); the ops that stayed hand-written for their
+  async dispatch, platform-DB or multi-stage error needs never picked it up.
+  This dependency is that same gate, so the two registration styles enforce
+  identically and a new hand-written op inherits it by using this dep.
+  """
+  require_graph_write_role(str(user.id), graph_id)
+  return user
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Operation request bodies — wrap path-specific IDs into the request body.
 # ───────────────────────────────────────────────────────────────────────────
@@ -737,8 +760,7 @@ class RemovePublishListMemberOperation(BaseModel):
 async def initialize_op(
   body: InitializeLedgerRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -797,8 +819,7 @@ async def initialize_op(
 async def update_entity_op(
   body: UpdateEntityRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -1058,8 +1079,7 @@ class AutoMapElementsOperation(BaseModel):
 async def auto_map_elements_op(
   body: AutoMapElementsOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -1319,8 +1339,7 @@ compute_forecast_op = _registrar.register(
 async def bind_text_block_op(
   body: BindTextBlockRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -1729,8 +1748,7 @@ rebuild_schedule_op = _registrar.register(
 async def set_close_target_op(
   body: SetCloseTargetOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -1808,8 +1826,7 @@ async def set_close_target_op(
 async def close_period_op(
   body: ClosePeriodOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -1947,8 +1964,7 @@ async def close_period_op(
 async def reopen_period_op(
   body: ReopenPeriodOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -2028,8 +2044,7 @@ async def reopen_period_op(
 async def backfill_plan_history_op(
   body: BackfillPlanHistoryOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   platform_db: Session = Depends(get_db_session),
@@ -2092,8 +2107,7 @@ async def backfill_plan_history_op(
 async def create_report_op(
   body: CreateReportRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2158,8 +2172,7 @@ async def create_report_op(
 async def regenerate_report_op(
   body: RegenerateReportOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2224,8 +2237,7 @@ async def regenerate_report_op(
 async def delete_report_op(
   body: DeleteReportOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2284,8 +2296,7 @@ async def delete_report_op(
 async def share_report_op(
   body: ShareReportOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2345,8 +2356,7 @@ async def share_report_op(
 async def file_report_op(
   body: FileReportRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2397,8 +2407,7 @@ async def file_report_op(
 async def transition_filing_status_op(
   body: TransitionFilingStatusRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2455,8 +2464,7 @@ async def transition_filing_status_op(
 async def create_publish_list_op(
   body: CreatePublishListRequest,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2499,8 +2507,7 @@ async def create_publish_list_op(
 async def update_publish_list_op(
   body: UpdatePublishListOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2553,8 +2560,7 @@ async def update_publish_list_op(
 async def delete_publish_list_op(
   body: DeletePublishListOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2604,8 +2610,7 @@ async def delete_publish_list_op(
 async def add_publish_list_members_op(
   body: AddPublishListMembersOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -2664,8 +2669,7 @@ async def add_publish_list_members_op(
 async def remove_publish_list_member_op(
   body: RemovePublishListMemberOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:

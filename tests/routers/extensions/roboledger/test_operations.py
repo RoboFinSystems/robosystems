@@ -58,7 +58,13 @@ def _bypass_write_role():
   ``require_graph_write_role`` (unit-tested in
   ``tests/middleware/auth/test_dependencies.py``; the deny path is asserted in
   ``TestRegistrarWriteRoleGate`` below). These direct-call wiring tests use a
-  mock user with no DB-backed ``GraphUser`` row, so no-op the gate here."""
+  mock user with no DB-backed ``GraphUser`` row, so no-op the gate here.
+
+  Deliberately scoped to ``middleware.extensions`` only. The hand-written
+  handlers enforce through the ``_require_roboledger_write`` *dependency*,
+  which direct calls never resolve — broadening this patch to that module
+  would silently disarm ``TestHandWrittenWriteRoleGate`` below, which is the
+  same blind spot that let the gap ship in the first place."""
   with patch(
     "robosystems.middleware.extensions.require_graph_write_role", return_value=None
   ):
@@ -1202,3 +1208,82 @@ class TestRegistrarWriteRoleGate:
           cache=_FakeCache(),
         )
     assert exc.value.status_code == 403
+
+
+class TestHandWrittenWriteRoleGate:
+  """The hand-written `@router.post` ops enforce the same write role the
+  registrar does.
+
+  `TestRegistrarWriteRoleGate` above only ever exercised registrar-mounted
+  handlers, which enforce inside the handler body. The hand-written ops in
+  this module enforce through a *dependency*, so a direct call never resolves
+  it — which is precisely why no test in this file could catch the gap.
+  """
+
+  def test_every_hand_written_post_requires_the_write_dependency(self) -> None:
+    """Structural, not behavioral: asserts the invariant rather than one
+    instance, so a newly added hand-written op that forgets the gate fails
+    here instead of shipping."""
+    from robosystems.routers.extensions.roboledger.operations import (
+      _require_roboledger_write,
+      router,
+    )
+
+    def _dependency_calls(dependant) -> list:
+      calls = []
+      for dep in dependant.dependencies:
+        if dep.call is not None:
+          calls.append(dep.call)
+        calls.extend(_dependency_calls(dep))
+      return calls
+
+    ungated = []
+    for route in router.routes:
+      if "POST" not in getattr(route, "methods", set()):
+        continue
+      # Registrar-mounted handlers call `require_graph_write_role` in the
+      # handler body rather than via a dependency; they are covered by
+      # `TestRegistrarWriteRoleGate`.
+      if route.endpoint.__module__ == "robosystems.middleware.extensions":
+        continue
+      if _require_roboledger_write not in _dependency_calls(route.dependant):
+        ungated.append(route.path)
+
+    assert ungated == [], (
+      f"hand-written write ops missing the write-role gate: {ungated}"
+    )
+
+  def test_write_dependency_denies_a_viewer(self) -> None:
+    from robosystems.routers.extensions.roboledger.operations import (
+      _require_roboledger_write,
+    )
+
+    with patch(
+      "robosystems.routers.extensions.roboledger.operations.require_graph_write_role",
+      side_effect=HTTPException(
+        status_code=403, detail="Write access denied; your role is read-only."
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        _require_roboledger_write(
+          graph_id=GRAPH_ID, user=_make_user(), _ext=MagicMock()
+        )
+
+    assert exc.value.status_code == 403
+
+  def test_write_dependency_returns_the_user_for_a_writer(self) -> None:
+    from robosystems.routers.extensions.roboledger.operations import (
+      _require_roboledger_write,
+    )
+
+    user = _make_user()
+    with patch(
+      "robosystems.routers.extensions.roboledger.operations.require_graph_write_role",
+      return_value=None,
+    ) as gate:
+      resolved = _require_roboledger_write(
+        graph_id=GRAPH_ID, user=user, _ext=MagicMock()
+      )
+
+    assert resolved is user
+    gate.assert_called_once_with(str(user.id), GRAPH_ID)
