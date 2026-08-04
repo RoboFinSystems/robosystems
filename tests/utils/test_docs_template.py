@@ -171,7 +171,7 @@ class TestGenerateSwaggerDocs:
     fallback_func = mock_load.call_args[0][1]
     fallback_result = fallback_func()
     assert "<!DOCTYPE html>" in fallback_result
-    assert "SwaggerUIBundle" in fallback_result
+    assert "/static/vendor/swagger-ui-5.9.0/swagger-ui-bundle.js" in fallback_result
 
 
 class TestGenerateRedocDocs:
@@ -267,7 +267,9 @@ class TestConvenienceFunctions:
     result = generate_robosystems_docs()
 
     assert result == "robosystems swagger"
-    mock_generate.assert_called_once_with(title="RoboSystems API")
+    kwargs = mock_generate.call_args.kwargs
+    assert kwargs["title"] == "RoboSystems API"
+    assert isinstance(kwargs["persist_auth"], bool)
 
   @patch("robosystems.utils.docs_template.generate_swagger_docs")
   def test_generate_lbug_docs(self, mock_generate):
@@ -277,7 +279,21 @@ class TestConvenienceFunctions:
     result = generate_lbug_docs()
 
     assert result == "lbug swagger"
-    mock_generate.assert_called_once_with(title="RoboSystems Graph API")
+    kwargs = mock_generate.call_args.kwargs
+    assert kwargs["title"] == "RoboSystems Graph API"
+    assert isinstance(kwargs["persist_auth"], bool)
+
+  @patch("robosystems.utils.docs_template.generate_swagger_docs")
+  @patch("robosystems.utils.docs_template.env")
+  def test_persist_auth_follows_environment(self, mock_env, mock_generate):
+    """Authorization persistence is a dev-only convenience."""
+    mock_env.is_development.return_value = True
+    generate_robosystems_docs()
+    assert mock_generate.call_args.kwargs["persist_auth"] is True
+
+    mock_env.is_development.return_value = False
+    generate_robosystems_docs()
+    assert mock_generate.call_args.kwargs["persist_auth"] is False
 
   @patch("robosystems.utils.docs_template.generate_redoc_docs")
   def test_generate_robosystems_redoc(self, mock_generate):
@@ -305,8 +321,13 @@ class TestFallbackTemplates:
     assert "{persist_auth}" in template
     assert "{models_expand_depth}" in template
     assert "{model_expand_depth}" in template
-    assert "swagger-ui-dist" in template
-    assert "SwaggerUIBundle" in template
+
+    # Self-hosted assets only — no third-party CDN, no inline script.
+    assert "/static/vendor/swagger-ui-5.9.0/swagger-ui.css" in template
+    assert "/static/vendor/swagger-ui-5.9.0/swagger-ui-bundle.js" in template
+    assert "/static/swagger-init.js" in template
+    assert "unpkg.com" not in template
+    assert "<script>" not in template
 
   def test_get_redoc_fallback_template(self):
     """Test ReDoc fallback template generation."""
