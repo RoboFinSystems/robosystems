@@ -3,7 +3,6 @@
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
 
 import pytest
 
@@ -261,7 +260,12 @@ class TestGraphCredits:
     # Should allocate since more than 30 days have passed
     result = credits.allocate_monthly_credits(self.session)
     assert result is True
-    assert credits.current_balance == Decimal("1500")
+    # Credits do not roll over — the unspent 500 is not carried forward. This
+    # asserted 1500 (a top-up) while the offering page tells customers
+    # "Credits do not roll over between billing periods" and
+    # `UserRepositoryCredits` resets, documenting itself as "no rollover, same
+    # as user graphs". Graph credits were the only ones that accumulated.
+    assert credits.current_balance == Decimal("1000")
     assert credits.last_allocation_date > last_month
 
     # Check allocation transaction was created
@@ -297,8 +301,16 @@ class TestGraphCredits:
     assert result is False
     assert credits.current_balance == Decimal("500")
 
-  def test_allocate_monthly_credits_overflow_protection(self):
-    """Test overflow protection during allocation."""
+  def test_allocation_never_accumulates_past_the_monthly_amount(self):
+    """A large prior balance is replaced, not added to.
+
+    Replaces the old overflow-protection test. That guard capped
+    `current_balance + monthly_allocation` at the `Numeric(10, 2)` ceiling —
+    a condition only reachable *because* allocation accumulated. With the
+    balance replaced, both values share one column type, so the sum can no
+    longer be formed and there is nothing to overflow. What matters now is
+    the invariant the guard was compensating for.
+    """
     credits = GraphCredits(
       graph_id=self.graph.graph_id,
       user_id=self.user.id,
@@ -310,12 +322,10 @@ class TestGraphCredits:
     self.session.add(credits)
     self.session.commit()
 
-    with patch("robosystems.models.core.graph.graph_credits.logger") as mock_logger:
-      result = credits.allocate_monthly_credits(self.session)
+    result = credits.allocate_monthly_credits(self.session)
 
     assert result is True
-    assert credits.current_balance == Decimal("99999999.99")  # Capped at MAX_BALANCE
-    mock_logger.warning.assert_called_once()
+    assert credits.current_balance == Decimal("2000000")
 
   def test_get_effective_storage_limit(self):
     """Test getting effective storage limit."""
@@ -624,3 +634,89 @@ class TestGraphCreditTransaction:
     assert transaction.operation_id is None
     assert transaction.user_id is None
     assert transaction.transaction_metadata is None
+
+
+class TestSingleBalanceDefinition:
+  """`current_balance` is the one definition of a graph's spendable credits.
+
+  Two definitions previously coexisted and were cached under the same key:
+  `consume_credits_atomic` decremented and gated on the `current_balance`
+  column, while the read paths recomputed
+  `monthly_allocation - consumed_this_month`. Because allocation *added* to the
+  balance, the two drifted apart permanently — so the same pool answered
+  differently depending on which one you asked, and a caller could be refused
+  at zero while the column it actually spends from held thousands.
+  """
+
+  @pytest.fixture(autouse=True)
+  def setup(self, db_session):
+    import uuid
+
+    self.session = db_session
+    unique_id = str(uuid.uuid4())[:8]
+
+    self.user = User(
+      email=f"balance_def_user_{unique_id}@example.com",
+      name="Test User",
+      password_hash="hashed_password",
+    )
+    self.session.add(self.user)
+    self.session.commit()
+
+    self.graph = Graph(
+      graph_id=f"test_balance_def_{unique_id}",
+      graph_name="Test Graph",
+      graph_type="entity",
+      graph_tier=GraphTier.LADYBUG_STANDARD.value,
+    )
+    self.session.add(self.graph)
+    self.session.commit()
+
+    self.credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.user.id,
+      current_balance=Decimal("250"),
+      monthly_allocation=Decimal("1000"),
+    )
+    self.session.add(self.credits)
+    self.session.commit()
+
+  def test_usage_summary_reports_the_column_the_consume_path_gates_on(self):
+    """A balance that has diverged from `allocation - consumed` is reported
+    as-is; recomputing it here is what made the two disagree."""
+    summary = self.credits.get_usage_summary(self.session)
+
+    assert summary["current_balance"] == 250.0
+    assert summary["monthly_allocation"] == 1000.0
+
+  def test_allocation_makes_the_two_definitions_agree(self):
+    """After a reset with nothing consumed since, the real column and the
+    derived figure coincide — the property that stops them drifting again."""
+    self.credits.last_allocation_date = datetime.now(UTC) - timedelta(days=35)
+    self.session.commit()
+
+    assert self.credits.allocate_monthly_credits(self.session) is True
+
+    summary = self.credits.get_usage_summary(self.session)
+    derived = float(self.credits.monthly_allocation) - summary["consumed_this_month"]
+    assert summary["current_balance"] == derived == 1000.0
+
+  def test_consuming_moves_both_in_step(self):
+    """Consumption decrements the column and is reflected in the summary, so
+    the two stay equal through a normal spend."""
+    self.credits.current_balance = Decimal("1000")
+    self.credits.last_allocation_date = datetime.now(UTC)
+    self.session.commit()
+
+    self.credits.consume_credits_atomic(
+      amount=Decimal("300"),
+      operation_type="agent_call",
+      operation_description="AI call",
+      session=self.session,
+      user_id=self.user.id,
+    )
+
+    summary = self.credits.get_usage_summary(self.session)
+    assert summary["current_balance"] == 700.0
+    assert summary["consumed_this_month"] == 300.0

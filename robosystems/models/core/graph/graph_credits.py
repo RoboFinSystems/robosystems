@@ -309,7 +309,18 @@ class GraphCredits(Base):
       }
 
   def allocate_monthly_credits(self, session: Session) -> bool:
-    """Allocate monthly credits if due."""
+    """Allocate monthly credits if due. Credits do not roll over.
+
+    The balance is *replaced* by the monthly allocation rather than added to
+    it. Adding was the outlier: the public offering page states "Credits do not
+    roll over between billing periods" (`routers/offering.py`),
+    `UserRepositoryCredits.allocate_monthly_credits` resets and documents
+    itself as "no rollover, same as user graphs", and `GraphCredits` carries no
+    `rollover_credits` column while `UserRepositoryCredits` does. Accumulating
+    here also made `current_balance` drift permanently away from the
+    `monthly_allocation - consumed_this_month` figure the read paths reported,
+    so the same pool answered differently depending on which one you asked.
+    """
     now = datetime.now(UTC)
 
     # Check if allocation is due (monthly)
@@ -318,17 +329,7 @@ class GraphCredits(Base):
       if days_since_last < 30:  # Not due yet
         return False
 
-    # Add monthly allocation with overflow protection
-    MAX_BALANCE = Decimal("99999999.99")  # Max value for Numeric(10,2) field
-    new_balance = self.current_balance + self.monthly_allocation
-    if new_balance > MAX_BALANCE:
-      logger.warning(
-        f"Credit balance overflow prevented for graph {self.graph_id}. "
-        f"Would have been {new_balance}, capped at {MAX_BALANCE}"
-      )
-      new_balance = MAX_BALANCE
-
-    self.current_balance = new_balance
+    self.current_balance = self.monthly_allocation
     self.last_allocation_date = now
     self.updated_at = now
 
@@ -381,13 +382,15 @@ class GraphCredits(Base):
       else Decimal("0")
     )
 
-    # Calculate the actual current balance based on allocation minus consumption
-    actual_current_balance = self.monthly_allocation - consumed_this_month
-
+    # `current_balance` is the column the atomic consume path decrements and
+    # gates on, so it is the only balance a caller can actually spend. This
+    # previously recomputed `monthly_allocation - consumed_this_month` and
+    # returned it under the same name, which disagreed with the real column
+    # for any graph whose allocation had ever rolled over.
     return {
       "graph_id": self.graph_id,
       "graph_tier": self.graph_tier,  # This now uses the property that gets it from graph
-      "current_balance": safe_float(actual_current_balance),
+      "current_balance": safe_float(self.current_balance),
       "monthly_allocation": safe_float(self.monthly_allocation),
       "consumed_this_month": safe_float(consumed_this_month),
       "transaction_count": transactions.transaction_count if transactions else 0,

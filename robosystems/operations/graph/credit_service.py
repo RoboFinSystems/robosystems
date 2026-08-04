@@ -573,9 +573,13 @@ class CreditService:
         "error": "No credit pool found for graph",
       }
 
-    # Calculate actual remaining balance (allocation - consumed)
-    consumed_this_month = self._get_consumed_this_month(parent_graph_id)
-    actual_balance = float(credits.monthly_allocation) - float(consumed_this_month)
+    # `current_balance` is the column `consume_credits_atomic` decrements and
+    # gates its UPDATE on, so it is the only balance that determines whether a
+    # spend will actually succeed. This used to derive
+    # `monthly_allocation - consumed_this_month` instead and cache it under the
+    # same key the consume path writes — two different definitions of "balance"
+    # sharing one key, so a caller got whichever had written last.
+    actual_balance = float(credits.current_balance)
 
     has_sufficient = Decimal(str(actual_balance)) >= required_credits
 
