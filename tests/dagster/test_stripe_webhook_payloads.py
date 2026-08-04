@@ -397,6 +397,8 @@ class TestResolveSubscription:
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
     mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = [mock_sub]
     mock_query.first.return_value = mock_sub
     db.query.return_value = mock_query
 
@@ -426,6 +428,8 @@ class TestResolveSubscription:
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
     mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = [mock_sub]
     mock_query.first.return_value = mock_sub
     db.query.return_value = mock_query
 
@@ -469,6 +473,8 @@ class TestResolveSubscription:
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
     mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = []
     mock_query.first.return_value = None
     db.query.return_value = mock_query
 
@@ -491,4 +497,161 @@ class TestResolveSubscription:
     assert result == mock_sub
     MockSub.get_by_provider_subscription_id.assert_called_with(
       "sub_1T98GkReD8VoQizP4kyPVtC1", db
+    )
+
+
+class TestCustomerFallbackIsBounded:
+  """The customer fallback must never guess between several subscriptions.
+
+  `BillingCustomer.org_id` is the primary key, so one Stripe customer maps to
+  an org that may now hold one subscription per graph plus one per member per
+  repository. Picking "most recent active" was reasonable when an org had one
+  member and one subscription; with multi-user orgs it silently applies an
+  event to the wrong resource.
+  """
+
+  def _customer(self, org_id="org_test"):
+    customer = MagicMock()
+    customer.org_id = org_id
+    return customer
+
+  def _subscription(self, sub_id):
+    sub = MagicMock()
+    sub.id = sub_id
+    sub.org_id = "org_test"
+    return sub
+
+  def _db_returning(self, rows):
+    db = MagicMock()
+    query = MagicMock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = rows
+    query.first.return_value = rows[0] if rows else None
+    db.query.return_value = query
+    return db
+
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
+  def test_sole_candidate_still_resolves(self, MockSub, MockCustomer):
+    """The race the fallback exists for: invoice.created can arrive before
+    checkout.session.completed has written the local row."""
+    sub = self._subscription("bsub_only")
+    MockSub.get_by_provider_subscription_id.return_value = None
+    MockSub.get_by_stripe_subscription_id.return_value = None
+    MockCustomer.get_by_stripe_customer_id.return_value = self._customer()
+
+    result = _resolve_subscription(
+      RENEWAL_INVOICE_CREATED, self._db_returning([sub]), MagicMock()
+    )
+
+    assert result is sub
+
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
+  def test_multiple_candidates_refuse_rather_than_guess(self, MockSub, MockCustomer):
+    """The scenario a second org member creates: the org already has an active
+    subscription when a new one's first invoice arrives. Attributing it to the
+    existing subscription would be permanent, because invoices dedupe on
+    `stripe_invoice_id` and nothing revisits the association."""
+    MockSub.get_by_provider_subscription_id.return_value = None
+    MockSub.get_by_stripe_subscription_id.return_value = None
+    MockCustomer.get_by_stripe_customer_id.return_value = self._customer()
+
+    db = self._db_returning(
+      [self._subscription("bsub_graph"), self._subscription("bsub_repo_member2")]
+    )
+
+    with pytest.raises(SubscriptionNotFoundError):
+      _resolve_subscription(RENEWAL_INVOICE_CREATED, db, MagicMock())
+
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
+  def test_destructive_handlers_refuse_the_fallback_entirely(
+    self, MockSub, MockCustomer
+  ):
+    """A customer.subscription.* payload always carries its own id, so a local
+    miss means we do not have it — not that another of the org's subscriptions
+    should be cancelled in its place."""
+    MockSub.get_by_provider_subscription_id.return_value = None
+    MockSub.get_by_stripe_subscription_id.return_value = None
+    MockCustomer.get_by_stripe_customer_id.return_value = self._customer()
+
+    db = self._db_returning([self._subscription("bsub_someone_elses")])
+
+    with pytest.raises(SubscriptionNotFoundError):
+      _resolve_subscription(
+        RENEWAL_SUBSCRIPTION_UPDATED,
+        db,
+        MagicMock(),
+        allow_customer_fallback=False,
+      )
+
+    # Never consulted — the refusal is structural, not a query that came back
+    # empty, so it holds no matter what the org happens to contain.
+    MockCustomer.get_by_stripe_customer_id.assert_not_called()
+
+  @patch("robosystems.models.core.billing.BillingCustomer")
+  @patch("robosystems.models.core.billing.BillingSubscription")
+  def test_our_own_id_in_metadata_resolves_without_the_fallback(
+    self, MockSub, MockCustomer
+  ):
+    """The create paths write `subscription_id` into the Stripe metadata, and
+    Stripe copies it onto derived objects — it identifies one exact row."""
+    sub = self._subscription("bsub_01KK9WP4KDFMFR7G579ABNME6N")
+    MockSub.get_by_provider_subscription_id.return_value = None
+    MockSub.get_by_stripe_subscription_id.return_value = None
+
+    db = self._db_returning([sub])
+
+    result = _resolve_subscription(
+      NEW_SUB_CHECKOUT_COMPLETED, db, MagicMock(), allow_customer_fallback=False
+    )
+
+    assert result is sub
+    MockCustomer.get_by_stripe_customer_id.assert_not_called()
+
+
+class TestDestructiveHandlersOptOutOfTheFallback:
+  """The handlers that mutate what they resolve must pass
+  `allow_customer_fallback=False`.
+
+  Asserted on the handlers rather than on the resolver: a test that calls
+  `_resolve_subscription(..., allow_customer_fallback=False)` directly proves
+  the parameter works, but would still pass if a handler stopped supplying it.
+  That is the difference between testing the control and testing that the
+  control is wired up.
+  """
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    "handler_name,payload",
+    [
+      ("_handle_subscription_updated", RENEWAL_SUBSCRIPTION_UPDATED),
+      ("_handle_subscription_deleted", RENEWAL_SUBSCRIPTION_UPDATED),
+    ],
+  )
+  async def test_handler_disallows_customer_fallback(self, handler_name, payload):
+    from robosystems.dagster.jobs import billing
+
+    handler = getattr(billing, handler_name)
+    resolved = MagicMock()
+    resolved.status = "active"
+    resolved.resource_type = "graph"
+
+    with patch.object(
+      billing, "_resolve_subscription", return_value=resolved
+    ) as resolver:
+      try:
+        await handler(payload, MagicMock(), MagicMock())
+      except Exception:
+        # Downstream behaviour is covered elsewhere; this asserts only how the
+        # resolver was invoked, which happens before anything else can fail.
+        pass
+
+    assert resolver.call_count == 1
+    assert resolver.call_args.kwargs.get("allow_customer_fallback") is False, (
+      f"{handler_name} can cancel what it resolves, so it must not fall back "
+      f"to picking another of the org's subscriptions"
     )
