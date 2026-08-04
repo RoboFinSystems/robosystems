@@ -31,6 +31,22 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["Org Usage"])
 
+# Event types that represent a caller-initiated API operation. Deliberately
+# excludes storage snapshots (written by a background sensor) and credit events
+# (reported separately as credits/AI operations).
+_API_EVENT_TYPES = frozenset(
+  {
+    UsageEventType.API_CALL.value,
+    UsageEventType.QUERY_EXECUTION.value,
+    UsageEventType.MCP_CALL.value,
+    UsageEventType.AGENT_CALL.value,
+    UsageEventType.IMPORT_OPERATION.value,
+    UsageEventType.BACKUP_OPERATION.value,
+    UsageEventType.SYNC_OPERATION.value,
+    UsageEventType.ANALYTICS_QUERY.value,
+  }
+)
+
 
 @router.get(
   "/orgs/{org_id}/limits",
@@ -172,7 +188,14 @@ async def get_org_usage(
         for r in usage_records
         if r.event_type == UsageEventType.CREDIT_CONSUMPTION.value
       )
-      graph_api_calls = len(usage_records)
+      # Count API-shaped events, not every row in the table. `graph_usage` also
+      # holds the 6-hourly storage snapshots the usage sensor writes and the
+      # credit-consumption rows counted just above, so `len(usage_records)`
+      # reported background bookkeeping as customer API traffic — an untouched
+      # graph still showed a steadily climbing "API calls" figure.
+      graph_api_calls = sum(
+        1 for r in usage_records if r.event_type in _API_EVENT_TYPES
+      )
 
       # Get latest storage snapshot
       latest_storage = (

@@ -29,6 +29,7 @@ from ...models.core import (
   Graph,
   GraphCredits,
   GraphCreditTransaction,
+  GraphUsage,
   GraphUser,
 )
 from ...models.core.graph.graph_credits import CreditTransactionType
@@ -253,15 +254,19 @@ class CreditService:
       except Exception as e:
         logger.warning(f"Failed to update credit cache after consumption: {e}")
 
+      # Resolved once, outside the best-effort blocks below: both consume it,
+      # and computing it inside the first one left it unbound for the second
+      # whenever that block raised early.
+      graph_tier_val = (
+        credits.graph_tier.value
+        if hasattr(credits.graph_tier, "value")
+        else str(credits.graph_tier)
+      )
+
       # Record OTel credit consumption metric
       try:
         from ...middleware.otel.metrics import get_endpoint_metrics
 
-        graph_tier_val = (
-          credits.graph_tier.value
-          if hasattr(credits.graph_tier, "value")
-          else str(credits.graph_tier)
-        )
         get_endpoint_metrics().record_credit_consumption(
           operation_type=operation_type,
           credits_consumed=float(consumption_result["credits_consumed"]),
@@ -269,6 +274,38 @@ class CreditService:
         )
       except Exception:
         pass  # Metrics are best-effort, never break credit consumption
+
+      # Usage-ledger row for the reporting surfaces. This is a different table
+      # from the credit ledger the atomic consume just wrote
+      # (`graph_credit_transactions`, authoritative for billing) — `graph_usage`
+      # is what `/orgs/{org_id}/usage` and the per-graph usage views read.
+      # `record_storage_usage` was the only recorder ever wired up, so
+      # `graph_usage` accumulated storage snapshots and nothing else: an org
+      # that had really run AI operations and spent credits still saw zero of
+      # both on its usage dashboard. Best-effort like the metric above — a
+      # reporting row must never fail a consumption that already committed.
+      try:
+        if user_id:
+          GraphUsage.record_credit_consumption(
+            user_id=user_id,
+            graph_id=graph_id,
+            graph_tier=graph_tier_val,
+            operation_type=operation_type,
+            credits_consumed=Decimal(str(consumption_result["credits_consumed"])),
+            base_credit_cost=Decimal(str(consumption_result["base_cost"])),
+            session=self.session,
+            cached_operation=cached,
+            metadata=metadata,
+          )
+        else:
+          # `GraphUsage.user_id` is NOT NULL and consumption is attributed per
+          # user, so an unattributed spend is dropped rather than forged.
+          logger.warning(
+            f"Credit consumption on {graph_id} has no user_id; "
+            f"usage row skipped (operation_type={operation_type})"
+          )
+      except Exception as e:
+        logger.warning(f"Failed to record credit usage for {graph_id}: {e}")
 
       return {
         "success": True,
