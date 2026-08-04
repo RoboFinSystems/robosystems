@@ -323,10 +323,13 @@ class GraphCredits(Base):
     """
     now = datetime.now(UTC)
 
-    # Check if allocation is due (monthly)
+    # One allocation per calendar month, matching both the monthly cron that
+    # drives bulk allocation and the transaction idempotency key below. A
+    # day-count gate here refuses the 1-Mar run for anything allocated on
+    # 1-Feb (28 days elapsed), silently skipping March fleet-wide.
     if self.last_allocation_date is not None:
-      days_since_last = (now - self.last_allocation_date).days
-      if days_since_last < 30:  # Not due yet
+      last = self.last_allocation_date
+      if (last.year, last.month) == (now.year, now.month):
         return False
 
     self.current_balance = self.monthly_allocation

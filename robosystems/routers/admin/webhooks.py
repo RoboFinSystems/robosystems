@@ -1,6 +1,6 @@
 """Admin webhook handlers for payment providers."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from ...database import SessionFactory, get_db_session
@@ -32,8 +32,16 @@ async def _process_webhook_event(
 ) -> None:
   """Process a Stripe webhook event directly (no Dagster).
 
-  Creates its own database session since this runs as a background task
-  after the request session has been closed.
+  Runs inside the request so the HTTP status reflects the processing
+  outcome — Stripe only redelivers on a non-2xx response, so raising here
+  is what makes retry semantics real. Uses its own database session to keep
+  handler transaction boundaries independent of the request session.
+
+  Raises:
+      SubscriptionNotFoundError: the event references a subscription we have
+          no record of yet (e.g. invoice events racing checkout completion).
+          The event is left unmarked so the redelivery can succeed.
+      Exception: any handler failure; the event is left unmarked.
   """
   from robosystems.dagster.jobs.billing import (
     SubscriptionNotFoundError,
@@ -105,19 +113,20 @@ async def _process_webhook_event(
     )
 
   except SubscriptionNotFoundError as e:
-    # Subscription not found — do NOT mark as processed so Stripe retries.
-    # This handles timing issues where checkout.session.completed hasn't
-    # fired yet but invoice webhooks have already arrived.
+    # Not marked as processed; the raise turns into a non-2xx response so
+    # Stripe redelivers (covers invoice events racing checkout completion).
     logger.warning(
-      f"Webhook {event_type} deferred (will retry): {e}",
+      f"Webhook {event_type} deferred for Stripe redelivery: {e}",
       extra={"event_id": event_id, "event_type": event_type},
     )
+    raise
   except Exception as e:
     logger.error(
       f"Failed to process webhook {event_type}: {e}",
       exc_info=True,
       extra={"event_id": event_id, "event_type": event_type},
     )
+    raise
   finally:
     db.close()
 
@@ -144,16 +153,17 @@ This endpoint receives and processes webhook events from Stripe including:
 Stripe webhooks cannot provide admin API keys. Instead, security is enforced
 through Stripe's webhook signature verification (verify_webhook).
 
-**Processing**: Webhooks are processed directly as background tasks for low
-latency. Heavy operations (graph provisioning) are handled by the direct
-provisioning system which manages its own async execution.
+**Processing**: Webhooks are processed before the response is sent so the
+HTTP status reflects the outcome — Stripe redelivers on any non-2xx, which is
+the retry mechanism for events that arrive before their subscription exists.
+Heavy operations (graph provisioning) are handled by the direct provisioning
+system which manages its own async execution.
 
 Webhooks are verified using Stripe signature before processing.""",
   operation_id="handleStripeWebhook",
 )
 async def handle_stripe_webhook(
   request: Request,
-  background_tasks: BackgroundTasks,
   db: Session = Depends(get_db_session),
 ):
   """Handle Stripe webhook events."""
@@ -219,15 +229,22 @@ async def handle_stripe_webhook(
       extra={"event_type": event_type, "event_id": event_id},
     )
 
-    # Process directly as a background task with its own DB session
-    background_tasks.add_task(
-      _process_webhook_event,
-      event_id=event_id,
-      event_type=event_type,
-      event_data=event_data,
-    )
+    from robosystems.dagster.jobs.billing import SubscriptionNotFoundError
 
-    return {"status": "success", "message": "Webhook accepted for processing"}
+    try:
+      await _process_webhook_event(
+        event_id=event_id,
+        event_type=event_type,
+        event_data=event_data,
+      )
+    except SubscriptionNotFoundError:
+      # Non-2xx so Stripe redelivers; the event was not marked as processed.
+      raise HTTPException(
+        status_code=409,
+        detail="Event references a subscription not yet recorded; retry",
+      )
+
+    return {"status": "success", "message": "Webhook processed"}
 
   except HTTPException:
     raise
