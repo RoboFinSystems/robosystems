@@ -51,8 +51,8 @@ _ROLLUP_SQL = text("""
     source.id AS coa_element_id,
     source.name AS coa_name,
     source.code AS coa_code,
-    COALESCE(SUM(li.debit_amount), 0) AS total_debits,
-    COALESCE(SUM(li.credit_amount), 0) AS total_credits
+    COALESCE(bal.total_debits, 0) AS total_debits,
+    COALESCE(bal.total_credits, 0) AS total_credits
   FROM associations mapping
   JOIN elements source ON source.id = mapping.from_element_id
   JOIN elements target ON target.id = mapping.to_element_id
@@ -63,14 +63,25 @@ _ROLLUP_SQL = text("""
     WHERE et.is_primary = TRUE
       AND tr.category = 'elementsOfFinancialStatements'
   ) t ON t.element_id = target.id
-  LEFT JOIN line_items li ON li.element_id = source.id
-  LEFT JOIN entries e ON e.id = li.entry_id AND e.status = 'posted'
-    AND (e.posting_date >= :start_date OR :start_date IS NULL)
-    AND (e.posting_date <= :end_date OR :end_date IS NULL)
+  -- Balances pre-aggregated with the posted/date predicates inside the
+  -- derived table (mirroring trial_balance): predicates on a LEFT JOIN's
+  -- ON clause don't filter the outer rows, so line items from draft,
+  -- reversed, or out-of-window entries would still land in the sums.
+  -- The join stays LEFT so mapped accounts with no activity remain
+  -- visible with zero balances.
+  LEFT JOIN (
+    SELECT li.element_id,
+           SUM(li.debit_amount) AS total_debits,
+           SUM(li.credit_amount) AS total_credits
+    FROM line_items li
+    JOIN entries e ON e.id = li.entry_id
+    WHERE e.status = 'posted'
+      AND (e.posting_date >= :start_date OR :start_date IS NULL)
+      AND (e.posting_date <= :end_date OR :end_date IS NULL)
+    GROUP BY li.element_id
+  ) bal ON bal.element_id = source.id
   WHERE mapping.structure_id = :mapping_id
     AND mapping.association_type = 'mapping'
-  GROUP BY target.id, target.name, target.qname, t.identifier,
-           target.balance_type, source.id, source.name, source.code
   ORDER BY t.identifier, target.name, source.code
 """)
 

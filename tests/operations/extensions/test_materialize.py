@@ -752,3 +752,64 @@ class TestPartialStatusAndSwapGate:
   async def test_error_build_does_not_swap(self):
     client = await self._run_blue_green("error")
     client.swap_database.assert_not_called()
+
+
+class TestScenarioExclusion:
+  """Forecast scenario fact sets must not reach the graph.
+
+  `FactSet.scenario_id` is the scenario axis — NULL means actuals, and
+  `forecast_compute` stamps every scenario month with a non-NULL
+  scenario_id. The graph schema carries no scenario discriminator, so a
+  materialized forecast would blend plan into history for every graph
+  reader (fact grids, Cypher, analytical views). Until an OLAP scenario
+  leg exists, every fact/fact_set projection must exclude scenario rows.
+  """
+
+  GUARDED_FACT_TABLES = [
+    "Fact",
+    "Period",
+    "Unit",
+    "FACT_HAS_ELEMENT",
+    "FACT_HAS_PERIOD",
+    "FACT_HAS_UNIT",
+    "FACT_SET_CONTAINS_FACT",
+  ]
+  FACT_SET_TABLES = ["FactSet", "STRUCTURE_HAS_FACT_SET", "REPORT_HAS_FACT_SET"]
+  JOINED_FACT_TABLES = ["REPORT_HAS_FACT", "FACT_HAS_ENTITY"]
+
+  def test_fact_projections_route_through_scenario_guard(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for name in self.GUARDED_FACT_TABLES:
+      assert "sfs.scenario_id IS NULL" in tables[name], (
+        f"{name} reads facts without the scenario guard"
+      )
+
+  def test_fact_set_projections_filter_scenario(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for name in self.FACT_SET_TABLES:
+      assert "scenario_id IS NULL" in tables[name], (
+        f"{name} projects fact_sets without filtering scenario rows"
+      )
+
+  def test_joined_fact_projections_filter_scenario(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for name in self.JOINED_FACT_TABLES:
+      assert "fs.scenario_id IS NULL" in tables[name], (
+        f"{name} joins fact_sets without filtering scenario rows"
+      )
+
+  def test_fact_has_entity_filters_both_union_branches(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["FACT_HAS_ENTITY"]
+    assert sql.count("fs.scenario_id IS NULL") == 2, (
+      "FACT_HAS_ENTITY has two UNION branches; both must filter scenarios"
+    )
+
+  def test_no_unguarded_facts_scan_anywhere(self):
+    """Completeness sweep: any projection reading facts or fact_sets must
+    carry a scenario filter — catches future projections added without one."""
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for name, sql in tables.items():
+      if "'facts'" in sql or "'fact_sets'" in sql:
+        assert "scenario_id IS NULL" in sql, (
+          f"{name} reads facts/fact_sets without a scenario filter"
+        )

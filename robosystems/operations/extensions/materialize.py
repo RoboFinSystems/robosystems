@@ -917,6 +917,21 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   # have been generated yet — that's fine, they'll be populated on next
   # materialization after report creation.
 
+  # Scenario guard: fact sets stamped with a scenario_id are forecast
+  # months (NULL means actuals — see FactSet.scenario_id). The graph
+  # schema carries no scenario discriminator, so materializing them would
+  # blend plan into history for every graph reader (fact grids, Cypher,
+  # analytical views). Until an OLAP scenario leg exists, scenario facts
+  # and fact sets stay OLTP-only: every projection below that reads
+  # `facts` goes through this derived table, and every `fact_sets`
+  # projection filters `scenario_id IS NULL` directly.
+  actual_facts = (
+    f"(SELECT f.* FROM postgres_scan('{c}', '{s}', 'facts') f "
+    f"LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') sfs "
+    f"ON sfs.id = f.fact_set_id "
+    f"WHERE sfs.scenario_id IS NULL)"
+  )
+
   tables["Taxonomy"] = f"""
     CREATE OR REPLACE TABLE Taxonomy AS
     SELECT
@@ -981,7 +996,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
         ELSE 'other'
       END                             AS duration_type,
       NULL::VARCHAR                   AS calendar_period_key
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
   """
 
   # Units come from the facts actually present (numeric facts only — XBRL
@@ -996,7 +1011,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       unit                            AS value,
       NULL::VARCHAR                   AS numerator_uri,
       NULL::VARCHAR                   AS denominator_uri
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
     WHERE fact_type = 'Numeric'
     UNION
     SELECT
@@ -1022,7 +1037,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       content_type                    AS content_type,
       false                           AS has_dimensions,
       0::BIGINT                       AS dimension_count
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
   """
 
   tables["FactSet"] = f"""
@@ -1032,6 +1047,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       COALESCE(factset_type, '')      AS factset_type,
       COALESCE(CAST(provenance AS VARCHAR), '')  AS provenance
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
+    WHERE scenario_id IS NULL
   """
 
   # ── Base Ontology Relationships (Entity ↔ Taxonomy) ────────────────────
@@ -1112,6 +1128,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
       ON fs.id = f.fact_set_id
     WHERE fs.report_id IS NOT NULL
+      AND fs.scenario_id IS NULL
   """
 
   tables["FACT_HAS_ELEMENT"] = f"""
@@ -1119,7 +1136,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       id                              AS src,
       element_id                      AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
   """
 
   tables["FACT_HAS_PERIOD"] = f"""
@@ -1130,7 +1147,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
           || '_' || CAST(period_end AS VARCHAR)
           || '_' || period_type)
                                       AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
   """
 
   # XBRL nonNumeric facts carry no unitRef — numeric facts only.
@@ -1139,7 +1156,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       id                              AS src,
       'unit_' || lower(unit)          AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
     WHERE fact_type = 'Numeric'
   """
 
@@ -1155,6 +1172,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     JOIN postgres_scan('{c}', '{s}', 'reports') rd
       ON fs.report_id = rd.id
     WHERE rd.source_graph_id IS NULL
+      AND fs.scenario_id IS NULL
     UNION ALL
     -- Shared facts: remap entity_id to the linked entity on this graph
     SELECT
@@ -1168,6 +1186,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON e.metadata->>'source_graph_id' = rd.source_graph_id
     WHERE rd.source_graph_id IS NOT NULL
+      AND fs.scenario_id IS NULL
   """
 
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
@@ -1177,6 +1196,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
     WHERE structure_id IS NOT NULL
+      AND scenario_id IS NULL
   """
 
   tables["REPORT_HAS_FACT_SET"] = f"""
@@ -1186,6 +1206,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
     WHERE report_id IS NOT NULL
+      AND scenario_id IS NULL
   """
 
   tables["FACT_SET_CONTAINS_FACT"] = f"""
@@ -1193,7 +1214,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       fact_set_id                     AS src,
       id                              AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts')
+    FROM {actual_facts} f
     WHERE fact_set_id IS NOT NULL
   """
 

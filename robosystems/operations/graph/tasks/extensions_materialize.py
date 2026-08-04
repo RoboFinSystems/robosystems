@@ -43,14 +43,21 @@ class ExtensionsMaterializeTask(BaseTask):
         rebuild=rebuild,
       )
 
-      if result.status == "error":
+      if result.status != "success":
+        # 'partial' matters as much as 'error' (same rule as the Dagster
+        # path): blue/green refused to swap the incomplete build, so the
+        # old graph generation is still active. Marking the graph fresh
+        # here would stop the staleness sensor from ever retrying while
+        # sync status reports 'fresh' — the stamp would lie about the
+        # refused swap.
         logger.error(
-          f"Extensions materialization failed for {self.graph_id}: {result.errors}"
+          f"Extensions materialization {result.status} for "
+          f"{self.graph_id}: {result.errors}"
         )
-        await self.report_progress("Materialization failed.", percent=100)
+        await self.report_progress(f"Materialization {result.status}.", percent=100)
         return {
           "graph_id": self.graph_id,
-          "status": "error",
+          "status": result.status,
           "errors": result.errors,
           "duration_ms": result.duration_ms,
           "execution_time_ms": result.duration_ms,
