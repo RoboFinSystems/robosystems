@@ -15,6 +15,7 @@ from ...models.api.admin import (
   CreditHealthResponse,
   CreditPoolResponse,
   RepositoryCreditPoolResponse,
+  ResetCreditPoolRequest,
 )
 from ...models.core import Graph, User
 from ...models.core.graph.graph_credits import (
@@ -186,6 +187,70 @@ async def add_bonus_credits_to_graph(
         "graph_id": graph_id,
         "amount": data.amount,
         "description": data.description,
+      },
+    )
+
+    return CreditPoolResponse(
+      graph_id=pool.graph_id,
+      user_id=pool.user_id,
+      graph_tier=pool.graph_tier,
+      current_balance=float(pool.current_balance),
+      monthly_allocation=float(pool.monthly_allocation),
+      credit_multiplier=1.0,
+      storage_limit_override_gb=float(pool.storage_override_gb)
+      if pool.storage_override_gb
+      else None,
+      created_at=pool.created_at,
+      updated_at=pool.updated_at,
+    )
+  finally:
+    session.close()
+
+
+@router.post("/graphs/{graph_id}/reset", response_model=CreditPoolResponse)
+@require_admin(permissions=["credits:write"])
+async def reset_graph_credit_pool(
+  request: Request, graph_id: str, data: ResetCreditPoolRequest | None = None
+):
+  """Reset a graph credit pool to its monthly allocation.
+
+  Forfeits the remaining balance (recorded as an EXPIRATION transaction)
+  and refills to the monthly allocation. The scheduled monthly reset still
+  fires normally when the month turns.
+  """
+  session = next(get_db_session())
+  try:
+    pool = GraphCredits.get_by_graph_id(graph_id, session)
+
+    if not pool:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Credit pool not found for graph {graph_id}",
+      )
+
+    credit_service = CreditService(session)
+    result = credit_service.reset_graph_pool(
+      graph_id=graph_id,
+      initiated_by=f"admin:{request.state.admin_key_id}",
+      reason=data.reason if data else None,
+    )
+
+    if "error" in result:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=result["error"],
+      )
+
+    session.refresh(pool)
+
+    logger.info(
+      f"Admin reset credit pool for graph {graph_id} "
+      f"(forfeited {result['credits_forfeited']})",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "graph_id": graph_id,
+        "credits_forfeited": result["credits_forfeited"],
+        "new_balance": result["new_balance"],
       },
     )
 

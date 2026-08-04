@@ -481,6 +481,58 @@ class TestCreditService:
     mock_session.commit.assert_called_once()
 
 
+class TestResetGraphPool:
+  """reset_graph_pool wires the model reset to commit + cache invalidation.
+
+  The ledger/balance mechanics are covered against a real database in
+  tests/models/core/graph/test_graph_credits.py; this pins the service
+  half the model test cannot see — the commit and the cache eviction.
+  """
+
+  def test_reset_delegates_commits_and_invalidates_cache(self):
+    session = MagicMock()
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
+      service = CreditService(session)
+      credits = MagicMock()
+      credits.reset_pool.return_value = Decimal("400")
+      credits.current_balance = Decimal("1000")
+      with patch(
+        "robosystems.operations.graph.credit_service.GraphCredits"
+      ) as MockCredits:
+        MockCredits.get_by_graph_id.return_value = credits
+        result = service.reset_graph_pool(
+          "kg0123456789abcdef", initiated_by="admin:key", reason="mid-month refresh"
+        )
+
+    credits.reset_pool.assert_called_once_with(
+      session, initiated_by="admin:key", reason="mid-month refresh"
+    )
+    session.commit.assert_called_once()
+    mock_cache.invalidate_graph_credit_balance.assert_called_once_with(
+      "kg0123456789abcdef"
+    )
+    assert result == {
+      "success": True,
+      "credits_forfeited": 400.0,
+      "new_balance": 1000.0,
+    }
+
+  def test_missing_pool_returns_error(self):
+    session = MagicMock()
+    with patch("robosystems.middleware.billing.cache.credit_cache"):
+      service = CreditService(session)
+      with patch(
+        "robosystems.operations.graph.credit_service.GraphCredits"
+      ) as MockCredits:
+        MockCredits.get_by_graph_id.return_value = None
+        result = service.reset_graph_pool(
+          "kg0123456789abcdef", initiated_by="admin:key"
+        )
+
+    assert result == {"error": "No credit pool found for graph"}
+    session.commit.assert_not_called()
+
+
 class TestCreditCaching:
   """Test cases for credit caching functionality."""
 

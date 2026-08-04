@@ -208,6 +208,10 @@ class StripePaymentProvider(PaymentProvider):
       success_url=f"{env.ROBOSYSTEMS_URL}/checkout/{{CHECKOUT_SESSION_ID}}",
       cancel_url=f"{env.ROBOSYSTEMS_URL}/organization?tab=billing",
       metadata=metadata,
+      # Stripe does not copy session metadata onto the subscription it
+      # creates; stamp it there too so webhook resolution can match the
+      # subscription by our own identifiers.
+      subscription_data={"metadata": metadata},
       payment_method_types=["card"],
       billing_address_collection="auto",
       allow_promotion_codes=True,

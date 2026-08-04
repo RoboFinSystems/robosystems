@@ -463,6 +463,33 @@ def add_bonus_credits(client, graph_id, amount, description):
   click.echo(f"   Description: {description}")
 
 
+@credits.command("reset")
+@click.argument("graph_id")
+@click.option("--reason", default=None, help="Reason recorded on the ledger rows")
+@click.confirmation_option(
+  prompt="Forfeit the remaining balance and refill to the monthly allocation?"
+)
+@click.pass_obj
+def reset_credit_pool(client, graph_id, reason):
+  """Reset a graph's credit pool to its monthly allocation.
+
+  The remaining balance is forfeited (recorded as an EXPIRATION ledger
+  row) and the pool refills to the monthly allocation. The scheduled
+  monthly reset still runs normally when the month turns.
+  """
+  data = {"reason": reason} if reason else {}
+
+  pool = client._make_request(
+    "POST", f"/admin/v1/credits/graphs/{graph_id}/reset", data=data
+  )
+
+  click.echo(f"✅ Reset credit pool for graph {graph_id}")
+  click.echo(f"   New balance: {pool['current_balance']:,.2f}")
+  click.echo(f"   Monthly allocation: {pool['monthly_allocation']:,.2f}")
+  if reason:
+    click.echo(f"   Reason: {reason}")
+
+
 @credits.command("analytics")
 @click.option("--tier", help="Filter by tier")
 @click.pass_obj

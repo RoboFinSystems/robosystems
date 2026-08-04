@@ -416,6 +416,104 @@ class TestAddBonusCreditsToGraph:
 
 
 # ===========================================================================
+# TestResetGraphCreditPool
+# ===========================================================================
+
+
+class TestResetGraphCreditPool:
+  """Tests for POST /admin/v1/credits/graphs/{graph_id}/reset."""
+
+  @pytest.mark.unit
+  async def test_happy_path(self, mock_request, mock_session):
+    """Reset delegates to the service with the admin identity and reason."""
+    from robosystems.routers.admin.credits import reset_graph_credit_pool
+
+    pool = _make_graph_credit_pool(current_balance=Decimal("1000.0"))
+
+    reset_request = MagicMock()
+    reset_request.reason = "Customer goodwill mid-month refresh"
+
+    with (
+      patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])),
+      patch(f"{MODULE}.GraphCredits") as MockGraphCredits,
+      patch(f"{MODULE}.CreditService") as MockCreditService,
+    ):
+      MockGraphCredits.get_by_graph_id.return_value = pool
+      mock_credit_svc = MagicMock()
+      mock_credit_svc.reset_graph_pool.return_value = {
+        "success": True,
+        "credits_forfeited": 400.0,
+        "new_balance": 1000.0,
+      }
+      MockCreditService.return_value = mock_credit_svc
+
+      result = await reset_graph_credit_pool(
+        request=mock_request,
+        graph_id="kg01234567890abcdef",
+        data=reset_request,
+      )
+
+    call_kwargs = mock_credit_svc.reset_graph_pool.call_args.kwargs
+    assert call_kwargs["graph_id"] == "kg01234567890abcdef"
+    assert call_kwargs["initiated_by"] == "admin:test_admin_key"
+    assert call_kwargs["reason"] == "Customer goodwill mid-month refresh"
+    assert result.graph_id == "kg01234567890abcdef"
+    mock_session.refresh.assert_called_once_with(pool)
+    mock_session.close.assert_called_once()
+
+  @pytest.mark.unit
+  async def test_not_found_raises_404(self, mock_request, mock_session):
+    """When pool does not exist, raise HTTPException 404."""
+    from fastapi import HTTPException
+
+    from robosystems.routers.admin.credits import reset_graph_credit_pool
+
+    with (
+      patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])),
+      patch(f"{MODULE}.GraphCredits") as MockGraphCredits,
+    ):
+      MockGraphCredits.get_by_graph_id.return_value = None
+      with pytest.raises(HTTPException) as exc_info:
+        await reset_graph_credit_pool(
+          request=mock_request,
+          graph_id="kg_nonexistent",
+          data=None,
+        )
+
+    assert exc_info.value.status_code == 404
+    mock_session.close.assert_called_once()
+
+  @pytest.mark.unit
+  async def test_no_body_passes_null_reason(self, mock_request, mock_session):
+    """The body is optional; a bare POST resets with the default reason."""
+    from robosystems.routers.admin.credits import reset_graph_credit_pool
+
+    pool = _make_graph_credit_pool()
+
+    with (
+      patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])),
+      patch(f"{MODULE}.GraphCredits") as MockGraphCredits,
+      patch(f"{MODULE}.CreditService") as MockCreditService,
+    ):
+      MockGraphCredits.get_by_graph_id.return_value = pool
+      mock_credit_svc = MagicMock()
+      mock_credit_svc.reset_graph_pool.return_value = {
+        "success": True,
+        "credits_forfeited": 0.0,
+        "new_balance": 1000.0,
+      }
+      MockCreditService.return_value = mock_credit_svc
+
+      await reset_graph_credit_pool(
+        request=mock_request,
+        graph_id="kg01234567890abcdef",
+        data=None,
+      )
+
+    assert mock_credit_svc.reset_graph_pool.call_args.kwargs["reason"] is None
+
+
+# ===========================================================================
 # TestListRepositoryCreditPools
 # ===========================================================================
 

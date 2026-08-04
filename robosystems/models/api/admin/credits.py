@@ -30,6 +30,14 @@ class BonusCreditsRequest(BaseModel):
   )
 
 
+class ResetCreditPoolRequest(BaseModel):
+  """Request to reset a graph credit pool to its monthly allocation."""
+
+  reason: str | None = Field(
+    default=None, description="Reason recorded on the ledger rows"
+  )
+
+
 class CreditAnalyticsResponse(BaseModel):
   """Response with system-wide credit analytics."""
 

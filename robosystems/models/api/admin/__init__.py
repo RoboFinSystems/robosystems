@@ -15,6 +15,7 @@ from .credits import (
   CreditHealthResponse,
   CreditPoolResponse,
   RepositoryCreditPoolResponse,
+  ResetCreditPoolRequest,
 )
 from .graphs import (
   GraphAnalyticsResponse,
@@ -66,6 +67,7 @@ __all__ = [
   "OrgUpdateRequest",
   "OrgUserInfo",
   "RepositoryCreditPoolResponse",
+  "ResetCreditPoolRequest",
   "SubscriptionCreateRequest",
   "SubscriptionResponse",
   "SubscriptionUpdateRequest",

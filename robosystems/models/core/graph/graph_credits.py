@@ -308,6 +308,37 @@ class GraphCredits(Base):
         "error": f"Credit consumption failed: {e!s}",
       }
 
+  def _expire_unspent(
+    self,
+    session: Session,
+    *,
+    description: str,
+    metadata: dict[str, Any],
+    idempotency_key: str | None,
+  ) -> Decimal:
+    """Record the forfeiture of the current balance before a reset.
+
+    A reset discards whatever is left in the pool; without this row the
+    ledger stops footing against the balance (`SUM(transactions)` drifts by
+    every discarded remainder, permanently). Returns the forfeited amount.
+    """
+    remainder = Decimal(str(self.current_balance or 0))
+    if remainder <= 0:
+      return Decimal("0")
+
+    GraphCreditTransaction.create_transaction(
+      graph_credits_id=self.id,
+      transaction_type=CreditTransactionType.EXPIRATION,
+      amount=-remainder,
+      description=description,
+      metadata=metadata,
+      session=session,
+      idempotency_key=idempotency_key,
+      graph_id=self.graph_id,
+      user_id=self.user_id,
+    )
+    return remainder
+
   def allocate_monthly_credits(self, session: Session) -> bool:
     """Allocate monthly credits if due. Credits do not roll over.
 
@@ -320,22 +351,37 @@ class GraphCredits(Base):
     here also made `current_balance` drift permanently away from the
     `monthly_allocation - consumed_this_month` figure the read paths reported,
     so the same pool answered differently depending on which one you asked.
+
+    The discarded remainder — unspent allocation and unspent bonus credits
+    alike — is recorded as an EXPIRATION transaction so the ledger keeps
+    footing against the balance through every reset.
     """
     now = datetime.now(UTC)
 
-    # Check if allocation is due (monthly)
+    # One allocation per calendar month, matching both the monthly cron that
+    # drives bulk allocation and the transaction idempotency key below. A
+    # day-count gate here refuses the 1-Mar run for anything allocated on
+    # 1-Feb (28 days elapsed), silently skipping March fleet-wide.
     if self.last_allocation_date is not None:
-      days_since_last = (now - self.last_allocation_date).days
-      if days_since_last < 30:  # Not due yet
+      last = self.last_allocation_date
+      if (last.year, last.month) == (now.year, now.month):
         return False
+
+    allocation_month = now.strftime("%Y-%m")
+
+    self._expire_unspent(
+      session,
+      description="Unspent credits forfeited at monthly reset (no rollover)",
+      metadata={
+        "allocation_month": allocation_month,
+        "expiration_type": "monthly_reset",
+      },
+      idempotency_key=f"monthly_expiration_{self.graph_id}_{allocation_month}",
+    )
 
     self.current_balance = self.monthly_allocation
     self.last_allocation_date = now
     self.updated_at = now
-
-    # Record transaction with idempotency based on month
-    allocation_month = now.strftime("%Y-%m")
-    idempotency_key = f"monthly_allocation_{self.graph_id}_{allocation_month}"
 
     GraphCreditTransaction.create_transaction(
       graph_credits_id=self.id,
@@ -347,12 +393,51 @@ class GraphCredits(Base):
         "allocation_type": "monthly",
       },
       session=session,
-      idempotency_key=idempotency_key,
+      idempotency_key=f"monthly_allocation_{self.graph_id}_{allocation_month}",
       graph_id=self.graph_id,
       user_id=self.user_id,
     )
 
     return True
+
+  def reset_pool(
+    self,
+    session: Session,
+    *,
+    initiated_by: str,
+    reason: str | None = None,
+  ) -> Decimal:
+    """Admin-initiated mid-month reset: forfeit the remainder, refill to the
+    monthly allocation, both recorded in the ledger.
+
+    Does not touch `last_allocation_date` — this is not a scheduled monthly
+    allocation, and the calendar-month refill gate must still fire normally
+    when the month turns. Returns the forfeited amount.
+    """
+    description = reason or "Credit pool reset by administrator"
+    forfeited = self._expire_unspent(
+      session,
+      description=description,
+      metadata={"expiration_type": "manual_reset", "initiated_by": initiated_by},
+      idempotency_key=None,
+    )
+
+    self.current_balance = self.monthly_allocation
+    self.updated_at = datetime.now(UTC)
+
+    GraphCreditTransaction.create_transaction(
+      graph_credits_id=self.id,
+      transaction_type=CreditTransactionType.ALLOCATION,
+      amount=self.monthly_allocation,
+      description=description,
+      metadata={"allocation_type": "manual_reset", "initiated_by": initiated_by},
+      session=session,
+      idempotency_key=None,
+      graph_id=self.graph_id,
+      user_id=self.user_id,
+    )
+
+    return forfeited
 
   def get_usage_summary(self, session: Session) -> dict[str, Any]:
     """Get usage summary for this graph."""

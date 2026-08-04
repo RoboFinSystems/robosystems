@@ -125,6 +125,24 @@ class TestStripeCheckoutSessions:
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
     assert call_args[1]["metadata"] == metadata
 
+  def test_checkout_session_stamps_metadata_on_the_subscription(self, stripe_provider):
+    """Stripe does not copy session metadata onto the subscription it
+    creates, and webhook resolution reads the subscription's metadata — so
+    the session must stamp it there explicitly via subscription_data."""
+    mock_session = Mock()
+    mock_session.id = "cs_test_789"
+    mock_session.url = "https://checkout.stripe.com/test"
+    stripe_provider.stripe.checkout.Session.create.return_value = mock_session
+
+    metadata = {
+      "user_id": "user_123",
+      "subscription_id": "sub_local_abc",
+    }
+    stripe_provider.create_checkout_session("cus_123", "price_456", metadata)
+
+    call_args = stripe_provider.stripe.checkout.Session.create.call_args
+    assert call_args[1]["subscription_data"] == {"metadata": metadata}
+
   @patch("robosystems.operations.providers.payment_provider.env")
   def test_checkout_session_urls_use_environment(self, mock_env, stripe_provider):
     """Test that success/cancel URLs use environment configuration."""
