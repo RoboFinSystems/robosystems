@@ -383,6 +383,20 @@ class TestQueryFactGrid:
     query = mock_repository.execute_query.call_args[0][0]
     assert "LIMIT" not in query.upper()
 
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_projects_the_full_period_signature(self, mock_repository):
+    """The dedup key needs both ends of the period, so the query must
+    project them. Without period_start the caller cannot distinguish a
+    quarterly fact from the YTD fact sharing its end_date — and neither
+    can the dedup."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "p.start_date as period_start" in query
+    assert "p.end_date as period_end" in query
+    assert "p.duration_type as duration_type" in query
+
 
 class TestDeduplicateFactRows:
   @pytest.mark.unit
@@ -414,6 +428,80 @@ class TestDeduplicateFactRows:
     ]
     deduped = _deduplicate_fact_rows(rows)
     assert len(deduped) == 2
+
+  @pytest.mark.unit
+  def test_overlapping_durations_sharing_an_end_date_are_not_collapsed(self):
+    """A 10-Q reports the same element for both the quarterly and the
+    year-to-date window ending on the same day. Keying on period_end alone
+    dropped one of them and returned the other with no way to tell which —
+    reproduced live on SEC: NVDA us-gaap:Revenues for 2024-10-27 returned
+    the nine-month 91,166,000,000 while the quarterly 35,082,000,000 was
+    silently discarded.
+    """
+    rows = [
+      {
+        "element_id": "us-gaap:Revenues",
+        "period_start": "2024-01-29",
+        "period_end": "2024-10-27",
+        "duration_type": "nine_months",
+        "entity_ticker": "NVDA",
+        "value": 91_166_000_000,
+      },
+      {
+        "element_id": "us-gaap:Revenues",
+        "period_start": "2024-07-29",
+        "period_end": "2024-10-27",
+        "duration_type": "quarterly",
+        "entity_ticker": "NVDA",
+        "value": 35_082_000_000,
+      },
+    ]
+    deduped = _deduplicate_fact_rows(rows)
+    assert len(deduped) == 2
+    assert {r["duration_type"] for r in deduped} == {"nine_months", "quarterly"}
+
+  @pytest.mark.unit
+  def test_true_duplicates_still_collapse(self):
+    """Identical period signature — the dedup this function exists for."""
+    rows = [
+      {
+        "element_id": "us-gaap:Revenues",
+        "period_start": "2024-07-29",
+        "period_end": "2024-10-27",
+        "duration_type": "quarterly",
+        "entity_ticker": "NVDA",
+        "value": 35_082_000_000,
+      },
+      {
+        "element_id": "us-gaap:Revenues",
+        "period_start": "2024-07-29",
+        "period_end": "2024-10-27",
+        "duration_type": "quarterly",
+        "entity_ticker": "NVDA",
+        "value": 35_082_000_000,
+      },
+    ]
+    assert len(_deduplicate_fact_rows(rows)) == 1
+
+  @pytest.mark.unit
+  def test_instants_without_a_start_date_still_collapse(self):
+    """Instant facts carry no start_date; the missing key element must not
+    turn two reads of the same instant into two rows."""
+    rows = [
+      {
+        "element_id": "us-gaap:Assets",
+        "period_end": "2024-10-27",
+        "entity_ticker": "NVDA",
+        "value": 1,
+      },
+      {
+        "element_id": "us-gaap:Assets",
+        "period_end": "2024-10-27",
+        "entity_ticker": "NVDA",
+        "value": 1,
+      },
+    ]
+    assert len(_deduplicate_fact_rows(rows)) == 1
 
   @pytest.mark.unit
   def test_sorted_desc_by_period_end(self):

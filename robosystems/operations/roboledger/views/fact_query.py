@@ -122,19 +122,27 @@ def _build_entity_match(
 
 
 def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Dedup by ``(element, period, entity)`` keeping the first occurrence,
+  """Dedup on the full period signature, keeping the first occurrence,
   then sort by ``period_end`` DESC.
 
   DISTINCT + ORDER BY returns empty results in LadybugDB, so the query
-  omits both and we handle dedup + sort here. Entity is always part of the
-  key — without it two filers reporting the same element for the same
-  period collapse into one row.
+  omits both and we handle dedup + sort here.
+
+  The key is ``(element, period_start, period_end, entity)``. Both ends of
+  the period are load-bearing: an XBRL duration fact is identified by
+  *(start, end)*, not by end alone, so a 10-Q reports the same element for
+  the 3-month AND the 9-month window ending on the same day. Keying on
+  ``period_end`` alone collapsed those into one arbitrary row — the caller
+  asked for a quarter and silently got year-to-date. Entity is in the key
+  for the same reason: without it two filers reporting the same element for
+  the same period collapse into one row.
   """
   seen: set[tuple] = set()
   deduped: list[dict[str, Any]] = []
   for row in rows:
     key = (
       row.get("element_id", ""),
+      row.get("period_start", ""),
       row.get("period_end", ""),
       row.get("entity_ticker") or row.get("entity_name", ""),
     )
@@ -243,11 +251,18 @@ async def query_fact_grid(
   # us-gaap:Assets fact count is identical with and without the traversal,
   # and materialize.py builds the edge for native and shared facts alike),
   # so the join drops nothing and the caller can always tell filers apart.
+  #
+  # period_start and duration_type are projected because an XBRL duration
+  # fact is identified by (start, end): without start_date the dedup key
+  # cannot distinguish a quarterly fact from the year-to-date fact sharing
+  # its end_date, and the caller has no way to tell which one it received.
   return_clause = (
     "\n      RETURN\n"
     "        el.qname as element_id,\n"
     "        el.name as element_name,\n"
+    "        p.start_date as period_start,\n"
     "        p.end_date as period_end,\n"
+    "        p.duration_type as duration_type,\n"
     "        f.numeric_value as value,\n"
     "        u.value as unit,\n"
     "        ent.ticker as entity_ticker,\n"

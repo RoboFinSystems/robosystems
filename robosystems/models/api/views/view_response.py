@@ -6,7 +6,24 @@ from robosystems.models.api.views.fact_grid import Dimension
 class FactRecord(BaseModel):
   element_id: str = Field(..., description="Element qname (e.g., 'us-gaap:Assets')")
   element_name: str | None = Field(None, description="Element local name")
+  period_start: str | None = Field(
+    None,
+    description=(
+      "Period start date (YYYY-MM-DD); null for instant facts. A duration "
+      "fact is identified by (start, end) — two facts for the same element "
+      "can share an end date and differ only here (e.g. a quarterly and a "
+      "year-to-date figure from the same 10-Q)."
+    ),
+  )
   period_end: str | None = Field(None, description="Period end date (YYYY-MM-DD)")
+  duration_type: str | None = Field(
+    None,
+    description=(
+      "Period duration classification (e.g. 'quarterly', 'nine_months', "
+      "'annual'); null for instant facts. Use with period_start to tell "
+      "overlapping windows apart."
+    ),
+  )
   value: float | None = Field(None, description="Numeric fact value")
   unit: str | None = Field(None, description="Unit of measure (e.g., 'USD')")
   entity_ticker: str | None = Field(
