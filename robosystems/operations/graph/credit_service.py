@@ -503,6 +503,43 @@ class CreditService:
       "description": description,
     }
 
+  def reset_graph_pool(
+    self,
+    graph_id: str,
+    initiated_by: str,
+    reason: str | None = None,
+  ) -> dict[str, Any]:
+    """Reset a graph's pool to its monthly allocation, forfeiting the rest.
+
+    Both movements land in the ledger (EXPIRATION for the remainder, then a
+    manual ALLOCATION), and the scheduled monthly reset still fires normally
+    when the month turns — `last_allocation_date` is left alone.
+    """
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
+    if not credits:
+      return {"error": "No credit pool found for graph"}
+
+    forfeited = credits.reset_pool(
+      self.session, initiated_by=initiated_by, reason=reason
+    )
+
+    self.session.commit()
+
+    try:
+      from ...middleware.billing.cache import credit_cache
+
+      credit_cache.invalidate_graph_credit_balance(parent_graph_id)
+    except Exception as e:
+      logger.warning(f"Failed to invalidate credit cache after pool reset: {e}")
+
+    return {
+      "success": True,
+      "credits_forfeited": float(forfeited),
+      "new_balance": float(credits.current_balance),
+    }
+
   def get_credit_transactions(
     self,
     graph_id: str,

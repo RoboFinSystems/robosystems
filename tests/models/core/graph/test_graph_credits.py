@@ -355,6 +355,122 @@ class TestGraphCredits:
     assert result is False
     assert credits.current_balance == Decimal("100")
 
+  def test_reset_forfeiture_keeps_the_ledger_footing(self):
+    """SUM(transactions) == current_balance through creation, consumption,
+    and the monthly reset. The discarded remainder gets an EXPIRATION row
+    instead of silently vanishing — without it every reset drifts the
+    ledger away from the balance permanently."""
+    from sqlalchemy import func
+
+    credits = GraphCredits.create_for_graph(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      monthly_allocation=Decimal("1000"),
+      session=self.session,
+    )
+    consumption = credits.consume_credits_atomic(
+      amount=Decimal("300"),
+      operation_type="agent_call",
+      operation_description="AI call",
+      session=self.session,
+    )
+    assert consumption["success"] is True
+
+    credits.last_allocation_date = datetime.now(UTC) - timedelta(days=35)
+    self.session.commit()
+
+    assert credits.allocate_monthly_credits(self.session) is True
+    self.session.commit()
+
+    expiration = (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(
+        graph_credits_id=credits.id,
+        transaction_type=CreditTransactionType.EXPIRATION.value,
+      )
+      .one()
+    )
+    assert expiration.amount == Decimal("-700")
+
+    ledger_total = (
+      self.session.query(func.sum(GraphCreditTransaction.amount))
+      .filter(GraphCreditTransaction.graph_credits_id == credits.id)
+      .scalar()
+    )
+    assert ledger_total == credits.current_balance == Decimal("1000")
+
+  def test_zero_remainder_reset_writes_no_expiration_row(self):
+    """A fully-spent pool has nothing to forfeit — no EXPIRATION noise."""
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("0"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=datetime.now(UTC) - timedelta(days=35),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    assert credits.allocate_monthly_credits(self.session) is True
+
+    expirations = (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(
+        graph_credits_id=credits.id,
+        transaction_type=CreditTransactionType.EXPIRATION.value,
+      )
+      .count()
+    )
+    assert expirations == 0
+    assert credits.current_balance == Decimal("1000")
+
+  def test_manual_reset_forfeits_refills_and_leaves_the_monthly_gate_alone(self):
+    """An admin mid-month reset forfeits the remainder and refills, with
+    both movements in the ledger — and because it does not touch
+    last_allocation_date, the scheduled reset still fires when the month
+    turns."""
+    from unittest.mock import patch
+
+    june_first = datetime(2027, 6, 1, tzinfo=UTC)
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("400"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=june_first,
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    forfeited = credits.reset_pool(self.session, initiated_by="admin:test")
+    self.session.commit()
+
+    assert forfeited == Decimal("400")
+    assert credits.current_balance == Decimal("1000")
+    assert credits.last_allocation_date == june_first
+
+    expiration = (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(
+        graph_credits_id=credits.id,
+        transaction_type=CreditTransactionType.EXPIRATION.value,
+      )
+      .one()
+    )
+    assert expiration.amount == Decimal("-400")
+    assert expiration.transaction_metadata is not None
+
+    with patch(
+      "robosystems.models.core.graph.graph_credits.datetime", wraps=datetime
+    ) as mock_dt:
+      mock_dt.now.return_value = datetime(2027, 7, 1, tzinfo=UTC)
+      assert credits.allocate_monthly_credits(self.session) is True
+
+    assert credits.current_balance == Decimal("1000")
+
   def test_allocation_never_accumulates_past_the_monthly_amount(self):
     """A large prior balance is replaced, not added to.
 
