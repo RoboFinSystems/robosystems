@@ -172,8 +172,12 @@ class PeriodCloseService:
      configured but the pivot fails. Runs after the draft→posted
      transition because the pivot reads posted entries only.
 
-  Callers commit the session. All failures raise domain exceptions that
-  the REST / MCP caller translates into its native error format.
+  Callers commit the session. One exception: the QB pre-publish step
+  (2b, before any close mutation) commits its own qb_external_id
+  markers — they record external writes that already happened and must
+  survive a failed close (see `_publish_drafts_to_qb`). All failures
+  raise domain exceptions that the REST / MCP caller translates into
+  its native error format.
 
   ``statement_stamper`` is injectable for tests; the default resolves
   :func:`stamp_canonical_statement_sets` lazily so this module stays
@@ -224,9 +228,11 @@ class PeriodCloseService:
     # 2b. Pre-publish step. For graphs with a QB connection in
     # `write_policy='qb_authoritative'` / `'hybrid'`, batch-publish every
     # in-period draft Entry whose triggering Event has
-    # `source IN ('schedule', 'manual')`. Atomic: any QB rejection
-    # raises `WritebackFailed` before the draft→posted transition
-    # below, rolling back the entire close.
+    # `source IN ('schedule', 'manual')`. Any QB rejection raises
+    # `WritebackFailed` before the draft→posted transition below, so the
+    # close itself never half-runs — but the step COMMITS the
+    # qb_external_id markers for entries that did reach QB (see its
+    # docstring), so a failed close never re-publishes them on retry.
     self._publish_drafts_to_qb(
       session, graph_id, period_start, period_end, actor_id=actor_id
     )
@@ -412,11 +418,20 @@ class PeriodCloseService:
     every in-period draft Entry whose triggering Event has
     ``source IN ('schedule', 'manual')`` to that QB connection.
 
-    Atomic: any per-event QB rejection collects into a list and raises
-    `WritebackFailed` BEFORE the close's draft→posted transition,
-    rolling back the entire close transaction. The operator fixes the
-    offending entries (mapping issue, balance error, period closed
-    in QB) and retries.
+    Any per-event QB rejection collects into a list and raises
+    `WritebackFailed` BEFORE the close's draft→posted transition, so no
+    close state mutates on failure. The operator fixes the offending
+    entries (mapping issue, balance error, period closed in QB) and
+    retries.
+
+    NOT atomic with the close, deliberately: each successful publish
+    stamps `Event.metadata['qb_external_id']` — the only dedupe marker —
+    and those markers are COMMITTED at the end of this step, before any
+    failure can roll them back. A QB JournalEntry is an external write
+    that already happened; losing its marker to a rollback would make
+    the retried close re-publish the same drafts as duplicates in the
+    customer's QuickBooks. Retries skip already-marked events via
+    `select_writeback_eligible_entries`.
 
     Skipped silently when:
     - No QB connection on the graph has qb_authoritative / hybrid policy
@@ -514,6 +529,17 @@ class PeriodCloseService:
             "qb_error": {"code": type(e).__name__, "message": str(e)},
           }
         )
+
+    # Durability boundary: the qb_external_id markers written by the loop
+    # record JournalEntries that now exist in QuickBooks, so they must
+    # survive whatever happens to the rest of the close. This is the
+    # close's first mutation point, and the tenant search_path is a plain
+    # (non-LOCAL) SET that survives commit. Without this commit, a later
+    # failure — the WritebackFailed below, a StatementStampError, a
+    # failed final commit — would roll the markers back while the QB
+    # writes stand, and the retried close would re-publish the same
+    # drafts into QuickBooks as duplicates.
+    session.commit()
 
     if failed_events:
       raise WritebackFailed(failed_events)
