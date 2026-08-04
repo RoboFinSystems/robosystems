@@ -33,3 +33,12 @@ They keep their original headings and trailing links, so treat them as records
 rather than as templates for the format above. None of them can affect a
 release — their tags already exist, so the workflow short-circuits before
 reading them.
+
+Read the generated ones for what they are: the workflow diffs from the
+immediately preceding tag, so a generated minor body describes only the final
+slice that carried the bump (`v1.6.0` covers `v1.5.17...v1.6.0`), **not** the
+line it closes — the patch releases of the prior line are summarized in no
+minor's notes. Each file's trailing Full Changelog link states its true span.
+The hand-written `v1.4.0`/`v1.5.0` notes are genuine line retrospectives and
+don't share this limit. When a future minor deserves a line retrospective,
+write a curated file — that's the mechanism above.
