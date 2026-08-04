@@ -161,14 +161,58 @@ def _extract_stripe_subscription_id(data: dict) -> str | None:
   return None
 
 
-def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> Any:
+def _extract_local_subscription_id(data: dict) -> str | None:
+  """Our own `BillingSubscription.id` from the Stripe payload's metadata.
+
+  The create paths write `subscription_id` into the Stripe subscription's
+  metadata, and Stripe copies that onto derived objects such as invoices. It
+  identifies one exact row, so it is a far better disambiguator than the
+  customer id — which now maps to an org holding many concurrent
+  subscriptions.
+  """
+  candidates = [data.get("metadata")]
+  if parent := data.get("parent"):
+    if isinstance(parent, dict) and (details := parent.get("subscription_details")):
+      if isinstance(details, dict):
+        candidates.append(details.get("metadata"))
+
+  for metadata in candidates:
+    if isinstance(metadata, dict):
+      local_id = metadata.get("subscription_id")
+      if isinstance(local_id, str) and local_id:
+        return local_id
+  return None
+
+
+def _resolve_subscription(
+  event_data: dict,
+  db_session: Any,
+  context: Any,
+  *,
+  allow_customer_fallback: bool = True,
+) -> Any:
   """Resolve the BillingSubscription for any Stripe event.
 
-  Tries subscription ID first (multiple payload locations), then falls
-  back to customer ID. This is the single entry point for subscription
-  lookup — all handlers should use this instead of rolling their own.
+  Tries the Stripe subscription id first (several payload locations), then our
+  own id from the payload metadata, then — only when the caller permits it and
+  the answer is unambiguous — the billing customer.
 
-  Raises SubscriptionNotFoundError if the subscription cannot be found.
+  `allow_customer_fallback=False` is required for handlers that mutate or
+  cancel what they resolve. A `customer.subscription.*` payload IS the
+  subscription, so `_extract_stripe_subscription_id` always finds an id in it;
+  failing to match that id locally means the subscription genuinely is not in
+  our database, and picking a different one from the same org would apply the
+  event to the wrong resource. Raising instead lets Stripe retry.
+
+  The customer fallback exists for invoice events, where `invoice.created` can
+  legitimately arrive before `checkout.session.completed` has written the local
+  row. It is kept for those, but only when the org has exactly one candidate:
+  `BillingCustomer.org_id` is the primary key, so one Stripe customer maps to
+  an org that may hold one subscription per graph plus one per member per
+  repository. "Most recently created active subscription" stopped being a
+  reasonable guess the moment an org could have more than one member.
+
+  Raises SubscriptionNotFoundError if the subscription cannot be resolved.
   """
   from robosystems.models.core.billing import BillingCustomer, BillingSubscription
 
@@ -187,21 +231,23 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
     if subscription:
       return subscription
 
+  # --- Try by our own subscription ID, carried in the Stripe metadata ---
+  local_sub_id = _extract_local_subscription_id(event_data)
+  if local_sub_id:
+    subscription = (
+      db_session.query(BillingSubscription)
+      .filter(BillingSubscription.id == local_sub_id)
+      .first()
+    )
+    if subscription:
+      return subscription
+
   # --- Fallback: customer ID → org → subscription ---
-  # Prefer active/provisioning over canceled to avoid matching a stale
-  # subscription when the org has re-subscribed.
   customer_id = event_data.get("customer")
-  if customer_id:
+  if customer_id and allow_customer_fallback:
     customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
     if customer:
-      from sqlalchemy import case
-
-      status_priority = case(
-        {"active": 0, "provisioning": 1, "pending_payment": 2, "canceled": 3},
-        value=BillingSubscription.status,
-        else_=4,
-      )
-      subscription = (
+      candidates = (
         db_session.query(BillingSubscription)
         .filter(
           BillingSubscription.org_id == customer.org_id,
@@ -209,18 +255,29 @@ def _resolve_subscription(event_data: dict, db_session: Any, context: Any) -> An
             ["pending_payment", "provisioning", "active", "canceled"]
           ),
         )
-        .order_by(status_priority, BillingSubscription.created_at.desc())
-        .first()
+        .limit(2)
+        .all()
       )
-      if subscription:
+      # Exactly one candidate or none — never a guess between several. An
+      # invoice misattributed here is permanent, because invoices dedupe on
+      # `stripe_invoice_id` and no later event revisits the association.
+      if len(candidates) == 1:
         context.log.info(
-          f"Resolved subscription {subscription.id} via customer {customer_id}"
+          f"Resolved subscription {candidates[0].id} via customer {customer_id} "
+          f"(sole candidate for org {customer.org_id})"
         )
-        return subscription
+        return candidates[0]
+      if len(candidates) > 1:
+        context.log.warning(
+          f"Refusing to resolve via customer {customer_id}: org "
+          f"{customer.org_id} has multiple candidate subscriptions and the "
+          f"event carries no subscription id to disambiguate them"
+        )
 
   raise SubscriptionNotFoundError(
     f"Subscription not found (stripe_sub={stripe_sub_id}, "
-    f"customer={event_data.get('customer')})"
+    f"local_sub={local_sub_id}, customer={event_data.get('customer')}, "
+    f"customer_fallback={'allowed' if allow_customer_fallback else 'disallowed'})"
   )
 
 
@@ -559,7 +616,13 @@ async def _handle_subscription_updated(
   status = subscription_data.get("status")
   cancel_at_period_end = subscription_data.get("cancel_at_period_end", False)
 
-  subscription = _resolve_subscription(subscription_data, db_session, context)
+  # No customer fallback: this handler mutates and can cancel what it
+  # resolves, and a customer.subscription.* payload always carries its own
+  # id — so a miss means we do not have this subscription, not that we
+  # should pick another one from the same org. Raising lets Stripe retry.
+  subscription = _resolve_subscription(
+    subscription_data, db_session, context, allow_customer_fallback=False
+  )
 
   # Sync billing period dates from Stripe
   # Newer Stripe API versions moved these from the subscription root
@@ -680,7 +743,13 @@ async def _handle_subscription_deleted(
   """
   from datetime import UTC, datetime
 
-  subscription = _resolve_subscription(subscription_data, db_session, context)
+  # No customer fallback: this handler mutates and can cancel what it
+  # resolves, and a customer.subscription.* payload always carries its own
+  # id — so a miss means we do not have this subscription, not that we
+  # should pick another one from the same org. Raising lets Stripe retry.
+  subscription = _resolve_subscription(
+    subscription_data, db_session, context, allow_customer_fallback=False
+  )
 
   if subscription.status == "canceled":
     # Already canceled (via portal updated handler or UI cancel button).
