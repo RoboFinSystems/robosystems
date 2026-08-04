@@ -741,7 +741,7 @@ async def _check_shared_repository_limits(
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail=f"You don't have access to the '{graph_id}' repository. "
-      f"Subscribe at {env.ROBOSYSTEMS_URL}/billing",
+      f"Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
     )
 
   # Rate limiting is optional - skip if disabled (dev environments)
@@ -780,7 +780,7 @@ async def _check_shared_repository_limits(
       if reason == "no_access":
         raise HTTPException(
           status_code=http_status.HTTP_403_FORBIDDEN,
-          detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/billing",
+          detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
         )
       elif reason == "endpoint_not_allowed":
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail=message)
@@ -789,7 +789,7 @@ async def _check_shared_repository_limits(
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
           detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-          f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/billing",
+          f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/repositories/browse",
         )
       else:
         raise HTTPException(

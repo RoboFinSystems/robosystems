@@ -135,7 +135,7 @@ class DualLayerRateLimiter:
         "allowed": False,
         "reason": "no_access",
         "message": f"Access to {graph_id} repository requires a paid subscription",
-        "upgrade_url": f"{env.ROBOSYSTEMS_URL}/billing",
+        "upgrade_url": f"{env.ROBOSYSTEMS_URL}/repositories/browse",
       }
 
     repo_check = await self._check_repository_limit(

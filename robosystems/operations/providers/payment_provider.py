@@ -206,7 +206,7 @@ class StripePaymentProvider(PaymentProvider):
       mode="subscription",
       line_items=[{"price": price_id, "quantity": 1}],
       success_url=f"{env.ROBOSYSTEMS_URL}/checkout/{{CHECKOUT_SESSION_ID}}",
-      cancel_url=f"{env.ROBOSYSTEMS_URL}/billing",
+      cancel_url=f"{env.ROBOSYSTEMS_URL}/organization?tab=billing",
       metadata=metadata,
       payment_method_types=["card"],
       billing_address_collection="auto",

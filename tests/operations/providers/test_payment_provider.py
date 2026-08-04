@@ -139,7 +139,9 @@ class TestStripeCheckoutSessions:
 
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
     assert "robosystems.example.com/checkout" in call_args[1]["success_url"]
-    assert "robosystems.example.com/billing" in call_args[1]["cancel_url"]
+    assert (
+      "robosystems.example.com/organization?tab=billing" in call_args[1]["cancel_url"]
+    )
 
   def test_checkout_session_mode_is_subscription(self, stripe_provider):
     """Test that checkout mode is set to subscription."""

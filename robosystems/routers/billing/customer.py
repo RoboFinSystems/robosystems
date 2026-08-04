@@ -137,7 +137,9 @@ async def create_portal_session(
         f"Created Stripe customer for org {org_id} during portal session",
         extra={"org_id": org_id, "user_id": current_user.id},
       )
-    return_url = f"{env.ROBOSYSTEMS_URL}/billing"
+    # Billing lives on the org page's Billing tab; /billing still redirects here
+    # for older sessions, but returning directly avoids a redirect hop.
+    return_url = f"{env.ROBOSYSTEMS_URL}/organization?tab=billing"
     portal_url = provider.create_portal_session(customer.stripe_customer_id, return_url)
 
     logger.info(
