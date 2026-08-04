@@ -34,16 +34,34 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
   Shared by the REST and MCP surfaces so both report the same numbers.
   `total` sums across every returned period — meaningful for duration facts,
   not for instants (summing a balance across time is not a balance).
+
+  Overlapping duration windows that share a `period_end` (a 10-Q reports the
+  same element for both the quarter and the year-to-date window ending the
+  same day) contribute only their narrowest window per (entity, period_end):
+  summing a quarter and the YTD window that contains it double-counts the
+  quarter. The window survives in the `facts` list either way — this is an
+  aggregation rule, not a filter.
   """
   summary: dict[str, dict[str, float]] = {}
 
-  by_element: dict[str, list[float]] = {}
+  # (element, entity, period_end) → (period_start, value); the latest start
+  # is the narrowest window ending that day. Instants have no period_start
+  # and arrive one-per-end after dedup, so they pass through unchanged.
+  narrowest: dict[tuple[str, Any, Any], tuple[str, float]] = {}
   for fact in facts:
     element = fact.get("element_id")
     value = fact.get("value")
     if element is None or value is None:
       continue
-    by_element.setdefault(str(element), []).append(float(value))
+    key = (str(element), fact.get("entity_ticker"), fact.get("period_end"))
+    start = str(fact.get("period_start") or "")
+    prev = narrowest.get(key)
+    if prev is None or start > prev[0]:
+      narrowest[key] = (start, float(value))
+
+  by_element: dict[str, list[float]] = {}
+  for (element, _entity, _period_end), (_start, value) in narrowest.items():
+    by_element.setdefault(element, []).append(value)
 
   for element, values in by_element.items():
     summary[element] = {

@@ -270,6 +270,7 @@ async def list_org_graphs(
       from ...models.core import GraphCredits
 
       credits = GraphCredits.get_by_graph_id(graph.graph_id, db)
+      usage = credits.get_usage_summary(db) if credits else None
 
       result.append(
         {
@@ -277,8 +278,8 @@ async def list_org_graphs(
           "graph_name": graph.graph_name,
           "graph_type": graph.graph_type,
           "graph_tier": graph.graph_tier,
-          "credits_available": float(credits.available_credits) if credits else 0,
-          "credits_used": float(credits.total_consumed) if credits else 0,
+          "credits_available": usage["current_balance"] if usage else 0,
+          "credits_used": usage["consumed_this_month"] if usage else 0,
           "created_at": graph.created_at,
           "updated_at": graph.updated_at,
         }

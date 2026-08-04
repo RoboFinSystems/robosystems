@@ -7,12 +7,23 @@ from robosystems.operations.roboledger.views.fact_grid_builder import (
 )
 
 
-def _fact(element_id, element_name, value, period_end, ticker="AAPL", unit="USD"):
+def _fact(
+  element_id,
+  element_name,
+  value,
+  period_end,
+  ticker="AAPL",
+  unit="USD",
+  period_start=None,
+  duration_type=None,
+):
   """A fact record shaped exactly as `query_fact_grid` returns one."""
   return {
     "element_id": element_id,
     "element_name": element_name,
+    "period_start": period_start,
     "period_end": period_end,
+    "duration_type": duration_type,
     "value": value,
     "unit": unit,
     "entity_ticker": ticker,
@@ -233,6 +244,85 @@ class TestSummarizeByElement:
     summary = summarize_by_element(facts)
 
     assert summary["us-gaap:Assets"]["count"] == 1
+
+  def test_overlapping_windows_contribute_only_the_narrowest(self):
+    """A 10-Q reports both the quarter and the YTD window ending the same
+    day. Since the dedup fix both survive into `facts` — summing them would
+    double-count the quarter inside its own YTD figure. NVDA's real numbers:
+    Q3 FY2025 revenue 35,082M inside the 91,166M nine-month window."""
+    facts = [
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        91_166_000_000,
+        "2024-10-27",
+        ticker="NVDA",
+        period_start="2024-01-29",
+      ),
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        35_082_000_000,
+        "2024-10-27",
+        ticker="NVDA",
+        period_start="2024-07-29",
+      ),
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        30_040_000_000,
+        "2024-07-28",
+        ticker="NVDA",
+        period_start="2024-04-29",
+      ),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    # The quarterly windows sum; the nine-month container does not join them.
+    assert summary["us-gaap:Revenues"]["count"] == 2
+    assert summary["us-gaap:Revenues"]["total"] == 65_122_000_000
+    assert summary["us-gaap:Revenues"]["max"] == 35_082_000_000
+
+  def test_same_period_end_across_entities_is_not_collapsed(self):
+    """The narrowest-window rule is per entity — two filers reporting the
+    same window are both real observations."""
+    facts = [
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        100,
+        "2024-12-31",
+        ticker="AAPL",
+        period_start="2024-10-01",
+      ),
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        200,
+        "2024-12-31",
+        ticker="MSFT",
+        period_start="2024-10-01",
+      ),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert summary["us-gaap:Revenues"]["count"] == 2
+    assert summary["us-gaap:Revenues"]["total"] == 300
+
+  def test_instants_without_a_start_are_unaffected(self):
+    """Instants carry period_start=None and arrive one-per-end after dedup;
+    the narrowest-window rule must pass them through unchanged."""
+    facts = [
+      _fact("us-gaap:Assets", "Assets", 1000, "2024-12-31"),
+      _fact("us-gaap:Assets", "Assets", 900, "2023-12-31"),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert summary["us-gaap:Assets"]["count"] == 2
+    assert summary["us-gaap:Assets"]["total"] == 1900
 
   def test_empty_input(self):
     assert summarize_by_element([]) == {}

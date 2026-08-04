@@ -91,6 +91,11 @@ dependencies = [
     "aiohttp>=3.14.3",
     "bcrypt>=5.0.0,<6.0",
     "beautifulsoup4>=4.13.0,<5.0",
+    # Direct dependency: auth cache, credential encryption, and connection
+    # credentials import it at module level. Without this pin it reaches the
+    # prod closure only transitively (intuit-oauth → pyjwt[crypto]), so
+    # dropping that adapter would break the auth path at import time.
+    "cryptography>=50.0.0,<51.0",
     "email-validator>=2.2.0,<3.0",
     "holidays>=0.101,<1.0",
     "httptools>=0.6.0,<1.0",

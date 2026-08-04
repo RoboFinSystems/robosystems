@@ -7,7 +7,6 @@ expose membership, limits, and graph state correctly for the authenticated user.
 
 from __future__ import annotations
 
-from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -196,7 +195,19 @@ class TestOrgRouter:
   async def test_list_org_graphs_includes_credit_totals(
     self, async_client, test_db, test_user
   ):
-    """Graph listing should merge credit availability for each org graph."""
+    """Graph listing merges credit availability from a REAL credits row.
+
+    The previous version stubbed a credits object carrying attribute names
+    `GraphCredits` has never had (`available_credits`, `total_consumed`),
+    which kept an AttributeError → 500 green for any org whose graph had a
+    real credits row — the fifth stub-asserts-the-bug instance across three
+    reviews. The endpoint now goes through `get_usage_summary`, and this
+    test would 500 if the field names drift again.
+    """
+    from decimal import Decimal
+
+    from robosystems.models.core import GraphCredits
+
     org = Org.create(
       name=f"Graph Org {uuid4().hex[:6]}",
       org_type=OrgType.TEAM,
@@ -215,16 +226,24 @@ class TestOrgRouter:
       session=test_db,
     )
 
-    class DummyCredits:
-      def __init__(self):
-        self.available_credits = 75.0
-        self.total_consumed = 25.0
+    credits = GraphCredits(
+      graph_id=graph_id,
+      user_id=test_user.id,
+      billing_admin_id=test_user.id,
+      current_balance=Decimal("100"),
+      monthly_allocation=Decimal("100"),
+    )
+    test_db.add(credits)
+    test_db.commit()
+    consumption = credits.consume_credits_atomic(
+      amount=Decimal("25"),
+      operation_type="agent_call",
+      operation_description="AI call",
+      session=test_db,
+    )
+    assert consumption["success"] is True
 
-    with patch(
-      "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id",
-      return_value=DummyCredits(),
-    ):
-      response = await async_client.get(f"/v1/orgs/{org.id}/graphs")
+    response = await async_client.get(f"/v1/orgs/{org.id}/graphs")
 
     assert response.status_code == 200
     graphs = response.json()
