@@ -162,6 +162,70 @@ class TestHasSystemCalls:
     assert has_system_calls("CALL show_tables() RETURN *")
 
 
+class TestCallClassification:
+  """`CALL` is classified explicitly, on an allowlist, failing closed.
+
+  The keyword patterns match on `\\b` word boundaries and `_` is a word
+  character, so an underscore-joined procedure name can never match them.
+  `CALL` itself appears in no keyword set. Both gaps meant the whole `CALL`
+  family classified as READ, on the surface that treats "not a write" as
+  "safe to run on a read replica".
+  """
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL CREATE_VECTOR_INDEX('Fact','x','embedding')",
+      "CALL DROP_VECTOR_INDEX('Fact','x')",
+      "CALL CREATE_FTS_INDEX('Fact','idx','text')",
+      "call create_vector_index(1)",
+      "CALL db.labels()",
+      "CALL some_future_procedure()",
+    ],
+  )
+  def test_unlisted_procedures_are_writes(self, analyzer, query):
+    """Fail closed: anything not on the read-only allowlist is a write,
+    including procedures that do not exist yet."""
+    assert analyzer.is_write_operation(query) is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL spill_to_disk=false",
+      "CALL timeout=0",
+      "CALL   TIMEOUT   =   0",
+    ],
+  )
+  def test_session_configuration_is_a_write(self, analyzer, query):
+    """`CALL <name> = <value>` mutates connection state that outlives the
+    statement, and connections are pooled and shared."""
+    assert analyzer.is_write_operation(query) is True
+
+  def test_trailing_configuration_after_a_read(self, analyzer):
+    """A read prefix must not launder a trailing configuration verb."""
+    assert analyzer.is_write_operation("MATCH (n) RETURN n; CALL timeout=0") is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL SHOW_TABLES() RETURN *",
+      "CALL TABLE_INFO('Fact') RETURN *",
+      "CALL db_version() RETURN *",
+      "CALL current_setting('threads') RETURN *",
+    ],
+  )
+  def test_allowlisted_read_procedures_stay_reads(self, analyzer, query):
+    """These are used by first-party schema introspection — regressing them
+    would break the schema endpoints and the MCP client."""
+    assert analyzer.is_write_operation(query) is False
+
+  def test_configuration_inside_a_string_literal_is_not_a_write(self, analyzer):
+    """String contents are masked before classification, so a literal that
+    merely looks like a config verb must not trip the gate."""
+    query = "MATCH (n:Fact) WHERE n.name = 'CALL timeout=0' RETURN n"
+    assert analyzer.is_write_operation(query) is False
+
+
 class TestQuerySecurityValidation:
   """Tests for query security validation."""
 
