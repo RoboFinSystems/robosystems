@@ -261,10 +261,17 @@ async def get_org_usage(
       day_start = start_date + timedelta(days=i)
       day_end = day_start + timedelta(days=1)
 
+      # Same definitions as the summary above: `api_calls` counts only
+      # API-shaped events (a bare count also swept in the 6-hourly storage
+      # snapshots and the credit-consumption rows, so the trend disagreed
+      # with the summary in the same payload), while credits sum across
+      # whatever rows carry them.
       day_records = (
         db.query(
           func.sum(GraphUsage.credits_consumed).label("credits"),
-          func.count(GraphUsage.id).label("api_calls"),
+          func.count(GraphUsage.id)
+          .filter(GraphUsage.event_type.in_(_API_EVENT_TYPES))
+          .label("api_calls"),
         )
         .filter(
           GraphUsage.graph_id.in_(graph_ids) if graph_ids else False,
