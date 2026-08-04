@@ -243,6 +243,15 @@ class TestOrgUsageEndpoints:
       for entry in body["daily_trend"]
     )
 
+    # The trend uses the same definitions as the summary. A bare row count
+    # here reported the storage snapshot and the credit event as API calls,
+    # so the same payload said "1 call" in summary and "2 calls" in trend.
+    yesterday, today = body["daily_trend"]
+    assert yesterday["credits_used"] == pytest.approx(10.0)
+    assert yesterday["api_calls"] == 0
+    assert today["credits_used"] == 0
+    assert today["api_calls"] == 1
+
   async def test_get_org_usage_handles_org_with_no_graphs(
     self, async_client, test_db, test_user
   ):
