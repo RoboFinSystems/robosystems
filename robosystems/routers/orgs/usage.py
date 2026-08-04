@@ -71,12 +71,17 @@ async def get_org_limits(
     if current_graphs >= limits.max_graphs * 0.9:
       warnings.append(f"Approaching graph limit ({current_graphs}/{limits.max_graphs})")
 
+    # Role as well as quota: reporting True to a member who would be refused at
+    # the create endpoint would make this flag a lie, and clients act on it —
+    # the graph-creation page gates its whole wizard behind it.
+    can_create_graph = membership.can_create_graphs() and limits.can_create_graph(db)[0]
+
     return OrgLimitsResponse(
       org_id=org_id,
       max_graphs=limits.max_graphs,
       current_usage=usage,
       warnings=warnings,
-      can_create_graph=limits.can_create_graph(db)[0],
+      can_create_graph=can_create_graph,
     )
 
   except HTTPException:

@@ -137,3 +137,15 @@ class OrgUser(Model):
   def can_manage_billing(self) -> bool:
     """Check if user can manage billing settings."""
     return self.is_admin()
+
+  def can_create_graphs(self) -> bool:
+    """Check if user can create graphs for the org.
+
+    Creating a graph provisions infrastructure, consumes the org's
+    `max_graphs` quota and starts a recurring charge on the org's payment
+    method, so it is an org-level commitment rather than a personal one.
+    Named separately from `can_manage_billing` because the two can diverge:
+    this governs spending on the org's behalf, not administering the billing
+    account itself.
+    """
+    return self.is_admin()

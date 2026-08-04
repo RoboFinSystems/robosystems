@@ -299,7 +299,25 @@ async def create_graph(
         message="User organization not found. Please contact support.",
       )
 
-    org_id = user_orgs[0].org_id
+    membership = user_orgs[0]
+    org_id = membership.org_id
+
+    # Creating a graph starts a recurring charge on the org's payment method
+    # and consumes org quota, so it is an owner/admin action. Members cannot
+    # add a payment method either (checkout is owner-only), so without this a
+    # member could commit the org's stored card without its billing
+    # administrators knowing until the invoice arrived.
+    if not membership.can_create_graphs():
+      _raise_http_exception(
+        status_code=status.HTTP_403_FORBIDDEN,
+        error_code="graph_creation_requires_admin",
+        message=(
+          "Only organization owners and admins can create graphs. "
+          "Ask an owner or admin to create one, or to grant you access to "
+          "an existing graph."
+        ),
+      )
+
     org_limits = OrgLimits.get_or_create_for_org(org_id, db)
 
     can_create, reason = org_limits.can_create_graph(db)

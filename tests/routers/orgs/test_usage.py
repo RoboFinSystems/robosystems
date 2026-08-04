@@ -312,6 +312,84 @@ class TestOrgUsageEndpoints:
     assert all(entry["credits_used"] == 0 for entry in body["daily_trend"])
 
 
+class TestGraphCreationAllowance:
+  """`can_create_graph` must account for role as well as quota.
+
+  Clients gate real UI on this flag — the graph-creation page hides its whole
+  wizard behind it — so reporting True to a member the create endpoint would
+  refuse sends them into a flow that 403s at the end.
+  """
+
+  async def test_member_is_refused_even_with_quota_available(
+    self, async_client, test_db, test_user
+  ):
+    """A plain member cannot create graphs regardless of remaining quota."""
+    owner = _create_user(test_db, password_hash=test_user.password_hash)
+    org = Org.create(
+      name=f"Role Gate Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 10
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    # Quota is wide open — the refusal is purely about role.
+    assert payload["current_usage"]["graphs"]["current"] == 0
+    assert payload["can_create_graph"] is False
+
+  async def test_admin_with_quota_is_allowed(self, async_client, test_db, test_user):
+    """An admin under quota is allowed."""
+    org = Org.create(
+      name=f"Admin Allowed Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.ADMIN, session=test_db
+    )
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 10
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_create_graph"] is True
+
+  async def test_admin_at_quota_is_still_refused(
+    self, async_client, test_db, test_user
+  ):
+    """Role passing does not bypass the quota check."""
+    org = Org.create(
+      name=f"Admin Capped Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    _create_graph(test_db, org.id, "Only")
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 1
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_create_graph"] is False
+
+
 class TestOrgUsageVisibility:
   """Org usage is an org-wide aggregate — per-graph names, credit balances and
   storage for every graph the org owns — so it is gated like invoices rather
