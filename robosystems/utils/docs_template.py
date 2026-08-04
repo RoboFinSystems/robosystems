@@ -5,6 +5,7 @@ Swagger and ReDoc documentation template utility for generating custom API docs.
 import html
 from pathlib import Path
 
+from ..config import env
 from ..config.logging import get_logger
 
 logger = get_logger(__name__)
@@ -170,7 +171,12 @@ def generate_swagger_docs(
 
 
 def _get_fallback_template() -> str:
-  """Fallback template if the file doesn't exist."""
+  """Fallback template if the file doesn't exist.
+
+  Assets are self-hosted from /static/vendor (no third-party CDN), and the
+  initializer lives in /static/swagger-init.js reading its configuration from
+  data attributes, so the page needs no inline script.
+  """
   return """<!DOCTYPE html>
 <html>
   <head>
@@ -179,40 +185,40 @@ def _get_fallback_template() -> str:
     <link
       rel="stylesheet"
       type="text/css"
-      href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css"
+      href="/static/vendor/swagger-ui-5.9.0/swagger-ui.css"
     />
     <link rel="stylesheet" type="text/css" href="/static/swagger-custom.css" />
   </head>
   <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
-    <script>
-      SwaggerUIBundle({{
-        url: "{openapi_url}",
-        dom_id: "#swagger-ui",
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIBundle.presets.standalone,
-        ],
-        docExpansion: "{doc_expansion}",
-        persistAuthorization: {persist_auth},
-        defaultModelsExpandDepth: {models_expand_depth},
-        defaultModelExpandDepth: {model_expand_depth},
-      }});
-    </script>
+    <div
+      id="swagger-ui"
+      data-openapi-url="{openapi_url}"
+      data-doc-expansion="{doc_expansion}"
+      data-persist-auth="{persist_auth}"
+      data-models-expand-depth="{models_expand_depth}"
+      data-model-expand-depth="{model_expand_depth}"
+    ></div>
+    <script src="/static/vendor/swagger-ui-5.9.0/swagger-ui-bundle.js"></script>
+    <script src="/static/swagger-init.js"></script>
   </body>
 </html>"""
 
 
-# Convenience functions for common use cases
+# Convenience functions for common use cases.
+# Authorization persistence in browser storage is a dev convenience only;
+# outside dev, credentials live no longer than the page.
 def generate_robosystems_docs() -> str:
   """Generate docs for main RoboSystems API."""
-  return generate_swagger_docs(title="RoboSystems API")
+  return generate_swagger_docs(
+    title="RoboSystems API", persist_auth=env.is_development()
+  )
 
 
 def generate_lbug_docs() -> str:
   """Generate docs for RoboSystems Graph API."""
-  return generate_swagger_docs(title="RoboSystems Graph API")
+  return generate_swagger_docs(
+    title="RoboSystems Graph API", persist_auth=env.is_development()
+  )
 
 
 def generate_redoc_docs(
@@ -274,15 +280,44 @@ def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
-    <link
-      href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700"
-      rel="stylesheet"
-    />
     <style>
+      @font-face {
+        font-family: "Orbitron";
+        src: url("/static/fonts/Orbitron/Orbitron-Bold.ttf") format("truetype");
+        font-weight: 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Orbitron";
+        src: url("/static/fonts/Orbitron/Orbitron-SemiBold.ttf") format("truetype");
+        font-weight: 600;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("/static/fonts/SpaceGrotesk/SpaceGrotesk-Regular.ttf")
+          format("truetype");
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("/static/fonts/SpaceGrotesk/SpaceGrotesk-Medium.ttf")
+          format("truetype");
+        font-weight: 500;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("/static/fonts/SpaceGrotesk/SpaceGrotesk-SemiBold.ttf")
+          format("truetype");
+        font-weight: 600;
+        font-display: swap;
+      }
       body {
         margin: 0;
         padding: 0;
-        font-family: "Roboto", sans-serif;
+        font-family: "Space Grotesk", sans-serif;
         background: #1a1a1a;
       }
       /* Override any default light backgrounds */
@@ -307,8 +342,7 @@ def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
   </head>
   <body>
     <redoc spec-url="__OPENAPI_URL__" theme='__THEME_JSON__'></redoc>
-    <!-- ReDoc latest stable -->
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+    <script src="/static/vendor/redoc-2.5.3/redoc.standalone.js"></script>
   </body>
 </html>"""
 

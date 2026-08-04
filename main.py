@@ -81,15 +81,20 @@ logger = get_logger("robosystems.api")
 _SENSITIVE_PATH_PREFIXES = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs")
 
 
-def is_relaxed_csp_path(path: str) -> bool:
-  """Paths that need CDN-hosted scripts/styles (Swagger UI, GraphiQL)."""
-  if path in ("/", "/docs"):
-    return True
-  if path.startswith("/static"):
-    return True
+def csp_variant_for_path(path: str) -> str:
+  """Which CSP variant a path gets.
+
+  - "docs": Swagger UI / ReDoc pages and their assets, self-hosted from
+    /static — no third-party script origins and no 'unsafe-inline' script.
+  - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
+    CDNs and needs the historical relaxed policy.
+  - "api": everything else — strict policy.
+  """
+  if path in ("/", "/docs") or path.startswith("/static"):
+    return "docs"
   if path.startswith("/extensions/") and path.endswith("/graphql"):
-    return True
-  return False
+    return "graphiql"
+  return "api"
 
 
 @asynccontextmanager
@@ -298,17 +303,39 @@ def create_app() -> FastAPI:
         "max-age=31536000; includeSubDomains"
       )
 
-    # Path-based CSP — strict for API, relaxed for docs / GraphiQL.
+    # Path-based CSP — strict for API, self-hosted policy for docs,
+    # relaxed (CDN) policy only for the GraphiQL playground.
     path = request.url.path
-    if is_relaxed_csp_path(path):
+    csp_variant = csp_variant_for_path(path)
+    if csp_variant == "docs":
+      # Swagger UI / ReDoc served entirely from this origin (/static/vendor).
+      # Both UIs inject inline <style> at runtime, so style-src keeps
+      # 'unsafe-inline'; script-src does not need it (init lives in
+      # /static/swagger-init.js) and no third-party origin is allowed.
       csp_directives = [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.redoc.ly",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "worker-src 'self' blob:",  # ReDoc renders via a blob web worker
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+      ]
+
+    elif csp_variant == "graphiql":
+      csp_directives = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com",
         "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
         "img-src 'self' data: https: blob:",
         "font-src 'self' data: https://fonts.gstatic.com",
-        "connect-src 'self' https://unpkg.com https://cdn.redoc.ly webpack:",  # Allow source maps
+        "connect-src 'self' https://unpkg.com webpack:",  # Allow source maps
         "worker-src 'self' blob:",  # Allow web workers from blob URLs
+        "object-src 'none'",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -322,6 +349,7 @@ def create_app() -> FastAPI:
         "style-src 'self'",
         "img-src 'self' data:",
         "connect-src 'self'",
+        "object-src 'none'",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'",
