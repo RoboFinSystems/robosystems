@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -180,6 +180,15 @@ def create_app() -> FastAPI:
 
   if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+  # RFC 9116 vulnerability disclosure pointer (mirrors the frontend apps).
+  security_txt_file = Path("static") / "security.txt"
+  if security_txt_file.exists():
+    security_txt_content = security_txt_file.read_text(encoding="utf-8")
+
+    @app.get("/.well-known/security.txt", include_in_schema=False)
+    async def security_txt() -> PlainTextResponse:
+      return PlainTextResponse(security_txt_content)
 
   # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)

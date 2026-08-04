@@ -1,0 +1,10 @@
+# RoboSystems vulnerability disclosure
+# We review all reports. We do not operate a paid bug bounty program
+# and do not offer monetary rewards for reports.
+# Trust center: https://trust.robosystems.ai
+Contact: mailto:security@robosystems.ai
+Contact: https://github.com/RoboFinSystems/robosystems/security/advisories/new
+Expires: 2027-08-01T00:00:00.000Z
+Policy: https://github.com/RoboFinSystems/robosystems/blob/main/SECURITY.md
+Canonical: https://api.robosystems.ai/.well-known/security.txt
+Preferred-Languages: en
