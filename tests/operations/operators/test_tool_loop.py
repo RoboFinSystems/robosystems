@@ -247,3 +247,42 @@ async def test_hits_iteration_cap_then_forces_a_final_answer():
     and "step limit" in b.get("text", "")
     for b in last_user.content
   )
+
+
+async def test_unadvertised_tool_is_refused_without_dispatch():
+  """The advertised set is enforced at dispatch, not just at advertisement.
+
+  get_tool_schemas filters what the model is SHOWN, but the model can emit
+  any name it likes — and call_tool dispatches whatever the underlying
+  manager exposes, including write tools when the surface was built
+  write-capable. A name outside the advertised set must be refused before
+  call_tool, not after.
+  """
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "delete-journal-entry", entry_id="je_1"),
+      _final("That tool isn't available."),
+    ]
+  )
+  tools = _tools_mock(call_results=[])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="sys",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=1000,
+  )
+
+  tools.call_tool.assert_not_awaited()
+  assert result.text == "That tool isn't available."
+
+  # The refusal is fed back to the model as an is_error tool_result so the
+  # transcript stays valid and the model can continue.
+  second_turn_messages = ai.create_message.call_args_list[1].kwargs["messages"]
+  blocks = _tool_result_blocks(second_turn_messages)
+  assert len(blocks) == 1
+  assert blocks[0]["is_error"] is True
+  assert "not available" in blocks[0]["content"]

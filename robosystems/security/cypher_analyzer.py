@@ -100,6 +100,7 @@ class CypherSecurityAnalyzer:
     "show_connection",
     "show_warnings",
     "show_indexes",
+    "show_functions",
     "query_vector_index",
     "query_fts_index",
   }
@@ -264,6 +265,28 @@ class CypherSecurityAnalyzer:
     except Exception as e:
       logger.warning(f"Admin operation analysis failed: {e}")
       # Default to true for safety with admin operations
+      return True
+
+  def is_non_read_call(self, query: str) -> bool:
+    """Check if a query contains CALL forms that are not read-only.
+
+    True for procedure invocations outside READ_ONLY_PROCEDURES and for
+    session-configuration assignments. Exists for validators that gate on
+    the operation *family* (bulk / admin / DDL) rather than on
+    `is_write_operation`, so they can still refuse the CALL surface without
+    refusing ordinary graph writes.
+
+    Args:
+        query: The Cypher query to check
+
+    Returns:
+        True if the query contains non-read CALL forms, False otherwise
+    """
+    try:
+      cleaned_query = self._clean_query(query)
+      return len(self._find_call_operations(cleaned_query)) > 0
+    except Exception as e:
+      logger.warning(f"CALL analysis failed, defaulting to non-read: {e}")
       return True
 
   def has_system_calls(self, query: str) -> bool:
@@ -734,6 +757,23 @@ def is_admin_operation(query: str) -> bool:
       True if the query contains admin operations, False otherwise
   """
   return cypher_analyzer.is_admin_operation(query)
+
+
+def is_non_read_call(query: str) -> bool:
+  """
+  Determine if a Cypher query contains CALL forms that are not read-only.
+
+  Procedure invocations outside the read-only allowlist and session
+  configuration assignments both count. For validators gating on operation
+  family rather than write-ness.
+
+  Args:
+      query: The Cypher query to analyze
+
+  Returns:
+      True if the query contains non-read CALL forms, False otherwise
+  """
+  return cypher_analyzer.is_non_read_call(query)
 
 
 def has_system_calls(query: str) -> bool:

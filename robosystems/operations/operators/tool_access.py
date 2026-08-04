@@ -20,10 +20,17 @@ class HttpToolAccess:
 
   Uses the full GraphMCPTools pipeline (HTTP → Graph API). Best for
   operators that execute Cypher queries or read graph schema.
+
+  ``read_only`` decides whether GraphMCPTools wires its write tools at all.
+  It must mirror the operator spec's ``read_only`` flag: the write-role gate
+  in the adapters is skipped for read-only operators, so a read-only
+  operator handed a write-capable tool surface would have an ungated write
+  path. Defaults to read-only so a caller has to opt in to writes.
   """
 
-  def __init__(self, graph_id: str) -> None:
+  def __init__(self, graph_id: str, read_only: bool = True) -> None:
     self._graph_id = graph_id
+    self._read_only = read_only
     self._client = None
     self._tools = None
 
@@ -41,10 +48,14 @@ class HttpToolAccess:
 
     self._client = await create_graph_mcp_client(graph_id=self._graph_id)
     schema_extensions = resolve_schema_extensions(self._graph_id)
-    self._tools = GraphMCPTools(self._client, schema_extensions=schema_extensions)
+    self._tools = GraphMCPTools(
+      self._client,
+      schema_extensions=schema_extensions,
+      read_only=self._read_only,
+    )
     logger.info(
       f"Initialized HTTP tool access for graph {self._graph_id} "
-      f"(extensions={schema_extensions})"
+      f"(extensions={schema_extensions}, read_only={self._read_only})"
     )
 
   async def call_tool(

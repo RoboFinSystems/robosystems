@@ -166,3 +166,100 @@ class TestRegisteredOperatorDeclarations:
     assert MappingOperator.spec.read_only is False, (
       "MappingOperator persists mapping associations, so it must stay gated"
     )
+
+
+class TestToolSurfaceMatchesSpec:
+  """The tool surface handed to an operator must not exceed what the role
+  gate checked for. A read-only operator skips the write-role gate, so its
+  tool access must be built read-only — otherwise the flag that skips the
+  gate is also the flag that unlocks the write tools.
+  """
+
+  @pytest.mark.asyncio
+  async def test_api_adapter_builds_tool_access_from_the_spec(self) -> None:
+    from robosystems.operations.operators.adapters import api
+
+    user = MagicMock()
+    user.id = USER_ID
+
+    with (
+      patch.object(api, "enforce_operator_write_role"),
+      patch.object(api, "enforce_operator_credits"),
+      patch.object(api, "HttpToolAccess") as tool_access,
+      patch.object(api, "AIClient"),
+      patch.object(api, "TrackedAIClient"),
+    ):
+      tool_access.return_value = MagicMock(close=AsyncMock())
+      await api.run_operator_api(
+        operator=_operator(read_only=True),
+        graph_id=GRAPH_ID,
+        user=user,
+        query="anything",
+      )
+
+    tool_access.assert_called_once_with(GRAPH_ID, read_only=True)
+
+  @pytest.mark.asyncio
+  async def test_api_adapter_grants_writes_only_to_write_capable_specs(self) -> None:
+    from robosystems.operations.operators.adapters import api
+
+    user = MagicMock()
+    user.id = USER_ID
+
+    with (
+      patch.object(api, "enforce_operator_write_role"),
+      patch.object(api, "enforce_operator_credits"),
+      patch.object(api, "HttpToolAccess") as tool_access,
+      patch.object(api, "AIClient"),
+      patch.object(api, "TrackedAIClient"),
+    ):
+      tool_access.return_value = MagicMock(close=AsyncMock())
+      await api.run_operator_api(
+        operator=_operator(read_only=False),
+        graph_id=GRAPH_ID,
+        user=user,
+        query="anything",
+      )
+
+    tool_access.assert_called_once_with(GRAPH_ID, read_only=False)
+
+  @pytest.mark.asyncio
+  async def test_http_tool_access_wires_read_only_into_the_tool_manager(self) -> None:
+    from robosystems.operations.operators.tool_access import HttpToolAccess
+
+    with (
+      patch("robosystems.middleware.mcp.GraphMCPTools") as tools_cls,
+      patch(
+        "robosystems.middleware.mcp.create_graph_mcp_client",
+        new=AsyncMock(return_value=MagicMock()),
+      ),
+      patch(
+        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+        return_value=[],
+      ),
+    ):
+      access = HttpToolAccess(GRAPH_ID, read_only=True)
+      await access.initialize()
+
+    assert tools_cls.call_args.kwargs["read_only"] is True
+
+  @pytest.mark.asyncio
+  async def test_http_tool_access_defaults_to_read_only(self) -> None:
+    """A caller that says nothing gets no write tools — the same fail-closed
+    default as OperatorSpec.read_only, in the opposite direction."""
+    from robosystems.operations.operators.tool_access import HttpToolAccess
+
+    with (
+      patch("robosystems.middleware.mcp.GraphMCPTools") as tools_cls,
+      patch(
+        "robosystems.middleware.mcp.create_graph_mcp_client",
+        new=AsyncMock(return_value=MagicMock()),
+      ),
+      patch(
+        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+        return_value=[],
+      ),
+    ):
+      await HttpToolAccess(GRAPH_ID).initialize()
+
+    assert tools_cls.call_args.kwargs["read_only"] is True

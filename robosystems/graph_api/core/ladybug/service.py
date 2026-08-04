@@ -228,15 +228,27 @@ def validate_cypher_query(cypher: str) -> None:
   from robosystems.security.cypher_analyzer import (
     is_admin_operation,
     is_bulk_operation,
+    is_non_read_call,
     is_schema_ddl,
   )
 
-  if is_bulk_operation(cypher) or is_admin_operation(cypher) or is_schema_ddl(cypher):
+  # `is_non_read_call` covers the CALL family (procedure DDL, session
+  # configuration) that the three family predicates cannot see — this
+  # validator deliberately does not use `is_write_operation`, since writer
+  # instances execute ordinary graph writes through this path. Index
+  # creation runs on the dedicated manager paths, never through here.
+  if (
+    is_bulk_operation(cypher)
+    or is_admin_operation(cypher)
+    or is_schema_ddl(cypher)
+    or is_non_read_call(cypher)
+  ):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail=(
         "Query contains an engine-level operation (bulk load, attach/install, "
-        "or schema DDL) that is not permitted on the ad-hoc query endpoint."
+        "schema DDL, or a restricted CALL) that is not permitted on the "
+        "ad-hoc query endpoint."
       ),
     )
 

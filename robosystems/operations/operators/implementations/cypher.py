@@ -58,9 +58,13 @@ class CypherOperator(Operator):
       OperatorCapability.ENTITY_ANALYSIS,
       OperatorCapability.CUSTOM,
     ],
-    # Every tool this operator can reach is in READ_ONLY_TOOLS above, so a
-    # graph `viewer` may run it. Removing this flag (or adding a write tool
-    # to the allowlist without removing it) is what the adapters gate on.
+    # A graph `viewer` may run this operator because the flag is enforced in
+    # two places downstream: HttpToolAccess builds the tool surface with
+    # read_only=True (write tools are never wired), and run_tool_loop
+    # refuses tool names outside the advertised READ_ONLY_TOOLS set. The
+    # flag alone guarantees nothing — the adapters skip the write-role gate
+    # because of it, so those two enforcement points are what make that
+    # skip safe.
     read_only=True,
     version="2.0.0",
     requires_credits=True,
