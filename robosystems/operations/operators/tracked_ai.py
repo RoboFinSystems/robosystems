@@ -19,6 +19,19 @@ if TYPE_CHECKING:
   from robosystems.operations.operators.credit_consumer import CreditConsumer
 
 
+class UnbilledAICallError(Exception):
+  """Raised when a prior AI call in this run could not be billed.
+
+  Stops a tool-use loop from continuing to spend after billing has broken,
+  which is the difference between one unbilled call and an unbounded number.
+  """
+
+  def __init__(self, detail: str) -> None:
+    super().__init__(
+      f"Refusing further AI calls: a previous call could not be billed ({detail})"
+    )
+
+
 class TrackedAIClient:
   """AI client wrapper that automatically tracks tokens and consumes credits."""
 
@@ -38,6 +51,7 @@ class TrackedAIClient:
     self.total_tokens: dict[str, int] = {"input": 0, "output": 0}
     self.total_credits: float = 0.0
     self.call_count: int = 0
+    self._unbilled_call: str | None = None
 
   async def create_message(
     self,
@@ -67,6 +81,14 @@ class TrackedAIClient:
     Returns:
         AIResponse with content and token counts.
     """
+    # A tool-use loop can make dozens of calls. If one of them could not be
+    # billed, every later call in the same run would be unbilled too, so stop
+    # here rather than after the spend. The already-returned answer from the
+    # failed call is kept — Bedrock has been paid for it either way, and
+    # discarding it would waste the money without recovering it.
+    if self._unbilled_call is not None:
+      raise UnbilledAICallError(self._unbilled_call)
+
     response = await self._ai.create_message(
       messages=messages,
       system=system,
@@ -95,12 +117,23 @@ class TrackedAIClient:
         )
         self.total_credits += credits
       except Exception as e:
-        logger.warning(
-          f"Credit consumption failed for graph={self._graph_id} "
-          f"tokens=({response.input_tokens}/{response.output_tokens}): {e}"
-        )
+        self._mark_unbilled(response, str(e))
 
     return response
+
+  def _mark_unbilled(self, response: AIResponse, reason: str) -> None:
+    """Record that a completed AI call could not be billed.
+
+    Logged at ERROR because this is real unrecovered spend, not a degraded
+    read — the previous WARNING made an unbounded billing failure look like
+    routine noise.
+    """
+    detail = (
+      f"graph={self._graph_id} user={self._user_id} "
+      f"tokens=({response.input_tokens}/{response.output_tokens}): {reason}"
+    )
+    self._unbilled_call = detail
+    logger.error(f"AI call completed but could not be billed — {detail}")
 
   @property
   def credit_summary(self) -> dict[str, Any]:

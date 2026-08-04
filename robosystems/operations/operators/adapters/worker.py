@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from robosystems.db.platform import SessionFactory
 from robosystems.logger import logger
 from robosystems.operations.operators.ai_client import AIClient
 from robosystems.operations.operators.base import (
@@ -20,6 +21,7 @@ from robosystems.operations.operators.base import (
   enforce_operator_write_role,
 )
 from robosystems.operations.operators.credit_consumer import FactoryCreditConsumer
+from robosystems.operations.operators.credit_preflight import enforce_operator_credits
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
 from robosystems.operations.operators.tool_access import DirectToolAccess
@@ -54,10 +56,23 @@ async def run_operator_worker(
   Returns:
       Result dict with operator output + credit summary.
   """
-  # Re-checked here rather than trusted from the enqueuing request: a task can
-  # sit in the queue, and the role that authorized it may have been revoked in
-  # between. Same reasoning as `GraphCreationService._validate_org`.
+  mode_str = params.get("mode", "standard")
+  try:
+    mode = OperatorMode(mode_str)
+  except ValueError:
+    mode = OperatorMode.STANDARD
+
+  # Both gates are re-checked here rather than trusted from the enqueuing
+  # request: a task can sit in the queue, and the role that authorized it may
+  # have been revoked — or the balance spent — in between. Same reasoning as
+  # `GraphCreationService._validate_org`.
   enforce_operator_write_role(operator, graph_id, user_id)
+
+  preflight_session = SessionFactory()
+  try:
+    enforce_operator_credits(operator, graph_id, user_id, preflight_session, mode)
+  finally:
+    preflight_session.close()
 
   tools = DirectToolAccess(graph_id)
   ai_client = AIClient()
@@ -69,12 +84,6 @@ async def run_operator_worker(
     user_id=user_id,
     credit_consumer=credit_consumer,
   )
-
-  mode_str = params.get("mode", "standard")
-  try:
-    mode = OperatorMode(mode_str)
-  except ValueError:
-    mode = OperatorMode.STANDARD
 
   ctx = OperatorContext(
     graph_id=graph_id,

@@ -20,6 +20,7 @@ from robosystems.operations.operators.base import (
   enforce_operator_write_role,
 )
 from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
+from robosystems.operations.operators.credit_preflight import enforce_operator_credits
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import CallbackProgress
 from robosystems.operations.operators.tool_access import HttpToolAccess
@@ -67,13 +68,20 @@ async def run_operator_api(
   # be checked on this path.
   enforce_operator_write_role(operator, graph_id, str(user.id))
 
+  # Credits are consumed after each Bedrock call returns, so this pre-flight is
+  # what bounds spend. The SSE and background-queue strategies reach this
+  # function without an orchestrator, so checking here rather than there is the
+  # difference between covering one execution path and covering all of them.
+  enforce_operator_credits(operator, graph_id, str(user.id), db_session, mode)
+
   tools = HttpToolAccess(graph_id)
   ai_client = AIClient()
 
   if db_session is None:
-    logger.warning(
+    logger.error(
       f"Operator running WITHOUT credit tracking (no db_session): "
-      f"graph={graph_id} user={user.id} — Bedrock cost will not be attributed"
+      f"graph={graph_id} user={user.id} — Bedrock cost will not be attributed "
+      f"and the pre-flight balance check was skipped"
     )
   credit_consumer = SessionCreditConsumer(db_session) if db_session else None
 

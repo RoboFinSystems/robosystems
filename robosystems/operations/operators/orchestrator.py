@@ -21,6 +21,9 @@ from robosystems.operations.operators.base import (
   OperatorResult,
   matches_graph_scope,
 )
+from robosystems.operations.operators.credit_preflight import (
+  InsufficientOperatorCreditsError,
+)
 from robosystems.operations.operators.operator_registry import (
   get_operator,
   list_operators,
@@ -461,26 +464,11 @@ class OperatorOrchestrator:
   ) -> OperatorResponse:
     """Execute an operator via the API adapter."""
     try:
-      # Credit pre-check
-      if operator.spec.requires_credits and self.db_session:
-        credit_check = await self._check_credits_for_operator(operator, mode)
-        if not credit_check["has_sufficient_credits"]:
-          return OperatorResponse(
-            content=f"Insufficient credits for {operator.spec.name}. "
-            f"Required: {credit_check['estimated_credits']:.0f}, "
-            f"Available: {credit_check['available_credits']:.0f}",
-            operator_name=operator.spec.name,
-            mode_used=mode,
-            error_details={
-              "code": "INSUFFICIENT_CREDITS",
-              "message": "Not enough credits to perform AI analysis",
-              "required_credits": credit_check["estimated_credits"],
-              "available_credits": credit_check["available_credits"],
-            },
-            execution_time=0.0,
-          )
-
-      # Execute via adapter with timeout
+      # The credit pre-flight lives in the adapter, not here: the SSE and
+      # background-queue strategies call the adapter directly and never build
+      # an orchestrator, so a check at this layer covered one path in three.
+      # This layer's job is only to render the refusal gracefully for the sync
+      # path, which returns a body rather than an error status.
       result = await asyncio.wait_for(
         run_operator_api(
           operator=operator,
@@ -509,6 +497,19 @@ class OperatorOrchestrator:
 
       return response
 
+    except InsufficientOperatorCreditsError as e:
+      return OperatorResponse(
+        content=str(e),
+        operator_name=operator.spec.name,
+        mode_used=mode,
+        error_details={
+          "code": "INSUFFICIENT_CREDITS",
+          "message": "Not enough credits to perform AI analysis",
+          "required_credits": e.estimated_credits,
+          "available_credits": e.available_credits,
+        },
+        execution_time=0.0,
+      )
     except TimeoutError:
       logger.error(f"Operator {operator.spec.name} timed out")
       return OperatorResponse(
@@ -663,63 +664,6 @@ class OperatorOrchestrator:
       "cache_misses": self._metrics.get("cache_misses", 0),
       "errors": self._metrics["errors"],
     }
-
-  async def _check_credits_for_operator(
-    self, operator: Operator, mode: OperatorMode
-  ) -> dict[str, Any]:
-    from decimal import Decimal
-
-    from robosystems.config.billing.ai import AIBillingConfig
-    from robosystems.operations.graph.credit_service import CreditService
-
-    try:
-      credit_service = CreditService(self.db_session)
-      estimated_tokens = self._estimate_token_usage(operator, mode)
-
-      pricing = AIBillingConfig.TOKEN_PRICING.get(
-        "anthropic_claude_4_sonnet",
-        {"input": Decimal("3"), "output": Decimal("15")},
-      )
-
-      input_cost = (Decimal(estimated_tokens["input"]) / 1000) * pricing["input"]
-      output_cost = (Decimal(estimated_tokens["output"]) / 1000) * pricing["output"]
-      estimated_cost = input_cost + output_cost
-
-      credit_check = credit_service.check_credit_balance(
-        graph_id=self.graph_id,
-        required_credits=estimated_cost,
-        user_id=str(self.user.id),
-        operation_type="agent_call",
-      )
-      credit_check["estimated_credits"] = float(estimated_cost)
-      credit_check["estimated_tokens"] = estimated_tokens
-      return credit_check
-
-    except Exception as e:
-      logger.warning(f"Credit check failed: {e!s}")
-      return {
-        "has_sufficient_credits": True,
-        "estimated_credits": 0,
-        "available_credits": 0,
-        "warning": f"Credit check failed: {e!s}",
-      }
-
-  def _estimate_token_usage(
-    self, operator: Operator, mode: OperatorMode
-  ) -> dict[str, int]:
-    mode_estimates = {
-      OperatorMode.QUICK: {"input": 2000, "output": 500},
-      OperatorMode.STANDARD: {"input": 5000, "output": 1500},
-      OperatorMode.EXTENDED: {"input": 15000, "output": 3000},
-      OperatorMode.STREAMING: {"input": 8000, "output": 2000},
-    }
-    estimate = mode_estimates.get(mode, {"input": 5000, "output": 1500})
-
-    if "financial" in operator.spec.name.lower():
-      estimate["input"] = int(estimate["input"] * 1.5)
-      estimate["output"] = int(estimate["output"] * 1.5)
-
-    return estimate
 
   def _get_cache_key(
     self, query: str, operator_type: str | None, mode: OperatorMode
