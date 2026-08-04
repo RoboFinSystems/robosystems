@@ -108,6 +108,10 @@ async def run_tool_loop(
     logger.warning(
       "run_tool_loop: none of %s available on graph %s", tool_names, ctx.graph_id
     )
+  # The dispatch below must enforce this set, not just advertise it: the
+  # model can emit any tool name, and call_tool dispatches whatever the
+  # underlying tool manager exposes.
+  advertised = {t["name"] for t in tools}
 
   messages: list[AIMessage] = _seed_history(ctx)
   messages.append(AIMessage(role="user", content=ctx.query))
@@ -157,6 +161,23 @@ async def run_tool_loop(
       tools_called.append(name)
 
       is_error = False
+      if name not in advertised:
+        logger.warning(
+          "run_tool_loop: model requested unadvertised tool %s on graph %s",
+          name,
+          ctx.graph_id,
+        )
+        tool_results.append(
+          {
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": _serialize_tool_result(
+              {"error": f"Tool '{name}' is not available"}
+            ),
+            "is_error": True,
+          }
+        )
+        continue
       try:
         result = await ctx.tools.call_tool(name, args, return_raw=True)
         # Registrar/domain tools report failure as {"error": ...} instead of

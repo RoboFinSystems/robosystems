@@ -74,7 +74,10 @@ async def run_operator_api(
   # difference between covering one execution path and covering all of them.
   enforce_operator_credits(operator, graph_id, str(user.id), db_session, mode)
 
-  tools = HttpToolAccess(graph_id)
+  # The tool surface must not exceed what the role gate above checked for:
+  # a read-only operator skips the write-role gate, so it must also get a
+  # read-only tool surface.
+  tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only)
   ai_client = AIClient()
 
   if db_session is None:

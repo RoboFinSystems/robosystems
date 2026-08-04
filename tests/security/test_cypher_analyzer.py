@@ -219,11 +219,61 @@ class TestCallClassification:
     would break the schema endpoints and the MCP client."""
     assert analyzer.is_write_operation(query) is False
 
+  def test_show_functions_is_a_read(self, analyzer):
+    """The MCP query validator's own remediation hint tells users to run
+    `CALL show_functions() RETURN *` in place of `SHOW FUNCTIONS` — the
+    sanctioned replacement must not be refused as a write."""
+    assert analyzer.is_write_operation("CALL show_functions() RETURN *") is False
+
   def test_configuration_inside_a_string_literal_is_not_a_write(self, analyzer):
     """String contents are masked before classification, so a literal that
     merely looks like a config verb must not trip the gate."""
     query = "MATCH (n:Fact) WHERE n.name = 'CALL timeout=0' RETURN n"
     assert analyzer.is_write_operation(query) is False
+
+
+class TestIsNonReadCall:
+  """`is_non_read_call` exposes the CALL classification to validators that
+  gate on operation *family* (bulk / admin / DDL) rather than on
+  `is_write_operation` — graph_api's ad-hoc query validator must allow
+  ordinary graph writes (writer instances execute them) while still
+  refusing the CALL surface."""
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL CREATE_VECTOR_INDEX('Fact','x','embedding')",
+      "CALL DROP_VECTOR_INDEX('Fact','x')",
+      "CALL some_future_procedure()",
+      "CALL spill_to_disk=false",
+      "MATCH (n) RETURN n; CALL timeout=0",
+    ],
+  )
+  def test_non_read_call_forms_are_flagged(self, analyzer, query):
+    assert analyzer.is_non_read_call(query) is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL SHOW_TABLES() RETURN *",
+      "CALL show_functions() RETURN *",
+      "CALL table_info('Fact') RETURN *",
+      "MATCH (n) RETURN n",
+      "CREATE (n:Foo {id: 1}) RETURN n",
+      "MATCH (n:Fact) WHERE n.name = 'CALL timeout=0' RETURN n",
+    ],
+  )
+  def test_reads_writes_and_allowlisted_calls_are_not_flagged(self, analyzer, query):
+    """Ordinary reads AND ordinary writes pass — the predicate is about the
+    CALL family only, so family-gating validators can compose it without
+    breaking writer instances."""
+    assert analyzer.is_non_read_call(query) is False
+
+  def test_module_level_wrapper(self):
+    from robosystems.security.cypher_analyzer import is_non_read_call
+
+    assert is_non_read_call("CALL CREATE_VECTOR_INDEX('a','b','c')") is True
+    assert is_non_read_call("MATCH (n) RETURN n") is False
 
 
 class TestQuerySecurityValidation:

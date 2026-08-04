@@ -246,6 +246,36 @@ class TestValidateCypherQueryEngineVerbs:
       validate_cypher_query("MATCH (n) WHERE n.note = '//' COPY t FROM '/x'")
     assert exc_info.value.status_code == 403
 
+  @pytest.mark.parametrize(
+    "call_form",
+    [
+      "CALL CREATE_VECTOR_INDEX('Fact','x','embedding')",
+      "CALL DROP_VECTOR_INDEX('Fact','x')",
+      "CALL some_future_procedure()",
+      "CALL spill_to_disk=false",
+    ],
+  )
+  def test_non_read_call_forms_raise_403(self, call_form):
+    """The CALL family (procedure DDL, session configuration) is invisible
+    to the bulk/admin/DDL predicates, so it is refused via the analyzer's
+    dedicated CALL classification. Index creation runs on the dedicated
+    manager paths, which never pass through this validator."""
+    with pytest.raises(HTTPException) as exc_info:
+      validate_cypher_query(call_form)
+    assert exc_info.value.status_code == 403
+
+  @pytest.mark.parametrize(
+    "read_call",
+    [
+      "CALL SHOW_TABLES() RETURN *",
+      "CALL show_functions() RETURN *",
+      "CALL table_info('Fact') RETURN *",
+    ],
+  )
+  def test_allowlisted_read_calls_pass(self, read_call):
+    """Schema introspection procedures stay available on the ad-hoc endpoint."""
+    validate_cypher_query(read_call)  # Should not raise
+
 
 # ---------------------------------------------------------------------------
 # _raise_database_not_found
