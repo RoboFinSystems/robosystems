@@ -5,14 +5,17 @@ These tests cover the billing enforcement functions for graph operations,
 including provisioning checks and subscription status validation.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.billing.enforcement import (
   check_can_provision_graph,
   check_graph_subscription_active,
+  require_graph_access,
 )
 from robosystems.models.core.billing import SubscriptionStatus
 
@@ -440,3 +443,109 @@ class TestEdgeCases:
 
       assert can_provision is True
       mock_logger.info.assert_called_once()
+
+
+class TestRequireGraphAccessGracePeriod:
+  """Canceled-subscription grace period in require_graph_access.
+
+  `BillingSubscription.ends_at` is a timezone-naive DateTime column while
+  the comparison side is `datetime.now(UTC)` — without tzinfo
+  normalization, every request to a graph in its cancellation grace
+  period raised TypeError (a 500) for the entire remaining paid period.
+  """
+
+  @pytest.fixture
+  def mock_session(self):
+    return Mock()
+
+  @pytest.fixture(autouse=True)
+  def clear_subscription_cache(self):
+    from robosystems.middleware.billing import enforcement
+
+    enforcement._subscription_cache.clear()
+    yield
+    enforcement._subscription_cache.clear()
+
+  def _active_graph(self):
+    graph = Mock()
+    graph.status = "active"
+    graph.is_repository = False
+    return graph
+
+  def _canceled_subscription(self, ends_at):
+    subscription = Mock()
+    subscription.status = "canceled"
+    subscription.ends_at = ends_at
+    return subscription
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_naive_future_ends_at_allows_reads(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """A naive (column-typed) future ends_at must grant read access, not 500."""
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
+      datetime.now(UTC).replace(tzinfo=None) + timedelta(days=10)
+    )
+
+    graph = require_graph_access("kg_gracetest1", mock_session)
+
+    assert graph is mock_graph_class.get_by_id.return_value
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_naive_future_ends_at_blocks_writes(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """Grace period allows reads only — writes must 403, not 500."""
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
+      datetime.now(UTC).replace(tzinfo=None) + timedelta(days=10)
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_gracetest2", mock_session, require_write=True)
+
+    assert exc.value.status_code == 403
+    assert "canceled" in exc.value.detail.lower()
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_naive_past_ends_at_denies_access(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """A naive past ends_at means the grace period is over: 403."""
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
+      datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_gracetest3", mock_session)
+
+    assert exc.value.status_code == 403
+    assert "ended" in exc.value.detail.lower()
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_aware_future_ends_at_still_works(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """Timezone-aware ends_at (future-proofing) passes through unchanged."""
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
+      datetime.now(UTC) + timedelta(days=10)
+    )
+
+    graph = require_graph_access("kg_gracetest4", mock_session)
+
+    assert graph is mock_graph_class.get_by_id.return_value
