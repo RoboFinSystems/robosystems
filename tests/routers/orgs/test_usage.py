@@ -310,12 +310,14 @@ class TestOrgUsageEndpoints:
 
 
 class TestGraphCreationAllowance:
-  """`can_create_graph` answers two different questions, and clients need to
-  tell them apart: a quota can be raised, a role restriction cannot — the
-  member has to ask someone else. Only the reason distinguishes them.
+  """`can_create_graph` must account for role as well as quota.
+
+  Clients gate real UI on this flag — the graph-creation page hides its whole
+  wizard behind it — so reporting True to a member the create endpoint would
+  refuse sends them into a flow that 403s at the end.
   """
 
-  async def test_member_is_refused_with_a_role_reason(
+  async def test_member_is_refused_even_with_quota_available(
     self, async_client, test_db, test_user
   ):
     """A plain member cannot create graphs regardless of remaining quota."""
@@ -340,12 +342,9 @@ class TestGraphCreationAllowance:
     # Quota is wide open — the refusal is purely about role.
     assert payload["current_usage"]["graphs"]["current"] == 0
     assert payload["can_create_graph"] is False
-    assert "owners and admins" in payload["can_create_graph_reason"]
 
-  async def test_admin_with_quota_is_allowed_and_has_no_reason(
-    self, async_client, test_db, test_user
-  ):
-    """An admin under quota gets a clean allowance with no explanation."""
+  async def test_admin_with_quota_is_allowed(self, async_client, test_db, test_user):
+    """An admin under quota is allowed."""
     org = Org.create(
       name=f"Admin Allowed Org {uuid4().hex[:6]}",
       org_type=OrgType.TEAM,
@@ -363,13 +362,11 @@ class TestGraphCreationAllowance:
     assert response.status_code == 200
     payload = response.json()
     assert payload["can_create_graph"] is True
-    assert payload["can_create_graph_reason"] is None
 
-  async def test_admin_at_quota_is_refused_with_a_quota_reason(
+  async def test_admin_at_quota_is_still_refused(
     self, async_client, test_db, test_user
   ):
-    """An admin at the cap is refused for a reason they *can* act on, which is
-    why it must read differently from the role refusal."""
+    """Role passing does not bypass the quota check."""
     org = Org.create(
       name=f"Admin Capped Org {uuid4().hex[:6]}",
       org_type=OrgType.TEAM,
@@ -388,6 +385,3 @@ class TestGraphCreationAllowance:
     assert response.status_code == 200
     payload = response.json()
     assert payload["can_create_graph"] is False
-    reason = payload["can_create_graph_reason"]
-    assert "limit" in reason.lower()
-    assert "owners and admins" not in reason

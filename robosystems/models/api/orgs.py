@@ -146,16 +146,6 @@ class OrgLimitsResponse(BaseModel):
   current_usage: dict[str, Any]
   warnings: list[str]
   can_create_graph: bool
-  can_create_graph_reason: str | None = Field(
-    default=None,
-    description=(
-      "Why graph creation is unavailable to the caller, or null when it is "
-      "available. Distinguishes a quota that could be raised from a role "
-      "restriction the caller cannot resolve themselves, so clients can say "
-      "which applies instead of showing a dead control."
-    ),
-    examples=["Only organization owners and admins can create graphs"],
-  )
 
 
 class OrgUsageSummary(BaseModel):
