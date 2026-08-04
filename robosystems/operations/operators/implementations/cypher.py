@@ -58,6 +58,10 @@ class CypherOperator(Operator):
       OperatorCapability.ENTITY_ANALYSIS,
       OperatorCapability.CUSTOM,
     ],
+    # Every tool this operator can reach is in READ_ONLY_TOOLS above, so a
+    # graph `viewer` may run it. Removing this flag (or adding a write tool
+    # to the allowlist without removing it) is what the adapters gate on.
+    read_only=True,
     version="2.0.0",
     requires_credits=True,
     execution_profile={

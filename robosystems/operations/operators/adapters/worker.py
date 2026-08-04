@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
 from robosystems.operations.operators.ai_client import AIClient
-from robosystems.operations.operators.base import OperatorMode
+from robosystems.operations.operators.base import (
+  OperatorMode,
+  enforce_operator_write_role,
+)
 from robosystems.operations.operators.credit_consumer import FactoryCreditConsumer
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
@@ -51,6 +54,11 @@ async def run_operator_worker(
   Returns:
       Result dict with operator output + credit summary.
   """
+  # Re-checked here rather than trusted from the enqueuing request: a task can
+  # sit in the queue, and the role that authorized it may have been revoked in
+  # between. Same reasoning as `GraphCreationService._validate_org`.
+  enforce_operator_write_role(operator, graph_id, user_id)
+
   tools = DirectToolAccess(graph_id)
   ai_client = AIClient()
   credit_consumer = FactoryCreditConsumer()

@@ -43,6 +43,7 @@ from robosystems.operations.operators.base import (
   OperatorResponse,
   OperatorResult,
   OperatorSpec,
+  enforce_operator_write_role,
   matches_graph_scope,
 )
 from robosystems.operations.operators.credit_consumer import (
@@ -117,6 +118,7 @@ __all__ = [
   "SessionCreditConsumer",
   "ToolAccess",
   "TrackedAIClient",
+  "enforce_operator_write_role",
   # Registry
   "get_operator",
   "get_operator_class",

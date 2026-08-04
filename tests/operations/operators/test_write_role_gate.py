@@ -1,0 +1,168 @@
+"""The operator execution path gates write-capable operators on the graph role.
+
+Operators drive MCP tools through a tool-access layer that carries no user
+identity, so the per-tool write classification the MCP router applies never runs
+here. The gate lives in the two execution adapters rather than the routers,
+because the SSE and background-queue handlers call the adapters directly and
+bypass the orchestrator entirely — a router-level check would miss them.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi import HTTPException
+
+from robosystems.operations.operators.base import (
+  OperatorCapability,
+  OperatorResult,
+  OperatorSpec,
+  enforce_operator_write_role,
+)
+
+GRAPH_ID = "kg01234567890abcdef"
+USER_ID = "usr_test123"
+
+
+def _operator(*, read_only: bool) -> MagicMock:
+  operator = MagicMock()
+  operator.spec = OperatorSpec(
+    name="Test Operator",
+    description="test",
+    capabilities=[OperatorCapability.CUSTOM],
+    read_only=read_only,
+  )
+  # Awaitable and harmless, so that removing the gate lets the adapter run to
+  # completion and the test fails with "DID NOT RAISE HTTPException" — the
+  # signal a reader can act on — rather than an incidental TypeError.
+  operator.run = AsyncMock(return_value=OperatorResult(content="ok"))
+  return operator
+
+
+class TestEnforceOperatorWriteRole:
+  def test_read_only_operator_skips_the_role_check(self) -> None:
+    with patch(
+      "robosystems.middleware.auth.dependencies.require_graph_write_role"
+    ) as gate:
+      enforce_operator_write_role(_operator(read_only=True), GRAPH_ID, USER_ID)
+
+    gate.assert_not_called()
+
+  def test_write_capable_operator_is_checked(self) -> None:
+    with patch(
+      "robosystems.middleware.auth.dependencies.require_graph_write_role"
+    ) as gate:
+      enforce_operator_write_role(_operator(read_only=False), GRAPH_ID, USER_ID)
+
+    gate.assert_called_once_with(USER_ID, GRAPH_ID)
+
+  def test_viewer_is_denied(self) -> None:
+    with patch(
+      "robosystems.middleware.auth.dependencies.require_graph_write_role",
+      side_effect=HTTPException(status_code=403, detail="read-only"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        enforce_operator_write_role(_operator(read_only=False), GRAPH_ID, USER_ID)
+
+    assert exc.value.status_code == 403
+
+  def test_spec_default_is_fail_closed(self) -> None:
+    """An operator that declares nothing is treated as write-capable."""
+    spec = OperatorSpec(
+      name="Undeclared",
+      description="test",
+      capabilities=[OperatorCapability.CUSTOM],
+    )
+    assert spec.read_only is False
+
+
+class TestAdaptersEnforceBeforeToolAccess:
+  """Both adapters check the role *before* constructing tool access.
+
+  Asserted through the adapter rather than by reading it, and by proving tool
+  access was never constructed — an ordering regression that left the gate in
+  place but moved it after initialization would still leak graph reads.
+  """
+
+  @pytest.mark.asyncio
+  async def test_api_adapter_denies_a_viewer(self) -> None:
+    from robosystems.operations.operators.adapters import api
+
+    user = MagicMock()
+    user.id = USER_ID
+
+    # AIClient is patched so that removing the gate fails this test with a
+    # clean "DID NOT RAISE HTTPException" rather than an unrelated credentials
+    # error from further down the adapter.
+    with (
+      patch.object(
+        api,
+        "enforce_operator_write_role",
+        side_effect=HTTPException(status_code=403, detail="read-only"),
+      ),
+      patch.object(api, "HttpToolAccess") as tool_access,
+      patch.object(api, "AIClient"),
+      patch.object(api, "TrackedAIClient"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await api.run_operator_api(
+          operator=_operator(read_only=False),
+          graph_id=GRAPH_ID,
+          user=user,
+          query="anything",
+        )
+
+    assert exc.value.status_code == 403
+    tool_access.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_worker_adapter_denies_a_viewer(self) -> None:
+    from robosystems.operations.operators.adapters import worker
+
+    with (
+      patch.object(
+        worker,
+        "enforce_operator_write_role",
+        side_effect=HTTPException(status_code=403, detail="read-only"),
+      ),
+      patch.object(worker, "DirectToolAccess") as tool_access,
+      patch.object(worker, "AIClient"),
+      patch.object(worker, "TrackedAIClient"),
+      patch.object(worker, "FactoryCreditConsumer"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await worker.run_operator_worker(
+          operator=_operator(read_only=False),
+          task_id="task_1",
+          graph_id=GRAPH_ID,
+          user_id=USER_ID,
+          params={},
+          manager=AsyncMock(),
+        )
+
+    assert exc.value.status_code == 403
+    tool_access.assert_not_called()
+
+
+class TestRegisteredOperatorDeclarations:
+  """The read_only flag is a security decision, so each registered operator's
+  value is asserted explicitly — flipping one has to break a test that says why.
+  """
+
+  def test_cypher_operator_is_read_only(self) -> None:
+    from robosystems.operations.operators.implementations.cypher import CypherOperator
+
+    assert CypherOperator.spec.read_only is True, (
+      "CypherOperator is viewer-accessible because READ_ONLY_TOOLS contains no "
+      "write tool; adding one means this flag must go"
+    )
+
+  def test_mapping_operator_is_write_capable(self) -> None:
+    from robosystems.operations.operators.implementations.mapping.operator import (
+      MappingOperator,
+    )
+
+    assert MappingOperator.spec.read_only is False, (
+      "MappingOperator persists mapping associations, so it must stay gated"
+    )
