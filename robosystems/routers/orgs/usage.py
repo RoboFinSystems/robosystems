@@ -71,12 +71,24 @@ async def get_org_limits(
     if current_graphs >= limits.max_graphs * 0.9:
       warnings.append(f"Approaching graph limit ({current_graphs}/{limits.max_graphs})")
 
+    # Two independent reasons creation can be unavailable, and clients need to
+    # tell them apart: a quota is raisable, a role restriction is not — the
+    # member has to ask someone else. Resolving both here keeps the rule in one
+    # place instead of having every client re-derive it from the caller's role.
+    if not membership.can_create_graphs():
+      can_create_graph = False
+      can_create_graph_reason = "Only organization owners and admins can create graphs"
+    else:
+      can_create_graph, quota_reason = limits.can_create_graph(db)
+      can_create_graph_reason = None if can_create_graph else quota_reason
+
     return OrgLimitsResponse(
       org_id=org_id,
       max_graphs=limits.max_graphs,
       current_usage=usage,
       warnings=warnings,
-      can_create_graph=limits.can_create_graph(db)[0],
+      can_create_graph=can_create_graph,
+      can_create_graph_reason=can_create_graph_reason,
     )
 
   except HTTPException:

@@ -991,3 +991,60 @@ class TestGraphCapacityEndpoint:
       # Others succeed
       assert status_map["ladybug-large"]["status"] == "ready"
       assert status_map["ladybug-xlarge"]["status"] == "ready"
+
+
+class TestGraphCreationRequiresAdmin:
+  """Creating a graph starts a recurring charge on the org's payment method
+  and consumes org quota, so it is an owner/admin action.
+
+  Members cannot add a payment method either — checkout is owner-only — so
+  without this gate a member could commit the org's stored card without its
+  billing administrators knowing until the invoice arrived.
+  """
+
+  @pytest.fixture
+  def graph_request(self):
+    return CreateGraphRequest(
+      metadata=GraphMetadata(
+        graph_name="Members Cannot Create",
+        description="Role gate coverage",
+        schema_extensions=["roboledger"],
+      ),
+      instance_tier="ladybug-standard",
+      custom_schema=None,
+      initial_entity=InitialEntityData(name="Test Corp", uri="https://testcorp.com"),
+      tags=["test"],
+    )
+
+  async def test_plain_member_is_refused(
+    self, async_client: AsyncClient, graph_request
+  ):
+    """A member gets 403 before quota is even consulted."""
+    with (
+      patch("robosystems.database.get_db_session") as mock_get_db,
+      patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs,
+    ):
+      mock_limits = Mock(spec=OrgLimits)
+      # Quota is wide open; the refusal must come from the role check alone.
+      mock_limits.can_create_graph.return_value = (True, "Can create graph")
+
+      with patch.object(OrgLimits, "get_or_create_for_org", return_value=mock_limits):
+        mock_get_db.return_value = iter([Mock()])
+
+        mock_org_user = Mock()
+        mock_org_user.org_id = "test-org-123"
+        mock_org_user.can_create_graphs.return_value = False
+        mock_get_user_orgs.return_value = [mock_org_user]
+
+        response = await async_client.post(
+          "/v1/graphs",
+          json=graph_request.model_dump(),
+        )
+
+        assert response.status_code == 403
+        error = response.json()["detail"]["error"]
+        assert error["code"] == "graph_creation_requires_admin"
+        # The message has to point somewhere actionable: unlike a quota, the
+        # member cannot resolve this themselves.
+        assert "owners and admins" in error["message"]
+        mock_limits.can_create_graph.assert_not_called()

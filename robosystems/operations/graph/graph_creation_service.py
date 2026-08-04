@@ -197,7 +197,16 @@ class GraphCreationService:
       if not user_orgs:
         raise ValueError("User has no organization")
 
-      org_id = user_orgs[0].org_id
+      membership = user_orgs[0]
+      org_id = membership.org_id
+
+      # Re-checked here as well as at the API boundary for the same reason the
+      # quota is: creation can be queued and retried, so the role is
+      # re-evaluated when the work actually runs rather than trusted from
+      # whenever it was requested.
+      if not membership.can_create_graphs():
+        raise ValueError("Only organization owners and admins can create graphs")
+
       org_limits = OrgLimits.get_or_create_for_org(org_id, db)
       can_create, reason = org_limits.can_create_graph(db)
       if not can_create:

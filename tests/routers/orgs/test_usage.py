@@ -307,3 +307,87 @@ class TestOrgUsageEndpoints:
     assert body["period_days"] == 45
     assert len(body["daily_trend"]) == 30
     assert all(entry["credits_used"] == 0 for entry in body["daily_trend"])
+
+
+class TestGraphCreationAllowance:
+  """`can_create_graph` answers two different questions, and clients need to
+  tell them apart: a quota can be raised, a role restriction cannot — the
+  member has to ask someone else. Only the reason distinguishes them.
+  """
+
+  async def test_member_is_refused_with_a_role_reason(
+    self, async_client, test_db, test_user
+  ):
+    """A plain member cannot create graphs regardless of remaining quota."""
+    owner = _create_user(test_db, password_hash=test_user.password_hash)
+    org = Org.create(
+      name=f"Role Gate Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(org_id=org.id, user_id=owner.id, role=OrgRole.OWNER, session=test_db)
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 10
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    # Quota is wide open — the refusal is purely about role.
+    assert payload["current_usage"]["graphs"]["current"] == 0
+    assert payload["can_create_graph"] is False
+    assert "owners and admins" in payload["can_create_graph_reason"]
+
+  async def test_admin_with_quota_is_allowed_and_has_no_reason(
+    self, async_client, test_db, test_user
+  ):
+    """An admin under quota gets a clean allowance with no explanation."""
+    org = Org.create(
+      name=f"Admin Allowed Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.ADMIN, session=test_db
+    )
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 10
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_create_graph"] is True
+    assert payload["can_create_graph_reason"] is None
+
+  async def test_admin_at_quota_is_refused_with_a_quota_reason(
+    self, async_client, test_db, test_user
+  ):
+    """An admin at the cap is refused for a reason they *can* act on, which is
+    why it must read differently from the role refusal."""
+    org = Org.create(
+      name=f"Admin Capped Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    _create_graph(test_db, org.id, "Only")
+    limits = OrgLimits.create_default_limits(org_id=org.id, session=test_db)
+    limits.max_graphs = 1
+    test_db.commit()
+
+    response = await async_client.get(f"/v1/orgs/{org.id}/limits")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_create_graph"] is False
+    reason = payload["can_create_graph_reason"]
+    assert "limit" in reason.lower()
+    assert "owners and admins" not in reason
