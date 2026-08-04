@@ -26,9 +26,11 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.extensions import (
   Association,
   Element,
+  ElementTrait,
   Rule,
   Structure,
   Taxonomy,
+  Trait,
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
@@ -73,6 +75,7 @@ def validate_update_envelope(
   structure_name_by_id = {s.id: s.name for s in current_structures}
   qname_by_element_id = {e.id: e.qname for e in current_elements}
   element_id_by_qname = {e.qname: e.id for e in current_elements if e.qname}
+  trait_by_element_id = _load_efs_traits(session, current_elements)
 
   _resolve_foreign_element_qnames(
     session, qname_by_element_id, current_elements, current_associations
@@ -100,7 +103,7 @@ def validate_update_envelope(
         TaxonomyBlockElementRequest(
           qname=qname,
           name=str(e.name),
-          trait=_element_classification_hint(e),
+          trait=trait_by_element_id.get(str(e.id)),
           balance_type=str(e.balance_type) if e.balance_type else None,
           period_type=str(e.period_type) if e.period_type else None,
           element_type=str(e.element_type) if e.element_type else "concept",
@@ -118,7 +121,7 @@ def validate_update_envelope(
         qname=qname,
         name=patch.name if patch.name is not None else str(e.name),
         trait=(
-          patch.trait if patch.trait is not None else _element_classification_hint(e)
+          patch.trait if patch.trait is not None else trait_by_element_id.get(str(e.id))
         ),
         balance_type=(
           patch.balance_type
@@ -272,16 +275,32 @@ def _resolve_foreign_element_qnames(
       qname_by_element_id[eid] = qname
 
 
-def _element_classification_hint(element: Element) -> str | None:
-  """Best-effort EFS trait for projection — None if not carried on the row.
+def _load_efs_traits(
+  session: Session, current_elements: list[Element]
+) -> dict[str, str]:
+  """Primary EFS trait identifier per element id, from the junction table.
 
-  The live DB row doesn't always carry a trait (it lives in the
-  element_traits junction), but for update validation we don't need to
-  re-check traits of rows that already validated at create time. Return
-  None so the CoA type-specific phase skips them (it only rejects *new*
-  rows with missing trait when the payload explicitly adds them).
+  The projection re-runs the create-time phases, and the CoA
+  type-specific phase rejects EVERY element with ``trait=None`` — not
+  just newly added ones — so existing rows must carry their live
+  classification into the virtual create request or any update on a
+  chart_of_accounts block fails validation wholesale.
   """
-  return None
+  if not current_elements:
+    return {}
+  element_ids = [e.id for e in current_elements]
+  return {
+    str(element_id): str(identifier)
+    for element_id, identifier in session.execute(
+      select(ElementTrait.element_id, Trait.identifier)
+      .join(Trait, Trait.id == ElementTrait.trait_id)
+      .where(
+        ElementTrait.element_id.in_(element_ids),
+        ElementTrait.is_primary.is_(True),
+        Trait.category == "elementsOfFinancialStatements",
+      )
+    ).all()
+  }
 
 
 def _validate_rules_to_remove(
