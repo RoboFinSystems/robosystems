@@ -246,6 +246,10 @@ def require_graph_access(
   if subscription.status == "canceled":
     now = datetime.now(UTC)
     ends_at = subscription.ends_at
+    # The DateTime column is timezone-naive; comparing naive against aware
+    # raises TypeError. Normalize like OrgInvitation.is_expired does.
+    if ends_at is not None and ends_at.tzinfo is None:
+      ends_at = ends_at.replace(tzinfo=UTC)
 
     if ends_at and ends_at > now:
       # Grace period: reads OK, writes blocked
