@@ -476,6 +476,7 @@ Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs
 - **GitHub-hosted runners** (default): Used for tests, builds, and deployments
 - **Self-hosted runners** (optional): Set `RUNNER_LABELS` repo variable to use self-hosted runners
 - **Deployments**: Manual workflow dispatch via `staging.yml` and `prod.yml`
+- **Release notes**: `tag-release.yml` auto-generates the changelog from changes since the last tag (via the Claude API). For milestone releases, commit curated notes to `.github/release-notes/v<version>.md` _before_ dispatching `create-release.yml` — when that file exists at the tagged ref it replaces the generated changelog (and the stats section is skipped)
 - **Infrastructure Config**: `.github/configs/graph.yml`
 
 ## AWS Infrastructure
