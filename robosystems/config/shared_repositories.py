@@ -300,7 +300,7 @@ def get_all_repository_pricing() -> dict:
     "plans": plans,
     "repositories": repositories,
     "billing_model": "No credit consumption for queries, rate-limited by subscription tier",
-    "upgrade_url": f"{env.ROBOSYSTEMS_URL}/billing",
+    "upgrade_url": f"{env.ROBOSYSTEMS_URL}/repositories/browse",
   }
 
 
