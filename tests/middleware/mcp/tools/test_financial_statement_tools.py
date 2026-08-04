@@ -140,6 +140,39 @@ class TestFinancialStatementAnalysisToolDefinition:
 @pytest.mark.asyncio
 class TestFinancialStatementAnalysisToolExecute:
   @pytest.mark.unit
+  async def test_unresolvable_fiscal_year_errors_instead_of_answering(self):
+    """Mirror of the REST view op's 404. An MCP caller asking for a fiscal
+    year with no filing must get an error, not the newest filing — the
+    unscoped ticker sweep never receives fiscal_year, so falling through
+    silently answers about a different year."""
+    tool = FinancialStatementAnalysisTool(_make_client("sec"))
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        "robosystems.adapters.sec.mcp.resolve_sec_report",
+        new_callable=AsyncMock,
+        return_value=None,
+      ),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=[],
+      ) as mock_query,
+    ):
+      result = await tool.execute(
+        {
+          "statement_type": "income_statement",
+          "ticker": "NVDA",
+          "fiscal_year": 2005,
+        }
+      )
+
+    assert "error" in result
+    assert "2005" in result["error"]
+    mock_query.assert_not_called()
+
+  @pytest.mark.unit
   async def test_shared_repo_ticker_autoresolves(self):
     tool = FinancialStatementAnalysisTool(_make_client("sec"))
     resolved = {

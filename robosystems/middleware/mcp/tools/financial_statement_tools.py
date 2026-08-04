@@ -275,6 +275,18 @@ class FinancialStatementAnalysisTool(BaseTool):
       )
       report_id = resolved.get("identifier") if resolved else None
 
+      # Mirror of the REST view op: a requested fiscal_year that resolves
+      # to nothing must be an error, not a silent fall-through to the
+      # unscoped ticker sweep below (which orders by end_date DESC and
+      # would answer with the newest filing instead).
+      if fiscal_year is not None and not report_id:
+        return {
+          "error": (
+            f"No {period_type or 'annual'} filing found for {ticker} "
+            f"in fiscal year {fiscal_year}."
+          ),
+        }
+
     rows: list[dict] = []
     if report_id or ticker:
       rows = await query_financial_statement(

@@ -384,6 +384,83 @@ class TestFinancialStatementAnalysisOp:
   """Wire-shape contract for financial-statement-analysis."""
 
   @pytest.mark.unit
+  async def test_unresolvable_fiscal_year_404s_instead_of_answering(self):
+    """A requested fiscal_year that matches no filing must 404.
+
+    Previously the handler fell through to the ticker path, which sweeps
+    the filer's entire history ordered by end_date DESC and never receives
+    fiscal_year — so a FY2005 request came back with FY2026 numbers,
+    report_id null, no error and no warning. Verified live against the SEC
+    repo before the fix.
+    """
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement",
+      ticker="NVDA",
+      fiscal_year=2005,
+      period_type="annual",
+    )
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        "robosystems.adapters.sec.mcp.resolve_sec_report",
+        new_callable=AsyncMock,
+        return_value=None,
+      ),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=[],
+      ) as mock_query,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await financial_statement_analysis_op(
+          body=body,
+          graph_id="sec",
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 404
+    assert "2005" in str(exc.value.detail)
+    # The unscoped sweep must not run at all — that is the defect.
+    mock_query.assert_not_called()
+
+  @pytest.mark.unit
+  async def test_no_fiscal_year_still_autoresolves_latest(self):
+    """Without a fiscal_year there is no scope to violate: the documented
+    'auto-resolve the latest filing' behaviour is preserved."""
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement",
+      ticker="NVDA",
+    )
+
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=True),
+      patch(
+        "robosystems.adapters.sec.mcp.resolve_sec_report",
+        new_callable=AsyncMock,
+        return_value=None,
+      ),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=[],
+      ) as mock_query,
+    ):
+      envelope = await financial_statement_analysis_op(
+        body=body,
+        graph_id="sec",
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "completed"
+    mock_query.assert_called_once()
+
+  @pytest.mark.unit
   async def test_shared_repo_ticker_autoresolves_report(self):
     """On SEC, missing report_id triggers resolve_sec_report; facts flow through."""
     body = FinancialStatementAnalysisRequest(

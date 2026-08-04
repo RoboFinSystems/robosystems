@@ -20,6 +20,15 @@ ANNUAL_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F")
 QUARTERLY_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F", "10-Q")
 
 
+class SECReportResolutionError(RuntimeError):
+  """Raised when the report lookup itself fails.
+
+  Distinct from a ``None`` return, which means the query ran and matched
+  nothing. Callers treat ``None`` as "no such filing" and may fall back to
+  a broader search; they must not do that when the lookup never completed.
+  """
+
+
 async def resolve_sec_report(
   graph_id: str,
   *,
@@ -68,9 +77,15 @@ async def resolve_sec_report(
     # shared master (DynamoDB discovery + retry) and times out the MCP tool.
     repository = await get_graph_repository(graph_id, operation_type="read")
     rows = await repository.execute_query(query, parameters)
-    if rows:
-      return rows[0]
   except Exception as e:
+    # Do NOT collapse an infrastructure failure into "no match". Callers
+    # fall back to an unscoped ticker sweep when this returns None, so
+    # swallowing here turned a transient graph timeout into a confident
+    # wrong answer — the caller's fiscal_year silently became "whatever is
+    # newest". A failed lookup must be distinguishable from an empty one.
     logger.warning(f"SEC report auto-resolve failed for {ticker}: {e}")
+    raise SECReportResolutionError(
+      f"Could not resolve an SEC filing for {ticker}: the report lookup failed."
+    ) from e
 
-  return None
+  return rows[0] if rows else None

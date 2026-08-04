@@ -3,7 +3,9 @@
 Verifies:
 - form-code selection by period_type
 - fiscal_year filter threading
-- graceful None on query error or no match
+- None on no match, and a raised SECReportResolutionError on lookup failure
+  (the two must stay distinguishable — callers fall back to an unscoped
+  sweep on None, which is only safe when the query actually ran)
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import pytest
 from robosystems.adapters.sec.mcp.report_resolver import (
   ANNUAL_FORMS,
   QUARTERLY_FORMS,
+  SECReportResolutionError,
   resolve_sec_report,
 )
 
@@ -122,11 +125,29 @@ class TestResolveSecReport:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_repository_error_returns_none(self):
-    """Transient errors shouldn't bubble; caller gets None and handles it."""
+  async def test_repository_error_raises_not_returns_none(self):
+    """A failed lookup must be distinguishable from an empty one.
+
+    This previously returned None on any exception. Callers treat None as
+    "no such filing" and fall back to an unscoped ticker sweep, so a
+    transient graph error silently became a confident answer about the
+    wrong fiscal year. The swallow was the defect; the old test asserted it.
+    """
     with patch(
       "robosystems.adapters.sec.mcp.report_resolver.get_graph_repository",
       side_effect=RuntimeError("repo down"),
     ):
-      result = await resolve_sec_report(MOCK_GRAPH, ticker="NVDA")
-    assert result is None
+      with pytest.raises(SECReportResolutionError):
+        await resolve_sec_report(MOCK_GRAPH, ticker="NVDA")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_query_error_also_raises(self, mock_repository):
+    """The failure can come from execute_query, not just repo acquisition."""
+    mock_repository.execute_query.side_effect = RuntimeError("query timeout")
+    with patch(
+      "robosystems.adapters.sec.mcp.report_resolver.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      with pytest.raises(SECReportResolutionError):
+        await resolve_sec_report(MOCK_GRAPH, ticker="NVDA")

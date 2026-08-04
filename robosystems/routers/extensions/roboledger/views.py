@@ -263,6 +263,21 @@ async def financial_statement_analysis_op(
       )
       report_id = resolved.get("identifier") if resolved else None
 
+      # A requested fiscal_year that resolves to nothing is a 404, not a
+      # licence to answer with a different year. Without this the ticker
+      # path below sweeps the filer's entire history ordered by end_date
+      # DESC — fiscal_year is never passed down — so a request scoped to
+      # FY2005 came back with the newest filing and no indication that the
+      # scope had been dropped.
+      if body.fiscal_year is not None and not report_id:
+        raise HTTPException(
+          status_code=404,
+          detail=(
+            f"No {body.period_type or 'annual'} filing found for "
+            f"{body.ticker} in fiscal year {body.fiscal_year}."
+          ),
+        )
+
     rows: list[dict] = []
     if report_id or body.ticker:
       rows = await query_financial_statement(
