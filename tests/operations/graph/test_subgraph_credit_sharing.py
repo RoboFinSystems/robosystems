@@ -184,14 +184,21 @@ class TestSubgraphCreditSharing:
     subgraph_id = f"{parent_graph.graph_id}_dev3"
 
     parent_credits.last_allocation_date = datetime(2024, 1, 1, tzinfo=UTC)
-    initial_balance = parent_credits.current_balance
+    # Spend some of the pool first, so a reset and a rollover would produce
+    # different numbers — otherwise this passes either way and asserts nothing.
+    parent_credits.current_balance = Decimal("2500")
     db_session.commit()
 
     result = credit_service.allocate_monthly_credits(graph_id=subgraph_id)
 
     assert result["success"] is True
     assert result["allocated_credits"] == 10000.0
-    assert result["new_balance"] == float(initial_balance + Decimal("10000"))
+    # Credits do not roll over: the balance is replaced, not topped up. The
+    # rollover this used to assert contradicted the offering page's "Credits do
+    # not roll over between billing periods" and drifted `current_balance`
+    # away from every read path that derived it from `monthly_allocation`.
+    assert result["new_balance"] == 10000.0
+    assert parent_credits.current_balance == Decimal("10000")
 
   def test_get_credit_transactions_with_subgraph_id(
     self,
