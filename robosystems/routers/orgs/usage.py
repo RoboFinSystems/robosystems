@@ -118,6 +118,17 @@ async def get_org_usage(
         detail="You are not a member of this organization",
       )
 
+    # This is an org-wide aggregate — per-graph names, credit balances and
+    # storage for every graph the org owns — so it is billing-shaped rather
+    # than caller-shaped, and gated like invoices. Narrowing it to the caller's
+    # graphs instead would make "organization usage" mean something different
+    # per reader; a plain member has no accessible view of an org-wide total.
+    if not membership.is_admin():
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only admins and owners can view organization usage",
+      )
+
     # Get all graphs for the org
     graphs = db.query(Graph).filter(Graph.org_id == org_id).all()
     graph_ids = [g.graph_id for g in graphs]
@@ -129,7 +140,7 @@ async def get_org_usage(
     # Aggregate credit usage across all graphs
     total_credits_used = Decimal(0)
     total_ai_operations = 0
-    total_storage_gb = Decimal(0)
+    total_storage_gb = 0.0
     total_api_calls = 0
 
     graph_usage_details = []
@@ -174,7 +185,12 @@ async def get_org_usage(
         .first()
       )
 
-      graph_storage = latest_storage.storage_gb if latest_storage else Decimal(0)
+      # GraphUsage.storage_gb is a Float column while the running total was a
+      # Decimal, so the first graph with a storage snapshot raised
+      # "unsupported operand type(s) for +=: 'decimal.Decimal' and 'float'"
+      # and 500'd the whole endpoint. Any org with real graph activity has
+      # snapshots, so this failed for exactly the orgs it mattered for.
+      graph_storage = float(latest_storage.storage_gb or 0) if latest_storage else 0.0
 
       graph_usage_details.append(
         {
@@ -182,7 +198,7 @@ async def get_org_usage(
           "graph_name": graph.graph_name,
           "credits_used": float(graph_credits_used),
           "ai_operations": graph_ai_ops,
-          "storage_gb": float(graph_storage),
+          "storage_gb": graph_storage,
           "api_calls": graph_api_calls,
           "credits_available": float(credits.current_balance) if credits else 0,
           "credits_allocated": float(credits.monthly_allocation) if credits else 0,

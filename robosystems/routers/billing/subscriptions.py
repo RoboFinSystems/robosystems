@@ -149,14 +149,18 @@ async def get_subscription(
         detail="You are not a member of this organization",
       )
 
-    subscription = (
-      db.query(BillingSubscription)
-      .filter(
-        BillingSubscription.id == subscription_id,
-        BillingSubscription.org_id == org_id,
-      )
-      .first()
-    )
+    filters = [
+      BillingSubscription.id == subscription_id,
+      BillingSubscription.org_id == org_id,
+    ]
+
+    # Same narrowing the listing applies: a member sees their own subscriptions,
+    # billing managers see the org's. Without it, fetch-by-id remains a way
+    # around the filtered list for anyone holding an id.
+    if not membership.can_manage_billing():
+      filters.append(BillingSubscription.user_id == current_user.id)
+
+    subscription = db.query(BillingSubscription).filter(*filters).first()
 
     if not subscription:
       raise HTTPException(status_code=404, detail="Subscription not found")
