@@ -156,6 +156,8 @@ just logs dagster-daemon      # View Dagster Daemon logs
 - `uv` for Python package and version management
 - `just` for project command runner
 
+Developed and tested on macOS and Linux. On Windows, use WSL2 with the repo cloned inside the Linux filesystem — see the **[Windows Setup (WSL2) Guide](https://github.com/RoboFinSystems/robosystems/wiki/Windows-Setup-with-WSL2)**.
+
 #### Deployment Requirements
 
 - Fork this repo
@@ -278,7 +280,7 @@ pip install robosystems-client
 
 **Getting Started & Platform:**
 
-- [Home / Overview](https://github.com/RoboFinSystems/robosystems/wiki) · [Quick Start](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start) · [Core Concepts](https://github.com/RoboFinSystems/robosystems/wiki/Core-Concepts) · [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) · [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) · [Security & Compliance](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)
+- [Home / Overview](https://github.com/RoboFinSystems/robosystems/wiki) · [Quick Start](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start) · [Core Concepts](https://github.com/RoboFinSystems/robosystems/wiki/Core-Concepts) · [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) · [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) · [Windows Setup (WSL2)](https://github.com/RoboFinSystems/robosystems/wiki/Windows-Setup-with-WSL2) · [Security & Compliance](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)
 
 **Operations Layer:**
 

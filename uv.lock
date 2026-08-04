@@ -3608,7 +3608,7 @@ dependencies = [
     { name = "stripe" },
     { name = "uuid6" },
     { name = "uvicorn" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -3706,7 +3706,7 @@ requires-dist = [
     { name = "stripe", specifier = ">=11.1.0,<12.0" },
     { name = "uuid6", specifier = ">=2025.0.0" },
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
-    { name = "uvloop", specifier = ">=0.21.0,<1.0" },
+    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
 ]
 provides-extras = ["dev"]
 

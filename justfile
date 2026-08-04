@@ -94,7 +94,6 @@ install-hooks:
 # Create virtual environment (assumes uv is installed)
 venv:
     uv venv
-    source .venv/bin/activate
     @just install
 
 # Install dependencies from lock file

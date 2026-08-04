@@ -37,7 +37,10 @@ dependencies = [
     "sse-starlette>=3.3.0,<4.0",
     "strawberry-graphql[fastapi]>=0.314.0,<1.0",
     "uvicorn>=0.48.0,<1.0",
-    "uvloop>=0.21.0,<1.0",
+    # uvloop ships no Windows wheels and its sdist refuses to build there, so an
+    # unconditional dependency makes `uv sync` fail outright on Windows hosts.
+    # Mirrors the marker uvicorn[standard] already carries for its own uvloop dep.
+    "uvloop>=0.21.0,<1.0; sys_platform != 'win32'",
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
     # OLAP Staging/Vector/Graph Databases
