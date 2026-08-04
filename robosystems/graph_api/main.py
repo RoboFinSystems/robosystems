@@ -146,7 +146,9 @@ def main():
     workers=args.workers,
     log_level=args.log_level,
     access_log=True,
-    loop="uvloop",
+    # "auto" resolves to uvloop wherever it is installed (every container) and
+    # degrades to asyncio where it is not; "uvloop" imports it unconditionally.
+    loop="auto",
     http="httptools",
   )
 

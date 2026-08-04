@@ -1,0 +1,40 @@
+# Line-ending normalization.
+#
+# Git for Windows defaults to core.autocrlf=true, which rewrites text files to
+# CRLF on checkout. Several files in this repo are executed on Linux regardless
+# of the developer's platform — the container ENTRYPOINT (bin/entrypoint.sh),
+# the init scripts bind-mounted into postgres and localstack, and the git hooks
+# — and a stray \r breaks all of them ("bad interpreter", "$'\r': command not
+# found", "exec ...: no such file or directory"). Pin LF in the working tree so
+# a Windows checkout produces the same bytes as a macOS or Linux one.
+* text=auto eol=lf
+
+# Force LF on files that must not rely on text auto-detection.
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.jsonld text eol=lf
+*.sql text eol=lf
+*.ini text eol=lf
+*.toml text eol=lf
+*.mako text eol=lf
+justfile text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+.env.example text eol=lf
+.env.local.example text eol=lf
+
+# Vendored third-party files — leave byte-identical to what upstream shipped.
+static/fonts/**/OFL.txt -text
+
+# Binary — never convert, never diff as text.
+*.png binary
+*.ico binary
+*.ttf binary
+*.gz binary
+*.zip binary
+*.parquet binary
+*.duckdb binary
+*.lbug binary
