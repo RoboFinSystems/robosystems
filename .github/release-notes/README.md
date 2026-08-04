@@ -25,9 +25,11 @@ up by a later release.
 
 ## Archived notes
 
-`v1.4.0.md` and `v1.5.0.md` predate this mechanism. They are the release bodies
-as published on GitHub, copied here verbatim so the writing lives in the repo
-rather than only in GitHub's database. They keep their original headings and
-trailing links, so treat them as records rather than as templates for the
-format above. Neither can affect a release — their tags already exist, so the
-workflow short-circuits before reading them.
+Every minor release from `v1.0.0` through `v1.6.0` predates this mechanism.
+Their files are the release bodies as published on GitHub, copied here verbatim
+so the writing lives in the repo rather than only in GitHub's database
+(`v1.4.0`/`v1.5.0` were archived first; the rest were backfilled 2026-08-04).
+They keep their original headings and trailing links, so treat them as records
+rather than as templates for the format above. None of them can affect a
+release — their tags already exist, so the workflow short-circuits before
+reading them.
