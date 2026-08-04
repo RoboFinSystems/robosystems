@@ -82,6 +82,28 @@ class CypherSecurityAnalyzer:
     "show_connection",
   }
 
+  # Procedures permitted on a read-only path. This is an ALLOWLIST and the
+  # classifier fails closed: a `CALL` to anything not named here is treated
+  # as a write, because the engine's procedure surface includes index DDL
+  # and session-configuration verbs that the keyword patterns below cannot
+  # see (those keywords are matched on `\b` word boundaries, and `_` is a
+  # word character, so an underscore-joined procedure name never matches).
+  #
+  # Keep this list minimal. A legitimate read procedure that is missing
+  # shows up as a refused query — safe, visible, and a one-line fix. The
+  # inverse mistake is silent.
+  READ_ONLY_PROCEDURES = {
+    "show_tables",
+    "table_info",
+    "db_version",
+    "current_setting",
+    "show_connection",
+    "show_warnings",
+    "show_indexes",
+    "query_vector_index",
+    "query_fts_index",
+  }
+
   # Read-only keywords that should never trigger write detection
   READ_KEYWORDS = {
     "MATCH",
@@ -123,8 +145,14 @@ class CypherSecurityAnalyzer:
       r"\b(" + "|".join(self.ADMIN_KEYWORDS) + r")\b", re.IGNORECASE
     )
 
-    # Pattern to find CALL procedures
-    self.call_pattern = re.compile(r"\bCALL\s+(\w+)\s*\(", re.IGNORECASE)
+    # Pattern to find CALL procedures. Dots are allowed so namespaced
+    # procedure names resolve as one identifier rather than matching on
+    # their prefix alone.
+    self.call_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*\(", re.IGNORECASE)
+
+    # `CALL <setting> = <value>` is the session-configuration form. It takes
+    # no parentheses, so the procedure pattern above never sees it.
+    self.call_assignment_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*=", re.IGNORECASE)
 
     # Comments, string literals, and backtick identifiers are masked by the
     # single-pass scanner in `_clean_query` (not by regex) so an in-string
@@ -396,7 +424,45 @@ class CypherSecurityAnalyzer:
       if self._validate_keyword_context(query, keyword, start_pos):
         found_operations.add(keyword)
 
+    # `CALL` is a verb the keyword patterns above cannot classify, so it is
+    # scanned separately. Folding the result in here (rather than into a
+    # separate public predicate) is deliberate: `is_write_operation` and
+    # `analyze_query` are the two gates every surface actually calls, and
+    # both read from this set.
+    found_operations |= self._find_call_operations(query)
+
     return found_operations
+
+  def _find_call_operations(self, query: str) -> set[str]:
+    """Find `CALL` forms that must not be treated as reads.
+
+    Two forms, neither reachable by the word-boundary keyword patterns:
+
+    - ``CALL <name>(...)`` — a procedure invocation. Fails closed: anything
+      outside ``READ_ONLY_PROCEDURES`` counts as a write, since the engine's
+      procedure surface includes index DDL whose names are underscore-joined
+      and therefore invisible to a ``\\b``-anchored keyword match.
+    - ``CALL <name> = <value>`` — session configuration. Always a write: it
+      mutates connection state that outlives the statement, and connections
+      are pooled and shared.
+
+    Args:
+        query: The cleaned query to analyze
+
+    Returns:
+        Set of normalized markers describing what was found
+    """
+    found: set[str] = set()
+
+    for match in self.call_assignment_pattern.finditer(query):
+      found.add(f"CALL_SET:{match.group(1).lower()}")
+
+    for match in self.call_pattern.finditer(query):
+      name = match.group(1).lower()
+      if name not in self.READ_ONLY_PROCEDURES:
+        found.add(f"CALL:{name}")
+
+    return found
 
   def _find_read_operations(self, query: str) -> set[str]:
     """
