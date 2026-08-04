@@ -51,13 +51,15 @@ jobs:
 
       - name: Check If Tag Exists
         id: check-tag
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
         run: |
-          if [ $(git tag -l "v${{ steps.get-version.outputs.version }}") ]; then
+          if [ -n "$(git tag -l "v${VERSION}")" ]; then
             echo "tag_exists=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.get-version.outputs.version }} already exists"
+            echo "Tag v${VERSION} already exists"
           else
             echo "tag_exists=false" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.get-version.outputs.version }} does not exist yet"
+            echo "Tag v${VERSION} does not exist yet"
           fi
 
       - name: Check for curated release notes
@@ -82,11 +84,12 @@ jobs:
       - name: Analyze changes since last release
         if: steps.check-tag.outputs.tag_exists == 'false'
         id: analyze-changes
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
-
-          # Get the last release tag
-          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          # Anchored at both ends so only strict vMAJOR.MINOR.PATCH tags are
+          # eligible; LAST_TAG is interpolated into git commands below.
+          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
 
           if [ -z "$LAST_TAG" ]; then
             echo "No previous release found, analyzing all commits"
@@ -202,9 +205,12 @@ jobs:
       - name: Call Claude API for changelog
         if: steps.check-tag.outputs.tag_exists == 'false' && steps.curated-notes.outputs.found != 'true'
         id: claude-changelog
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}
         run: |
           # Check if ANTHROPIC_API_KEY is available
-          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::notice::ANTHROPIC_API_KEY not set - using basic changelog"
             CHANGELOG="## What's Changed"$'\n\n'
             CHANGELOG="${CHANGELOG}- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed"$'\n'
@@ -226,7 +232,7 @@ jobs:
 
           # Create a proper JSON payload using jq to handle escaping
           PAYLOAD=$(jq -n \
-            --arg model "${{ vars.CLAUDE_MODEL || 'claude-sonnet-4-6' }}" \
+            --arg model "$CLAUDE_MODEL" \
             --arg content "$PROMPT" \
             '{
               "model": $model,
@@ -239,11 +245,15 @@ jobs:
               ]
             }')
 
-          RESPONSE=$(curl -s --max-time 60 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$PAYLOAD")
+          # The API key is handed to curl through a config file on stdin rather
+          # than an -H flag. A "-H x-api-key: $VAR" form would not help: the
+          # shell expands the variable before exec, so the literal key would
+          # still sit in the curl process's argv for the life of the request.
+          RESPONSE=$(printf 'header = "x-api-key: %s"\n' "$ANTHROPIC_API_KEY" |
+            curl -s --config - --max-time 60 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
+              -H "Content-Type: application/json" \
+              -H "anthropic-version: 2023-06-01" \
+              -d "$PAYLOAD")
 
           # Check for API errors
           if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
@@ -327,11 +337,13 @@ jobs:
 
       - name: Create Release Tag
         if: steps.check-tag.outputs.tag_exists == 'false'
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.get-version.outputs.version }}" -m "Release v${{ steps.get-version.outputs.version }}"
-          git push origin "v${{ steps.get-version.outputs.version }}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
 
       - name: Create GitHub Release
         if: steps.check-tag.outputs.tag_exists == 'false'
@@ -351,9 +363,10 @@ jobs:
         # The changelog (Claude-generated or curated) is untrusted, so it is read
         # from the file written by the compose step — its markdown must not break
         # out into the shell (same reason the prompt inputs use env above).
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+          LAST_TAG: ${{ steps.analyze-changes.outputs.last_tag }}
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
-
           echo "## 🚀 Release v$VERSION Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release URL:** [v$VERSION](https://github.com/${{ github.repository }}/releases/tag/v$VERSION)" >> $GITHUB_STEP_SUMMARY
@@ -363,7 +376,7 @@ jobs:
           echo "- **Files Changed:** ${{ steps.analyze-changes.outputs.files_changed }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Lines Added:** ${{ steps.analyze-changes.outputs.additions }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Lines Deleted:** ${{ steps.analyze-changes.outputs.deletions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Release:** ${LAST_TAG}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Changelog" >> $GITHUB_STEP_SUMMARY
           cat /tmp/release_changelog.md >> $GITHUB_STEP_SUMMARY
@@ -371,8 +384,9 @@ jobs:
       - name: Set outputs
         id: set-outputs
         if: steps.check-tag.outputs.tag_exists == 'false'
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
           TAG_NAME="v$VERSION"
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME"
 
