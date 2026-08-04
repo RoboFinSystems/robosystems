@@ -187,6 +187,19 @@ class TestOrgUsageEndpoints:
         billing_day=now.day,
         billing_hour=now.hour,
       ),
+      # A genuine caller-initiated call, so `total_api_calls` has something to
+      # count that is neither the credit event nor the background snapshot.
+      GraphUsage(
+        user_id=test_user.id,
+        graph_id=graph.graph_id,
+        event_type=UsageEventType.QUERY_EXECUTION.value,
+        graph_tier=graph.graph_tier,
+        recorded_at=now,
+        billing_year=now.year,
+        billing_month=now.month,
+        billing_day=now.day,
+        billing_hour=now.hour,
+      ),
     ]
     test_db.add_all(usage_records)
     test_db.flush()
@@ -210,7 +223,10 @@ class TestOrgUsageEndpoints:
     summary = body["summary"]
     assert summary["total_credits_used"] == pytest.approx(10.0)
     assert summary["total_ai_operations"] == 1
-    assert summary["total_api_calls"] == 2
+    # One query execution — not three. This counted every row in the table,
+    # so the background storage snapshot and the credit event were both
+    # reported to org admins as customer API traffic.
+    assert summary["total_api_calls"] == 1
     assert summary["total_storage_gb"] == pytest.approx(7.5, rel=1e-2)
 
     assert len(body["graph_details"]) == 1

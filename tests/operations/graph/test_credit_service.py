@@ -9,6 +9,7 @@ import pytest
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.core import (
   GraphCredits,
+  GraphUsage,
   User,
 )
 from robosystems.operations.graph.credit_service import (
@@ -613,3 +614,135 @@ class TestSharedRepositorySubgraphBilling:
       )
 
     assert mock_check.call_args.kwargs["repository_name"] == "sec"
+
+
+class TestCreditConsumptionWritesUsageLedger:
+  """Consuming credits records a `graph_usage` row, not just a credit ledger
+  transaction.
+
+  These are two different tables. `graph_credit_transactions` is authoritative
+  for billing and was always written; `graph_usage` is what the org and
+  per-graph usage dashboards read, and only `record_storage_usage` was ever
+  wired to it. In production that left `graph_usage` holding storage snapshots
+  and nothing else, so an org that had genuinely run AI operations and spent
+  credits saw zero of both on its usage view.
+  """
+
+  @pytest.fixture
+  def mock_session(self):
+    return MagicMock()
+
+  @pytest.fixture
+  def credit_service(self, mock_session):
+    with patch("robosystems.middleware.billing.cache.credit_cache"):
+      return CreditService(mock_session)
+
+  def _credits(self, result: dict):
+    credits = MagicMock()
+    credits.graph_tier = "ladybug-standard"
+    credits.consume_credits_atomic = Mock(return_value=result)
+    return credits
+
+  def _consume(self, credit_service, credits, **kwargs):
+    with (
+      patch("robosystems.middleware.billing.cache.credit_cache") as cache,
+      patch.object(GraphCredits, "get_by_graph_id", return_value=credits),
+      patch.object(GraphUsage, "record_credit_consumption") as record,
+    ):
+      # Real tuple, not a MagicMock: consume_credits unpacks this.
+      cache.get_cached_graph_credit_balance.return_value = (
+        Decimal("1000.0"),
+        "ladybug-standard",
+      )
+      result = credit_service.consume_credits(
+        graph_id="graph123",
+        operation_type="agent_call",
+        base_cost=Decimal("10.0"),
+        **kwargs,
+      )
+    return result, record
+
+  def test_successful_consumption_records_a_usage_row(self, credit_service):
+    credits = self._credits(
+      {
+        "success": True,
+        "credits_consumed": 10.0,
+        "new_balance": 990.0,
+        "transaction_id": "t-1",
+        "base_cost": 10.0,
+      }
+    )
+
+    result, record = self._consume(credit_service, credits, user_id="usr_abc")
+
+    assert result["success"] is True
+    record.assert_called_once()
+    kwargs = record.call_args.kwargs
+    assert kwargs["user_id"] == "usr_abc"
+    assert kwargs["graph_id"] == "graph123"
+    assert kwargs["operation_type"] == "agent_call"
+    assert kwargs["credits_consumed"] == Decimal("10.0")
+
+  def test_failed_consumption_records_nothing(self, credit_service):
+    credits = self._credits(
+      {"success": False, "error": "Insufficient credits", "available_credits": 1.0}
+    )
+
+    result, record = self._consume(credit_service, credits, user_id="usr_abc")
+
+    assert result["success"] is False
+    record.assert_not_called()
+
+  def test_unattributed_consumption_is_skipped_not_forged(self, credit_service):
+    """`GraphUsage.user_id` is NOT NULL and usage is attributed per user, so a
+    spend with no user is dropped rather than written against a placeholder."""
+    credits = self._credits(
+      {
+        "success": True,
+        "credits_consumed": 10.0,
+        "new_balance": 990.0,
+        "transaction_id": "t-1",
+        "base_cost": 10.0,
+      }
+    )
+
+    result, record = self._consume(credit_service, credits)
+
+    assert result["success"] is True
+    record.assert_not_called()
+
+  def test_a_failing_usage_write_never_breaks_consumption(self, credit_service):
+    """The credits are already committed by the time this runs — a reporting
+    row must not turn a successful spend into an error."""
+    credits = self._credits(
+      {
+        "success": True,
+        "credits_consumed": 10.0,
+        "new_balance": 990.0,
+        "transaction_id": "t-1",
+        "base_cost": 10.0,
+      }
+    )
+
+    with (
+      patch("robosystems.middleware.billing.cache.credit_cache") as cache,
+      patch.object(GraphCredits, "get_by_graph_id", return_value=credits),
+      patch.object(
+        GraphUsage,
+        "record_credit_consumption",
+        side_effect=RuntimeError("usage table unavailable"),
+      ),
+    ):
+      cache.get_cached_graph_credit_balance.return_value = (
+        Decimal("1000.0"),
+        "ladybug-standard",
+      )
+      result = credit_service.consume_credits(
+        graph_id="graph123",
+        operation_type="agent_call",
+        base_cost=Decimal("10.0"),
+        user_id="usr_abc",
+      )
+
+    assert result["success"] is True
+    assert result["credits_consumed"] == 10.0
