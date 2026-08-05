@@ -356,17 +356,19 @@ Only **unencrypted** backups can be downloaded. The URL expires after `expires_i
 
 ### Which File You Get
 
-| Source | Filename | Contents |
-| --- | --- | --- |
-| A backup of a graph you own | `{graph_id}_{timestamp}.zip` | ZIP archive containing the LadybugDB database file `{graph_id}.lbug` |
-| A shared repository snapshot (e.g. `sec`) | `{graph_id}_{timestamp}.lbug.zst` | A single zstd-compressed LadybugDB database file |
+You don't have to guess: every entry from `GET /v1/graphs/{graph_id}/backups` carries a **`download_extension`** telling you what the download will be and therefore how to unpack it. It is `null` for encrypted backups, which cannot be downloaded at all.
 
-### Unpacking a `.zip`
+| `download_extension` | Filename | Contents |
+| --- | --- | --- |
+| `.lbug.zip` | `{graph_id}_{timestamp}.lbug.zip` | ZIP archive containing the LadybugDB database file `{graph_id}.lbug` |
+| `.lbug.zst` | `{graph_id}_{timestamp}.lbug.zst` | A single zstd-compressed LadybugDB database file — how shared repository snapshots (e.g. `sec`) ship |
+
+### Unpacking a `.lbug.zip`
 
 Nothing special — `unzip` on macOS/Linux, or double-click in Finder / Explorer:
 
 ```bash
-unzip kg1a2b3c4d5_20260805_031500.zip
+unzip kg1a2b3c4d5_20260805_031500.lbug.zip
 # -> kg1a2b3c4d5.lbug
 ```
 
