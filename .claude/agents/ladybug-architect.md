@@ -257,26 +257,31 @@ INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
 
 ### CloudWatch Resources
 
-```bash
-# Log groups
-/robosystems/{env}/graph-api  # Unified log group for all instances
+The graph tier writes to a single unified log group per environment. Discover it rather than hardcoding one:
 
-# View recent errors
-aws logs tail /robosystems/prod/graph-api \
-  --follow --filter-pattern ERROR
+```bash
+aws logs describe-log-groups --region us-east-1 \
+  --query 'logGroups[?contains(logGroupName, `graph`)].logGroupName' --output text
+
+# then, against the group you found
+aws logs tail <log-group> --follow --filter-pattern ERROR
 ```
 
 ### DynamoDB Inspection
 
+Resolve the table names for the environment you're working in first — they follow the `GRAPH_REGISTRY_TABLE` / `INSTANCE_REGISTRY_TABLE` convention above, but confirm rather than assume:
+
 ```bash
-# Find instance hosting a database
-aws dynamodb get-item \
-  --table-name robosystems-graph-prod-graph-registry \
-  --key '{"graph_id":{"S":"kg1a2b3c4d5"}}'
+aws dynamodb list-tables --region us-east-1 --query 'TableNames[?contains(@, `registry`)]'
+
+# Find the instance hosting a database
+aws dynamodb get-item --region us-east-1 \
+  --table-name <graph-registry-table> \
+  --key '{"graph_id":{"S":"<graph_id>"}}'
 
 # List healthy instances
-aws dynamodb scan \
-  --table-name robosystems-graph-prod-instance-registry \
+aws dynamodb scan --region us-east-1 \
+  --table-name <instance-registry-table> \
   --filter-expression "#s = :healthy" \
   --expression-attribute-names '{"#s":"status"}' \
   --expression-attribute-values '{":healthy":{"S":"healthy"}}'
