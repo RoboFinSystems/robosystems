@@ -17,16 +17,53 @@ RoboSystems uses the word "agent" for two unrelated concepts. Keep them separate
 
 ---
 
+## Connecting from MCP Clients
+
+Every graph is an MCP server. The recommended way to connect is the **remote MCP endpoint** — MCP's Streamable HTTP transport served directly by the API. One URL plus one header replaces the old install-Node-and-edit-config recipe:
+
+> **URL shape:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — use `sec` for the public SEC repository, your graph id for a tenant graph. A subgraph id (`kg…_dev`) is just another URL.
+
+Your API key goes in the same `X-API-Key` header the REST API uses. Keys are account-wide — the URL picks the graph — so multi-graph users add one connector per graph with the same key.
+
+**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector:
+
+```text
+URL:    https://api.robosystems.ai/v1/graphs/sec/mcp
+Header: X-API-Key: <your key>
+```
+
+**Claude Code** — one command:
+
+```bash
+claude mcp add --transport http robosystems-sec \
+  https://api.robosystems.ai/v1/graphs/sec/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+**Cursor / VS Code** (`mcp.json`):
+
+```json
+"robosystems-sec": {
+  "url": "https://api.robosystems.ai/v1/graphs/sec/mcp",
+  "headers": { "X-API-Key": "<your key>" }
+}
+```
+
+The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-18), streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
+
+---
+
 ## The MCP Tool Surface
 
 MCP is the shared tool layer. Every agent path — the in-product Operator endpoint, Claude Desktop, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
-Two HTTP entry points expose the surface on every graph:
+Three HTTP entry points expose the surface on every graph:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/graphs/{graph_id}/mcp/tools` | List the MCP tools available on this graph |
-| `POST` | `/v1/graphs/{graph_id}/mcp/call-tool` | Execute one MCP tool |
+| `POST` | `/v1/graphs/{graph_id}/mcp` | MCP Streamable HTTP transport — any MCP client connects here directly ([see above](#connecting-from-mcp-clients)) |
+| `GET` | `/v1/graphs/{graph_id}/mcp/tools` | REST: list the MCP tools available on this graph |
+| `POST` | `/v1/graphs/{graph_id}/mcp/call-tool` | REST: execute one MCP tool |
 
 A `call-tool` request body is a `MCPToolCall`: a tool `name` plus an `arguments` object.
 

@@ -426,25 +426,24 @@ You can access the demo custom graph through any MCP-compatible AI tool (Claude 
 cat .local/config.json | grep -E "api_key|graph_id"
 ```
 
-3. Add to your MCP tool config. For Claude Desktop:
+3. Connect your client. Every graph serves the MCP Streamable HTTP transport directly — one URL plus one header, with the graph id in the URL. For Claude Code:
+
+```bash
+claude mcp add --transport http robosystems-demo \
+  http://localhost:8000/v1/graphs/<your-graph-id>/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+For Cursor / VS Code (`mcp.json`):
 
 ```json
-{
-  "mcpServers": {
-    "robosystems": {
-      "command": "npx",
-      "args": ["-y", "@robosystems/mcp@latest"],
-      "env": {
-        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
-        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
-        "ROBOSYSTEMS_GRAPH_ID": "your-graph-id"
-      }
-    }
-  }
+"robosystems-demo": {
+  "url": "http://localhost:8000/v1/graphs/<your-graph-id>/mcp",
+  "headers": { "X-API-Key": "<your key>" }
 }
 ```
 
-**Important:** Replace `rfsabc123xyz...` with your actual API key and `your-graph-id` with your actual graph ID from the credentials file.
+Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`. Clients without HTTP transport support can use the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
 4. Restart your MCP-compatible AI tool
 

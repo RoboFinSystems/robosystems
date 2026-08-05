@@ -156,29 +156,28 @@ Access data through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cur
 cat .local/config.json | grep api_key
 ```
 
-3. Add to your MCP tool config. For Claude Desktop:
+3. Connect your client. Every graph serves the MCP Streamable HTTP transport directly — one URL plus one header. For Claude Code:
+
+```bash
+claude mcp add --transport http robosystems-sec \
+  http://localhost:8000/v1/graphs/sec/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+For Cursor / VS Code (`mcp.json`):
 
 ```json
-{
-  "mcpServers": {
-    "robosystems": {
-      "command": "npx",
-      "args": ["-y", "@robosystems/mcp@latest"],
-      "env": {
-        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
-        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
-        "ROBOSYSTEMS_GRAPH_ID": "sec"
-      }
-    }
-  }
+"robosystems-sec": {
+  "url": "http://localhost:8000/v1/graphs/sec/mcp",
+  "headers": { "X-API-Key": "<your key>" }
 }
 ```
 
-**Important:** Replace `rfsabc123xyz...` with your actual API key from the test user creation step.
+Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. Clients without HTTP transport support can use the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-3. Restart your MCP-compatible AI tool
+4. Restart your MCP-compatible AI tool
 
-4. The MCP server provides these tools:
+5. The MCP server provides these tools:
 
    **Curated Tools** (no Cypher needed):
    - `financial-statement-analysis` - Structured financial statement by ticker and type (income_statement, balance_sheet, cash_flow_statement)
