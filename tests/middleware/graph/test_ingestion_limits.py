@@ -183,6 +183,102 @@ class TestCheckMaterializationLimits:
     assert "current_nodes" not in result["current_usage"]
     assert "current_relationships" not in result["current_usage"]
 
+  @pytest.mark.asyncio
+  async def test_subgraph_storage_check_measures_parent_scope(self):
+    """A subgraph id must widen to its parent for the storage check.
+
+    The breakdown's prefix scan for `kg123_dev` covers only `kg123_dev*`,
+    excluding the parent and sibling databases from the denominator — a
+    tenant at cap could keep promoting data via subgraphs. Row-count
+    checks stay on the subgraph's own staging.
+    """
+    mock_db = MagicMock()
+    mock_graph = MagicMock()
+    mock_graph.parent_graph_id = "kg123"
+
+    storage_ok = {
+      "allowed": True,
+      "retryable": False,
+      "errors": [],
+      "total_storage_gb": 1.0,
+      "limit_gb": 20.0,
+      "usage_percentage": 5.0,
+      "status": "healthy",
+      "databases": [],
+      "items": [],
+    }
+
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={"Entity": 1000},
+      ) as mock_rows,
+      patch(
+        "robosystems.models.core.Graph.get_by_id",
+        return_value=mock_graph,
+      ),
+      patch.object(
+        IngestionLimitChecker,
+        "check_instance_storage",
+        new_callable=AsyncMock,
+        return_value=storage_ok,
+      ) as mock_storage,
+    ):
+      result = await IngestionLimitChecker.check_materialization_limits(
+        db=mock_db,
+        graph_id="kg123_dev",
+        tier="ladybug-standard",
+      )
+
+    assert result["allowed"] is True
+    mock_storage.assert_awaited_once_with(mock_db, "kg123", "ladybug-standard")
+    mock_rows.assert_called_once_with(mock_db, "kg123_dev")
+
+  @pytest.mark.asyncio
+  async def test_parent_graph_storage_check_keeps_own_scope(self):
+    """A parent (or unregistered) graph id passes through unchanged."""
+    mock_db = MagicMock()
+    mock_graph = MagicMock()
+    mock_graph.parent_graph_id = None
+
+    storage_ok = {
+      "allowed": True,
+      "retryable": False,
+      "errors": [],
+      "total_storage_gb": 1.0,
+      "limit_gb": 20.0,
+      "usage_percentage": 5.0,
+      "status": "healthy",
+      "databases": [],
+      "items": [],
+    }
+
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={},
+      ),
+      patch(
+        "robosystems.models.core.Graph.get_by_id",
+        return_value=mock_graph,
+      ),
+      patch.object(
+        IngestionLimitChecker,
+        "check_instance_storage",
+        new_callable=AsyncMock,
+        return_value=storage_ok,
+      ) as mock_storage,
+    ):
+      await IngestionLimitChecker.check_materialization_limits(
+        db=mock_db,
+        graph_id="kg123",
+        tier="ladybug-standard",
+      )
+
+    mock_storage.assert_awaited_once_with(mock_db, "kg123", "ladybug-standard")
+
 
 class TestCheckInstanceStorage:
   """Test instance storage usage checking."""

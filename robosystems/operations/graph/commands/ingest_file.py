@@ -21,7 +21,6 @@ from robosystems.config.constants import (
   MAX_FILE_SIZE_MB,
   SMALL_FILE_STAGING_THRESHOLD_MB,
 )
-from robosystems.config.graph_tier import GraphTierConfig
 from robosystems.logger import logger
 from robosystems.models.api.graphs.tables import FileUploadStatus
 from robosystems.models.core import Graph, GraphFile, GraphTable, User
@@ -74,22 +73,47 @@ async def ingest_file_cmd(
     )
 
   graph = Graph.get_by_id(graph_id, db)
-  if graph:
-    storage_limit_gb = GraphTierConfig.get_instance_storage_limit_gb(
-      str(graph.graph_tier)
+  if graph is None:
+    # A graph the registry cannot resolve is refused, not exempted — skipping
+    # the cap on a lookup miss is the fail-open shape this subsystem
+    # eliminated everywhere else.
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail=f"Graph {graph_id} not found",
     )
-    storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
 
-    all_tables = GraphTable.get_all_for_graph(graph_id, db)
-    current_storage_bytes = sum(t.total_size_bytes or 0 for t in all_tables)
+  # Gate against the measured instance footprint, not the logical staging
+  # sum: `GraphTable.total_size_bytes` counts only staging rows and is far
+  # smaller than the bytes on disk, so the old comparison could pass on an
+  # instance already at its cap. Instance scope for the same reason as
+  # materialization — a subgraph shares its parent's box.
+  from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
 
-    if current_storage_bytes + actual_file_size > storage_limit_bytes:
-      raise HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024 * 1024 * 1024):.2f} GB, "
-        f"Limit: {storage_limit_gb} GB, "
-        f"Attempted upload: {actual_file_size / (1024 * 1024 * 1024):.2f} GB",
-      )
+  scope_graph_id = str(graph.parent_graph_id) if graph.parent_graph_id else graph_id
+  graph_tier = str(graph.graph_tier) or "ladybug-standard"
+  storage_check = await IngestionLimitChecker.check_instance_storage(
+    db, scope_graph_id, graph_tier
+  )
+
+  if storage_check.get("retryable"):
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Storage usage could not be verified; retry shortly",
+      headers={"Retry-After": "30"},
+    )
+
+  storage_limit_bytes = storage_check["limit_gb"] * 1024**3
+  current_storage_bytes = (storage_check["total_storage_gb"] or 0) * 1024**3
+  if (
+    not storage_check["allowed"]
+    or current_storage_bytes + actual_file_size > storage_limit_bytes
+  ):
+    raise HTTPException(
+      status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+      detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024**3):.2f} GB, "
+      f"Limit: {storage_check['limit_gb']} GB, "
+      f"Attempted upload: {actual_file_size / (1024**3):.2f} GB",
+    )
 
   actual_row_count = None
   try:
