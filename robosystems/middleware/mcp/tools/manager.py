@@ -41,6 +41,7 @@ from .graph_tools import (
   MaterializeTool,
   SetWritePolicyTool,
   SwitchWorkspaceTool,
+  SyncConnectionTool,
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
 from .schema_tool import SchemaTool
@@ -239,6 +240,15 @@ class GraphMCPTools:
     self.set_write_policy_tool = None
     if not read_only and not self._is_shared_repository():
       self.set_write_policy_tool = SetWritePolicyTool(graph_client)
+
+    # Connection sync — the on-demand resync trigger (write half of the
+    # sync-freshness pair; get-fiscal-calendar / get-graph-sync-status are
+    # the read half). Same gate as set-write-policy: platform-DB,
+    # writable user graphs only — not roboledger-gated because the REST
+    # sync endpoint isn't either.
+    self.sync_connection_tool = None
+    if not read_only and not self._is_shared_repository():
+      self.sync_connection_tool = SyncConnectionTool(graph_client)
 
     # Layer 2: Period-workflow read tools (gated by roboledger extension
     # + ROBOLEDGER_ENABLED). Schedule-specific reads were retired in
@@ -814,6 +824,8 @@ class GraphMCPTools:
     tools.extend(self._get_workspace_tool_definitions())
     if self.set_write_policy_tool is not None:
       tools.append(self.set_write_policy_tool.get_tool_definition())
+    if self.sync_connection_tool is not None:
+      tools.append(self.sync_connection_tool.get_tool_definition())
     tools.extend(self._get_subgraph_write_tool_definitions())
     tools.extend(self._get_semantic_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
@@ -1012,6 +1024,15 @@ class GraphMCPTools:
             "shared-repository graph."
           )
         result = await self.set_write_policy_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "sync-connection":
+        if self.sync_connection_tool is None:
+          raise ValueError(
+            "sync-connection tool is not available on this read-only or "
+            "shared-repository graph."
+          )
+        result = await self.sync_connection_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "write-graph-cypher":

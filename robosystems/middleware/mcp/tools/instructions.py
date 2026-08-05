@@ -100,6 +100,11 @@ def build_instructions(
       else:
         orient += "."
       close_lines.append(orient)
+    if has("sync-connection"):
+      close_lines.append(
+        "- Stale source data (`sync_stale` blocker)? Pull fresh data with "
+        "`sync-connection`, then re-check `get-fiscal-calendar`."
+      )
     sections.append(_block(*close_lines))
 
   # Chart-of-accounts mapping.

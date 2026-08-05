@@ -117,6 +117,10 @@ class ProviderRegistry:
       # Don't fail initialization if metrics fail
       logger.warning(f"Failed to record feature flag metrics: {e}")
 
+  def is_enabled(self, provider_type: str) -> bool:
+    """Whether a provider is registered (feature-flag enabled)."""
+    return provider_type.lower() in self._providers
+
   def get_provider(self, provider_type: str) -> dict[str, Any]:
     """Get provider configuration."""
     provider_lower = provider_type.lower()

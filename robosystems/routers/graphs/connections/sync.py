@@ -2,8 +2,6 @@
 Connection sync endpoint.
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
@@ -30,11 +28,15 @@ from robosystems.models.api.common import (
 )
 from robosystems.models.api.graphs.connections import SyncConnectionRequest
 from robosystems.models.core import User
-from robosystems.operations.connection_service import ConnectionService
+from robosystems.operations.connection_service import (
+  ConnectionNotFoundError,
+  ProviderUnavailableError,
+  SyncInProgressError,
+  dispatch_connection_sync,
+)
 
 from .utils import (
   create_robustness_components,
-  provider_registry,
   record_operation_failure,
   record_operation_start,
   record_operation_success,
@@ -46,7 +48,7 @@ router = APIRouter()
 @router.post(
   "/{connection_id}/sync",
   summary="Sync Connection",
-  description="SEC: downloads latest EDGAR filings (5-10 min). QuickBooks: fetches transactions, balances, and chart of accounts. Returns an `OperationEnvelope` — monitor progress via SSE at `/v1/operations/{operation_id}/stream`. Supports `Idempotency-Key`.",
+  description="SEC: downloads latest EDGAR filings (5-10 min). QuickBooks: fetches transactions, balances, and chart of accounts. Async — returns an `OperationEnvelope` with the provider task id; completion is reflected in the connection's `last_sync` timestamp. Supports `Idempotency-Key`.",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="syncConnection",
@@ -121,96 +123,34 @@ async def sync_connection(
       metadata={"connection_id": connection_id},
     )
 
-    # Get connection details
-    connection = await ConnectionService.get_connection(
-      connection_id, current_user.id, graph_id=graph_id
-    )
-
-    if not connection:
+    # Validate, lock, and dispatch via the shared kernel (also behind
+    # the `sync-connection` MCP tool); map domain exceptions to the
+    # HTTP contract this endpoint has always had.
+    try:
+      dispatch = await dispatch_connection_sync(
+        graph_id=graph_id,
+        connection_id=connection_id,
+        user_id=str(current_user.id),
+        full_rebuild=request.full_rebuild,
+        since_date=request.since_date,
+        sync_options=request.sync_options,
+        dispatch_timeout=operation_timeout,
+      )
+    except ConnectionNotFoundError:
       raise create_error_response(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Connection not found",
         code=ErrorCode.NOT_FOUND,
       )
-
-    provider = connection["provider"].lower()
-
-    # Validate provider is enabled before any sync operations
-    provider_registry.get_provider(provider)
-
-    # Per-connection sync lock. Two concurrent qb_sync runs
-    # against the same connection_id race on the UPSERT path; the
-    # lock serializes them. 30-min TTL bounds a *stuck* job (Dagster
-    # crash mid-sync); the normal completion path releases the lock
-    # explicitly from `qb_load` via the `sync_lock_id` plumbed through
-    # `QBSyncConfig`. The 30-min number is a safety-net for failed
-    # syncs, not an "intentional cooldown."
-    #
-    # If the same operator mashes "Sync Now" or the OAuth callback
-    # races a scheduler, the second attempt returns 409 with the
-    # holder's lock_id.
-    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-    from robosystems.middleware.auth.distributed_lock import DistributedLock
-
-    sync_lock_id: str = ""
-    try:
-      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-      sync_lock = DistributedLock(
-        redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
-      )
-      lock_result = sync_lock.acquire(blocking=False)
-      if not lock_result.acquired:
-        raise create_error_response(
-          status_code=status.HTTP_409_CONFLICT,
-          detail=(
-            f"Sync already in progress for connection {connection_id} "
-            f"(held by {lock_result.holder_id}, "
-            f"expires in {lock_result.ttl_remaining}s)"
-          ),
-          code=ErrorCode.OPERATION_FAILED,
-        )
-      # Capture the lock id so the Dagster job can release the lock
-      # on completion. `lock_result.lock_id` is the same value the
-      # holder stored under the lock key; `release_lock_by_id` does
-      # an atomic compare-and-delete against it.
-      sync_lock_id = lock_result.lock_id or ""
-    except HTTPException:
-      raise
-    except Exception as e:
-      # Dashboards watch for `lock_skipped=true` to detect Valkey-
-      # degraded sync runs (we proceed unlocked rather than fail
-      # closed, so the silent race risk is real and worth surfacing).
-      logger.warning(
-        "Could not acquire sync lock for connection %s: %s; "
-        "proceeding without lock (concurrent-sync race still possible)",
-        connection_id,
-        e,
-        extra={
-          "connection_id": connection_id,
-          "lock_skipped": True,
-          "lock_skip_reason": type(e).__name__,
-        },
+    except SyncInProgressError as e:
+      raise create_error_response(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=str(e),
+        code=ErrorCode.OPERATION_FAILED,
       )
 
-    effective_options: dict[str, object] = dict(request.sync_options or {})
-    if request.full_rebuild:
-      effective_options["full_rebuild"] = True
-    if request.since_date is not None:
-      effective_options["since_date"] = request.since_date.isoformat()
-    # Lock release: pass the acquired lock_id through to QBSyncConfig
-    # so `qb_load` can release it on completion.
-    if sync_lock_id:
-      effective_options["sync_lock_id"] = sync_lock_id
-
-    # Sync using provider registry with timeout coordination
-    task_id = await asyncio.wait_for(
-      provider_registry.sync_connection(
-        provider, connection, effective_options or None, graph_id
-      ),
-      timeout=operation_timeout,
-    )
-
-    logger.info(f"Sync initiated for connection {connection_id}: task_id={task_id}")
+    provider = dispatch["provider"]
+    task_id = dispatch["task_id"]
 
     # Record successful operation
     record_operation_success(
@@ -284,7 +224,7 @@ async def sync_connection(
       error_type="http_exception",
     )
     raise
-  except ValueError as e:
+  except (ProviderUnavailableError, ValueError) as e:
     # Handle disabled provider errors as client errors
     record_operation_failure(
       components=components,

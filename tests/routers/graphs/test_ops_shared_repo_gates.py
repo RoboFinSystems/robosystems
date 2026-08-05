@@ -124,6 +124,27 @@ class TestDeleteSubgraphMCPSharedRepoGate:
     assert "sec" in result["message"]
 
 
+# ── MCP: SyncConnectionTool rejects shared repos ──────────────────────────
+
+
+class TestSyncConnectionMCPSharedRepoGate:
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("graph_id", ["sec", "sec_historical"])
+  async def test_rejects_shared_repo(self, graph_id: str) -> None:
+    """Shared repos sync via their own pipeline; a tenant agent must not
+    be able to trigger ingestion against them."""
+    from robosystems.middleware.mcp.tools.graph_tools import SyncConnectionTool
+
+    client = MagicMock()
+    client.graph_id = graph_id
+    client.user = _user()
+
+    result = await SyncConnectionTool(client).execute({})
+
+    assert result["error"] == "not_allowed_on_shared_repo"
+    assert graph_id in result["message"]
+
+
 # ── Navigation still allowed — positive invariants ────────────────────────
 
 

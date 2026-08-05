@@ -31,6 +31,10 @@ _RECURRING_SEQUENCE: list[str] = [
   "get-fiscal-calendar — orient: read closed_through, close_target, "
   "closeable_now, blockers, catch_up_sequence. Confirm the period you intend "
   "to close is exactly closed_through + 1.",
+  "If blockers include sync_stale: run sync-connection (incremental, no "
+  "arguments needed — it auto-resolves the graph's sync connection), then "
+  "poll get-fiscal-calendar until last_sync_at advances and the blocker "
+  "clears. Prefer this over closing with allow_stale_sync=true.",
   "get-period-close-status (period_start/period_end as YYYY-MM-DD) — see "
   "which schedules are pending / drafted / posted and their amounts.",
   "promote-obligations (dispatch_handlers=true) — draft every matured "
@@ -47,7 +51,8 @@ _RECURRING_SEQUENCE: list[str] = [
   "close-period (period as YYYY-MM) — atomic: posts the drafts, runs the "
   "balance-sheet equation check, advances closed_through. Use "
   "allow_stale_sync=true only when the user has verified QB is complete "
-  "despite a stale sync.",
+  "despite a stale sync — normally run sync-connection instead (see the "
+  "sync_stale step above).",
 ]
 
 _INITIATE_SEQUENCE: list[str] = [
@@ -146,7 +151,8 @@ _KEY_RULES: list[str] = [
   "comprehensive_income) and 'metric' return HTTP 501 — statements are built "
   "via create-report.",
   "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
-  "(month not over yet), sync_stale (QuickBooks sync older than period end), "
+  "(month not over yet), sync_stale (QuickBooks sync older than period end "
+  "— run sync-connection and poll get-fiscal-calendar until it clears), "
   "calendar_not_initialized, and pending_obligations (matured "
   "schedule_entry_due events still 'pending' at/before the period — run "
   "promote-obligations to draft them, or, if they belong to a "

@@ -14,6 +14,11 @@ from fastapi import HTTPException
 from robosystems.routers.graphs.connections.sync import sync_connection
 
 SYNC_MODULE = "robosystems.routers.graphs.connections.sync"
+# The validate → lock → dispatch orchestration lives in the shared kernel
+# (`dispatch_connection_sync`), so connection lookup and provider dispatch
+# are patched at their source modules, not on the router.
+KERNEL_MODULE = "robosystems.operations.connection_service"
+REGISTRY_MODULE = "robosystems.operations.providers.registry"
 
 GRAPH_ID = "kg01234567890abcdef"
 USER_ID = "usr_test123"
@@ -146,11 +151,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_qb_001")
@@ -189,11 +194,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_sec_001")
@@ -229,7 +234,7 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=None,
       ),
@@ -266,11 +271,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(
         side_effect=ValueError("Provider is disabled")
@@ -308,14 +313,16 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
-      patch(f"{SYNC_MODULE}.asyncio.wait_for", side_effect=TimeoutError()),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      # TimeoutError raised from the awaited dispatch propagates through
+      # asyncio.wait_for exactly like an elapsed dispatch_timeout.
+      mock_registry.sync_connection = AsyncMock(side_effect=TimeoutError())
 
       with pytest.raises(HTTPException) as exc_info:
         await sync_connection(
@@ -349,11 +356,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(
@@ -392,7 +399,7 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         side_effect=original_exc,
       ),
@@ -436,11 +443,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       sync_mock = AsyncMock(return_value="task_123")
@@ -491,11 +498,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       sync_mock = AsyncMock(return_value="task_456")
@@ -543,11 +550,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_001")
@@ -585,11 +592,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_failure") as mock_record_failure,
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(
         side_effect=ValueError("Provider disabled")
@@ -629,11 +636,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success") as mock_record_success,
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_success")
@@ -669,11 +676,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_quickbooks")
@@ -710,11 +717,11 @@ class TestSyncConnection:
       patch(f"{SYNC_MODULE}.record_operation_start"),
       patch(f"{SYNC_MODULE}.record_operation_success"),
       patch(
-        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        f"{KERNEL_MODULE}.ConnectionService.get_connection",
         new_callable=AsyncMock,
         return_value=connection_dict,
       ),
-      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
       mock_registry.sync_connection = AsyncMock(return_value="task_001")
