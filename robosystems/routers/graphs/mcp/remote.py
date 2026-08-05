@@ -25,6 +25,7 @@ Transport rules:
   the generated SDK clients.
 """
 
+import asyncio
 import json
 from importlib.metadata import version as pkg_version
 from typing import Any
@@ -33,6 +34,7 @@ from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi import status as http_status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import JSONResponse
+from sse_starlette.sse import EventSourceResponse
 
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -53,7 +55,8 @@ from .execute import (
   execute_tool_to_json,
 )
 from .handlers import MCPHandler, validate_mcp_access
-from .strategies import MCPStrategySelector
+from .strategies import MCPExecutionStrategy, MCPStrategySelector
+from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 
 router = APIRouter()
 
@@ -214,9 +217,147 @@ async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any
   return {"tools": mcp_tools}
 
 
+# Strategies whose work is long or chunked enough to earn the SSE response
+# mode. Everything else answers as a single application/json body — Streamable
+# HTTP lets the server choose per call.
+_SSE_STRATEGIES = frozenset(
+  {
+    MCPExecutionStrategy.STREAM_AGGREGATED,
+    MCPExecutionStrategy.SSE_PROGRESS,
+    MCPExecutionStrategy.SSE_STREAMING,
+    MCPExecutionStrategy.NDJSON_STREAMING,
+  }
+)
+
+# Keepalive interval for SSE responses. Comment pings (`: ping …`) keep the
+# stream alive through the ALB idle timeout (default 60s) without being
+# parsed as messages by MCP clients.
+_SSE_PING_SECONDS = 15
+
+
+def _event_to_progress(
+  token: Any, event: dict[str, Any], last_progress: float
+) -> tuple[dict[str, Any] | None, float]:
+  """Map one internal streaming event to a notifications/progress message.
+
+  Internal progress events mix scales (percentages vs row counts), so the
+  emitted `progress` value is clamped monotonically increasing as the MCP
+  spec requires. Data-bearing events (chunks, results) return None here —
+  they are aggregated into the final response, never sent as notifications.
+  """
+  etype = event.get("event")
+  data = event.get("data") or {}
+
+  message: str | None = None
+  value: float | None = None
+  if etype == "start":
+    message = data.get("message")
+    value = 0.0
+  elif etype == "progress":
+    message = data.get("message")
+    raw = data.get("progress", data.get("rows_processed"))
+    value = float(raw) if raw is not None else None
+  elif etype == "query_chunk":
+    rows = data.get("total_rows_so_far")
+    if rows is not None:
+      value = float(rows)
+      message = f"Fetched {rows} rows"
+  else:
+    return None, last_progress
+
+  progress = value if value is not None else last_progress + 1.0
+  if progress <= last_progress:
+    progress = last_progress + 1.0
+
+  params: dict[str, Any] = {"progressToken": token, "progress": progress}
+  if message:
+    params["message"] = message
+  return (
+    {"jsonrpc": "2.0", "method": "notifications/progress", "params": params},
+    progress,
+  )
+
+
+async def _stream_tool_call(
+  handler: MCPHandler,
+  graph_id: str,
+  tool_call: MCPToolCall,
+  strategy: MCPExecutionStrategy,
+  timeout: int,
+  msg_id: Any,
+  progress_token: Any,
+):
+  """Drive one tools/call as the SSE body of the POST response.
+
+  Emits notifications/progress while the tool runs (only when the client sent
+  `_meta.progressToken` — the MCP contract), then the final JSON-RPC response,
+  then ends the stream. A client disconnect cancels this generator and with it
+  the in-flight tool work — the transport-level closure of the abandoned-CPU
+  gap. sse_starlette's comment ping carries the stream across the ALB idle
+  timeout while the tool is silent.
+  """
+  events: list[dict[str, Any]] = []
+  last_progress = 0.0
+  payload: dict[str, Any]
+  try:
+    try:
+      async with asyncio.timeout(timeout):
+        async for event in stream_mcp_tool_execution(
+          handler, tool_call.name, tool_call.arguments, strategy.value
+        ):
+          events.append(event)
+          if progress_token is None:
+            continue
+          notification, last_progress = _event_to_progress(
+            progress_token, event, last_progress
+          )
+          if notification:
+            yield {"data": json.dumps(notification)}
+
+      result = aggregate_streamed_results(events)
+      payload = {"jsonrpc": "2.0", "id": msg_id, "result": _to_tool_result(result)}
+      circuit_breaker.record_success(graph_id, tool_call.name)
+    except TimeoutError:
+      payload = {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": f"Error: tool '{tool_call.name}' timed out after {timeout} seconds",
+            }
+          ],
+          "isError": True,
+        },
+      }
+    except Exception as e:
+      circuit_breaker.record_failure(graph_id, tool_call.name)
+      logger.error(
+        f"Remote MCP streamed tool execution failed: {e}",
+        extra={"graph_id": graph_id, "tool_name": tool_call.name},
+      )
+      payload = {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": {
+          "content": [{"type": "text", "text": "Tool execution failed."}],
+          "isError": True,
+        },
+      }
+    yield {"data": json.dumps(payload)}
+  finally:
+    if not handler._closed:
+      await handler.close()
+
+
 async def _handle_tools_call(
-  graph_id: str, current_user: User, msg_id: Any, params: dict[str, Any]
-) -> JSONResponse:
+  request: Request,
+  graph_id: str,
+  current_user: User,
+  msg_id: Any,
+  params: dict[str, Any],
+) -> Response:
   name = params.get("name")
   if not isinstance(name, str) or not name:
     return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: 'name' is required")
@@ -247,26 +388,41 @@ async def _handle_tools_call(
     },
   )
 
+  from robosystems.middleware.graph.query_queue import get_query_queue
+
+  tool_stats = get_query_queue().get_stats()
+  strategy = MCPStrategySelector.select_strategy(
+    tool_name=name,
+    arguments=arguments,
+    client_info=_REMOTE_CLIENT_INFO,
+    system_state={
+      "queue_size": tool_stats["queue_size"],
+      "running_queries": tool_stats["running_queries"],
+      "cache_available": True,
+    },
+    graph_id=graph_id,
+    user_tier=None,
+  )
+  timeout = MCPStrategySelector.get_timeout_for_strategy(strategy)
+
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
-  try:
-    from robosystems.middleware.graph.query_queue import get_query_queue
 
-    tool_stats = get_query_queue().get_stats()
-    strategy = MCPStrategySelector.select_strategy(
-      tool_name=name,
-      arguments=arguments,
-      client_info=_REMOTE_CLIENT_INFO,
-      system_state={
-        "queue_size": tool_stats["queue_size"],
-        "running_queries": tool_stats["running_queries"],
-        "cache_available": True,
-      },
-      graph_id=graph_id,
-      user_tier=None,
+  # SSE-on-POST: long/streaming strategies answer as text/event-stream when
+  # the client accepts it (MCP clients advertise both). Handler ownership
+  # passes to the generator, which closes it when the stream ends.
+  meta = params.get("_meta")
+  progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
+  accept_header = request.headers.get("accept", "")
+  if strategy in _SSE_STRATEGIES and "text/event-stream" in accept_header:
+    return EventSourceResponse(
+      _stream_tool_call(
+        handler, graph_id, tool_call, strategy, timeout, msg_id, progress_token
+      ),
+      ping=_SSE_PING_SECONDS,
     )
-    timeout = MCPStrategySelector.get_timeout_for_strategy(strategy)
 
+  try:
     result = await execute_tool_to_json(handler, graph_id, tool_call, strategy, timeout)
   except HTTPException as e:
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
@@ -352,7 +508,7 @@ async def mcp_remote_transport(
     elif method == "tools/list":
       return _rpc_result(msg_id, await _handle_tools_list(graph_id, current_user))
     elif method == "tools/call":
-      return await _handle_tools_call(graph_id, current_user, msg_id, params)
+      return await _handle_tools_call(request, graph_id, current_user, msg_id, params)
     else:
       return _rpc_error(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
   except HTTPException as e:
