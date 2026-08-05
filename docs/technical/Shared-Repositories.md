@@ -91,6 +91,37 @@ The Advanced plan carries roughly 5× the rate limits of Starter. Rate limits ap
 
 The repository id is `sec`, and it exposes a `sec_historical` subgraph for older filings. For a hands-on walkthrough — loading filings locally, querying them with Cypher and MCP, and the data model — see the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
 
+### Downloading a snapshot
+
+Subscribers whose plan carries a download allowance can pull the whole repository down as a LadybugDB file rather than querying it over the API. Ask for a presigned URL, then fetch it:
+
+```bash
+# Latest published snapshot — one backup record per repository, republished on each pipeline run
+curl -s "https://api.robosystems.ai/v1/graphs/sec/backups" \
+  -H "X-API-Key: YOUR_API_KEY"
+
+curl -s "https://api.robosystems.ai/v1/graphs/sec/backups/BACKUP_ID/download" \
+  -H "X-API-Key: YOUR_API_KEY"
+
+curl -L -o sec.lbug.zst "PASTE_THE_DOWNLOAD_URL"
+```
+
+Snapshots arrive **zstd-compressed** (`.lbug.zst`), so you need the `zstd` tool — it ships with neither macOS nor most Linux distributions by default:
+
+```bash
+brew install zstd            # macOS
+sudo apt-get install zstd    # Debian / Ubuntu
+sudo dnf install zstd        # Amazon Linux / Fedora / RHEL
+```
+
+Then decompress it in the folder holding the download (on macOS, right-click the folder → **Services** → **New Terminal at Folder** to get there):
+
+```bash
+zstd -d sec.lbug.zst   # -> sec.lbug ; add --rm to delete the .zst afterwards
+```
+
+Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
+
 ## Related Documentation
 
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The dedicated per-customer tiers, the other half of graph access

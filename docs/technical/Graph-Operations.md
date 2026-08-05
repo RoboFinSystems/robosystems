@@ -13,6 +13,7 @@ This guide shows you how to perform graph-lifecycle writes — creating subgraph
 - [Monitoring Progress with SSE](#monitoring-progress-with-sse)
 - [Operations Reference](#operations-reference)
 - [Worked Example: Create a Backup and Watch It Complete](#worked-example-create-a-backup-and-watch-it-complete)
+- [Downloading and Unpacking a Backup](#downloading-and-unpacking-a-backup)
 - [Common Pitfalls](#common-pitfalls)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
@@ -337,6 +338,91 @@ curl -s "http://localhost:8000/v1/graphs/kg1a2b3c4d5/backups" \
 ```
 
 Because you sent an `Idempotency-Key` in Step 1, re-running that exact request within 24 hours replays the original envelope (`idempotentReplay: true`) instead of creating a second backup.
+
+## Downloading and Unpacking a Backup
+
+Downloading is a read, not an operation. Ask for a time-limited presigned URL, then fetch the file straight from object storage:
+
+```bash
+# Returns { "download_url": "...", "expires_at": "...", "backup_id": "..." }
+curl -s "http://localhost:8000/v1/graphs/kg1a2b3c4d5/backups/bk1a2b3c4d5/download?expires_in=3600" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+
+# Fetch the file — the presigned URL carries its own auth, so no API key here
+curl -L -o backup.zip "PASTE_THE_DOWNLOAD_URL"
+```
+
+Only **unencrypted** backups can be downloaded. The URL expires after `expires_in` seconds (300–86400, default 3600), and each download counts against your graph tier's or repository plan's monthly download allowance.
+
+### Which File You Get
+
+| Source | Filename | Contents |
+| --- | --- | --- |
+| A backup of a graph you own | `{graph_id}_{timestamp}.zip` | ZIP archive containing the LadybugDB database file `{graph_id}.lbug` |
+| A shared repository snapshot (e.g. `sec`) | `{graph_id}_{timestamp}.lbug.zst` | A single zstd-compressed LadybugDB database file |
+
+### Unpacking a `.zip`
+
+Nothing special — `unzip` on macOS/Linux, or double-click in Finder / Explorer:
+
+```bash
+unzip kg1a2b3c4d5_20260805_031500.zip
+# -> kg1a2b3c4d5.lbug
+```
+
+### Unpacking a `.lbug.zst`
+
+Shared repository snapshots are compressed with [zstd](https://github.com/facebook/zstd), which is **not** installed by default on macOS or most Linux distributions. Install it first:
+
+```bash
+# macOS (Homebrew)
+brew install zstd
+
+# Debian / Ubuntu
+sudo apt-get install zstd
+
+# Amazon Linux / Fedora / RHEL
+sudo dnf install zstd
+
+# Windows — via winget, or use 7-Zip which reads .zst natively
+winget install Facebook.Zstandard
+```
+
+Then decompress from the directory holding the download. On macOS you can jump straight there by right-clicking the enclosing folder → **Services** → **New Terminal at Folder**:
+
+```bash
+# Writes sec_20260805_031500.lbug and keeps the .zst
+zstd -d sec_20260805_031500.lbug.zst
+
+# Same, but removes the compressed file afterwards
+zstd -d --rm sec_20260805_031500.lbug.zst
+```
+
+No `--long` flag is needed on your side: the snapshots are compressed with a 128 MB window that plain `zstd -d` handles. Budget disk for roughly **2×** the download size — these files compress at about 2.2×.
+
+### Using the Decompressed `.lbug`
+
+The result is an ordinary LadybugDB database file. Drop it into a local stack's database directory and query it directly:
+
+```bash
+mv sec_20260805_031500.lbug ./data/lbug-dbs/sec.lbug
+just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
+```
+
+Or open it from Python with the `ladybug` package (pinned to `0.18.1` in this repo — match the version the snapshot was written with):
+
+```python
+import ladybug as lbug
+
+db = lbug.Database("sec_20260805_031500.lbug")
+conn = lbug.Connection(db)
+
+result = conn.execute("MATCH (e:Entity) RETURN e.name LIMIT 10")
+while result.has_next():
+    print(result.get_next())
+
+conn.close()
+```
 
 ## Common Pitfalls
 
