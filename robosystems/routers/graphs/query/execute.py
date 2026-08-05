@@ -24,6 +24,12 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.query_telemetry import (
+  api_key_prefix_from_request,
+  log_shared_query_end,
+  log_shared_query_start,
+  record_shared_query_outcome,
+)
 from robosystems.middleware.graph.statement_kernel import (
   StatementEngine,
   statement_kernel,
@@ -140,6 +146,11 @@ async def execute_cypher_query(
 
   # Initialize client_info for exception handling
   client_info = {"is_interactive": False}
+
+  # Shared-repository telemetry context (no-ops on user graphs)
+  is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
+  key_prefix = api_key_prefix_from_request(full_request)
+  exec_id: str | None = None
 
   try:
     # Authorize the statement — write policy, engine validation, role gate.
@@ -280,6 +291,15 @@ async def execute_cypher_query(
       },
     )
 
+    exec_id = log_shared_query_start(
+      graph_id,
+      current_user.id,
+      api_key_prefix=key_prefix,
+      source="query_cypher",
+      query_length=len(request.query),
+      strategy=strategy.value,
+    )
+
     # Execute based on strategy
     if strategy == ExecutionStrategy.SSE_QUEUE_STREAM:
       # Queue with SSE then stream results
@@ -291,6 +311,14 @@ async def execute_cypher_query(
       )
 
       # Stream with unified monitoring support
+      log_shared_query_end(
+        exec_id,
+        graph_id,
+        current_user.id,
+        outcome="dispatched_stream",
+        api_key_prefix=key_prefix,
+        source="query_cypher",
+      )
       return await stream_sse_with_queue(
         request=request,
         graph_id=graph_id,
@@ -303,6 +331,14 @@ async def execute_cypher_query(
 
     elif strategy == ExecutionStrategy.SSE_STREAMING:
       # Direct SSE streaming
+      log_shared_query_end(
+        exec_id,
+        graph_id,
+        current_user.id,
+        outcome="dispatched_stream",
+        api_key_prefix=key_prefix,
+        source="query_cypher",
+      )
       return await stream_sse_response(
         repository=repository,
         request=request,
@@ -315,6 +351,14 @@ async def execute_cypher_query(
 
     elif strategy == ExecutionStrategy.NDJSON_STREAMING:
       # NDJSON streaming
+      log_shared_query_end(
+        exec_id,
+        graph_id,
+        current_user.id,
+        outcome="dispatched_stream",
+        api_key_prefix=key_prefix,
+        source="query_cypher",
+      )
       return await stream_ndjson_response(
         repository=repository,
         request=request,
@@ -349,6 +393,17 @@ async def execute_cypher_query(
 
         # Extract columns
         columns = list(result[0].keys()) if result else []
+
+        log_shared_query_end(
+          exec_id,
+          graph_id,
+          current_user.id,
+          outcome="completed",
+          duration_ms=execution_time,
+          row_count=len(result),
+          api_key_prefix=key_prefix,
+          source="query_cypher",
+        )
 
         # Check if result is too large for testing tools
         if (
@@ -467,11 +522,27 @@ async def execute_cypher_query(
         # (ALB + ASG) — queuing just delays the inevitable, so return a
         # timeout error. User graphs benefit from the queue since they have
         # limited connections (max 3) and no read replicas.
-        is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
-
         if client_info["is_interactive"] or is_shared:
           elapsed = (datetime.now(UTC) - start_time).total_seconds()
 
+          record_shared_query_outcome(
+            graph_id,
+            current_user.id,
+            signal="timeout",
+            status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
+            api_key_prefix=key_prefix,
+            endpoint="/v1/graphs/{graph_id}/query/cypher",
+            source="query_cypher",
+          )
+          log_shared_query_end(
+            exec_id,
+            graph_id,
+            current_user.id,
+            outcome="timeout",
+            duration_ms=elapsed * 1000,
+            api_key_prefix=key_prefix,
+            source="query_cypher",
+          )
           return JSONResponse(
             status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
             content={
@@ -649,6 +720,14 @@ async def execute_cypher_query(
       "monitor": f"/v1/operations/{sse_response['operation_id']}/stream",  # Unified monitoring only
     }
 
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome="queued",
+      api_key_prefix=key_prefix,
+      source="query_cypher",
+    )
     return JSONResponse(
       status_code=http_status.HTTP_202_ACCEPTED, content=response_content
     )
@@ -660,6 +739,14 @@ async def execute_cypher_query(
         status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
         detail="No credit pool found for this graph. Please check your subscription.",
       )
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/query/cypher",
+      source="query_cypher",
+    )
     # Re-raise other ValueErrors — 400s are client errors, keep specific message
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -669,10 +756,44 @@ async def execute_cypher_query(
   except HTTPException as exc:
     if exc.status_code >= 500:
       circuit_breaker.record_failure(graph_id, "cypher_query")
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=exc.status_code,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/query/cypher",
+      source="query_cypher",
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome=f"http_{exc.status_code}",
+      duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+      api_key_prefix=key_prefix,
+      source="query_cypher",
+    )
     raise
 
   except Exception as e:
     circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      error=e,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/query/cypher",
+      source="query_cypher",
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome="error",
+      duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+      api_key_prefix=key_prefix,
+      source="query_cypher",
+    )
 
     # Record business event for unexpected errors
     metrics_instance = get_endpoint_metrics()

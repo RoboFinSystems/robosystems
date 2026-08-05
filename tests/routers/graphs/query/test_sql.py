@@ -42,6 +42,7 @@ async def test_execute_sql_success():
     ),
   ):
     resp = await sql_module.execute_sql(
+      full_request=MagicMock(),
       graph_id="kg1234567890abcdef",
       request=req,
       current_user=_user(),
@@ -61,6 +62,7 @@ async def test_execute_sql_shared_repo_blocked():
   ):
     with pytest.raises(HTTPException) as e:
       await sql_module.execute_sql(
+        full_request=MagicMock(),
         graph_id="sec",
         request=req,
         current_user=_user(),

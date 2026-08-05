@@ -8,13 +8,17 @@ tables). Authorization runs through the shared StatementKernel.
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.query_telemetry import (
+  api_key_prefix_from_request,
+  record_shared_query_outcome,
+)
 from robosystems.middleware.graph.statement_kernel import (
   StatementEngine,
   statement_kernel,
@@ -53,6 +57,7 @@ circuit_breaker = CircuitBreakerManager()
   "/v1/graphs/{graph_id}/query/sql", business_event_type="table_query_executed"
 )
 async def execute_sql(
+  full_request: Request,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -70,13 +75,24 @@ async def execute_sql(
 
   # Authorize the statement — SQL is read-only and blocked on shared repos.
   # Shared, transport-independent path (also used by /query/cypher, MCP).
-  statement_kernel.authorize(
-    engine=StatementEngine.SQL,
-    graph_id=graph_id,
-    statement=request.sql,
-    user=current_user,
-    session=db,
-  )
+  try:
+    statement_kernel.authorize(
+      engine=StatementEngine.SQL,
+      graph_id=graph_id,
+      statement=request.sql,
+      user=current_user,
+      session=db,
+    )
+  except HTTPException as exc:
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=exc.status_code,
+      api_key_prefix=api_key_prefix_from_request(full_request),
+      endpoint="/v1/graphs/{graph_id}/query/sql",
+      source="query_sql",
+    )
+    raise
 
   try:
     # Verify graph access

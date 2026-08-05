@@ -28,6 +28,7 @@ Transport rules:
 import asyncio
 import json
 import re
+import time
 from importlib.metadata import version as pkg_version
 from typing import Any
 
@@ -40,6 +41,13 @@ from sse_starlette.sse import EventSourceResponse
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.graph.query_telemetry import (
+  api_key_prefix_from_request,
+  is_disrupted_aggregation,
+  log_shared_query_end,
+  log_shared_query_start,
+  record_shared_query_outcome,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
@@ -359,6 +367,9 @@ async def _stream_tool_call(
   timeout: int,
   msg_id: Any,
   progress_token: Any,
+  user_id: str | None = None,
+  api_key_prefix: str | None = None,
+  exec_id: str | None = None,
 ):
   """Drive one tools/call as the SSE body of the POST response.
 
@@ -372,6 +383,10 @@ async def _stream_tool_call(
   events: list[dict[str, Any]] = []
   last_progress = 0.0
   payload: dict[str, Any]
+  started = time.monotonic()
+  # Default covers the generator being closed at a yield (client disconnect
+  # cancels in-flight work); every settled path overwrites it.
+  outcome = "client_disconnected"
   try:
     try:
       async with asyncio.timeout(timeout):
@@ -388,9 +403,32 @@ async def _stream_tool_call(
             yield {"data": json.dumps(notification)}
 
       result = aggregate_streamed_results(events)
+      outcome = "completed"
+      if is_disrupted_aggregation(result):
+        outcome = "stream_disrupted"
+        record_shared_query_outcome(
+          graph_id,
+          user_id,
+          signal="stream_disrupted",
+          disruption=True,
+          api_key_prefix=api_key_prefix,
+          endpoint="/v1/graphs/{graph_id}/mcp",
+          source="mcp_remote",
+          tool_name=tool_call.name,
+        )
       payload = {"jsonrpc": "2.0", "id": msg_id, "result": _to_tool_result(result)}
       circuit_breaker.record_success(graph_id, tool_call.name)
     except TimeoutError:
+      outcome = "timeout"
+      record_shared_query_outcome(
+        graph_id,
+        user_id,
+        signal="timeout",
+        api_key_prefix=api_key_prefix,
+        endpoint="/v1/graphs/{graph_id}/mcp",
+        source="mcp_remote",
+        tool_name=tool_call.name,
+      )
       payload = {
         "jsonrpc": "2.0",
         "id": msg_id,
@@ -405,7 +443,17 @@ async def _stream_tool_call(
         },
       }
     except Exception as e:
+      outcome = "error"
       circuit_breaker.record_failure(graph_id, tool_call.name)
+      record_shared_query_outcome(
+        graph_id,
+        user_id,
+        error=e,
+        api_key_prefix=api_key_prefix,
+        endpoint="/v1/graphs/{graph_id}/mcp",
+        source="mcp_remote",
+        tool_name=tool_call.name,
+      )
       logger.error(
         f"Remote MCP streamed tool execution failed: {e}",
         extra={"graph_id": graph_id, "tool_name": tool_call.name},
@@ -420,6 +468,16 @@ async def _stream_tool_call(
       }
     yield {"data": json.dumps(payload)}
   finally:
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      user_id,
+      outcome=outcome,
+      duration_ms=(time.monotonic() - started) * 1000,
+      api_key_prefix=api_key_prefix,
+      source="mcp_remote",
+      tool_name=tool_call.name,
+    )
     if not handler._closed:
       await handler.close()
 
@@ -430,6 +488,8 @@ async def _stream_queued_call(
   current_user: User,
   msg_id: Any,
   progress_token: Any,
+  api_key_prefix: str | None = None,
+  exec_id: str | None = None,
 ):
   """Bridge a queued cypher execution onto the SSE response.
 
@@ -450,6 +510,8 @@ async def _stream_queued_call(
   queue_id: str | None = None
   query_settled = False  # reached completed/failed/cancelled in the queue
   last_progress = 0.0
+  started = time.monotonic()
+  outcome = "client_disconnected"
   try:
     try:
       queue_id = await queue_manager.submit_query(
@@ -496,6 +558,7 @@ async def _stream_queued_call(
 
           if state == "completed":
             query_settled = True
+            outcome = "completed"
             result = await queue_manager.get_query_result(queue_id)
             payload = {
               "jsonrpc": "2.0",
@@ -506,19 +569,41 @@ async def _stream_queued_call(
             break
           if state in ("failed", "cancelled"):
             query_settled = True
+            outcome = f"queue_{state}"
             error = status.get("error") or f"Query {state}"
+            if state == "failed":
+              record_shared_query_outcome(
+                graph_id,
+                current_user.id,
+                signal="queue_failed",
+                api_key_prefix=api_key_prefix,
+                endpoint="/v1/graphs/{graph_id}/mcp",
+                source="mcp_remote",
+                tool_name=tool_call.name,
+              )
             payload = _tool_error_payload(msg_id, str(error))
             break
 
           await asyncio.sleep(_QUEUE_POLL_SECONDS)
     except TimeoutError:
+      outcome = "bridge_timeout"
       payload = _tool_error_payload(
         msg_id,
         f"Error: queued query did not complete within "
         f"{_QUEUE_BRIDGE_TIMEOUT_SECONDS} seconds",
       )
     except Exception as e:
+      outcome = "error"
       circuit_breaker.record_failure(graph_id, tool_call.name)
+      record_shared_query_outcome(
+        graph_id,
+        current_user.id,
+        error=e,
+        api_key_prefix=api_key_prefix,
+        endpoint="/v1/graphs/{graph_id}/mcp",
+        source="mcp_remote",
+        tool_name=tool_call.name,
+      )
       logger.error(
         f"Remote MCP queued execution failed: {e}",
         extra={"graph_id": graph_id, "tool_name": tool_call.name},
@@ -527,6 +612,16 @@ async def _stream_queued_call(
 
     yield {"data": json.dumps(payload)}
   finally:
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome=outcome,
+      duration_ms=(time.monotonic() - started) * 1000,
+      api_key_prefix=api_key_prefix,
+      source="mcp_remote",
+      tool_name=tool_call.name,
+    )
     # Reached without a settled queue state on disconnect (generator closed
     # at a yield), bridge timeout, or submit/monitor failure: stop the queued
     # work so abandoned queries don't burn queue capacity.
@@ -556,11 +651,24 @@ async def _handle_tools_call(
     )
 
   tool_call = MCPToolCall(name=name, arguments=arguments)
+  key_prefix = api_key_prefix_from_request(request)
 
   try:
     circuit_breaker.check_circuit(graph_id, name)
     access_type = await authorize_mcp_tool_call(graph_id, tool_call, current_user)
   except HTTPException as e:
+    # Tool failures leave this transport as HTTP 200 + isError per the MCP
+    # contract, so outcomes must be recorded here at classification time —
+    # status-code-level telemetry is blind to this surface.
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=e.status_code,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp",
+      source="mcp_remote",
+      tool_name=name,
+    )
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
     return _tool_error_result(msg_id, detail)
 
@@ -605,6 +713,17 @@ async def _handle_tools_call(
   )
   timeout = MCPStrategySelector.get_timeout_for_strategy(strategy)
 
+  query_arg = arguments.get("query")
+  exec_id = log_shared_query_start(
+    graph_id,
+    current_user.id,
+    api_key_prefix=key_prefix,
+    source="mcp_remote",
+    tool_name=name,
+    query_length=len(query_arg) if isinstance(query_arg, str) else None,
+    strategy=strategy.value,
+  )
+
   meta = params.get("_meta")
   progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
   accept_header = request.headers.get("accept", "")
@@ -624,7 +743,15 @@ async def _handle_tools_call(
     strategy in _QUEUE_STRATEGIES and name in _CYPHER_READ_TOOLS and client_accepts_sse
   ):
     return EventSourceResponse(
-      _stream_queued_call(graph_id, tool_call, current_user, msg_id, progress_token),
+      _stream_queued_call(
+        graph_id,
+        tool_call,
+        current_user,
+        msg_id,
+        progress_token,
+        api_key_prefix=key_prefix,
+        exec_id=exec_id,
+      ),
       ping=_SSE_PING_SECONDS,
     )
 
@@ -637,18 +764,66 @@ async def _handle_tools_call(
   if strategy in _SSE_STRATEGIES and client_accepts_sse:
     return EventSourceResponse(
       _stream_tool_call(
-        handler, graph_id, tool_call, strategy, timeout, msg_id, progress_token
+        handler,
+        graph_id,
+        tool_call,
+        strategy,
+        timeout,
+        msg_id,
+        progress_token,
+        user_id=str(current_user.id),
+        api_key_prefix=key_prefix,
+        exec_id=exec_id,
       ),
       ping=_SSE_PING_SECONDS,
     )
 
+  direct_started = time.monotonic()
   try:
     result = await execute_tool_to_json(handler, graph_id, tool_call, strategy, timeout)
   except HTTPException as e:
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=e.status_code,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp",
+      source="mcp_remote",
+      tool_name=name,
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome=f"http_{e.status_code}",
+      duration_ms=(time.monotonic() - direct_started) * 1000,
+      api_key_prefix=key_prefix,
+      source="mcp_remote",
+      tool_name=name,
+    )
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
     return _tool_error_result(msg_id, detail)
   except Exception as e:
     circuit_breaker.record_failure(graph_id, name)
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      error=e,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp",
+      source="mcp_remote",
+      tool_name=name,
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome="error",
+      duration_ms=(time.monotonic() - direct_started) * 1000,
+      api_key_prefix=key_prefix,
+      source="mcp_remote",
+      tool_name=name,
+    )
     logger.error(
       f"Remote MCP tool execution failed: {e}",
       extra={"graph_id": graph_id, "user_id": str(current_user.id), "tool_name": name},
@@ -659,6 +834,29 @@ async def _handle_tools_call(
       await handler.close()
 
   circuit_breaker.record_success(graph_id, name)
+  outcome = "completed"
+  if is_disrupted_aggregation(result):
+    outcome = "stream_disrupted"
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      signal="stream_disrupted",
+      disruption=True,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp",
+      source="mcp_remote",
+      tool_name=name,
+    )
+  log_shared_query_end(
+    exec_id,
+    graph_id,
+    current_user.id,
+    outcome=outcome,
+    duration_ms=(time.monotonic() - direct_started) * 1000,
+    api_key_prefix=key_prefix,
+    source="mcp_remote",
+    tool_name=name,
+  )
   return _rpc_result(msg_id, _to_tool_result(result))
 
 
