@@ -1,4 +1,8 @@
-Run a read-only AWS cost & usage review, then produce a cost report and a prioritized savings plan ranked by dollar impact. Pairs with the `cost-analysis-cur-athena` (the $ side) and `prometheus-usage-amp-cli` (the usage-driver side) runbooks for the account-specific query detail.
+---
+description: Read-only AWS cost & usage review producing a cost report and a dollar-ranked savings plan.
+---
+
+Run a read-only AWS cost & usage review, then produce a cost report and a prioritized savings plan ranked by dollar impact. Pairs with the `cost-analysis-cur-athena` (the $ side) and `prometheus-usage-amp-cli` (the usage-driver side) runbooks in `local/RoboSystems/runbooks/` for the account-specific query detail — read them alongside this file.
 
 ## Scope & guardrails
 
@@ -17,7 +21,22 @@ Then the **effective-cost breakdown by component × environment** from the CUR v
 
 ## Phase 2 — Rightsizing
 
-`aws compute-optimizer get-*-recommendations` for ECS/Fargate services, RDS, EC2 (LadybugDB tiers), and ElastiCache — look for over-provisioned CPU/memory and downsizing candidates. Cross-check against admission-control/headroom needs before acting.
+**Check enrollment first** — every recommendation call returns `OptInRequiredException` when the account isn't registered, and that exception reads deceptively like "no opportunities found":
+
+```bash
+aws compute-optimizer get-enrollment-status --region us-east-1
+```
+
+If `status` is not `Active`, stop and report Phase 2 as **unavailable pending enrollment** — do not report "no rightsizing opportunities". Once active:
+
+```bash
+aws compute-optimizer get-ecs-service-recommendations  --region us-east-1
+aws compute-optimizer get-rds-database-recommendations --region us-east-1
+aws compute-optimizer get-ec2-instance-recommendations --region us-east-1   # graph tiers
+aws compute-optimizer get-idle-recommendations         --region us-east-1
+```
+
+**ElastiCache has no Compute Optimizer recommendations API** — size it from CloudWatch instead (`EngineCPUUtilization`, `DatabaseMemoryUsagePercentage` via `get-metric-statistics`). Cross-check every recommendation against admission-control/headroom needs before acting.
 
 ## Phase 3 — Idle & orphaned (fast wins)
 
@@ -27,7 +46,17 @@ Then the **effective-cost breakdown by component × environment** from the CUR v
 
 ## Phase 4 — Commitment coverage
 
-`aws ce get-savings-plans-coverage` / `get-reservation-coverage` and `get-savings-plans-purchase-recommendation`. Check **Fargate Spot** weighting (Spot-preferred here) and **ARM/Graviton** adoption (already the default — flag any x86 stragglers).
+All three of these have **required** arguments — they fail outright if you copy the bare command name:
+
+```bash
+aws ce get-savings-plans-coverage --time-period Start=<mo-start>,End=<mo-end> --region us-east-1
+aws ce get-reservation-coverage   --time-period Start=<mo-start>,End=<mo-end> --region us-east-1
+aws ce get-savings-plans-purchase-recommendation --region us-east-1 \
+  --savings-plans-type COMPUTE_SP --term-in-years ONE_YEAR \
+  --payment-option NO_UPFRONT --lookback-period-in-days SIXTY_DAYS
+```
+
+Check **Fargate Spot** weighting (Spot-preferred here) and **ARM/Graviton** adoption (already the default — flag any x86 stragglers). Note reserved capacity may exist for the managed search domain and is tied to its instance type — confirm before recommending a type change.
 
 ## Phase 5 — Storage, logs & transfer
 
@@ -39,10 +68,18 @@ Then the **effective-cost breakdown by component × environment** from the CUR v
 
 - **Amazon Managed Prometheus** active-series cardinality + ingestion — the top cost driver for observability. The `aws` CLI can't run PromQL; use the SigV4 signing helpers + canonical cardinality queries in the `prometheus-usage-amp-cli` runbook (top metrics by series, label drill-down, deploy-sawtooth trend).
 - High-cardinality metrics/labels, log volume per service, per-tier graph compute.
+- **Managed search** and **Bedrock** are material line items that only surface incidentally in the Phase 1 service grouping — call them out explicitly. Bedrock is the cost basis for AI credits, so it should reconcile against billed credit revenue.
 
 ## Phase 7 — Tagging & allocation
 
-Untagged/mis-tagged resources (break cost attribution), and confirm the Cost & Usage Report (the `RoboSystemsCUR` stack) is delivering.
+Untagged/mis-tagged resources (break cost attribution), and confirm the Cost & Usage Report is actually delivering:
+
+```bash
+aws cur describe-report-definitions --region us-east-1 \
+  --query 'ReportDefinitions[].{name:ReportName,status:ReportStatus,bucket:S3Bucket,format:Format}'
+```
+
+The legacy `cur` API is the right one here — don't "modernize" to `bcm-data-exports` without checking (`list-exports` returning empty means this account hasn't migrated to CUR 2.0, not that the report is missing). Also confirm a cost-anomaly monitor exists (`aws ce get-anomaly-monitors`), since `get-anomalies` returns nothing useful without one.
 
 ## Output — report + savings plan
 

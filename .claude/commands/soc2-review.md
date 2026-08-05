@@ -1,4 +1,10 @@
+---
+description: Assess SOC 2 readiness against the Trust Services Criteria and produce a readiness dashboard.
+---
+
 Assess SOC 2 readiness: map the security posture to the Trust Services Criteria, inventory policies and evidence, and produce a readiness dashboard plus a before-vs-with-the-auditor remediation plan. This is the compliance-framed companion to `/security-audit` (which gathers the raw posture).
+
+Pairs with the `soc2-readiness-review` runbook in `local/RoboSystems/runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live record of the current TSC mapping, which evidence slots are filled, and what the compliance platform already automates. It is authoritative for this environment.
 
 ## Scope & guardrails
 

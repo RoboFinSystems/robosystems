@@ -1,3 +1,8 @@
+---
+description: Draft curated release notes for a milestone release.
+argument-hint: "[version]"
+---
+
 Draft curated release notes for an upcoming milestone release, following the convention in `.github/release-notes/README.md`.
 
 ## Why this command exists

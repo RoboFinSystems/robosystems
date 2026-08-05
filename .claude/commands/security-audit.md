@@ -1,10 +1,19 @@
-Run a read-only AWS + GitHub security-posture review, then produce a findings report and a prioritized remediation plan. This is an infrastructure/cloud posture audit (detective controls, live findings, data protection) — distinct from `/security-review`, which reviews pending code changes.
+---
+description: Read-only AWS + GitHub security-posture audit with a prioritized remediation plan.
+---
+
+Run a read-only AWS + GitHub security-posture review, then produce a findings report and a prioritized remediation plan.
+
+**Scope boundary.** This is an infrastructure/cloud posture audit — detective controls, live findings, data protection. It is *not* a code review. `/security-review` reviews pending code changes on the current branch; `/pr-review` covers a PR's diff. Those look at what the code does; this looks at what the account is running. Keep them separate — don't fold diff review into this sweep.
+
+Pairs with the `security-posture-audit` runbook in `local/RoboSystems/runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live, account-specific record of what's currently enabled, suppressed, accepted, or retired, and it is authoritative for this environment.
 
 ## Scope & guardrails
 
-- **Read-only by default.** Use only `describe-*` / `list-*` / `get-*` and `gh` reads. **Never** run `get-secret-value`. Any change — enabling a service, creating a suppression/archive rule, deleting a resource, deploying a stack — requires **explicit in-the-moment user confirmation**, and destructive/CloudFormation actions are the user's to run.
+- **Read-only by default.** Use only `describe-*` / `list-*` / `get-*` and `gh` reads. **Never** run `get-secret-value`. Any change — enabling a service, creating a suppression/archive rule, deleting a resource, deploying a stack — requires **explicit in-the-moment user confirmation**, and destructive/CloudFormation actions are the user's to run. One carve-out: `generate-credential-report` is technically a write (it produces a report) but carries no configuration change — it's in scope for Phase 4.
 - **Outputs are sensitive — never commit them.** This skill (the *methodology*) is safe in a public repo; its *output* — a report of live findings, exposed resources, and disabled controls — is a reconnaissance roadmap for an attacker. Write reports to a git-ignored path (`local/`, the scratchpad) or an ephemeral private Artifact. **Never commit a findings report, account ID, resource ARN, or CVE inventory to the repo.**
-- **Context.** Discover the account at runtime (`aws sts get-caller-identity`); region defaults to `us-east-1`; the robosystems deployment runs `prod` + `staging` in one shared account. Detective services are account-global singletons and several **ship off** (gated by GitHub variables — see the compliance stacks below). Frontend images live in ECR repos `robosystems-app` / `roboledger-app` / `roboinvestor-app`; the backend image is `robosystems`.
+- **Never state posture in this file.** Because this file is public, it must describe *how to determine* the current state, never *what the state is*. A hardcoded "X is enabled" / "Y ships off" is both a disclosure and a claim that silently rots — every posture question below resolves to a command you run now. If you find yourself wanting to record a finding here, it belongs in the runbook.
+- **Context.** Discover everything at runtime: the account (`aws sts get-caller-identity`), the region (defaults to `us-east-1`), the deployed stacks (`aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE`), and the image repositories (`aws ecr describe-repositories --query 'repositories[].repositoryName'`). Both environments share one account, so expect per-environment resource pairs.
 - **Parallelize the sweep.** Phases 1–6 are independent read-only sweeps — fan them out with the Agent tool (one agent per phase) and synthesize the results in the main loop. A denied/empty CLI call is itself a finding (service not enabled, or the role lacks the read perm — say which).
 
 ## Phase 1 — Detective controls: are they ON?
@@ -30,16 +39,31 @@ For each detective service that IS on, pull and *triage* findings (don't just du
 
 **Amazon Inspector** (usually the loudest — container/host CVEs):
 - Aggregate by severity, by repo (`list-finding-aggregations --aggregation-type REPOSITORY`), and by CVE (`--aggregation-type TITLE`). **Dedup**: the same CVE is replicated across many image copies — N findings ≈ a handful of distinct CVEs × many images.
+- Inspector also scans Lambda when enabled — check `batch-get-account-status` for which resource types are on, and don't assume container-only.
 - Check **fix availability** (`fixAvailable` filter) — if ~100% have fixes, it's a stale-image backlog, not an incident.
 - Classify each CVE: **base-image OS/runtime** (openssl, glibc, node) → one base-image bump clears many at once (stay **in-major** when the runtime/`engines` constrains it); **language deps** (npm/pip) → if the flagged dep is a **devDependency-only transitive** (test/build tooling — jsdom, vitest, eslint), exclude it from the runtime image (`npm ci --omit=dev`, don't copy dev `node_modules` into the runner stage) rather than override it — that clears the whole devDep CVE class; only override a genuine *runtime* transitive; **no upstream fix** (`fixedInVersion=NotAvailable`) → suppress.
 - Watch for **inert vendored lockfiles** (e.g. a `package.json`/`package-lock.json` bundled in a non-node image with no `node_modules`) — Inspector flags declared deps that never run; strip the lockfile from the image instead of chasing the CVE.
-- Check the Inspector **`ecrConfiguration.rescanDuration`** (`get-configuration`) — that, not the ECR lifecycle policy, is the real scan-surface knob.
+- Check the Inspector rescan configuration — that, not the ECR lifecycle policy, is the real scan-surface knob. **Mind the nesting**: the value sits one level deeper than it looks, and the shallow path returns `null` while appearing to succeed.
+  ```bash
+  aws inspector2 get-configuration --region us-east-1 \
+    --query 'ecrConfiguration.{rescan:rescanDurationState.rescanDuration,pullDate:rescanDurationState.pullDateRescanDuration,mode:rescanDurationState.pullDateRescanMode}'
+  ```
 
 **IAM Access Analyzer** (external/public exposure — the highest-signal, fastest-actionable):
-- `list-findings-v2`. Classify each ACTIVE finding: **by-design** (SSO/OIDC federation roles, intentionally-public content/CDN buckets) → archive; **real exposure** (a resource that shouldn't be public/shared) → fix or retire.
+- `list-findings-v2` **requires `--analyzer-arn`** — resolve it first:
+  ```bash
+  ANALYZER=$(aws accessanalyzer list-analyzers --region us-east-1 --query 'analyzers[0].arn' --output text)
+  aws accessanalyzer list-findings-v2 --analyzer-arn "$ANALYZER" --region us-east-1
+  ```
+- Classify each ACTIVE finding: **by-design** (SSO/OIDC federation roles, intentionally-public content/CDN buckets) → archive; **real exposure** (a resource that shouldn't be public/shared) → fix or retire.
 - Confirm "intentional" against IaC/source before accepting — grep the CloudFormation/config that defines the resource.
 
-**GuardDuty**: `list-findings` — usually 0 on a freshly enabled detector (it flags *activity*, not config). Report clean, note it's baselining.
+**GuardDuty**: `list-findings` **requires `--detector-id`**:
+```bash
+DETECTOR=$(aws guardduty list-detectors --region us-east-1 --query 'DetectorIds[0]' --output text)
+aws guardduty list-findings --detector-id "$DETECTOR" --region us-east-1
+```
+GuardDuty flags *activity*, not configuration, so a freshly enabled detector may be baselining — but don't assume zero. Read the count, and pull `get-findings` on anything present.
 
 **Security Hub**: `get-enabled-standards` — FSBP `INCOMPLETE` with `NO_AVAILABLE_CONFIGURATION_RECORDER` is expected when Config is off (the control-scoring half is dormant); note it, don't treat it as failure.
 
@@ -50,9 +74,37 @@ aws rds describe-db-instances --region us-east-1        # StorageEncrypted, Back
 aws elasticache describe-replication-groups --region us-east-1   # AtRest + Transit encryption
 aws s3api list-buckets                                  # per relevant bucket: get-bucket-encryption, get-public-access-block, get-bucket-versioning
 aws secretsmanager list-secrets --region us-east-1      # RotationEnabled (never read values)
-aws kms list-keys --region us-east-1                    # CMK vs AWS-managed; get-key-rotation-status on CMKs
-aws backup list-backup-plans --region us-east-1         # centralized backup vs RDS-native snapshots only
-aws opensearch list-domain-names --region us-east-1     # EncryptionAtRest, NodeToNode, EnforceHTTPS
+aws backup list-backup-plans --region us-east-1         # centralized backup vs service-native snapshots only
+```
+
+**KMS** — `list-keys` returns bare key IDs with no manager distinction, so it can't answer "CMK vs AWS-managed" on its own. Loop into `describe-key`:
+```bash
+aws kms list-keys --region us-east-1 --query 'Keys[].KeyId' --output text | tr '\t' '\n' | while read -r k; do
+  aws kms describe-key --key-id "$k" --region us-east-1 --query 'KeyMetadata.{id:KeyId,mgr:KeyManager,usage:KeyUsage}'
+done
+# then get-key-rotation-status on each CUSTOMER-managed key
+```
+
+**Managed search** — `list-domain-names` returns only `{DomainName, EngineType}`; the encryption fields require `describe-domain`:
+```bash
+aws opensearch list-domain-names --region us-east-1
+aws opensearch describe-domain --domain-name <d> --region us-east-1 \
+  --query 'DomainStatus.{enc:EncryptionAtRestOptions.Enabled,n2n:NodeToNodeEncryptionOptions.Enabled,https:DomainEndpointOptions.EnforceHTTPS,policy:AccessPolicies}'
+```
+
+**Edge protection** — check WAF association on both scopes; a regional ACL does **not** protect CloudFront:
+```bash
+aws wafv2 list-web-acls --scope REGIONAL   --region us-east-1
+aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1
+aws cloudfront list-distributions --query 'DistributionList.Items[].{id:Id,enabled:Enabled,waf:WebACLId}'
+```
+An enabled distribution with an empty `waf` is an unprotected public edge — report it.
+
+**Lambda & DynamoDB** — often skipped, and both sit on critical paths (secret rotation, volume management, graph routing registries):
+```bash
+aws lambda list-functions --region us-east-1 --query 'Functions[].{n:FunctionName,role:Role,runtime:Runtime}'
+aws dynamodb list-tables --region us-east-1
+aws dynamodb describe-table --table-name <t> --region us-east-1 --query 'Table.SSEDescription'
 ```
 
 ## Phase 4 — IAM hygiene
@@ -65,7 +117,15 @@ Org 2FA (`gh api orgs/<org>`), branch protection / rulesets on `main` (required 
 
 ## Phase 6 — Codebase controls inventory (optional)
 
-Read `SECURITY.md` (control catalog) and the `robosystems/security/` modules. Note the **optional compliance stacks and their GitHub-variable toggles** (all off by default): `SECURITY_ENABLED` (`cloudformation/security.yaml` — the detective baseline; needs `just bootstrap` re-run first for deploy-role IAM), `SECURITY_CONFIG_ENABLED` (AWS Config — cost outlier), `CLOUDTRAIL_ENABLED`, `AUDIT_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED`, `SECRETS_ROTATION_ENABLED_*`, `WAF_ENABLED_*`.
+Read `SECURITY.md` (control catalog) and the `robosystems/security/` modules.
+
+The compliance stacks are gated by GitHub repository variables, and **which are on is a runtime question — read it, don't assume it**:
+
+```bash
+gh variable list | grep -iE 'security|cloudtrail|audit|flow_log|rotation|waf|endpoint'
+```
+
+Cross-check the variables against what's actually deployed (`aws cloudformation list-stacks`), since a variable can be flipped without the stack having been redeployed. Where a control is off, determine *why* before filing it as a gap — some are deliberately off on cost grounds (AWS Config is the usual one), and the runbook records which have been formally accepted. Note that enabling the detective baseline may require re-running the bootstrap first so the deploy role carries the necessary IAM.
 
 ## Output — report + prioritized plan
 
@@ -78,8 +138,13 @@ If the result is worth sharing visually, offer to render it as an Artifact (a re
 
 ## Remediation patterns (the playbook)
 
-- **Detective services off** → enable via the gated compliance stacks (flip the GH var + deploy; re-`bootstrap` first for `SECURITY_ENABLED`). Turn the cheap/free-trial ones (GuardDuty, Access Analyzer, Security Hub, Inspector) on and leave them on; gate **Config** separately (cost).
-- **Inspector no-fix CVE** → `aws inspector2 create-filter --action SUPPRESS` scoped to `{"vulnerabilityId":[EQUALS <cve>],"fixAvailable":[EQUALS "NO"]}` so it **auto-un-suppresses when a patch ships**.
+- **Detective services off** → enable via the gated compliance stacks (flip the GH var + deploy; re-run the bootstrap first where the deploy role needs new IAM). Turn the cheap/free-trial ones (GuardDuty, Access Analyzer, Security Hub, Inspector) on and leave them on; gate **Config** separately (cost).
+- **Inspector no-fix CVE** → suppress with a filter that **auto-un-suppresses when a patch ships**. Note `create-filter` requires `--name` and `--filter-criteria`, and each criterion is an object with `comparison`/`value` — not a bare string (this is a write; the user runs it):
+  ```bash
+  aws inspector2 create-filter --action SUPPRESS --name "suppress-<cve>-nofix" --region us-east-1 \
+    --filter-criteria '{"vulnerabilityId":[{"comparison":"EQUALS","value":"<CVE>"}],
+                        "fixAvailable":[{"comparison":"EQUALS","value":"NO"}]}'
+  ```
 - **Inspector base-image CVEs** → bump the base image, **staying in-major** when `engines`/runtime constrain it (e.g. node `>=22` → latest `22.x`); verify the lockfile churn is scoped.
 - **Inspector inert vendored lockfile** → strip it from the image (`RUN find … -name 'package*.json' -delete`), don't bump a dep that never runs.
 - **Access Analyzer intentional finding** → `create-archive-rule` scoped to the resource ARN / path, then `apply-archive-rule` to clear existing.
@@ -88,6 +153,7 @@ If the result is worth sharing visually, offer to render it as an Artifact (a re
 
 ## Notes
 
-- Detective services are account-global singletons — a per-env stack would collide; they live in one shared stack (`cloudformation/security.yaml`, like `cloudtrail.yaml`).
+- Detective services are account-global singletons — a per-env stack would collide, so they live in one shared stack rather than per-environment ones.
 - `AWS::SecurityHub::Hub` auto-enables default standards — set `EnableDefaultStandards: false` if the stack also declares explicit `Standard` resources, or they collide.
+- Security Hub's FSBP standard reports `INCOMPLETE` with `NO_AVAILABLE_CONFIGURATION_RECORDER` whenever Config is off. That's expected, not a failure — the control-scoring half is simply dormant. Note it and move on.
 - A `CREATE_FAILED`→`ROLLBACK_COMPLETE` stack must be deleted before redeploy; `DeletionPolicy: Retain` buckets survive and must be cleaned up manually.

@@ -1,10 +1,17 @@
+---
+description: Open a pull request for the current branch, writing the description from the work actually done.
+argument-hint: "[target-branch] [review]"
+---
+
 Create a GitHub pull request for the current branch, writing the title and description from the actual work done in this session — not reconstructed from the diff.
 
 ## Why this command exists
 
 The previous flow outsourced PR-description authoring to a GitHub Action that only saw the diff and commit messages. It could not know _why_ the changes were made, so it frequently described things that weren't true. Those inaccurate descriptions then fed `@claude` reviews, compounding the bad information. This command fixes that at the root: **you author the description here, where the full context of what was done and why is available.**
 
-This is a Python backend service (FastAPI + Kuzu graphs, managed with `uv` and `just`). Ground every description in the actual code that changed, and stay mindful of multi-tenancy (graph operations scoped to `graph_id`).
+This is a Python backend service (FastAPI + LadybugDB graphs, managed with `uv` and `just`). Ground every description in the actual code that changed, and stay mindful of multi-tenancy (graph operations scoped to `graph_id`).
+
+**This repository is public.** The PR title and body are world-readable the moment they're pushed — routinely *before* the change is deployed, since deploys are manual. Treat the description as a publication, not a work note.
 
 ## Instructions
 
@@ -22,6 +29,7 @@ TARGET=${1:-main}            # override target via the first argument
 - **Source ≠ target.** If `CURRENT == TARGET`, stop.
 - **Uncommitted changes.** Run `git status --porcelain`. If there are uncommitted/staged changes, surface them and ask whether to commit them (respecting the repo's commit rules — never on `main`, stage files by name, no `git add -A`) or proceed without them. The PR description must reflect committed state.
 - **Existing PR.** Check `gh pr list --head "$CURRENT" --base "$TARGET" --json url,number`. If a PR already exists, do **not** create a duplicate — offer to update its title/body with `gh pr edit` instead.
+- **Security fixes — check deployment first.** A security-fix commit discloses the bug through its diff the moment it's pushed. If this branch carries one, check whether the vulnerable code is still live in production (`git show <prod-tag>:<file>` against the fix) and tell the user, so they can sequence the deploy with — or ahead of — the public push rather than opening a window.
 - **Push the branch.** `gh pr create` requires the branch on the remote. Ensure it's pushed: `git push -u origin "$CURRENT"` (the user invoking `/create-pr` is the explicit, in-the-moment request that authorizes pushing _this feature branch_ — this is the one push allowed without a separate ask; never push `main`).
 
 ### 2. Gather the real change context
@@ -41,11 +49,16 @@ This is the whole point — ground the description in what actually happened:
 
 - **Type** — derive from the branch prefix (`feature/` → feat, `bugfix/`/`fix/` → fix, `hotfix/` → fix, `chore/` → chore, `refactor/` → refactor, `release/` → release). Default to `feat` if unprefixed.
 - **Title** — concise (~50–72 chars), conventional-commit style, e.g. `feat(graph): scope materialize to graph_id`. Match the style in `git log`.
-- **Body** — markdown, only sections that apply:
+- **Body** — markdown. **Match the headings in `.github/PULL_REQUEST_TEMPLATE.md`**, because `--body-file` bypasses template prefill entirely and a hand-written body silently drops whatever sections it omits:
   - **Summary** — 1–3 sentences: what this PR does and why.
-  - **Changes** — bullets grouped by area/module/file, describing real edits.
-  - **Testing** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`); `just lint` / `just format` / `just typecheck` can be run standalone. If you ran any of these this session, say which and give the result. Note that the `just test` / `just test-all` test portion needs a local env and is often not runnable in this session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
-  - **Notes / Follow-ups** — optional: deferred items, risks, related issues, migrations needed.
+  - **Key Accomplishments** — bullets grouped by area/module/file, describing real edits.
+  - **Breaking Changes** — "None" if there are none, and say so explicitly rather than omitting the section. See the SDK contract below; this is where it goes.
+  - **Testing Notes** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt quickbooks`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`); `just test-code` is the code-quality half without the ~6-minute test run. If you ran any of these this session, say which and give the result. The test portion needs a local env and is often not runnable in-session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
+  - **Related Issues** — `Closes #123` / `Fixes #456`, or omit.
+
+- **SDK contract.** `robosystems-python-client` and `robosystems-typescript-client` are post-1.0 semver contracts with external integrators. Any breaking change to the public API surface — the per-graph GraphQL schema, the operations envelope, REST request/response shapes — propagates as a **client major** and must be called out under Breaking Changes so the regen lands as a coordinated major with deprecation notes rather than silent drift. Additive changes are free; note them as an SDK regen opportunity. If you're about to describe an unavoidable break, say so explicitly in the body — don't bury it in a bullet.
+
+- **Security-fix disclosure.** If the PR fixes a security issue, the prose is often *more* actionable than the diff — keep it terse and non-actionable. Describe the area hardened, never the mechanism: "harden write-path authorization on the query surface", not the how. **No** exploit mechanics, attack scenarios, affected-endpoint enumerations, payloads/regexes, or "previously protected only by X" tells. Detailed root cause and any PoC go in the git-ignored vault under `local/RoboSystems/specs/`, referenced **by filename only** — never pasted into the PR. For coordinated disclosure use a private GitHub Security Advisory, never a public issue.
 - **Attribution** — attribute to the user only. Do **not** add a "🤖 Generated with Claude Code" footer or a `Co-Authored-By: Claude` trailer (per the repo's commit conventions). Include such a line only if the user explicitly asks.
 
 ### 4. Create the PR

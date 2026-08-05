@@ -1,3 +1,8 @@
+---
+description: Review a pull request — gather metadata, diff, and existing feedback, then give a verdict.
+argument-hint: "[pr-number-or-url]"
+---
+
 Review a pull request by gathering all PR metadata, diff, and review comments, then provide a comprehensive review summary.
 
 ## Instructions
@@ -15,23 +20,22 @@ The user may provide a PR URL, number, or nothing:
 Run these `gh` commands to collect all context:
 
 ```bash
-# PR metadata — use only valid fields
-gh pr view <NUMBER> --json title,body,author,state,labels,reviews,reviewRequests,statusCheckRollup,mergeStateStatus,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,updatedAt
+# PR metadata + conversation comments in one call
+gh pr view <NUMBER> --json number,url,title,body,author,state,isDraft,labels,comments,reviews,reviewDecision,latestReviews,reviewRequests,statusCheckRollup,mergeStateStatus,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,files,closingIssuesReferences,createdAt,updatedAt
 
 # PR diff (the actual code changes)
 gh pr diff <NUMBER>
 
-# Inline review comments (gh api needs owner/repo — use gh repo view to get it)
+# Inline review comments — no --json equivalent exists, so this call is still required
 gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/pulls/<NUMBER>/comments --paginate
-
-# Top-level PR conversation comments
-gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/<NUMBER>/comments --paginate
 ```
 
-**Important `gh pr view --json` field reference** (common mistakes to avoid):
-- Use `reviews` not `reviewers` (reviewers is not a valid field)
-- Use `reviewRequests` for pending review requests
-- Use `headRefOid` for the HEAD commit SHA
+**Field notes:**
+- `reviews` not `reviewers` — `reviewers` is not a valid field and errors.
+- `reviewDecision` is the single field that answers "has this been approved."
+- `comments` covers the top-level conversation, so no separate `issues/<n>/comments` call is needed.
+- `closingIssuesReferences` gives the linked issue (needed for step 5's requirements check); `files` gives per-file add/delete counts (needed for triaging a large diff); `headRefOid` is the HEAD SHA.
+- Keep `--paginate` **bare**. Adding `-q`/`--jq` makes gh emit one JSON document *per page* instead of a merged array, and `--slurp` can't be combined with `--jq`. Pipe to `jq` after the call, not through it.
 
 ### 3. Categorize Review Feedback
 
@@ -43,17 +47,24 @@ Organize all comments and checks into categories:
 - **Security**: Findings from security scanners (e.g., Snyk, Dependabot, CodeQL, GitGuardian)
 - **CI/CD**: Build status, test results, deployment checks
 
+**How feedback actually arrives in this repo** — don't read the categories too literally:
+- Formal `reviews` and inline `pulls/<n>/comments` are typically **empty**, and `reviewDecision` is usually blank. That's the norm here, not a signal that review was skipped. Don't report "no review feedback" on the strength of an empty `reviews` array.
+- The AI reviewer posts as a **bot account in the conversation `comments`**, not as a formal review. That's where AI findings will be.
+- In `statusCheckRollup`, checks expose `.name` while legacy statuses expose `.context`, and a `conclusion` of `NEUTRAL` or `SKIPPED` is not a failure. Read the conclusion, don't pattern-match on non-`SUCCESS`.
+
 ### 4. Review the Diff
 
 With the full PR diff in hand, perform your own review focusing on:
 
 - **Correctness**: Does the code do what the PR description says?
-- **Patterns**: Does it follow existing codebase patterns (check CLAUDE.md)?
+- **Patterns**: Does it follow existing codebase patterns (check CLAUDE.md)? Business logic belongs in the operations kernel — logic added directly in a router, GraphQL resolver, or MCP tool handler is a layering mistake, not a style preference.
 - **Security**: Any OWASP top 10 concerns?
 - **Multi-tenancy**: Are graph operations scoped to `graph_id`?
+- **SDK contract**: Does this break the public API surface — the per-graph GraphQL schema, the operations envelope, or REST request/response shapes? Those are post-1.0 semver contracts with external integrators, so a break propagates as a **client major**. An uncoordinated break is a blocking issue, not a note: renames, removals, and changed semantics all count; additive fields are free.
+- **Disclosure hygiene** (this repo is public): does the PR *text* over-disclose? A security-fix description should name the area hardened, never the mechanism — no exploit mechanics, attack scenarios, affected-endpoint enumerations, payloads, or "previously protected only by X" tells. Detailed root cause belongs in the git-ignored vault, referenced by filename. Also check sequencing: if the vulnerable code is still live in production, the diff discloses a live bug the moment it merges — flag it so the deploy can be sequenced.
 - **Error handling**: Appropriate for the context?
-- **Tests**: Are changes covered by tests?
-- **Missing changes**: Any files that should have been updated but weren't?
+- **Tests**: Are changes covered by tests? Read the test, don't trust that it's green — a test that asserts the buggy behavior passes just as happily as a correct one.
+- **Missing changes**: Any files that should have been updated but weren't? Migrations for model changes, and both databases have independent histories.
 
 ### 5. Output Format
 
