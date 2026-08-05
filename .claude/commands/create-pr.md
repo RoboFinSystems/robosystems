@@ -51,10 +51,11 @@ This is the whole point — ground the description in what actually happened:
 - **Title** — concise (~50–72 chars), conventional-commit style, e.g. `feat(graph): scope materialize to graph_id`. Match the style in `git log`.
 - **Body** — markdown. **Match the headings in `.github/PULL_REQUEST_TEMPLATE.md`**, because `--body-file` bypasses template prefill entirely and a hand-written body silently drops whatever sections it omits:
   - **Summary** — 1–3 sentences: what this PR does and why.
-  - **Key Accomplishments** — bullets grouped by area/module/file, describing real edits.
+  - **Changes** — bullets grouped by area/module/file, describing real edits. Call out anything reviewers should look at closely.
   - **Breaking Changes** — "None" if there are none, and say so explicitly rather than omitting the section. See the SDK contract below; this is where it goes.
-  - **Testing Notes** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt quickbooks`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`); `just test-code` is the code-quality half without the ~6-minute test run. If you ran any of these this session, say which and give the result. The test portion needs a local env and is often not runnable in-session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
-  - **Related Issues** — `Closes #123` / `Fixes #456`, or omit.
+  - **Testing** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt quickbooks`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`); `just test-code` is the code-quality half without the ~6-minute test run. If you ran any of these this session, say which and give the result. The test portion needs a local env and is often not runnable in-session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
+
+  The template has no Related Issues section — put `Closes #123` / `Fixes #456` as the last line of the Summary. GitHub links it from anywhere in the body.
 
 - **SDK contract.** `robosystems-python-client` and `robosystems-typescript-client` are post-1.0 semver contracts with external integrators. Any breaking change to the public API surface — the per-graph GraphQL schema, the operations envelope, REST request/response shapes — propagates as a **client major** and must be called out under Breaking Changes so the regen lands as a coordinated major with deprecation notes rather than silent drift. Additive changes are free; note them as an SDK regen opportunity. If you're about to describe an unavoidable break, say so explicitly in the body — don't bury it in a bullet.
 
