@@ -240,7 +240,7 @@ RoboSystems provides comprehensive client libraries for building applications:
 
 ### MCP (Model Context Protocol)
 
-Every graph is an MCP server. Connect Claude, Claude Code, Cursor, or any MCP client to the graph's URL — no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header.
+Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header.
 
 **Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector:
 
@@ -266,7 +266,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-- **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport support
+- **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport support
 
 ### TypeScript/JavaScript Client
 

@@ -105,7 +105,7 @@ Built on the blocks:
 
 ## Connect via MCP
 
-Every graph is an MCP server — connect Claude, Claude Code, Cursor, or any MCP client directly, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header:
+Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header:
 
 ```
 https://api.robosystems.ai/v1/graphs/{graph_id}/mcp
@@ -119,7 +119,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp).
+Clients without HTTP transport support can use the legacy [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp).
 
 ## Clients
 
