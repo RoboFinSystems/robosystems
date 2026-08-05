@@ -29,7 +29,7 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 
 - **Subgraphs**: List subgraphs, quota, and storage information
 - **Backups**: List backups, download URLs, and storage statistics
-- **Analytics**: Usage and content analytics
+- **Usage**: Graph content metrics and consumption usage (storage, credits)
 
 **Lifecycle commands** (`/operations/{op_name}`):
 
@@ -40,11 +40,14 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 - **change-tier**: Change graph infrastructure tier with Stripe billing integration
 - **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)
 
-### Documents & Search
+### Documents, Search & Memory
 
-- **Documents**: Upload, list, retrieve, update, and delete documents attached to a graph
+Reads are REST `GET`s; content writes share the same `/operations/{op_name}` envelope as lifecycle commands.
+
+- **Documents**: List and retrieve documents attached to a graph; write via `index-document` / `delete-document`
 - **Search**: Full-text and semantic (BM25 + KNN) search across graph documents via OpenSearch, with section-level retrieval
-- **Files**: Manage uploaded files — create upload, list, inspect, update status, and delete
+- **Files**: Stage uploaded files — `create-file-upload`, `ingest-file`, and `delete-file` commands with list and inspect reads
+- **Memory**: Per-graph semantic memory for AI agents — ranked `recall` plus list/get reads, with `remember` / `forget` / `update-memory` commands
 
 ### MCP & AI Operators
 
@@ -53,6 +56,7 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 
 ### Data Synchronization
 
+- **Connections**: Provider connections with OAuth flows, sync triggers, and status
 - **SEC Filings**: Process XBRL documents and build filing knowledge graphs
 - **QuickBooks**: Sync transactions, accounts, and financial reports
 
@@ -68,8 +72,8 @@ Domain extensions (RoboLedger, RoboInvestor) bring their own schema and OLTP tab
 
 [RoboLedger](https://roboledger.ai) is an accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate, broadly implementing the [Seattle Method](http://xbrlsite.com/seattlemethod/). Three block molecules are the authoring substrate:
 
-- **Information Blocks** — reportable content (schedules, statements, metrics) bundled with period-versioned fact sets, typed mechanics, and rules; `evaluate-rules` runs arithmetic checks over materialized facts
-- **Event Blocks** — REA event capture: record what happened via an action-verb vocabulary, and a handler registry derives debits/credits across the three-level ledger (Transaction → Entry → LineItem)
+- **Information Blocks** — reportable content (schedules, statements, metrics) bundled with period-versioned fact sets, typed mechanics, and rules; `evaluate-rules` runs arithmetic checks over materialized facts, and `assert-metrics` writes asserted metric series
+- **Event Blocks** — REA event capture: record what happened via an action-verb vocabulary, and a handler registry derives debits/credits across the three-level ledger (Transaction → Entry → LineItem); external systems post events through registered event sources
 - **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; Ships with `rs-gaap` (~2,000 curated US-GAAP concepts) as the initial base taxonomy
 
 Built on the blocks:
@@ -78,6 +82,7 @@ Built on the blocks:
 - **Close lifecycle** — fiscal calendar (`closed_through` / `close_target`) with period close/reopen gated on the balance equation and QuickBooks sync-staleness
 - **Mapping** — CoA→GAAP associations plus AI-assisted bulk mapping via the **MappingOperator** (auto-approve / review / skip)
 - **Reporting** — multi-period statements through a Reporting Style, with a draft → under_review → filed → archived lifecycle and publish lists
+- **Forecasting** — operating-plan scenarios projected through the same statement structures: rule-driven forecasts, per-line growth trajectories, and manual line assertions, with forecast periods returned alongside actuals on statement reads
 - **Analytical views** — `live-financial-statement` from the OLTP ledger; `build-fact-grid` and `financial-statement-analysis` over the materialized XBRL graph hypercube
 - **Serialization** — reports to **JSON-LD** (SHACL-validatable) and **XBRL 2.1** (Arelle-validated)
 - **Pipelines** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`
@@ -96,7 +101,7 @@ Built on the blocks:
 - **User Management**: Manage user account settings and profile
 - **Subscriptions**: Shared repository subscription access & AI credits
 - **Limits**: Rate limiting and usage tracking for shared repositories
-- **Organizations**: Team collaboration and permission management
+- **Organizations**: Multi-user orgs — invitations, member roles, org-billed subscriptions, and per-graph membership
 
 ## MCP Client
 
