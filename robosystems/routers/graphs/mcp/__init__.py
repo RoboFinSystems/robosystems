@@ -12,6 +12,7 @@ This module provides a comprehensive MCP tool execution system optimized for AI 
 from fastapi import APIRouter
 
 from .execute import router as execute_router
+from .remote import router as remote_router
 from .tools import router as tools_router
 
 # Create main MCP router
@@ -23,5 +24,9 @@ router = APIRouter(
 router.include_router(tools_router)
 router.include_router(execute_router)
 
-# Export main router
-__all__ = ["router"]
+# The Streamable-HTTP JSON-RPC transport lives at POST /v1/graphs/{graph_id}/mcp
+# (the bare /mcp path). FastAPI rejects an empty path on a prefix-less include,
+# so it is exported separately and mounted with the "/mcp" prefix alongside this
+# router in robosystems/routers/__init__.py. Schema-excluded so the JSON-RPC
+# envelope never reaches the generated SDKs.
+__all__ = ["remote_router", "router"]
