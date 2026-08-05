@@ -3,8 +3,13 @@
 All connection metadata is stored in PostgreSQL (Connection model).
 Encrypted credentials are stored in ConnectionCredentials.
 No graph database operations — connections are platform metadata.
+
+Module-level functions at the bottom form the connection-sync dispatch
+kernel shared by the REST sync endpoint and the `sync-connection` MCP
+tool, so both surfaces validate, lock, and dispatch identically.
 """
 
+from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -577,3 +582,211 @@ class ConnectionService:
     finally:
       if session_created:
         session.close()
+
+
+class ConnectionSyncError(Exception):
+  """Base for connection-sync dispatch failures."""
+
+
+class ConnectionNotFoundError(ConnectionSyncError):
+  """Connection missing, outside the graph scope, or not owned by the caller."""
+
+
+class ProviderUnavailableError(ConnectionSyncError):
+  """The connection's provider is disabled or unknown."""
+
+
+class SyncInProgressError(ConnectionSyncError):
+  """A sync already holds the per-connection lock."""
+
+  def __init__(
+    self,
+    connection_id: str,
+    holder_id: str | None,
+    ttl_remaining: int | None,
+  ) -> None:
+    self.connection_id = connection_id
+    self.holder_id = holder_id
+    self.ttl_remaining = ttl_remaining
+    super().__init__(
+      f"Sync already in progress for connection {connection_id} "
+      f"(held by {holder_id}, expires in {ttl_remaining}s)"
+    )
+
+
+class NoSyncConnectionError(ConnectionSyncError):
+  """The graph has no syncable connection to resolve."""
+
+
+class AmbiguousSyncConnectionError(ConnectionSyncError):
+  """More than one syncable connection matched; the caller must pick one."""
+
+  def __init__(self, candidates: list[dict[str, Any]]) -> None:
+    self.candidates = candidates
+    listing = ", ".join(
+      f"{c.get('connection_id')} ({c.get('provider')})" for c in candidates
+    )
+    super().__init__(
+      f"Multiple sync connections found; specify connection_id: {listing}"
+    )
+
+
+async def resolve_sync_connection(
+  graph_id: str,
+  user_id: str,
+  provider: str | None = None,
+) -> dict[str, Any]:
+  """Resolve a graph's single syncable connection.
+
+  Considers only connections whose provider is registered (feature-flag
+  enabled). When several rows exist, currently-connected ones win — the
+  same preference `qb_sync_state` applies for the close gate. Refuses to
+  guess between multiple live candidates.
+
+  Raises:
+      NoSyncConnectionError: no syncable connection for the graph.
+      AmbiguousSyncConnectionError: more than one candidate; carries
+          `candidates` so callers can present the choice.
+  """
+  from robosystems.operations.providers.registry import provider_registry
+
+  connections = await ConnectionService.list_connections(
+    graph_id=graph_id, user_id=user_id, provider=provider
+  )
+  candidates = [
+    c for c in connections if provider_registry.is_enabled(c.get("provider", ""))
+  ]
+  connected = [c for c in candidates if c.get("status") == "connected"]
+  pool = connected or candidates
+  if not pool:
+    raise NoSyncConnectionError(
+      f"Graph {graph_id} has no syncable connection"
+      + (f" for provider '{provider}'" if provider else "")
+    )
+  if len(pool) > 1:
+    raise AmbiguousSyncConnectionError(
+      [
+        {
+          "connection_id": c.get("connection_id"),
+          "provider": c.get("provider"),
+          "status": c.get("status"),
+        }
+        for c in pool
+      ]
+    )
+  return pool[0]
+
+
+async def dispatch_connection_sync(
+  *,
+  graph_id: str,
+  connection_id: str,
+  user_id: str,
+  full_rebuild: bool = False,
+  since_date: date | None = None,
+  sync_options: dict[str, object] | None = None,
+  dispatch_timeout: float | None = None,
+) -> dict[str, Any]:
+  """Validate, lock, and dispatch a connection sync (async via Dagster).
+
+  The shared kernel behind `POST .../connections/{id}/sync` and the
+  `sync-connection` MCP tool: graph- and user-scoped connection lookup,
+  provider validation, the per-connection sync lock, and provider
+  dispatch. Completion is observed via `Connection.last_sync` (the load
+  asset updates it), surfaced through `get-fiscal-calendar` and the
+  connections read surface.
+
+  Raises:
+      ConnectionNotFoundError, ProviderUnavailableError,
+      SyncInProgressError. `TimeoutError` propagates when
+      `dispatch_timeout` elapses before the dispatch call returns.
+  """
+  import asyncio
+
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
+  from robosystems.operations.providers.registry import provider_registry
+
+  connection = await ConnectionService.get_connection(
+    connection_id, user_id, graph_id=graph_id
+  )
+  if not connection:
+    raise ConnectionNotFoundError(f"Connection {connection_id} not found")
+
+  provider = connection["provider"].lower()
+  try:
+    provider_registry.get_provider(provider)
+  except ValueError as e:
+    raise ProviderUnavailableError(str(e)) from e
+
+  # Per-connection sync lock. Two concurrent qb_sync runs against the
+  # same connection_id race on the UPSERT path; the lock serializes
+  # them. 30-min TTL bounds a *stuck* job (Dagster crash mid-sync); the
+  # normal completion path releases the lock explicitly from `qb_load`
+  # via the `sync_lock_id` plumbed through `QBSyncConfig`. The 30-min
+  # number is a safety-net for failed syncs, not an "intentional
+  # cooldown."
+  #
+  # If the same operator mashes "Sync Now" or the OAuth callback races
+  # a scheduler, the second attempt surfaces the holder's lock_id.
+  sync_lock_id: str = ""
+  try:
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    sync_lock = DistributedLock(
+      redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
+    )
+    lock_result = sync_lock.acquire(blocking=False)
+    if not lock_result.acquired:
+      raise SyncInProgressError(
+        connection_id, lock_result.holder_id, lock_result.ttl_remaining
+      )
+    # Capture the lock id so the Dagster job can release the lock on
+    # completion. `lock_result.lock_id` is the same value the holder
+    # stored under the lock key; `release_lock_by_id` does an atomic
+    # compare-and-delete against it.
+    sync_lock_id = lock_result.lock_id or ""
+  except SyncInProgressError:
+    raise
+  except Exception as e:
+    # Dashboards watch for `lock_skipped=true` to detect Valkey-
+    # degraded sync runs (we proceed unlocked rather than fail closed,
+    # so the silent race risk is real and worth surfacing).
+    logger.warning(
+      "Could not acquire sync lock for connection %s: %s; "
+      "proceeding without lock (concurrent-sync race still possible)",
+      connection_id,
+      e,
+      extra={
+        "connection_id": connection_id,
+        "lock_skipped": True,
+        "lock_skip_reason": type(e).__name__,
+      },
+    )
+
+  effective_options: dict[str, object] = dict(sync_options or {})
+  if full_rebuild:
+    effective_options["full_rebuild"] = True
+  if since_date is not None:
+    effective_options["since_date"] = since_date.isoformat()
+  # Lock release: pass the acquired lock_id through to QBSyncConfig
+  # so `qb_load` can release it on completion.
+  if sync_lock_id:
+    effective_options["sync_lock_id"] = sync_lock_id
+
+  task_id = await asyncio.wait_for(
+    provider_registry.sync_connection(
+      provider, connection, effective_options or None, graph_id
+    ),
+    timeout=dispatch_timeout,
+  )
+
+  logger.info(f"Sync initiated for connection {connection_id}: task_id={task_id}")
+
+  return {
+    "connection_id": connection_id,
+    "provider": provider,
+    "task_id": task_id,
+    "full_rebuild": bool(full_rebuild),
+    "since_date": since_date.isoformat() if since_date else None,
+    "last_sync_before_dispatch": connection.get("last_sync"),
+  }

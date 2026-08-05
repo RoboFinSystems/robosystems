@@ -9,10 +9,13 @@ Five tools that mirror a subset of the REST graph lifecycle surface at
 4. `materialize` — rebuild LadybugDB from OLTP (extensions) or staging
 5. `create-backup` — enqueue a full-dump backup (admin)
 
-Plus one platform-DB connection tool that shares the same hand-written
+Plus two platform-DB connection tools that share the same hand-written
 rationale (platform DB, graph-scoped auth, no extensions registrar):
 
 6. `set-write-policy` — opt a connection into / out of outbound write-back
+7. `sync-connection` — trigger a provider resync (the write half of the
+   sync-freshness pair; `get-fiscal-calendar` / `get-graph-sync-status`
+   are the read half)
 
 **Deliberately NOT exposed on MCP:**
 
@@ -36,7 +39,7 @@ not just the bare operation name.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from robosystems.logger import logger
@@ -708,6 +711,159 @@ class GetGraphSyncStatusTool:
       }
     finally:
       close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# sync-connection
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class SyncConnectionTool:
+  """Trigger a provider resync for this graph's connection.
+
+  The write half of the sync-freshness pair (`get-fiscal-calendar` /
+  `get-graph-sync-status` are the read half). Platform-DB, hand-written
+  for the same reason as `set-write-policy`: `Connection` lives in the
+  platform DB and the op is graph-scoped via the service rather than the
+  extensions registrar. Both this tool and the REST sync endpoint call
+  the same `dispatch_connection_sync` kernel — same lock, same dispatch.
+  """
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "sync-connection",
+      "description": (
+        "Pull fresh data from this graph's connected source system "
+        "(e.g. QuickBooks) into the ledger. Async — dispatches the "
+        "provider's sync pipeline and returns immediately.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Before a period close when `get-fiscal-calendar` reports the "
+        "`sync_stale` blocker (source sync older than period end) — sync "
+        "first instead of passing `allow_stale_sync=true`\n"
+        "- When the user says the source system has new transactions\n"
+        "- After a code-level chart-of-accounts / mapping change that must "
+        "back-propagate: set `full_rebuild=true`\n\n"
+        "**PARAMETERS:**\n"
+        "- connection_id: Omit to auto-resolve the graph's single sync "
+        "connection; needed only when the graph has several (the error "
+        "lists them).\n"
+        "- provider: Optional auto-resolution filter (e.g. 'quickbooks').\n"
+        "- full_rebuild: EXPENSIVE — re-ingests the entire source history "
+        "and resets captured/classified state. Use only after a code-level "
+        "CoA/mapping change that must back-propagate; the default "
+        "incremental refresh is the common case.\n"
+        "- since_date: Bounded incremental window (YYYY-MM-DD); ignored "
+        "when full_rebuild=true.\n\n"
+        "**COMPLETION:** returns `task_id` once dispatched; the sync runs "
+        "in the background. Poll `get-fiscal-calendar` until "
+        "`last_sync_at` advances past the dispatch time (and any "
+        "`sync_stale` blocker clears) before proceeding with a close. A "
+        "`sync_in_progress` error means a sync is already running — wait "
+        "and poll rather than retrying."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "connection_id": {"type": "string"},
+          "provider": {"type": "string"},
+          "full_rebuild": {"type": "boolean", "default": False},
+          "since_date": {"type": "string", "format": "date"},
+        },
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.operations.connection_service import (
+      AmbiguousSyncConnectionError,
+      ConnectionNotFoundError,
+      NoSyncConnectionError,
+      ProviderUnavailableError,
+      SyncInProgressError,
+      dispatch_connection_sync,
+      resolve_sync_connection,
+    )
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    graph_id = self.client.graph_id
+    repo_err = _block_shared_repo(graph_id)
+    if repo_err:
+      return repo_err
+
+    connection_id = arguments.get("connection_id") or None
+    provider = arguments.get("provider") or None
+    full_rebuild = bool(arguments.get("full_rebuild", False))
+    since_date = None
+    since_date_raw = arguments.get("since_date") or None
+    if since_date_raw:
+      try:
+        since_date = date.fromisoformat(since_date_raw)
+      except ValueError:
+        return {
+          "error": "invalid_arguments",
+          "message": f"since_date must be YYYY-MM-DD, got {since_date_raw!r}.",
+        }
+
+    try:
+      if connection_id is None:
+        connection = await resolve_sync_connection(
+          graph_id, str(user.id), provider=provider
+        )
+        connection_id = connection["connection_id"]
+      result = await dispatch_connection_sync(
+        graph_id=graph_id,
+        connection_id=connection_id,
+        user_id=str(user.id),
+        full_rebuild=full_rebuild,
+        since_date=since_date,
+        dispatch_timeout=120,
+      )
+    except NoSyncConnectionError as exc:
+      return {"error": "no_sync_connection", "message": str(exc)}
+    except AmbiguousSyncConnectionError as exc:
+      return {
+        "error": "ambiguous_sync_connection",
+        "message": str(exc),
+        "candidates": exc.candidates,
+      }
+    except ConnectionNotFoundError as exc:
+      return {"error": "connection_not_found", "message": str(exc)}
+    except SyncInProgressError as exc:
+      return {
+        "error": "sync_in_progress",
+        "message": str(exc),
+        "holder_id": exc.holder_id,
+        "ttl_remaining_seconds": exc.ttl_remaining,
+      }
+    except ProviderUnavailableError as exc:
+      return {"error": "provider_unavailable", "message": str(exc)}
+    except TimeoutError:
+      return {
+        "error": "dispatch_timeout",
+        "message": (
+          "Sync dispatch timed out; the job may not have started. "
+          "Check get-fiscal-calendar before retrying."
+        ),
+      }
+    except Exception as exc:
+      logger.error("sync-connection failed for %s: %s", graph_id, exc, exc_info=True)
+      return {"error": "command_failed", "message": str(exc)}
+
+    return {
+      "status": "accepted",
+      **result,
+      "message": (
+        "Sync dispatched. Poll get-fiscal-calendar until last_sync_at "
+        "advances past this dispatch (and any sync_stale blocker clears) "
+        "before closing."
+      ),
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════

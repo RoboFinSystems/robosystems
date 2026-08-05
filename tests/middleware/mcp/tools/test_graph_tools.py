@@ -10,7 +10,7 @@ Covers the six tools in `middleware/mcp/tools/graph_tools.py`:
 6. `GetGraphSyncStatusTool`
 
 Plus the client-side sentinel `SwitchWorkspaceTool` and the platform-DB
-connection tool `SetWritePolicyTool`.
+connection tools `SetWritePolicyTool` and `SyncConnectionTool`.
 
 Shared-repo gate coverage (the primary defense-in-depth concern) lives
 in `tests/routers/graphs/test_ops_shared_repo_gates.py`. This file
@@ -34,6 +34,7 @@ from robosystems.middleware.mcp.tools.graph_tools import (
   MaterializeTool,
   SetWritePolicyTool,
   SwitchWorkspaceTool,
+  SyncConnectionTool,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.graph_tools"
@@ -545,3 +546,129 @@ class TestSetWritePolicyExecute:
         {"connection_id": "conn_x", "write_policy": "native"}
       )
     assert result["error"] == "connection_not_found"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SyncConnectionTool
+# ══════════════════════════════════════════════════════════════════════════
+
+_DISPATCH_RESULT = {
+  "connection_id": "conn_1",
+  "provider": "quickbooks",
+  "task_id": "run_123",
+  "full_rebuild": False,
+  "since_date": None,
+  "last_sync_before_dispatch": "2026-07-31T00:00:00+00:00",
+}
+
+
+class TestSyncConnectionDefinition:
+  def test_definition_shape(self) -> None:
+    defn = SyncConnectionTool(_client()).get_tool_definition()
+    assert defn["name"] == "sync-connection"
+    props = defn["inputSchema"]["properties"]
+    assert set(props) == {"connection_id", "provider", "full_rebuild", "since_date"}
+    # No required params — connection auto-resolution is the default path.
+    assert "required" not in defn["inputSchema"]
+    assert props["full_rebuild"]["default"] is False
+
+
+class TestSyncConnectionExecute:
+  @pytest.mark.asyncio
+  async def test_missing_user(self) -> None:
+    client = _client()
+    client.user = None
+    result = await SyncConnectionTool(client).execute({})
+    assert result["error"] == "authentication_required"
+
+  @pytest.mark.asyncio
+  async def test_invalid_since_date(self) -> None:
+    result = await SyncConnectionTool(_client()).execute({"since_date": "07/01/2026"})
+    assert result["error"] == "invalid_arguments"
+
+  @pytest.mark.asyncio
+  async def test_auto_resolves_single_connection(self) -> None:
+    with (
+      patch(
+        f"{CONN_MODULE}.resolve_sync_connection",
+        new=AsyncMock(return_value={"connection_id": "conn_1"}),
+      ) as mock_resolve,
+      patch(
+        f"{CONN_MODULE}.dispatch_connection_sync",
+        new=AsyncMock(return_value=_DISPATCH_RESULT),
+      ) as mock_dispatch,
+    ):
+      result = await SyncConnectionTool(_client()).execute({})
+
+    assert result["status"] == "accepted"
+    assert result["task_id"] == "run_123"
+    assert mock_resolve.call_args.args[0] == GRAPH_ID
+    assert mock_dispatch.call_args.kwargs["connection_id"] == "conn_1"
+    assert mock_dispatch.call_args.kwargs["full_rebuild"] is False
+
+  @pytest.mark.asyncio
+  async def test_explicit_connection_id_skips_resolution(self) -> None:
+    with (
+      patch(
+        f"{CONN_MODULE}.resolve_sync_connection",
+        new=AsyncMock(),
+      ) as mock_resolve,
+      patch(
+        f"{CONN_MODULE}.dispatch_connection_sync",
+        new=AsyncMock(return_value=_DISPATCH_RESULT),
+      ) as mock_dispatch,
+    ):
+      result = await SyncConnectionTool(_client()).execute(
+        {"connection_id": "conn_9", "full_rebuild": True, "since_date": "2026-07-01"}
+      )
+
+    assert result["status"] == "accepted"
+    mock_resolve.assert_not_called()
+    kwargs = mock_dispatch.call_args.kwargs
+    assert kwargs["connection_id"] == "conn_9"
+    assert kwargs["full_rebuild"] is True
+    assert kwargs["since_date"].isoformat() == "2026-07-01"
+
+  @pytest.mark.asyncio
+  async def test_ambiguous_resolution_lists_candidates(self) -> None:
+    from robosystems.operations.connection_service import (
+      AmbiguousSyncConnectionError,
+    )
+
+    candidates = [
+      {"connection_id": "conn_1", "provider": "quickbooks", "status": "connected"},
+      {"connection_id": "conn_2", "provider": "sec", "status": "connected"},
+    ]
+    with patch(
+      f"{CONN_MODULE}.resolve_sync_connection",
+      new=AsyncMock(side_effect=AmbiguousSyncConnectionError(candidates)),
+    ):
+      result = await SyncConnectionTool(_client()).execute({})
+
+    assert result["error"] == "ambiguous_sync_connection"
+    assert result["candidates"] == candidates
+
+  @pytest.mark.asyncio
+  async def test_no_sync_connection(self) -> None:
+    from robosystems.operations.connection_service import NoSyncConnectionError
+
+    with patch(
+      f"{CONN_MODULE}.resolve_sync_connection",
+      new=AsyncMock(side_effect=NoSyncConnectionError("none")),
+    ):
+      result = await SyncConnectionTool(_client()).execute({})
+    assert result["error"] == "no_sync_connection"
+
+  @pytest.mark.asyncio
+  async def test_sync_in_progress_surfaces_holder(self) -> None:
+    from robosystems.operations.connection_service import SyncInProgressError
+
+    with patch(
+      f"{CONN_MODULE}.dispatch_connection_sync",
+      new=AsyncMock(side_effect=SyncInProgressError("conn_1", "holder_abc", 1200)),
+    ):
+      result = await SyncConnectionTool(_client()).execute({"connection_id": "conn_1"})
+
+    assert result["error"] == "sync_in_progress"
+    assert result["holder_id"] == "holder_abc"
+    assert result["ttl_remaining_seconds"] == 1200

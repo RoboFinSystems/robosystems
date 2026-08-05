@@ -5,7 +5,7 @@ No graph database dependencies.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1117,3 +1117,276 @@ class TestSetWritePolicy:
 
     assert result is not None
     mock_conn.set_write_policy.assert_called_once_with(mock_session, "qb_authoritative")
+
+
+# ---------------------------------------------------------------------------
+# Connection-sync dispatch kernel (resolve_sync_connection /
+# dispatch_connection_sync) — shared by the REST endpoint and the
+# `sync-connection` MCP tool.
+# ---------------------------------------------------------------------------
+
+REGISTRY_MODULE = "robosystems.operations.providers.registry"
+LOCK_MODULE = "robosystems.middleware.auth.distributed_lock"
+VALKEY_MODULE = "robosystems.config.valkey_registry"
+
+
+def _conn_dict(connection_id="conn_1", provider="quickbooks", status="connected"):
+  return {
+    "connection_id": connection_id,
+    "provider": provider,
+    "status": status,
+    "last_sync": "2026-07-31T00:00:00+00:00",
+    "metadata": {"realm_id": "123456"},
+  }
+
+
+class TestResolveSyncConnection:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_no_connections_raises(self):
+    from robosystems.operations.connection_service import (
+      NoSyncConnectionError,
+      resolve_sync_connection,
+    )
+
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.list_connections",
+        new=AsyncMock(return_value=[]),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.is_enabled.return_value = True
+      with pytest.raises(NoSyncConnectionError):
+        await resolve_sync_connection("kg_test", "usr_123")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_single_connection_resolves(self):
+    from robosystems.operations.connection_service import resolve_sync_connection
+
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.list_connections",
+        new=AsyncMock(return_value=[_conn_dict()]),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.is_enabled.return_value = True
+      result = await resolve_sync_connection("kg_test", "usr_123")
+
+    assert result["connection_id"] == "conn_1"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_disabled_provider_filtered_out(self):
+    from robosystems.operations.connection_service import (
+      NoSyncConnectionError,
+      resolve_sync_connection,
+    )
+
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.list_connections",
+        new=AsyncMock(return_value=[_conn_dict(provider="quickbooks")]),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.is_enabled.return_value = False
+      with pytest.raises(NoSyncConnectionError):
+        await resolve_sync_connection("kg_test", "usr_123")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_prefers_connected_over_stale_rows(self):
+    from robosystems.operations.connection_service import resolve_sync_connection
+
+    rows = [
+      _conn_dict(connection_id="conn_old", status="error"),
+      _conn_dict(connection_id="conn_live", status="connected"),
+    ]
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.list_connections",
+        new=AsyncMock(return_value=rows),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.is_enabled.return_value = True
+      result = await resolve_sync_connection("kg_test", "usr_123")
+
+    assert result["connection_id"] == "conn_live"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_multiple_live_candidates_raise_ambiguous(self):
+    from robosystems.operations.connection_service import (
+      AmbiguousSyncConnectionError,
+      resolve_sync_connection,
+    )
+
+    rows = [
+      _conn_dict(connection_id="conn_1", provider="quickbooks"),
+      _conn_dict(connection_id="conn_2", provider="sec"),
+    ]
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.list_connections",
+        new=AsyncMock(return_value=rows),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.is_enabled.return_value = True
+      with pytest.raises(AmbiguousSyncConnectionError) as exc:
+        await resolve_sync_connection("kg_test", "usr_123")
+
+    ids = [c["connection_id"] for c in exc.value.candidates]
+    assert ids == ["conn_1", "conn_2"]
+
+
+class TestDispatchConnectionSync:
+  def _lock_patches(self, acquired=True, holder_id=None, ttl_remaining=None):
+    lock_result = MagicMock()
+    lock_result.acquired = acquired
+    lock_result.holder_id = holder_id
+    lock_result.ttl_remaining = ttl_remaining
+    lock_result.lock_id = "lock_abc" if acquired else None
+    lock_instance = MagicMock()
+    lock_instance.acquire.return_value = lock_result
+    return (
+      patch(f"{LOCK_MODULE}.DistributedLock", MagicMock(return_value=lock_instance)),
+      patch(f"{VALKEY_MODULE}.create_redis_client", MagicMock()),
+    )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_connection_not_found_raises(self):
+    from robosystems.operations.connection_service import (
+      ConnectionNotFoundError,
+      dispatch_connection_sync,
+    )
+
+    with patch(
+      f"{MODULE}.ConnectionService.get_connection",
+      new=AsyncMock(return_value=None),
+    ):
+      with pytest.raises(ConnectionNotFoundError):
+        await dispatch_connection_sync(
+          graph_id="kg_test", connection_id="conn_x", user_id="usr_123"
+        )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_disabled_provider_raises_provider_unavailable(self):
+    from robosystems.operations.connection_service import (
+      ProviderUnavailableError,
+      dispatch_connection_sync,
+    )
+
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.get_provider.side_effect = ValueError("disabled")
+      with pytest.raises(ProviderUnavailableError):
+        await dispatch_connection_sync(
+          graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
+        )
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_lock_contention_raises_sync_in_progress(self):
+    from robosystems.operations.connection_service import (
+      SyncInProgressError,
+      dispatch_connection_sync,
+    )
+
+    lock_patch, valkey_patch = self._lock_patches(
+      acquired=False, holder_id="holder_xyz", ttl_remaining=900
+    )
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+      lock_patch,
+      valkey_patch,
+    ):
+      mock_registry.get_provider.return_value = MagicMock()
+      with pytest.raises(SyncInProgressError) as exc:
+        await dispatch_connection_sync(
+          graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
+        )
+
+    assert exc.value.holder_id == "holder_xyz"
+    assert exc.value.ttl_remaining == 900
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_happy_path_builds_options_and_returns_dispatch_info(self):
+    from datetime import date
+
+    from robosystems.operations.connection_service import dispatch_connection_sync
+
+    lock_patch, valkey_patch = self._lock_patches(acquired=True)
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+      lock_patch,
+      valkey_patch,
+    ):
+      mock_registry.get_provider.return_value = MagicMock()
+      mock_registry.sync_connection = AsyncMock(return_value="run_777")
+
+      result = await dispatch_connection_sync(
+        graph_id="kg_test",
+        connection_id="conn_1",
+        user_id="usr_123",
+        full_rebuild=True,
+        since_date=date(2026, 7, 1),
+        sync_options={"lookback_days": 90},
+      )
+
+    assert result["task_id"] == "run_777"
+    assert result["provider"] == "quickbooks"
+    assert result["last_sync_before_dispatch"] == "2026-07-31T00:00:00+00:00"
+
+    options = mock_registry.sync_connection.call_args.args[2]
+    assert options["full_rebuild"] is True
+    assert options["since_date"] == "2026-07-01"
+    assert options["sync_lock_id"] == "lock_abc"
+    assert options["lookback_days"] == 90
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_valkey_degraded_proceeds_without_lock(self):
+    from robosystems.operations.connection_service import dispatch_connection_sync
+
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+      patch(
+        f"{VALKEY_MODULE}.create_redis_client",
+        MagicMock(side_effect=RuntimeError("valkey down")),
+      ),
+    ):
+      mock_registry.get_provider.return_value = MagicMock()
+      mock_registry.sync_connection = AsyncMock(return_value="run_888")
+
+      result = await dispatch_connection_sync(
+        graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
+      )
+
+    assert result["task_id"] == "run_888"
+    options = mock_registry.sync_connection.call_args.args[2]
+    assert options is None or "sync_lock_id" not in options
