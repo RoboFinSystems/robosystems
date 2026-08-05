@@ -12,8 +12,8 @@ Pairs with the `security-posture-audit` runbook in `local/RoboSystems/runbooks/`
 
 - **Read-only by default.** Use only `describe-*` / `list-*` / `get-*` and `gh` reads. **Never** run `get-secret-value`. Any change — enabling a service, creating a suppression/archive rule, deleting a resource, deploying a stack — requires **explicit in-the-moment user confirmation**, and destructive/CloudFormation actions are the user's to run. One carve-out: `generate-credential-report` is technically a write (it produces a report) but carries no configuration change — it's in scope for Phase 4.
 - **Outputs are sensitive — never commit them.** This skill (the *methodology*) is safe in a public repo; its *output* — a report of live findings, exposed resources, and disabled controls — is a reconnaissance roadmap for an attacker. Write reports to a git-ignored path (`local/`, the scratchpad) or an ephemeral private Artifact. **Never commit a findings report, account ID, resource ARN, or CVE inventory to the repo.**
-- **Never state posture in this file.** Because this file is public, it must describe *how to determine* the current state, never *what the state is*. A hardcoded "X is enabled" / "Y ships off" is both a disclosure and a claim that silently rots — every posture question below resolves to a command you run now. If you find yourself wanting to record a finding here, it belongs in the runbook.
-- **Context.** Discover everything at runtime: the account (`aws sts get-caller-identity`), the region (defaults to `us-east-1`), the deployed stacks (`aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE`), and the image repositories (`aws ecr describe-repositories --query 'repositories[].repositoryName'`). Both environments share one account, so expect per-environment resource pairs.
+- **Never state live posture in this file.** Naming the *configuration* — a stack, a log group, an ECR repo, a GitHub variable — is fine and makes the sweep usable; it's already in the public IaC. Naming its *current value* is not: no "X is enabled", no finding counts, no account IDs or ARNs. Those rot silently and are a disclosure besides. Every posture question below resolves to a command you run now; anything you learn from running it belongs in the runbook, not here.
+- **Context.** Discover the account at runtime (`aws sts get-caller-identity`); region defaults to `us-east-1`; the robosystems deployment runs `prod` + `staging` in one shared account, so expect per-environment resource pairs. Detective services are account-global singletons gated by GitHub variables (see Phase 6). Frontend images live in ECR repos `robosystems-app` / `roboledger-app` / `roboinvestor-app`; the backend image is `robosystems`. Confirm what's actually deployed with `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE`.
 - **Parallelize the sweep.** Phases 1–6 are independent read-only sweeps — fan them out with the Agent tool (one agent per phase) and synthesize the results in the main loop. A denied/empty CLI call is itself a finding (service not enabled, or the role lacks the read perm — say which).
 
 ## Phase 1 — Detective controls: are they ON?
@@ -119,13 +119,15 @@ Org 2FA (`gh api orgs/<org>`), branch protection / rulesets on `main` (required 
 
 Read `SECURITY.md` (control catalog) and the `robosystems/security/` modules.
 
-The compliance stacks are gated by GitHub repository variables, and **which are on is a runtime question — read it, don't assume it**:
+The optional compliance stacks and their GitHub-variable toggles: `SECURITY_ENABLED` (`cloudformation/security.yaml` — the detective baseline; needs `just bootstrap` re-run first so the deploy role carries the IAM), `SECURITY_CONFIG_ENABLED` (AWS Config — the cost outlier, and the one most often left off deliberately), `CLOUDTRAIL_ENABLED` (`cloudformation/cloudtrail.yaml`), `AUDIT_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED`, `SECRETS_ROTATION_ENABLED_*`, `WAF_ENABLED_*`.
+
+**Which of these are currently on is a runtime question — read it, don't assume it:**
 
 ```bash
 gh variable list | grep -iE 'security|cloudtrail|audit|flow_log|rotation|waf|endpoint'
 ```
 
-Cross-check the variables against what's actually deployed (`aws cloudformation list-stacks`), since a variable can be flipped without the stack having been redeployed. Where a control is off, determine *why* before filing it as a gap — some are deliberately off on cost grounds (AWS Config is the usual one), and the runbook records which have been formally accepted. Note that enabling the detective baseline may require re-running the bootstrap first so the deploy role carries the necessary IAM.
+Cross-check against what's actually deployed (`aws cloudformation list-stacks`), since a variable can be flipped without the stack having been redeployed. Where a control is off, determine *why* before filing it as a gap — the runbook records which have been formally accepted as risk decisions.
 
 ## Output — report + prioritized plan
 
@@ -153,7 +155,7 @@ If the result is worth sharing visually, offer to render it as an Artifact (a re
 
 ## Notes
 
-- Detective services are account-global singletons — a per-env stack would collide, so they live in one shared stack rather than per-environment ones.
+- Detective services are account-global singletons — a per-env stack would collide; they live in one shared stack (`cloudformation/security.yaml`, like `cloudtrail.yaml`).
 - `AWS::SecurityHub::Hub` auto-enables default standards — set `EnableDefaultStandards: false` if the stack also declares explicit `Standard` resources, or they collide.
 - Security Hub's FSBP standard reports `INCOMPLETE` with `NO_AVAILABLE_CONFIGURATION_RECORDER` whenever Config is off. That's expected, not a failure — the control-scoring half is simply dormant. Note it and move on.
 - A `CREATE_FAILED`→`ROLLBACK_COMPLETE` stack must be deleted before redeploy; `DeletionPolicy: Retain` buckets survive and must be cleaned up manually.

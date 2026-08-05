@@ -72,7 +72,7 @@ Check **Fargate Spot** weighting (Spot-preferred here) and **ARM/Graviton** adop
 
 ## Phase 7 — Tagging & allocation
 
-Untagged/mis-tagged resources (break cost attribution), and confirm the Cost & Usage Report is actually delivering:
+Untagged/mis-tagged resources (break cost attribution), and confirm the Cost & Usage Report (the `RoboSystemsCUR` stack) is actually delivering:
 
 ```bash
 aws cur describe-report-definitions --region us-east-1 \
