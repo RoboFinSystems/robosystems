@@ -12,8 +12,8 @@ Not every release deserves curated notes. Routine patch releases should keep the
 
 ### 2. Establish the version and the range
 
-- The target version comes from the argument (e.g. `/release-notes 1.7.0`). If none was given, ask what version the user intends to tag — the filename must match the eventual tag exactly, and a mismatched file is silently ignored.
-- **Never bump the version yourself.** `pyproject.toml` stays untouched; the user bumps during release prep.
+- The target version comes from the argument (e.g. `/release-notes 1.7.0`). If none was given, ask what version the user intends to tag — the filename must match the eventual tag exactly, and a mismatched file is silently ignored. Derive it from the current `pyproject.toml` version plus the bump type the user will dispatch (`1.6.30` + `minor` → `1.7.0`).
+- **Never bump the version yourself.** `create-release.yml` bumps `pyproject.toml` on `main` as its first step and derives the tag from the result — a hand-bump collides with it.
 - **The range depends on the release kind.** A minor memorializes the whole series since the *previous minor* (`vX.(Y-1).0..origin/main`) — patches got generated changelogs; the minor is the digest nobody gets from reading thirty of them. A curated patch or hotfix covers only the span since the last tag:
 
 ```bash
@@ -53,4 +53,6 @@ Write `.github/release-notes/v<version>.md` — **body only**:
 
 ### 6. Hand off — sequencing matters
 
-The file must exist **at the tagged ref**, so it belongs in release prep alongside the version bump, committed before `create-release.yml` is dispatched. Never commit on `main` — the notes ride a feature branch (created via `just create-feature`) or the user's existing release-prep branch. Present the draft for review and leave the bump, merge, and dispatch to the user.
+The file must exist **at the tagged ref**, and there is no window to add it late: `create-release.yml` bumps the version on `main`, cuts `release/<version>` from the result, and tags it in the same run. So the notes have to be **merged into `main` before the workflow is dispatched** — a file added to the release branch afterwards is already too late.
+
+Write the draft on a feature branch (created via `just create-feature`), never on `main`. Present it for review and leave the merge and the dispatch to the user.
