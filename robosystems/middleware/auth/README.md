@@ -69,7 +69,7 @@ Used for programmatic access and integrations.
 **Features:**
 
 - **Header**: `X-API-Key`
-- **Format**: `rfs` prefix + 64 lowercase hex characters (regex `^rfs[0-9a-f]{64}$`, 67 chars total) — see `utils.py:_API_KEY_FORMAT_RE`
+- **Format**: `rfs` (account-wide) or `rfsc` (graph-scoped) prefix + 64 lowercase hex characters (regex `^rfsc?[0-9a-f]{64}$`) — see `utils.py:_API_KEY_FORMAT_RE`
 - **Storage**: bcrypt-hashed in database; SHA-256 of the raw key is used as the cache lookup key
 - **Graph Scoping**: Access is validated per graph via `validate_api_key_with_graph`
 - **Activity Tracking**: Last used timestamp
@@ -80,6 +80,32 @@ Used for programmatic access and integrations.
 curl -H "X-API-Key: rfs..." \
      https://api.robosystems.ai/v1/graphs/kg1a2b3c/...
 ```
+
+**Graph-scoped keys** (`user_api_keys.graph_id`): a key minted with a graph
+scope is valid only for that graph and its subgraphs — on *every* carriage
+path — and is rejected on endpoints with no graph context (`validate_api_key`
+refuses scoped keys). NULL scope = account-wide, the historical behavior. The
+authoritative check is the row's `graph_id`; the `rfsc` prefix is legibility
+only.
+
+### Credentials in query parameters (the two deliberate doors)
+
+Header carriage is the rule; exactly two routes accept a credential via a
+`?token=` query parameter, both because their client cannot send custom
+headers, and both already covered by the sensitive-query-param redaction in
+`middleware/logging.py` and the OTel span redaction in `middleware/otel/setup.py`:
+
+| Route | Dependency | Credential accepted | Why |
+| --- | --- | --- | --- |
+| `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse` | **JWT only** (30-min TTL) | browser `EventSource` cannot set headers |
+| `POST /v1/graphs/{graph_id}/mcp` | `get_current_user_with_graph_or_url_token` | **graph-scoped API key only** | MCP connector clients (claude.ai / Claude Desktop) cannot set headers |
+
+The asymmetry is deliberate: the SSE door carries a short-lived session token,
+so no extra restriction is needed; the MCP door carries a durable key, so only
+graph-scoped keys are honored there and account-wide keys are hard-rejected —
+the account credential must never be the one that travels in a URL. Do not add
+a third query-credential door without matching this table, the redaction
+lists, and a scope story.
 
 ### 3. Single Sign-On (SSO)
 
