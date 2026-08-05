@@ -27,6 +27,7 @@ Transport rules:
 
 import asyncio
 import json
+import re
 from importlib.metadata import version as pkg_version
 from typing import Any
 
@@ -155,6 +156,55 @@ def _get_mcp_operation_type(graph_id: str) -> str:
     return "write"
 
 
+# On the npx bridge, switch-workspace mutates client process state; a remote
+# connector has no client process and is URL-anchored to one graph. The
+# remote surface rewrites the tool to resolve the target's connector URL.
+_REMOTE_SWITCH_WORKSPACE_DESCRIPTION = (
+  "Resolve the MCP connector URL for a different subgraph workspace (or "
+  "`primary` for the parent graph). This connector is anchored to one graph "
+  "by its URL and cannot switch in-session — the tool returns the URL to add "
+  "as a separate MCP connector (same API key), where work on that workspace "
+  "continues."
+)
+
+
+def _remote_switch_workspace(graph_id: str, arguments: dict[str, Any]) -> str:
+  """Answer switch-workspace with the target's connector URL (text result)."""
+  from robosystems.config import env
+
+  target = str(arguments.get("workspace_id") or "").strip()
+  parent = graph_id.split("_")[0]
+  if not target:
+    return "Error: workspace_id is required (a subgraph id, name, or 'primary')."
+
+  if target == "primary":
+    target_id = parent
+  elif "_" in target:
+    target_id = target
+  else:
+    target_id = f"{parent}_{target}"
+
+  if not re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, target_id):
+    return f"Error: '{target}' is not a valid workspace id or name."
+
+  connector_url = f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{target_id}/mcp"
+  return json.dumps(
+    {
+      "switched": False,
+      "reason": "url_anchored_connector",
+      "target_graph_id": target_id,
+      "connector_url": connector_url,
+      "message": (
+        f"This connector is anchored to graph '{graph_id}' by its URL and "
+        f"cannot switch workspaces in-session. To work on '{target_id}', add "
+        f"a new MCP connector pointing at {connector_url} (same API key) and "
+        "continue there."
+      ),
+    },
+    indent=2,
+  )
+
+
 async def _handle_initialize(
   graph_id: str, current_user: User, params: dict[str, Any]
 ) -> dict[str, Any]:
@@ -219,6 +269,8 @@ async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any
     # statement by the StatementKernel and can carry writes on tenant graphs.
     if tool["name"] in READ_ONLY_MCP_TOOLS:
       entry["annotations"] = {"readOnlyHint": True}
+    if tool["name"] == "switch-workspace":
+      entry["description"] = _REMOTE_SWITCH_WORKSPACE_DESCRIPTION
     mcp_tools.append(entry)
 
   return {"tools": mcp_tools}
@@ -532,6 +584,18 @@ async def _handle_tools_call(
       "access_type": access_type,
     },
   )
+
+  # switch-workspace never reaches the tool layer on this transport: the
+  # connector is URL-anchored (a subgraph is another connector URL), so the
+  # answer is the target's URL. Runs after the gauntlet — access to THIS
+  # graph is still required to resolve its family's URLs.
+  if name == "switch-workspace":
+    return _rpc_result(
+      msg_id,
+      _to_tool_result(
+        {"type": "text", "text": _remote_switch_workspace(graph_id, arguments)}
+      ),
+    )
 
   from robosystems.middleware.graph.query_queue import get_query_queue
 
