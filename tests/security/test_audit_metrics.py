@@ -265,3 +265,63 @@ class TestAdminAuthFailurePath:
       await mw(request)
 
     mock_log.assert_not_called()
+
+
+class TestQueryAbuseSignalMetrics:
+  """The shared-query telemetry events publish their own alarm metrics."""
+
+  @patch("robosystems.security.audit_logger._publish_security_metrics")
+  def test_query_abuse_signal_emits_metric(self, mock_publish):
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.QUERY_ABUSE_SIGNAL,
+    )
+    mock_publish.assert_called_once_with(["QueryAbuseSignal"])
+
+  @patch("robosystems.security.audit_logger._publish_security_metrics")
+  def test_query_engine_disruption_emits_metric(self, mock_publish):
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.QUERY_ENGINE_DISRUPTION,
+    )
+    mock_publish.assert_called_once_with(["QueryEngineDisruption"])
+
+  @patch("robosystems.security.audit_logger._publish_security_metrics")
+  def test_log_query_abuse_signal_routes_by_disruption_flag(self, mock_publish):
+    SecurityAuditLogger.log_query_abuse_signal(
+      user_id="user_1",
+      graph_id="sec",
+      signal="timeout",
+      api_key_prefix="rfs12345",
+    )
+    mock_publish.assert_called_once_with(["QueryAbuseSignal"])
+    mock_publish.reset_mock()
+
+    SecurityAuditLogger.log_query_abuse_signal(
+      user_id="user_1",
+      graph_id="sec",
+      signal="stream_disrupted",
+      disruption=True,
+    )
+    mock_publish.assert_called_once_with(["QueryEngineDisruption"])
+
+  @patch("robosystems.security.audit_logger._publish_security_metrics")
+  def test_log_query_abuse_signal_detail_payload(self, mock_publish):
+    with patch(
+      "robosystems.security.audit_logger.SecurityAuditLogger.log_security_event"
+    ) as mock_event:
+      SecurityAuditLogger.log_query_abuse_signal(
+        user_id="user_1",
+        graph_id="sec",
+        signal="rate_limited",
+        api_key_prefix="rfs12345",
+        endpoint="/v1/graphs/{graph_id}/query/cypher",
+        metadata={"status_code": 429, "source": "query_cypher"},
+      )
+    kwargs = mock_event.call_args.kwargs
+    assert kwargs["event_type"] == SecurityEventType.QUERY_ABUSE_SIGNAL
+    assert kwargs["user_id"] == "user_1"
+    assert kwargs["risk_level"] == "medium"
+    details = kwargs["details"]
+    assert details["graph_id"] == "sec"
+    assert details["signal"] == "rate_limited"
+    assert details["api_key_prefix"] == "rfs12345"
+    assert details["status_code"] == 429

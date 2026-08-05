@@ -799,6 +799,73 @@ Resources:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching
 
+  # Container-start marker from the replica entrypoint. Fires on every
+  # container start on an existing instance (unexpected — the serving process
+  # should start once per instance) and on fresh instance launches (expected
+  # during deploys and scale-out), so pages during an instance refresh are
+  # normal. The alarm exists for the unexpected case.
+  ReplicaContainerStartMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/graph-api
+      FilterPattern: '"Starting LadybugDB Shared Replica API"'
+      MetricTransformations:
+        - MetricName: ReplicaContainerStart
+          MetricNamespace: !Sub RoboSystems/SharedReplicas/${Environment}
+          MetricValue: "1"
+          Unit: Count
+
+  ReplicaContainerStartAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-container-start
+      AlarmDescription: Replica serving container started - expected only during deploys and scale-out
+      MetricName: ReplicaContainerStart
+      Namespace: !Sub RoboSystems/SharedReplicas/${Environment}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+  # Application-published telemetry for the shared query surface (emitted by
+  # the API tier into RoboSystems/Security/{env}; alarmed here rather than in
+  # api.yaml because these guard the shared-replica surface).
+  QueryAbuseSignalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-query-abuse-signal
+      AlarmDescription: Sustained adverse query outcomes on shared repositories
+      MetricName: QueryAbuseSignal
+      Namespace: !Sub RoboSystems/Security/${Environment}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+  QueryEngineDisruptionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-query-engine-disruption
+      AlarmDescription: Query outcome consistent with an engine connection loss on a shared repository
+      MetricName: QueryEngineDisruption
+      Namespace: !Sub RoboSystems/Security/${Environment}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
 Outputs:
   ALBDNSName:
     Description: DNS name of the shared replicas ALB

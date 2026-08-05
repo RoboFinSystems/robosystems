@@ -7,7 +7,8 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 - **Data Ingestion**: DuckDB staging from S3 Parquet, PostgreSQL (postgres_scanner), and queries
 - **Backup & Restore**: On-demand full database backups with optional encryption and compression
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
-- **Vector Search**: LanceDB-powered semantic search across graph data
+- **Vector Search**: LadybugDB-native HNSW indexes built at materialization and searched in Cypher (`QUERY_VECTOR_INDEX`)
+- **Semantic Memory**: Per-graph LanceDB memory store backing the platform AI-memory surface (writer/master only)
 
 ## API Operations
 
@@ -17,6 +18,7 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 - Get database metadata (size, health status, node/relationship counts)
 - List all accessible databases
 - Health checks and status monitoring
+- LadybugDB engine version migrations
 
 ### Query Execution
 
@@ -29,6 +31,7 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 
 - **DuckDB Staging**: Validate and transform data before graph import
 - **Materialization**: Stage DuckDB tables into LadybugDB graph
+- **Blue-Green Swap**: Materialize a WIP database beside the active one, then promote it atomically (one-way)
 - **Batch Processing**: Chunked operations for large datasets
 - **Schema Validation**: Ensure data conforms to graph schema
 

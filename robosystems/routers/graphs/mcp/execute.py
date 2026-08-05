@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +26,13 @@ from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.query_telemetry import (
+  api_key_prefix_from_request,
+  is_disrupted_aggregation,
+  log_shared_query_end,
+  log_shared_query_start,
+  record_shared_query_outcome,
+)
 from robosystems.middleware.graph.statement_kernel import (
   StatementEngine,
   statement_kernel,
@@ -513,6 +521,14 @@ async def call_mcp_tool(
   # Import config
   from robosystems.config import env
 
+  # Shared-repository telemetry context (no-ops on user graphs)
+  key_prefix = api_key_prefix_from_request(full_request)
+  exec_id: str | None = None
+  # Branches whose true outcome differs from the strategy-based inference in
+  # the finally block set this explicitly (server-side aggregation completes
+  # inline; queue submission only hands off).
+  cost_outcome: str | None = None
+
   # Initialize monitoring and logging
   # (Operation logging is handled by circuit breaker)
 
@@ -625,6 +641,17 @@ async def call_mcp_tool(
       elif format == "json":
         strategy = MCPExecutionStrategy.JSON_COMPLETE
 
+    query_arg = tool_call.arguments.get("query") if tool_call.arguments else None
+    exec_id = log_shared_query_start(
+      graph_id,
+      current_user.id,
+      api_key_prefix=key_prefix,
+      source="mcp_rest",
+      tool_name=tool_call.name,
+      query_length=len(query_arg) if isinstance(query_arg, str) else None,
+      strategy=strategy.value,
+    )
+
     # Log execution attempt (debug level for production to reduce verbosity)
     if env.ENVIRONMENT in ["staging", "prod"]:
       logger.debug(
@@ -684,6 +711,19 @@ async def call_mcp_tool(
 
           # Aggregate and return as JSON
           aggregated = aggregate_streamed_results(events)
+          cost_outcome = "completed"
+          if is_disrupted_aggregation(aggregated):
+            cost_outcome = "stream_disrupted"
+            record_shared_query_outcome(
+              graph_id,
+              current_user.id,
+              signal="stream_disrupted",
+              disruption=True,
+              api_key_prefix=key_prefix,
+              endpoint="/v1/graphs/{graph_id}/mcp/call-tool",
+              source="mcp_rest",
+              tool_name=tool_call.name,
+            )
           return MCPToolResult(result=aggregated)
         else:
           # For other clients, return NDJSON stream
@@ -770,10 +810,12 @@ async def call_mcp_tool(
                 await asyncio.sleep(1)
 
             await handler.close()
+            cost_outcome = "queued"
             return EventSourceResponse(monitor_queue())
           else:
             # Return queue info for polling
             await handler.close()
+            cost_outcome = "queued"
             return JSONResponse(
               status_code=http_status.HTTP_202_ACCEPTED,
               content={
@@ -838,6 +880,25 @@ async def call_mcp_tool(
 
       # Record success metrics
       execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
+
+      if sys.exc_info()[0] is not None:
+        resolved_outcome = "error"
+      elif cost_outcome is not None:
+        resolved_outcome = cost_outcome
+      elif is_streaming:
+        resolved_outcome = "dispatched_stream"
+      else:
+        resolved_outcome = "completed"
+      log_shared_query_end(
+        exec_id,
+        graph_id,
+        current_user.id,
+        outcome=resolved_outcome,
+        duration_ms=execution_time,
+        api_key_prefix=key_prefix,
+        source="mcp_rest",
+        tool_name=tool_call.name,
+      )
       record_operation_metric(
         operation_type=OperationType.TOOL_EXECUTION,
         status=OperationStatus.SUCCESS,
@@ -855,9 +916,18 @@ async def call_mcp_tool(
       # Record success in circuit breaker
       circuit_breaker.record_success(graph_id, tool_call.name)
 
-  except HTTPException:
+  except HTTPException as exc:
     # Record failure metrics
     execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=exc.status_code,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp/call-tool",
+      source="mcp_rest",
+      tool_name=tool_call.name,
+    )
     record_operation_metric(
       operation_type=OperationType.TOOL_EXECUTION,
       status=OperationStatus.FAILURE,
@@ -874,6 +944,15 @@ async def call_mcp_tool(
   except Exception as e:
     # Record failure
     circuit_breaker.record_failure(graph_id, tool_call.name)
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      error=e,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp/call-tool",
+      source="mcp_rest",
+      tool_name=tool_call.name,
+    )
 
     logger.error(
       f"MCP tool execution failed: {e}",

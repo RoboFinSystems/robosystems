@@ -168,6 +168,17 @@ def _get_user_for_verified_jwt(user_id: str, token_session_version: int) -> User
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
+def _stash_api_key_identity(request: Request, api_key: str) -> None:
+  """Record which API key authenticated this request on request.state.
+
+  The first 8 characters are the key's stored identification prefix
+  (``UserAPIKey.prefix``), so downstream telemetry can attribute activity
+  to a specific key without access to the raw header. JWT-authenticated
+  requests leave the attribute unset.
+  """
+  request.state.api_key_prefix = api_key[:8]
+
+
 def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
@@ -214,6 +225,8 @@ async def get_optional_user(
   # Fall back to API key authentication
   if api_key:
     user = validate_api_key(api_key)
+    if user:
+      _stash_api_key_identity(request, api_key)
     return user
 
   return None
@@ -280,6 +293,7 @@ async def get_current_user(
   if api_key:
     user = validate_api_key(api_key)
     if user:
+      _stash_api_key_identity(request, api_key)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,
@@ -420,6 +434,7 @@ async def get_current_user_with_graph(
   if api_key:
     user = validate_api_key_with_graph(api_key, graph_id)
     if user:
+      _stash_api_key_identity(request, api_key)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,
@@ -629,6 +644,7 @@ async def get_current_user_sse(
   if api_key:
     user = validate_api_key(api_key)
     if user:
+      _stash_api_key_identity(request, api_key)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,

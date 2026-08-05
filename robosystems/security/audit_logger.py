@@ -51,13 +51,17 @@ class SecurityEventType(Enum):
   SUBGRAPH_DELETED = "subgraph_deleted"
   # Graph lifecycle events
   GRAPH_DELETED = "graph_deleted"
+  # Shared-repository query telemetry
+  QUERY_ABUSE_SIGNAL = "query_abuse_signal"
+  QUERY_ENGINE_DISRUPTION = "query_engine_disruption"
 
 
 # CloudWatch metrics: the compliance/alerting-relevant subset of security
 # events is published to RoboSystems/Security/{env} so the detective-control
-# alarms in cloudformation/api.yaml can actually fire. Operational events
-# (email_sent, auth_success, operation_timeout, …) are deliberately excluded
-# to keep the metric stream low-volume and the alarms meaningful.
+# alarms (cloudformation/api.yaml, graph-ladybug-replicas.yaml) can actually
+# fire. Operational events (email_sent, auth_success, operation_timeout, …)
+# are deliberately excluded to keep the metric stream low-volume and the
+# alarms meaningful.
 _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.AUTH_FAILURE: "AuthFailure",
   SecurityEventType.AUTH_TOKEN_EXPIRED: "AuthFailure",
@@ -68,6 +72,8 @@ _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",
+  SecurityEventType.QUERY_ABUSE_SIGNAL: "QueryAbuseSignal",
+  SecurityEventType.QUERY_ENGINE_DISRUPTION: "QueryEngineDisruption",
 }
 
 # Emitted in addition to AuthFailure when the failure is on the admin surface,
@@ -393,6 +399,39 @@ class SecurityAuditLogger:
       endpoint=endpoint,
       details=details,
       risk_level="medium" if amount < 1000 else "high",
+    )
+
+  @staticmethod
+  def log_query_abuse_signal(
+    user_id: str | None,
+    graph_id: str,
+    signal: str,
+    api_key_prefix: str | None = None,
+    endpoint: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    disruption: bool = False,
+  ):
+    """Log a shared-repository query outcome that counts toward abuse detection.
+
+    ``signal`` names the outcome class (e.g. ``timeout``, ``admission_reject``,
+    ``rate_limited``, ``analyzer_reject``, ``write_denied``). Set ``disruption``
+    for engine-connection-loss outcomes, which publish their own metric so they
+    can alarm at a lower threshold than routine pressure signals.
+    """
+    details: dict[str, Any] = {"graph_id": graph_id, "signal": signal}
+    if api_key_prefix:
+      details["api_key_prefix"] = api_key_prefix
+    if metadata:
+      details.update(metadata)
+
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.QUERY_ENGINE_DISRUPTION
+      if disruption
+      else SecurityEventType.QUERY_ABUSE_SIGNAL,
+      user_id=user_id,
+      endpoint=endpoint,
+      details=details,
+      risk_level="critical" if disruption else "medium",
     )
 
   @staticmethod

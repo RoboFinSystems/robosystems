@@ -1325,3 +1325,56 @@ class TestRequireGraphWriteRole:
     ):
       # member/admin -> no raise
       require_graph_write_role("user_1", "kg0123456789abcdef")
+
+
+class TestApiKeyIdentityStash:
+  """API-key auth records the key's identification prefix on request.state."""
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.validate_api_key")
+  async def test_get_optional_user_stashes_prefix(self, mock_validate_api_key):
+    api_key = "rfs" + "a" * 64
+    mock_request = Mock()
+    mock_request.headers = {}
+    mock_validate_api_key.return_value = Mock(spec=User)
+
+    result = await get_optional_user(request=mock_request, api_key=api_key)
+
+    assert result is not None
+    assert mock_request.state.api_key_prefix == api_key[:8]
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.validate_api_key")
+  async def test_invalid_key_stashes_nothing(self, mock_validate_api_key):
+    api_key = "rfs" + "b" * 64
+    mock_request = Mock()
+    mock_request.headers = {}
+
+    class _State:
+      pass
+
+    mock_request.state = _State()
+    mock_validate_api_key.return_value = None
+
+    result = await get_optional_user(request=mock_request, api_key=api_key)
+
+    assert result is None
+    assert not hasattr(mock_request.state, "api_key_prefix")
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
+  @patch("robosystems.middleware.auth.dependencies.validate_api_key")
+  async def test_get_current_user_stashes_prefix(self, mock_validate_api_key, _audit):
+    api_key = "rfs" + "c" * 64
+    mock_request = Mock()
+    mock_request.headers = {}
+    mock_request.client.host = "203.0.113.9"
+    mock_request.url.path = "/v1/graphs/sec/query/cypher"
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_1"
+    mock_validate_api_key.return_value = mock_user
+
+    result = await get_current_user(request=mock_request, api_key=api_key)
+
+    assert result == mock_user
+    assert mock_request.state.api_key_prefix == api_key[:8]
