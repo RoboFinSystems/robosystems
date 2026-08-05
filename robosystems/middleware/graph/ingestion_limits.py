@@ -89,8 +89,15 @@ class IngestionLimitChecker:
           f"Table '{tbl_name}' has {row_count:,} rows, exceeding max_single_table_rows limit ({max_single_table:,})"
         )
 
-    # Check aggregate instance storage cap (hard limit — product cap, blocks COGS overruns)
-    storage_check = await cls.check_instance_storage(db, graph_id, tier)
+    # Check aggregate instance storage cap (hard limit — product cap, blocks
+    # COGS overruns). Measured at instance scope: a subgraph shares its
+    # parent's box, so the denominator must be the whole instance — measuring
+    # the subgraph's own prefix excludes the parent and sibling databases.
+    # The row-count checks above stay scoped to the requested graph_id, whose
+    # own staging tables are what materialize.
+    storage_check = await cls.check_instance_storage(
+      db, cls._resolve_instance_scope(db, graph_id), tier
+    )
     if not storage_check["allowed"]:
       errors.extend(storage_check["errors"])
 
@@ -114,6 +121,22 @@ class IngestionLimitChecker:
       },
       "tier": tier,
     }
+
+  @classmethod
+  def _resolve_instance_scope(cls, db: Session, graph_id: str) -> str:
+    """Map a graph id to the id owning its instance.
+
+    The storage breakdown's ``{id}_*`` prefix scan only covers the given id
+    and its children, so a subgraph id must be widened to its parent before
+    the instance cap is measured. Mirrors the resolution the ``/limits``
+    reporting path performs.
+    """
+    from robosystems.models.core import Graph
+
+    graph = Graph.get_by_id(graph_id, db)
+    if graph is not None and graph.parent_graph_id:
+      return str(graph.parent_graph_id)
+    return graph_id
 
   @classmethod
   async def check_instance_storage(
