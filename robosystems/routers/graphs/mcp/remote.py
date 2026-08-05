@@ -665,21 +665,10 @@ async def _handle_tools_call(
   return _rpc_result(msg_id, _to_tool_result(result))
 
 
-@router.post("", include_in_schema=False, response_model=None)
-@endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/mcp", business_event_type="mcp_remote_request"
-)
-async def mcp_remote_transport(
-  request: Request,
-  graph_id: str = Path(
-    ...,
-    description="Graph database identifier",
-    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+async def dispatch_jsonrpc(
+  request: Request, graph_id: str, current_user: User
 ) -> Response:
-  """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""
+  """Parse and dispatch one JSON-RPC message (the transport's whole surface)."""
   try:
     message = await request.json()
   except Exception:
@@ -745,3 +734,21 @@ async def mcp_remote_transport(
       extra={"graph_id": graph_id, "user_id": str(current_user.id)},
     )
     return _rpc_error(msg_id, INTERNAL_ERROR, "Internal error")
+
+
+@router.post("", include_in_schema=False, response_model=None)
+@endpoint_metrics_decorator(
+  "/v1/graphs/{graph_id}/mcp", business_event_type="mcp_remote_request"
+)
+async def mcp_remote_transport(
+  request: Request,
+  graph_id: str = Path(
+    ...,
+    description="Graph database identifier",
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  ),
+  current_user: User = Depends(get_current_user_with_graph),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> Response:
+  """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""
+  return await dispatch_jsonrpc(request, graph_id, current_user)
