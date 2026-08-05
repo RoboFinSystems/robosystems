@@ -151,14 +151,14 @@ async def create_api_key(
 
     # A graph-scoped key can only be minted for a graph the user can access.
     if request.graph_id is not None:
-      import re as _re
+      import re
 
       from ...config.shared_repositories import is_shared_repository_or_subgraph
       from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
       from ...middleware.graph.utils import MultiTenantUtils
       from ...models.core import GraphUser
 
-      if not _re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, request.graph_id):
+      if not re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, request.graph_id):
         raise HTTPException(
           status_code=status.HTTP_400_BAD_REQUEST,
           detail="Invalid graph_id format",
