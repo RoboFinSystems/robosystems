@@ -58,6 +58,21 @@ class CreditLimits(BaseModel):
   current_balance: int = Field(..., description="Current credit balance")
 
 
+class DocumentLimits(BaseModel):
+  """Knowledge-base document usage against the tier's cap."""
+
+  current_count: int = Field(
+    ..., description="Uploaded documents currently stored for this graph"
+  )
+  max_documents: int | None = Field(
+    None,
+    description="Maximum uploaded documents for this tier (null when uncapped)",
+  )
+  approaching_limit: bool = Field(
+    ..., description="Whether approaching document limit (>80%)"
+  )
+
+
 class ContentLimits(BaseModel):
   """Per-operation materialization limits."""
 
@@ -165,6 +180,11 @@ class GraphLimitsResponse(BaseModel):
             "monthly_ai_credits": 8000,
             "current_balance": 7500,
           },
+          "documents": {
+            "current_count": 12,
+            "max_documents": 100,
+            "approaching_limit": False,
+          },
           "content": {
             "max_rows_per_copy": 1000000,
             "max_single_table_rows": 2500000,
@@ -238,6 +258,9 @@ class GraphLimitsResponse(BaseModel):
   rate_limits: RateLimits = Field(..., description="API rate limits")
   credits: CreditLimits | None = Field(
     None, description="AI credit limits (if applicable)"
+  )
+  documents: DocumentLimits | None = Field(
+    None, description="Knowledge-base document usage and tier cap (user graphs only)"
   )
   content: ContentLimits | None = Field(
     None, description="Per-operation materialization limits (if applicable)"

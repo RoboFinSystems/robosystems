@@ -26,6 +26,7 @@ from robosystems.models.api.graphs.limits import (
   CopyOperationLimits,
   CreditLimits,
   DatabaseStorageEntry,
+  DocumentLimits,
   GraphLimitsResponse,
   InstanceUsage,
   QueryLimits,
@@ -65,7 +66,7 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
   "/limits",
   response_model=GraphLimitsResponse,
   summary="Get Graph Operational Limits",
-  description="Limits vary by subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge). Includes storage, query, backup, rate, credit, and instance usage limits.",
+  description="Limits vary by subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge). Includes storage, query, backup, rate, credit, document, and instance usage limits.",
   operation_id="getGraphLimits",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -224,6 +225,29 @@ async def get_graph_limits(
         # must be visible.
         logger.warning(f"Could not get credit limits for {graph_id}: {e}")
 
+    # Document usage against the tier cap. Mirrors upload enforcement
+    # (DocumentService._check_tier_limit): only uploaded documents count, and
+    # shared repositories have no documents surface at all.
+    document_limits = None
+    if not is_shared:
+      try:
+        from robosystems.config.billing.core import get_tier_max_documents
+        from robosystems.models.core import Document
+
+        max_documents = get_tier_max_documents(graph_tier)
+        document_count = Document.count_by_graph(
+          graph_id, session, source_type="uploaded_doc"
+        )
+        document_limits = DocumentLimits(
+          current_count=document_count,
+          max_documents=max_documents,
+          approaching_limit=(
+            max_documents is not None and document_count > max_documents * 0.8
+          ),
+        )
+      except Exception as e:
+        logger.warning(f"Could not get document limits for {graph_id}: {e}")
+
     # Get content limits and instance usage for non-shared graphs.
     # check_instance_storage is a single Graph API call covering the whole
     # instance — subgraphs live on the parent's box, so one breakdown itemizes
@@ -302,6 +326,7 @@ async def get_graph_limits(
       backups=BackupLimits(**backup_limits),
       rate_limits=RateLimits(**rate_limits),
       credits=CreditLimits(**credit_limits) if credit_limits else None,
+      documents=document_limits,
       content=content_limits,
       instance=instance_usage,
     )

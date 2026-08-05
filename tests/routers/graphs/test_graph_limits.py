@@ -305,6 +305,46 @@ class TestGraphLimitsEndpoint:
       "current_balance": 31999,
     }
 
+  async def test_reports_document_usage_against_tier_cap(
+    self, async_client: AsyncClient, test_db, test_org, test_user
+  ):
+    """The meter must mirror upload enforcement: only uploaded documents
+    count toward the tier cap, not connection-synced ones."""
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.core import Document
+
+    graph = self._make_graph(test_db, test_org, test_user, GraphTier.LADYBUG_STANDARD)
+    for i in range(2):
+      Document.create(
+        graph_id=graph.graph_id,
+        user_id=test_user.id,
+        title=f"Uploaded {i}",
+        content="# doc",
+        session=test_db,
+      )
+    Document.create(
+      graph_id=graph.graph_id,
+      user_id=test_user.id,
+      title="Synced",
+      content="# synced",
+      session=test_db,
+      external_id="qb-123",
+      source_type="connection_sync",
+    )
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get(f"/v1/graphs/{graph.graph_id}/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["documents"] == {
+      "current_count": 2,
+      "max_documents": 100,
+      "approaching_limit": False,
+    }
+
   async def test_shared_repository_reports_the_enforced_fallback_tier(
     self, async_client: AsyncClient, test_db
   ):
@@ -343,6 +383,13 @@ class TestGraphLimitsEndpoint:
     assert data["graph_tier"] == "kuzu-standard"
     assert data["subscription_tier"] == "ladybug-standard"
     assert data["rate_limits"]["requests_per_minute"] == 60
+    # No billing plan for the legacy string: the count reports, the cap is
+    # open — matching enforcement, which only gates known tiers.
+    assert data["documents"] == {
+      "current_count": 0,
+      "max_documents": None,
+      "approaching_limit": False,
+    }
 
   async def test_shared_repository_subgraph_takes_the_shared_path(
     self, async_client: AsyncClient, test_db
@@ -363,5 +410,6 @@ class TestGraphLimitsEndpoint:
     assert data["subscription_tier"] == "ladybug-standard"
     assert data["rate_limits"]["requests_per_minute"] == 60
     assert data["credits"] is None
+    assert data["documents"] is None
     assert data["content"] is None
     assert data["instance"] is None
