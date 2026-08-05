@@ -222,6 +222,207 @@ async def execute_tool_directly(
     )
 
 
+async def authorize_mcp_tool_call(
+  graph_id: str,
+  tool_call: MCPToolCall,
+  current_user: User,
+) -> str:
+  """Run the shared MCP tool-call authorization gauntlet.
+
+  Used by both the REST endpoint (POST /mcp/call-tool) and the remote JSON-RPC
+  transport (POST /mcp) so the two surfaces cannot drift: fail-closed write
+  classification, StatementKernel statement policy for cypher read tools,
+  per-graph role validation, shared-repo subscription lookup, and dual-layer
+  volume rate limiting.
+
+  Returns:
+      The resolved access type: "read" or "write".
+
+  Raises:
+      HTTPException: 403 on access/subscription denial, 429 on volume limits.
+  """
+  from robosystems.config import env
+  from robosystems.database import SessionFactory
+
+  is_cypher_read_tool = tool_call.name in (
+    "read-graph-cypher",
+    "read-neo4j-cypher",
+    "read-ladybug-cypher",
+  )
+  # Fail-closed write classification: a tool is a WRITE unless it is on the
+  # read-only allowlist. This makes every non-read tool — including all
+  # registrar-generated OLTP command ops (update-journal-entry, close-period,
+  # execute-event-block, the content-op writes, …) — require the member/admin
+  # role via `validate_mcp_access(..., "write")` below, closing the prior
+  # fail-open gap where only three tool names were flagged as writes and a
+  # `viewer` could reach the whole command surface. Cypher read tools are
+  # classified precisely by the StatementKernel (they can carry a write).
+  is_write_query = (not is_cypher_read_tool) and (
+    tool_call.name not in READ_ONLY_MCP_TOOLS
+  )
+
+  # Validate access using a short-lived session.  The MCP endpoint's
+  # tool execution can take minutes; using a scoped session or FastAPI
+  # db dependency would hold a pool connection for the entire duration.
+  # A plain SessionFactory() session is closed immediately after the
+  # DB work, returning the connection to the pool before tool execution.
+  repo_access = None
+  sess = SessionFactory()
+  try:
+    if is_cypher_read_tool:
+      cypher_query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
+      # Only authorize an actual statement. An empty/missing query is a
+      # validation error the tool surfaces ("Query parameter is required"),
+      # not a policy decision — and is_write_operation fail-safes empty input
+      # to "write", which would otherwise mis-trigger the write block.
+      if cypher_query.strip():
+        authz = statement_kernel.authorize(
+          engine=StatementEngine.CYPHER,
+          graph_id=graph_id,
+          statement=cypher_query,
+          user=current_user,
+          session=sess,
+        )
+        is_write_query = authz.is_write
+
+    access_type = "write" if is_write_query else "read"
+    await validate_mcp_access(graph_id, current_user, sess, access_type)
+
+    # Look up shared-repo subscription while session is still open.
+    # Covers subgraphs (e.g. sec_historical) too — subscriptions live on
+    # the parent, so resolve to it before the lookup, matching the query
+    # path in query/execute.py::_check_shared_repository_limits.
+    if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
+      from robosystems.config.shared_repositories import (
+        resolve_shared_repository_parent,
+      )
+      from robosystems.models.core.user.user_repository import UserRepository
+
+      repo_access = UserRepository.get_by_user_and_repository(
+        current_user.id, resolve_shared_repository_parent(graph_id), sess
+      )
+  finally:
+    sess.close()
+
+  # Apply dual-layer rate limiting for shared repositories (incl. subgraphs)
+  # Rate limiting is optional - skip if disabled (dev environments)
+  if (
+    MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
+    and env.RATE_LIMIT_ENABLED
+  ):
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_async_redis_client,
+    )
+    from robosystems.middleware.rate_limits import DualLayerRateLimiter
+
+    if not repo_access:
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail=f"Access to {graph_id.upper()} repository requires a subscription. Visit {env.ROBOSYSTEMS_URL}/repositories/browse",
+      )
+
+    # Get Redis client for rate limiting with proper ElastiCache support
+    redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
+
+    try:
+      limiter = DualLayerRateLimiter(redis_client)
+
+      # Check shared-repository per-plan volume limits (burst protection is
+      # already enforced upstream by subscription_aware_rate_limit_dependency).
+      limit_check = await limiter.check_limits(
+        user_id=str(current_user.id),
+        graph_id=graph_id,
+        operation="mcp",
+        endpoint=f"mcp/call-tool/{tool_call.name}",
+        repository_plan=repo_access.repository_plan,
+      )
+
+      if not limit_check["allowed"]:
+        reason = limit_check.get("reason", "unknown")
+        message = limit_check.get("message", "Rate limit exceeded")
+
+        if reason == "no_access":
+          raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
+          )
+        elif reason == "endpoint_not_allowed":
+          raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=message,
+          )
+        elif reason == "repository_limit":
+          detail = limit_check.get("detail", {})
+          raise HTTPException(
+            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
+            f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/repositories/browse",
+            headers={
+              "Retry-After": str(detail.get("retry_after", 60)),
+              "X-RateLimit-Repository": graph_id,
+              "X-RateLimit-Plan": str(repo_access.repository_plan),
+            },
+          )
+        else:
+          raise HTTPException(
+            status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=message,
+          )
+    finally:
+      await redis_client.close()
+
+  return access_type
+
+
+async def execute_tool_to_json(
+  handler: MCPHandler,
+  graph_id: str,
+  tool_call: MCPToolCall,
+  strategy: MCPExecutionStrategy,
+  timeout: int,
+) -> dict[str, Any]:
+  """Execute a tool call to a single JSON result for the given strategy.
+
+  The remote JSON-RPC transport must return one result per `tools/call`
+  (MCP has no partial-result mechanism), so streaming strategies are
+  aggregated server-side and cacheable strategies go through the Valkey MCP
+  cache. Queue strategies fall through to direct execution here; the remote
+  transport bridges the queue over its SSE response mode instead.
+  """
+  if strategy == MCPExecutionStrategy.SCHEMA_CACHED:
+    cached = await _get_mcp_cache(graph_id, tool_call.name)
+    if cached is not None:
+      return cached
+    result = await execute_tool_directly(handler, tool_call, timeout)
+    await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
+    return result
+
+  if strategy == MCPExecutionStrategy.INFO_CACHED:
+    cached = await _get_mcp_cache(graph_id, tool_call.name)
+    if cached is not None:
+      return cached
+    result = await execute_tool_directly(handler, tool_call, timeout)
+    await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
+    return result
+
+  if strategy in (
+    MCPExecutionStrategy.STREAM_AGGREGATED,
+    MCPExecutionStrategy.SSE_PROGRESS,
+    MCPExecutionStrategy.SSE_STREAMING,
+    MCPExecutionStrategy.NDJSON_STREAMING,
+  ):
+    events = [
+      event
+      async for event in stream_mcp_tool_execution(
+        handler, tool_call.name, tool_call.arguments, strategy.value
+      )
+    ]
+    return aggregate_streamed_results(events)
+
+  return await execute_tool_directly(handler, tool_call, timeout)
+
+
 async def stream_sse_response(request: Request, events_generator):
   """Generate SSE response with disconnect detection."""
   async for event in events_generator:
@@ -334,141 +535,12 @@ async def call_mcp_tool(
   circuit_breaker.check_circuit(graph_id, tool_call.name)
 
   try:
-    # Determine write intent, and for cypher read tools run the statement
-    # policy — bulk/admin/DDL validation, the three-tier write policy, and the
-    # role gate — through the shared StatementKernel, the same path REST
-    # /query/cypher uses, so the MCP HTTP surface can't drift from it. The
-    # kernel needs a live session, so the call runs inside the short-lived
-    # session block below.
-    from robosystems.database import SessionFactory
-
-    is_cypher_read_tool = tool_call.name in (
-      "read-graph-cypher",
-      "read-neo4j-cypher",
-      "read-ladybug-cypher",
-    )
-    # Fail-closed write classification: a tool is a WRITE unless it is on the
-    # read-only allowlist. This makes every non-read tool — including all
-    # registrar-generated OLTP command ops (update-journal-entry, close-period,
-    # execute-event-block, the content-op writes, …) — require the member/admin
-    # role via `validate_mcp_access(..., "write")` below, closing the prior
-    # fail-open gap where only three tool names were flagged as writes and a
-    # `viewer` could reach the whole command surface. Cypher read tools are
-    # classified precisely by the StatementKernel (they can carry a write).
-    is_write_query = (not is_cypher_read_tool) and (
-      tool_call.name not in READ_ONLY_MCP_TOOLS
-    )
-
-    # Validate access using a short-lived session.  The MCP endpoint's
-    # tool execution can take minutes; using a scoped session or FastAPI
-    # db dependency would hold a pool connection for the entire duration.
-    # A plain SessionFactory() session is closed immediately after the
-    # DB work, returning the connection to the pool before tool execution.
-    repo_access = None
-    sess = SessionFactory()
-    try:
-      if is_cypher_read_tool:
-        cypher_query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
-        # Only authorize an actual statement. An empty/missing query is a
-        # validation error the tool surfaces ("Query parameter is required"),
-        # not a policy decision — and is_write_operation fail-safes empty input
-        # to "write", which would otherwise mis-trigger the write block.
-        if cypher_query.strip():
-          authz = statement_kernel.authorize(
-            engine=StatementEngine.CYPHER,
-            graph_id=graph_id,
-            statement=cypher_query,
-            user=current_user,
-            session=sess,
-          )
-          is_write_query = authz.is_write
-
-      access_type = "write" if is_write_query else "read"
-      await validate_mcp_access(graph_id, current_user, sess, access_type)
-
-      # Look up shared-repo subscription while session is still open.
-      # Covers subgraphs (e.g. sec_historical) too — subscriptions live on
-      # the parent, so resolve to it before the lookup, matching the query
-      # path in query/execute.py::_check_shared_repository_limits.
-      if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
-        from robosystems.config.shared_repositories import (
-          resolve_shared_repository_parent,
-        )
-        from robosystems.models.core.user.user_repository import UserRepository
-
-        repo_access = UserRepository.get_by_user_and_repository(
-          current_user.id, resolve_shared_repository_parent(graph_id), sess
-        )
-    finally:
-      sess.close()
-
-    # Apply dual-layer rate limiting for shared repositories (incl. subgraphs)
-    # Rate limiting is optional - skip if disabled (dev environments)
-    if (
-      MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
-      and env.RATE_LIMIT_ENABLED
-    ):
-      from robosystems.config.valkey_registry import (
-        ValkeyDatabase,
-        create_async_redis_client,
-      )
-      from robosystems.middleware.rate_limits import DualLayerRateLimiter
-
-      if not repo_access:
-        raise HTTPException(
-          status_code=http_status.HTTP_403_FORBIDDEN,
-          detail=f"Access to {graph_id.upper()} repository requires a subscription. Visit {env.ROBOSYSTEMS_URL}/repositories/browse",
-        )
-
-      # Get Redis client for rate limiting with proper ElastiCache support
-      redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
-
-      try:
-        limiter = DualLayerRateLimiter(redis_client)
-
-        # Check shared-repository per-plan volume limits (burst protection is
-        # already enforced upstream by subscription_aware_rate_limit_dependency).
-        limit_check = await limiter.check_limits(
-          user_id=str(current_user.id),
-          graph_id=graph_id,
-          operation="mcp",
-          endpoint=f"mcp/call-tool/{tool_call.name}",
-          repository_plan=repo_access.repository_plan,
-        )
-
-        if not limit_check["allowed"]:
-          reason = limit_check.get("reason", "unknown")
-          message = limit_check.get("message", "Rate limit exceeded")
-
-          if reason == "no_access":
-            raise HTTPException(
-              status_code=http_status.HTTP_403_FORBIDDEN,
-              detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
-            )
-          elif reason == "endpoint_not_allowed":
-            raise HTTPException(
-              status_code=http_status.HTTP_403_FORBIDDEN,
-              detail=message,
-            )
-          elif reason == "repository_limit":
-            detail = limit_check.get("detail", {})
-            raise HTTPException(
-              status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-              detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-              f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/repositories/browse",
-              headers={
-                "Retry-After": str(detail.get("retry_after", 60)),
-                "X-RateLimit-Repository": graph_id,
-                "X-RateLimit-Plan": str(repo_access.repository_plan),
-              },
-            )
-          else:
-            raise HTTPException(
-              status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-              detail=message,
-            )
-      finally:
-        await redis_client.close()
+    # The full authorization gauntlet — fail-closed write classification,
+    # StatementKernel policy for cypher tools, role validation, shared-repo
+    # subscription lookup, and per-plan volume limits — is shared with the
+    # remote JSON-RPC transport (remote.py) so the two surfaces cannot drift.
+    access_type = await authorize_mcp_tool_call(graph_id, tool_call, current_user)
+    is_write_query = access_type == "write"
 
     # Get repository
     operation_type = _get_mcp_operation_type(graph_id)
