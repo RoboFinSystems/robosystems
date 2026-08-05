@@ -126,7 +126,7 @@ Model Context Protocol server for AI integration:
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
-**Client Integration**: External MCP client (`@robosystems/mcp` npm package) connects Claude Desktop to the server.
+**Client Integration**: MCP clients (Claude, Claude Code, Cursor) connect directly to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header — see [AI Operators and MCP](AI-Operators-and-MCP). A legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (`@robosystems/mcp` npm package) remains for stdio-only clients.
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 
