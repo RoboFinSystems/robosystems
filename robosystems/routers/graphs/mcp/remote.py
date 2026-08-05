@@ -50,6 +50,7 @@ from robosystems.models.core import User
 
 from .execute import (
   READ_ONLY_MCP_TOOLS,
+  _get_user_priority,
   authorize_mcp_tool_call,
   circuit_breaker,
   execute_tool_to_json,
@@ -106,17 +107,23 @@ def _rpc_error(
   )
 
 
-def _tool_error_result(msg_id: Any, text: str) -> JSONResponse:
-  """Report a tool-execution failure inside a successful JSON-RPC response.
+def _tool_error_payload(msg_id: Any, text: str) -> dict[str, Any]:
+  """A tool-execution failure as a complete JSON-RPC response payload.
 
   Per the MCP spec, failures of the tool itself (as opposed to protocol
   errors) are returned as ``result.isError`` so the model can see the message
   and react — e.g. relay a subscription or rate-limit notice to the user.
   """
-  return _rpc_result(
-    msg_id,
-    {"content": [{"type": "text", "text": text}], "isError": True},
-  )
+  return {
+    "jsonrpc": "2.0",
+    "id": msg_id,
+    "result": {"content": [{"type": "text", "text": text}], "isError": True},
+  }
+
+
+def _tool_error_result(msg_id: Any, text: str) -> JSONResponse:
+  """`_tool_error_payload` as an HTTP response (the non-streaming path)."""
+  return JSONResponse(content=_tool_error_payload(msg_id, text))
 
 
 def _to_tool_result(result: Any) -> dict[str, Any]:
@@ -233,6 +240,29 @@ _SSE_STRATEGIES = frozenset(
 # stream alive through the ALB idle timeout (default 60s) without being
 # parsed as messages by MCP clients.
 _SSE_PING_SECONDS = 15
+
+# Cypher read tools route through the shared query queue under load; other
+# tools execute directly (mirrors the REST endpoint's queue path).
+_CYPHER_READ_TOOLS = frozenset(
+  {"read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"}
+)
+
+_QUEUE_STRATEGIES = frozenset(
+  {
+    MCPExecutionStrategy.QUEUE_WITH_MONITORING,
+    MCPExecutionStrategy.QUEUE_SIMPLE,
+  }
+)
+
+# Explicit end-to-end ceiling (queue wait + execution) for a bridged queued
+# call. MCP tools/call must resolve on this request, so unlike the REST 202
+# path — where the client owns the polling budget — the held stream needs its
+# own deliberate ceiling. Matches the long-tool ceiling advertised in
+# tools/list capabilities.
+_QUEUE_BRIDGE_TIMEOUT_SECONDS = 300
+
+# Poll cadence for bridged queue monitoring (same as the REST monitor loop).
+_QUEUE_POLL_SECONDS = 1.0
 
 
 def _event_to_progress(
@@ -351,6 +381,121 @@ async def _stream_tool_call(
       await handler.close()
 
 
+async def _stream_queued_call(
+  graph_id: str,
+  tool_call: MCPToolCall,
+  current_user: User,
+  msg_id: Any,
+  progress_token: Any,
+):
+  """Bridge a queued cypher execution onto the SSE response.
+
+  The REST endpoint answers queue strategies with 202 + a polling URL, which
+  has no MCP equivalent — tools/call must resolve on this request. So the
+  bridge submits to the shared query queue, holds the stream, relays queue
+  state as notifications/progress, and emits the final JSON-RPC response on
+  completion. A client disconnect cancels the queued query so abandoned work
+  stops consuming queue capacity.
+  """
+  from robosystems.middleware.graph.query_queue import get_query_queue
+
+  queue_manager = get_query_queue()
+  query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
+  parameters = tool_call.arguments.get("parameters") or {}
+
+  payload: dict[str, Any]
+  queue_id: str | None = None
+  query_settled = False  # reached completed/failed/cancelled in the queue
+  last_progress = 0.0
+  try:
+    try:
+      queue_id = await queue_manager.submit_query(
+        cypher=query,
+        parameters=parameters,  # type: ignore[arg-type]
+        graph_id=graph_id,
+        user_id=str(current_user.id),
+        credits_required=10.0,
+        priority=_get_user_priority(current_user),
+      )
+
+      async with asyncio.timeout(_QUEUE_BRIDGE_TIMEOUT_SECONDS):
+        while True:
+          status = await queue_manager.get_query_status(queue_id)
+          if not status:
+            query_settled = True  # nothing left in the queue to cancel
+            payload = _tool_error_payload(
+              msg_id, "Queued query state was lost. Please retry."
+            )
+            break
+
+          state = str(status.get("status", ""))
+          if progress_token is not None:
+            position = status.get("queue_position")
+            message = (
+              f"Queued (position {position})"
+              if state == "pending" and position
+              else state.capitalize()
+            )
+            last_progress += 1.0
+            yield {
+              "data": json.dumps(
+                {
+                  "jsonrpc": "2.0",
+                  "method": "notifications/progress",
+                  "params": {
+                    "progressToken": progress_token,
+                    "progress": last_progress,
+                    "message": message,
+                  },
+                }
+              )
+            }
+
+          if state == "completed":
+            query_settled = True
+            result = await queue_manager.get_query_result(queue_id)
+            payload = {
+              "jsonrpc": "2.0",
+              "id": msg_id,
+              "result": _to_tool_result(result),
+            }
+            circuit_breaker.record_success(graph_id, tool_call.name)
+            break
+          if state in ("failed", "cancelled"):
+            query_settled = True
+            error = status.get("error") or f"Query {state}"
+            payload = _tool_error_payload(msg_id, str(error))
+            break
+
+          await asyncio.sleep(_QUEUE_POLL_SECONDS)
+    except TimeoutError:
+      payload = _tool_error_payload(
+        msg_id,
+        f"Error: queued query did not complete within "
+        f"{_QUEUE_BRIDGE_TIMEOUT_SECONDS} seconds",
+      )
+    except Exception as e:
+      circuit_breaker.record_failure(graph_id, tool_call.name)
+      logger.error(
+        f"Remote MCP queued execution failed: {e}",
+        extra={"graph_id": graph_id, "tool_name": tool_call.name},
+      )
+      payload = _tool_error_payload(msg_id, "Tool execution failed.")
+
+    yield {"data": json.dumps(payload)}
+  finally:
+    # Reached without a settled queue state on disconnect (generator closed
+    # at a yield), bridge timeout, or submit/monitor failure: stop the queued
+    # work so abandoned queries don't burn queue capacity.
+    if not query_settled and queue_id is not None:
+      try:
+        await queue_manager.cancel_query(queue_id, str(current_user.id))
+      except Exception as cancel_error:
+        logger.warning(
+          f"Failed to cancel abandoned queued query {queue_id}: {cancel_error}"
+        )
+
+
 async def _handle_tools_call(
   request: Request,
   graph_id: str,
@@ -405,16 +550,30 @@ async def _handle_tools_call(
   )
   timeout = MCPStrategySelector.get_timeout_for_strategy(strategy)
 
+  meta = params.get("_meta")
+  progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
+  accept_header = request.headers.get("accept", "")
+  client_accepts_sse = "text/event-stream" in accept_header
+
+  # Queue bridge: under load, cypher reads route through the shared query
+  # queue. The stream relays queue state as progress and resolves with the
+  # result — no handler needed, the queue executes the query itself. Clients
+  # that don't accept SSE fall through to bounded direct execution.
+  if (
+    strategy in _QUEUE_STRATEGIES and name in _CYPHER_READ_TOOLS and client_accepts_sse
+  ):
+    return EventSourceResponse(
+      _stream_queued_call(graph_id, tool_call, current_user, msg_id, progress_token),
+      ping=_SSE_PING_SECONDS,
+    )
+
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
 
   # SSE-on-POST: long/streaming strategies answer as text/event-stream when
   # the client accepts it (MCP clients advertise both). Handler ownership
   # passes to the generator, which closes it when the stream ends.
-  meta = params.get("_meta")
-  progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
-  accept_header = request.headers.get("accept", "")
-  if strategy in _SSE_STRATEGIES and "text/event-stream" in accept_header:
+  if strategy in _SSE_STRATEGIES and client_accepts_sse:
     return EventSourceResponse(
       _stream_tool_call(
         handler, graph_id, tool_call, strategy, timeout, msg_id, progress_token
