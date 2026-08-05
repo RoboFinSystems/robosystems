@@ -50,5 +50,5 @@ def latest_report_id(client: LedgerClient, graph_id: str) -> str:
   reports = client.list_reports(graph_id) or []
   if not reports:
     raise SystemExit(f"No Report found for graph {graph_id}.")
-  reports.sort(key=lambda r: r.get("created_at") or "", reverse=True)
-  return str(reports[0]["id"])
+  reports.sort(key=lambda r: r.created_at or "", reverse=True)
+  return reports[0].id
