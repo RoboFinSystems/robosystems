@@ -735,6 +735,15 @@ async def execute_cypher_query(
   except ValueError as e:
     # Handle credit-related errors (no credit pool found)
     if "No credit pool found" in str(e):
+      log_shared_query_end(
+        exec_id,
+        graph_id,
+        current_user.id,
+        outcome="http_402",
+        duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+        api_key_prefix=key_prefix,
+        source="query_cypher",
+      )
       raise HTTPException(
         status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
         detail="No credit pool found for this graph. Please check your subscription.",
@@ -745,6 +754,15 @@ async def execute_cypher_query(
       status_code=http_status.HTTP_400_BAD_REQUEST,
       api_key_prefix=key_prefix,
       endpoint="/v1/graphs/{graph_id}/query/cypher",
+      source="query_cypher",
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome="http_400",
+      duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+      api_key_prefix=key_prefix,
       source="query_cypher",
     )
     # Re-raise other ValueErrors — 400s are client errors, keep specific message

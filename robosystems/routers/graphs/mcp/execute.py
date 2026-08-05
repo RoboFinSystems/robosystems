@@ -524,6 +524,10 @@ async def call_mcp_tool(
   # Shared-repository telemetry context (no-ops on user graphs)
   key_prefix = api_key_prefix_from_request(full_request)
   exec_id: str | None = None
+  # Branches whose true outcome differs from the strategy-based inference in
+  # the finally block set this explicitly (server-side aggregation completes
+  # inline; queue submission only hands off).
+  cost_outcome: str | None = None
 
   # Initialize monitoring and logging
   # (Operation logging is handled by circuit breaker)
@@ -707,7 +711,9 @@ async def call_mcp_tool(
 
           # Aggregate and return as JSON
           aggregated = aggregate_streamed_results(events)
+          cost_outcome = "completed"
           if is_disrupted_aggregation(aggregated):
+            cost_outcome = "stream_disrupted"
             record_shared_query_outcome(
               graph_id,
               current_user.id,
@@ -804,10 +810,12 @@ async def call_mcp_tool(
                 await asyncio.sleep(1)
 
             await handler.close()
+            cost_outcome = "queued"
             return EventSourceResponse(monitor_queue())
           else:
             # Return queue info for polling
             await handler.close()
+            cost_outcome = "queued"
             return JSONResponse(
               status_code=http_status.HTTP_202_ACCEPTED,
               content={
@@ -874,16 +882,18 @@ async def call_mcp_tool(
       execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       if sys.exc_info()[0] is not None:
-        cost_outcome = "error"
+        resolved_outcome = "error"
+      elif cost_outcome is not None:
+        resolved_outcome = cost_outcome
       elif is_streaming:
-        cost_outcome = "dispatched_stream"
+        resolved_outcome = "dispatched_stream"
       else:
-        cost_outcome = "completed"
+        resolved_outcome = "completed"
       log_shared_query_end(
         exec_id,
         graph_id,
         current_user.id,
-        outcome=cost_outcome,
+        outcome=resolved_outcome,
         duration_ms=execution_time,
         api_key_prefix=key_prefix,
         source="mcp_rest",
