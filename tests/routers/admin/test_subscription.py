@@ -147,6 +147,33 @@ class TestListSubscriptions:
     subscription_ids = [sub["id"] for sub in data]
     assert test_subscription.id in subscription_ids
 
+  def test_list_subscriptions_with_null_resource_id(
+    self, client, db_session, test_org, test_subscription, mock_admin_auth
+  ):
+    """A pre-provisioning row (resource_id=None, as checkout creates) must not
+    break the list endpoint."""
+    pending = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="repository",
+      resource_id=None,
+      plan_name="starter",
+      base_price_cents=2900,
+      session=db_session,
+    )
+    pending.status = SubscriptionStatus.PENDING_PAYMENT.value
+    db_session.commit()
+
+    response = client.get(
+      "/admin/v1/subscriptions",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    by_id = {sub["id"]: sub for sub in data}
+    assert by_id[pending.id]["resource_id"] is None
+    assert by_id[test_subscription.id]["resource_id"] is not None
+
   def test_list_subscriptions_with_resource_type_filter(
     self, client, db_session, test_subscription, mock_admin_auth
   ):

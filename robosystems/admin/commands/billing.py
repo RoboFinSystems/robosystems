@@ -52,7 +52,7 @@ def list_subscriptions(client, status, email, resource_type, include_canceled, l
   for sub in subscriptions:
     table.add_row(
       sub["id"],
-      sub["resource_id"],
+      sub["resource_id"] or "—",
       sub.get("owner_email", "N/A"),
       sub["status"],
       sub["plan_name"],
@@ -79,7 +79,7 @@ def get_subscription(client, subscription_id):
   click.echo("=" * 60)
 
   click.echo(f"\nID: {sub['id']}")
-  click.echo(f"Resource: {sub['resource_type']} / {sub['resource_id']}")
+  click.echo(f"Resource: {sub['resource_type']} / {sub['resource_id'] or '—'}")
   click.echo(f"Org: {sub.get('org_name', 'N/A')} ({sub['org_id']})")
   click.echo(f"Owner: {sub.get('owner_name', 'N/A')} ({sub.get('owner_email', 'N/A')})")
   click.echo(f"Status: {sub['status']}")

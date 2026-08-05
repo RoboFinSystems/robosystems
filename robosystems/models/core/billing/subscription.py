@@ -130,7 +130,7 @@ class BillingSubscription(Base):
     cls,
     org_id: str,
     resource_type: str,
-    resource_id: str,
+    resource_id: str | None,
     plan_name: str,
     base_price_cents: int,
     session: Session,
@@ -142,6 +142,8 @@ class BillingSubscription(Base):
 
     Pass `user_id` for per-user resources (repository subscriptions) so access
     and credits can be provisioned to the right member of the paying org.
+    `resource_id` may be None for pre-provisioning rows (checkout creates the
+    subscription first and binds the resource after payment).
     """
     now = datetime.now(UTC)
 
