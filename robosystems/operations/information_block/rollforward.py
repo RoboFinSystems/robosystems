@@ -12,10 +12,8 @@ This module owns the authoring surface — ``create`` / ``update`` /
 ``delete`` persist the typed :class:`RollforwardMechanics` to
 ``structures.artifact_mechanics``; ``build_envelope`` round-trips the
 typed mechanics and an empty facts list. The filter engine is callable
-directly from caller code (the cross-taxonomy reconciliation harness in
-``local/scripts/run_reconciliation.py`` is the first consumer); filter
-evaluation is not yet wired into the live ``fact_grid`` rendering
-pipeline.
+directly from caller code, but filter evaluation is not yet wired into
+the live ``fact_grid`` rendering pipeline — it has no in-tree consumer.
 
 Pattern mirrors :mod:`robosystems.operations.information_block.schedule`
 (the canonical declarative-mode reference). Differences are:

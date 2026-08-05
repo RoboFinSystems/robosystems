@@ -106,9 +106,8 @@ element exists, so the deterministic label/reference ids
 (`uuid5(element_id:role:language)` / `uuid5(element_id:citation)`) reseed
 byte-identically to inline labels/refs. The split was a one-shot transform of
 the hand-authored source (provenance in git history; the spent
-`split_type_subtype` script lives developer-local under
-`local/scripts/taxonomy/`, not in the committed tree) — these JSON-LD artifacts
-are now the source of truth, edit them directly. Both are `tenant_copy: true` —
+`split_type_subtype` script was developer-local and has been deleted) — these
+JSON-LD artifacts are now the source of truth, edit them directly. Both are `tenant_copy: true` —
 tenants get the citations and labels for the concepts they keep.
 
 **`rs-gaap-reporting-styles`** is THE vertical-flavor surface. New
