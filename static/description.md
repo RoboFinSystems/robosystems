@@ -51,7 +51,7 @@ Reads are REST `GET`s; content writes share the same `/operations/{op_name}` env
 
 ### MCP & AI Operators
 
-- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents and assistants
+- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, alongside the REST tool surface (`/mcp/tools`, `/mcp/call-tool`)
 - **AI Operators**: Autonomous Claude/MCP executors for financial analysis and report generation, with automatic credit tracking and SSE progress (sync, SSE, or background worker)
 
 ### Data Synchronization
@@ -103,27 +103,23 @@ Built on the blocks:
 - **Limits**: Rate limiting and usage tracking for shared repositories
 - **Organizations**: Multi-user orgs — invitations, member roles, org-billed subscriptions, and per-graph membership
 
-## MCP Client
+## Connect via MCP
 
-Model Context Protocol client for AI agent integration - [@robosystems/mcp](https://www.npmjs.com/package/@robosystems/mcp)
-
-**Usage**: `npx -y @robosystems/mcp@latest`
+Every graph is an MCP server — connect Claude, Claude Code, Cursor, or any MCP client directly, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header:
 
 ```
-{
-  "mcpServers": {
-    "robosystems": {
-      "command": "npx",
-      "args": ["-y", "@robosystems/mcp@latest"],
-      "env": {
-        "ROBOSYSTEMS_API_URL": "https://api.robosystems.ai",
-        "ROBOSYSTEMS_API_KEY": "rfs*",
-        "ROBOSYSTEMS_GRAPH_ID": "kg*"
-      }
-    }
-  }
-}
+https://api.robosystems.ai/v1/graphs/{graph_id}/mcp
 ```
+
+For example, in Claude Code:
+
+```
+claude mcp add --transport http robosystems-sec \
+  https://api.robosystems.ai/v1/graphs/sec/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp).
 
 ## Clients
 

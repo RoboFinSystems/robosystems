@@ -1,23 +1,20 @@
 ## Summary
 
-<!-- Brief description of what this PR does and why -->
+<!-- What this PR does and why. Ground it in the actual change, not the diff mechanics. -->
 
-## Key Accomplishments
+## Changes
+
+<!-- The substantive changes, grouped by area. Call out anything reviewers should look at closely. -->
 
 -
 
 ## Breaking Changes
 
-<!-- List any breaking changes, or "None" -->
+<!-- Breaking changes to the public API surface (GraphQL schema, operations envelope, REST shapes)
+     must be coordinated with the client SDKs (semver contracts) — say so explicitly here. -->
 
 None
 
-## Testing Notes
+## Testing
 
-- [ ] Tests pass locally (`just test-all`)
-- [ ] Linting passes (`just lint`)
-- [ ] Type checking passes (`just typecheck`)
-
-## Related Issues
-
-<!-- Closes #123, Fixes #456 -->
+<!-- How the change was verified. Run `just test-all` (unit tests + lint + format + typecheck) before opening. -->

@@ -6,9 +6,11 @@ releases but reads poorly for a milestone, where the story is what the version
 *is* rather than what changed since last Tuesday.
 
 To override it, commit the notes here as `v<version>.md` **before** dispatching
-`create-release.yml`. The file has to exist at the tagged ref, so it belongs in
-release prep alongside the version bump — not added afterwards. When the file is
-present the workflow uses it verbatim and skips the generated changelog, the
+`create-release.yml`. The file has to exist at the tagged ref, and
+`create-release.yml` bumps the version on `main`, cuts `release/<version>` from
+the result, and tags it in the same run — so the notes must be merged to `main`
+before the dispatch, not added to the release branch afterwards. When the file
+is present the workflow uses it verbatim and skips the generated changelog, the
 release-statistics section, and the generated-with footer.
 
 No file, no change: the release falls back to the generated changelog. Skipping

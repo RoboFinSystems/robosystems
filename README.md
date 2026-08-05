@@ -238,17 +238,35 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentatio
 
 RoboSystems provides comprehensive client libraries for building applications:
 
-### MCP (Model Context Protocol) Client
+### MCP (Model Context Protocol)
 
-AI integration client for connecting Claude and other LLMs to RoboSystems.
+Every graph is an MCP server. Connect Claude, Claude Code, Cursor, or any MCP client to the graph's URL — no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header.
 
-```bash
-npx -y @robosystems/mcp@latest
+**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector:
+
+```text
+URL:    https://api.robosystems.ai/v1/graphs/sec/mcp
+Header: X-API-Key: <your key>
 ```
 
-- **Features**: Claude Desktop integration, natural language queries, graph traversal, financial analysis
-- **Use Cases**: AI agents, chatbots, intelligent assistants, automated research
-- **Documentation**: [npm](https://www.npmjs.com/package/@robosystems/mcp) | [GitHub](https://github.com/RoboFinSystems/robosystems-mcp-client)
+**Claude Code** — one command:
+
+```bash
+claude mcp add --transport http robosystems-sec \
+  https://api.robosystems.ai/v1/graphs/sec/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+**Cursor / VS Code** — add to `mcp.json`:
+
+```json
+"robosystems-sec": {
+  "url": "https://api.robosystems.ai/v1/graphs/sec/mcp",
+  "headers": { "X-API-Key": "<your key>" }
+}
+```
+
+- **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport support
 
 ### TypeScript/JavaScript Client
 
