@@ -595,7 +595,7 @@ def create_mappings(
   if not structures:
     print("  ERROR: No mapping structure found")
     return 0
-  mapping_id = structures[0]["id"]
+  mapping_id = structures[0].id
 
   # Resolve rs-gaap qnames → element IDs via the library in the entity graph.
   # rs-gaap has ~2000 elements; list_elements caps at 1000 per page, so paginate.
@@ -671,7 +671,7 @@ def create_disclosure_notes(
     return 0, 0
 
   structures = client.list_structures(graph_id, block_type="coa_mapping")
-  mapping_id = structures[0]["id"] if structures else None
+  mapping_id = structures[0].id if structures else None
   if mapping_id is None:
     print("  ERROR: no coa_mapping structure — member multi-mapping skipped")
 
@@ -684,7 +684,7 @@ def create_disclosure_notes(
     payload = {
       "name": note.get("taxonomy_name", f"{struct_name} Extension"),
       "taxonomy_type": "reporting_extension",
-      "parent_taxonomy_id": rs_gaap["id"],
+      "parent_taxonomy_id": rs_gaap.id,
       "description": note.get("description"),
       "elements": [
         {
@@ -798,7 +798,7 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
 
     order = float(len(note["members"]) + 1)
     payload = {
-      "taxonomy_id": taxonomy["id"],
+      "taxonomy_id": taxonomy.id,
       "elements_to_add": [
         {
           "qname": member["qname"],
@@ -833,9 +833,9 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
       print(f"  ERROR: update-taxonomy-block failed: {e}")
       continue
 
-    block = client.get_information_block(graph_id, structure["id"]) or {}
+    block = client.get_information_block(graph_id, structure.id)
     rollups = [
-      r for r in (block.get("rules") or []) if r.get("rule_pattern") == "RollUp"
+      r for r in (block.rules if block else []) if r.rule_pattern == "RollUp"
     ]
     refreshed = any(
       member["qname"]
@@ -902,7 +902,7 @@ def create_text_block_notes(
     payload = {
       "name": note.get("taxonomy_name", f"{struct_name} Extension"),
       "taxonomy_type": "reporting_extension",
-      "parent_taxonomy_id": rs_gaap["id"],
+      "parent_taxonomy_id": rs_gaap.id,
       "description": note.get("description"),
       "elements": [
         {
@@ -1191,7 +1191,7 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
     payload = {
       "name": catalog.get("taxonomy_name", f"{struct_name} Extension"),
       "taxonomy_type": "reporting_extension",
-      "parent_taxonomy_id": rs_gaap["id"],
+      "parent_taxonomy_id": rs_gaap.id,
       "description": catalog.get("description"),
       "elements": [
         {
@@ -1276,7 +1276,7 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
     if structure is None:
       print(f"  ERROR: metric structure {struct_name!r} not found after create")
       continue
-    created.append({"structure_id": structure["id"], "name": struct_name})
+    created.append({"structure_id": structure.id, "name": struct_name})
     print(f"  {struct_name}: {len(metrics)} metric(s) authored")
 
   return created
@@ -1687,7 +1687,7 @@ def run_ai_mapping(graph_id: str) -> None:
   if not structures:
     print("  ERROR: No coa_mapping structure found — was the CoA taxonomy created?")
     return
-  mapping_id = structures[0]["id"]
+  mapping_id = structures[0].id
   print(f"  Mapping structure: {mapping_id}")
 
   try:
@@ -1835,15 +1835,15 @@ def create_schedules(
   # Find or create schedule taxonomy
   existing_taxonomies = client.list_taxonomies(graph_id, taxonomy_type="schedule")
   schedule_tax = next(
-    (t for t in existing_taxonomies if t["name"] == taxonomy_name), None
+    (t for t in existing_taxonomies if t.name == taxonomy_name), None
   )
   if schedule_tax:
-    taxonomy_id = schedule_tax["id"]
+    taxonomy_id = schedule_tax.id
     # Clean up prior-run schedules for idempotency
     existing_blocks = client.list_information_blocks(graph_id, block_type="schedule")
     for block in existing_blocks:
-      if block.get("taxonomy_name") == taxonomy_name:
-        client.delete_schedule(graph_id, block["id"])
+      if block.taxonomy_name == taxonomy_name:
+        client.delete_schedule(graph_id, block.id)
   else:
     result = client.create_taxonomy_block(
       graph_id,
@@ -2056,7 +2056,7 @@ def generate_annual_report(
   if not structures:
     print("  ERROR: No coa_mapping structure — was the CoA created?")
     return None
-  mapping_id = structures[0]["id"]
+  mapping_id = structures[0].id
 
   # Render against rs-gaap — the canonical reporting vocabulary. The
   # CoA was mapped CoA→rs-gaap above, and the Default Reporting Style's

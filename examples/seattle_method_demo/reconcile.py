@@ -123,32 +123,36 @@ class ReconciliationLine:
 # ``IncomeLossFromContinuingOperationsBeforeTax`` is a subtotal but its
 # qname doesn't follow ``*Current/*Noncurrent`` patterns); explicit
 # listing is more honest than fragile regex.
-_COVERAGE_SUBTOTALS: frozenset[str] = frozenset({
-  "mini:CurrentAssets",
-  "mini:NoncurrentAssets",
-  "mini:CurrentLiabilities",
-  "mini:NoncurrentLiabilities",
-  "mini:Liabilities",
-  "mini:Equity",
-  "mini:GrossProfitLoss",
-  "mini:OperatingExpenses",
-  "mini:OperatingIncomeLoss",
-  "mini:IncomeLossFromContinuingOperationsBeforeTax",
-  "mini:NetCashFlowOperatingActivities",
-  "mini:NetCashFlowInvestingActivities",
-  "mini:NetCashFlowFinancingActivities",
-})
+_COVERAGE_SUBTOTALS: frozenset[str] = frozenset(
+  {
+    "mini:CurrentAssets",
+    "mini:NoncurrentAssets",
+    "mini:CurrentLiabilities",
+    "mini:NoncurrentLiabilities",
+    "mini:Liabilities",
+    "mini:Equity",
+    "mini:GrossProfitLoss",
+    "mini:OperatingExpenses",
+    "mini:OperatingIncomeLoss",
+    "mini:IncomeLossFromContinuingOperationsBeforeTax",
+    "mini:NetCashFlowOperatingActivities",
+    "mini:NetCashFlowInvestingActivities",
+    "mini:NetCashFlowFinancingActivities",
+  }
+)
 
-_COVERAGE_GRANULARITY: frozenset[str] = frozenset({
-  "mini:Cash",
-  "mini:Equipment",
-  "mini:AccumulatedDepreciation",
-  "mini:PropertyPlantAndEquipmentGross",
-  "mini:TradePayables",
-  "mini:RawMaterial",
-  "mini:OtherSecuredLoans",
-  "mini:MaturesInOneYear",
-})
+_COVERAGE_GRANULARITY: frozenset[str] = frozenset(
+  {
+    "mini:Cash",
+    "mini:Equipment",
+    "mini:AccumulatedDepreciation",
+    "mini:PropertyPlantAndEquipmentGross",
+    "mini:TradePayables",
+    "mini:RawMaterial",
+    "mini:OtherSecuredLoans",
+    "mini:MaturesInOneYear",
+  }
+)
 
 
 def _categorize_missing(concept: str) -> str:
@@ -310,28 +314,28 @@ def _load_concept_totals_via_graphql(
   rs-gaap and other taxonomies on the graph are filtered out
   client-side (the GraphQL query returns every CoA account).
 
-  The trialBalance response shape per row:
-  ``{account_id, account_code (=qname), account_name, trait,
-  account_type, total_debits, total_credits, net_balance}``.
-  Values come back as floats in dollars; we multiply by 100 for
-  internal cents-precision.
+  The trialBalance rows are typed (SDK 1.0): ``account_id``,
+  ``account_code`` (=qname), ``account_name``, ``trait``,
+  ``account_type``, ``total_debits``, ``total_credits``,
+  ``net_balance``. Values come back as floats in dollars; we
+  multiply by 100 for internal cents-precision.
   """
   data = client.get_trial_balance(
     graph_id,
     start_date=period_start.isoformat(),
     end_date=period_end.isoformat(),
   )
-  rows = (data or {}).get("rows", []) or []
+  rows = data.rows if data else []
 
   totals: list[ConceptTotal] = []
   for r in rows:
     # ``account_code`` carries the mini qname (set at load time —
     # see ``load_taxonomy.build_element_payloads``).
-    qname = r.get("account_code") or ""
+    qname = r.account_code
     if not qname.startswith("mini:"):
       continue
-    dollars_dr = float(r.get("total_debits") or 0)
-    dollars_cr = float(r.get("total_credits") or 0)
+    dollars_dr = r.total_debits
+    dollars_cr = r.total_credits
     # Filter on "had activity" not "non-zero net" — Charlie's
     # Receivables has $8K DR + $8K CR netting to $0, but it's
     # legitimate activity that the diff should compare.
@@ -342,13 +346,13 @@ def _load_concept_totals_via_graphql(
     # directly — they live on the Element row. Derive period_type
     # from trait (instant for asset/liability/equity, duration for
     # revenue/expense). For balance_type, infer from trait + sign.
-    trait = r.get("trait")
+    trait = r.trait
     period_type = _period_type_from_trait(trait)
     balance_type = _balance_type_from_trait(trait)
     totals.append(
       ConceptTotal(
         qname=qname,
-        label=r.get("account_name") or qname,
+        label=r.account_name or qname,
         balance_type=balance_type,
         period_type=period_type,
         trait=trait,
@@ -526,9 +530,7 @@ def _build_diff(
     # but they aren't meaningful for our current-period reconciliation.
     if f.value_cents == 0 and f.period_end.year < 2024:
       continue
-    expected_by_concept_kind.setdefault(
-      (f.concept, f.period_kind), f.value_cents
-    )
+    expected_by_concept_kind.setdefault((f.concept, f.period_kind), f.value_cents)
 
   diff_lines: list[ReconciliationLine] = []
   for c in ours:
@@ -541,9 +543,7 @@ def _build_diff(
     # grown). Ours are debit-positive (credit-balance concepts come
     # in negative). Sign-flip credit-balance concepts.
     our_signed = (
-      c.debit_positive_cents
-      if c.balance_type == "debit"
-      else -c.debit_positive_cents
+      c.debit_positive_cents if c.balance_type == "debit" else -c.debit_positive_cents
     )
     diff_lines.append(
       ReconciliationLine(
@@ -594,10 +594,9 @@ def _load_rollforward_ibs_via_graphql(
 
   Uses ``LedgerClient.list_information_blocks(block_type='rollforward')``
   — the same query the frontend / MCP / any external client would
-  hit. The envelope's ``artifact.mechanics`` field carries the
-  typed ``RollforwardMechanics`` JSON; we re-validate it through
-  Pydantic to recover the typed shape (the hand-written GraphQL
-  parser returns ``dict[str, Any]``).
+  hit. The typed row's ``artifact.mechanics`` field carries the
+  ``RollforwardMechanics`` JSON (an untyped GraphQL JSON scalar);
+  we re-validate it through Pydantic to recover the typed shape.
 
   Note: the IB envelope's ``facts`` field is empty here (see
   ``information_block/rollforward.py:build_envelope``); the filter
@@ -606,12 +605,11 @@ def _load_rollforward_ibs_via_graphql(
   blocks = client.list_information_blocks(graph_id, block_type="rollforward")
   out: list[tuple[str, RollforwardMechanics]] = []
   for block in blocks or []:
-    artifact = block.get("artifact") or {}
-    raw_mechanics = artifact.get("mechanics")
+    raw_mechanics = block.artifact.mechanics
     if not raw_mechanics:
       continue
     mechanics = RollforwardMechanics.model_validate(raw_mechanics)
-    out.append((block.get("id", ""), mechanics))
+    out.append((block.id, mechanics))
   return out
 
 
@@ -699,9 +697,7 @@ def _anchor_totals(concepts: list[ConceptTotal]) -> dict[str, int]:
   # count. Without explicit RE, the implicit addition closes the
   # accounting equation for a startup's first-period reconciliation
   # (no opening RE to inherit).
-  has_explicit_re = any(
-    "retainedearnings" in (c.qname or "").lower() for c in concepts
-  )
+  has_explicit_re = any("retainedearnings" in (c.qname or "").lower() for c in concepts)
   if not has_explicit_re:
     totals["Total Liabilities & Equity"] += totals["Net Income"]
 
@@ -814,17 +810,17 @@ def render_markdown(report: ReconciliationReport) -> str:
       out.append("| Concept | Period | Charlie's value |")
       out.append("|---|---|---:|")
       for f in sorted(items, key=lambda x: x.concept):
-        out.append(
-          f"| `{f.concept}` | {f.period_kind} | {_fmt_cents(f.value_cents)} |"
-        )
+        out.append(f"| `{f.concept}` | {f.period_kind} | {_fmt_cents(f.value_cents)} |")
       out.append("")
 
   # Anchor totals
   out.append("## Four Anchor Totals")
   out.append("")
-  out.append("These four lines must match Charlie's PoC for the test to "
-             "pass. All amounts are debit-positive cents internally; "
-             "presentation flips signs per accounting convention.")
+  out.append(
+    "These four lines must match Charlie's PoC for the test to "
+    "pass. All amounts are debit-positive cents internally; "
+    "presentation flips signs per accounting convention."
+  )
   out.append("")
   totals = _anchor_totals(report.concept_totals)
   out.append("| Anchor | Our value |")
@@ -836,11 +832,13 @@ def render_markdown(report: ReconciliationReport) -> str:
   # Concept-level period totals
   out.append("## Concept-Level Period Totals")
   out.append("")
-  out.append("Every mini concept with non-zero activity in the period. "
-             "``Δ debit-positive`` is the period flow (Σ DR − Σ CR). For "
-             "instant/asset concepts this equals the period-ending "
-             "balance (Charlie's data starts from zero). For duration "
-             "concepts this is the period income/expense.")
+  out.append(
+    "Every mini concept with non-zero activity in the period. "
+    "``Δ debit-positive`` is the period flow (Σ DR − Σ CR). For "
+    "instant/asset concepts this equals the period-ending "
+    "balance (Charlie's data starts from zero). For duration "
+    "concepts this is the period income/expense."
+  )
   out.append("")
   out.append("| QName | Label | Trait | Period | Δ debit-positive |")
   out.append("|---|---|---|---|---:|")
@@ -856,11 +854,13 @@ def render_markdown(report: ReconciliationReport) -> str:
   # Rollforward attribution detail
   out.append("## Rollforward Attribution")
   out.append("")
-  out.append("Each rollforward IB decomposes its BS source's period "
-             "delta across declared TDC filters. Where ``Σ filters == "
-             "Δ BS``, the rollforward is balanced (residual = 0). A "
-             "non-zero residual indicates either an unattributed flow "
-             "or a phantom TDC in the source data (logged at author time).")
+  out.append(
+    "Each rollforward IB decomposes its BS source's period "
+    "delta across declared TDC filters. Where ``Σ filters == "
+    "Δ BS``, the rollforward is balanced (residual = 0). A "
+    "non-zero residual indicates either an unattributed flow "
+    "or a phantom TDC in the source data (logged at author time)."
+  )
   out.append("")
   for rf in report.rollforward_results:
     out.append(f"### {rf.bs_label} ({rf.bs_qname})")
@@ -890,53 +890,67 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("")
   out.append("**Their data quality** (source CSV inconsistencies):")
   out.append("")
-  out.append("- **JE-205** — Description \"Payment for contractor\" but "
-             "TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount`. "
-             "Contractor services aren't inventory; vocabulary misuse.")
-  out.append("- **JE-209** — TDC `mini:PaymentOfInterest` on the Cash "
-             "line is a typo for `mini:PaymentInterest` (the canonical "
-             "mini.xsd concept name). `ingest_transactions.py::"
-             "_KNOWN_TDC_ALIASES` normalizes it at ingest time so the "
-             "rollforward filter engine matches; logged as a warning "
-             "per JE so the substitution stays transparent. Note that "
-             "`mini:DecreaseFromPaymentOfInterest` (the AccruedExpenses-"
-             "side TDC) keeps the \"Of\" — Charlie's naming is "
-             "internally inconsistent.")
-  out.append("- **JE-226** — Income tax accrual ($400) but TDC is "
-             "`mini:InterestAccrued` instead of `IncomeTaxAccrued`. "
-             "Copy-paste-style bug from the JE-210 interest pattern.")
+  out.append(
+    '- **JE-205** — Description "Payment for contractor" but '
+    "TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount`. "
+    "Contractor services aren't inventory; vocabulary misuse."
+  )
+  out.append(
+    "- **JE-209** — TDC `mini:PaymentOfInterest` on the Cash "
+    "line is a typo for `mini:PaymentInterest` (the canonical "
+    "mini.xsd concept name). `ingest_transactions.py::"
+    "_KNOWN_TDC_ALIASES` normalizes it at ingest time so the "
+    "rollforward filter engine matches; logged as a warning "
+    "per JE so the substitution stays transparent. Note that "
+    "`mini:DecreaseFromPaymentOfInterest` (the AccruedExpenses-"
+    'side TDC) keeps the "Of" — Charlie\'s naming is '
+    "internally inconsistent."
+  )
+  out.append(
+    "- **JE-226** — Income tax accrual ($400) but TDC is "
+    "`mini:InterestAccrued` instead of `IncomeTaxAccrued`. "
+    "Copy-paste-style bug from the JE-210 interest pattern."
+  )
   out.append("")
   out.append("**Methodology gap** (architecturally aligned, semantically distinct):")
   out.append("")
-  out.append("- **JE-225** — \"Write off of PPE\" with `Amount = 0` on "
-             "both lines. Boundary test case. Our GL handler rejects "
-             "nil-amount entries (`must have non-zero D or C`); Charlie's "
-             "system likely creates `$0` facts. Reconciliation delta is "
-             "`$0` either way; the four anchor totals are unaffected.")
-  out.append("- **rs-gaap library subset** — Two flow concepts in "
-             "`mappings.py` don't exist in our currently-loaded rs-gaap "
-             "library: `rs-gaap:InterestPaidNet` (mapped through to the "
-             "closest available `rs-gaap:InterestExpense`) and "
-             "`rs-gaap:StockIssuedDuringPeriodValueNewIssues` (mapped "
-             "through to `rs-gaap:ProceedsFromIssuanceOfCommonStock`). "
-             "Approximation; future library expansion closes the gap.")
+  out.append(
+    '- **JE-225** — "Write off of PPE" with `Amount = 0` on '
+    "both lines. Boundary test case. Our GL handler rejects "
+    "nil-amount entries (`must have non-zero D or C`); Charlie's "
+    "system likely creates `$0` facts. Reconciliation delta is "
+    "`$0` either way; the four anchor totals are unaffected."
+  )
+  out.append(
+    "- **rs-gaap library subset** — Two flow concepts in "
+    "`mappings.py` don't exist in our currently-loaded rs-gaap "
+    "library: `rs-gaap:InterestPaidNet` (mapped through to the "
+    "closest available `rs-gaap:InterestExpense`) and "
+    "`rs-gaap:StockIssuedDuringPeriodValueNewIssues` (mapped "
+    "through to `rs-gaap:ProceedsFromIssuanceOfCommonStock`). "
+    "Approximation; future library expansion closes the gap."
+  )
   out.append("")
   out.append("**Our bug**: none identified.")
   out.append("")
-  out.append("**Matching**: see Anchor Totals table above + line-by-line "
-             "concept totals. Compare manually against Charlie's PoC "
-             "rendering at the expected-output URL — an automated HTML "
-             "diff is a possible future enhancement.")
+  out.append(
+    "**Matching**: see Anchor Totals table above + line-by-line "
+    "concept totals. Compare manually against Charlie's PoC "
+    "rendering at the expected-output URL — an automated HTML "
+    "diff is a possible future enhancement."
+  )
   out.append("")
 
   # Footer
   out.append("---")
   out.append("")
-  out.append("*Reconciliation produced by "
-             "`examples/seattle_method_demo/reconcile.py` against the "
-             "rollforward filter engine. See "
-             "`examples/seattle_method_demo/README.md` for the full "
-             "methodology and the architectural pattern this test validates.*")
+  out.append(
+    "*Reconciliation produced by "
+    "`examples/seattle_method_demo/reconcile.py` against the "
+    "rollforward filter engine. See "
+    "`examples/seattle_method_demo/README.md` for the full "
+    "methodology and the architectural pattern this test validates.*"
+  )
 
   return "\n".join(out) + "\n"
 
@@ -1015,7 +1029,9 @@ def main() -> None:
   concepts = _load_concept_totals_via_graphql(
     client, graph_id, args.period_start, args.period_end
   )
-  print(f"  Loaded {len(concepts)} concept(s) with period activity (via GraphQL trialBalance)")
+  print(
+    f"  Loaded {len(concepts)} concept(s) with period activity (via GraphQL trialBalance)"
+  )
   bs_label_by_qname = {c.qname: c.label for c in concepts}
 
   rollforwards = _load_rollforward_ibs_via_graphql(client, graph_id)

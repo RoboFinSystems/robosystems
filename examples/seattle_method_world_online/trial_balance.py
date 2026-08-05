@@ -87,25 +87,24 @@ def _fmt(v: float | None) -> str:
   return f"$({abs(v):,.2f})" if v < 0 else f"${v:,.2f}"
 
 
-def render(graph_id: str, rows: list[dict]) -> str:
+def render(graph_id: str, rows: list) -> str:
   # Keep only mini CoA accounts with activity (the graph also carries
   # the rs-gaap library; filter it out client-side, as reconcile does).
   mini_rows = [
     r
     for r in rows
-    if (r.get("account_code") or "").startswith("mini:")
-    and (float(r.get("total_debits") or 0) or float(r.get("total_credits") or 0))
+    if r.account_code.startswith("mini:") and (r.total_debits or r.total_credits)
   ]
   mini_rows.sort(
     key=lambda r: (
-      _TRAIT_ORDER.get(r.get("trait") or "", 99),
-      r.get("account_code") or "",
+      _TRAIT_ORDER.get(r.trait or "", 99),
+      r.account_code,
     )
   )
 
-  total_dr = sum(float(r.get("total_debits") or 0) for r in mini_rows)
-  total_cr = sum(float(r.get("total_credits") or 0) for r in mini_rows)
-  total_net = sum(float(r.get("net_balance") or 0) for r in mini_rows)
+  total_dr = sum(r.total_debits for r in mini_rows)
+  total_cr = sum(r.total_credits for r in mini_rows)
+  total_net = sum(r.net_balance for r in mini_rows)
   balances = abs(total_dr - total_cr) < 0.01
 
   lines = [
@@ -125,12 +124,12 @@ def render(graph_id: str, rows: list[dict]) -> str:
     "|---|---|---:|---:|---:|",
   ]
   for r in mini_rows:
-    name = r.get("account_name") or r.get("account_code")
+    name = r.account_name or r.account_code
     lines.append(
-      f"| {name} (`{r.get('account_code')}`) | {r.get('trait') or '—'} | "
-      f"{_fmt(float(r.get('total_debits') or 0))} | "
-      f"{_fmt(float(r.get('total_credits') or 0))} | "
-      f"{_fmt(float(r.get('net_balance') or 0))} |"
+      f"| {name} (`{r.account_code}`) | {r.trait or '—'} | "
+      f"{_fmt(r.total_debits)} | "
+      f"{_fmt(r.total_credits)} | "
+      f"{_fmt(r.net_balance)} |"
     )
   lines += [
     f"| **Total** | | **{_fmt(total_dr)}** | **{_fmt(total_cr)}** | "
@@ -163,7 +162,7 @@ def main() -> None:
   graph_id = _resolve_graph_id(args.graph_id)
   client = _get_ledger_client()
   data = client.get_trial_balance(graph_id, start_date=TB_START, end_date=TB_END)
-  rows = (data or {}).get("rows", []) or []
+  rows = data.rows if data else []
   if not rows:
     raise SystemExit(f"trialBalance returned no rows for graph {graph_id}.")
 
