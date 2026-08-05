@@ -97,6 +97,39 @@ class TestUserAPIKeyModel:
     # Verify security audit logging
     mock_audit_logger.log_security_event.assert_called_once()
 
+  @patch("robosystems.models.core.user.user_api_key.SecurityAuditLogger")
+  def test_create_graph_scoped_api_key(self, mock_audit_logger, db_session):
+    """Graph-scoped keys store the scope and mint the rfsc prefix."""
+    user = User.create(
+      email="scopedkey@example.com",
+      name="Scoped Key User",
+      password_hash="hashed_password",
+      session=db_session,
+    )
+
+    graph_id = "kg" + "c" * 16
+    api_key, plain_key = UserAPIKey.create(
+      user_id=user.id,
+      name="Claude connector",
+      session=db_session,
+      graph_id=graph_id,
+    )
+
+    assert api_key.graph_id == graph_id
+    assert plain_key.startswith("rfsc")
+    assert len(plain_key) == 68  # rfsc + 64 hex chars
+    assert api_key.prefix == plain_key[:8]
+
+    # Unscoped keys are unchanged
+    account_key, account_plain = UserAPIKey.create(
+      user_id=user.id,
+      name="Account key",
+      session=db_session,
+    )
+    assert account_key.graph_id is None
+    assert account_plain.startswith("rfs")
+    assert len(account_plain) == 67
+
   def test_create_api_key_without_session(self):
     """Test that creating API key without session raises error."""
     with pytest.raises(ValueError, match="Session is required"):

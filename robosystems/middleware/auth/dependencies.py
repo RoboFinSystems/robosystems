@@ -474,6 +474,75 @@ async def get_current_user_with_graph(
   )
 
 
+async def get_current_user_with_graph_or_url_token(
+  request: Request,
+  graph_id: str,
+  api_key: str = Security(API_KEY_HEADER),
+  token: str | None = Query(
+    None,
+    description="Graph-scoped API key carried in the URL, for MCP connector "
+    "clients that cannot send custom headers",
+  ),
+) -> User:
+  """
+  Graph authentication that additionally accepts a graph-scoped API key via
+  the ``token`` query parameter.
+
+  Built for the MCP Streamable HTTP endpoint: claude.ai / Claude Desktop
+  custom connectors cannot send custom headers, so the connector URL carries a
+  graph-scoped key instead. Header and JWT authentication take precedence and
+  behave exactly like ``get_current_user_with_graph``; the query parameter is
+  consulted only when neither is present, and it honors only keys whose scope
+  covers the URL's graph — an account-wide key in a URL is rejected outright,
+  so the account credential can never be the one that travels in a URL.
+
+  ``token`` is in the sensitive-query-params redaction list
+  (``middleware/logging.py``), so it never appears in logged URLs.
+  """
+  authorization = request.headers.get("authorization")
+  has_header_auth = bool(api_key) or bool(
+    authorization and authorization.startswith("Bearer ")
+  )
+
+  if has_header_auth or not token:
+    # Normal path — including the no-credentials 401.
+    return await get_current_user_with_graph(request, graph_id, api_key)
+
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  endpoint = str(request.url.path)
+
+  user = validate_api_key_with_graph(token, graph_id, require_scoped=True)
+  if user:
+    _stash_api_key_identity(request, token)
+    SecurityAuditLogger.log_auth_success(
+      user_id=str(user.id),
+      ip_address=client_ip,
+      user_agent=user_agent,
+      auth_method="api_key_url",
+    )
+    return user
+
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.API_KEY_INVALID,
+    ip_address=client_ip,
+    user_agent=user_agent,
+    endpoint=endpoint,
+    details={
+      "api_key_prefix": token[:8] if token else "",
+      "graph_id": graph_id,
+      "carriage": "url_token",
+    },
+    risk_level="high",
+  )
+  # Same deliberate conflation as the header path: no validity oracle.
+  raise HTTPException(
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail="Invalid API key or access denied to graph",
+    headers={"WWW-Authenticate": "ApiKey"},
+  )
+
+
 def require_graph_write_role(user_id: str, graph_id: str) -> None:
   """Assert the user holds a write role (member/admin) on the graph.
 
