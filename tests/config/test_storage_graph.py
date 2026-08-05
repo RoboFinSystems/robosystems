@@ -10,6 +10,7 @@ from robosystems.config.storage.graph import (
   get_backup_metadata_key,
   get_backup_prefix,
   get_backup_uri,
+  get_download_extension,
   get_instance_backup_key,
   get_instance_backup_prefix,
   get_instance_backup_uri,
@@ -157,6 +158,37 @@ class TestSharedRepoKeys:
   def test_get_shared_repo_backup_prefix_with_graph(self):
     result = get_shared_repo_backup_prefix("sec")
     assert result == "shared-repositories/backups/sec/"
+
+
+class TestDownloadExtension:
+  """Tests for deriving the served extension from a stored object key."""
+
+  def test_full_dump_zip(self):
+    key = "graph-backups/databases/kg1/full/backup-20240115_123045.lbug.zip"
+    assert get_download_extension(key) == ".lbug.zip"
+
+  def test_r2_zstd_snapshot(self):
+    assert get_download_extension("downloads/sec/sec.lbug.zst") == ".lbug.zst"
+
+  def test_raw_lbug(self):
+    assert get_download_extension("downloads/sec/sec.lbug") == ".lbug"
+
+  def test_compound_extension_wins_over_its_own_suffix(self):
+    """ ".lbug.zip" must not be truncated to ".zip" by an earlier match."""
+    for key, expected in (
+      ("a/b/backup.csv.zip", ".csv.zip"),
+      ("a/b/backup.json.zip", ".json.zip"),
+      ("a/b/backup.parquet.zip", ".parquet.zip"),
+      ("a/b/backup.lbug.gz", ".lbug.gz"),
+    ):
+      assert get_download_extension(key) == expected
+
+  def test_uppercase_key_matches(self):
+    assert get_download_extension("A/B/BACKUP.LBUG.ZST") == ".lbug.zst"
+
+  def test_unknown_key_falls_back_to_default(self):
+    assert get_download_extension("a/b/backup.bin") == ".zip"
+    assert get_download_extension("a/b/backup.bin", default=".lbug") == ".lbug"
 
 
 class TestURIBuilders:

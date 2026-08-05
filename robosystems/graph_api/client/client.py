@@ -1479,8 +1479,8 @@ class GraphClient(BaseGraphClient):
         backup_format: Backup format (only 'full_dump' supported)
         compression: Enable compression
         encryption: Enable encryption
-        backup_type: "standard", "replica", or "shared_repository"
-        s3_destination: Target S3 location (required for replica/shared_repository)
+        backup_type: "standard", "replica", "duckdb_staging", or "r2_download"
+        s3_destination: Target S3 location (required for all non-standard types)
         checkpoint: Run CHECKPOINT before backup
         vacuum: Run VACUUM to compact database before backup (DuckDB only)
 
@@ -1527,8 +1527,8 @@ class GraphClient(BaseGraphClient):
         compression: Enable compression
         encryption: Enable encryption
         timeout: Maximum time to wait for completion (seconds)
-        backup_type: "standard", "replica", or "shared_repository"
-        s3_destination: Target S3 location (required for replica/shared_repository)
+        backup_type: "standard", "replica", "duckdb_staging", or "r2_download"
+        s3_destination: Target S3 location (required for all non-standard types)
         checkpoint: Run CHECKPOINT before backup
         vacuum: Run VACUUM to compact database before backup (DuckDB only)
 

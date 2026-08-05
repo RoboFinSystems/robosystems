@@ -65,6 +65,15 @@ class BackupResponse(BaseModel):
   encryption_enabled: bool
   compression_enabled: bool
   allow_export: bool
+  download_extension: str | None = Field(
+    None,
+    description=(
+      "Extension the download will carry, and therefore how to unpack it: "
+      "'.lbug.zip' is a ZIP holding the LadybugDB database file, '.lbug.zst' "
+      "is zstd-compressed (`zstd -d`). Null when the backup is encrypted and "
+      "so cannot be downloaded."
+    ),
+  )
   created_at: str
   completed_at: str | None
   expires_at: str | None

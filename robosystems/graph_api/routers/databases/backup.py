@@ -7,8 +7,8 @@ LadybugDB databases.
 Supports four backup types:
 - standard: Existing BackupManager flow (ZIP, optional encrypt, S3 upload)
 - replica: Raw .lbug upload to S3 via OnInstanceBackupService (for replica fleet download)
-- shared_repository: Compressed tar.gz to S3 via OnInstanceBackupService
 - duckdb_staging: Raw .duckdb upload to S3 via OnInstanceBackupService
+- r2_download: zstd-compressed .lbug.zst to R2 via OnInstanceBackupService
 """
 
 from datetime import UTC, datetime
@@ -47,14 +47,11 @@ async def perform_backup(
   Perform the actual backup in the background.
   Updates task status for monitoring.
 
-  Routes to OnInstanceBackupService for replica/shared_repository/duckdb_staging types,
+  Routes to OnInstanceBackupService for replica/duckdb_staging/r2_download types,
   or to BackupManager for standard backups.
   """
   try:
-    if (
-      backup_type in ("replica", "shared_repository", "duckdb_staging", "r2_download")
-      and s3_destination
-    ):
+    if backup_type in ("replica", "duckdb_staging", "r2_download") and s3_destination:
       # On-instance backup: CHECKPOINT + direct S3 upload
       from robosystems.graph_api.core.backup_service import OnInstanceBackupService
 
@@ -138,10 +135,10 @@ async def create_backup(
   Backup types:
   - **standard**: Full dump ZIP, optionally encrypted, uploaded to S3
   - **replica**: Raw .lbug uploaded to S3 (downloaded by replica fleet at startup)
-  - **shared_repository**: Compressed tar.gz uploaded to S3 (for subscriber downloads)
   - **duckdb_staging**: Raw .duckdb uploaded to S3 (for local dev / analytics)
+  - **r2_download**: zstd-compressed .lbug.zst uploaded to R2 (subscriber downloads)
 
-  For replica/shared_repository/duckdb_staging types, s3_destination is required.
+  For replica/duckdb_staging/r2_download types, s3_destination is required.
   """
   if ladybug_service.read_only:
     raise HTTPException(
@@ -178,8 +175,7 @@ async def create_backup(
 
   # Validate s3_destination for non-standard backup types
   if (
-    request.backup_type
-    in ("replica", "shared_repository", "duckdb_staging", "r2_download")
+    request.backup_type in ("replica", "duckdb_staging", "r2_download")
     and not request.s3_destination
   ):
     raise HTTPException(

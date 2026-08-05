@@ -6,17 +6,14 @@ uploading results to S3 via multipart upload with progress tracking.
 All heavy work (CHECKPOINT, compression, upload) happens on-instance,
 avoiding the need to transfer large databases over HTTP.
 
-Supports five backup types:
+Supports four backup types:
 - replica: Raw .lbug upload to S3 (downloaded by replica fleet at startup)
-- shared_repository: Compressed tar.gz to S3 (legacy, prefer r2_download)
 - duckdb_staging: Raw .duckdb upload to S3 (for local dev / analytics)
 - r2_download: zstd-compressed .lbug.zst upload to Cloudflare R2 (zero-egress subscriber downloads)
 - standard: ZIP + optional encrypt to S3 (existing user backup flow)
 """
 
-import hashlib
 import subprocess
-import tarfile
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,9 +67,9 @@ class OnInstanceBackupService:
     Args:
         task_id: Background task ID for progress tracking
         graph_id: Database identifier
-        backup_type: "replica", "shared_repository", or "standard"
+        backup_type: "replica", "duckdb_staging", or "r2_download"
         s3_destination: Dict with "bucket" and "key"
-        compression: Enable compression (for shared_repository/standard)
+        compression: Enable compression (for r2_download/standard)
         encryption: Enable encryption (for standard only)
         checkpoint: Run CHECKPOINT before backup
 
@@ -147,10 +144,6 @@ class OnInstanceBackupService:
           task_id,
           db_size,
           s3_client=self._get_r2_client(),
-        )
-      elif backup_type == "shared_repository":
-        result = self._upload_shared_repository(
-          db_path, bucket, key, task_id, graph_id, db_size
         )
       else:
         raise ValueError(f"Unsupported on-instance backup type: {backup_type}")
@@ -330,7 +323,8 @@ class OnInstanceBackupService:
     if s3_client is None:
       s3_client = self._get_r2_client()
 
-    # Use EBS-backed temp dir (same pattern as _upload_shared_repository)
+    # Use EBS-backed temp dir, not /tmp (tmpfs/RAM-backed and too small for
+    # compressing multi-GB database files)
     ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
     ebs_temp_dir.mkdir(parents=True, exist_ok=True)
     self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
@@ -409,95 +403,6 @@ class OnInstanceBackupService:
       "original_size_bytes": db_size,
       "compressed_size_bytes": uploaded_size,
       "compression_ratio": round(compression_ratio, 3),
-      "compress_time_seconds": round(compress_time, 1),
-      "uploaded_at": datetime.now(UTC).isoformat(),
-    }
-
-  def _upload_shared_repository(
-    self,
-    db_path: Path,
-    bucket: str,
-    key: str,
-    task_id: str,
-    graph_id: str,
-    db_size: int,
-  ) -> dict[str, Any]:
-    """Create tar.gz in temp dir and upload to S3 for subscriber downloads."""
-    logger.info(f"[Task {task_id}] Creating tar.gz backup for shared repository")
-
-    s3_client = self._get_s3_client()
-
-    # Use EBS-backed directory instead of /tmp (which is tmpfs/RAM-backed
-    # and too small for compressing multi-GB database files).
-    # LBUG_DATABASE_PATH is /app/data/lbug-dbs (inside container), mounted
-    # from the EBS volume. Parent (/app/data) has the full EBS capacity.
-    ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
-    ebs_temp_dir.mkdir(parents=True, exist_ok=True)
-
-    # Clean up stale temp dirs from crashed backups (TemporaryDirectory
-    # auto-cleans on normal exit but not on process kill/OOM)
-    self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
-
-    with tempfile.TemporaryDirectory(dir=ebs_temp_dir) as temp_dir:
-      temp_path = Path(temp_dir)
-      backup_file = temp_path / f"{graph_id}.tar.gz"
-
-      # Stream compress the database
-      logger.info(f"[Task {task_id}] Compressing database...")
-      compress_start = datetime.now(UTC)
-      with tarfile.open(backup_file, "w:gz", compresslevel=6) as tar:
-        tar.add(db_path, arcname=db_path.name)
-      compress_time = (datetime.now(UTC) - compress_start).total_seconds()
-
-      compressed_size = backup_file.stat().st_size
-      compression_ratio = compressed_size / max(db_size, 1)
-
-      logger.info(
-        f"[Task {task_id}] Compression complete: "
-        f"{db_size / (1024**3):.2f}GB -> {compressed_size / (1024**3):.2f}GB "
-        f"({compression_ratio:.1%}) in {compress_time:.1f}s"
-      )
-
-      # Calculate checksum
-      sha256 = hashlib.sha256()
-      with open(backup_file, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-          sha256.update(chunk)
-      checksum = sha256.hexdigest()
-
-      # Upload compressed backup to S3
-      logger.info(f"[Task {task_id}] Uploading to s3://{bucket}/{key}")
-      transfer_config = TransferConfig(
-        multipart_chunksize=S3_MULTIPART_CHUNKSIZE,
-        multipart_threshold=S3_MULTIPART_THRESHOLD,
-        max_concurrency=S3_MAX_CONCURRENCY,
-      )
-
-      s3_client.upload_file(
-        str(backup_file),
-        bucket,
-        key,
-        Config=transfer_config,
-        ExtraArgs={
-          "Metadata": {
-            "backup_type": "shared_repository",
-            "checksum": checksum,
-            "created_at": datetime.now(UTC).isoformat(),
-            "original_size": str(db_size),
-          },
-          "StorageClass": "STANDARD",
-        },
-      )
-
-    return {
-      "status": "success",
-      "s3_uri": f"s3://{bucket}/{key}",
-      "s3_bucket": bucket,
-      "s3_key": key,
-      "original_size_bytes": db_size,
-      "compressed_size_bytes": compressed_size,
-      "compression_ratio": round(compression_ratio, 3),
-      "checksum": checksum,
       "compress_time_seconds": round(compress_time, 1),
       "uploaded_at": datetime.now(UTC).isoformat(),
     }
