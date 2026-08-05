@@ -25,13 +25,6 @@ Every graph is an MCP server. The recommended way to connect is the **remote MCP
 
 Your API key goes in the same `X-API-Key` header the REST API uses. Keys are account-wide — the URL picks the graph — so multi-graph users add one connector per graph with the same key.
 
-**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector:
-
-```text
-URL:    https://api.robosystems.ai/v1/graphs/sec/mcp
-Header: X-API-Key: <your key>
-```
-
 **Claude Code** — one command:
 
 ```bash
@@ -48,6 +41,8 @@ claude mcp add --transport http robosystems-sec \
   "headers": { "X-API-Key": "<your key>" }
 }
 ```
+
+**Claude (claude.ai / Desktop)** — not yet: custom connectors currently authenticate with OAuth only — the Add custom connector dialog has no header field, so it cannot send an API key. Use Claude Code or Cursor; on Claude Desktop the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) works today in `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries — a `url` entry is skipped as invalid).
 
 The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-18), streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
 
