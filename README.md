@@ -240,7 +240,7 @@ RoboSystems provides comprehensive client libraries for building applications:
 
 ### MCP (Model Context Protocol)
 
-Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header.
+Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header, or rides inside a generated connector URL for clients that cannot send headers.
 
 **Claude Code** — one command:
 
@@ -259,9 +259,9 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — custom connectors currently authenticate with OAuth only (no API-key header support), so they can't connect yet. Use Claude Code or Cursor; on Claude Desktop the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) works today.
+**Claude (claude.ai / Desktop)** — generate a connector URL from your Connect page in the app and paste it into Settings → Connectors → Add custom connector. The URL carries its own graph-scoped API key (Claude's connectors can't send custom headers), valid only for that graph and revocable anytime from Settings → API Keys.
 
-- **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport support
+- **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
 
 ### TypeScript/JavaScript Client
 
