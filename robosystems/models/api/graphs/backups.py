@@ -138,21 +138,21 @@ class BackupDownloadUrlResponse(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "download_url": "https://s3.amazonaws.com/robosystems-backups/kg1a2b3c4d5/backup_20240115_100000.lbug.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg1a2b3c4d5/full/backup-20240115_100000.lbug.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 3600,
           "expires_at": 1705315200.0,
           "backup_id": "bk1a2b3c4d5",
           "graph_id": "kg1a2b3c4d5",
         },
         {
-          "download_url": "https://s3.amazonaws.com/robosystems-backups/kg9f8e7d6c5/backup_20240114_183000.lbug.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg9f8e7d6c5/full/backup-20240114_183000.lbug.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 86400,
           "expires_at": 1705401600.0,
           "backup_id": "bk9f8e7d6c5",
           "graph_id": "kg9f8e7d6c5",
         },
         {
-          "download_url": "https://s3.amazonaws.com/robosystems-backups/sec/backup_20240115_120000.lbug.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://account.r2.cloudflarestorage.com/robosystems-downloads/downloads/sec/sec.lbug.zst?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 300,
           "expires_at": 1705314900.0,
           "backup_id": "bksec123456",

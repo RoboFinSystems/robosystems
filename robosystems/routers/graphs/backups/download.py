@@ -41,7 +41,14 @@ router = APIRouter()
   response_model=BackupDownloadUrlResponse,
   operation_id="getBackupDownloadUrl",
   summary="Get temporary download URL for backup",
-  description="Generate a temporary download URL for a backup (unencrypted, compressed .lbug files only)",
+  description=(
+    "Generate a temporary download URL for a backup (unencrypted backups only). "
+    "Backups of your own graphs download as a `.zip` containing the LadybugDB "
+    "database file `{graph_id}.lbug`; shared repository snapshots download as a "
+    "single zstd-compressed `.lbug.zst`. Decompress the latter with "
+    "`zstd -d <file>.lbug.zst` (install zstd first: `brew install zstd`, "
+    "`apt-get install zstd`, or `dnf install zstd`) — no `--long` flag is needed."
+  ),
   status_code=status.HTTP_200_OK,
   responses={
     200: {"description": "Download URL generated successfully"},
@@ -76,6 +83,16 @@ async def get_backup_download_url(
   - Only unencrypted backups can be downloaded
   - Backup must be in full_dump format (complete .lbug file)
   - File will be compressed
+
+  Unpacking the download:
+  - `{graph_id}_{timestamp}.zip` (backups of a graph you own) — a standard ZIP
+    archive holding the LadybugDB database file `{graph_id}.lbug`; `unzip` it.
+  - `{graph_id}_{timestamp}.lbug.zst` (shared repository snapshots) — a single
+    zstd-compressed LadybugDB file. Install zstd (`brew install zstd` on macOS,
+    `apt-get install zstd` on Debian/Ubuntu, `dnf install zstd` on
+    Amazon Linux/Fedora), then run `zstd -d <file>.lbug.zst`. Compression uses a
+    128MB long window, so plain `zstd -d` suffices — no `--long` flag required.
+    Allow disk for roughly 2x the download size.
 
   Args:
     backup_id: Backup identifier
