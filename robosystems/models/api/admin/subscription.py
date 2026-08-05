@@ -37,7 +37,7 @@ class SubscriptionResponse(BaseModel):
   has_payment_method: bool
   invoice_billing_enabled: bool
   resource_type: str
-  resource_id: str
+  resource_id: str | None
   plan_name: str
   billing_interval: str
   base_price_cents: int
