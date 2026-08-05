@@ -43,6 +43,11 @@ class UserAPIKey(Model):
   prefix = Column(
     String, nullable=False, index=True
   )  # First few chars for identification
+  # Scope restriction: NULL = account-wide (full historical behavior); a value
+  # restricts the key to that graph (and its subgraphs). Scoped keys are the
+  # only kind accepted via the MCP endpoint's URL query parameter, and are
+  # rejected on endpoints that carry no graph context.
+  graph_id = Column(String, nullable=True, index=True)
   is_active = Column(Boolean, default=True, nullable=False)
   description = Column(Text, nullable=True)  # Optional description
   last_used_at = Column(DateTime, nullable=True)
@@ -77,6 +82,7 @@ class UserAPIKey(Model):
     description: str | None = None,
     expires_at: datetime | None = None,
     session: Session | None = None,
+    graph_id: str | None = None,
   ) -> tuple["UserAPIKey", str]:
     """
     Create a new API key for a user with secure bcrypt hashing.
@@ -84,8 +90,12 @@ class UserAPIKey(Model):
     Returns:
         tuple: (UserAPIKey instance, plain text key)
     """
-    # Generate a cryptographically secure API key
-    plain_key = f"rfs{secrets.token_hex(32)}"
+    # Generate a cryptographically secure API key. Graph-scoped keys get a
+    # distinguishable prefix for human/incident legibility; the authoritative
+    # scope check is always the row's graph_id, never the prefix.
+    plain_key = (
+      f"rfsc{secrets.token_hex(32)}" if graph_id else f"rfs{secrets.token_hex(32)}"
+    )
 
     # Hash the key using bcrypt with high work factor
     key_hash = cls._hash_api_key(plain_key)
@@ -104,6 +114,7 @@ class UserAPIKey(Model):
       key_hash=key_hash,
       key_fingerprint=key_fingerprint,
       prefix=prefix,
+      graph_id=graph_id,
     )
 
     if session is None:
@@ -122,6 +133,7 @@ class UserAPIKey(Model):
           "user_id": user_id,
           "api_key_id": user_api_key.id,
           "key_prefix": prefix,
+          "graph_scope": graph_id,
         },
         risk_level="low",
       )

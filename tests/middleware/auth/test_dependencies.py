@@ -1378,3 +1378,111 @@ class TestApiKeyIdentityStash:
 
     assert result == mock_user
     assert mock_request.state.api_key_prefix == api_key[:8]
+
+
+class TestGetCurrentUserWithGraphOrUrlToken:
+  """The MCP URL-token carriage rule: header wins, query honors scoped keys only."""
+
+  def _request(self, headers=None):
+    mock_request = Mock(spec=Request)
+    mock_request.headers = headers or {}
+    mock_request.client = Mock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.url = Mock()
+    mock_request.url.path = "/v1/graphs/kg123/mcp"
+    mock_request.state = Mock()
+    return mock_request
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.get_current_user_with_graph")
+  async def test_header_auth_takes_precedence(self, mock_delegate):
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_graph_or_url_token,
+    )
+
+    mock_user = Mock(spec=User)
+    mock_delegate.return_value = mock_user
+    request = self._request()
+
+    result = await get_current_user_with_graph_or_url_token(
+      request, "kg123", api_key="rfs" + "a" * 64, token="rfsc" + "b" * 64
+    )
+
+    assert result == mock_user
+    mock_delegate.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.validate_api_key_with_graph")
+  async def test_url_token_authenticates_scoped_key(self, mock_validate):
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_graph_or_url_token,
+    )
+
+    mock_user = Mock(spec=User)
+    mock_user.id = "user123"
+    mock_validate.return_value = mock_user
+    request = self._request()
+
+    token = "rfsc" + "b" * 64
+    result = await get_current_user_with_graph_or_url_token(
+      request, "kg123", api_key=None, token=token
+    )
+
+    assert result == mock_user
+    mock_validate.assert_called_once_with(token, "kg123", require_scoped=True)
+    assert request.state.api_key_prefix == token[:8]
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.validate_api_key_with_graph")
+  async def test_url_token_invalid_returns_403(self, mock_validate):
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_graph_or_url_token,
+    )
+
+    mock_validate.return_value = None
+    request = self._request()
+
+    with pytest.raises(HTTPException) as exc_info:
+      await get_current_user_with_graph_or_url_token(
+        request, "kg123", api_key=None, token="rfs" + "b" * 64
+      )
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.get_current_user_with_graph")
+  async def test_no_credentials_delegates_to_normal_401(self, mock_delegate):
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_graph_or_url_token,
+    )
+
+    mock_delegate.side_effect = HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+    )
+    request = self._request()
+
+    with pytest.raises(HTTPException) as exc_info:
+      await get_current_user_with_graph_or_url_token(
+        request, "kg123", api_key=None, token=None
+      )
+
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+    mock_delegate.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.get_current_user_with_graph")
+  async def test_jwt_header_takes_precedence_over_token(self, mock_delegate):
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_graph_or_url_token,
+    )
+
+    mock_user = Mock(spec=User)
+    mock_delegate.return_value = mock_user
+    request = self._request(headers={"authorization": "Bearer some.jwt.token"})
+
+    result = await get_current_user_with_graph_or_url_token(
+      request, "kg123", api_key=None, token="rfsc" + "b" * 64
+    )
+
+    assert result == mock_user
+    mock_delegate.assert_awaited_once()

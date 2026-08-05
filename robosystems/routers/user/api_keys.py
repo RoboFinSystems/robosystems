@@ -75,6 +75,7 @@ async def list_api_keys(
           else None,
           expires_at=api_key.expires_at.isoformat() if api_key.expires_at else None,
           created_at=api_key.created_at.isoformat(),
+          graph_id=api_key.graph_id,
         )
       )
 
@@ -148,12 +149,39 @@ async def create_api_key(
           detail="Invalid expiration date format. Use ISO format (e.g. 2024-12-31T23:59:59Z)",
         )
 
+    # A graph-scoped key can only be minted for a graph the user can access.
+    if request.graph_id is not None:
+      import re
+
+      from ...config.shared_repositories import is_shared_repository_or_subgraph
+      from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+      from ...middleware.graph.utils import MultiTenantUtils
+      from ...models.core import GraphUser
+
+      if not re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, request.graph_id):
+        raise HTTPException(
+          status_code=status.HTTP_400_BAD_REQUEST,
+          detail="Invalid graph_id format",
+        )
+      if is_shared_repository_or_subgraph(request.graph_id):
+        has_access = MultiTenantUtils.validate_repository_access(
+          request.graph_id, current_user.id, "read"
+        )
+      else:
+        has_access = GraphUser.user_has_access(current_user.id, request.graph_id, db)
+      if not has_access:
+        raise HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail="Access denied to graph",
+        )
+
     api_key, plain_key = UserAPIKey.create(
       user_id=current_user.id,
       name=sanitized_name,
       description=sanitized_description,
       expires_at=expires_at,
       session=db,
+      graph_id=request.graph_id,
     )
 
     api_key_info = APIKeyInfo(
@@ -165,6 +193,7 @@ async def create_api_key(
       last_used_at=None,
       expires_at=api_key.expires_at.isoformat() if api_key.expires_at else None,
       created_at=api_key.created_at.isoformat(),
+      graph_id=api_key.graph_id,
     )
 
     metrics_instance = get_endpoint_metrics()
@@ -269,6 +298,7 @@ async def update_api_key(
       last_used_at=api_key.last_used_at.isoformat() if api_key.last_used_at else None,
       created_at=api_key.created_at.isoformat(),
       expires_at=api_key.expires_at.isoformat() if api_key.expires_at else None,
+      graph_id=api_key.graph_id,
     )
 
   except HTTPException:

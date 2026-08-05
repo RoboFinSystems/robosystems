@@ -29,13 +29,46 @@ from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
 from robosystems.config import env
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+
+class QueryParamRedactionSpanProcessor(SpanProcessor):
+  """Redact sensitive query parameters from URL-bearing span attributes.
+
+  The ASGI auto-instrumentation records the full request target — including
+  the query string — into ``http.url``/``http.target`` (old semconv) and
+  ``url.full``/``url.query`` (new semconv). OTel's built-in ``redact_url``
+  only covers cloud-signature params, not ours (``token``, ``api_key``, …),
+  so credential-bearing query strings would otherwise be exported to the
+  tracing backend. Runs the same redaction list as request logging
+  (``middleware/logging.py``) over those attributes at span start.
+  """
+
+  _FULL_URL_ATTRS = ("http.url", "url.full", "http.target")
+  _QUERY_ATTRS = ("url.query",)
+
+  def on_start(self, span: Span, parent_context=None) -> None:
+    attributes = span.attributes
+    if not attributes:
+      return
+    from robosystems.middleware.logging import redact_sensitive_query_params
+
+    for attr in self._FULL_URL_ATTRS:
+      value = attributes.get(attr)
+      if isinstance(value, str) and "?" in value:
+        base, _, query = value.partition("?")
+        span.set_attribute(attr, f"{base}?{redact_sensitive_query_params(query)}")
+    for attr in self._QUERY_ATTRS:
+      value = attributes.get(attr)
+      if isinstance(value, str) and value:
+        span.set_attribute(attr, redact_sensitive_query_params(value))
+
 
 # Configuration
 # OTEL enabled by default for staging/prod, otherwise disabled
@@ -190,6 +223,9 @@ def setup_telemetry(app: FastAPI) -> None:
     # Add console exporter for development only if explicitly enabled
     if env.is_development() and env.OTEL_CONSOLE_EXPORT:
       exporters.append(ConsoleSpanExporter())
+
+    # Redact sensitive query params before any exporter sees the span
+    _tracer_provider.add_span_processor(QueryParamRedactionSpanProcessor())
 
     # Add span processors
     for exporter in exporters:

@@ -490,6 +490,7 @@ class TestUserAPIKeys:
     mock_key1.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key1.last_used_at = None
     mock_key1.expires_at = None
+    mock_key1.graph_id = None
 
     mock_key2 = Mock()
     mock_key2.id = "key2"
@@ -500,6 +501,7 @@ class TestUserAPIKeys:
     mock_key2.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key2.last_used_at = None
     mock_key2.expires_at = None
+    mock_key2.graph_id = None
 
     mock_key3 = Mock()
     mock_key3.id = "key3"
@@ -510,6 +512,7 @@ class TestUserAPIKeys:
     mock_key3.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key3.last_used_at = None
     mock_key3.expires_at = None
+    mock_key3.graph_id = None
 
     mock_keys = [mock_key1, mock_key2, mock_key3]
 
@@ -601,6 +604,7 @@ class TestUserAPIKeys:
     mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_api_key.last_used_at = None
     mock_api_key.expires_at = None
+    mock_api_key.graph_id = None
 
     mock_create.return_value = (mock_api_key, "rfs999_full_api_key_here")
 
@@ -737,6 +741,64 @@ class TestUserAPIKeys:
     response = client_with_api_keys.delete("/v1/user/api-keys/nonexistent-id")
 
     assert response.status_code == 404
+
+  @patch("robosystems.models.core.GraphUser.user_has_access")
+  @patch("robosystems.models.core.UserAPIKey.create")
+  def test_create_graph_scoped_api_key(
+    self, mock_create, mock_has_access, client_with_api_keys: TestClient
+  ):
+    """A graph-scoped key can be minted for an accessible graph."""
+    from datetime import datetime
+
+    graph_id = "kg" + "a" * 16
+    mock_has_access.return_value = True
+
+    mock_api_key = Mock()
+    mock_api_key.id = "scoped-key-id"
+    mock_api_key.name = "Claude connector"
+    mock_api_key.description = None
+    mock_api_key.prefix = "rfsc1234"
+    mock_api_key.is_active = True
+    mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
+    mock_api_key.last_used_at = None
+    mock_api_key.expires_at = None
+    mock_api_key.graph_id = graph_id
+    mock_create.return_value = (mock_api_key, "rfsc" + "1" * 64)
+
+    response = client_with_api_keys.post(
+      "/v1/user/api-keys",
+      json={"name": "Claude connector", "graph_id": graph_id},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["api_key"]["graph_id"] == graph_id
+    assert mock_create.call_args[1]["graph_id"] == graph_id
+
+  @patch("robosystems.models.core.GraphUser.user_has_access")
+  def test_create_graph_scoped_api_key_access_denied(
+    self, mock_has_access, client_with_api_keys: TestClient
+  ):
+    """Minting a scoped key for an inaccessible graph is denied."""
+    mock_has_access.return_value = False
+
+    response = client_with_api_keys.post(
+      "/v1/user/api-keys",
+      json={"name": "Claude connector", "graph_id": "kg" + "b" * 16},
+    )
+
+    assert response.status_code == 403
+
+  def test_create_graph_scoped_api_key_bad_graph_id(
+    self, client_with_api_keys: TestClient
+  ):
+    """A malformed graph_id is rejected before any access check."""
+    response = client_with_api_keys.post(
+      "/v1/user/api-keys",
+      json={"name": "Claude connector", "graph_id": "not a graph!"},
+    )
+
+    assert response.status_code == 400
 
 
 class TestUserPasswordUpdate:
@@ -1026,6 +1088,7 @@ class TestUserEndpointsMetrics:
     mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_api_key.last_used_at = None
     mock_api_key.expires_at = None
+    mock_api_key.graph_id = None
 
     mock_create.return_value = (mock_api_key, "rfs999_full_api_key_here")
 

@@ -39,7 +39,9 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.logger import api_logger, logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_graph_or_url_token,
+)
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.query_telemetry import (
   api_key_prefix_from_request,
@@ -945,7 +947,7 @@ async def mcp_remote_transport(
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  current_user: User = Depends(get_current_user_with_graph),
+  current_user: User = Depends(get_current_user_with_graph_or_url_token),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Response:
   """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""

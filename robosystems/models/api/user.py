@@ -235,6 +235,13 @@ class CreateAPIKeyRequest(BaseModel):
     None,
     description="Optional expiration date in ISO format (e.g. 2024-12-31T23:59:59Z)",
   )
+  graph_id: str | None = Field(
+    None,
+    max_length=100,
+    description="Optional graph scope. A scoped key works only for this graph "
+    "(and its subgraphs) and is the only kind of key accepted in an MCP "
+    "connector URL. Omit for an account-wide key.",
+  )
 
 
 class APIKeyInfo(BaseModel):
@@ -248,6 +255,7 @@ class APIKeyInfo(BaseModel):
   last_used_at: str | None = Field(None, description="Last used timestamp")
   expires_at: str | None = Field(None, description="Expiration timestamp")
   created_at: str = Field(..., description="Creation timestamp")
+  graph_id: str | None = Field(None, description="Graph scope; null means account-wide")
 
 
 class CreateAPIKeyResponse(BaseModel):
