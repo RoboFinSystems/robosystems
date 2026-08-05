@@ -23,7 +23,7 @@ Every graph is an MCP server. The recommended way to connect is the **remote MCP
 
 > **URL shape:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — use `sec` for the public SEC repository, your graph id for a tenant graph. A subgraph id (`kg…_dev`) is just another URL.
 
-Your API key goes in the same `X-API-Key` header the REST API uses. Keys are account-wide — the URL picks the graph — so multi-graph users add one connector per graph with the same key.
+Your API key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide (one key works for every graph; the URL picks the graph) or **graph-scoped** — valid only for one graph and its subgraphs, which is what a generated connector URL embeds.
 
 **Claude Code** — one command:
 
@@ -42,7 +42,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — not yet: custom connectors currently authenticate with OAuth only — the Add custom connector dialog has no header field, so it cannot send an API key. Use Claude Code or Cursor; on Claude Desktop the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) works today in `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries — a `url` entry is skipped as invalid).
+**Claude (claude.ai / Desktop)** — generate a **connector URL** from the Connect page in the app and paste it into Settings → Connectors → Add custom connector. The dialog has no header field, so the URL carries its own graph-scoped, revocable API key as a query parameter — accepted only on the MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
 
 The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-18), streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
 
