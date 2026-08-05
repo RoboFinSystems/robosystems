@@ -41,7 +41,6 @@ from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
-from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -51,6 +50,7 @@ from robosystems.models.core import User
 
 from .execute import (
   READ_ONLY_MCP_TOOLS,
+  _get_mcp_operation_type,
   _get_user_priority,
   authorize_mcp_tool_call,
   circuit_breaker,
@@ -145,15 +145,6 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     await validate_mcp_access(graph_id, current_user, sess, "read")
   finally:
     sess.close()
-
-
-def _get_mcp_operation_type(graph_id: str) -> str:
-  # Shared repos and their subgraphs route to the reader cluster; user graphs
-  # always use the writer for consistency (matches tools.py / factory.py).
-  if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
-    return "read"
-  else:
-    return "write"
 
 
 # On the npx bridge, switch-workspace mutates client process state; a remote
@@ -621,8 +612,14 @@ async def _handle_tools_call(
 
   # Queue bridge: under load, cypher reads route through the shared query
   # queue. The stream relays queue state as progress and resolves with the
-  # result — no handler needed, the queue executes the query itself. Clients
-  # that don't accept SSE fall through to bounded direct execution.
+  # result — no handler needed, the queue executes the query itself.
+  #
+  # DELIBERATE: a client that doesn't accept SSE falls through to bounded
+  # direct execution below, bypassing queue admission during exactly the load
+  # window the queue exists for. Accepted because spec-compliant MCP clients
+  # always send `Accept: …, text/event-stream` (the fallback is for curl-grade
+  # callers), the direct path is still bounded by its strategy timeout, and
+  # the graph API's own admission control backstops instance saturation.
   if (
     strategy in _QUEUE_STRATEGIES and name in _CYPHER_READ_TOOLS and client_accepts_sse
   ):
@@ -699,16 +696,19 @@ async def dispatch_jsonrpc(
 
   method = message.get("method")
   msg_id = message.get("id")
-  params = message.get("params") or {}
-  if not isinstance(params, dict):
-    return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: expected an object")
 
   # A message without a method is a client->server response; a message without
   # an id is a notification. Streamable HTTP: accept both with 202, no body.
+  # This runs BEFORE params validation — a notification must never receive a
+  # reply, not even an error for malformed params (JSON-RPC 2.0 §4.1).
   # (notifications/initialized and notifications/cancelled land here —
   # cancellation is best-effort only on a stateless multi-node transport.)
   if not isinstance(method, str) or "id" not in message:
     return Response(status_code=http_status.HTTP_202_ACCEPTED)
+
+  params = message.get("params") or {}
+  if not isinstance(params, dict):
+    return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: expected an object")
 
   try:
     if method == "initialize":

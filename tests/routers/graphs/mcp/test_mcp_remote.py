@@ -172,6 +172,19 @@ class TestDispatchEnvelope:
     )
     assert response.status_code == 202
 
+  async def test_malformed_notification_still_gets_202_not_an_error(self):
+    # JSON-RPC 2.0: a notification must never receive a reply — not even an
+    # invalid-params error. The notification check must run before params
+    # validation.
+    response = await dispatch_jsonrpc(
+      _make_request(
+        {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": [1, 2]}
+      ),
+      "kg123",
+      _make_user(),
+    )
+    assert response.status_code == 202
+
   async def test_ping(self):
     response = await dispatch_jsonrpc(
       _make_request({"jsonrpc": "2.0", "id": 2, "method": "ping"}),
