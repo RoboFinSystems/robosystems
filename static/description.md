@@ -28,7 +28,7 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 **Graph and infrastructure state:**
 
 - **Subgraphs**: List subgraphs, quota, and storage information
-- **Backups**: List backups, download URLs, and storage statistics
+- **Backups**: List backups, download URLs, and storage statistics (each backup reports its `download_extension` — `.lbug.zip` or zstd `.lbug.zst`)
 - **Usage**: Graph content metrics and consumption usage (storage, credits)
 
 **Lifecycle commands** (`/operations/{op_name}`):

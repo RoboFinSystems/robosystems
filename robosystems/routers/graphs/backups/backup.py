@@ -18,6 +18,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from robosystems.config.storage.graph import get_download_extension
 from robosystems.database import get_async_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -143,6 +144,11 @@ async def list_backups(
           encryption_enabled=backup.encryption_enabled,
           compression_enabled=backup.compression_enabled,
           allow_export=not backup.encryption_enabled,  # Encrypted backups cannot be exported
+          download_extension=(
+            get_download_extension(backup.s3_key)
+            if backup.s3_key and not backup.encryption_enabled
+            else None
+          ),
           created_at=backup.created_at.isoformat()
           if backup.created_at
           else datetime.now(UTC).isoformat(),

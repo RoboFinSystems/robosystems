@@ -483,6 +483,54 @@ def get_r2_download_key(graph_id: str, extension: str = ".lbug") -> str:
 
 
 # =============================================================================
+# Download Helpers
+# =============================================================================
+
+# Extensions a stored backup object can carry, ordered longest-first so a
+# compound extension wins over its own suffix (".lbug.zip" over ".zip").
+BACKUP_DOWNLOAD_EXTENSIONS = (
+  ".parquet.zip",
+  ".json.zip",
+  ".lbug.zst",
+  ".lbug.zip",
+  ".csv.zip",
+  ".lbug.gz",
+  ".duckdb",
+  ".tar.gz",
+  ".lbug",
+  ".zip",
+)
+
+
+def get_download_extension(s3_key: str, default: str = ".zip") -> str:
+  """Return the extension a stored backup should be served as.
+
+  The stored object key is the only reliable record of what a backup actually
+  contains, so the served filename is derived from it rather than assumed.
+  Keeping the compound extension makes the download self-describing — the
+  recipient sees both the payload and its compression without opening the file.
+
+  Args:
+      s3_key: Stored object key, from S3 or R2
+      default: Extension used when the key matches nothing known
+
+  Returns:
+      Extension string including the leading dot
+
+  Example:
+      >>> get_download_extension("graph-backups/databases/kg456/full/backup-20240115_123045.lbug.zip")
+      '.lbug.zip'
+      >>> get_download_extension("downloads/sec/sec.lbug.zst")
+      '.lbug.zst'
+  """
+  key = s3_key.lower()
+  for extension in BACKUP_DOWNLOAD_EXTENSIONS:
+    if key.endswith(extension):
+      return extension
+  return default
+
+
+# =============================================================================
 # URI Builders
 # =============================================================================
 

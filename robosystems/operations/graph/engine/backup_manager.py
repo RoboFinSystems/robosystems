@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from robosystems.config.storage.graph import get_download_extension
 from robosystems.operations.aws.s3 import BackupMetadata, S3BackupAdapter
 
 from ....logger import logger
@@ -197,11 +198,10 @@ class BackupManager:
           and isinstance(backup.backup_metadata, dict)
           and backup.backup_metadata.get("storage") == "r2"
         )
-        if is_r2:
-          fmt = backup.backup_metadata.get("format", "raw")
-          extension = ".lbug.zst" if fmt == "zstd" else ".lbug"
-        else:
-          extension = ".zip"
+        # Derive the served extension from the stored key rather than the
+        # storage backend, so the filename describes what is inside it
+        # (".lbug.zip", not a bare ".zip" that hides the payload).
+        extension = get_download_extension(backup.s3_key)
         filename = f"{graph_id}_{timestamp_str}{extension}"
 
         # Choose S3 or R2 client based on backup storage type
