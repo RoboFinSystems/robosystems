@@ -42,7 +42,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — generate a **connector URL** from the Connect page in the app and paste it into Settings → Connectors → Add custom connector. The dialog has no header field, so the URL carries its own graph-scoped, revocable API key as a query parameter — accepted only on the MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
+**Claude (claude.ai / Desktop)** — generate a **connector URL** from the **MCP page** in the app (`/connect`) and paste it into Settings → Connectors → Add custom connector. The dialog has no header field, so the URL carries its own graph-scoped, revocable API key as a query parameter — accepted only on the MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
 
 The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-18), streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
 
