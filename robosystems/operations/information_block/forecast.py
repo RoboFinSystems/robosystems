@@ -49,7 +49,10 @@ from robosystems.models.api.information_block import (
   RenderingRowLite,
   ViewProjections,
 )
-from robosystems.models.extensions import Element, Structure
+from robosystems.models.extensions import Dimension, Element, Structure
+from robosystems.models.extensions.roboledger.dimension_junctions import (
+  fact_dimensions,
+)
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.information_block.envelope import (
@@ -449,6 +452,33 @@ def _load_lever_fact_set(session: Session, structure_id: str) -> FactSet | None:
   ).scalar_one_or_none()
 
 
+def _ensure_scenario_dimension(session: Session, scenario_id: str, name: str) -> str:
+  """Get-or-create the ``scenario`` Dimension for a forecast Structure.
+
+  ``value`` is the structure id (stable across renames — the unique
+  constraint on ``(dimension_type, value)`` makes this idempotent);
+  ``name`` carries the display legibility. Shared by both scenario fact
+  producers: the lever-set writer here and ``_upsert_month_set`` in
+  :mod:`.forecast_compute`.
+  """
+  existing = session.execute(
+    select(Dimension.id).where(
+      Dimension.dimension_type == "scenario",
+      Dimension.value == scenario_id,
+    )
+  ).scalar_one_or_none()
+  if existing is not None:
+    return existing
+  dimension = Dimension(
+    dimension_type="scenario",
+    name=name,
+    value=scenario_id,
+  )
+  session.add(dimension)
+  session.flush()
+  return dimension.id
+
+
 def _write_lever_fact_set(
   session: Session,
   structure: Structure,
@@ -498,11 +528,13 @@ def _write_lever_fact_set(
     .all()
   }
 
+  new_facts: list[Fact] = []
+
   def _add_fact(element_id: str, month: str, value: float, period_type: str) -> None:
     element = elements_by_id.get(element_id)
     unit = _metric_unit(element) if element is not None else "pure"
     month_start, month_end = period_date_range(month)
-    session.add(
+    new_facts.append(
       Fact(
         id=generate_prefixed_ulid("fact"),
         element_id=element_id,
@@ -524,7 +556,19 @@ def _write_lever_fact_set(
   for assertion in mechanics.line_assertions:
     for month, value in sorted(assertion.values_by_period.items()):
       _add_fact(assertion.element_id, month, value, assertion.period_type)
+  session.add_all(new_facts)
   session.flush()
+  if new_facts:
+    scenario_dimension_id = _ensure_scenario_dimension(
+      session, structure.id, structure.name or structure.id
+    )
+    session.execute(
+      fact_dimensions.insert(),
+      [
+        {"fact_id": fact.id, "dimension_id": scenario_dimension_id}
+        for fact in new_facts
+      ],
+    )
   return fact_set
 
 

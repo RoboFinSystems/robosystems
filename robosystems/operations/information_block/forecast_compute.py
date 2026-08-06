@@ -61,10 +61,14 @@ from robosystems.models.extensions import (
   Rule,
   Structure,
 )
+from robosystems.models.extensions.roboledger.dimension_junctions import (
+  fact_dimensions,
+)
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.information_block.forecast import (
   FORECAST_BLOCK_TYPE,
+  _ensure_scenario_dimension,
   _load_lever_fact_set,
 )
 from robosystems.operations.information_block.forecast_articulation import (
@@ -201,6 +205,9 @@ def cmd_compute_forecast(
       f"{body.structure_id!r} is {structure.block_type!r}"
     )
   scenario_id = structure.id
+  scenario_dimension_id = _ensure_scenario_dimension(
+    session, scenario_id, structure.name or scenario_id
+  )
   mechanics = ForecastMechanics.model_validate(structure.artifact_mechanics or {})
 
   months_n = body.months or mechanics.horizon_months
@@ -863,6 +870,7 @@ def cmd_compute_forecast(
       structure_id=is_structure_id,
       entity_id=entity_id,
       scenario_id=scenario_id,
+      scenario_dimension_id=scenario_dimension_id,
       period_start=month_start,
       period_end=month_end,
       provenance=provenance,
@@ -876,6 +884,7 @@ def cmd_compute_forecast(
         structure_id=bs_structure_id,
         entity_id=entity_id,
         scenario_id=scenario_id,
+        scenario_dimension_id=scenario_dimension_id,
         period_start=month_start,
         period_end=month_end,
         provenance=provenance,
@@ -889,6 +898,7 @@ def cmd_compute_forecast(
         structure_id=ctx.cf_structure_id,
         entity_id=entity_id,
         scenario_id=scenario_id,
+        scenario_dimension_id=scenario_dimension_id,
         period_start=month_start,
         period_end=month_end,
         provenance=provenance,
@@ -1162,6 +1172,7 @@ def _upsert_month_set(
   structure_id: str,
   entity_id: str,
   scenario_id: str,
+  scenario_dimension_id: str,
   period_start: date,
   period_end: date,
   provenance: ForecastProvenance,
@@ -1169,7 +1180,13 @@ def _upsert_month_set(
   facts: list[tuple[Element, float]],
 ) -> str | None:
   """Upsert one scenario standing set — the metrics full-replace pattern,
-  keyed by (structure, entity, factset_type, period_end, **scenario**)."""
+  keyed by (structure, entity, factset_type, period_end, **scenario**).
+
+  Every emitted fact is stamped with the scenario Dimension via
+  ``fact_dimensions`` — the explicit-member half of the default-member
+  rule (actuals carry no dimension rows and stay in consolidated
+  totals; scenario facts carry one and drop out for any reader
+  honoring the ``has_dimensions`` contract)."""
   if not facts:
     return None
   standing = session.execute(
@@ -1208,9 +1225,10 @@ def _upsert_month_set(
       session.delete(fact)
     standing.provenance = provenance.model_dump(mode="json")
 
+  new_facts: list[Fact] = []
   for element, value in facts:
     period_type = element.period_type or "duration"
-    session.add(
+    new_facts.append(
       Fact(
         id=generate_prefixed_ulid("fact"),
         element_id=element.id,
@@ -1225,7 +1243,12 @@ def _upsert_month_set(
         fact_set_id=standing.id,
       )
     )
+  session.add_all(new_facts)
   session.flush()
+  session.execute(
+    fact_dimensions.insert(),
+    [{"fact_id": fact.id, "dimension_id": scenario_dimension_id} for fact in new_facts],
+  )
   return standing.id
 
 

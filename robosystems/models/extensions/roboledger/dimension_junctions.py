@@ -11,6 +11,9 @@ qualifiers:
 - Transaction: source system, provenance dimensions
 - Entry: fund, trust account, product channel dimensions
 - LineItem: department, class, location, project dimensions
+- Fact: report-layer aspects — scenario first (which world a number
+  belongs to); segment/geography/product members as the dimensional
+  spine grows
 """
 
 from sqlalchemy import Column, ForeignKey, String, Table
@@ -84,6 +87,28 @@ event_dimensions = Table(
     "event_id",
     String,
     ForeignKey("events.id", ondelete="CASCADE"),
+    primary_key=True,
+  ),
+  Column(
+    "dimension_id",
+    String,
+    ForeignKey("dimensions.id", ondelete="RESTRICT"),
+    primary_key=True,
+  ),
+)
+
+# Fact-level aspects. Actuals stay undimensioned (the default member, in
+# XBRL terms) — a row here marks a fact as belonging to an explicit member
+# on some axis. Scenario is the first: forecast facts carry a `scenario`
+# Dimension, so every reader honoring the documented consolidated-totals
+# contract (`has_dimensions = false`) excludes them by construction.
+fact_dimensions = Table(
+  "fact_dimensions",
+  ExtensionsBase.metadata,
+  Column(
+    "fact_id",
+    String,
+    ForeignKey("facts.id", ondelete="CASCADE"),
     primary_key=True,
   ),
   Column(
