@@ -504,3 +504,52 @@ class TestNamedRateLimitDependencies:
     mock_cache.check_rate_limit.return_value = (True, 9)
     request = _make_request(headers={"X-API-Key": "key"})
     jwt_refresh_rate_limit_dependency(request)
+
+
+@pytest.mark.unit
+class TestPublishedPrincipalIdentity:
+  """The auth layer publishes request.state.auth_user_id for credentials the
+  limiter cannot reparse (the MCP connector's URL token; opaque OAuth tokens
+  later). Without it those requests bucket as anonymous-by-IP, and every
+  client behind one egress IP shares a 5/min budget."""
+
+  class _State:
+    def __init__(self, auth_user_id=None):
+      if auth_user_id is not None:
+        self.auth_user_id = auth_user_id
+
+  def test_get_user_identifier_uses_published_principal(self):
+    request = _make_request()
+    request.state = self._State("user-42")
+    assert get_user_identifier(request) == "apikey:user:user-42"
+
+  def test_get_user_from_request_uses_published_principal(self):
+    request = _make_request()
+    request.state = self._State("user-42")
+    assert get_user_from_request(request) == "user-42"
+
+  def test_header_credentials_still_take_precedence(self):
+    request = _make_request(headers={"X-API-Key": "rfs" + "a" * 64})
+    request.state = self._State("user-42")
+    assert get_user_identifier(request).startswith("apikey:")
+    assert "user-42" not in get_user_identifier(request)
+
+  def test_absent_principal_falls_back_to_ip(self):
+    request = _make_request(host="10.0.0.9")
+    request.state = self._State()
+    assert get_user_identifier(request) == "ip:10.0.0.9"
+    assert get_user_from_request(request) is None
+
+  def test_non_string_principal_is_ignored(self):
+    request = _make_request(host="10.0.0.9")
+    request.state = self._State(auth_user_id=12345)
+    assert get_user_identifier(request) == "ip:10.0.0.9"
+    assert get_user_from_request(request) is None
+
+  def test_published_principal_gets_api_key_tier_limits(self):
+    request = _make_request()
+    request.state = self._State("user-42")
+    identifier = get_user_identifier(request)
+    limit, window = get_rate_limit_config(identifier)
+    anon_limit, _ = get_rate_limit_config("ip:10.0.0.9")
+    assert limit > anon_limit

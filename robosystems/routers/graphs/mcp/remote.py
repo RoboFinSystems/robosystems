@@ -66,15 +66,26 @@ from .execute import (
   circuit_breaker,
   execute_tool_to_json,
 )
-from .handlers import MCPHandler, validate_mcp_access
+from .handlers import (
+  MCPHandler,
+  is_tool_error_result,
+  tool_error_kind,
+  validate_mcp_access,
+)
 from .strategies import MCPExecutionStrategy, MCPStrategySelector
 from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 
 router = APIRouter()
 
 # Protocol revisions this transport can negotiate. The server answers with the
-# client's requested revision when supported, else its own latest.
-MCP_SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
+# client's requested revision when supported, else its own latest. Exactly the
+# revision this dispatch implements is offered — 2024-11-05 predates Streamable
+# HTTP, and 2025-03-26 permitted JSON-RPC batching, which this transport
+# unconditionally rejects, so advertising either would promise semantics the
+# wire doesn't honor. Clients on other revisions negotiate to 2025-06-18 at
+# initialize (Claude requests 2025-11-25 and accepts this fine); requests
+# carrying no MCP-Protocol-Version header are still served for compatibility.
+MCP_SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-06-18"})
 MCP_LATEST_PROTOCOL_VERSION = "2025-06-18"
 
 # JSON-RPC 2.0 error codes
@@ -99,6 +110,38 @@ _REMOTE_CLIENT_INFO: dict[str, Any] = {
   "is_browser": False,
   "is_interactive": False,
 }
+
+
+def _transport_gate(request: Request) -> None:
+  """HTTP-level Streamable HTTP checks, run before auth and dispatch.
+
+  Origin: the MCP spec requires servers to validate Origin and answer 403 for
+  untrusted values. Server-to-server callers (Claude's backend, the npx
+  bridge) send no Origin header — absent is allowed; a browser context must
+  come from a first-party app origin.
+
+  Content-Type: JSON-RPC bodies must be ``application/json``, which also
+  keeps the endpoint out of the browser "simple request" delivery class.
+  """
+  from robosystems.config import env
+
+  origin = request.headers.get("origin")
+  if origin and origin not in env.get_main_cors_origins():
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail="Origin not allowed",
+    )
+
+  # Exact media-type essence match — a substring check would accept
+  # `text/plain; application/json` (still a browser simple request) and
+  # unrelated `+json` types.
+  content_type = request.headers.get("content-type", "")
+  media_type = content_type.split(";", 1)[0].strip().casefold()
+  if media_type != "application/json":
+    raise HTTPException(
+      status_code=http_status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+      detail="Content-Type must be application/json",
+    )
 
 
 def _rpc_result(msg_id: Any, result: dict[str, Any]) -> JSONResponse:
@@ -137,13 +180,38 @@ def _tool_error_result(msg_id: Any, text: str) -> JSONResponse:
   return JSONResponse(content=_tool_error_payload(msg_id, text))
 
 
+def _tool_failure(result: Any) -> tuple[bool, str | None]:
+  """Classify an internal tool result as (is_error, failure_kind).
+
+  Two failure encodings reach this transport: the handler's marked text
+  result (``is_error``/``error_kind``, see ``handlers.tool_error_result``)
+  and the streaming aggregator's failure shape (``success: False`` +
+  ``error`` — which also covers a stream that ended with no terminal event).
+  ``failure_kind`` is ``timeout``/``backend`` (breaker-relevant) or
+  ``constraint`` (caller error).
+  """
+  if is_tool_error_result(result):
+    return True, tool_error_kind(result)
+  if isinstance(result, dict) and result.get("success") is False and "error" in result:
+    kind = result.get("error_kind")
+    return True, kind if isinstance(kind, str) else "backend"
+  return False, None
+
+
 def _to_tool_result(result: Any) -> dict[str, Any]:
-  """Map an internal tool result onto the MCP ``tools/call`` result shape."""
+  """Map an internal tool result onto the MCP ``tools/call`` result shape.
+
+  Execution failures come back as ``isError: true`` so the model sees a
+  failed call rather than error prose masquerading as valid output.
+  """
+  is_error, _ = _tool_failure(result)
   if isinstance(result, dict) and result.get("type") == "text" and "text" in result:
     content = [{"type": "text", "text": result["text"]}]
+  elif is_error and isinstance(result, dict) and isinstance(result.get("error"), str):
+    content = [{"type": "text", "text": result["error"]}]
   else:
     content = [{"type": "text", "text": json.dumps(result, indent=2, default=str)}]
-  return {"content": content, "isError": False}
+  return {"content": content, "isError": is_error}
 
 
 async def _validate_read_access(graph_id: str, current_user: User) -> None:
@@ -161,16 +229,24 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
 # connector has no client process and is URL-anchored to one graph. The
 # remote surface rewrites the tool to resolve the target's connector URL.
 _REMOTE_SWITCH_WORKSPACE_DESCRIPTION = (
-  "Resolve the MCP connector URL for a different subgraph workspace (or "
-  "`primary` for the parent graph). This connector is anchored to one graph "
-  "by its URL and cannot switch in-session — the tool returns the URL to add "
-  "as a separate MCP connector (same API key), where work on that workspace "
-  "continues."
+  "Resolve the MCP connector URL for a different workspace in this graph's "
+  "family (a subgraph, or `primary` for the parent graph). This connector is "
+  "anchored to one graph by its URL and cannot switch in-session — the tool "
+  "returns the endpoint to set up as a separate MCP connector with its own "
+  "credential, where work on that workspace continues."
 )
 
 
 def _remote_switch_workspace(graph_id: str, arguments: dict[str, Any]) -> str:
-  """Answer switch-workspace with the target's connector URL (text result)."""
+  """Answer switch-workspace with the target's connector URL (text result).
+
+  Targets are constrained to this connector's graph family — the parent or
+  one of its subgraphs. The URL alone carries no credential, and a
+  URL-token connector's key may not cover the target (a key scoped to a
+  subgraph does not reach its parent or siblings), so the guidance points at
+  minting a connector credential for the target rather than claiming the
+  current one transfers.
+  """
   from robosystems.config import env
 
   target = str(arguments.get("workspace_id") or "").strip()
@@ -188,6 +264,13 @@ def _remote_switch_workspace(graph_id: str, arguments: dict[str, Any]) -> str:
   if not re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, target_id):
     return f"Error: '{target}' is not a valid workspace id or name."
 
+  if target_id != parent and not target_id.startswith(f"{parent}_"):
+    return (
+      f"Error: '{target}' is outside this connector's graph family "
+      f"('{parent}' and its subgraphs). A different graph needs its own "
+      "connector, set up from that graph's MCP page."
+    )
+
   connector_url = f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{target_id}/mcp"
   return json.dumps(
     {
@@ -198,8 +281,9 @@ def _remote_switch_workspace(graph_id: str, arguments: dict[str, Any]) -> str:
       "message": (
         f"This connector is anchored to graph '{graph_id}' by its URL and "
         f"cannot switch workspaces in-session. To work on '{target_id}', add "
-        f"a new MCP connector pointing at {connector_url} (same API key) and "
-        "continue there."
+        f"a new MCP connector for {connector_url} with a credential for that "
+        "workspace — generate one from the app's MCP page (/connect) with "
+        f"'{target_id}' selected, or reuse an API key whose scope covers it."
       ),
     },
     indent=2,
@@ -405,7 +489,7 @@ async def _stream_tool_call(
             yield {"data": json.dumps(notification)}
 
       result = aggregate_streamed_results(events)
-      outcome = "completed"
+      failed, failure_kind = _tool_failure(result)
       if is_disrupted_aggregation(result):
         outcome = "stream_disrupted"
         record_shared_query_outcome(
@@ -418,10 +502,29 @@ async def _stream_tool_call(
           source="mcp_remote",
           tool_name=tool_call.name,
         )
+      elif failed and failure_kind == "timeout":
+        outcome = "timeout"
+        record_shared_query_outcome(
+          graph_id,
+          user_id,
+          signal="timeout",
+          api_key_prefix=api_key_prefix,
+          endpoint="/v1/graphs/{graph_id}/mcp",
+          source="mcp_remote",
+          tool_name=tool_call.name,
+        )
+      elif failed:
+        outcome = "tool_error"
+      else:
+        outcome = "completed"
       payload = {"jsonrpc": "2.0", "id": msg_id, "result": _to_tool_result(result)}
-      circuit_breaker.record_success(graph_id, tool_call.name)
+      if failed and failure_kind in ("timeout", "backend"):
+        circuit_breaker.record_failure(graph_id, tool_call.name)
+      else:
+        circuit_breaker.record_success(graph_id, tool_call.name)
     except TimeoutError:
       outcome = "timeout"
+      circuit_breaker.record_failure(graph_id, tool_call.name)
       record_shared_query_outcome(
         graph_id,
         user_id,
@@ -560,20 +663,25 @@ async def _stream_queued_call(
 
           if state == "completed":
             query_settled = True
-            outcome = "completed"
             result = await queue_manager.get_query_result(queue_id)
+            failed, failure_kind = _tool_failure(result)
+            outcome = "tool_error" if failed else "completed"
             payload = {
               "jsonrpc": "2.0",
               "id": msg_id,
               "result": _to_tool_result(result),
             }
-            circuit_breaker.record_success(graph_id, tool_call.name)
+            if failed and failure_kind in ("timeout", "backend"):
+              circuit_breaker.record_failure(graph_id, tool_call.name)
+            else:
+              circuit_breaker.record_success(graph_id, tool_call.name)
             break
           if state in ("failed", "cancelled"):
             query_settled = True
             outcome = f"queue_{state}"
             error = status.get("error") or f"Query {state}"
             if state == "failed":
+              circuit_breaker.record_failure(graph_id, tool_call.name)
               record_shared_query_outcome(
                 graph_id,
                 current_user.id,
@@ -589,6 +697,11 @@ async def _stream_queued_call(
           await asyncio.sleep(_QUEUE_POLL_SECONDS)
     except TimeoutError:
       outcome = "bridge_timeout"
+      # Deliberate: the bridge ceiling exhausting counts against the breaker.
+      # Whether the 300s went to queue wait or execution, the backend didn't
+      # produce a result in time — and if the queue is saturated, opening the
+      # breaker sheds exactly the load the queue is drowning under.
+      circuit_breaker.record_failure(graph_id, tool_call.name)
       payload = _tool_error_payload(
         msg_id,
         f"Error: queued query did not complete within "
@@ -835,8 +948,14 @@ async def _handle_tools_call(
     if not handler._closed:
       await handler.close()
 
-  circuit_breaker.record_success(graph_id, name)
-  outcome = "completed"
+  failed, failure_kind = _tool_failure(result)
+  # Constraint failures mean the backend answered fine — they reset the
+  # breaker like a success; only timeout/backend failures count against it.
+  if failed and failure_kind in ("timeout", "backend"):
+    circuit_breaker.record_failure(graph_id, name)
+  else:
+    circuit_breaker.record_success(graph_id, name)
+
   if is_disrupted_aggregation(result):
     outcome = "stream_disrupted"
     record_shared_query_outcome(
@@ -849,6 +968,21 @@ async def _handle_tools_call(
       source="mcp_remote",
       tool_name=name,
     )
+  elif failed and failure_kind == "timeout":
+    outcome = "timeout"
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      signal="timeout",
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/mcp",
+      source="mcp_remote",
+      tool_name=name,
+    )
+  elif failed:
+    outcome = "tool_error"
+  else:
+    outcome = "completed"
   log_shared_query_end(
     exec_id,
     graph_id,
@@ -896,6 +1030,27 @@ async def dispatch_jsonrpc(
 
   method = message.get("method")
   msg_id = message.get("id")
+
+  # Post-negotiation requests must carry a supported MCP-Protocol-Version when
+  # they send the header at all (absent = pre-header clients, allowed for
+  # backwards compatibility). Unsupported values answer 400 per the spec.
+  # initialize is exempt — negotiation happens in its body.
+  version_header = request.headers.get("mcp-protocol-version")
+  if (
+    method != "initialize"
+    and version_header is not None
+    and version_header not in MCP_SUPPORTED_PROTOCOL_VERSIONS
+  ):
+    supported = ", ".join(sorted(MCP_SUPPORTED_PROTOCOL_VERSIONS))
+    if isinstance(method, str) and "id" in message:
+      return _rpc_error(
+        msg_id,
+        INVALID_REQUEST,
+        f"Unsupported MCP-Protocol-Version '{version_header}' (supported: {supported})",
+        http_code=http_status.HTTP_400_BAD_REQUEST,
+      )
+    # Notifications never receive JSON-RPC replies; reject at HTTP level only.
+    return Response(status_code=http_status.HTTP_400_BAD_REQUEST)
 
   # A message without a method is a client->server response; a message without
   # an id is a notification. Streamable HTTP: accept both with 202, no body.
@@ -947,6 +1102,7 @@ async def mcp_remote_transport(
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
+  _transport: None = Depends(_transport_gate),
   current_user: User = Depends(get_current_user_with_graph_or_url_token),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Response:

@@ -12,6 +12,8 @@ from typing import Any
 
 from robosystems.logger import logger
 
+from .handlers import is_tool_error_result, tool_error_kind
+
 
 async def stream_mcp_tool_execution(
   handler: Any,
@@ -76,6 +78,19 @@ async def stream_mcp_tool_execution(
 
       result = await handler.call_tool(tool_name, arguments)
 
+      # The handler encodes execution failures as marked text results; emit
+      # them as error events so aggregation yields a failure, not a success.
+      if is_tool_error_result(result):
+        yield {
+          "event": "error",
+          "data": {
+            "tool": tool_name,
+            "error": result.get("text", "Tool execution failed"),
+            "error_kind": tool_error_kind(result),
+          },
+        }
+        return
+
       yield {
         "event": "result",
         "data": {
@@ -102,6 +117,7 @@ async def stream_mcp_tool_execution(
         "tool": tool_name,
         "error": "Execution timeout",
         "message": f"Tool {tool_name} execution timed out",
+        "error_kind": "timeout",
       },
     }
   except Exception as e:
@@ -112,6 +128,7 @@ async def stream_mcp_tool_execution(
         "tool": tool_name,
         "error": str(e),
         "error_type": type(e).__name__,
+        "error_kind": "backend",
       },
     }
 
@@ -139,6 +156,22 @@ async def stream_cypher_query(
     async for chunk in handler.execute_query_streaming(
       query, parameters, chunk_size=chunk_size
     ):
+      # A failed backend query arrives as an error chunk (see
+      # StreamingRepositoryWrapper): surface it as an error event, or the
+      # stream completes normally and aggregates to a successful empty result.
+      if isinstance(chunk, dict) and chunk.get("error"):
+        error_type = str(chunk.get("error_type", ""))
+        yield {
+          "event": "error",
+          "data": {
+            "tool": "read-graph-cypher",
+            "error": str(chunk["error"]),
+            "error_type": error_type,
+            "error_kind": "timeout" if "Timeout" in error_type else "backend",
+          },
+        }
+        return
+
       chunk_count += 1
       rows_in_chunk = len(chunk.get("data", []))
       total_rows += rows_in_chunk
@@ -190,6 +223,17 @@ async def stream_cypher_query(
 
     result = await handler.call_tool("read-graph-cypher", arguments)
 
+    if is_tool_error_result(result):
+      yield {
+        "event": "error",
+        "data": {
+          "tool": "read-graph-cypher",
+          "error": result.get("text", "Query execution failed"),
+          "error_kind": tool_error_kind(result),
+        },
+      }
+      return
+
     # Parse result if it's in the expected format
     if isinstance(result, dict) and "text" in result:
       try:
@@ -240,6 +284,17 @@ async def stream_schema_retrieval(
 
   # Get full schema
   schema_result = await handler.call_tool(tool_name, arguments)
+
+  if is_tool_error_result(schema_result):
+    yield {
+      "event": "error",
+      "data": {
+        "tool": tool_name,
+        "error": schema_result.get("text", "Schema retrieval failed"),
+        "error_kind": tool_error_kind(schema_result),
+      },
+    }
+    return
 
   # Parse schema result
   if isinstance(schema_result, dict) and "text" in schema_result:
@@ -322,11 +377,18 @@ def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
   # Check for errors
   for event in events:
     if event.get("event") == "error":
-      return {
+      failure: dict[str, Any] = {
         "success": False,
         "error": event["data"].get("error", "Unknown error"),
         "tool": tool_name,
       }
+      # Preserve the handler's failure classification so transports can
+      # separate breaker-relevant failures (timeout/backend) from caller
+      # errors (constraint).
+      kind = event["data"].get("error_kind")
+      if isinstance(kind, str):
+        failure["error_kind"] = kind
+      return failure
 
   # Aggregate based on event types
   if any(e.get("event") == "query_chunk" for e in events):

@@ -364,6 +364,9 @@ class TestMCPHandler:
 
           assert "Error" in result["text"]
           assert "timed out" in result["text"]
+          # Marked so transports return MCP isError instead of a success.
+          assert result["is_error"] is True
+          assert result["error_kind"] == "timeout"
 
           await handler.close()
 
@@ -390,6 +393,8 @@ class TestMCPHandler:
         result = await handler.call_tool("get-graph-info", {})
 
         assert "Error" in result["text"]
+        assert result["is_error"] is True
+        assert result["error_kind"] == "backend"
 
         await handler.close()
 

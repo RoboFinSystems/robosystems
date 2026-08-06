@@ -35,6 +35,34 @@ MCP_AVAILABLE = False
 timeout_coordinator = TimeoutCoordinator()
 
 
+def tool_error_result(text: str, kind: str) -> dict[str, Any]:
+  """A tool-execution failure in the handler's text-result shape, marked so
+  transports can surface it as an MCP ``isError`` result and the circuit
+  breaker can count it — instead of both reading it as a success.
+
+  ``kind`` is one of:
+    - ``timeout``: the tool or backend query ran out of time (breaker-relevant)
+    - ``backend``: the graph API failed or an unexpected error occurred
+      (breaker-relevant)
+    - ``constraint``: the caller's query violated a policy/complexity limit —
+      a caller error, not a backend-health signal
+  """
+  return {"type": "text", "text": text, "is_error": True, "error_kind": kind}
+
+
+def is_tool_error_result(result: Any) -> bool:
+  """True when a handler result is a marked tool-execution failure."""
+  return isinstance(result, dict) and result.get("is_error") is True
+
+
+def tool_error_kind(result: Any) -> str | None:
+  """The failure kind of a marked tool-execution failure, else None."""
+  if not is_tool_error_result(result):
+    return None
+  kind = result.get("error_kind")
+  return kind if isinstance(kind, str) else "backend"
+
+
 async def validate_mcp_access(
   graph_id: str, current_user: Any, db: Session, operation_type: str = "read"
 ) -> None:
@@ -276,25 +304,30 @@ class MCPHandler:
       if name == "read-graph-cypher":
         error_msg += ". Consider simplifying your query or adding LIMIT clauses."
       logger.error(error_msg)
-      return {"type": "text", "text": f"Error: {error_msg}"}
+      return tool_error_result(f"Error: {error_msg}", "timeout")
 
-    except (GraphQueryTimeoutError, GraphQueryComplexityError) as e:
-      # Handle specific timeout/complexity errors with user-friendly messages
+    except GraphQueryTimeoutError as e:
+      logger.warning(f"Query timeout for {name}: {e}")
+      return tool_error_result(f"Query Error: {e!s}", "timeout")
+
+    except GraphQueryComplexityError as e:
+      # Caller's query exceeded policy limits — an error result, but not a
+      # backend-health signal.
       logger.warning(f"Query constraint violation for {name}: {e}")
-      return {"type": "text", "text": f"Query Error: {e!s}"}
+      return tool_error_result(f"Query Error: {e!s}", "constraint")
 
     except GraphAPIError as e:
       # Handle Graph API errors with their enhanced messages
       # These already include helpful context from the MCP adapter
       logger.error(f"Graph API error in tool '{name}': {e}")
-      return {"type": "text", "text": str(e)}
+      return tool_error_result(str(e), "backend")
 
     except Exception as e:
       logger.error(f"Tool call failed for {name} on {self.backend_type}: {e}")
-      return {
-        "type": "text",
-        "text": "Error: operation failed. Please try again or contact support.",
-      }
+      return tool_error_result(
+        "Error: operation failed. Please try again or contact support.",
+        "backend",
+      )
 
   async def execute_query_streaming(
     self, query: str, parameters: dict[str, Any] | None = None, chunk_size: int = 1000
@@ -388,10 +421,10 @@ class MCPHandler:
       return {"type": "text", "text": json.dumps(info, indent=2)}
     except Exception as e:
       logger.error(f"Error getting graph info: {e}")
-      return {
-        "type": "text",
-        "text": "Error getting graph info: service temporarily unavailable.",
-      }
+      return tool_error_result(
+        "Error getting graph info: service temporarily unavailable.",
+        "backend",
+      )
 
   async def close(self):
     """Close the MCP tools and database connections."""

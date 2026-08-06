@@ -440,3 +440,171 @@ class TestAggregateStreamedResults:
     result = aggregate_streamed_results(events)
 
     assert result["tool"] == "my-custom-tool"
+
+
+@pytest.mark.unit
+class TestMarkedErrorPropagation:
+  """Handler-marked execution failures must surface as error events, so the
+  aggregated result is a failure — never a success wrapping error prose."""
+
+  @pytest.mark.asyncio
+  async def test_generic_tool_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "Error: operation failed.",
+        "is_error": True,
+        "error_kind": "backend",
+      }
+    )
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(handler, "get-graph-info", {}, "json_immediate")
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "result" not in event_types
+    assert "complete" not in event_types
+    error_event = next(e for e in events if e["event"] == "error")
+    assert error_event["data"]["error_kind"] == "backend"
+
+  @pytest.mark.asyncio
+  async def test_cypher_fallback_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "Error: tool 'read-graph-cypher' timed out after 60 seconds",
+        "is_error": True,
+        "error_kind": "timeout",
+      }
+    )
+    del handler.execute_query_streaming
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(
+        handler, "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, "json_immediate"
+      )
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "query_result" not in event_types
+
+  @pytest.mark.asyncio
+  async def test_schema_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "backend down",
+        "is_error": True,
+        "error_kind": "backend",
+      }
+    )
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(handler, "get-graph-schema", {}, "json_complete")
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "schema_nodes" not in event_types
+
+  def test_aggregation_preserves_error_kind(self):
+    events = [
+      {"event": "start", "data": {"tool": "get-graph-info"}},
+      {
+        "event": "error",
+        "data": {"tool": "get-graph-info", "error": "boom", "error_kind": "timeout"},
+      },
+    ]
+
+    result = aggregate_streamed_results(events)
+
+    assert result["success"] is False
+    assert result["error"] == "boom"
+    assert result["error_kind"] == "timeout"
+
+
+@pytest.mark.unit
+class TestStreamingErrorChunks:
+  """A failed backend query arrives as an error chunk from the streaming
+  wrapper — it must become an error event, never a successful empty result."""
+
+  def _handler_with_error_chunk(self, error_type):
+    async def failing_stream(query, parameters, chunk_size=1000):
+      yield {
+        "error": "connection lost",
+        "error_type": error_type,
+        "chunk_index": 0,
+        "is_last_chunk": True,
+        "row_count": 0,
+      }
+
+    handler = AsyncMock()
+    handler.execute_query_streaming = failing_stream
+    return handler
+
+  @pytest.mark.asyncio
+  async def test_error_chunk_yields_error_event_not_completion(self):
+    handler = self._handler_with_error_chunk("GraphAPIError")
+
+    events = await _collect_events(
+      stream_cypher_query(handler, {"query": "MATCH (n) RETURN n"}, 100)
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "query_complete" not in event_types
+    assert "query_chunk" not in event_types
+    error_event = next(e for e in events if e["event"] == "error")
+    assert error_event["data"]["error"] == "connection lost"
+    assert error_event["data"]["error_kind"] == "backend"
+
+  @pytest.mark.asyncio
+  async def test_timeout_error_type_maps_to_timeout_kind(self):
+    handler = self._handler_with_error_chunk("GraphQueryTimeoutError")
+
+    events = await _collect_events(
+      stream_cypher_query(handler, {"query": "MATCH (n) RETURN n"}, 100)
+    )
+
+    error_event = next(e for e in events if e["event"] == "error")
+    assert error_event["data"]["error_kind"] == "timeout"
+
+  @pytest.mark.asyncio
+  async def test_error_chunk_aggregates_to_failure_end_to_end(self):
+    handler = self._handler_with_error_chunk("GraphAPIError")
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(
+        handler, "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, "sse_streaming"
+      )
+    )
+
+    result = aggregate_streamed_results(events)
+    assert result["success"] is False
+    assert result["error"] == "connection lost"
+    assert result["error_kind"] == "backend"
+
+  @pytest.mark.asyncio
+  async def test_rows_before_error_chunk_still_fail(self):
+    async def partial_then_error(query, parameters, chunk_size=1000):
+      yield {"chunk_index": 0, "data": [{"n": 1}], "columns": ["n"]}
+      yield {"error": "engine died mid-stream", "error_type": "GraphAPIError"}
+
+    handler = AsyncMock()
+    handler.execute_query_streaming = partial_then_error
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(
+        handler, "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, "sse_streaming"
+      )
+    )
+
+    result = aggregate_streamed_results(events)
+    assert result["success"] is False
+    assert result["error"] == "engine died mid-stream"

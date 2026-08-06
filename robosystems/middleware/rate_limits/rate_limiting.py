@@ -83,6 +83,14 @@ def get_user_identifier(request: Request) -> str:
     if user_id:
       return f"jwt:{user_id}"
 
+  # Principal published by the auth dependencies (request.state.auth_user_id).
+  # Covers credentials this function cannot reparse — the MCP connector's
+  # URL-carried key today, opaque OAuth bearer tokens later. Only set after
+  # successful validation, so it never grants identity to junk credentials.
+  auth_user_id = getattr(request.state, "auth_user_id", None)
+  if isinstance(auth_user_id, str) and auth_user_id:
+    return f"apikey:user:{auth_user_id}"
+
   # Fallback to IP address for unauthenticated requests
   client_ip = request.client.host if request.client else "unknown"
   return f"ip:{client_ip}"
@@ -282,6 +290,14 @@ def get_user_from_request(request: Request) -> str | None:
 
     api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
     return f"apikey_{api_key_hash}"
+
+  # Principal published by the auth dependencies for credentials that carry
+  # no reparseable header — the MCP connector's URL-carried key today, opaque
+  # OAuth bearer tokens later. Without this, connector traffic is bucketed as
+  # anonymous-by-IP, and every client behind one egress IP shares that budget.
+  auth_user_id = getattr(request.state, "auth_user_id", None)
+  if isinstance(auth_user_id, str) and auth_user_id:
+    return auth_user_id
 
   return None
 
