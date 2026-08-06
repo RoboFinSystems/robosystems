@@ -1,21 +1,50 @@
 {
-  "mcpServers": {
+  // Credentials never live in this file: ${input:...} values are prompted on
+  // first server start and stored in VS Code's encrypted secret storage.
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "robosystems-api-key",
+      "description": "RoboSystems API key (X-API-Key; .local/config.json after `just demo-user`)",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "robosystems-graph-id",
+      "description": "Graph ID (e.g. kg1a2b3c4d5e)"
+    }
+  ],
+  "servers": {
+    // Preferred: VS Code speaks Streamable HTTP natively — point it straight
+    // at the remote MCP endpoint. The graph id lives in the URL path; the key
+    // rides in the X-API-Key header (account-wide or graph-scoped both work).
     "robosystems": {
+      "type": "http",
+      "url": "http://localhost:8000/v1/graphs/${input:robosystems-graph-id}/mcp",
+      "headers": {
+        "X-API-Key": "${input:robosystems-api-key}"
+      }
+    },
+    // Published stdio bridge (@robosystems/mcp >= 0.4.0 defaults to proxy
+    // mode, piping stdio to the same endpoint above). For clients without
+    // native HTTP transport, or to test the published package.
+    "robosystems-bridge": {
       "command": "npx",
       "args": ["-y", "@robosystems/mcp"],
       "env": {
         "ROBOSYSTEMS_API_URL": "http://localhost:8000",
-        "ROBOSYSTEMS_API_KEY": "rfs*",
-        "ROBOSYSTEMS_GRAPH_ID": "kg*"
+        "ROBOSYSTEMS_API_KEY": "${input:robosystems-api-key}",
+        "ROBOSYSTEMS_GRAPH_ID": "${input:robosystems-graph-id}"
       }
     },
-    "robosystems-local": {
+    // Local checkout of the bridge, for developing the bridge itself.
+    "robosystems-bridge-dev": {
       "command": "node",
       "args": ["../../robosystems-mcp-client/index.js"],
       "env": {
         "ROBOSYSTEMS_API_URL": "http://localhost:8000",
-        "ROBOSYSTEMS_API_KEY": "rfs*",
-        "ROBOSYSTEMS_GRAPH_ID": "kg*"
+        "ROBOSYSTEMS_API_KEY": "${input:robosystems-api-key}",
+        "ROBOSYSTEMS_GRAPH_ID": "${input:robosystems-graph-id}"
       }
     },
     "Context7": {
