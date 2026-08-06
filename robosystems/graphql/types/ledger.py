@@ -334,6 +334,7 @@ class EventBlock:
   currency: str
   description: str | None
   metadata: JSON
+  payload_drift: bool
   dimension_ids: list[str]
   agent_id: str | None
   resource_type: str | None
@@ -362,6 +363,7 @@ class EventBlock:
       currency=row.currency,
       description=row.description,
       metadata=row.metadata,
+      payload_drift=row.payload_drift,
       dimension_ids=list(row.dimension_ids),
       agent_id=row.agent_id,
       resource_type=row.resource_type,

@@ -490,6 +490,35 @@ class TestEventBlockResolvers:
     assert kwargs["limit"] == 10
     assert kwargs["offset"] == 0
 
+  def test_event_blocks_payload_drift_filter_and_field(self) -> None:
+    drifted = self._event(id="evt_drift", status="committed")
+    drifted.payload_drift = True
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+        return_value=[drifted],
+      ) as list_mock,
+    ):
+      result = schema.execute_sync(
+        """
+        query {
+          eventBlocks(payloadDrift: true) {
+            id
+            payloadDrift
+          }
+        }
+        """,
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data is not None
+    (block,) = result.data["eventBlocks"]
+    assert block["id"] == "evt_drift"
+    assert block["payloadDrift"] is True
+    assert list_mock.call_args.kwargs["payload_drift"] is True
+
   def test_event_block_raises_typed_error_when_schema_not_initialized(self) -> None:
     with (
       _patch_session(),

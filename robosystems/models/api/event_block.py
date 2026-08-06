@@ -357,6 +357,17 @@ class EventBlockEnvelope(BaseModel):
       "through a handler, otherwise whatever the adapter captured."
     ),
   )
+  payload_drift: bool = Field(
+    False,
+    description=(
+      "True when a source re-sync surfaced a changed upstream payload "
+      "for an event whose GL is already posted (committed/fulfilled "
+      "are immutable to sync). The live payload and GL are untouched; "
+      "the incoming payload is stashed in `metadata.drift_payload` "
+      "with `metadata.drift_detected_at`. Drifted events need operator "
+      "reconciliation — the local books no longer mirror the source."
+    ),
+  )
   dimension_ids: list[str] = Field(
     ...,
     description=(
