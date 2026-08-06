@@ -119,7 +119,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-For claude.ai and Claude Desktop — whose custom connectors cannot send an API-key header — generate a connector URL from the Connect page in the app: the URL carries its own graph-scoped, revocable API key, so it pastes straight into Settings → Connectors → Add custom connector. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
+For claude.ai and Claude Desktop — whose custom connectors cannot send an API-key header — generate a connector URL from the MCP page in the app (`/connect`): the URL carries its own graph-scoped, revocable API key, so it pastes straight into Settings → Connectors → Add custom connector. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
 
 ## Clients
 

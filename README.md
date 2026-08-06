@@ -259,7 +259,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — generate a connector URL from your Connect page in the app and paste it into Settings → Connectors → Add custom connector. The URL carries its own graph-scoped API key (Claude's connectors can't send custom headers), valid only for that graph and revocable anytime from Settings → API Keys.
+**Claude (claude.ai / Desktop)** — generate a connector URL from the **MCP page** in the app (`/connect`) and paste it into Settings → Connectors → Add custom connector. The URL carries its own graph-scoped API key (Claude's connectors can't send custom headers), valid only for that graph and revocable anytime from Settings → API Keys.
 
 - **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
 
