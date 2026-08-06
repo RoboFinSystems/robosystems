@@ -272,8 +272,15 @@ class TestInitialize:
       return await dispatch_jsonrpc(request, "kg123", _make_user())
 
   async def test_supported_version_is_echoed(self):
+    body = _body(await self._initialize("2025-06-18"))
+    assert body["result"]["protocolVersion"] == "2025-06-18"
+
+  async def test_batching_revision_not_negotiable(self):
+    # The transport unconditionally rejects JSON-RPC batches, which 2025-03-26
+    # permitted — so that revision must not be offered. A client requesting it
+    # negotiates to the revision the wire actually implements.
     body = _body(await self._initialize("2025-03-26"))
-    assert body["result"]["protocolVersion"] == "2025-03-26"
+    assert body["result"]["protocolVersion"] == MCP_LATEST_PROTOCOL_VERSION
 
   async def test_unsupported_version_answers_latest(self):
     body = _body(await self._initialize("1999-01-01"))
@@ -461,6 +468,76 @@ class TestStreamToolCall:
     assert len(messages) == 1
     assert "id" in messages[0]
 
+  async def test_hard_timeout_is_error_and_breaker_failure(self):
+    import asyncio
+
+    async def hung_stream(handler, name, arguments, strategy):
+      yield {"event": "start", "data": {"tool": name}}
+      await asyncio.sleep(5)
+
+    handler = _make_handler()
+    breaker = Mock()
+    with (
+      patch.object(remote, "circuit_breaker", breaker),
+      patch.object(remote, "stream_mcp_tool_execution", hung_stream),
+    ):
+      tool_call = Mock()
+      tool_call.name = "read-graph-cypher"
+      tool_call.arguments = {"query": "MATCH (n) RETURN n"}
+      events = [
+        event
+        async for event in remote._stream_tool_call(
+          handler,
+          "kg123",
+          tool_call,
+          remote.MCPExecutionStrategy.STREAM_AGGREGATED,
+          0,  # timeout ceiling expires immediately
+          7,
+          None,
+        )
+      ]
+
+    final = json.loads(events[-1]["data"])
+    assert final["result"]["isError"] is True
+    breaker.record_failure.assert_called_once_with("kg123", "read-graph-cypher")
+    breaker.record_success.assert_not_called()
+
+  async def test_stream_error_event_is_error_and_breaker_failure(self):
+    async def failing_stream(handler, name, arguments, strategy):
+      yield {"event": "start", "data": {"tool": name}}
+      yield {
+        "event": "error",
+        "data": {"tool": name, "error": "backend down", "error_kind": "backend"},
+      }
+
+    handler = _make_handler()
+    breaker = Mock()
+    with (
+      patch.object(remote, "circuit_breaker", breaker),
+      patch.object(remote, "stream_mcp_tool_execution", failing_stream),
+    ):
+      tool_call = Mock()
+      tool_call.name = "read-graph-cypher"
+      tool_call.arguments = {"query": "MATCH (n) RETURN n"}
+      events = [
+        event
+        async for event in remote._stream_tool_call(
+          handler,
+          "kg123",
+          tool_call,
+          remote.MCPExecutionStrategy.STREAM_AGGREGATED,
+          30,
+          8,
+          None,
+        )
+      ]
+
+    final = json.loads(events[-1]["data"])
+    assert final["result"]["isError"] is True
+    assert "backend down" in final["result"]["content"][0]["text"]
+    breaker.record_failure.assert_called_once_with("kg123", "read-graph-cypher")
+    breaker.record_success.assert_not_called()
+
 
 def _make_queue_manager(statuses, result=None):
   manager = Mock()
@@ -630,6 +707,20 @@ class TestTransportGate:
 
   def test_json_with_charset_passes(self):
     _transport_gate(self._request({"content-type": "application/json; charset=utf-8"}))
+
+  def test_json_smuggled_in_parameters_is_415(self):
+    # A substring check would accept this — still a browser simple request.
+    with pytest.raises(HTTPException) as exc:
+      _transport_gate(self._request({"content-type": "text/plain; application/json"}))
+    assert exc.value.status_code == 415
+
+  def test_unrelated_json_suffix_type_is_415(self):
+    with pytest.raises(HTTPException) as exc:
+      _transport_gate(self._request({"content-type": "application/json-patch+json"}))
+    assert exc.value.status_code == 415
+
+  def test_media_type_match_is_case_insensitive(self):
+    _transport_gate(self._request({"content-type": "APPLICATION/JSON"}))
 
 
 @pytest.mark.asyncio

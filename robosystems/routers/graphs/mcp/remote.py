@@ -78,11 +78,14 @@ from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 router = APIRouter()
 
 # Protocol revisions this transport can negotiate. The server answers with the
-# client's requested revision when supported, else its own latest. Streamable
-# HTTP was introduced in 2025-03-26, so earlier revisions are not offered —
-# a 2024-11-05 client negotiates down (up) to a revision this transport
-# actually implements.
-MCP_SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-03-26", "2025-06-18"})
+# client's requested revision when supported, else its own latest. Exactly the
+# revision this dispatch implements is offered — 2024-11-05 predates Streamable
+# HTTP, and 2025-03-26 permitted JSON-RPC batching, which this transport
+# unconditionally rejects, so advertising either would promise semantics the
+# wire doesn't honor. Clients on other revisions negotiate to 2025-06-18 at
+# initialize (Claude requests 2025-11-25 and accepts this fine); requests
+# carrying no MCP-Protocol-Version header are still served for compatibility.
+MCP_SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2025-06-18"})
 MCP_LATEST_PROTOCOL_VERSION = "2025-06-18"
 
 # JSON-RPC 2.0 error codes
@@ -129,8 +132,12 @@ def _transport_gate(request: Request) -> None:
       detail="Origin not allowed",
     )
 
+  # Exact media-type essence match — a substring check would accept
+  # `text/plain; application/json` (still a browser simple request) and
+  # unrelated `+json` types.
   content_type = request.headers.get("content-type", "")
-  if "application/json" not in content_type.lower():
+  media_type = content_type.split(";", 1)[0].strip().casefold()
+  if media_type != "application/json":
     raise HTTPException(
       status_code=http_status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
       detail="Content-Type must be application/json",
@@ -517,6 +524,7 @@ async def _stream_tool_call(
         circuit_breaker.record_success(graph_id, tool_call.name)
     except TimeoutError:
       outcome = "timeout"
+      circuit_breaker.record_failure(graph_id, tool_call.name)
       record_shared_query_outcome(
         graph_id,
         user_id,
@@ -689,6 +697,11 @@ async def _stream_queued_call(
           await asyncio.sleep(_QUEUE_POLL_SECONDS)
     except TimeoutError:
       outcome = "bridge_timeout"
+      # Deliberate: the bridge ceiling exhausting counts against the breaker.
+      # Whether the 300s went to queue wait or execution, the backend didn't
+      # produce a result in time — and if the queue is saturated, opening the
+      # breaker sheds exactly the load the queue is drowning under.
+      circuit_breaker.record_failure(graph_id, tool_call.name)
       payload = _tool_error_payload(
         msg_id,
         f"Error: queued query did not complete within "

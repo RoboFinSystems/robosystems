@@ -156,6 +156,22 @@ async def stream_cypher_query(
     async for chunk in handler.execute_query_streaming(
       query, parameters, chunk_size=chunk_size
     ):
+      # A failed backend query arrives as an error chunk (see
+      # StreamingRepositoryWrapper): surface it as an error event, or the
+      # stream completes normally and aggregates to a successful empty result.
+      if isinstance(chunk, dict) and chunk.get("error"):
+        error_type = str(chunk.get("error_type", ""))
+        yield {
+          "event": "error",
+          "data": {
+            "tool": "read-graph-cypher",
+            "error": str(chunk["error"]),
+            "error_type": error_type,
+            "error_kind": "timeout" if "Timeout" in error_type else "backend",
+          },
+        }
+        return
+
       chunk_count += 1
       rows_in_chunk = len(chunk.get("data", []))
       total_rows += rows_in_chunk
