@@ -1,19 +1,6 @@
 # AI Operators & MCP
 
-RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any external agent (Claude Desktop, a custom orchestrator) can call directly.
-
----
-
-## Two Kinds of "Agent"
-
-RoboSystems uses the word "agent" for two unrelated concepts. Keep them separate.
-
-| Term | What it is | Where it lives |
-| --- | --- | --- |
-| **Operator** | The AI executor layer — Claude reasoning over MCP tools (`CypherOperator`, `MappingOperator`, etc.) | `operations/operators/`, `routers/graphs/operator/`, endpoint `/v1/graphs/{g}/operator` |
-| **REA Agent** | A ledger counterparty — a customer, vendor, or employee party in the accounting ontology | `models/extensions/roboledger/agent.py` |
-
-"REA Agent" is the canonical ontology term (Resources-Events-Agents accounting). The AI side is always called an **Operator** in the codebase to avoid the "agent operates on agent" collision. Marketing copy may still say "AI agent" — that is decoupled from the internal naming used in this page.
+RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude Desktop, a custom orchestrator) can call directly.
 
 ---
 
@@ -50,7 +37,7 @@ The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-
 
 ## The MCP Tool Surface
 
-MCP is the shared tool layer. Every agent path — the in-product Operator endpoint, Claude Desktop, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
+MCP is the shared tool layer. Every entry path — the in-product Operator endpoint, external MCP clients, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
 Three HTTP entry points expose the surface on every graph:
 
@@ -321,6 +308,7 @@ For direct, API-bypassing graph access during development, `just lbug-query GRAP
 | GraphQL MCP kill switch | `MCP_GRAPHQL_ENABLED=false` removes `query-graphql` / `get-graphql-schema` |
 | Bulk ingestion is not a read tool | Loading data into the graph is not part of the `read-graph-cypher` surface; use the file-upload ingestion path instead |
 | Search scope | Shared-repo search resolves to the parent `graph_id`; subgraphs are not a search boundary |
+| `agent` tools are not AI | On ledger graphs, `create-agent` / `list-agents` / `update-agent` manage **REA counterparties** — customers, vendors, employees (the accounting-ontology term). The AI executor layer is always called an Operator |
 | Credits | Only AI (LLM) calls consume credits; every database/search tool call is free |
 
 Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `SEMANTIC_SEARCH_ENABLED`, `MCP_GRAPHQL_ENABLED`, `MCP_MEMORY_ENABLED`, `FACT_GRID_ENABLED`) determine the catalog at runtime. See the [Configuration README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/README.md) in codebase.
