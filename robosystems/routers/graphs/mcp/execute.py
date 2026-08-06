@@ -58,7 +58,7 @@ from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
 from robosystems.models.core import User
 
 # Import MCP components
-from .handlers import MCPHandler, validate_mcp_access
+from .handlers import MCPHandler, is_tool_error_result, validate_mcp_access
 from .strategies import (
   MCPClientDetector,
   MCPExecutionStrategy,
@@ -403,7 +403,10 @@ async def execute_tool_to_json(
     if cached is not None:
       return cached
     result = await execute_tool_directly(handler, tool_call, timeout)
-    await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
+    # Never cache an execution failure — a transient backend error would be
+    # served as the schema for the full cache TTL.
+    if not is_tool_error_result(result):
+      await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
     return result
 
   if strategy == MCPExecutionStrategy.INFO_CACHED:
@@ -411,7 +414,8 @@ async def execute_tool_to_json(
     if cached is not None:
       return cached
     result = await execute_tool_directly(handler, tool_call, timeout)
-    await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
+    if not is_tool_error_result(result):
+      await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
     return result
 
   if strategy in (
@@ -848,7 +852,8 @@ async def call_mcp_tool(
           return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
-        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
+        if not is_tool_error_result(result):
+          await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_SCHEMA_CACHE_TTL)
         return MCPToolResult(result=result)
 
       elif strategy == MCPExecutionStrategy.INFO_CACHED:
@@ -858,7 +863,8 @@ async def call_mcp_tool(
           return MCPToolResult(result=cached)
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
-        await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
+        if not is_tool_error_result(result):
+          await _set_mcp_cache(graph_id, tool_call.name, result, _MCP_INFO_CACHE_TTL)
         return MCPToolResult(result=result)
 
       else:

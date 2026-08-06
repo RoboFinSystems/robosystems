@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.routers.graphs.mcp import remote
+from robosystems.routers.graphs.mcp.handlers import tool_error_result
 from robosystems.routers.graphs.mcp.remote import (
   INVALID_PARAMS,
   INVALID_REQUEST,
@@ -17,6 +18,8 @@ from robosystems.routers.graphs.mcp.remote import (
   _remote_switch_workspace,
   _to_tool_result,
   _tool_error_payload,
+  _tool_failure,
+  _transport_gate,
   dispatch_jsonrpc,
 )
 
@@ -25,13 +28,13 @@ def _body(response):
   return json.loads(response.body)
 
 
-def _make_request(message, accept="application/json, text/event-stream"):
+def _make_request(message, accept="application/json, text/event-stream", headers=None):
   request = Mock()
   if isinstance(message, Exception):
     request.json = AsyncMock(side_effect=message)
   else:
     request.json = AsyncMock(return_value=message)
-  request.headers = {"accept": accept}
+  request.headers = {"accept": accept, **(headers or {})}
   return request
 
 
@@ -131,6 +134,20 @@ class TestRemoteSwitchWorkspace:
   def test_invalid_characters_rejected(self):
     text = _remote_switch_workspace(KG, {"workspace_id": "../etc/passwd"})
     assert text.startswith("Error:")
+
+  def test_foreign_graph_family_rejected(self):
+    # A full id outside this connector's family must not resolve to a URL.
+    other = "kg29fb490f76871d22e835_dev"
+    text = _remote_switch_workspace(KG, {"workspace_id": other})
+    assert text.startswith("Error:")
+    assert "family" in text
+
+  def test_message_never_claims_current_key_transfers(self):
+    # A URL-token connector's credential may not cover the target; the
+    # guidance must point at minting one, not claim the same key works.
+    payload = json.loads(_remote_switch_workspace(KG, {"workspace_id": "dev"}))
+    assert "same API key" not in payload["message"]
+    assert "credential" in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -544,3 +561,201 @@ class TestStreamQueuedCall:
       await generator.aclose()
 
     manager.cancel_query.assert_awaited_once_with("q-1", "user-123")
+
+
+class TestToolFailureClassification:
+  """Marked handler failures and aggregated stream failures map to isError."""
+
+  def test_marked_error_maps_to_is_error(self):
+    marked = tool_error_result("Error: it broke", "backend")
+    result = _to_tool_result(marked)
+    assert result["isError"] is True
+    assert result["content"] == [{"type": "text", "text": "Error: it broke"}]
+
+  def test_aggregated_failure_maps_to_is_error(self):
+    aggregated = {"success": False, "error": "boom", "tool": "read-graph-cypher"}
+    result = _to_tool_result(aggregated)
+    assert result["isError"] is True
+    assert result["content"] == [{"type": "text", "text": "boom"}]
+
+  def test_success_shapes_stay_not_error(self):
+    for value in (
+      {"type": "text", "text": "fine"},
+      {"success": True, "rows": 3},
+      ["plain", "list"],
+    ):
+      assert _to_tool_result(value)["isError"] is False
+
+  def test_tool_failure_kinds(self):
+    assert _tool_failure(tool_error_result("t", "timeout")) == (True, "timeout")
+    assert _tool_failure(tool_error_result("c", "constraint")) == (True, "constraint")
+    # Aggregated failures without a kind default to backend (covers the
+    # disrupted-stream shape).
+    assert _tool_failure({"success": False, "error": "x"}) == (True, "backend")
+    assert _tool_failure({"type": "text", "text": "ok"}) == (False, None)
+
+
+class TestTransportGate:
+  """Origin and Content-Type checks required by MCP Streamable HTTP."""
+
+  def _request(self, headers):
+    request = Mock()
+    request.headers = headers
+    return request
+
+  def test_absent_origin_with_json_passes(self):
+    _transport_gate(self._request({"content-type": "application/json"}))
+
+  def test_trusted_origin_passes(self):
+    from robosystems.config import env
+
+    origin = env.get_main_cors_origins()[0]
+    _transport_gate(
+      self._request({"origin": origin, "content-type": "application/json"})
+    )
+
+  def test_untrusted_origin_is_403(self):
+    with pytest.raises(HTTPException) as exc:
+      _transport_gate(
+        self._request(
+          {"origin": "https://evil.example", "content-type": "application/json"}
+        )
+      )
+    assert exc.value.status_code == 403
+
+  def test_non_json_content_type_is_415(self):
+    with pytest.raises(HTTPException) as exc:
+      _transport_gate(self._request({"content-type": "text/plain"}))
+    assert exc.value.status_code == 415
+
+  def test_json_with_charset_passes(self):
+    _transport_gate(self._request({"content-type": "application/json; charset=utf-8"}))
+
+
+@pytest.mark.asyncio
+class TestProtocolVersionHeader:
+  """Post-initialize requests carrying MCP-Protocol-Version must be validated."""
+
+  async def test_unsupported_version_header_is_400(self):
+    request = _make_request(
+      {"jsonrpc": "2.0", "id": 5, "method": "ping"},
+      headers={"mcp-protocol-version": "2024-11-05"},
+    )
+    response = await dispatch_jsonrpc(request, "kg123", _make_user())
+    assert response.status_code == 400
+    body = _body(response)
+    assert body["error"]["code"] == INVALID_REQUEST
+    assert "2024-11-05" in body["error"]["message"]
+
+  async def test_supported_version_header_passes(self):
+    request = _make_request(
+      {"jsonrpc": "2.0", "id": 5, "method": "ping"},
+      headers={"mcp-protocol-version": "2025-06-18"},
+    )
+    body = _body(await dispatch_jsonrpc(request, "kg123", _make_user()))
+    assert body["result"] == {}
+
+  async def test_absent_version_header_passes(self):
+    request = _make_request({"jsonrpc": "2.0", "id": 5, "method": "ping"})
+    body = _body(await dispatch_jsonrpc(request, "kg123", _make_user()))
+    assert body["result"] == {}
+
+  async def test_initialize_is_exempt_from_header_check(self):
+    handler = _make_handler()
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {"protocolVersion": "2025-11-25"},
+        },
+        headers={"mcp-protocol-version": "2025-11-25"},
+      )
+      response = await dispatch_jsonrpc(request, "kg123", _make_user())
+    assert response.status_code == 200
+    # Unsupported requested revision negotiates down to the server's latest.
+    assert _body(response)["result"]["protocolVersion"] == MCP_LATEST_PROTOCOL_VERSION
+
+  async def test_notification_with_bad_header_is_400_without_body(self):
+    request = _make_request(
+      {"jsonrpc": "2.0", "method": "notifications/initialized"},
+      headers={"mcp-protocol-version": "bogus"},
+    )
+    response = await dispatch_jsonrpc(request, "kg123", _make_user())
+    assert response.status_code == 400
+    assert not response.body
+
+  async def test_pre_streamable_revision_is_not_negotiable(self):
+    assert "2024-11-05" not in remote.MCP_SUPPORTED_PROTOCOL_VERSIONS
+
+
+@pytest.mark.asyncio
+class TestToolFailureOutcomes:
+  """Execution failures reach the client as isError and the breaker as failures."""
+
+  async def _call(self, result, breaker):
+    handler = _make_handler()
+    with (
+      patch.object(remote, "circuit_breaker", breaker),
+      patch.object(remote, "authorize_mcp_tool_call", AsyncMock(return_value="read")),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+      patch.object(remote, "execute_tool_to_json", AsyncMock(return_value=result)),
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 21,
+          "method": "tools/call",
+          "params": {"name": "get-graph-info", "arguments": {}},
+        },
+        accept="application/json",
+      )
+      return _body(await dispatch_jsonrpc(request, "kg123", _make_user()))
+
+  async def test_swallowed_timeout_is_error_and_breaker_failure(self):
+    breaker = Mock()
+    body = await self._call(
+      tool_error_result("Error: tool 'get-graph-info' timed out", "timeout"), breaker
+    )
+    assert body["result"]["isError"] is True
+    breaker.record_failure.assert_called_once()
+    breaker.record_success.assert_not_called()
+
+  async def test_backend_error_is_error_and_breaker_failure(self):
+    breaker = Mock()
+    body = await self._call(
+      tool_error_result("Graph API unavailable", "backend"), breaker
+    )
+    assert body["result"]["isError"] is True
+    breaker.record_failure.assert_called_once()
+
+  async def test_constraint_error_is_error_but_not_breaker_failure(self):
+    breaker = Mock()
+    body = await self._call(
+      tool_error_result("Query Error: too complex", "constraint"), breaker
+    )
+    # The model sees a failed call; the breaker sees a healthy backend.
+    assert body["result"]["isError"] is True
+    breaker.record_failure.assert_not_called()
+    breaker.record_success.assert_called_once()
+
+  async def test_disrupted_aggregation_is_error_and_breaker_failure(self):
+    breaker = Mock()
+    body = await self._call(
+      {"success": False, "error": "Unable to aggregate results", "tool": "t"}, breaker
+    )
+    assert body["result"]["isError"] is True
+    breaker.record_failure.assert_called_once()
+
+  async def test_success_still_records_breaker_success(self):
+    breaker = Mock()
+    body = await self._call({"type": "text", "text": "fine"}, breaker)
+    assert body["result"]["isError"] is False
+    breaker.record_success.assert_called_once()
+    breaker.record_failure.assert_not_called()

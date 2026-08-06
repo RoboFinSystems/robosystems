@@ -440,3 +440,90 @@ class TestAggregateStreamedResults:
     result = aggregate_streamed_results(events)
 
     assert result["tool"] == "my-custom-tool"
+
+
+@pytest.mark.unit
+class TestMarkedErrorPropagation:
+  """Handler-marked execution failures must surface as error events, so the
+  aggregated result is a failure — never a success wrapping error prose."""
+
+  @pytest.mark.asyncio
+  async def test_generic_tool_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "Error: operation failed.",
+        "is_error": True,
+        "error_kind": "backend",
+      }
+    )
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(handler, "get-graph-info", {}, "json_immediate")
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "result" not in event_types
+    assert "complete" not in event_types
+    error_event = next(e for e in events if e["event"] == "error")
+    assert error_event["data"]["error_kind"] == "backend"
+
+  @pytest.mark.asyncio
+  async def test_cypher_fallback_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "Error: tool 'read-graph-cypher' timed out after 60 seconds",
+        "is_error": True,
+        "error_kind": "timeout",
+      }
+    )
+    del handler.execute_query_streaming
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(
+        handler, "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, "json_immediate"
+      )
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "query_result" not in event_types
+
+  @pytest.mark.asyncio
+  async def test_schema_marked_error_yields_error_event(self):
+    handler = AsyncMock()
+    handler.call_tool = AsyncMock(
+      return_value={
+        "type": "text",
+        "text": "backend down",
+        "is_error": True,
+        "error_kind": "backend",
+      }
+    )
+
+    events = await _collect_events(
+      stream_mcp_tool_execution(handler, "get-graph-schema", {}, "json_complete")
+    )
+
+    event_types = [e["event"] for e in events]
+    assert "error" in event_types
+    assert "schema_nodes" not in event_types
+
+  def test_aggregation_preserves_error_kind(self):
+    events = [
+      {"event": "start", "data": {"tool": "get-graph-info"}},
+      {
+        "event": "error",
+        "data": {"tool": "get-graph-info", "error": "boom", "error_kind": "timeout"},
+      },
+    ]
+
+    result = aggregate_streamed_results(events)
+
+    assert result["success"] is False
+    assert result["error"] == "boom"
+    assert result["error_kind"] == "timeout"

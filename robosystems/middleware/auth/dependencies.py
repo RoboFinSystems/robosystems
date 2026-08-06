@@ -168,15 +168,29 @@ def _get_user_for_verified_jwt(user_id: str, token_session_version: int) -> User
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def _stash_api_key_identity(request: Request, api_key: str) -> None:
+def _stash_api_key_identity(
+  request: Request,
+  api_key: str,
+  user: "User | None" = None,
+  auth_method: str = "api_key",
+) -> None:
   """Record which API key authenticated this request on request.state.
 
   The first 8 characters are the key's stored identification prefix
   (``UserAPIKey.prefix``), so downstream telemetry can attribute activity
   to a specific key without access to the raw header. JWT-authenticated
   requests leave the attribute unset.
+
+  When the resolved ``user`` is passed, the sanitized principal is also
+  published as ``request.state.auth_user_id`` / ``auth_method``, so
+  downstream consumers that cannot reparse the credential — the rate
+  limiter for URL-token connectors, and eventually opaque OAuth bearer
+  tokens — can identify the caller without re-validating anything.
   """
   request.state.api_key_prefix = api_key[:8]
+  if user is not None:
+    request.state.auth_user_id = str(user.id)
+    request.state.auth_method = auth_method
 
 
 def verify_jwt_claims(
@@ -226,7 +240,7 @@ async def get_optional_user(
   if api_key:
     user = validate_api_key(api_key)
     if user:
-      _stash_api_key_identity(request, api_key)
+      _stash_api_key_identity(request, api_key, user)
     return user
 
   return None
@@ -293,7 +307,7 @@ async def get_current_user(
   if api_key:
     user = validate_api_key(api_key)
     if user:
-      _stash_api_key_identity(request, api_key)
+      _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,
@@ -434,7 +448,7 @@ async def get_current_user_with_graph(
   if api_key:
     user = validate_api_key_with_graph(api_key, graph_id)
     if user:
-      _stash_api_key_identity(request, api_key)
+      _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,
@@ -514,7 +528,7 @@ async def get_current_user_with_graph_or_url_token(
 
   user = validate_api_key_with_graph(token, graph_id, require_scoped=True)
   if user:
-    _stash_api_key_identity(request, token)
+    _stash_api_key_identity(request, token, user, auth_method="api_key_url")
     SecurityAuditLogger.log_auth_success(
       user_id=str(user.id),
       ip_address=client_ip,
@@ -713,7 +727,7 @@ async def get_current_user_sse(
   if api_key:
     user = validate_api_key(api_key)
     if user:
-      _stash_api_key_identity(request, api_key)
+      _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(
         user_id=str(user.id),
         ip_address=client_ip,

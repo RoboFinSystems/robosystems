@@ -1378,6 +1378,8 @@ class TestApiKeyIdentityStash:
 
     assert result == mock_user
     assert mock_request.state.api_key_prefix == api_key[:8]
+    assert mock_request.state.auth_user_id == "user_1"
+    assert mock_request.state.auth_method == "api_key"
 
 
 class TestGetCurrentUserWithGraphOrUrlToken:
@@ -1431,6 +1433,10 @@ class TestGetCurrentUserWithGraphOrUrlToken:
     assert result == mock_user
     mock_validate.assert_called_once_with(token, "kg123", require_scoped=True)
     assert request.state.api_key_prefix == token[:8]
+    # The sanitized principal must be published for consumers that cannot
+    # reparse the URL credential — the rate limiter reads these.
+    assert request.state.auth_user_id == "user123"
+    assert request.state.auth_method == "api_key_url"
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.auth.dependencies.validate_api_key_with_graph")
