@@ -26,6 +26,17 @@ TYPE_MEMORY = "memory"
 TYPE_SUBGRAPH = "subgraph"
 TYPE_VECTORS = "vectors"
 TYPE_STAGING = "staging"
+TYPE_TRANSIENT = "transient"
+
+# Applied by the platform API, not here: a `{parent}_*` database with no row in
+# the graph registry. This module is instance-local and cannot tell a live
+# subgraph from the remains of a deleted one, so it reports both as
+# TYPE_SUBGRAPH and the registry-aware layer re-labels what it knows is gone.
+TYPE_ORPHAN = "orphan"
+
+# Blue-green build artifacts (see `swap_database`). Real disk, but transient and
+# reclaimable, so they are reported apart from the databases they belong to.
+TRANSIENT_SUFFIXES = ("-wip", "-prev")
 
 
 def path_size_bytes(path: Path) -> int:
@@ -53,18 +64,40 @@ def path_size_bytes(path: Path) -> int:
   return total
 
 
+def _base_name(name: str) -> str:
+  """Strip a blue-green suffix, leaving the database the artifact belongs to."""
+  for suffix in TRANSIENT_SUFFIXES:
+    if name.endswith(suffix):
+      return name[: -len(suffix)]
+  return name
+
+
 def _owns(name: str, graph_id: str) -> bool:
   """Whether an on-disk name belongs to this graph.
 
   Exact match is the graph itself; the ``_`` boundary covers its memory
   database and subgraphs. Top-level ids are fixed-length ``kg`` + hex, so the
   prefix cannot collide with a different tenant's graph.
+
+  Matching on the base name is what brings the graph's *own* build artifacts
+  into scope. ``{graph_id}-wip`` uses a hyphen, so it failed both arms of this
+  test and went uncounted, while a subgraph's ``{graph_id}_{name}-wip`` passed
+  on the ``_`` prefix — the same artifact counted or not depending on which
+  database it was built for.
   """
-  return name == graph_id or name.startswith(f"{graph_id}_")
+  base = _base_name(name)
+  return base == graph_id or base.startswith(f"{graph_id}_")
 
 
 def _classify_lbug(stem: str, graph_id: str) -> str:
-  """Classify a `.lbug` database by its name."""
+  """Classify a `.lbug` database by its name.
+
+  Order matters: the transient check comes first because a subgraph's build
+  artifact matches the subgraph fallthrough below, and reporting it as a
+  subgraph is what made the storage breakdown disagree with the subgraph list.
+  """
+  if stem.endswith(TRANSIENT_SUFFIXES):
+    return TYPE_TRANSIENT
   if stem == graph_id:
     return TYPE_GRAPH
   if stem == f"{graph_id}_memory":
@@ -141,7 +174,7 @@ def compute_storage_breakdown(graph_id: str) -> dict[str, Any]:
 
   Returns:
       ``{graph_id, total_bytes, items: [{type, id, bytes}]}`` where ``type``
-      is one of graph, memory, subgraph, vectors, staging.
+      is one of graph, memory, subgraph, vectors, staging, transient.
 
   Raises:
       HTTPException: If ``graph_id`` fails name validation.

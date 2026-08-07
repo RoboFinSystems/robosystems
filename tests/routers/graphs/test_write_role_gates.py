@@ -85,3 +85,35 @@ class TestLifecycleWriteRoleGates:
         )
     assert exc.value.status_code == 403
     gate.assert_called_once_with("usr_1", "kg123")
+
+
+@pytest.mark.unit
+class TestMaterializeSubgraphGate:
+  """Materialization and direct writes cannot share a database.
+
+  Blue-green rebuilds from DuckDB into `{id}-wip` and renames it over the
+  active file, so every direct write made since staging began disappears at
+  the swap. A subgraph exists for those direct writes, so the pipeline is
+  refused there — before the write-role check, since it is a property of the
+  graph rather than of the caller.
+  """
+
+  def test_materialize_blocked_on_subgraph(self):
+    from robosystems.routers.graphs.operations import materialize_op
+
+    gate = MagicMock()
+    with patch(f"{OPS}.require_graph_write_role", gate):
+      with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+          materialize_op(
+            body=MagicMock(),
+            graph_id="kg19ed34f81c37ba3f31fa_entities",
+            user=SimpleNamespace(id="usr_1"),
+            idempotency_key=None,
+            cache=MagicMock(),
+            db=MagicMock(),
+          )
+        )
+    assert exc.value.status_code == 403
+    assert "staging" in exc.value.detail.lower()
+    gate.assert_not_called()

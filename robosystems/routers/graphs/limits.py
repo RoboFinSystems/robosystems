@@ -166,10 +166,28 @@ async def get_graph_limits(
 
         current_storage_gb = breakdown.get("total_bytes", 0) / (1024**3)
 
+        # The warning flag reads durable bytes only, matching cap enforcement:
+        # a blue-green `-wip` copy the size of the database would trip it on
+        # every rebuild of a graph past ~40% usage.
+        from robosystems.graph_api.core.storage_breakdown import TYPE_TRANSIENT
+
+        transient_bytes = sum(
+          item.get("bytes", 0)
+          for item in breakdown.get("items", [])
+          if item.get("type") == TYPE_TRANSIENT
+        )
+        durable_storage_gb = (breakdown.get("total_bytes", 0) - transient_bytes) / (
+          1024**3
+        )
+
         storage_limits = {
-          "current_usage_gb": round(current_storage_gb, 2),
+          # Byte-level precision, not 2 decimals. Rounding to 0.01 GB quantises
+          # this to ~10.7 MB, which for a graph in the tens of megabytes both
+          # destroys the figure and makes it contradict the itemized breakdown
+          # rendered directly beneath it.
+          "current_usage_gb": round(current_storage_gb, 9),
           "max_storage_gb": max_storage_gb,
-          "approaching_limit": current_storage_gb > (max_storage_gb * 0.8),
+          "approaching_limit": durable_storage_gb > (max_storage_gb * 0.8),
         }
       except Exception as e:
         logger.warning(f"Could not get storage info for {graph_id}: {e}")
