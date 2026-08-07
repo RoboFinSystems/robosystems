@@ -1054,12 +1054,16 @@ class TestApplySourceElementTraits:
 
     session = MagicMock()
 
-    def query_dispatcher(model):
+    def query_dispatcher(*models):
       result = MagicMock()
-      if model is Element:
+      if models == (Element,):
         result.filter.return_value.all.return_value = list(elements_by_id.values())
-      elif model is Trait:
+      elif models == (Trait,):
         result.filter.return_value.__iter__ = lambda self: iter(traits)
+      else:
+        # The (ElementTrait, Trait) join loading existing EFS rows for the
+        # heal pass — these tests model fresh elements with no prior rows.
+        result.join.return_value.filter.return_value.all.return_value = []
       return result
 
     session.query.side_effect = query_dispatcher
