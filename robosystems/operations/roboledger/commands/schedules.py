@@ -13,8 +13,6 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
-  ClosingEntryResponse,
-  CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
   PromoteObligationsRequest,
@@ -109,35 +107,6 @@ def reinstate_reopened_schedule_scopes(session: Session) -> int:
     {"closed_through": closed_through},
   )
   return result.rowcount or 0
-
-
-def _build_closing_entry_response(result) -> ClosingEntryResponse:
-  """Map a ScheduleService ClosingEntryResult to the wire response."""
-  reversal_resp = None
-  if result.reversal:
-    reversal_resp = ClosingEntryResponse(
-      outcome=result.reversal.outcome,
-      entry_id=result.reversal.entry_id,
-      status=result.reversal.status,
-      posting_date=result.reversal.posting_date,
-      memo=result.reversal.memo,
-      debit_element_id=result.reversal.debit_element_id,
-      credit_element_id=result.reversal.credit_element_id,
-      amount=result.reversal.amount,
-      reason=result.reversal.reason,
-    )
-  return ClosingEntryResponse(
-    outcome=result.outcome,
-    entry_id=result.entry_id,
-    status=result.status,
-    posting_date=result.posting_date,
-    memo=result.memo,
-    debit_element_id=result.debit_element_id,
-    credit_element_id=result.credit_element_id,
-    amount=result.amount,
-    reason=result.reason,
-    reversal=reversal_resp,
-  )
 
 
 def _validate_element_references(session: Session, body: CreateScheduleRequest) -> None:
@@ -306,38 +275,6 @@ def promote_obligations(
     stranded_event_ids=result.stranded_event_ids,
     errors=[{"event_id": eid, "error": msg} for eid, msg in result.errors],
   )
-
-
-def create_manual_closing_entry(
-  session: Session,
-  body: CreateManualClosingEntryRequest,
-  created_by: str,
-) -> ClosingEntryResponse:
-  """Create a manual (non-schedule) draft closing entry.
-
-  Used for one-off adjustments (asset disposals, impairments,
-  reclassifications). Total debits must equal total credits.
-  Raises `ValueError` for validation failures — caller maps to 422.
-  """
-  service = ScheduleService()
-  result = service.create_manual_closing_entry(
-    session,
-    posting_date=body.posting_date,
-    line_items=[
-      {
-        "element_id": li.element_id,
-        "debit_amount": li.debit_amount,
-        "credit_amount": li.credit_amount,
-        "description": li.description,
-      }
-      for li in body.line_items
-    ],
-    memo=body.memo,
-    created_by=created_by,
-    entry_type=body.entry_type,
-  )
-  session.commit()
-  return _build_closing_entry_response(result)
 
 
 # ─── Schedule update / delete ─────────────────────────────────────────────
