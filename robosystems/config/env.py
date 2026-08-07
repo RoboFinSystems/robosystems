@@ -812,6 +812,11 @@ class EnvConfig:
 
   # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
+  # Fallbacks for the staging connection's resource caps. The tier config in
+  # .github/configs/graph.yml wins when CLUSTER_TIER is set; these apply on
+  # hosts that carry no tier. Defaults match GraphTierConfig's own fallbacks.
+  DUCKDB_MEMORY_LIMIT = get_str_env("DUCKDB_MEMORY_LIMIT", "2GB")
+  DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", 4)
 
   # Artifact Storage (precomputed Parquet files for enrichment refinement)
   ARTIFACT_PATH = get_str_env("ARTIFACT_PATH", "./data/artifacts")

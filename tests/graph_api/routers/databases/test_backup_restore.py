@@ -171,7 +171,10 @@ def test_restore_initiates_task_with_metadata(restore_client):
   assert payload["task_id"] == "task-456"
   assert payload["database"] == "graph1"
   assert payload["status"] == "initiated"
-  assert payload["system_backup_created"] is True
+  # `perform_restore` takes no pre-restore snapshot, so the response must not
+  # claim one — even when the caller asks for it. The request flag is still
+  # recorded in task metadata below.
+  assert payload["system_backup_created"] is False
 
   client.task_manager.create_task.assert_awaited_once()
   _, kwargs = client.task_manager.create_task.await_args

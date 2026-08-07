@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
   ClosingEntryResponse,
-  CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
@@ -269,29 +268,6 @@ def create_schedule(
     schedule_created_event_id=metadata.get("schedule_created_event_id"),
     pending_event_count=metadata.get("pending_event_count", 0),
   )
-
-
-def create_closing_entry(
-  session: Session,
-  body: CreateClosingEntryOperation,
-  created_by: str,
-) -> ClosingEntryResponse:
-  """Create a draft closing entry from a schedule's facts for a period.
-
-  Raises `ValueError` for validation failures — caller maps to 422.
-  """
-  service = ScheduleService()
-  result = service.create_closing_entry(
-    session,
-    structure_id=body.structure_id,
-    posting_date=body.posting_date,
-    period_start=body.period_start,
-    period_end=body.period_end,
-    created_by=created_by,
-    memo=body.memo,
-  )
-  session.commit()
-  return _build_closing_entry_response(result)
 
 
 def promote_obligations(

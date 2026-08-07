@@ -87,12 +87,20 @@ def verify_subgraph_tier_support(parent_graph: Graph):
 
 
 def verify_parent_graph_active(parent_graph: Graph):
-  """Placeholder for a parent-graph liveness check; currently a no-op.
+  """Verify the parent graph is active, raising 403 if it is not.
 
-  Callers must not rely on this for authorization — it performs no
-  validation and raises nothing.
+  A suspended parent has its access blocked while the infrastructure stays
+  in place, and a deprovisioned one has no infrastructure left to host a
+  subgraph — creating one under either would strand it.
   """
-  pass
+  if not parent_graph.is_active:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=(
+        f"Parent graph {parent_graph.graph_id} is {parent_graph.status}; "
+        "subgraph operations require an active parent graph."
+      ),
+    )
 
 
 def check_subgraph_quota(parent_graph: Graph, session: Session):

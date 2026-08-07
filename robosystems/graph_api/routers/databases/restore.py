@@ -37,16 +37,16 @@ async def perform_restore(
   graph_id: str,
   s3_bucket: str,
   s3_key: str,
-  create_system_backup: bool,
   force_overwrite: bool,
-  encrypted: bool,
-  compressed: bool,
   connection_pool=None,
 ) -> None:
   """Run the restore in the background, updating task status for monitoring.
 
   ``connection_pool`` is the LadybugDB pool, needed to close open connections
   before the database files are replaced.
+
+  Encryption and compression are read from the backup's own S3 metadata, so
+  the caller does not describe them.
   """
   try:
     await restore_task_manager.update_task(
@@ -143,14 +143,17 @@ async def restore_database(
   Restore a database from S3 backup.
 
   This endpoint restores a complete LadybugDB database from S3:
-  - Downloads backup from S3
-  - Decrypts if encrypted
-  - Decompresses if compressed
-  - Creates a system backup of existing database before restore
+  - Downloads the backup from S3
+  - Decrypts and decompresses according to the backup's stored metadata
+  - Replaces the existing database, which requires ``force_overwrite``
   - Runs asynchronously with progress tracking
 
   The restore operation runs as a background task and can be monitored
   using the returned task_id.
+
+  ``create_system_backup`` is accepted for wire compatibility but no
+  pre-restore snapshot is taken; ``encrypted`` and ``compressed`` are
+  likewise inert, since the backup's own metadata governs both.
   """
   # Validate graph_id to prevent path injection
   graph_id = validate_database_name(graph_id)
@@ -188,10 +191,7 @@ async def restore_database(
     graph_id=graph_id,
     s3_bucket=s3_bucket,
     s3_key=s3_key,
-    create_system_backup=create_system_backup and database_exists,
     force_overwrite=force_overwrite,
-    encrypted=encrypted,
-    compressed=compressed,
     connection_pool=ladybug_service.db_manager.connection_pool,
   )
 
@@ -203,7 +203,8 @@ async def restore_database(
     message=f"Restore task started for database {graph_id}",
     database=graph_id,
     monitor_url=f"/tasks/{task_id}/monitor",
-    system_backup_created=create_system_backup and database_exists,
+    # No pre-restore snapshot is taken, so this cannot claim otherwise.
+    system_backup_created=False,
   )
 
 
