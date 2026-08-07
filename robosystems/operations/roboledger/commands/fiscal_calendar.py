@@ -227,6 +227,8 @@ def close_period(
     fiscal_calendar=fc_response,
     period=result.period,
     entries_posted=result.entries_posted,
+    entries_published_to_qb=result.entries_published_to_qb,
+    entries_posted_locally=result.entries_posted_locally,
     target_auto_advanced=result.target_auto_advanced,
     rule_summary=result.rule_summary,
     evaluated_structure_ids=list(result.evaluated_structure_ids),

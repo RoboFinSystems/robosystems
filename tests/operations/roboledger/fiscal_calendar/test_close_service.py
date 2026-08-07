@@ -14,7 +14,7 @@ interactions. They cover:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -153,6 +153,33 @@ class TestCloseHappyPath:
     assert result.was_reclose is False
     fcs.advance_closed_through.assert_called_once()
     fcs.record_reclose.assert_not_called()
+
+  def test_entries_posted_counts_both_post_paths(self):
+    """The QB pre-publish step promotes each published draft before the
+    bulk transition runs, so the receipt must sum both paths — counting
+    only the bulk pass reported entries_posted=0 while posting everything
+    (June-close F10)."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    # All 36 drafts were published (and promoted) by the pre-publish
+    # step; the bulk transition finds none left.
+    session = _mock_session_with_fp(
+      _fp(status="open"), debit=5000, credit=5000, updated=0
+    )
+
+    with patch.object(svc, "_publish_drafts_to_qb", return_value=36):
+      result = svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+    assert result.entries_posted == 36
+    assert result.entries_published_to_qb == 36
+    assert result.entries_posted_locally == 0
 
   def test_close_sets_period_status_and_actor(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))

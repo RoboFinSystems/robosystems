@@ -214,7 +214,10 @@ class ClosePeriodTool:
 
 **RETURNS:**
 - period: the period that was closed
-- entries_posted: number of drafts transitioned to posted
+- entries_posted: TOTAL drafts transitioned to posted, across both post
+  paths; entries_published_to_qb / entries_posted_locally carry the
+  split (drafts published to QuickBooks are promoted at publish time,
+  before the local bulk transition)
 - target_auto_advanced: true if close_target moved forward after this close
 - fiscal_calendar: updated calendar state (same shape as get-fiscal-calendar)
 - rule_summary: aggregated rule-eval tally across every schedule Structure
@@ -323,6 +326,8 @@ class ClosePeriodTool:
         return {
           "period": result.period,
           "entries_posted": result.entries_posted,
+          "entries_published_to_qb": result.entries_published_to_qb,
+          "entries_posted_locally": result.entries_posted_locally,
           "target_auto_advanced": result.target_auto_advanced,
           "fiscal_calendar": fc_payload,
           # Rule eval outcomes from the auto-run on close. Pairs with

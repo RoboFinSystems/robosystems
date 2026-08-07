@@ -410,7 +410,27 @@ class ClosePeriodResponse(BaseModel):
   fiscal_calendar: FiscalCalendarResponse
   period: str
   entries_posted: int = Field(
-    0, description="Number of draft entries transitioned to posted"
+    0,
+    description=(
+      "Total draft entries the close transitioned to posted, across both "
+      "post paths (QB pre-publish + local bulk transition). See "
+      "entries_published_to_qb / entries_posted_locally for the split."
+    ),
+  )
+  entries_published_to_qb: int = Field(
+    0,
+    description=(
+      "Drafts published to QuickBooks by the close's pre-publish step "
+      "(each is promoted to posted at publish time)."
+    ),
+  )
+  entries_posted_locally: int = Field(
+    0,
+    description=(
+      "Drafts posted by the local bulk transition (entries that don't "
+      "publish to QuickBooks, e.g. native-only graphs or local-only "
+      "sources)."
+    ),
   )
   target_auto_advanced: bool = Field(
     False,

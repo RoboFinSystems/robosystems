@@ -114,13 +114,25 @@ class WritebackFailed(PeriodCloseError):
 
 @dataclass
 class PeriodCloseResult:
-  """Outcome of a successful `PeriodCloseService.close()` call."""
+  """Outcome of a successful `PeriodCloseService.close()` call.
+
+  ``entries_posted`` is the TOTAL entries the close transitioned to
+  posted, across both post paths: the QB pre-publish step (which
+  promotes each published draft immediately) and the bulk draft→posted
+  transition that follows. The split rides on
+  ``entries_published_to_qb`` / ``entries_posted_locally`` — counting
+  only the bulk path made the close receipt report 0 while posting
+  everything (June-close F10).
+  """
 
   period: str
   entries_posted: int
   target_auto_advanced: bool
   calendar: FiscalCalendar
   was_reclose: bool
+  # The two post paths behind entries_posted.
+  entries_published_to_qb: int = 0
+  entries_posted_locally: int = 0
   # Auto-run rules on close. None if no schedules with facts in the
   # period had rules attached. Otherwise a dict tallying outcomes:
   # {"pass": int, "fail": int, "error": int, "skipped": int}.
@@ -235,7 +247,7 @@ class PeriodCloseService:
     # close itself never half-runs — but the step COMMITS the
     # qb_external_id markers for entries that did reach QB (see its
     # docstring), so a failed close never re-publishes them on retry.
-    self._publish_drafts_to_qb(
+    published_to_qb = self._publish_drafts_to_qb(
       session, graph_id, period_start, period_end, actor_id=actor_id
     )
 
@@ -250,9 +262,12 @@ class PeriodCloseService:
       raise PeriodNotFoundError(period)
     is_reclose = fp.status == "closing"
 
-    # 3. Draft → posted
+    # 3. Draft → posted. The pre-publish step already promoted every
+    # draft it published, so this bulk pass covers only what remains
+    # (local-only drafts); the receipt's entries_posted is the sum of
+    # both paths.
     now = datetime.now(UTC)
-    entries_posted = (
+    posted_locally = (
       session.query(Entry)
       .filter(
         Entry.posting_date >= period_start,
@@ -264,6 +279,7 @@ class PeriodCloseService:
         synchronize_session=False,
       )
     )
+    entries_posted = posted_locally + published_to_qb
     session.flush()
 
     # 4. Advance / reclose. Capture target before so we can report
@@ -353,7 +369,9 @@ class PeriodCloseService:
 
     logger.info(
       f"Period {period} closed for graph {graph_id}: "
-      f"entries_posted={entries_posted} reclose={is_reclose} "
+      f"entries_posted={entries_posted} "
+      f"(published_to_qb={published_to_qb} posted_locally={posted_locally}) "
+      f"reclose={is_reclose} "
       f"target_auto_advanced={target_auto_advanced} "
       f"statements_stamped={stamp.stamped} "
       f"stamp_note={stamp.note} "
@@ -366,6 +384,8 @@ class PeriodCloseService:
       target_auto_advanced=target_auto_advanced,
       calendar=calendar,
       was_reclose=is_reclose,
+      entries_published_to_qb=published_to_qb,
+      entries_posted_locally=posted_locally,
       rule_summary=rule_summary,
       evaluated_structure_ids=evaluated_ids,
       statements_stamped=stamp.stamped,
@@ -415,13 +435,16 @@ class PeriodCloseService:
     period_end,
     *,
     actor_id: str,
-  ) -> None:
-    """Close-period pre-publish step.
+  ) -> int:
+    """Close-period pre-publish step. Returns the count published.
 
     For graphs with at least one QB connection in
     ``write_policy='qb_authoritative'`` / ``'hybrid'``, batch-publish
     every in-period draft Entry whose triggering Event has
-    ``source IN ('schedule', 'manual')`` to that QB connection.
+    ``source IN ('schedule', 'manual')`` to that QB connection. Each
+    successful publish also promotes its draft to posted, so the
+    returned count feeds the close receipt's ``entries_posted`` total
+    (the bulk transition that follows no longer sees these drafts).
 
     Any per-event QB rejection collects into a list and raises
     `WritebackFailed` BEFORE the close's draft→posted transition, so no
@@ -464,7 +487,7 @@ class PeriodCloseService:
         f"No qb_authoritative QB connection on graph {graph_id}; "
         f"skipping close-period pre-publish step"
       )
-      return
+      return 0
     qb_connection_id = writeback.connection_id
 
     # In-period draft entries from RL-originated events not already in QB
@@ -478,7 +501,7 @@ class PeriodCloseService:
         f"Graph {graph_id}: no RL-originated drafts in period to publish "
         f"({period_start} → {period_end})"
       )
-      return
+      return 0
 
     logger.info(
       f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} draft "
@@ -548,6 +571,8 @@ class PeriodCloseService:
 
     if failed_events:
       raise WritebackFailed(failed_events)
+
+    return len(drafts_to_publish)
 
   def _preflight_bs_check(
     self,
