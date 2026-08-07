@@ -1,8 +1,8 @@
-"""
-Admission control for Graph API server.
+"""Admission control for the Graph API server.
 
-Monitors system resources and rejects requests when the server is overloaded,
-preventing OOM kills and maintaining service stability.
+Rejects requests when memory headroom, CPU, or per-database connections are
+exhausted, so an overloaded instance sheds load instead of being OOM-killed
+and taking every database on the box with it.
 """
 
 import time
@@ -39,11 +39,10 @@ class AdmissionDecision(str, Enum):
 
 
 class LadybugAdmissionController:
-  """
-  Admission controller for Graph API server.
+  """Resource gate in front of every Graph API request.
 
-  Critical - prevents server crashes that would affect
-  all databases on the instance.
+  Resource readings are cached for ``check_interval`` seconds so the gate does
+  not pay for psutil on each request.
   """
 
   def __init__(
@@ -54,23 +53,17 @@ class LadybugAdmissionController:
     max_connections_per_db: int = 10,
     check_interval: float = 1.0,
   ):
-    """
-    Initialize LadybugDB admission controller.
+    """Configure the thresholds.
 
-    Args:
-        memory_threshold: Memory usage percent at which the node reports
-            pressure. Not a rejection gate - a buffer pool is meant to fill,
-            so percent of total conflates that fixed allocation with the
-            query working set. See min_available_mb.
-        min_available_mb: Reject when free memory falls below this many MB.
-            Absolute rather than proportional, so it stays correct when the
-            buffer pool or the instance size changes. Free memory is the
-            tighter of host-available and headroom under the container's
-            cgroup memory limit, since whichever binds first is the one
-            that kills the process.
-        cpu_threshold: Max CPU usage percent before rejecting
-        max_connections_per_db: Max concurrent connections per database
-        check_interval: Seconds between resource checks (cached)
+    ``memory_threshold`` (percent used) is reported, never enforced: a buffer
+    pool is meant to fill, so percent-of-total conflates that fixed allocation
+    with the query working set and a healthy warm node would latch into
+    rejection. ``min_available_mb`` is the actual memory gate — absolute, so
+    it stays correct when the buffer pool or instance size changes, and
+    measured against the tighter of host-available memory and cgroup headroom,
+    since whichever binds first is what kills the process.
+
+    ``cpu_threshold`` is 10 points stricter for ingestion than for queries.
     """
     self.memory_threshold = memory_threshold
     self.min_available_mb = min_available_mb
@@ -78,14 +71,12 @@ class LadybugAdmissionController:
     self.max_connections_per_db = max_connections_per_db
     self.check_interval = check_interval
 
-    # Cached resource data to avoid frequent psutil calls
     self._last_check = 0.0
     self._cached_memory = 0.0
     self._cached_available_mb = float("inf")
     self._cached_cgroup_available_mb: float | None = None
     self._cached_cpu = 0.0
 
-    # Connection tracking
     self._connections_per_db: dict[str, int] = {}
 
     try:
@@ -115,10 +106,9 @@ class LadybugAdmissionController:
     distance to whichever limit is tighter. Returns None when no cgroup v2
     memory limit applies (dev machines, unlimited containers).
 
-    File cache counts toward memory.current but the kernel reclaims it
-    before OOM-killing, so it is headroom, not pressure - without adding it
-    back a warm node would latch into rejection just like the old percent
-    gate did.
+    File cache counts toward memory.current but the kernel reclaims it before
+    OOM-killing, so it is added back: it is headroom, not pressure, and
+    without it a warm node latches into rejection.
     """
     limit = _read_cgroup_limit_bytes()
     if limit is None:
@@ -157,24 +147,17 @@ class LadybugAdmissionController:
   def check_admission(
     self, database_name: str, operation_type: str = "query"
   ) -> tuple[AdmissionDecision, str | None]:
-    """
-    Check if a new request should be admitted.
+    """Decide whether to admit a request, returning the reason on rejection.
 
-    Args:
-        database_name: Database the request targets
-        operation_type: Type of operation (query, ingestion, backup)
-
-    Returns:
-        Tuple of (decision, rejection_reason)
+    ``operation_type`` (query, ingestion, backup) only tightens the CPU
+    threshold; memory and connection limits apply the same way to all.
     """
-    # Update cached metrics
     self._update_resource_cache()
 
-    # Check free memory headroom. Gated on absolute available memory, not
-    # percent used: the buffer pool is a fixed allocation that fills by design,
-    # so a warm node legitimately sits high on percent-used while still having
-    # room to serve. Available is the tighter of host memory and the
-    # container's cgroup limit - the memcg cap binds first under Docker.
+    # Absolute available memory, not percent used: the buffer pool is a fixed
+    # allocation that fills by design, so a warm node sits high on percent-used
+    # while still having room to serve. Available is the tighter of host memory
+    # and the container's cgroup limit — the memcg cap binds first on Docker.
     if self._cached_available_mb < self.min_available_mb:
       reason = (
         f"Insufficient memory headroom: {self._cached_available_mb:.0f}MB available "
@@ -183,17 +166,15 @@ class LadybugAdmissionController:
       logger.warning(f"Rejecting request for {database_name}: {reason}")
       return AdmissionDecision.REJECT_MEMORY, reason
 
-    # Check CPU threshold (more lenient for queries)
     cpu_limit = self.cpu_threshold
     if operation_type == "ingestion":
-      cpu_limit = self.cpu_threshold - 10  # More strict for heavy operations
+      cpu_limit = self.cpu_threshold - 10  # Stricter for heavy operations
 
     if self._cached_cpu > cpu_limit:
       reason = f"CPU usage too high: {self._cached_cpu:.1f}% (threshold: {cpu_limit}%)"
       logger.warning(f"Rejecting request for {database_name}: {reason}")
       return AdmissionDecision.REJECT_CPU, reason
 
-    # Check connection limits per database
     current_connections = self._connections_per_db.get(database_name, 0)
     if current_connections >= self.max_connections_per_db:
       reason = (
@@ -203,7 +184,6 @@ class LadybugAdmissionController:
       logger.warning(f"Rejecting request: {reason}")
       return AdmissionDecision.REJECT_CONNECTIONS, reason
 
-    # Accept the request
     return AdmissionDecision.ACCEPT, None
 
   def register_connection(self, database_name: str) -> None:
@@ -255,7 +235,6 @@ def get_admission_controller() -> LadybugAdmissionController:
     from robosystems.config import env
     from robosystems.config.constants import LBUG_MAX_CONNECTIONS_PER_DB
 
-    # Use centralized config (which handles env vars and defaults properly)
     _admission_controller = LadybugAdmissionController(
       memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
       min_available_mb=env.LBUG_ADMISSION_MIN_AVAILABLE_MB,

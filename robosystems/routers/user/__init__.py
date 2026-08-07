@@ -1,8 +1,4 @@
-"""
-User management and profile endpoints.
-
-Provides user profile management and security functionality.
-"""
+"""User endpoints under `/v1/user`: profile, password, and API keys."""
 
 from fastapi import APIRouter
 

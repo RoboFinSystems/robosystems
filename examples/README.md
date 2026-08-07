@@ -1,341 +1,267 @@
 # RoboSystems Examples
 
-Comprehensive examples demonstrating RoboSystems' graph database capabilities across different domains and use cases.
+Runnable demos that load real and synthetic data into RoboSystems and query it
+back. Each one is a working reference for a different slice of the platform:
+double-entry accounting on a graph, SEC XBRL filings, a custom domain schema,
+and cross-taxonomy financial reporting.
+
+## Prerequisites
+
+```bash
+just start        # local stack: API, PostgreSQL, Valkey, LadybugDB
+just demo-user    # provisions a user + API key into .local/config.json
+```
+
+Every demo reads its credentials from `.local/config.json`, so `just demo-user`
+only needs to run once. Demos that call an AI Operator (`--ai`) additionally
+need AWS Bedrock configured; without it, use the default hardcoded mappings.
 
 ## Quick Start
 
 ```bash
-# Make sure RoboSystems is running
-just start
-
-# Run all demos in sequence (roboledger → custom-graph → sec)
+# Run the core three in sequence (roboledger → custom-graph → sec)
 just demo
 
-# Or run individual demos
+# Or pick one
 just demo-roboledger
 just demo-custom-graph
 just demo-sec --ticker NVDA --year 2025
-just demo-seattle-method
-just demo-world-online
 ```
 
-## Available Demos
+## The Demos
 
-### 1. RoboLedger Demo - End-to-End Accounting Workflow
+### RoboLedger — end-to-end accounting workflow
 
-Full RoboLedger workflow on synthetic data for a boutique consulting firm: bulk OLTP import, taxonomy and schedule blocks, fiscal calendar, a filed annual report, and an AI-driven month-end close. All data flows in through the same HTTP API the frontend UI and MCP tools use.
+`examples/roboledger_demo/` · [walkthrough](roboledger_demo/README.md)
 
-**Features:**
+The full RoboLedger arc on synthetic data for a boutique consulting firm
+(Cascade Advisory Group LLC): bulk OLTP import, taxonomy and schedule blocks, a
+fiscal calendar, a filed annual report, and an AI-driven month-end close. Data
+is generated on a rolling 16-month window ending at the current month, so the
+demo always covers recent history.
 
-- Generates a rolling 16-month window ending at the current month
-- Creates a chart of accounts, REA Agents (customers/vendors/employees), and a typed business-event stream
-- Initializes a fiscal calendar with exactly one period ready to close on first run
-- Optional MappingOperator (`--ai`) to map the chart of accounts via the AI Operator (requires Bedrock)
-
-**Usage:**
+Everything loads through the same HTTP API the frontend UI and MCP tools use —
+the demo deliberately does not write to the database directly, because the
+point is to emulate data arriving from outside the system the way a real
+customer integration would.
 
 ```bash
-# Run the full demo (creates graph, loads data, creates schedules, uploads policies)
-just demo-roboledger
-
-# Load into an existing graph
-just demo-roboledger <graph_id>
-
-# Skeleton: create user + empty roboledger graph only (then connect a real QuickBooks sandbox manually)
-just demo-roboledger --skeleton
-
-# Use the MappingOperator instead of hardcoded mappings (requires Bedrock)
-just demo-roboledger --ai
-
-# Validate data only
-just demo-roboledger --dry-run
+just demo-roboledger                  # create graph, load data, file the report
+just demo-roboledger <graph_id>       # load into an existing graph
+just demo-roboledger --skeleton       # user + empty graph only (connect QuickBooks by hand)
+just demo-roboledger --ai             # map the CoA with the MappingOperator (needs Bedrock)
+just demo-roboledger --dry-run        # validate the generated data, write nothing
 ```
 
-**Location:** `/examples/roboledger_demo/`
+You get a graph with 27 accounts, 17 REA agents, ~305 typed business events, 6
+depreciation/amortization schedules, 4 policy documents, and a filed FY report
+— plus exactly one period queued and ready for the AI close.
 
-**Documentation:** See [README.md](roboledger_demo/README.md) for the full walkthrough
+### Showcase scenarios — Driftline Coffee and Cadence Labs
 
-### 2. SEC Demo - Public Company Financial Data
+`examples/coffee_roaster_demo/` · `examples/saas_startup_demo/`
 
-Query real SEC XBRL financial data from public companies.
+Two synthetic companies built on the same scenario engine as the RoboLedger
+demo, each authored to make one accounting story fall out of the numbers rather
+than be asserted in prose:
 
-**Features:**
-
-- Loads SEC 10-K/10-Q filings from EDGAR
-- Processes XBRL financial statements
-- Queries balance sheets, income statements, and cash flows
-- Demonstrates financial fact analysis
-
-**Usage:**
+- **Driftline Coffee Roasters** is *profitable but cash-poor*. The income
+  statement glows while cash drains into green-coffee inventory and one
+  slow-paying wholesale account. The working-capital squeeze emerges
+  mechanically from the gap between revenue recognition and cash collection.
+- **Cadence Labs** is a seed-funded B2B SaaS startup *burning cash behind a
+  deferred-revenue float*. Customers pay annually up front, so the bank balance
+  looks like comfortable runway until you net out the service still owed.
 
 ```bash
-# Load and query NVIDIA 2025 financials (includes queries)
-just demo-sec --ticker NVDA --year 2025
+just demo-coffee-roaster              # Driftline: profitable-but-cash-poor
+just demo-saas-startup                # Cadence: burn masked by deferred revenue
+```
 
-# Load NVIDIA data without running queries
+Both accept the same flags as the RoboLedger demo (`[graph_id]`, `--ai`,
+`--dry-run`). Each also has an offline preview that renders the arc without the
+platform running:
+
+```bash
+uv run python -m examples.coffee_roaster_demo.data
+uv run python -m examples.saas_startup_demo.data
+```
+
+### SEC — public company financial data
+
+`examples/sec_demo/` · [walkthrough](sec_demo/README.md)
+
+Loads real 10-K/10-Q XBRL filings from EDGAR into the shared SEC repository,
+subscribes the demo user to it, and runs example queries over the resulting
+facts. Works for any US public company with SEC filings (AAPL, MSFT, GOOGL,
+TSLA, NVDA, …).
+
+```bash
+just demo-sec --ticker NVDA --year 2025          # load + query
 just demo-sec --ticker NVDA --year 2025 --skip-queries
-
-# Query SEC data with specific examples
-just demo-sec-query
-
-# Run all available query examples
-just demo-sec-query --all
+just demo-sec-subscribe                          # subscription only, no data load
+just demo-sec-subscribe sec-advanced             # higher rate limits, more credits
 ```
 
-**Available Tickers:**
-Any publicly traded US company with SEC filings (e.g., AAPL, MSFT, GOOGL, TSLA, NVDA)
-
-**What It Does:**
-
-1. Fetches SEC filing from EDGAR API
-2. Processes XBRL data into graph format
-3. Loads entities, elements, facts, and relationships
-4. Runs example queries on financial data
-
-**Location:** `/examples/sec_demo/`
-
-**Documentation:** See [README.md](sec_demo/README.md) for detailed guide and query examples
-
-### 3. Custom Graph Demo - Generic Graph Structure
-
-Demonstrates custom schema creation with people, companies, and projects.
-
-**Features:**
-
-- Custom node types (Person, Company, Project)
-- Custom relationships (employment, collaboration, participation)
-- Flexible schema definition via JSON
-- Demonstrates generic graph capabilities
-
-**Usage:**
+Query the loaded data separately:
 
 ```bash
-# Run with new graph (default)
-just demo-custom-graph
-
-# Create new user and graph
-just demo-custom-graph --new-user --new-graph
-
-# Skip verification queries
-just demo-custom-graph --skip-queries
+just demo-sec-query --list                       # show available presets
+just demo-sec-query --preset <NAME>              # run one preset
+just demo-sec-query --all                        # run them all
+just demo-sec-query --search "revenue recognition"
 ```
 
-**What It Creates:**
+The subscription must exist before queries will resolve — `just demo-sec`
+creates it for you as part of the run.
 
-- 50 Person nodes (name, age, email, interests)
-- 10 Company nodes (name, industry, location, size)
-- 15 Project nodes (name, description, status, budget)
-- PERSON_WORKS_FOR_COMPANY relationships (employment)
-- PERSON_WORKS_ON_PROJECT relationships (project teams)
-- COMPANY_SPONSORS_PROJECT relationships (sponsorship)
+### Custom Graph — your own schema
 
-**What It Does:**
+`examples/custom_graph_demo/` · [walkthrough](custom_graph_demo/README.md)
 
-1. Sets up user credentials (or reuses existing)
-2. Creates graph with custom schema from schema.json
-3. Generates synthetic graph data
-4. Uploads and ingests via staging tables
-5. Runs example queries (org charts, collaborations, projects)
-
-**Location:** `/examples/custom_graph_demo/`
-
-**Documentation:** See [README.md](custom_graph_demo/README.md) for step-by-step guide
-
-**Customization:** Edit `schema.json` to define your own node types and relationships
-
-### 4. Seattle Method Demo - Record-to-Report (Charlie Hoffman's "mini")
-
-End-to-end accounting proof against Charlie Hoffman's Seattle Method "mini" record-to-report test case: ingest a 14-JE general journal (lemonade stand), map the chart of accounts to rs-gaap, and render a validated 4-statement report.
-
-**Features:**
-
-- Ingests Charlie's `mini`-tagged general-journal transactions
-- Cross-taxonomy projection: `mini` → rs-gaap (reconciles 18/18 concepts; BS balances $14,450)
-- Materializes a 4-Information-Block rs-gaap Report (BS / IS / CF / SE)
-- Reconciliation report vs. Charlie's published reference
-
-**Usage:**
+A domain-neutral example: people, companies, and projects defined by a custom
+schema in `schema.json`. Use it as the template for modelling your own domain.
+It generates 50 Person, 10 Company, and 15 Project nodes wired together by
+employment, project-team, and sponsorship relationships, then queries them back
+as org charts and collaboration graphs.
 
 ```bash
-# Run the full demo (ingest → map → render)
-just demo-seattle-method
-
-# Render the reconciliation report for an existing graph
-just demo-seattle-method-reconcile
-
-# Materialize the 4-statement rs-gaap report
-just demo-seattle-method-create-report
+just demo-custom-graph                    # reuse existing user + graph
+just demo-custom-graph --new-graph        # new graph for the existing user
+just demo-custom-graph --new-user         # new user (implies --new-graph)
+just demo-custom-graph --skip-queries     # load only, no verification queries
 ```
 
-**Location:** `/examples/seattle_method_demo/`
+Edit `schema.json` to define your own node types and relationships.
 
-**Documentation:** See [README.md](seattle_method_demo/README.md) for the walkthrough
+### Seattle Method — record-to-report against a published reference
 
-### 5. World Online Demo - Seattle Method at Scale
+`examples/seattle_method_demo/` · [walkthrough](seattle_method_demo/README.md)
 
-The scaled-up sibling of the `mini` demo: Charlie Hoffman's "The World Online" dataset — a real-size general ledger tagged against MINI 2026.
-
-**Features:**
-
-- 22,288 GL lines / 3,389 entries / 239-account chart of accounts
-- Opening balances ingested as ordinary BBF transactions (`mini:OpeningBalance` as a first-class flow concept), not synthesized as a prior-period number
-- Reconciles 22/23 vs. the source pivot; BS balances $0.00; trial balance balances
-- Same `load_taxonomy` / `seed_mappings` / report-render helpers as the `mini` demo
-
-**Usage:**
+Proves that one ledger can be read through two vocabularies. Charlie Hoffman's
+`mini` reporting framework is loaded as a chart of accounts, his 14-entry
+lemonade-stand general journal is ingested against it, and the same postings
+are then projected into `rs-gaap` for a four-statement report — with both sides
+reconciled against his published figures (18/18 concepts; balance sheet balances
+at $14,450).
 
 ```bash
-# Run the full demo
-just demo-world-online
+just demo-seattle-method                      # new graph + every step
+just demo-seattle-method --graph <id>         # against an existing graph
+just demo-seattle-method --step <name>        # re-run a single step
+just demo-seattle-method --dry-run            # validate + report, no writes
 
-# Render the reconciliation report (pivot vs. SummaryOfTransactions.csv)
-just demo-world-online-reconcile
-
-# Materialize the 4-statement rs-gaap report
-just demo-world-online-create-report
-
-# Render the trial balance
-just demo-world-online-trial-balance
+just demo-seattle-method-reconcile            # reconciliation report only
+just demo-seattle-method-create-report        # materialize the 4-statement report
 ```
 
-**Location:** `/examples/seattle_method_world_online/`
+Artifacts land in `examples/seattle_method_demo/output/`: two markdown reports
+plus JSON-LD, holon, and XBRL 2.1 exports with their SHACL and Arelle verdicts.
 
-**Documentation:** See [README.md](seattle_method_world_online/README.md) for the walkthrough
+### The World Online — Seattle Method at realistic scale
 
-## Credential Management
+`examples/seattle_method_world_online/` · [walkthrough](seattle_method_world_online/README.md)
 
-All demos share a common credential system for authentication.
+The scaled-up sibling of the lemonade stand: Charlie Hoffman's *The World
+Online* dataset, 22,288 GL lines across 3,389 journal entries against a
+239-account chart of accounts, tagged to MINI 2026. Same methodology, real
+company size.
 
-**Setup Credentials:**
+Opening balances are ingested as ordinary brought-forward transactions tagging
+`mini:OpeningBalance` as a first-class flow concept, rather than synthesized as
+a prior-period number. That is what lets them attribute in the rollforwards and
+reconcile line-for-line against the source pivot (22/23; balance sheet balances
+to $0.00; trial balance balances).
 
 ```bash
-# Create new user and API key
-just demo-user
+just demo-world-online                          # new graph + every step
+just demo-world-online --graph <id>             # against an existing graph
+just demo-world-online --step <name>            # re-run a single step
+just demo-world-online --limit 50               # smoke-test on a GL subset
+just demo-world-online --dry-run                # validate + report, no writes
 
-# Create with specific details
-just demo-user --name "Your Name" --email your@email.com
-
-# Force create new credentials
-just demo-user --force
+just demo-world-online-reconcile                # pivot vs SummaryOfTransactions.csv
+just demo-world-online-create-report            # materialize the 4-statement report
+just demo-world-online-trial-balance            # render the trial balance
+just demo-world-online-statement-reconcile      # statement anchors vs the reference instance
 ```
 
-**Credentials Location:** `.local/config.json`
-
-**Shared Across Demos:** All demos use the same credentials file, so you only need to run this once.
-
-## Demo Flags
-
-All demo recipes pass flags through to the underlying script. Default behavior reuses existing credentials and graph.
-
-**Custom Graph Demo flags:**
-
-- `--new-user` - Create a new user (implies `--new-graph`)
-- `--new-graph` - Create a new graph
-- `--skip-queries` - Skip verification queries after ingestion
-
-**Examples:**
+## Credentials
 
 ```bash
-# Default: reuse existing user and graph, regenerate data
-just demo-custom-graph
-
-# Create new graph for existing user
-just demo-custom-graph --new-graph
-
-# Create new user and graph
-just demo-custom-graph --new-user --new-graph
-
-# Skip queries
-just demo-custom-graph --skip-queries
+just demo-user                                        # create or reuse
+just demo-user --name "Your Name" --email you@example.com
+just demo-user --force                                # discard and re-provision
 ```
+
+Credentials live in `.local/config.json` and are shared by every demo, which
+also records a graph ID per demo slot there so re-runs reuse the same graph.
+
+`--force` provisions a *new* user: graphs created by the previous user stay
+where they are and are no longer reachable with the new API key.
+
+## The Ingestion Pipeline
+
+The bulk-load demos all follow the same five-step path, which is the same one
+production ingestion uses — this is why they stage through S3 rather than
+inserting rows directly:
+
+1. **Generate Parquet files** — node and relationship tables
+2. **Upload to S3** — via presigned URLs issued by the API
+3. **Create staging tables** — load the Parquet files into DuckDB staging
+4. **Validate** — query the staging tables with SQL before committing
+5. **Ingest to graph** — load from staging into the graph database
+
+Step 4 is the reason for the detour: staging gives you a place to check the
+data *before* it becomes graph state.
 
 ## Running Individual Steps
 
-Each demo has a `main.py` that runs all steps automatically. For manual control, you can run individual numbered scripts:
-
-**Custom Graph Demo:**
+Each demo's `main.py` runs every step in order. To drive them one at a time:
 
 ```bash
 cd examples/custom_graph_demo
 uv run setup_credentials.py
 uv run create_graph.py
-uv run generate_data.py
+uv run generate_data.py --regenerate
 uv run upload_ingest.py
 uv run query_graph.py --all
+uv run upload_documents.py
+uv run memory_subgraph.py
 ```
 
-**Note:** The just commands are the recommended way to run demos as they handle all setup automatically.
+Data is regenerated on every run so the Parquet identifiers line up with the
+current graph — that is why `generate_data.py` comes after `create_graph.py`.
 
-## Data Ingestion Pipeline
+The Seattle Method demos take `--step <name>` instead; run with `--help` to
+list the step names. The `just` recipes remain the recommended path — they set
+`UV_ENV_FILE` so the scripts pick up `ROBOSYSTEMS_API_URL` and the other
+settings from `.env.local`.
 
-All demos follow the same data ingestion pattern:
+## Troubleshooting
 
-1. **Generate Parquet Files** - Create node and relationship data
-2. **Upload to S3** - Get presigned URLs and upload files
-3. **Create Staging Tables** - Load Parquet files into DuckDB staging
-4. **Validate Data** - Query staging tables with SQL
-5. **Ingest to Graph** - Load from DuckDB into graph database
+| Symptom | Fix |
+| --- | --- |
+| "API connection failed" | The stack isn't up — run `just start` |
+| "Permission denied" / 401 | Stale or missing API key in `.local/config.json` — re-run `just demo-user` |
+| "User already exists" | Expected; demos reuse the existing user. Pass `--new-user` to force a fresh one |
+| "Graph already exists" | Expected; demos reuse the recorded graph. Pass `--new-graph` for a fresh one |
+| `--ai` step fails | Bedrock isn't configured. Drop `--ai` to use the hardcoded mappings |
 
-This pipeline demonstrates the production data loading workflow used by RoboSystems.
-
-## Understanding the Output
-
-**Successful Demo Output:**
-
-```text
-✓ User authenticated
-✓ Graph created: kg1a2b3c4d5e
-✓ Data generated: 6 files
-✓ Files uploaded to S3
-✓ Staging tables created
-✓ Data ingested to graph
-✓ Queries executed successfully
-
-Example Query Results:
-- Trial Balance: 20 accounts
-- Income Statement: Net Income $42,000
-- Balance Sheet: Total Assets $125,000
-```
-
-**Common Issues:**
-
-- "User already exists" - Default behavior reuses existing user, or use `--new-user` flag
-- "Graph already exists" - Default behavior reuses existing graph, or use `--new-graph` flag
-- "API connection failed" - Ensure RoboSystems is running (`just start`)
-- "Permission denied" - Check credentials in config.json
-
-## Next Steps
-
-After running the demos:
-
-1. **Explore the Data:**
-   - Use the query examples as templates
-   - Modify queries to explore different patterns
-   - Try the Graph API directly via `just graph-query`
-
-2. **Integrate with Applications:**
-   - Check out the [Python Client](https://github.com/RoboFinSystems/robosystems-python-client)
-   - Try the [TypeScript Client](https://github.com/RoboFinSystems/robosystems-typescript-client)
-   - Explore the [MCP Client](https://github.com/RoboFinSystems/robosystems-mcp-client)
-
-3. **Build Your Own:**
-   - Use `custom_graph_demo` as a template
-   - Define your own schema in JSON
-   - Generate data specific to your domain
-   - Load and query via the same pipeline
+Logs: `just logs api`, `just logs worker`.
 
 ## Related Documentation
 
-- **[Main README](../README.md)** - RoboSystems overview and setup
-- **[API Documentation](https://api.robosystems.ai/docs)** - REST API reference
-- **[Graph API README](../robosystems/graph_api/README.md)** - Graph database system
-- **[Schema System](../robosystems/schemas/README.md)** - Schema definitions
-- **[Wiki](https://github.com/RoboFinSystems/robosystems/wiki)** - Detailed guides and tutorials
+- [Main README](../README.md) — platform overview and setup
+- [API Documentation](https://api.robosystems.ai/docs) — REST API reference
+- [Graph API README](../robosystems/graph_api/README.md) — graph database system
+- [Schema System](../robosystems/schemas/README.md) — schema definitions
+- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki) — guides and tutorials
+- SDKs: [Python](https://github.com/RoboFinSystems/robosystems-python-client) ·
+  [TypeScript](https://github.com/RoboFinSystems/robosystems-typescript-client) ·
+  [MCP](https://github.com/RoboFinSystems/robosystems-mcp-client)
 
 ## Support
 
-For issues or questions:
-
 - [GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)
 - [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- Check logs: `just logs api` or `just logs worker`

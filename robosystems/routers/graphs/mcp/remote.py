@@ -236,9 +236,8 @@ async def _handle_initialize(
 
   await _validate_read_access(graph_id, current_user)
 
-  # Instructions are rebuilt per initialize from the live tool surface — the
-  # remote transport's correctness upgrade over the npx bridge, where the
-  # instructions field is frozen at client-process start.
+  # Instructions are rebuilt on every initialize from the live tool surface,
+  # so a reconnecting client picks up changes to the graph's tool set.
   instructions: str | None = None
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
@@ -953,8 +952,9 @@ async def dispatch_jsonrpc(
 
   # Post-negotiation requests must carry a supported MCP-Protocol-Version when
   # they send the header at all (absent = pre-header clients, allowed for
-  # backwards compatibility). Unsupported values answer 400 per the spec.
-  # initialize is exempt — negotiation happens in its body.
+  # backwards compatibility). Unsupported values answer 400, as the MCP
+  # Streamable HTTP transport specification requires. initialize is exempt —
+  # negotiation happens in its body.
   version_header = request.headers.get("mcp-protocol-version")
   if (
     method != "initialize"

@@ -1,6 +1,5 @@
 """Extract narrative sections from SEC 10-K/10-Q HTML filings.
 
-Evolved from content-machine POC (tools/extract_10k_narrative.py).
 Handles inconsistent formatting across filers using multi-strategy
 section detection: regex patterns + heading proximity heuristics.
 

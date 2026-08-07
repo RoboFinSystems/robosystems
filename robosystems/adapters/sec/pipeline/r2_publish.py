@@ -43,8 +43,5 @@ def sec_lbug_r2_published(
   - CHECKPOINT + R2 multipart upload on-instance
   - Upload verification
   - GraphBackup record upsert
-
-  Returns:
-      MaterializeResult with R2 URI and upload statistics
   """
   return publish_to_r2(context, graph_id="sec", db_resource=db)

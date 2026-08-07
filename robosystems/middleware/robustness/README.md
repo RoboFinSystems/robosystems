@@ -1,36 +1,16 @@
 # Robustness Middleware
 
-This middleware provides a small set of resilience and operational-visibility
-primitives used across the graph endpoints: a per-graph/per-operation circuit
-breaker, hierarchical timeout coordination, structured operation logging, and a
-lightweight operation-metric shim. These are plain helper classes and functions
-— they are constructed and called explicitly inside endpoint handlers, not
-applied as decorators.
+Resilience and operational-visibility primitives used across the graph
+endpoints: a per-graph/per-operation circuit breaker, hierarchical timeout
+coordination, structured operation logging, and a lightweight operation-metric
+shim.
 
-## Overview
-
-The robustness middleware:
-
-- Tracks failures per `(graph_id, operation)` and short-circuits requests to a
-  failing graph (circuit breaker)
-- Provides coordinated, layered timeout budgets so endpoint, queue, tool, and
-  instance timeouts don't conflict
-- Emits structured, in-memory operation logs for debugging and audit
-- Records notable operation outcomes (failures / slow operations), delegating
-  the primary metrics pipeline to OpenTelemetry (`middleware/otel/metrics.py`)
-
-## Architecture
-
-```
-robustness/
-├── __init__.py              # Public exports
-├── circuit_breaker.py       # CircuitBreakerManager + CircuitState
-├── timeout_coordinator.py   # TimeoutCoordinator + TimeoutConfiguration
-├── operation_logging.py     # OperationLogger + get_operation_logger()
-└── operation_metrics.py     # record_operation_metric + OperationType/OperationStatus
-```
-
-Public exports (`__init__.py`):
+**These are plain helper classes, not decorators or ASGI middleware.** You
+construct them at module scope and call them explicitly inside the handler.
+There is no `@retry`, `@timeout`, `@fallback`, or `@throttle` in this package,
+no retry-policy classes, and no fallback handlers. Retries and backoff, where
+needed, live with the relevant client or adapter; this package breaks, times
+out, logs, and tracks status.
 
 ```python
 from robosystems.middleware.robustness import (
@@ -43,34 +23,31 @@ from robosystems.middleware.robustness import (
 )
 ```
 
-## Key Components
-
-### 1. Circuit Breaker (`circuit_breaker.py`)
+## Circuit breaker (`circuit_breaker.py`)
 
 `CircuitBreakerManager` tracks state per `(graph_id, operation)` key and blocks
-requests to a graph/operation that has been failing repeatedly, allowing it to
-recover.
-
-**State (`CircuitState` dataclass):** `failure_count`, `last_failure_time`,
-`is_open`, `last_success_time`. There is no explicit "half-open" object — once
-`recovery_timeout` elapses, the next `check_circuit` call resets the circuit and
-lets a request through (a one-shot recovery probe).
-
-**Constructor:**
+requests to a graph/operation that has been failing repeatedly, giving it room
+to recover.
 
 ```python
 CircuitBreakerManager(
-    failure_threshold: int | None = None,   # default: TuningConfig.get_circuit_breaker_threshold()
-    recovery_timeout: int | None = None,     # default: TuningConfig.get_circuit_breaker_timeout()
+    failure_threshold: int | None = None,   # default: TuningConfig.get_circuit_breaker_threshold() → 5
+    recovery_timeout: int | None = None,    # default: TuningConfig.get_circuit_breaker_timeout() → 60s
     half_open_max_calls: int = 3,
 )
 ```
 
-When `failure_threshold` / `recovery_timeout` are omitted they are read from
-`TuningConfig` (SSM-tunable at runtime via `circuits/THRESHOLD` and
-`circuits/TIMEOUT`).
+Omitted arguments resolve through `TuningConfig`, which is SSM-tunable at
+runtime (`circuits/THRESHOLD`, `circuits/TIMEOUT`) — you can widen a breaker in
+production without a redeploy.
 
-**Key methods:**
+`CircuitState` carries `failure_count`, `last_failure_time`, `is_open`, and
+`last_success_time`. There is **no half-open state object**: once
+`recovery_timeout` elapses, the next `check_circuit` call resets the circuit and
+lets one request through as a one-shot recovery probe. If that probe fails, the
+count starts again from zero rather than reopening immediately at the threshold.
+
+Methods:
 
 - `check_circuit(graph_id, operation) -> bool` — call before the operation;
   raises `HTTPException(503)` with a `Retry-After` header if the circuit is open.
@@ -83,15 +60,12 @@ When `failure_threshold` / `recovery_timeout` are omitted they are read from
 - `get_circuit_status(...)` / `get_all_circuit_status()` — status snapshots for
   monitoring.
 
-**Usage (the pattern used in the graph routers):**
-
 ```python
 from robosystems.middleware.robustness import CircuitBreakerManager
 
 circuit_breaker = CircuitBreakerManager()
 
-# Before the operation — raises HTTP 503 if the circuit is open
-circuit_breaker.check_circuit(graph_id, "analytics_metrics")
+circuit_breaker.check_circuit(graph_id, "analytics_metrics")  # raises 503 if open
 
 try:
     result = await run_operation()
@@ -101,15 +75,20 @@ except Exception as e:
     raise
 ```
 
-### 2. Timeout Coordinator (`timeout_coordinator.py`)
+## Timeout coordinator (`timeout_coordinator.py`)
 
 `TimeoutCoordinator` holds per-operation `TimeoutConfiguration`s with a
-decreasing budget across four layers (`endpoint_timeout > queue_timeout >
-tool_timeout > instance_timeout`) so each layer leaves headroom for the one
-above it. Defaults are defined for `cypher_query`, `read-graph-cypher`,
+decreasing budget across four layers — `endpoint_timeout > queue_timeout >
+tool_timeout > instance_timeout` — so each layer leaves headroom for the one
+above it and an inner timeout fires before its outer wrapper gives up. Getting
+that ordering backwards produces the confusing failure where the client sees a
+generic gateway timeout instead of the specific inner error;
+`validate_timeout_hierarchy()` exists to catch it.
+
+Defaults are defined for `cypher_query`, `read-graph-cypher`,
 `get-graph-schema`, `get-graph-info`, and a `default` fallback.
 
-**Key methods:**
+Methods:
 
 - `get_timeout_config(tool_name) -> TimeoutConfiguration`
 - `get_endpoint_timeout(tool_name)` / `get_queue_timeout(...)` /
@@ -119,8 +98,6 @@ above it. Defaults are defined for `cypher_query`, `read-graph-cypher`,
 - `calculate_timeout(operation_type, complexity_factors=None) -> float` —
   maps an operation type to a config and scales the endpoint timeout by
   complexity (row `limit`, `has_search`, `fields_count`), capped at 3x.
-
-**Usage:**
 
 ```python
 from robosystems.middleware.robustness import TimeoutCoordinator
@@ -138,20 +115,24 @@ metrics = await asyncio.wait_for(
 )
 ```
 
-### 3. Operation Logger (`operation_logging.py`)
+## Operation logger (`operation_logging.py`)
 
-`OperationLogger` provides structured, in-memory operation logging with
-correlation IDs, slow-operation detection, and an audit trail. Retrieve the
-shared singleton via `get_operation_logger()`.
+`OperationLogger` provides structured operation logging with correlation IDs,
+slow-operation detection, and an audit trail. Get the shared singleton via
+`get_operation_logger()`.
 
-Log entries are `OperationLogEntry` dataclasses categorized by
-`OperationLogEventType` (e.g. `OPERATION_START`, `OPERATION_SUCCESS`,
+Entries are `OperationLogEntry` dataclasses categorized by
+`OperationLogEventType` — `OPERATION_START`, `OPERATION_SUCCESS`,
 `OPERATION_FAILURE`, `CIRCUIT_BREAKER_OPEN`, `EXTERNAL_SERVICE_CALL`,
-`CREDIT_OPERATION`, `PERFORMANCE_ALERT`). Entries are kept in a bounded,
-thread-safe in-memory buffer (`max_log_entries`, default 10,000) and also
-written through the standard `logger`.
+`CREDIT_OPERATION`, `PERFORMANCE_ALERT`, and others.
 
-**Key methods:**
+**The buffer is per-process and in-memory** — bounded and thread-safe
+(`max_log_entries`, default 10,000), so `get_recent_logs()` on a multi-task
+deployment returns only what that task saw, and everything is lost on restart.
+Entries are also written through the standard `logger`, which is what actually
+reaches CloudWatch. Use the buffer for live debugging, not as a durable record.
+
+Methods:
 
 - `log_operation_start(...) -> operation_id`
 - `log_operation_success(operation_id, result_metadata=None)`
@@ -162,8 +143,6 @@ written through the standard `logger`.
   `log_resource_event(...)`, `log_credit_operation(...)`
 - `get_recent_logs(endpoint=None, graph_id=None, event_type=None, ...)` —
   query the in-memory buffer
-
-**Usage:**
 
 ```python
 from robosystems.middleware.robustness import get_operation_logger
@@ -191,26 +170,24 @@ with operation_logger.operation_context(
     result = await some_operation()  # success/failure logged automatically
 ```
 
-### 4. Operation Metrics (`operation_metrics.py`)
+## Operation metrics (`operation_metrics.py`)
 
-A lightweight shim. The primary metrics pipeline (request duration, errors,
-business events, query queue, SSE) lives in `middleware/otel/metrics.py`. This
-module is retained for two purposes:
+**This module does not emit metrics.** The real metrics pipeline — request
+duration, errors, business events, query queue, SSE — is
+[`../otel/`](../otel/README.md). Two things live here:
 
-1. **Circuit-breaker status tracking** — `CircuitBreakerMetrics` (accessed via
+1. **Circuit-breaker status tracking** — `CircuitBreakerMetrics` (via
    `get_operation_metrics_collector()`) stores the latest circuit state per
    `(graph_id, operation)`. `CircuitBreakerManager` updates it internally; you
    normally don't call it directly.
-2. **`record_operation_metric(...)`** — a backward-compatible logging shim. It
-   logs a warning for any non-`SUCCESS` status or any operation slower than
-   10s; otherwise it is a no-op. It does **not** emit OTel metrics.
+2. **`record_operation_metric(...)`** — a logging shim. It logs a warning for
+   any non-`SUCCESS` status or any operation slower than 10 s, and is otherwise
+   a no-op. If you need a metric on a dashboard, use the OTel helpers instead;
+   calling this and then looking for a Prometheus series is the mistake.
 
-`OperationType` and `OperationStatus` are enums describing the operation
-category and outcome (e.g. `OperationType.ANALYTICS_QUERY`,
-`OperationStatus.SUCCESS` / `FAILURE` / `TIMEOUT` / `CIRCUIT_OPEN` /
-`INSUFFICIENT_CREDITS`).
-
-**Usage:**
+`OperationType` and `OperationStatus` are enums for the operation category and
+outcome (`OperationType.ANALYTICS_QUERY`; `OperationStatus.SUCCESS` /
+`FAILURE` / `TIMEOUT` / `CIRCUIT_OPEN` / `INSUFFICIENT_CREDITS`).
 
 ```python
 from robosystems.middleware.robustness import (
@@ -230,13 +207,13 @@ record_operation_metric(
 )
 ```
 
-## Putting It Together
+## Putting it together
 
 The graph routers (`routers/graphs/usage.py`, `health.py`, `limits.py`,
-`info.py`, `query/sql.py`, `mcp/handlers.py`) construct these helpers at
-module scope and wire them together inside the handler: check the circuit,
-compute a timeout, run under `asyncio.wait_for`, then record success/failure on
-the breaker and emit logs/metrics.
+`info.py`, `query/sql.py`, `mcp/handlers.py`) construct these helpers at module
+scope and wire them together inside the handler: check the circuit, compute a
+timeout, run under `asyncio.wait_for`, then record success or failure on the
+breaker and emit logs.
 
 ```python
 circuit_breaker = CircuitBreakerManager()
@@ -266,24 +243,25 @@ async def handler(graph_id, user_id):
 
 ## Configuration
 
-The circuit breaker reads its defaults from `TuningConfig` (SSM-tunable at
-runtime, no redeploy required):
+Only the circuit breaker is runtime-tunable. Its defaults come from
+`TuningConfig`, backed by SSM, so they change without a redeploy:
 
-| Setting              | TuningConfig accessor               | SSM key             |
-| -------------------- | ----------------------------------- | ------------------- |
-| Failure threshold    | `get_circuit_breaker_threshold()`   | `circuits/THRESHOLD`|
-| Recovery timeout (s) | `get_circuit_breaker_timeout()`     | `circuits/TIMEOUT`  |
+| Setting              | Accessor                          | SSM key              | Default |
+| -------------------- | --------------------------------- | -------------------- | ------- |
+| Failure threshold    | `get_circuit_breaker_threshold()` | `circuits/THRESHOLD` | 5       |
+| Recovery timeout (s) | `get_circuit_breaker_timeout()`   | `circuits/TIMEOUT`   | 60      |
 
-Timeout budgets are defined in code in `TimeoutCoordinator` (per operation
-type); the operation logger's thresholds (`slow_operation_threshold_ms`,
-`max_log_entries`) are constructor arguments on `OperationLogger`.
+```bash
+just ssm-get prod tuning/circuits/THRESHOLD
+just ssm-set prod tuning/circuits/THRESHOLD 8
+```
 
-## Notes
+Timeout budgets are defined in code, per operation type, inside
+`TimeoutCoordinator`. The operation logger's thresholds
+(`slow_operation_threshold_ms`, `max_log_entries`) are constructor arguments on
+`OperationLogger`. Changing either means a code change.
 
-- These helpers are constructed explicitly in handlers; there are no
-  decorators (`@retry` / `@timeout` / `@fallback` / `@throttle`), no retry-policy
-  classes, and no fallback handlers in this module.
-- Retries/backoff, if needed, live with the relevant client/adapter; this
-  module focuses on breaking, timing out, logging, and status tracking.
-- The primary metrics surface is OpenTelemetry — see
-  `middleware/otel/README.md`.
+## Related
+
+- [`../otel/README.md`](../otel/README.md) — the metrics and tracing surface
+- [`../graph/README.md`](../graph/README.md) — the routers that use these helpers

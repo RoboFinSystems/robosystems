@@ -1,8 +1,7 @@
 """
 AWS Secrets Manager integration for dynamic secret retrieval.
 
-This module provides a centralized way to fetch secrets from AWS Secrets Manager
-rather than relying on environment variables passed through userdata scripts.
+Fetches secrets at runtime instead of passing them through userdata scripts.
 
 ## Architecture
 
@@ -24,27 +23,22 @@ Secrets are organized in AWS Secrets Manager with the following structure:
   - `/admin`: ADMIN_API_KEY
   - `/graph-api`: GRAPH_API_KEY
 
-## Feature Flags (Moved to SSM Parameter Store)
+## Feature Flags
 
-Feature flags have been migrated to SSM Parameter Store for cost efficiency.
-See parameter_store.py for the new implementation. Feature flags are stored at:
-  /robosystems/{environment}/features/{FLAG_NAME}
+Feature flags are not secrets and live in SSM Parameter Store at
+/robosystems/{environment}/features/{FLAG_NAME} — see parameter_store.py.
 
 ## Usage
 
-The module automatically detects the environment (dev/staging/prod) and:
-- For prod/staging: Fetches secrets from AWS Secrets Manager with caching
-- For dev: Returns empty dict, falling back to environment variables
+The environment is detected automatically:
+- prod/staging: fetch from AWS Secrets Manager, cached both by an LRU on
+  ``get_secret`` and by the instance-level ``_cache`` dict (~256ms cold,
+  ~0.01ms warm)
+- dev: return an empty dict so callers fall back to environment variables
 
-Secrets are cached using two mechanisms:
-1. LRU cache on the get_secret method (function-level)
-2. Instance-level cache in _cache dict (cross-function)
+env.py reads every sensitive value through this module, guarded so a missing
+boto3 or a circular import degrades to plain env vars rather than failing:
 
-Performance: ~256ms for first fetch, ~0.01ms for cached access
-
-## Integration with env.py
-
-The env.py module uses this for all sensitive configuration:
 ```python
 try:
     from robosystems.config.secrets_manager import get_secret_value
@@ -52,8 +46,6 @@ try:
 except ImportError:
     SECRET_VALUE = get_str_env("SECRET_KEY", "default")
 ```
-
-This pattern ensures backward compatibility and graceful fallback.
 """
 
 import json
@@ -79,12 +71,7 @@ class SecretsManager:
     cache_ttl_seconds: int = 3600,
   ):
     """
-    Initialize the secrets manager.
-
-    Args:
-        environment: Environment name (prod/staging). Defaults to ENVIRONMENT env var.
-        region: AWS region. Defaults to AWS_REGION env var or us-east-1.
-        cache_ttl_seconds: TTL for cached secrets in seconds. Default 1 hour.
+    Initialize the secrets manager; unset arguments fall back to env vars.
     """
     self.environment = environment or os.getenv("ENVIRONMENT", "dev")
     self.region = region or os.getenv("AWS_REGION", "us-east-1")
@@ -101,12 +88,9 @@ class SecretsManager:
     """
     Retrieve a secret from AWS Secrets Manager with TTL-based caching.
 
-    Args:
-        secret_type: Optional type of secret (e.g., "s3", "postgres").
-                    If None, retrieves the base environment secret.
-
-    Returns:
-        Dictionary containing secret values.
+    ``secret_type`` selects an extension secret ("postgres", "valkey", ...);
+    None retrieves the base environment secret. Returns {} outside
+    prod/staging.
     """
     # Only use Secrets Manager for prod/staging
     if self.environment not in ["prod", "staging"]:
@@ -180,10 +164,7 @@ class SecretsManager:
 
   def get_admin_key(self) -> str:
     """
-    Get the admin API key from secrets.
-
-    Returns:
-        Admin API key string.
+    Get the admin API key from the /admin extension secret.
     """
     if self.environment not in ["prod", "staging"]:
       # For local dev, optionally use env var
@@ -194,10 +175,7 @@ class SecretsManager:
 
   def refresh(self, secret_type: str | None = None):
     """
-    Refresh cached secrets.
-
-    Args:
-        secret_type: Specific secret to refresh, or None to refresh all.
+    Drop cached secrets — one by type, or all when ``secret_type`` is None.
     """
     if secret_type:
       cache_key = f"{self.environment}/{secret_type}"
@@ -213,10 +191,7 @@ _secrets_manager: SecretsManager | None = None
 
 def get_secrets_manager() -> SecretsManager:
   """
-  Get or create the global secrets manager instance.
-
-  Returns:
-      SecretsManager instance.
+  Get or create the process-wide SecretsManager.
   """
   global _secrets_manager
   if _secrets_manager is None:
@@ -282,18 +257,10 @@ SECRET_MAPPINGS = {
 
 def get_secret_value(key: str, default: str = "") -> str:
   """
-  Get a specific secret value from AWS Secrets Manager.
+  Get one secret value, e.g. "JWT_SECRET_KEY".
 
-  This is a convenience function that handles the logic of:
-  1. Checking if we're in prod/staging (use Secrets Manager)
-  2. Otherwise returning the default or environment variable
-
-  Args:
-      key: The key name to retrieve (e.g., "JWT_SECRET_KEY", "DATABASE_URL")
-      default: Default value if not found
-
-  Returns:
-      The secret value or default
+  Reads Secrets Manager in prod/staging, and the environment variable of the
+  same name otherwise.
   """
   # First check environment variable
   env_value = os.getenv(key)
@@ -333,17 +300,9 @@ def get_secret_list_value(
   key: str, default: str = "", separator: str = ","
 ) -> list[str]:
   """
-  Get a list secret value from AWS Secrets Manager.
+  Get a secret holding a separator-joined list, e.g. "JWT_AUDIENCE".
 
-  Retrieves a comma-separated string from Secrets Manager and splits it into a list.
-
-  Args:
-      key: The key name to retrieve (e.g., "JWT_AUDIENCE")
-      default: Default comma-separated value if not found
-      separator: String separator for list items (default: comma)
-
-  Returns:
-      List of strings from secret or default
+  Splits on ``separator`` and trims each item.
   """
   value = get_secret_value(key, default)
   if not value:

@@ -32,20 +32,10 @@ async def get_current_user_for_email_verification(
   request: Request,
   session: Session = Depends(get_async_db_session),
 ) -> User:
-  """
-  Get the authenticated user for email verification endpoints.
+  """Resolve the authenticated user for the email-verification endpoints.
 
-  This is a local version to avoid circular imports with middleware.auth.dependencies.
-
-  Args:
-      request: FastAPI request object
-      session: Database session
-
-  Returns:
-      User: The authenticated user
-
-  Raises:
-      HTTPException: If authentication fails
+  A local copy of the shared dependency, kept here to avoid a circular import
+  with `middleware.auth.dependencies`. Raises 401 when authentication fails.
   """
   # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
   authorization = request.headers.get("authorization")
@@ -135,7 +125,6 @@ async def resend_verification_email(
     user_agent=user_agent,
   )
 
-  # Detect app source from request
   app = detect_app_source(request)
 
   # Queue verification email via Dagster (async with retry logic)
@@ -153,7 +142,6 @@ async def resend_verification_email(
     run_config=run_config,
   )
 
-  # Log security event
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.EMAIL_SENT,
     user_id=current_user.id,
@@ -198,7 +186,6 @@ async def verify_email(
       detail="Invalid or expired verification token",
     )
 
-  # Get user
   user = User.get_by_id(user_id, session)
   if not user:
     raise HTTPException(
@@ -213,7 +200,6 @@ async def verify_email(
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Detect app source
   app = detect_app_source(fastapi_request)
 
   # Queue welcome email via Dagster (async with retry logic)
@@ -230,7 +216,6 @@ async def verify_email(
     run_config=run_config,
   )
 
-  # Log security event
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.EMAIL_VERIFIED,
     user_id=user.id,

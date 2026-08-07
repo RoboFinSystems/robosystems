@@ -1,3 +1,10 @@
+"""Parse LadybugDB Cypher DDL back into node and relationship metadata.
+
+The reverse direction of `schemas/models.py`: given the DDL a database was
+created with, recover the node types, their properties, and the relationship
+type names.
+"""
+
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -25,11 +32,11 @@ def parse_cypher_schema(ddl: str) -> list[NodeType]:
       CREATE NODE TABLE Customer(name STRING, sector STRING, PRIMARY KEY(name));
       CREATE NODE TABLE Order(id INT64, amount DOUBLE, PRIMARY KEY(id));
 
-  Returns:
-      List of NodeType objects with name and properties
+  Constraint clauses (PRIMARY KEY, UNIQUE, FOREIGN KEY) are skipped, so only
+  data properties come back.
 
   Raises:
-      ValueError: If DDL is malformed or cannot be parsed
+      ValueError: If the DDL is empty or malformed.
   """
   if not ddl or not ddl.strip():
     raise ValueError("Schema DDL cannot be empty")
@@ -118,9 +125,6 @@ def parse_relationship_types(ddl: str) -> list[str]:
 
   Example DDL:
       CREATE REL TABLE HAS_ORDER(FROM Customer TO Order);
-
-  Returns:
-      List of relationship type names
   """
   rel_types = []
 

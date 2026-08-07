@@ -97,11 +97,10 @@ _QB_ACCOUNT_TYPE_TO_TRAIT: dict[str, str] = {
 # axis — equity / revenue / expense accounts are deliberately absent (no
 # liquidity trait is emitted for them).
 #
-# Captured alongside the EFS trait so the auto-map agent can narrow
-# rs-gaap candidates by current-vs-noncurrent instead of guessing it from
-# the account name (e.g. a "Bank" account no longer surfaces noncurrent
-# asset candidates). The rendered statement classification stays
-# structural; this trait is an advisory narrowing signal for mapping.
+# Captured alongside the EFS trait so the auto-map agent narrows rs-gaap
+# candidates by current-vs-noncurrent rather than guessing from the account
+# name — a "Bank" account should never surface noncurrent-asset candidates.
+# Statement classification stays structural; this trait is advisory only.
 _QB_ACCOUNT_TYPE_TO_LIQUIDITY: dict[str, str] = {
   # Current assets
   "Bank": "current",
@@ -416,22 +415,11 @@ class OLTPLoader:
       rebuilds only, so incremental syncs never wipe history outside
       their window.
 
-    Args:
-        graph_id: The graph ID (maps to a PostgreSQL schema).
-        source: The data source name (e.g., 'quickbooks', 'xero').
-        connection_id: The connection ID for data isolation.
-        duckdb_path: Path to the dbt output DuckDB database.
-        created_by: User ID for audit trail.
-        full_rebuild: When True, run the pre-sync DELETE before UPSERT.
-            Wipes only ``captured``/``classified`` events (voided +
-            committed + fulfilled survive). Default False = incremental.
-        since_date: When set, signals an incremental window sync;
-            advisory only on the loader (the dbt mart is already
-            window-scoped) but documented for symmetry with
-            ``QBSyncConfig``. Does not enable the pre-sync DELETE.
+    ``graph_id`` names the PostgreSQL tenant schema; ``connection_id`` scopes
+    the data for isolation. ``since_date`` is advisory on the loader — the dbt
+    mart is already window-scoped — and never enables the pre-sync DELETE.
 
-    Returns:
-        LoadResult with row counts per table.
+    Returns a ``LoadResult`` with per-table row counts.
     """
     import duckdb
 
@@ -444,12 +432,10 @@ class OLTPLoader:
 
     result = LoadResult(graph_id=graph_id, source=source, connection_id=connection_id)
 
-    # Ensure tenant schema exists
     provision_tenant_schema(graph_id)
 
-    # Read dbt output tables from DuckDB
-    # Use fetchall() instead of fetchdf() to avoid pyarrow/DuckDB segfault
-    # in containerized Dagster workers where both libraries coexist.
+    # fetchall(), not fetchdf(): pyarrow and DuckDB coexisting in the
+    # containerized Dagster workers segfault on the dataframe path.
     con = duckdb.connect(str(duckdb_path), read_only=True)
     try:
       existing_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}

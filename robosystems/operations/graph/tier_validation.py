@@ -16,17 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def validate_subgraph_count(graph_id: str, new_tier: str, db: Session) -> None:
-  """Validate that the graph's subgraph count fits the target tier's limit.
+  """Raise 400 when the graph has more subgraphs than ``new_tier`` allows.
 
-  No-op for upgrades (higher tier always has >= subgraphs).
-
-  Args:
-      graph_id: Parent graph identifier
-      new_tier: Target tier name (e.g., "ladybug-standard")
-      db: Database session
-
-  Raises:
-      HTTPException: 400 if subgraph count exceeds target tier's max_subgraphs
+  Effectively a no-op on an upgrade, since a higher tier never allows fewer.
   """
   new_max = get_tier_max_subgraphs(new_tier)
   if new_max is None:
@@ -49,18 +41,10 @@ def validate_subgraph_count(graph_id: str, new_tier: str, db: Session) -> None:
 async def validate_storage_capacity(
   graph_id: str, current_tier: str, new_tier: str, db: Session
 ) -> None:
-  """Validate that the graph's storage usage fits the target tier's limit.
+  """Raise 400 when stored data exceeds ``new_tier``'s cap, 503 if unknowable.
 
-  No-op for upgrades (higher tier always has >= storage).
-
-  Args:
-      graph_id: Parent graph identifier
-      current_tier: Current tier name (for storage lookup)
-      new_tier: Target tier name
-      db: Database session
-
-  Raises:
-      HTTPException: 400 if storage usage exceeds target tier's limit
+  A no-op on an upgrade. Usage is judged on *durable* bytes, so a transient
+  blue-green artifact does not block a downgrade.
   """
   new_limit_gb = GraphTierConfig.get_instance_storage_limit_gb(new_tier)
   current_limit_gb = GraphTierConfig.get_instance_storage_limit_gb(current_tier)

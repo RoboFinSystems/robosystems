@@ -101,17 +101,17 @@ class MigrationService:
     return boto3.client("s3", **kwargs)
 
   def _checkpoint_database(self, graph_id: str) -> None:
-    """Drain the WAL into the .lbug file via the connection pool (single-writer path).
+    """Drain the WAL into the .lbug file, through the pool's single-writer path.
 
-    Run before EXPORT so the on-disk file rolls cleanly to the new engine
-    version. An un-checkpointed v40 WAL tail cannot be replayed by the new engine
-    after an upgrade ("Corrupted wal file. Read out invalid WAL record type."),
-    which 500s every read until the import rebuilds the db; it also leaves the raw
-    .lbug S3 system backup (which excludes the .wal) incomplete. The pool's
-    auto_checkpoint only fires past a size threshold (512 MB for regular graphs),
-    so small graphs never auto-drain — hence the explicit CHECKPOINT. Mirrors
-    OnInstanceBackupService._checkpoint. Best-effort: the caller logs and
-    continues on failure (the parquet export still captures committed WAL data).
+    Must run before EXPORT. A WAL tail written by the old engine cannot be
+    replayed by the new one after an upgrade, which fails every read until the
+    import rebuilds the database; it also leaves the raw .lbug system backup
+    incomplete, since that excludes the .wal. The explicit CHECKPOINT is
+    needed because auto_checkpoint only fires past a size threshold (512 MB
+    for regular graphs), so small graphs never drain on their own.
+
+    Best-effort — the caller logs and continues on failure, since the Parquet
+    export captures committed WAL data regardless.
     """
     from robosystems.graph_api.core.ladybug import get_ladybug_service
 
@@ -127,18 +127,15 @@ class MigrationService:
     target_version: str,
     bucket: str,
   ) -> str:
-    """Upload .lbug file to S3 as a system backup before migration.
+    """Upload the .lbug file to S3 as a pre-migration system backup.
 
-    Returns:
-        S3 key of the uploaded backup
+    ``bucket`` is supplied by the caller, as it is for the backup and restore
+    endpoints: the writer container does not set ``USER_DATA_BUCKET``, so
+    resolving it here yields the default and 404s on upload. Returns the S3
+    key.
     """
     timestamp = datetime.now(UTC)
     s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
-    # The bucket is passed in by the caller. The migration op resolves
-    # USER_DATA_BUCKET in the worker (where it is set) and forwards it, matching
-    # the backup/restore endpoints, which also take the bucket from the request.
-    # The graph-api writer container does not set USER_DATA_BUCKET, so reading it
-    # here would resolve to the bogus default and 404 on upload.
 
     s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
@@ -212,14 +209,15 @@ class MigrationService:
     return count
 
   def _check_disk_space(self, databases: list[str]) -> None:
-    """Verify sufficient disk space for exports."""
+    """Fail before exporting if the volume cannot hold the export."""
     total_db_size = 0
     for db_name in databases:
       db_file = self.base_path / f"{db_name}.lbug"
       if db_file.exists():
         total_db_size += db_file.stat().st_size
 
-    # Parquet exports are typically 25-60% of .lbug size, but be conservative
+    # Parquet exports run 25-60% of .lbug size; budgeting 100% is deliberate
+    # headroom, since running out mid-export leaves a half-migrated instance.
     estimated_export_size = total_db_size
 
     stat = os.statvfs(self.base_path)
@@ -235,13 +233,15 @@ class MigrationService:
   async def export_all_databases(
     self, task_id: str, source_version: str, target_version: str, bucket: str
   ) -> None:
-    """
-    Background task: export all databases to Parquet for version migration.
+    """Export every database on this instance to Parquet, for a version upgrade.
 
-    1. Check disk space
-    2. Discover all .lbug files
-    3. For each database: EXPORT DATABASE to exports/{graph_id}/
-    4. Write migration.json manifest
+    Checks disk space, discovers the ``.lbug`` files, EXPORTs each to
+    ``exports/{graph_id}/``, and writes the ``migration.json`` manifest that
+    :meth:`import_all_databases` reads on the new engine version. Runs on the
+    OLD version, before the deploy; the EBS volume carries the exports across
+    the container swap.
+
+    Guarded by a process-wide flag — only one export runs at a time.
     """
     if not _try_start_export():
       await migration_task_manager.fail_task(task_id, "Export already in progress")
@@ -268,7 +268,7 @@ class MigrationService:
 
       self._check_disk_space(databases)
 
-      # Clean any previous export
+      # A stale export would be mixed into this one's manifest.
       if self.exports_path.exists():
         shutil.rmtree(self.exports_path)
 
@@ -280,10 +280,7 @@ class MigrationService:
 
         logger.info(f"Exporting {db_name} ({i + 1}/{len(databases)})")
 
-        # Drain the WAL on the OLD engine so the file rolls cleanly to the new
-        # engine version (see _checkpoint_database). Best-effort — never block
-        # the export on it; the parquet export captures committed WAL data
-        # regardless, and the read-only export handle below opens the file next.
+        # See _checkpoint_database. Never blocks the export.
         try:
           self._checkpoint_database(db_name)
         except Exception as e:
@@ -295,11 +292,10 @@ class MigrationService:
           db = lbug.Database(str(db_file), read_only=True)
           conn = lbug.Connection(db)
 
-          # Collect counts for verification
+          # Recorded in the manifest so the import can verify against them.
           node_count = self._get_node_count(conn)
           rel_tables = self._get_rel_table_count(conn)
 
-          # Export to Parquet
           conn.execute(f"EXPORT DATABASE '{export_dir}'")
         except Exception as e:
           logger.error(f"Failed to export {db_name}: {e}")
@@ -310,7 +306,6 @@ class MigrationService:
           if db:
             db.close()
 
-        # Upload system backup to S3 (safety net)
         db_size = db_file.stat().st_size
         system_backup_key = self._upload_system_backup(
           db_file, db_name, source_version, target_version, bucket
@@ -333,7 +328,6 @@ class MigrationService:
           f"{rel_tables} rel tables, {db_size / 1024 / 1024:.1f} MB"
         )
 
-        # Update progress
         progress = int((i + 1) / len(databases) * 100)
         await migration_task_manager.update_task(
           task_id,
@@ -348,7 +342,6 @@ class MigrationService:
           },
         )
 
-      # Write manifest
       manifest = {
         "source_version": source_version,
         "target_version": target_version,
@@ -381,15 +374,13 @@ class MigrationService:
       _clear_export_in_progress()
 
   async def import_all_databases(self, task_id: str) -> None:
-    """
-    Background task: import all databases from a previous export.
+    """Rebuild every database from a previous export, on the new engine version.
 
-    1. Set _migration_in_progress (health -> 503)
-    2. Read migration.json
-    3. For each database: rename .lbug -> .pre-migration, create fresh, IMPORT DATABASE
-    4. Verify node counts
-    5. On success: cleanup and clear flag
-    6. On failure: restore .pre-migration files and clear flag
+    Runs post-deploy. Each database is renamed to ``.pre-migration``, then
+    recreated by IMPORT DATABASE and verified against the manifest's node
+    counts; any failure restores every ``.pre-migration`` file. The health
+    endpoint returns 503 for the duration, so an instance mid-rebuild is not
+    routed traffic.
     """
     if not _try_start_import(task_id):
       await migration_task_manager.fail_task(task_id, "Import already in progress")
@@ -406,7 +397,6 @@ class MigrationService:
         started_at=datetime.now(UTC).isoformat(),
       )
 
-      # Read manifest
       if not self.manifest_path.exists():
         logger.info("No migration.json found - nothing to import")
         _set_migration_in_progress(False)
@@ -431,7 +421,7 @@ class MigrationService:
         f"{manifest['source_version']} -> {manifest['target_version']}"
       )
 
-      # Sort: shorter graph_ids first (parents before subgraphs)
+      # Shortest ID first, which puts a parent ahead of its subgraphs.
       databases.sort(key=lambda d: len(d["graph_id"]))
 
       results: list[dict[str, Any]] = []
@@ -445,21 +435,20 @@ class MigrationService:
 
         logger.info(f"Importing {db_name} ({i + 1}/{len(databases)})")
 
-        # Validate export directory exists
+        # Checked before the rename below, so a missing export cannot leave
+        # the database renamed away with nothing to restore it from.
         if not export_dir.exists():
           raise RuntimeError(f"Export directory missing for {db_name}: {export_dir}")
 
-        # Rename old .lbug -> .pre-migration
         if db_file.exists():
           os.rename(db_file, pre_migration_file)
           renamed_files.append((pre_migration_file, db_file))
           logger.info(f"Renamed {db_name}.lbug -> .pre-migration")
 
-        # Remove WAL
+        # The old WAL cannot be replayed by the new engine version.
         if wal_file.exists():
           os.remove(wal_file)
 
-        # Create fresh database and import
         start_time = time.time()
         db = None
         conn = None
@@ -468,7 +457,6 @@ class MigrationService:
           conn = lbug.Connection(db)
           conn.execute(f"IMPORT DATABASE '{export_dir}'")
 
-          # Verify node counts
           actual_nodes = self._get_node_count(conn)
           expected_nodes = entry.get("node_count", 0)
           duration = time.time() - start_time
@@ -481,7 +469,7 @@ class MigrationService:
             db.close()
 
         if expected_nodes > 0 and actual_nodes != expected_nodes:
-          # Allow small tolerance for concurrent writes between export and import
+          # 0.1% tolerance absorbs writes committed between export and import.
           tolerance = max(1, int(expected_nodes * 0.001))
           if abs(actual_nodes - expected_nodes) > tolerance:
             raise RuntimeError(
@@ -507,7 +495,6 @@ class MigrationService:
           f"{new_size / 1024 / 1024:.1f} MB"
         )
 
-        # Update progress
         progress = int((i + 1) / len(databases) * 100)
         await migration_task_manager.update_task(
           task_id,
@@ -520,7 +507,7 @@ class MigrationService:
           },
         )
 
-      # Success: cleanup
+      # Removing the manifest is what marks the migration as no longer pending.
       os.remove(self.manifest_path)
       if self.exports_path.exists():
         shutil.rmtree(self.exports_path)
@@ -542,11 +529,10 @@ class MigrationService:
     except Exception as e:
       logger.error(f"Migration import failed: {e}")
 
-      # Restore all .pre-migration files
       for pre_migration, original in renamed_files:
         try:
           if pre_migration.exists():
-            # Remove any partial .lbug that was created
+            # A partially imported .lbug would block the rename back.
             if original.exists():
               os.remove(original)
             os.rename(pre_migration, original)
@@ -567,7 +553,6 @@ class MigrationService:
       except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Failed to read migration manifest: {e}")
 
-    # Find .pre-migration files
     pre_migration_files = []
     if self.base_path.exists():
       for f in sorted(self.base_path.iterdir()):
@@ -583,13 +568,11 @@ class MigrationService:
     }
 
   def cleanup_pre_migration_files(self) -> dict[str, Any]:
-    """Delete .pre-migration files after successful migration.
+    """Delete the ``.pre-migration`` files once the migration is verified.
 
-    These files are the original .lbug databases from the old version.
-    System backups in S3 provide the safety net after cleanup.
-
-    Returns:
-        Cleanup result with files deleted and total size freed
+    These are the original databases from the old engine version, and the
+    only local rollback path — once they are gone, the S3 system backups are
+    the remaining safety net. Returns the files deleted and bytes freed.
     """
     deleted = []
     total_freed = 0

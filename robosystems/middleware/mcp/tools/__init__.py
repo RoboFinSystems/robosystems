@@ -1,8 +1,7 @@
-"""
-MCP Tools - Individual tool implementations for graph databases graph database.
+"""Individual MCP tool implementations.
 
-This module contains individual tool implementations that can be composed
-together to create the full MCP tools interface.
+`GraphMCPTools` (see `manager.py`) composes these into the tool surface a
+given graph advertises.
 """
 
 from .base_tool import BaseTool

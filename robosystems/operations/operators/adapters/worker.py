@@ -1,12 +1,9 @@
 """Worker execution adapter — runs operators in worker context.
 
-Constructs an OperatorContext with:
-- DirectToolAccess (in-process tool classes, no HTTP)
-- FactoryCreditConsumer (creates sessions per call)
-- OperationManagerProgress (SSE progress + cancellation)
-
-Used by the OperatorWorkerTask bridge to run operators inside the
-existing worker consumer loop.
+Builds an OperatorContext from `DirectToolAccess` (in-process tool classes, no
+HTTP), `FactoryCreditConsumer` (a session per call), and
+`OperationManagerProgress` (SSE progress + cancellation). Reached through the
+`OperatorWorkerTask` bridge in `worker_task.py`.
 """
 
 from __future__ import annotations
@@ -40,21 +37,11 @@ async def run_operator_worker(
   params: dict[str, Any],
   manager: OperationManager,
 ) -> dict[str, Any]:
-  """Run an operator in worker context.
+  """Run an operator in worker context for a long-running background task.
 
-  Handles tool access, credit tracking, and progress reporting
-  for long-running background tasks.
-
-  Args:
-      operator: The operator to run.
-      task_id: Worker task identifier.
-      graph_id: Graph database identifier.
-      user_id: User ID string.
-      params: Task parameters (operator-specific).
-      manager: SSE OperationManager for progress/cancellation.
-
-  Returns:
-      Result dict with operator output + credit summary.
+  `params` carries the operator-specific arguments and an optional `mode`
+  (an unrecognized value falls back to STANDARD). Returns the operator's
+  content and metadata merged with a credit/token summary.
   """
   mode_str = params.get("mode", "standard")
   try:

@@ -1,8 +1,5 @@
 """S3 storage resource for Dagster.
 
-Provides AWS S3 operations for data storage and retrieval,
-consistent with existing RoboSystems S3 patterns.
-
 Bucket Configuration:
     Default bucket is USER_DATA_BUCKET (robosystems-user-{env}).
     For shared data operations (SEC, FRED, etc.), use explicit bucket names:
@@ -20,11 +17,7 @@ from robosystems.config import env
 
 
 class S3Resource(ConfigurableResource):
-  """AWS S3 resource for Dagster operations.
-
-  Provides S3 client operations for storing and retrieving
-  pipeline data, parquet files, and intermediate results.
-  """
+  """AWS S3 resource for storing and retrieving pipeline data."""
 
   bucket_name: str = ""
   region_name: str = ""
@@ -56,16 +49,7 @@ class S3Resource(ConfigurableResource):
     key: str,
     content_type: str = "application/octet-stream",
   ) -> str:
-    """Upload a file to S3.
-
-    Args:
-        file_obj: File-like object to upload
-        key: S3 object key (path)
-        content_type: MIME type of the file
-
-    Returns:
-        S3 URI of the uploaded file
-    """
+    """Upload a file to ``key`` in the configured bucket, returning its S3 URI."""
     self.client.upload_fileobj(
       file_obj,
       self.bucket,
@@ -75,23 +59,11 @@ class S3Resource(ConfigurableResource):
     return f"s3://{self.bucket}/{key}"
 
   def download_file(self, key: str, file_obj: BinaryIO) -> None:
-    """Download a file from S3.
-
-    Args:
-        key: S3 object key (path)
-        file_obj: File-like object to write to
-    """
+    """Download the object at ``key`` into ``file_obj``."""
     self.client.download_fileobj(self.bucket, key, file_obj)
 
   def list_objects(self, prefix: str) -> list[dict[str, Any]]:
-    """List objects with a given prefix.
-
-    Args:
-        prefix: S3 key prefix to filter by
-
-    Returns:
-        List of object metadata dictionaries
-    """
+    """List objects under ``prefix`` as {key, size, last_modified} dicts."""
     paginator = self.client.get_paginator("list_objects_v2")
     objects = []
 
@@ -108,15 +80,7 @@ class S3Resource(ConfigurableResource):
     return objects
 
   def get_presigned_url(self, key: str, expiration: int = 3600) -> str:
-    """Generate a presigned URL for an S3 object.
-
-    Args:
-        key: S3 object key
-        expiration: URL expiration time in seconds
-
-    Returns:
-        Presigned URL string
-    """
+    """Generate a presigned GET URL, valid for ``expiration`` seconds."""
     return self.client.generate_presigned_url(
       "get_object",
       Params={"Bucket": self.bucket, "Key": key},

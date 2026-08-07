@@ -1,17 +1,17 @@
 """Credit pre-flight for operator execution.
 
-Credits are consumed *after* a Bedrock call returns, so the pre-flight check is
-the only thing standing between an under-funded graph and real spend. It lives
-here rather than on the orchestrator because two of the three API execution
-strategies (SSE streaming and background queue) call the execution adapters
-directly and never construct an orchestrator — a check that lived only there
-covered one path in three.
+Credits are consumed *after* a Bedrock call returns, so this check is the only
+thing standing between an under-funded graph and real spend. It belongs in the
+execution adapters rather than the orchestrator: two of the three API execution
+strategies (SSE streaming and background queue) call the adapters directly and
+never construct an orchestrator, so a check at that layer would cover one path
+in three.
 
 Fail-closed on purpose: an error resolving the balance denies the run. The
-normal "no credit pool" and "no shared-repository access" cases already return
-a well-formed negative answer from `CreditService.check_credit_balance`, so
-reaching the exception path means the balance genuinely could not be
-established, and the old fail-open behaviour turned that into free AI.
+ordinary "no credit pool" and "no shared-repository access" cases already come
+back as a well-formed negative answer from `CreditService.check_credit_balance`,
+so reaching the exception path means the balance genuinely could not be
+established — and allowing the run there would hand out free AI.
 """
 
 from __future__ import annotations
@@ -60,7 +60,11 @@ _MODE_ESTIMATES: dict[str, dict[str, int]] = {
 
 
 def estimate_operator_tokens(operator: Operator, mode: OperatorMode) -> dict[str, int]:
-  """Rough per-run token estimate used only to size the pre-flight check."""
+  """Rough per-run token estimate, used only to size the pre-flight check.
+
+  Actual billing comes from the token counts Bedrock reports, so an inaccurate
+  estimate only shifts where the balance floor sits.
+  """
   estimate = dict(_MODE_ESTIMATES.get(mode.value, {"input": 5000, "output": 1500}))
 
   if "financial" in operator.spec.name.lower():

@@ -1023,9 +1023,9 @@ def _metric_period_windows(
   """The (period_start, period_end) windows a metric compute should run.
 
   Monthly windows when the monthly-report loop provided them (the
-  standing series at the operating cadence); otherwise the legacy
-  two-window probe — prior comparative end + report end, mirroring the
-  report's ``_compute_prior_period``.
+  standing series at the operating cadence); otherwise a two-window
+  probe — prior comparative end + report end, mirroring the report's
+  ``_compute_prior_period``.
   """
   if period_windows:
     return list(period_windows)
@@ -1247,8 +1247,8 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
       ],
     }
     # Direct POST rather than the SDK: the generated client's rule_pattern
-    # enum predates 'Derive' — regenerating the SDKs picks it up, but the
-    # demo shouldn't depend on a client release to author Derive rules.
+    # enum doesn't carry 'Derive', and the demo shouldn't depend on an SDK
+    # release to author Derive rules.
     import httpx
 
     resp = httpx.post(
@@ -1325,7 +1325,7 @@ def compute_custom_metrics(
 
 
 # ---------------------------------------------------------------------------
-# Step 3f: Forecast scenario — author levers, walk the cascade (FP&A F-1)
+# Step 3f: Forecast scenario — author levers, walk the driver cascade
 # ---------------------------------------------------------------------------
 
 
@@ -1379,7 +1379,7 @@ def run_forecast_scenario(
   scenario,
   forecast_levers: dict[str, float],
 ) -> str | None:
-  """Author + compute the operating-budget scenario (the FP&A F-1 walk).
+  """Author + compute the operating-budget scenario.
 
   The full forecast-engine loop through the public surface: the forecast
   block is authored via the generic ``create-information-block`` op
@@ -1515,7 +1515,7 @@ def run_forecast_scenario(
       else:
         print(f"  WARNING: implied DSO {implied:.4f} != asserted {dso}")
 
-  # 4b. Articulation (F-2) — the three-statement claims, live:
+  # 4b. Articulation — the three-statement claims, live:
   #     A = L + E by construction; RE rolls by exactly NI; cash moves by
   #     exactly the CF net change; every month's rule corpus passes.
   assets = _rendering_value(bs_rendering, "rs-gaap:Assets")
@@ -2021,8 +2021,8 @@ def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date,
     result = client.close_period(
       graph_id, period, note="historical close (provisioning)"
     )
-    # The published SDK predates the stamping fields — read them off the
-    # untyped overflow until the regen lands.
+    # The stamping fields aren't on the generated response model, so read
+    # them off the untyped overflow.
     props = getattr(result, "additional_properties", None) or {}
     if props.get("statements_stamped"):
       stamped += 1
@@ -2062,9 +2062,8 @@ def generate_annual_report(
   # CoA was mapped CoA→rs-gaap above, and the Default Reporting Style's
   # Networks resolve rs-gaap concepts into the BS / IS / CF / Equity
   # structures, so we pass the standard name directly: create_report
-  # resolves it to the rs-gaap reporting_standard taxonomy (this is also the
-  # request default). The old fac-presentation path predated the
-  # rs-gaap-canonical flip and is no longer copied into tenants.
+  # resolves it to the rs-gaap reporting_standard taxonomy (also the
+  # request default).
   taxonomy_id = "rs-gaap"
 
   report = client.create_report(
@@ -2086,9 +2085,8 @@ def generate_annual_report(
   package = client.get_report_package(graph_id, report_id)
   if package:
     items = package.get("items", []) or []
-    # `block_type` lives nested at item.block.block_type — the rehydrated
-    # InformationBlockEnvelope. Earlier this read item.block_type directly
-    # and silently rendered "?" for every item.
+    # `block_type` lives nested at item.block.block_type on the
+    # rehydrated InformationBlockEnvelope, not on the item itself.
     block_names = [
       (i.get("block") or {}).get("name")
       or (i.get("block") or {}).get("block_type")
@@ -2348,8 +2346,8 @@ def run_demo(
       graph_id, scenario, authored_metric_catalogs, period_windows[:-1]
     )
 
-  # Forecast scenario — the FP&A F-1 walk: authored levers, driver
-  # cascade 12 months past the close boundary, scenario metric series.
+  # Forecast scenario — authored levers, driver cascade 12 months past
+  # the close boundary, scenario metric series.
   forecast_scenario_id = None
   if report_id and forecast_levers:
     print("\nRunning forecast scenario...")

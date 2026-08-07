@@ -202,12 +202,6 @@ def flatten_journal_lines(
 
   Each journal entry has a Line array with one row per debit/credit.
   This flattens them into a flat list suitable for a DataFrame.
-
-  Args:
-      journal_entries: List of JournalEntry.to_dict() objects from QBClient
-
-  Returns:
-      List of flattened line item dicts matching raw_journal_lines schema
   """
   lines = []
   for entry in journal_entries:
@@ -498,14 +492,7 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
 
 
 def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
-  """Flatten CompanyInfo objects into rows matching raw_company_info schema.
-
-  Args:
-      company_info_list: Result of QBClient.get_entity_info()
-
-  Returns:
-      List of company info dicts
-  """
+  """Flatten CompanyInfo objects into rows matching raw_company_info schema."""
   rows = []
   for info in company_info_list:
     data = info.to_dict() if hasattr(info, "to_dict") else info
@@ -540,14 +527,7 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
 def flatten_journal_entries(
   journal_entries: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-  """Flatten journal entries into rows matching raw_journal_entries schema.
-
-  Args:
-      journal_entries: List of JournalEntry.to_dict() objects
-
-  Returns:
-      List of journal entry header dicts (no lines)
-  """
+  """Flatten journal entries into rows matching raw_journal_entries schema."""
   rows = []
   for entry in journal_entries:
     rows.append(
@@ -567,15 +547,7 @@ def filter_entries_by_date(
   journal_entries: list[dict[str, Any]],
   lookback_days: int = 60,
 ) -> list[dict[str, Any]]:
-  """Filter journal entries to only include those within the lookback window.
-
-  Args:
-      journal_entries: Full list of journal entries
-      lookback_days: Number of days to look back from today
-
-  Returns:
-      Filtered list of journal entries
-  """
+  """Filter journal entries to only include those within the lookback window."""
   cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
   filtered = [e for e in journal_entries if (e.get("TxnDate", "") or "") >= cutoff]
   logger.info(

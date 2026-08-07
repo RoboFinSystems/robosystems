@@ -1,22 +1,28 @@
 # Background Task Worker
 
-Always-on ECS service that processes long-running operations from a Valkey queue. Provides SSE progress streaming, Dagster observability, and tenant-isolated execution.
+Always-on ECS service that runs long-running, user-initiated operations off the request path, with SSE progress streaming and tenant-isolated execution.
 
-## How It Works
+Use the worker when a user is waiting and wants progress or cancellation. Use a [Dagster job](../dagster/README.md) for scheduled or sensor-triggered platform work. Use FastAPI `BackgroundTasks` only for fire-and-forget work short enough that losing it on a restart is acceptable.
+
+## How it works
 
 ```
 API route calls enqueue_task()
-  → Creates SSE operation (PENDING) on Valkey DB 3
-  → Pushes task JSON to worker queue on Valkey DB 6
+  → Creates an SSE operation (PENDING) on Valkey DB 3
+  → RPUSH the task JSON onto "worker:tasks" on Valkey DB 6
   → Returns 202 with _links for stream/status/cancel
 
-Worker consumer (BRPOP loop)
-  → Picks up task from queue
-  → Looks up handler via task registry
-  → Executes with progress streaming via OperationManager
-  → Reports completion to Dagster
-  → Cleans up DB connections between tasks
+Worker consumer loop
+  → BLMOVE atomically moves the task from "worker:tasks" to a per-worker
+    inflight list
+  → Looks up the handler in the task registry
+  → Marks itself protected from ECS scale-in, then executes with progress
+    streaming through OperationManager
+  → Removes the task from inflight on success
+  → Disposes DB connection pools before the next task
 ```
+
+RPUSH plus BLMOVE gives FIFO ordering. The inflight list is the reliability half: if a worker crashes mid-task, the task stays there until the `worker_inflight_reaper_sensor` in the Dagster daemon finds it and requeues it. A task that stays stale past its attempt budget is moved to `worker:dlq` with a `dlq_reason`; inspect and drain it with `just admin <env> worker dlq list|retry|clear`.
 
 ## Running
 
@@ -24,9 +30,9 @@ Worker consumer (BRPOP loop)
 uv run python -m robosystems.worker
 ```
 
-In Docker, the worker runs as a separate container in the `robosystems` profile.
+In Docker the worker is a separate container in the `robosystems` profile.
 
-## Enqueueing Tasks
+## Enqueueing
 
 ```python
 from robosystems.worker.client import enqueue_task
@@ -37,14 +43,30 @@ response = await enqueue_task(
     user_id="user_...",
     params={"operator_type": "mapping", "mapping_id": "struct_..."},
 )
-# response includes operation_id, _links.stream, _links.status
+# response includes operation_id, status, _links.stream / .status / .cancel
 ```
 
-## Task Registration
+A `task_type` + `graph_id` + `user_id` + `params` combination is deduplicated within `DEDUP_TTL` seconds and returns the existing operation instead of enqueueing twice. Deduplication is skipped when `graph_id` is `None` (graph creation, for instance).
+
+## Registered task types
+
+| `task_type` | Handler | Purpose |
+| ----------- | ------- | ------- |
+| `operator` | `operations/operators/adapters/worker_task.py` | Dispatches to an AI Operator via `params["operator_type"]` |
+| `graph_creation` | `operations/graph/tasks/graph_creation.py` | Provision a new graph |
+| `graph_materialization` | `operations/graph/tasks/graph_materialization.py` | Materialize a graph |
+| `extensions_materialize` | `operations/graph/tasks/extensions_materialize.py` | OLTP→OLAP materialization for a tenant |
+| `graph_tier_upgrade` | `operations/graph/tasks/graph_tier_upgrade.py` | Move a graph to another tier |
+| `dagster_job_monitor` | `worker/tasks/dagster_monitoring.py` | Submit a Dagster job and relay its status to SSE |
+
+Per-task-type timeouts live in `constants.py`, shared by the consumer and the reaper sensor. An unrecognized `task_type` falls back to `DEFAULT_TASK_TIMEOUT`.
+
+## Adding a task
 
 Non-operator tasks extend `BaseTask` and register with `@register_task`:
 
 ```python
+from typing import Any
 from robosystems.worker.tasks.base import BaseTask
 from robosystems.worker.tasks import register_task
 
@@ -57,36 +79,43 @@ class MyTask(BaseTask):
         return {"result": "ok"}
 ```
 
-Operator tasks use the unified Operator system instead — `OperatorWorkerTask` at `operations/operators/adapters/worker_task.py` handles `task_type="operator"` and dispatches to the appropriate operator via `params["operator_type"]`.
+Registration happens through side-effect imports at module load — add the import to `worker/__init__.py`. Add a timeout for the new `task_type` in `constants.py`.
 
-## Module Layout
+AI Operator work does not need a new task class: `OperatorWorkerTask` already handles `task_type="operator"` and dispatches on `params["operator_type"]`.
 
-```
-worker/
-    __init__.py       # Imports task modules to trigger @register_task decorators
-    __main__.py       # Entry point: asyncio.run(consumer.run())
-    consumer.py       # BRPOP loop, task dispatch, lifecycle management
-    client.py         # enqueue_task() — used by API routes
-    cleanup.py        # DB connection pool disposal between tasks (tenant isolation)
-    dagster.py        # Fire-and-forget AssetMaterialization reporting
-    tasks/
-        __init__.py   # Task registry: @register_task, get_task_handler()
-        base.py       # BaseTask ABC with progress/cancellation helpers
-```
+## Layout
 
-## Tenant Isolation
+| Module | Contents |
+| ------ | -------- |
+| `__init__.py` | Side-effect imports that trigger `@register_task`, plus `load_adapter_tasks()` |
+| `__main__.py` | Entry point — `asyncio.run(consumer.run())` |
+| `consumer.py` | BLMOVE loop, dispatch, operation lifecycle, signal handling |
+| `client.py` | `enqueue_task()` — used by API routes |
+| `constants.py` | Per-task-type timeouts, shared with the reaper sensor |
+| `cleanup.py` | Disposes SQLAlchemy connection pools between tasks |
+| `metrics.py` | Daemon thread publishing queue depth to CloudWatch, independent of the consume loop |
+| `task_protection.py` | ECS scale-in protection while a task is in flight |
+| `tasks/__init__.py` | `TASK_REGISTRY`, `@register_task`, `get_task_handler()` |
+| `tasks/base.py` | `BaseTask` ABC with progress and cancellation helpers |
+| `tasks/dagster_monitoring.py` | `DagsterJobMonitorTask` |
 
-`cleanup.py` disposes all SQLAlchemy connection pools between tasks. This prevents `search_path` leaking between tenants — a lesson from a prior Celery incident where a leaked session caused cross-tenant writes.
+## Tenant isolation
 
-## SSE Progress
+`cleanup.py` disposes every SQLAlchemy connection pool between tasks. Correctly written tasks already use `extensions_session()` and close platform sessions in `finally` blocks, but this catches what slips through: a pooled connection carrying a leaked `search_path` into the next task would read another tenant's schema.
 
-Tasks stream progress to clients via the existing `OperationManager` (Valkey DB 3). Clients connect to `/v1/operations/{task_id}/stream` for real-time updates.
+## Scale-in protection
 
-## Valkey Databases
+While processing a task the worker marks itself protected from ECS scale-in and clears protection when idle — otherwise a busy worker chosen for termination gets SIGKILLed at the StopTimeout and its task is only requeued after the full task timeout elapses. Protection calls are best-effort: failures are logged, never raised, and outside ECS the manager disables itself entirely.
+
+## SSE progress
+
+Tasks stream progress through `OperationManager` on Valkey DB 3. Clients connect to `/v1/operations/{operation_id}/stream`.
+
+## Valkey databases
 
 | DB | Purpose |
-|---|---|
-| 3 | SSE operations (OperationManager) |
-| 6 | Worker task queue (BRPOP) |
+| -- | ------- |
+| 3 | SSE operations (`OperationManager`) |
+| 6 | Worker task queue (`worker:tasks`), per-worker inflight lists, and `worker:dlq` |
 
-See `config/valkey_registry.py` for the full allocation.
+Never hardcode these numbers — see `config/valkey_registry.py` for the full allocation.

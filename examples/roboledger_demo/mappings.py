@@ -34,12 +34,12 @@ The Classified BS admits a richer set of rs-gaap rollups:
 - **APIC** → ``rs-gaap:AdditionalPaidInCapital``
 - **Retained Earnings** → ``rs-gaap:RetainedEarningsAccumulatedDeficit``
 
-The Default Style was split into standard SMB granularity (2026-06): Cash
-and Short-Term Investments, Goodwill and Intangibles, Accounts Payable and
-Accrued Liabilities, and G&A and Selling & Marketing each render as their
-own line. Still-finer concepts (PrepaidInsurance, SalariesAndWages, etc.)
-remain in the broader rs-gaap library but outside the Default Style's
-Networks — they won't render until a richer Reporting Style is picked.
+The Default Style renders at standard SMB granularity: Cash and Short-Term
+Investments, Goodwill and Intangibles, Accounts Payable and Accrued
+Liabilities, and G&A and Selling & Marketing each get their own line.
+Finer concepts (PrepaidInsurance, SalariesAndWages, and the like) exist in
+the broader rs-gaap library but sit outside the Default Style's Networks —
+they render only under a richer Reporting Style.
 
 The demo resolves rs-gaap qnames → element IDs at runtime against the
 library in the entity graph.

@@ -1,5 +1,4 @@
-"""
-Shared execution strategies and utilities for query and MCP endpoints.
+"""Shared execution strategies and utilities for query and MCP endpoints.
 
 This module provides base classes and common logic for intelligent strategy
 selection based on client capabilities, system load, and operation characteristics.
@@ -57,8 +56,7 @@ class BaseAnalyzer(ABC):
 
   @classmethod
   def analyze_cypher_query(cls, query: str) -> dict[str, Any]:
-    """
-    Analyze a Cypher query to estimate its characteristics and execution requirements.
+    """Analyze a Cypher query to estimate its characteristics and execution requirements.
 
     This method performs static analysis on a Cypher query to determine execution
     strategy based on query patterns, complexity, and estimated result size.
@@ -70,25 +68,6 @@ class BaseAnalyzer(ABC):
     - Detection of potential Cartesian products
     - Streaming requirements based on estimated data volume
     - Progress reporting capabilities
-
-    Args:
-        query: The Cypher query string to analyze
-
-    Returns:
-        Dict[str, Any]: Analysis results containing:
-            - has_limit (bool): Whether query has a LIMIT clause
-            - limit_value (Optional[int]): Extracted LIMIT value if present
-            - estimated_rows (Union[str, int]): Size category ('small', 'medium', 'large')
-            - has_aggregation (bool): Contains aggregation functions
-            - has_match (bool): Contains MATCH clause
-            - has_where (bool): Contains WHERE clause
-            - has_order_by (bool): Contains ORDER BY clause
-            - has_shortest_path (bool): Uses shortest path algorithm
-            - has_all_paths (bool): Searches for all paths
-            - potentially_expensive (bool): May require significant resources
-            - is_count_only (bool): Returns only count without grouping
-            - requires_streaming (bool): Should use streaming for large results
-            - supports_progress (bool): Can provide progress updates
 
     Examples:
         >>> analyze_cypher_query("MATCH (n) RETURN n LIMIT 10")
@@ -143,8 +122,7 @@ class BaseAnalyzer(ABC):
   def _estimate_result_size(
     cls, query_upper: str, limit_value: int | None
   ) -> int | str:
-    """
-    Estimate the result size category based on query patterns and LIMIT clause.
+    """Estimate the result size category based on query patterns and LIMIT clause.
 
     This method uses heuristics to categorize expected result size for execution
     strategy selection. The categorization affects decisions about streaming,
@@ -159,14 +137,6 @@ class BaseAnalyzer(ABC):
        - Single COUNT without GROUP BY: 'small' (single value)
        - No LIMIT clause at all: 'large' (unbounded results)
        - Other patterns: 'medium' (default assumption)
-
-    Args:
-        query_upper: The uppercase version of the Cypher query
-        limit_value: Extracted LIMIT value if present, None otherwise
-
-    Returns:
-        Union[int, str]: Size category as string ('small', 'medium', 'large')
-            Note: Despite the Union type hint, this always returns str in practice
 
     Examples:
         >>> _estimate_result_size("MATCH (n) RETURN n LIMIT 50", 50)
@@ -202,24 +172,14 @@ class BaseClientDetector:
 
   @classmethod
   def detect_client_capabilities(cls, headers: dict[str, str]) -> dict[str, Any]:
-    """
-    Detect client capabilities from request headers.
-
-    Args:
-        headers: Request headers
-
-    Returns:
-        Client capability information
-    """
+    """Detect client capabilities from request headers."""
     user_agent = headers.get("user-agent", "").lower()
     accept = headers.get("accept", "").lower()
 
-    # Check for SSE support
     supports_sse = (
       "text/event-stream" in accept or "eventstream" in accept or "sse" in accept
     )
 
-    # Check for NDJSON support
     supports_ndjson = (
       "application/x-ndjson" in accept
       or "ndjson" in accept
@@ -267,17 +227,7 @@ class BaseStrategySelector(ABC):
   def should_use_cache(
     cls, is_cacheable: bool, cache_available: bool, cache_ttl: int | None = None
   ) -> bool:
-    """
-    Determine if cache should be used.
-
-    Args:
-        is_cacheable: Whether the operation is cacheable
-        cache_available: Whether cache is available
-        cache_ttl: Cache time-to-live in seconds
-
-    Returns:
-        Whether to use cache
-    """
+    """Determine if cache should be used."""
     return is_cacheable and cache_available and (cache_ttl is None or cache_ttl > 0)
 
   @classmethod
@@ -288,31 +238,12 @@ class BaseStrategySelector(ABC):
     max_concurrent: int = 5,
     queue_threshold: int = 10,
   ) -> bool:
-    """
-    Determine if operation should be queued.
-
-    Args:
-        queue_size: Current queue size
-        running_count: Currently running operations
-        max_concurrent: Maximum concurrent operations
-        queue_threshold: Queue size threshold
-
-    Returns:
-        Whether to queue the operation
-    """
+    """Determine if operation should be queued."""
     return queue_size > queue_threshold or running_count >= max_concurrent
 
   @classmethod
   def get_priority_for_user(cls, user_tier: str | None) -> int:
-    """
-    Get priority based on user subscription tier.
-
-    Args:
-        user_tier: User subscription tier name
-
-    Returns:
-        Priority value (lower is higher priority)
-    """
+    """Get priority based on user subscription tier."""
     return QueryQueueConfig.get_priority_for_user(user_tier)
 
   @classmethod
@@ -324,19 +255,7 @@ class BaseStrategySelector(ABC):
     is_interactive: bool,
     estimated_size: str,
   ) -> BaseExecutionStrategy | None:
-    """
-    Select appropriate streaming strategy.
-
-    Args:
-        supports_sse: Client supports SSE
-        supports_ndjson: Client supports NDJSON
-        requires_streaming: Operation requires streaming
-        is_interactive: Client is interactive (testing tool/browser)
-        estimated_size: Estimated result size
-
-    Returns:
-        Selected streaming strategy or None
-    """
+    """Select appropriate streaming strategy."""
     if not (supports_sse or supports_ndjson):
       return None
 

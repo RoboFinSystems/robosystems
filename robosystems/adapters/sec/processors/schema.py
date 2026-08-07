@@ -62,19 +62,14 @@ class SchemaIngestConfig:
 
 class XBRLSchemaAdapter:
   """
-  Adapts XBRL DataFrame structures to ensure compatibility with LadybugDB schemas.
-
-  This adapter bridges the gap between XBRL data extraction and graph ingestion by:
-  - Validating DataFrame structures against schema definitions
-  - Creating schema-compatible DataFrames with proper columns
-  - Transforming data to match expected schema formats
-  - Providing schema introspection and validation capabilities
+  Reshapes XBRL DataFrames to match the LadybugDB schema before ingestion:
+  validates structures against the schema definitions, creates DataFrames with
+  the full column set, and exposes schema introspection for the writers.
   """
 
-  # Mapping from XBRLGraphProcessor table names to schema relationship names
+  # XBRLGraphProcessor table names → schema relationship names. Node tables
+  # already carry their schema name and need no entry.
   XBRL_TABLE_MAPPING = {
-    # Node table mappings (no changes needed - already work)
-    # Relationship table mappings - complete list from XBRL processing
     "EntityReports": "ENTITY_HAS_REPORT",
     "ReportFacts": "REPORT_HAS_FACT",
     "StructureFactSets": "STRUCTURE_HAS_FACT_SET",
@@ -105,12 +100,7 @@ class XBRLSchemaAdapter:
   }
 
   def __init__(self, schema_config: dict[str, Any]):
-    """
-    Initialize adapter with schema configuration.
-
-    Args:
-        schema_config: Configuration dict for schema building
-    """
+    """Build and index the compiled schema from `schema_config`."""
     self.schema_config = schema_config
     self.schema_builder = LadybugSchemaBuilder(schema_config)
     self.schema_builder.load_schemas()
@@ -162,15 +152,7 @@ class XBRLSchemaAdapter:
     )
 
   def create_schema_compatible_dataframe(self, table_name: str) -> pd.DataFrame:
-    """
-    Create an empty DataFrame with columns matching the schema definition.
-
-    Args:
-        table_name: Name of the table/schema to create DataFrame for
-
-    Returns:
-        Empty DataFrame with correct column structure for the schema
-    """
+    """Create an empty DataFrame whose columns match the schema definition."""
     schema_name = self._resolve_schema_name(table_name)
     schema_info = self._get_schema_info(schema_name)
 
@@ -193,15 +175,9 @@ class XBRLSchemaAdapter:
   def process_dataframe_for_schema(
     self, table_name: str, data_dict: dict[str, Any]
   ) -> pd.DataFrame:
-    """
-    Process data dictionary into a schema-compatible DataFrame.
+    """Turn a raw data dict into a one-row DataFrame with the full column set.
 
-    Args:
-        table_name: Name of the target table/schema
-        data_dict: Raw data dictionary (may have missing columns)
-
-    Returns:
-        DataFrame with complete schema-compatible structure
+    Columns missing from `data_dict` are filled with the schema's default.
     """
     schema_name = self._resolve_schema_name(table_name)
     schema_info = self._get_schema_info(schema_name)
@@ -226,15 +202,10 @@ class XBRLSchemaAdapter:
   def validate_dataframe_schema(
     self, table_name: str, df: pd.DataFrame
   ) -> dict[str, Any]:
-    """
-    Validate DataFrame structure against schema requirements.
+    """Validate a DataFrame's columns against the schema.
 
-    Args:
-        table_name: Name of the target schema
-        df: DataFrame to validate
-
-    Returns:
-        Validation results with status and any issues found
+    Returns `{"valid": True, ...}` or a dict carrying the error plus the
+    expected / actual / missing / extra column sets.
     """
     schema_name = self._resolve_schema_name(table_name)
     schema_info = self._get_schema_info(schema_name)
@@ -272,15 +243,7 @@ class XBRLSchemaAdapter:
     return {"valid": True, "message": "DataFrame structure matches schema"}
 
   def get_schema_info(self, table_name: str) -> dict[str, Any]:
-    """
-    Get comprehensive information about a table's schema.
-
-    Args:
-        table_name: Name of the table/schema
-
-    Returns:
-        Schema information including type, properties, and metadata
-    """
+    """Return a table's schema type, properties, and column count."""
     schema_name = self._resolve_schema_name(table_name)
     schema_info = self._get_schema_info(schema_name)
 
@@ -300,7 +263,7 @@ class XBRLSchemaAdapter:
     return list(self.node_schemas.keys()) + list(self.relationship_schemas.keys())
 
   def print_schema_summary(self) -> None:
-    """Print comprehensive schema summary for debugging."""
+    """Log node/relationship schemas and table mappings, for debugging."""
     logger.debug("=== XBRL SCHEMA ADAPTER SUMMARY ===")
     logger.debug(f"Node Schemas: {len(self.node_schemas)}")
     for name, info in self.node_schemas.items():
@@ -390,27 +353,18 @@ class XBRLSchemaAdapter:
 
 class XBRLSchemaConfigGenerator:
   """
-  Generates dynamic ingestion configurations from XBRL schema definitions.
+  Derives ingestion configuration from a compiled XBRL schema (base +
+  extensions), so nothing about table layout is hardcoded here:
 
-  This processor takes schema configurations (base + extensions) and creates
-  comprehensive ingestion mappings by:
-
-  1. Analyzing all nodes and relationships in the compiled schema
-  2. Generating file patterns for parquet file recognition
-  3. Creating column mappings from schema properties
-  4. Providing table information for LadybugDB ingestion
-  5. Handling relationship structure and foreign key detection
-
-  Replaces hardcoded ingestion logic with schema-driven automation.
+  1. Walks all nodes and relationships in the compiled schema
+  2. Generates file patterns for parquet file recognition
+  3. Creates column mappings from schema properties
+  4. Provides table information for LadybugDB ingestion
+  5. Resolves relationship structure and foreign keys
   """
 
   def __init__(self, schema_config: dict[str, Any]):
-    """
-    Initialize generator with schema configuration.
-
-    Args:
-        schema_config: Schema configuration with base_schema and extensions
-    """
+    """Compile `schema_config` ("base_schema" + "extensions") into ingest config."""
     self.schema_manager = SchemaManager()
     self.schema_config = schema_config
     self.config = self._create_schema_configuration(schema_config)
@@ -520,11 +474,7 @@ class XBRLSchemaConfigGenerator:
   def _generate_file_patterns(
     self, table_name: str, is_relationship: bool
   ) -> list[str]:
-    """
-    Generate file patterns for a table name.
-
-    Creates patterns that match typical parquet file naming conventions.
-    """
+    """Generate the parquet filename patterns that map back to `table_name`."""
     patterns = []
 
     snake_case_name = self._pascal_to_snake(table_name)
@@ -547,15 +497,7 @@ class XBRLSchemaConfigGenerator:
     return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
   def is_relationship_file(self, filename: str) -> bool:
-    """
-    Determine if a file contains relationship data based on schema.
-
-    Args:
-        filename: Name of the parquet file or full S3 path
-
-    Returns:
-        True if file contains relationship data
-    """
+    """True when the parquet path (local or S3) maps to a relationship table."""
     table_name = self.get_table_name_from_file(filename)
     if table_name:
       return table_name in self.ingest_config.relationship_tables
@@ -563,16 +505,10 @@ class XBRLSchemaConfigGenerator:
     return False
 
   def get_table_name_from_file(self, filename: str) -> str | None:
-    """
-    Get proper table name from filename using schema mappings.
+    """Resolve a parquet path (local or S3) to its table name, or None.
 
-    With exact table names in directory structure, this is now much simpler.
-
-    Args:
-        filename: Name of the parquet file or full path (local or S3)
-
-    Returns:
-        Proper table name or None if not found
+    Output layout puts each table's part files under a directory named for the
+    table, so the parent directory is the table name.
     """
     if "/" in filename or "\\" in filename:
       path_parts = filename.replace("\\", "/").split("/")
@@ -588,15 +524,7 @@ class XBRLSchemaConfigGenerator:
     return None
 
   def get_table_info(self, table_name: str) -> IngestTableInfo | None:
-    """
-    Get complete table information for ingestion.
-
-    Args:
-        table_name: Name of the table
-
-    Returns:
-        Table information or None if not found
-    """
+    """Look up a table's ingest info across both node and relationship tables."""
     if table_name in self.ingest_config.node_tables:
       return self.ingest_config.node_tables[table_name]
 
@@ -606,15 +534,7 @@ class XBRLSchemaConfigGenerator:
     return None
 
   def get_relationship_info(self, table_name: str) -> tuple[str, str, str] | None:
-    """
-    Get relationship information for creating relationship tables.
-
-    Args:
-        table_name: Name of the relationship table
-
-    Returns:
-        Tuple of (relationship_name, from_node, to_node) or None
-    """
+    """Return `(relationship_name, from_node, to_node)`, or None if unknown."""
     if table_name in self.ingest_config.relationship_tables:
       table_info = self.ingest_config.relationship_tables[table_name]
       if table_info.from_node and table_info.to_node:

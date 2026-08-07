@@ -196,5 +196,6 @@ class Element(ExtensionsBase):
     return f"<Element {self.qname or self.code} {self.name}>"
 
 
-# Backward compatibility alias
+# ``Account`` is the chart-of-accounts name for the same table; Element is the
+# ontology name. Both are exported.
 Account = Element

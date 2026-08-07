@@ -38,13 +38,9 @@ def zip_and_upload(
   cache_key: str,
   tables: dict[str, bytes],
 ) -> None:
-  """Zip filing parquet tables and upload as a single S3 object.
+  """Zip a filing's parquet tables and upload as a single S3 object.
 
-  Args:
-      s3_client: Boto3 S3 client
-      bucket: S3 bucket name
-      cache_key: S3 key for the zip file
-      tables: Mapping of table_key (e.g. "nodes/Entity") to parquet bytes
+  `tables` maps a table_key like "nodes/Entity" to its parquet bytes.
   """
   buf = io.BytesIO()
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -66,21 +62,13 @@ def download_and_extract(
 
   Extracts files into the same structure that process_single_filing_to_memory
   would produce: work_dir/{entity_type}/{table_name}/{source_file_id}.parquet
-
-  Args:
-      s3_client: Boto3 S3 client
-      bucket: S3 bucket name
-      cache_key: S3 key for the zip file
-      work_dir: Local work directory for disk-buffered processing
-      source_file_id: SourceFile ID used as the parquet filename
   """
   response = s3_client.get_object(Bucket=bucket, Key=cache_key)
   zip_bytes = response["Body"].read()
 
   with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
     for name in zf.namelist():
-      # name is e.g. "nodes/Entity.parquet"
-      # Extract table_key by removing .parquet suffix
+      # Entries are named "{table_key}.parquet", e.g. "nodes/Entity.parquet".
       if not name.endswith(".parquet"):
         continue
       table_key = name.removesuffix(".parquet")
@@ -97,18 +85,12 @@ def delete_cache_keys(
   bucket: str,
   cache_keys: list[str],
 ) -> int:
-  """Bulk delete cache entries from S3.
-
-  Uses S3 bulk delete (up to 1000 keys per call).
-
-  Returns:
-      Number of objects deleted
-  """
+  """Bulk delete cache entries, returning the number of objects deleted."""
   if not cache_keys:
     return 0
 
   deleted = 0
-  # S3 bulk delete supports up to 1000 keys per request
+  # S3 bulk delete accepts at most 1000 keys per request.
   for i in range(0, len(cache_keys), 1000):
     batch = cache_keys[i : i + 1000]
     response = s3_client.delete_objects(

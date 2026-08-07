@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
 """Ingest Charlie Hoffman's 14-JE lemonade-stand dataset.
 
-Reads the GeneralJournal.csv pulled from Charlie's
-``seattlemethod/prototypes`` GitHub repo into
-``local/datasets/seattle_method/`` (see ``pull_general_journal.sh``),
-groups by ``JournalEntryID``, and posts one event per JE via
-``create-event-block`` with ``apply_handlers=True``. Each line carries
-its ``TransactionDescriptionCode`` on
-``metadata['transaction_description_code']`` — the field the rollforward
-filter engine matches against.
+Reads ``GeneralJournal.csv``, groups its lines by ``JournalEntryID``, and
+posts one event per journal entry via ``create-event-block`` with
+``apply_handlers=True`` — so the ledger is built by replaying business events,
+not by writing balances. Each line carries its ``TransactionDescriptionCode``
+on ``metadata['transaction_description_code']``: that is the flow concept the
+rollforward filter engine later matches on to decompose a balance-sheet
+movement into the events that caused it.
 
-Pre-condition: ``load_taxonomy.py`` + ``seed_mappings.py`` have run
-against this graph (the JE lines reference mini concepts by
-element_external_id, which the journal_entry_recorded handler
-resolves against the Element table).
+Prerequisites: ``load_taxonomy.py`` and ``seed_mappings.py`` have run against
+this graph. JE lines name mini concepts by qname, and this script resolves each
+one to an element id against the graph's Element table before posting — so a
+missing CoA fails loudly here rather than producing unresolvable line items.
 
-CSV column convention (Charlie's format — read by header name via
-``csv.DictReader``, so column order is tolerant):
+CSV columns (read by header name via ``csv.DictReader``, so column order does
+not matter):
 
 - ``JournalEntryID``: e.g. "JE-201"
-- ``EconomicEntityIdentifier``: ignored (single entity in this dataset)
-- ``TransactionPeriod``: posting date — handles ISO ``YYYY-MM-DD`` (Charlie's
-  GitHub format) and the legacy ``M/D/YY`` shape from earlier exports
-- ``Account``: legacy CoA code (e.g. "000-1100-00"); preserved on
-  ``LineItem.metadata['source_account_code']`` for audit but not used
-  for element resolution
+- ``EconomicEntityIdentifier``: ignored (this dataset is a single entity)
+- ``TransactionPeriod``: posting date — accepts both ``YYYY-MM-DD`` and
+  ``M/D/YY`` shapes
+- ``Account``: the source system's chart-of-accounts code (e.g.
+  "000-1100-00"); preserved on ``LineItem.metadata['source_account_code']``
+  for traceability back to the source, never used to resolve the element
 - ``GeneralLedgerAccountCode``: the mini qname (e.g.
-  "mini:CashAndCashEquivalents") — used as the LineItem element
-  reference
+  "mini:CashAndCashEquivalents") — this is the LineItem's element reference
 - ``TransactionDescriptionCode``: the flow concept (e.g.
-  "mini:ProceedsFromInvestmentsByOwner") — stamped on
-  LineItem.metadata for rollforward attribution; passed through a small
-  alias map (``_KNOWN_TDC_ALIASES``) to repair known typos against the
-  canonical mini.xsd vocabulary (e.g. ``mini:PaymentOfInterest`` →
-  ``mini:PaymentInterest``)
-- ``Amount``: whole dollars (multiply by 100 for cents)
+  "mini:ProceedsFromInvestmentsByOwner"), stamped on LineItem metadata for
+  rollforward attribution and normalized through ``_KNOWN_TDC_ALIASES``
+  against the canonical mini.xsd vocabulary
+- ``Amount``: whole dollars (stored as cents)
 - ``Balance``: "D" for debit, "C" for credit
 - ``Sequence``: line order within the JE
 - ``TransactionDescription``: per-line memo
 
-Usage:
+Run it (the orchestrator runs this as step 5):
     uv run python -m examples.seattle_method_demo.ingest_transactions <graph_id>
     uv run python -m examples.seattle_method_demo.ingest_transactions <graph_id> --dry-run
 """
@@ -53,11 +49,10 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
-# Resolve relative to this file so the script works regardless of the
-# caller's CWD — matches the pattern ``main.py`` uses. Points at the
-# gitignored ``local/datasets/seattle_method/`` location populated by
-# ``pull_general_journal.sh``; Charlie's GitHub repo is the canonical
-# source.
+# Resolved relative to this file so the script works from any working
+# directory. ``local/datasets/seattle_method/`` is gitignored and populated by
+# ``pull_general_journal.sh``, which fetches the CSV from Charlie Hoffman's
+# ``seattlemethod/prototypes`` repository — the canonical source.
 CSV_PATH = (
   Path(__file__).resolve().parents[2]
   / "local"
@@ -67,15 +62,15 @@ CSV_PATH = (
 )
 
 
-# Known TDC typos / vocabulary mismatches in Charlie's upstream CSV.
-# We normalize at ingest time so the rollforward filter engine matches
-# against the canonical mini.xsd concepts. Logged as warnings when
-# applied so the substitution is transparent — also surfaces in the
-# reconciliation report as a "Their data quality" classification.
+# Flow-concept names that appear in the upstream CSV but not in mini.xsd.
+# Normalizing them at ingest keeps the rollforward filters matching against
+# canonical concepts. Every substitution is logged as a warning so it stays
+# visible, and surfaces in the reconciliation report under "Their data
+# quality".
 _KNOWN_TDC_ALIASES: dict[str, str] = {
-  # JE-209: Cash-line TDC. mini.xsd's canonical name has no "Of"; the
+  # JE-209: Cash-line TDC. mini.xsd's canonical name has no "Of", while the
   # sibling AccruedExpenses line uses ``mini:DecreaseFromPaymentOfInterest``
-  # which DOES keep the "Of" — Charlie's naming is internally inconsistent.
+  # which does keep it — the source naming is internally inconsistent.
   "mini:PaymentOfInterest": "mini:PaymentInterest",
 }
 
@@ -100,13 +95,11 @@ def _parse_date(raw: str) -> date:
   """Parse a TransactionPeriod value → date.
 
   Accepts two shapes:
-  - ISO ``YYYY-MM-DD`` — Charlie's current GitHub CSV format
-  - ``M/D/YY`` or ``M/D/YYYY`` — legacy short-date shape from earlier
-    exports; two-digit years are assumed to be 20YY (the dataset is
-    Q1 2024)
+  - ISO ``YYYY-MM-DD``
+  - ``M/D/YY`` or ``M/D/YYYY``, where a two-digit year is read as 20YY
 
-  Raises ``ValueError`` on any other shape so the demo fails loudly
-  rather than silently mis-dating events.
+  Raises ``ValueError`` on anything else, so the demo fails loudly rather
+  than silently mis-dating events.
   """
   raw = raw.strip()
   if "-" in raw:
@@ -132,12 +125,12 @@ def _normalize_tdc(tdc: str, je_id: str, warnings: list[str]) -> str:
 def _read_csv_grouped(csv_path: Path) -> dict[str, list[dict]]:
   """Read the CSV → {JournalEntryID: [line_row_dict, ...]}.
 
-  Preserves CSV row order; rows within a JE are sorted by Sequence on
-  the way out so JE-209's 4 lines stay in their intended order.
+  Rows within each entry come back sorted by ``Sequence``, so a multi-line
+  entry keeps its intended line order.
   """
   by_je: dict[str, list[dict]] = defaultdict(list)
-  # Charlie's CSV is UTF-8 BOM-prefixed; ``utf-8-sig`` strips the BOM
-  # so ``JournalEntryID`` parses cleanly as the first column header.
+  # The CSV is UTF-8 BOM-prefixed; ``utf-8-sig`` strips the BOM so
+  # ``JournalEntryID`` parses cleanly as the first column header.
   with csv_path.open(encoding="utf-8-sig") as f:
     reader = csv.DictReader(f)
     for row in reader:
@@ -162,9 +155,9 @@ def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
 def _build_qname_to_element_id_map(client, graph_id: str) -> dict[str, str]:
   """Resolve every ``mini:*`` qname to its element_id on the graph.
 
-  Mini elements get persisted with ``source='native'`` (the source
-  CHECK constraint doesn't admit 'mini'), so we look them up by
-  taxonomy_id rather than source.
+  Mini elements persist with ``source='native'`` — the Element source CHECK
+  constraint admits a fixed enum that has no 'mini' member — so the lookup
+  scopes by taxonomy_id rather than by source.
   """
   taxonomy_id = _find_mini_taxonomy_id(client, graph_id)
   if not taxonomy_id:
@@ -198,20 +191,18 @@ def _build_event_payload(
 ) -> dict:
   """Build a single ``create-event-block`` request from a JE's rows.
 
-  Flat-shape (single-entry) journal_entry_recorded metadata: one
-  ``line_items`` list, ``posting_date``, ``memo``. Each line carries
-  ``element_external_id`` (the mini qname) and per-line metadata
-  with ``transaction_description_code``.
+  Emits flat single-entry ``journal_entry_recorded`` metadata: one
+  ``line_items`` list plus ``posting_date`` and ``memo``, with each line
+  carrying its mini element reference and its
+  ``transaction_description_code``.
 
-  ``source`` is ``manual`` — Charlie's data isn't from any of our
-  integrated sources (QB, Plaid, etc.), and the events DB CHECK
-  constraint only admits {manual, system, schedule, quickbooks, xero,
-  plaid}. ``manual`` is the closest semantic fit.
+  ``source`` is ``manual`` because the dataset comes from none of the
+  integrated sources, and the events CHECK constraint admits only
+  {manual, system, schedule, quickbooks, xero, plaid}.
   """
   posting = _parse_date(rows[0]["TransactionPeriod"])
 
-  # Use the first line's description as the entry-level memo. Each line
-  # also carries its own description.
+  # Entry-level memo. Each line also keeps its own description.
   memo = rows[0]["TransactionDescription"]
 
   line_items: list[dict] = []
@@ -250,10 +241,8 @@ def _build_event_payload(
       }
     )
 
-  # Pick an event_category from REA's vocabulary. Best-fit per JE
-  # would require parsing the description; for this fixture we use
-  # 'adjustment' as a catch-all neutral category — the GL impact is
-  # what matters for the reconciliation, not the REA classification.
+  # REA event category, inferred from the description. Advisory only — the
+  # reconciliation turns on the GL impact, not on this classification.
   event_category = _pick_event_category(rows[0]["TransactionDescription"])
 
   occurred_at = datetime.combine(posting, datetime.min.time()).isoformat() + "Z"
@@ -297,7 +286,7 @@ def _pick_event_category(description: str) -> str:
 
 
 def _pick_entry_type(description: str) -> str:
-  """Detect closing entries — JE-223..226 are explicitly closing."""
+  """Classify an entry as closing, adjusting, or standard from its description."""
   if "closing entry" in description.lower():
     return "closing"
   if "accrual" in description.lower():
@@ -320,7 +309,7 @@ def ingest(
 
   warnings: list[str] = []
   if dry_run:
-    # Build payloads with a fake mapping so dry-run validates shape.
+    # Stand-in element ids so the payload shape can be validated offline.
     fake_map = {
       row["GeneralLedgerAccountCode"]: f"elem_dry_{row['GeneralLedgerAccountCode']}"
       for rows in grouped.values()

@@ -10,38 +10,33 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (38) — in logical workflow order:**
+Registered operations, in workflow order:
 
 - Setup: `initialize`, `update-entity`, `change-reporting-style`
 - Ontology / Taxonomy Blocks: `create-taxonomy-block`,
   `update-taxonomy-block`, `delete-taxonomy-block`,
   `link-entity-taxonomy`
-- Mapping (craft, not curation): `create-mapping-association`,
-  `delete-mapping-association`, `auto-map-elements`
+- Mapping: `create-mapping-association`, `delete-mapping-association`,
+  `auto-map-elements`
 - Information Blocks: `create-information-block`,
   `update-information-block`, `delete-information-block`,
   `evaluate-rules`
 - Agents: `create-agent`, `update-agent`
 - Event Blocks: `create-event-block`, `update-event-block`,
   `preview-event-block`. `create-event-block` is the single write surface
-  for business events that cause GL consequences. Four event types are
-  dispatched via the Python handler registry: `journal_entry_recorded`
-  (manual journal entry — any type, draft or posted),
-  `journal_entry_reversed` (offsetting reversal of a posted entry),
-  `schedule_entry_due` (a schedule period matured), and `asset_disposed`
-  (atomic disposal + schedule termination, including the schedule
-  truncate that previously needed a separate call).
-- Journal Entries: `update-journal-entry`, `delete-journal-entry`. All
-  GL-write origination flows through
-  `create-event-block(event_type='journal_entry_recorded')`; reversal
-  through `event_type='journal_entry_reversed'`. The draft-correction
-  path (update / delete on a draft entry) is a CRUD surface.
+  for business events with GL consequences; the Python handler registry
+  dispatches on event type: `journal_entry_recorded` (manual entry, draft
+  or posted), `journal_entry_reversed` (offsetting reversal of a posted
+  entry), `schedule_entry_due` (a schedule period matured), and
+  `asset_disposed` (atomic disposal plus schedule termination and
+  truncate).
+- Journal Entries: `update-journal-entry`, `delete-journal-entry`. These
+  are the draft-correction CRUD surface; all GL-write origination goes
+  through `create-event-block`.
 - Close Workflow: `set-close-target`, `close-period`, `reopen-period`.
-  Closing-entry drafting goes through
-  `create-event-block(event_type='schedule_entry_due')` (schedule-derived)
-  or `event_type='journal_entry_recorded'` (manual). Asset disposal via
-  `event_type='asset_disposed'` (handles the schedule truncate
-  internally).
+  Closing entries are drafted through `create-event-block` with
+  `schedule_entry_due` (schedule-derived) or `journal_entry_recorded`
+  (manual).
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -49,20 +44,12 @@ Every route follows the pattern:
   `remove-publish-list-member`
 
 Raw ontology CRUD (taxonomies, structures, elements, non-mapping
-associations) is not exposed publicly — the Taxonomy Block envelope is
-the only tenant-facing construction path. Mapping associations stay
-direct (craft, not curation).
+associations) is not exposed: the Taxonomy Block envelope is the only
+tenant-facing construction path. Mapping associations stay direct.
 
-`build-fact-grid` is registered separately in the sibling `views.py`
-file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
-needs to work for SEC-only deployments without roboledger tenants).
-
-**URL migration note for SDK consumers:** the legacy
-`POST /v1/ledger/{graph_id}/mappings/{mapping_id}/auto-map`
-endpoint has moved to
-`POST /extensions/roboledger/{graph_id}/operations/auto-map-elements`
-with `mapping_id` now in the request body instead of the path.
-Same async semantics, same SSE stream URL for progress.
+`build-fact-grid` is registered in the sibling `views.py` so it can be
+mounted independently of `ROBOLEDGER_ENABLED`, for SEC-only deployments
+that have no roboledger tenants.
 """
 
 from __future__ import annotations
@@ -445,8 +432,7 @@ router = APIRouter()
 _OP_TAG = "Extensions: RoboLedger"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
-# Stateless service singletons reused across requests (same pattern
-# as the old router-level `_svc = FiscalCalendarService()`).
+# Stateless service singletons, reused across requests.
 _fiscal_svc = FiscalCalendarService()
 _close_svc = PeriodCloseService(_fiscal_svc)
 
@@ -535,13 +521,12 @@ def _require_roboledger_write(
   """Membership + provisioning + write role for the hand-written ops below.
 
   Every `@router.post` in this file is a command. `get_current_user_with_graph`
-  proves graph *membership* and `_require_roboledger` proves *provisioning* —
-  neither consults the graph role, so a read-only `viewer` cleared both. The
-  registrar applies `require_graph_write_role` to every op it mounts
-  (`middleware/extensions.py`); the ops that stayed hand-written for their
-  async dispatch, platform-DB or multi-stage error needs never picked it up.
-  This dependency is that same gate, so the two registration styles enforce
-  identically and a new hand-written op inherits it by using this dep.
+  proves graph *membership* and `_require_roboledger` proves *provisioning*;
+  neither consults the graph role, so a read-only `viewer` clears both on its
+  own. `require_graph_write_role` is the gate that stops that, and the
+  registrar applies it to every op it mounts (`middleware/extensions.py`).
+  Hand-written ops depend on this helper so both registration styles enforce
+  identically.
   """
   require_graph_write_role(str(user.id), graph_id)
   return user
@@ -1687,14 +1672,6 @@ promote_obligations_op = _registrar.register(
 )
 
 
-# Re-run the schedule generator in place on an existing schedule. Atomic
-# alternative to delete-then-recreate (which orphans the obligation chain):
-# preserves the structure id + element associations + taxonomy, voids the
-# old pending obligation chain, deletes the old facts + rules, and
-# regenerates fresh forward facts + a fresh obligation chain from the
-# schedule's stored definition. Re-scopes historical-vs-in-scope from the
-# CURRENT fiscal calendar `closed_through`. This is the redo-after-a-
-# generator-fix path (e.g. the roll-forward direction fix).
 rebuild_schedule_op = _registrar.register(
   OperationSpec(
     name="rebuild-schedule",
@@ -1794,15 +1771,13 @@ async def set_close_target_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-# All ledger writes — closing entries, journal entries, schedule
-# truncation, asset disposal, journal entry reversal — are handled via
-# create-event-block with Python-registered event types. See
-# operations/event_block/python_handlers/ for the handler modules:
-# journal_entry_recorded (manual GL writes), journal_entry_reversed
-# (offsetting reversal of a posted entry), schedule_entry_due (schedule
-# period matured), asset_disposed (atomic disposal + schedule termination
-# — `truncate-schedule` retired as a public op since this is its only
-# real consumer).
+# All ledger writes — closing entries, journal entries, schedule truncation,
+# asset disposal, journal entry reversal — go through create-event-block with
+# Python-registered event types. The handler modules live in
+# operations/event_block/python_handlers/: journal_entry_recorded (manual GL
+# writes), journal_entry_reversed (offsetting reversal of a posted entry),
+# schedule_entry_due (schedule period matured), and asset_disposed (atomic
+# disposal plus schedule termination).
 
 
 @router.post(
@@ -2006,8 +1981,8 @@ async def reopen_period_op(
   def _runner():
     try:
       with extensions_session(graph_id) as session:
-        # Wire shape unchanged: the envelope still carries the refreshed
-        # calendar; the retraction count rides the MCP surface only.
+        # The envelope carries the refreshed calendar; the retraction count
+        # surfaces on the MCP tool result only.
         return cmd_reopen_period(
           session,
           platform_db,

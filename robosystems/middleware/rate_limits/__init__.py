@@ -1,11 +1,8 @@
-"""
-Rate limiting middleware for RoboSystems API.
+"""API rate limiting.
 
-This module provides comprehensive rate limiting functionality including:
-- Burst protection based on user subscription tiers
-- Repository-specific volume limits for shared repositories
-- Dual-layer rate limiting system
-- Rate limit headers for API responses
+Two layers: burst protection scaled to the caller's subscription or graph
+tier, and volume limits on shared repositories. Both publish their state
+through response headers.
 """
 
 from ...config.rate_limits import EndpointCategory

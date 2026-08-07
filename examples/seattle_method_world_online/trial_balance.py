@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """Render a trial balance for the World Online graph.
 
-Charlie's objective list includes "a trial balance" (item 9); MINI 2026
-ships a TrialBalance support network. This produces it from the ingested
-graph via the existing ``trialBalance`` GraphQL query (the same query
-Test Case 1's reconcile consumes) — one row per CoA account with Σdebits,
-Σcredits and net balance, plus the footing totals.
+The accountant's first sanity check on a ledger, produced from the ingested
+graph via the ``trialBalance`` GraphQL query: one row per account with total
+debits, total credits and net balance, plus the footing totals. A trial
+balance's defining property is that **total debits equal total credits**, and
+for a balanced ledger the debit-positive net column also sums to $0.00.
 
-A trial balance's defining property is that **total debits == total
-credits**; for the World Online GL the per-account net balances also sum
-to $0.00 (a balanced ledger). Because LineItems reference the collapsed
-mini line-item concept (not the 239 raw GL accounts), the trial balance
-is at the mini-concept grain — the same grain as the reconciliation and
-the statements.
+Because line items reference the collapsed mini line-item concept rather than
+the 239 raw GL accounts, this is a trial balance at mini-concept grain — the
+same grain as the reconciliation and the statements, so the three can be read
+against each other.
 
-Period: cumulative — ``TB_START`` precedes the 12/31/2023 opening so the
-opening balances are included, through ``TB_END``.
+The period is cumulative and starts before the 12/31/2023 opening, so the
+opening balances are included rather than assumed.
 
-Usage:
-    uv run python -m examples.seattle_method_world_online.trial_balance <graph_id>
-    uv run python -m examples.seattle_method_world_online.trial_balance  # cached slot
+Prerequisites: ``just demo-world-online`` has ingested the GL.
+
+Run it (the orchestrator runs this as step 9):
+    just demo-world-online-trial-balance <graph_id>
+    just demo-world-online-trial-balance          # cached graph slot
+
+Writes ``output/world-online-trial-balance.md``.
 """
 
 from __future__ import annotations
@@ -36,8 +38,8 @@ TB_START = "2023-01-01"
 TB_END = "2028-12-31"
 
 # Display ordering: balance-sheet accounts first (asset → liability →
-# equity), then income-statement accounts (revenue → expense). Unknown
-# traits sort last. Within a trait, sort by qname.
+# equity), then income-statement accounts (revenue → expense), each group
+# sorted by qname. Unknown traits sort last.
 _TRAIT_ORDER = {
   "asset": 0,
   "contraAsset": 1,
@@ -88,8 +90,8 @@ def _fmt(v: float | None) -> str:
 
 
 def render(graph_id: str, rows: list) -> str:
-  # Keep only mini CoA accounts with activity (the graph also carries
-  # the rs-gaap library; filter it out client-side, as reconcile does).
+  # Keep only mini CoA accounts with activity. The graph also carries the
+  # rs-gaap library, which the query returns and this filters out.
   mini_rows = [
     r
     for r in rows

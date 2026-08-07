@@ -90,21 +90,13 @@ def resolve_handler(
 ) -> EventHandler:
   """Find the highest-priority matching handler for the given event fields.
 
-  Args:
-      session: SQLAlchemy session (tenant-scoped via extensions_session).
-      event_type: Required — must match handler.event_type exactly.
-      event_category: Matched against handler.event_category (null = wildcard).
-      source: Matched against handler.match_source (null = wildcard).
-      agent_type: Matched against handler.match_agent_type (null = wildcard).
-      resource_type: Matched against handler.match_resource_type (null = wildcard).
-      metadata: Event metadata dict for match_metadata_expression evaluation.
+  ``event_type`` must match exactly. The remaining fields are matched
+  against the handler's corresponding ``match_*`` column, where a null on
+  the handler side acts as a wildcard, and ``metadata`` feeds
+  ``match_metadata_expression``. The session must be tenant-scoped.
 
-  Returns:
-      The highest-priority matching EventHandler row.
-
-  Raises:
-      HandlerNotFoundError: No active handler matched.
-      HandlerAmbiguousError: Multiple handlers tied at top priority.
+  Raises ``HandlerNotFoundError`` when nothing active matches, and
+  ``HandlerAmbiguousError`` when several handlers tie at the top priority.
   """
   candidates = (
     session.execute(
@@ -119,11 +111,10 @@ def resolve_handler(
 
   matched: list[EventHandler] = []
   for handler in candidates:
-    # Skip unapproved AI-suggested handlers
     if handler.suggested_by == "ai" and handler.approved_by is None:
       continue
 
-    # Wildcard match: handler field null means "match any"
+    # A null handler field is a wildcard — it matches any event value.
     if handler.event_category is not None and handler.event_category != event_category:
       continue
     if handler.match_source is not None and handler.match_source != source:

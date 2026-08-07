@@ -25,16 +25,9 @@ router = APIRouter(prefix="/admin/v1/cache", tags=["admin-cache"])
 
 
 def _resolve_database(name: str) -> ValkeyDatabase:
-  """Convert a kebab-case name to a ValkeyDatabase enum member.
+  """Convert a kebab-case name ('rate-limits') to a ValkeyDatabase member.
 
-  Args:
-      name: Kebab-case database name (e.g., 'rate-limits', 'graph-routing')
-
-  Returns:
-      Matching ValkeyDatabase enum member
-
-  Raises:
-      HTTPException: If name doesn't match any database
+  Raises 404 when the name matches no database.
   """
   for member in ValkeyDatabase:
     if member.name.lower().replace("_", "-") == name:

@@ -296,9 +296,9 @@ class TestQueryShape:
 
 
 class TestOrphanGuard:
-  """Layer 2: obligations whose schedule structure was deleted are voided in
-  place, never drafted — the catch-all that stops a deleted schedule from
-  double-posting at promotion. See specs/schedule-delete-obligation-integrity.md.
+  """Obligations whose schedule structure was deleted are voided in place,
+  never drafted — the catch-all that stops a deleted schedule from
+  double-posting at promotion.
   """
 
   def test_orphan_voided_not_classified_copilot(self) -> None:

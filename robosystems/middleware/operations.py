@@ -1,19 +1,18 @@
 """Operation envelope, idempotency cache, and audit helpers.
 
-Shared dispatch infrastructure for any operation surface — extensions,
-graph lifecycle ops, or future command surfaces.  Three concerns live
-in this module so per-domain routers stay thin:
+Shared dispatch infrastructure for every operation surface — extensions,
+graph lifecycle ops, and any future command surface. Three concerns live
+here so per-domain routers stay thin:
 
 1. **Envelope** — wrap a command's Pydantic result in a uniform payload.
 2. **Idempotency** — cache completed envelopes in Valkey keyed by the
    caller's ``Idempotency-Key`` header so retries are safe for 24 hours.
-3. **Audit** — structured log per operation call with the durations and
-   identifiers a SOC-2-style audit trail needs.
+3. **Audit** — one structured log line per operation call carrying the
+   durations and identifiers a SOC-2-style audit trail needs.
 
-Operation IDs reuse ``robosystems.utils.ulid.generate_prefixed_ulid("op")``
-so the existing ``/v1/operations/{operation_id}/stream`` SSE endpoint
-(which already matches ``^op_[0-9A-Z]{26}$``) accepts async operation
-IDs without any regex changes.
+Operation IDs are ``op_``-prefixed ULIDs, matching the
+``^op_[0-9A-Z]{26}$`` pattern the ``/v1/operations/{operation_id}/stream``
+SSE endpoint accepts.
 """
 
 from __future__ import annotations
@@ -36,24 +35,18 @@ from robosystems.config.valkey_registry import (
 from robosystems.logger import logger
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# `default=Any` (PEP 696) lets unparameterized usage of OperationEnvelope keep
-# the current loose shape — `result: Any | None` — while parameterized usage
-# (`OperationEnvelope[PortfolioBlockEnvelope]`) tightens it to a typed payload.
+# `default=Any` (PEP 696) keeps unparameterized `OperationEnvelope` loose
+# (`result: Any | None`) while `OperationEnvelope[PortfolioBlockEnvelope]`
+# tightens it to a typed payload.
 TResult = TypeVar("TResult", default=Any)
 
 OperationStatus = Literal["completed", "pending", "failed"]
 
-# 24 hours — matches the plan's idempotency retention window.
 IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
 
 def generate_operation_id() -> str:
-  """Return a fresh `op_`-prefixed ULID.
-
-  Delegates to the repo-wide prefixed-ULID helper so the format stays
-  aligned with `/v1/operations/{operation_id}/stream` and the existing
-  `SSEEventStorage.create_operation` path.
-  """
+  """Return a fresh `op_`-prefixed ULID."""
   return generate_prefixed_ulid("op")
 
 
@@ -85,36 +78,20 @@ def _result_to_payload(
 class OperationEnvelope(BaseModel, Generic[TResult]):
   """Uniform response shape for every operation endpoint.
 
-  Every dispatch through an operation surface returns an envelope carrying
-  an ``op_<ULID>`` operation_id.  That id is the bridge to the platform's
-  monitoring surface: pass it to
+  Every dispatch carries an ``op_<ULID>`` operation_id, which is the bridge
+  to the monitoring surface: pass it to
   ``GET /v1/operations/{operation_id}/stream`` (see ``routers/operations.py``)
-  to subscribe to SSE progress events.  Sync commands complete in the
-  envelope itself; async commands (``status: "pending"``, HTTP 202) hand
-  off to a background worker and stream their tail through the same SSE
-  endpoint until completion.  Failed dispatches still mint an
+  to subscribe to SSE progress events. Sync commands complete in the envelope
+  itself (``status: "completed"``, HTTP 200); async commands
+  (``status: "pending"``, HTTP 202) hand off to a background worker and stream
+  their tail through that SSE endpoint. Failed dispatches still mint an
   ``operation_id`` so the audit log and any partial SSE events stay
   correlatable.
 
-  ``TResult`` parameterizes the ``result`` field so per-op response shapes
-  surface in OpenAPI. Operations that pin ``OperationSpec.result_type`` get
-  ``OperationEnvelope[YourEnvelope]`` as their response model; ops that
-  don't keep the default ``Any`` shape (`result: any | null` on the wire).
-
-  Fields:
-  - ``operation``: kebab-case command name (e.g. ``close-period``)
-  - ``operation_id``: ``op_``-prefixed ULID; always present, usable for
-    audit correlation and — for async commands — SSE subscription via
-    ``/v1/operations/{operation_id}/stream``
-  - ``status``: ``"completed"`` (sync, HTTP 200), ``"pending"``
-    (async, HTTP 202), or ``"failed"`` (error responses)
-  - ``result``: the domain-specific payload (the original Pydantic
-    response) or ``None`` for async/failed cases
-  - ``at``: ISO-8601 UTC timestamp of when the envelope was minted
-  - ``created_by``: user ID of the caller who initiated this operation
-  - ``idempotent_replay``: ``True`` when the dispatcher returned this
-    envelope from the idempotency cache (the underlying command did NOT
-    execute again)
+  ``TResult`` parameterizes ``result`` so per-op response shapes surface in
+  OpenAPI. Operations that pin ``OperationSpec.result_type`` get
+  ``OperationEnvelope[YourEnvelope]`` as their response model; the rest keep
+  the default ``Any`` shape (``result: any | null`` on the wire).
   """
 
   model_config = ConfigDict(populate_by_name=True)
@@ -152,9 +129,8 @@ def wrap_completed(
 ) -> OperationEnvelope:
   """Build a `status="completed"` envelope for a sync command result.
 
-  `created_by` is the user ID that initiated the operation; the
-  dispatcher passes it from `ctx.user_id` so clients and audit
-  consumers can correlate envelopes without reading the audit log.
+  The dispatcher passes `created_by` from `ctx.user_id` so clients and
+  audit consumers can correlate envelopes without reading the audit log.
   """
   return OperationEnvelope(
     operation=operation_name,
@@ -174,12 +150,9 @@ def wrap_pending(
 ) -> OperationEnvelope:
   """Build a `status="pending"` envelope for an async-dispatched command.
 
-  `operation_id` is required here because the caller already registered
-  the operation with the SSE infrastructure (or the Dagster dispatcher)
-  and needs the same ID in the response for streaming.
-
-  `created_by` should be the user ID that enqueued the job so the
-  pending envelope carries the same provenance as a completed one.
+  `operation_id` is required: the caller already registered the operation
+  with the SSE infrastructure (or the Dagster dispatcher) and needs the
+  same ID in the response for streaming.
   """
   return OperationEnvelope(
     operation=operation_name,
@@ -199,10 +172,10 @@ def wrap_failed(
 ) -> OperationEnvelope:
   """Build a `status="failed"` envelope.
 
-  Reserved for error responses where we still want the client to see the
-  canonical envelope shape with an `operation_id` for audit correlation.
-  The REST dispatcher normally raises `HTTPException` instead, but async
-  commands may surface failure through the envelope itself.
+  For error responses that should still carry the canonical envelope shape
+  and an `operation_id` for audit correlation. The REST dispatcher normally
+  raises `HTTPException` instead; async commands surface failure through
+  the envelope.
   """
   if isinstance(error, str):
     payload: dict[str, Any] = {"error": error}
@@ -270,14 +243,10 @@ def compute_idempotency_cache_key(
 def fingerprint_body(body: Any) -> str:
   """SHA-256 of a request body, used to detect Idempotency-Key reuse.
 
-  Pydantic models are serialized via `model_dump(mode="json")`,
-  dicts/lists serialized directly, and `None` produces a stable
-  sentinel. JSON serialization uses `sort_keys=True` so dict ordering
-  doesn't cause spurious mismatches.
-
-  Route handlers compute this once per request and put the result
-  on `OperationContext.body_fingerprint`. The dispatcher and cache
-  then enforce the (key, body) pair as the idempotency identity.
+  Serialization uses `sort_keys=True` so dict ordering doesn't cause
+  spurious mismatches. Route handlers compute this once per request and
+  put the result on `OperationContext.body_fingerprint`; the dispatcher
+  and cache then treat the (key, body) pair as the idempotency identity.
   """
   if body is None:
     payload = "null"
@@ -431,9 +400,9 @@ def log_operation_audit(
   in prod, stdout in dev). Fields are picked to satisfy a SOC-2-style
   "who did what, to which tenant, when, with what result" review.
 
-  The ``event`` parameter controls the event name in the audit payload
-  and log message.  Defaults to ``"extensions.operation"`` for backward
-  compatibility; graph ops pass ``"graph.operation"``.
+  ``event`` names the event in the audit payload and log message:
+  ``"extensions.operation"`` for extension ops, ``"graph.operation"`` for
+  graph lifecycle ops.
   """
   payload: dict[str, Any] = {
     "event": event,
@@ -469,14 +438,12 @@ def log_operation_audit(
 class OperationContext:
   """Per-call context carried through `execute_operation`.
 
-  Captures the identifying tuple for a single operation call —
-  everything needed by the idempotency cache, the audit log, and any
-  async Dagster dispatch that needs user + graph provenance.
+  Everything the idempotency cache, the audit log, and any async Dagster
+  dispatch need to identify a single operation call.
 
-  `body_fingerprint` is computed by the route layer from the typed
-  request body via `fingerprint_body(body)` and pinned to the cached
-  envelope so that reusing an `Idempotency-Key` with a different body
-  raises a `409 Conflict` instead of silently replaying.
+  `body_fingerprint` comes from the route layer via `fingerprint_body(body)`
+  and is pinned to the cached envelope, so reusing an `Idempotency-Key`
+  with a different body raises `409 Conflict` instead of silently replaying.
   """
 
   domain: str
@@ -504,10 +471,10 @@ _idempotency_cache_singleton: IdempotencyCache | None = None
 
 
 def get_idempotency_cache() -> IdempotencyCache:
-  """FastAPI dependency that returns a shared `IdempotencyCache` instance.
+  """Return the shared `IdempotencyCache`.
 
-  Kept as a module-level singleton so every request shares one Valkey
-  connection pool. Tests override via `dependency_overrides`.
+  A module-level singleton so every request reuses one Valkey connection
+  pool. Tests override via `dependency_overrides`.
   """
   global _idempotency_cache_singleton
   if _idempotency_cache_singleton is None:
@@ -578,42 +545,31 @@ async def execute_operation(
 ) -> OperationEnvelope:
   """Run an operation and return its `OperationEnvelope`.
 
-  Responsibilities:
+  Order of operations:
 
-  1. **Idempotency lookup** — if `ctx.idempotency_key` is set and a
-     cache is provided, check for a cached envelope. On match, return
-     it and emit an `idempotent_replay=True` audit line. On
-     fingerprint mismatch (key reused with different body), raise
-     `IdempotencyKeyConflictError` for the route to map to HTTP 409.
-  2. **Timing** — wall-clock duration of the runner call (excludes
-     idempotency lookup).
-  3. **Audit logging** — emit exactly one structured audit line with
-     `status` set to `"completed"` (happy path) or `"failed"`
-     (any exception raised).
-  4. **Envelope wrapping** — `wrap_completed(result)` on success.
-  5. **Side-effect hook** — `on_fresh_success(envelope)` runs ONLY on
-     a fresh execution, not on idempotent replay. Use this for things
-     that must happen exactly once (e.g. `mark_graph_stale`).
-  6. **Idempotency store** — cache the successful envelope (with body
-     fingerprint) so retries within the TTL return it unchanged.
+  1. **Idempotency lookup** — when `ctx.idempotency_key` and a cache are
+     both present. On match, return the cached envelope with an
+     `idempotent_replay=True` audit line and never call the runner. On
+     fingerprint mismatch, raise `IdempotencyKeyConflictError` for the
+     route to map to HTTP 409.
+  2. **Run + time** the runner; wall-clock duration excludes the lookup.
+  3. **Side-effect hook** — `on_fresh_success(envelope)` runs ONLY on a
+     fresh execution, and BEFORE the envelope is cached, so a hook failure
+     aborts the request rather than poisoning the cache. Use it for
+     effects that must happen exactly once (e.g. `mark_graph_stale`).
+  4. **Cache + audit** — store the envelope with its body fingerprint so
+     retries within the TTL return it unchanged, and emit exactly one
+     audit line (`"completed"`, or `"failed"` if anything raised).
 
-  The `runner` callable is responsible for:
-  - Opening its own database session
-  - Validating inputs (body already parsed by FastAPI; further
-    business validation like "no fields to update" goes here)
-  - Calling the ops layer
-  - Translating domain exceptions (`None` returns, `LookupError`,
-    `ValueError`, etc.) into `HTTPException(...)`
-
-  Both sync and async runners are supported so simple CRUD commands
-  can stay sync and heavier commands can await Dagster jobs. Detection
-  uses `inspect.iscoroutine()` on the runner result.
+  The `runner` opens its own database session, performs business
+  validation beyond FastAPI's parsing, calls the ops layer, and
+  translates domain exceptions into `HTTPException`. Sync and async
+  runners are both accepted.
   """
   import inspect
 
-  # 1. Idempotency cache lookup. Requires both a key AND a fingerprint
-  # so a route handler can't accidentally request idempotency without
-  # supplying the body fingerprint that protects against key reuse.
+  # Requires both a key AND a fingerprint so a route handler can't request
+  # idempotency without the fingerprint that protects against key reuse.
   use_idempotency = (
     ctx.idempotency_key
     and ctx.body_fingerprint is not None
@@ -642,13 +598,9 @@ async def execute_operation(
       )
       raise
     if cached is not None:
-      # Return a copy with `idempotent_replay=True` rather than mutating
-      # `cached` in place. The production `IdempotencyCache` deserializes
-      # a fresh instance per call (so mutation would be safe), but the
-      # dispatcher contract should not depend on that — a future
-      # in-memory cache implementation that shares object references
-      # across requests would silently corrupt prior envelopes. Pydantic
-      # `model_copy` is O(1) for the envelope's small field set.
+      # Copy rather than mutate: an in-memory cache implementation that
+      # shares object references across requests would otherwise corrupt
+      # previously returned envelopes.
       cached = cached.model_copy(update={"idempotent_replay": True})
       log_operation_audit(
         operation_name=ctx.operation_name,
@@ -662,14 +614,10 @@ async def execute_operation(
       )
       return cached
 
-  # 2. Run + time + audit any failure (HTTPException OR otherwise)
-  #
-  # We catch HTTPException and bare Exception separately so that:
-  #   - HTTPException still propagates with its original status code +
-  #     detail (FastAPI converts to a JSON error response).
-  #   - Any other exception (RuntimeError, IntegrityError, KeyError, …)
-  #     also produces a failed audit line before re-raising. Without
-  #     this, a buggy command would 500 with no audit record at all.
+  # HTTPException and bare Exception are caught separately: the former
+  # propagates with its original status/detail, the latter still produces a
+  # failed audit line before re-raising, so a buggy command can never 500
+  # with no audit record.
   start = time.monotonic()
   try:
     maybe_result = runner()
@@ -706,11 +654,8 @@ async def execute_operation(
 
   duration_ms = (time.monotonic() - start) * 1000
 
-  # 3. Wrap envelope, fire side-effect hook, then cache + audit.
-  #
-  # The hook runs BEFORE caching so that if it raises (e.g. database
-  # failure marking the graph stale), the failure aborts the request
-  # without poisoning the idempotency cache with a stuck envelope.
+  # The hook runs before caching: if it raises, the failure aborts the
+  # request without poisoning the idempotency cache with a stuck envelope.
   envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
   if on_fresh_success is not None:
     on_fresh_success(envelope)

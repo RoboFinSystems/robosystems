@@ -145,13 +145,10 @@ DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 min - small/medium tables
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 min - direct COPY of 200M+ row tables
 CHUNKED_MATERIALIZATION_TIMEOUT = 2400  # 40 min per 20M row batch
 #
-# Chunked materialization settings for large tables
-# RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
-# with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
-# exhaustion by materializing in chunks with cleanup between batches.
-# 20M batches with 30min timeout balances memory vs timeout risk.
-# 10M batches were conservative; 20M reduces batch count for large tables.
-# Tables larger than this are batched; smaller tables use single COPY.
+# Chunked materialization threshold. A direct COPY of a 200M+ row table OOMs on
+# r7g.2xlarge (64 GB) once the LadybugDB buffer pool is boosted, so tables above
+# this size are materialized in batches with cleanup between them; smaller
+# tables use a single COPY. 20M balances peak memory against timeout risk.
 MATERIALIZATION_BATCH_SIZE = 20_000_000  # 20M rows per batch
 
 # Retry configuration for staging operations
@@ -247,18 +244,7 @@ def s3_url_exists(s3_client: "S3Client", s3_url: str) -> bool:
 
 
 def s3_prefix_has_objects(s3_client: "S3Client", bucket: str, prefix: str) -> bool:
-  """Check if any objects exist under an S3 prefix.
-
-  Uses list_objects with max_keys=1 for minimal overhead.
-
-  Args:
-      s3_client: S3Client instance
-      bucket: S3 bucket name
-      prefix: S3 key prefix to check
-
-  Returns:
-      True if at least one object exists under the prefix
-  """
+  """Check if any object exists under an S3 prefix (list with max_keys=1)."""
   objects = s3_client.list_objects(bucket, prefix=prefix, max_keys=1)
   return len(objects) > 0
 
@@ -273,28 +259,17 @@ def s3_table_data_exists(
 ) -> bool:
   """Check if table data exists in either old or new S3 format.
 
-  Checks both formats:
-  - Old: {source_prefix}/{filed_pattern}/{entity_type}/{table_name}.parquet
-  - New: {source_prefix}/{filed_pattern}/{entity_type}/{table_name}/*.parquet
-
-  Args:
-      s3_client: S3Client instance
-      bucket: S3 bucket name
-      source_prefix: Base prefix (e.g. "sec/processed")
-      filed_pattern: Filing partition (e.g. "filed=2024-Q1")
-      entity_type: Entity type (e.g. "nodes", "relationships")
-      table_name: Table name (e.g. "Element")
-
-  Returns:
-      True if data exists in either format
+  Checks both formats under
+  `{source_prefix}/{filed_pattern}/{entity_type}/` (e.g.
+  `sec/processed/filed=2024-Q1/nodes/`):
+  - single file: `{table_name}.parquet`
+  - part files:  `{table_name}/*.parquet`
   """
   base = f"{source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
 
-  # Check old format: TABLE.parquet
   if s3_client.object_exists(bucket, f"{base}.parquet"):
     return True
 
-  # Check new format: TABLE/*.parquet (any part file under the directory)
   if s3_prefix_has_objects(s3_client, bucket, f"{base}/"):
     return True
 
@@ -313,28 +288,18 @@ def s3_get_table_patterns(
 
   Returns only patterns for formats where data is present, preventing
   DuckDB errors from literal paths that don't exist. DuckDB treats paths
-  without wildcards as literal files and errors if they're missing.
-
-  Args:
-      s3_client: S3Client instance
-      bucket: S3 bucket name
-      source_prefix: Base prefix (e.g. "sec/processed")
-      filed_pattern: Filing partition (e.g. "filed=2024-Q1")
-      entity_type: Entity type (e.g. "nodes", "relationships")
-      table_name: Table name (e.g. "Element")
-
-  Returns:
-      List of S3 URL patterns (may be empty if no data exists)
+  without wildcards as literal files and errors if they're missing. The
+  returned list may be empty.
   """
   base_key = f"{source_prefix}/{filed_pattern}/{entity_type}/{table_name}"
   base_url = f"s3://{bucket}/{base_key}"
   patterns: list[str] = []
 
-  # Check old format: TABLE.parquet (literal path — must exist to include)
+  # Single-file form is a literal path, so it must be confirmed to exist.
   if s3_client.object_exists(bucket, f"{base_key}.parquet"):
     patterns.append(f"{base_url}.parquet")
 
-  # Check new format: TABLE/*.parquet (glob — DuckDB handles empty match)
+  # Part-file form is a glob — DuckDB tolerates an empty match.
   if s3_prefix_has_objects(s3_client, bucket, f"{base_key}/"):
     patterns.append(f"{base_url}/*.parquet")
 

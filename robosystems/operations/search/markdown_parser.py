@@ -24,7 +24,7 @@ MAX_SECTION_CHARS = 50_000
 
 
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
-  """Extract YAML frontmatter from markdown content.
+  """Split markdown into its ``(frontmatter, remaining_content)`` pair.
 
   Frontmatter is delimited by --- at the start and end:
       ---
@@ -33,15 +33,13 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
       ---
       # Content starts here
 
-  Returns:
-      Tuple of (metadata_dict, remaining_content).
-      If no frontmatter, returns ({}, content).
+  Returns ``({}, content)`` unchanged when there is no frontmatter, or when
+  it is unterminated or doesn't parse as a YAML mapping.
   """
   stripped = content.lstrip()
   if not stripped.startswith("---"):
     return {}, content
 
-  # Find the closing ---
   end_idx = stripped.find("---", 3)
   if end_idx == -1:
     return {}, content
@@ -79,16 +77,14 @@ def section_markdown(
 ) -> list[dict[str, Any]]:
   """Split markdown content into sections based on headings.
 
-  Each section includes its heading and all content until the next
-  same-or-higher-level heading.
-
-  Args:
-      content: Markdown content (frontmatter already removed).
-      default_title: Title to use if no headings found.
-
-  Returns:
-      List of section dicts with keys: section_id, section_label,
-      heading_depth, content.
+  ``content`` must already have its frontmatter removed. Each section
+  includes its own heading plus everything up to the next heading, and is
+  returned as a dict with keys ``section_id``, ``section_label``,
+  ``heading_depth``, and ``content``. Sections shorter than
+  ``MIN_SECTION_WORDS`` merge into a neighbour so headings with no body
+  don't become standalone hits, and anything over ``MAX_SECTION_CHARS`` is
+  truncated. ``default_title`` labels the preamble and the
+  no-headings-at-all case.
   """
   headings = list(_HEADING_PATTERN.finditer(content))
 
@@ -176,31 +172,23 @@ def section_markdown(
 def parse_document(
   content: str, title: str
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-  """Parse a markdown document into metadata and sections.
+  """Parse a markdown document into ``(metadata, sections)``.
 
-  Combines frontmatter extraction and heading-based sectioning.
-  Frontmatter fields override the title parameter if present.
-
-  Args:
-      content: Full markdown content (may include frontmatter).
-      title: Document title (used if not in frontmatter).
-
-  Returns:
-      Tuple of (metadata, sections) where metadata includes
-      frontmatter fields and sections is a list of section dicts.
+  Combines frontmatter extraction with heading-based sectioning. A
+  frontmatter ``title`` overrides the ``title`` argument, and the returned
+  metadata always carries the winning title. Frontmatter ``tags`` are
+  normalized to a list whether written as a YAML list or a comma-separated
+  string.
   """
   metadata, body = parse_frontmatter(content)
 
-  # Frontmatter title overrides the parameter
   doc_title = metadata.get("title", title)
 
-  # Parse tags from frontmatter (may be comma-separated string or list)
   if "tags" in metadata and isinstance(metadata["tags"], str):
     metadata["tags"] = [t.strip() for t in metadata["tags"].split(",") if t.strip()]
 
   sections = section_markdown(body, default_title=doc_title)
 
-  # Ensure title is in metadata
   metadata["title"] = doc_title
 
   return metadata, sections

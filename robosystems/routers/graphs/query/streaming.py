@@ -1,9 +1,7 @@
-"""
-Streaming response handlers for query execution.
+"""Streaming response handlers for query execution.
 
-This module provides various streaming implementations including
-NDJSON and Server-Sent Events (SSE) for efficient large result handling.
-It leverages the shared streaming utilities for consistency across endpoints.
+NDJSON and Server-Sent Events implementations for large result sets, built on
+the shared streaming utilities so the query and MCP endpoints behave alike.
 """
 
 import asyncio
@@ -33,24 +31,7 @@ circuit_breaker = CircuitBreakerManager()
 async def execute_query_with_timeout(
   repository: Any, query: str, parameters: dict[str, Any] | None, timeout: int
 ) -> list[dict[str, Any]]:
-  """
-  Execute a query with timeout handling.
-
-  This is a legacy function maintained for backward compatibility.
-  Consider using QueryHandler.execute_query() instead.
-
-  Args:
-      repository: The graph repository instance
-      query: The Cypher query to execute
-      parameters: Optional query parameters
-      timeout: Timeout in seconds
-
-  Returns:
-      Query results as a list of dictionaries
-
-  Raises:
-      TimeoutError: If query exceeds timeout
-  """
+  """Execute a query, raising `TimeoutError` once `timeout` seconds elapse."""
 
   async def execute():
     # Check if repository has async execute_query method
@@ -79,23 +60,8 @@ async def stream_ndjson_response(
   chunk_size: int = 1000,
   start_time: datetime | None = None,
 ) -> StreamingResponse:
-  """
-  Stream query results as NDJSON (newline-delimited JSON).
-
-  Each line is a complete JSON object representing a chunk of results.
-  This format is efficient for large results and works well with many clients.
-
-  Args:
-      repository: Graph repository instance
-      request: Query request
-      graph_id: Graph identifier
-      current_user: Current authenticated user
-      chunk_size: Number of rows per chunk
-      start_time: Request start time for metrics
-
-  Returns:
-      StreamingResponse with NDJSON content
-  """
+  """Stream query results as NDJSON, one JSON chunk of `chunk_size` rows per
+  line."""
   if not start_time:
     start_time = datetime.now(UTC)
 
@@ -242,23 +208,10 @@ async def stream_sse_response(
   include_progress: bool = True,
   start_time: datetime | None = None,
 ) -> EventSourceResponse:
-  """
-  Stream query results via Server-Sent Events (SSE).
+  """Stream query results as Server-Sent Events.
 
-  Provides rich feedback including progress updates, chunks, and metadata.
-  Best for real-time monitoring and progressive rendering.
-
-  Args:
-      repository: Graph repository instance
-      request: Query request
-      graph_id: Graph identifier
-      current_user: Current authenticated user
-      chunk_size: Number of rows per chunk
-      include_progress: Whether to send progress events
-      start_time: Request start time for metrics
-
-  Returns:
-      EventSourceResponse with SSE stream
+  Carries progress updates, result chunks, and metadata, so the client can
+  render progressively.
   """
   if not start_time:
     start_time = datetime.now(UTC)
@@ -461,24 +414,8 @@ async def stream_sse_with_queue(
   chunk_size: int = 100,
   operation_id: str | None = None,
 ) -> EventSourceResponse:
-  """
-  Handle queued queries with SSE, providing queue updates then streaming results.
-
-  This combines queue management with result streaming in a single SSE connection,
-  providing the best user experience for queries that need to be queued.
-
-  Args:
-      request: Query request
-      graph_id: Graph identifier
-      repository: Graph repository instance
-      current_user: Current authenticated user
-      priority: Query priority
-      chunk_size: Number of rows per chunk
-      operation_id: Optional unified SSE operation ID for monitoring
-
-  Returns:
-      EventSourceResponse with queue updates and result stream
-  """
+  """Stream a queued query over one SSE connection: queue-position updates
+  while it waits, then the result chunks once it runs."""
 
   async def sse_queue_stream_generator():
     """Generate SSE events for queued query with streaming."""
@@ -489,7 +426,6 @@ async def stream_sse_with_queue(
       # Calculate query cost
       credits_required = 0.0  # Queries are included
 
-      # Submit to queue
       query_id = await queue_manager.submit_query(
         cypher=request.query,
         parameters=request.parameters,
@@ -627,7 +563,6 @@ async def stream_sse_with_queue(
                 ),
               }
 
-          # Mark complete in queue
           await queue_manager.mark_completed(query_id, {"rows": total_rows})
 
           # Send completion

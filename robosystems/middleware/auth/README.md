@@ -1,303 +1,96 @@
 # Authentication Middleware
 
-This middleware provides authentication and authorization for the RoboSystems platform.
-
-## Overview
-
-The authentication middleware:
-
-- Handles JWT token and API key authentication
-- Implements caching (Valkey) for performance
-- Manages multi-tenant graph access control
-- Supports Single Sign-On (SSO) across RoboSystems applications
-- Provides admin authentication via AWS Secrets Manager
+Authentication and per-graph authorization for the platform. This package
+exposes FastAPI **dependencies**, not ASGI middleware classes — you protect an
+endpoint by declaring the dependency in the route signature. It handles two
+credential types (JWT and API key), caches validation results in Valkey, and
+enforces graph access on every authenticated graph-scoped route.
 
 Rate limiting is a separate concern and lives in
-[`middleware/rate_limits/`](/robosystems/middleware/rate_limits/) — this
-package re-exports two rate-limit dependencies (`graph_scoped_rate_limit_dependency`,
-`subscription_aware_rate_limit_dependency`) for convenience but does not
-implement them.
+[`../rate_limits/`](../rate_limits/). This package's `__init__.py` re-exports
+`graph_scoped_rate_limit_dependency` and
+`subscription_aware_rate_limit_dependency` for convenience but implements
+neither.
 
-## Architecture
+## The two credential surfaces
 
-```
-auth/
-├── __init__.py                  # Module exports
-├── dependencies.py              # FastAPI dependency injection (get_current_user, etc.)
-├── jwt.py                       # JWT create/verify/revoke + SSO token helpers
-├── utils.py                     # API key validation utilities
-├── admin.py                     # AdminAuthMiddleware (AWS Secrets Manager admin key)
-├── cache.py                     # Valkey caching layer (API key + JWT user data)
-├── cache_validator.py           # Cache validation and refresh
-├── distributed_lock.py          # Distributed locking for cache
-└── maintenance.py               # API key expiry cleanup functions
-```
+**JWT (`Authorization: Bearer …`) is for frontends.** Short-lived HS256 access
+tokens, 30-minute expiry (`JWT_EXPIRY_HOURS = 0.5` in `config/constants.py` — a
+constant, not an env var), with a refresh flow. Claims: `user_id`, `jti`,
+`session_version`, `iss`, `aud`, and an optional `device_hash`. Revocation is
+per-`jti` in Valkey (`revoked_jwt:{jti}`) with a TTL equal to the token's
+remaining lifetime and a short grace window for `session_refresh` revocations.
+Bumping a user's `session_version` invalidates every outstanding token for that
+user, because `verify_jwt_claims` compares the claim against the stored value.
 
-## Authentication Methods
+**API keys (`X-API-Key`) are for programmatic clients.** Format is
+`^rfsc?[0-9a-f]{64}$` (`utils.py:_API_KEY_FORMAT_RE`) — 64 lowercase hex
+characters from `secrets.token_hex(32)`, prefixed `rfs` for account-wide keys
+and `rfsc` for graph-scoped keys. Keys are bcrypt-hashed in the database; the
+first 8 characters are stored in an indexed `prefix` column so verification
+only bcrypt-checks the handful of candidate rows. SHA-256 of the raw key is
+used *only* as the Valkey cache lookup key, never as credential storage.
 
-### 1. JWT Token Authentication
-
-Used by frontend applications for user sessions.
-
-**Features:**
-
-- **Algorithm**: HS256
-- **Expiration**: 30 minutes (`JWT_EXPIRY_HOURS = 0.5` in `config/constants.py`); short-lived access tokens with a refresh flow
-- **Claims**: `user_id`, `jti` (for revocation), `session_version`, `iss`, `aud`, optional `device_hash`
-- **Revocation**: Tokens can be revoked by `jti` (Valkey-backed revocation list with a short refresh grace period)
-
-The token is created in `jwt.py:create_jwt_token()`:
-
-```python
-payload = {
-    "user_id": user_id,
-    "jti": jti,                  # JWT ID for revocation tracking
-    "session_version": ...,
-    "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),  # 30 minutes
-    "iat": datetime.now(UTC),
-    "iss": env.JWT_ISSUER,
-    "aud": env.JWT_AUDIENCE,
-}
-```
-
-Auth routers return the token in the response body (e.g. `expires_in = int(JWT_EXPIRY_HOURS * 3600)`); cookie-based delivery (cookie name `auth-token`) is a frontend concern and is read back by the rate-limit and SSO layers.
-
-### 2. API Key Authentication
-
-Used for programmatic access and integrations.
-
-**Features:**
-
-- **Header**: `X-API-Key`
-- **Format**: `rfs` (account-wide) or `rfsc` (graph-scoped) prefix + 64 lowercase hex characters (regex `^rfsc?[0-9a-f]{64}$`) — see `utils.py:_API_KEY_FORMAT_RE`
-- **Storage**: bcrypt-hashed in database; SHA-256 of the raw key is used as the cache lookup key
-- **Graph Scoping**: Access is validated per graph via `validate_api_key_with_graph`
-- **Activity Tracking**: Last used timestamp
-
-**Example:**
+When testing locally, always use `X-API-Key` — Bearer tokens are a frontend
+concern:
 
 ```bash
-curl -H "X-API-Key: rfs..." \
-     https://api.robosystems.ai/v1/graphs/kg1a2b3c/...
+curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+     http://localhost:8000/v1/graphs/$GRAPH_ID/...
 ```
 
-**Graph-scoped keys** (`user_api_keys.graph_id`): a key minted with a graph
-scope is valid only for that graph and its subgraphs — on *every* carriage
-path — and is rejected on endpoints with no graph context (`validate_api_key`
-refuses scoped keys). NULL scope = account-wide, the historical behavior. The
-authoritative check is the row's `graph_id`; the `rfsc` prefix is legibility
-only.
+### Key scoping
 
-### Credentials in query parameters (the two deliberate doors)
+A key minted with a `graph_id` (`user_api_keys.graph_id`, prefix `rfsc`) is
+valid only for that graph and its subgraphs, **on every carriage path**, and is
+rejected outright on endpoints with no graph context — `validate_api_key`
+refuses scoped keys. A NULL `graph_id` means account-wide. The authoritative
+check is always the row's `graph_id`; the `rfsc` prefix is legibility for
+humans and incident response only.
 
-Header carriage is the rule; exactly two routes accept a credential via a
+### Credentials in query parameters — the two deliberate doors
+
+Header carriage is the rule. Exactly two routes accept a credential via a
 `?token=` query parameter, both because their client cannot send custom
-headers, and both already covered by the sensitive-query-param redaction in
-`middleware/logging.py` and the OTel span redaction in `middleware/otel/setup.py`:
+headers. Both are covered by the redaction list in `middleware/logging.py` and
+by the OTel span redaction in `middleware/otel/setup.py`.
 
-| Route | Dependency | Credential accepted | Why |
-| --- | --- | --- | --- |
-| `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse` | **JWT only** (30-min TTL) | browser `EventSource` cannot set headers |
-| `POST /v1/graphs/{graph_id}/mcp` | `get_current_user_with_graph_or_url_token` | **graph-scoped API key only** | MCP connector clients (claude.ai / Claude Desktop) cannot set headers |
+| Route                                  | Dependency                              | Accepts                          | Why                                       |
+| -------------------------------------- | --------------------------------------- | -------------------------------- | ----------------------------------------- |
+| `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse`                  | **JWT only** (30-min TTL)        | browser `EventSource` cannot set headers  |
+| `POST /v1/graphs/{graph_id}/mcp`       | `get_current_user_with_graph_or_url_token` | **graph-scoped API key only** | MCP connector clients cannot set headers  |
 
 The asymmetry is deliberate: the SSE door carries a short-lived session token,
 so no extra restriction is needed; the MCP door carries a durable key, so only
-graph-scoped keys are honored there and account-wide keys are hard-rejected —
-the account credential must never be the one that travels in a URL. Do not add
-a third query-credential door without matching this table, the redaction
-lists, and a scope story.
+graph-scoped keys are honored and account-wide keys are hard-rejected — the
+account credential must never be the one that travels in a URL. Header and JWT
+auth take precedence on both; the query parameter is consulted only when
+neither is present. Do not add a third door without matching this table, the
+redaction lists, and a scope story.
 
-### 3. Single Sign-On (SSO)
+### SSO
 
-Seamless authentication across RoboSystems applications.
+`jwt.py:create_sso_token` mints a single-use handoff JWT with a 300-second TTL,
+carrying `{"sso": true}` and a `token_id` used to enforce single use. Reuse of
+a spent token is treated as a possible replay of a leaked credential and logged
+as such. Used for handoff between app.robosystems.ai, roboledger.ai, and
+roboinvestor.ai.
 
-**Flow:**
+## Dependencies
 
-1. Generate SSO token (300-second / 5-minute TTL — `jwt.py:create_sso_token`)
-2. Exchange token for session (single-use, tracked by `token_id`)
-3. Complete handoff
+All in `dependencies.py`. Every one of them accepts either credential type —
+JWT is tried first when an `Authorization: Bearer` header is present, otherwise
+the `X-API-Key` header is used.
 
-**Supported Applications:**
-
-- RoboLedger (roboledger.ai)
-- RoboInvestor (roboinvestor.ai)
-- RoboSystems (app.robosystems.ai)
-
-## Key Components
-
-### 1. Dependencies (`dependencies.py`)
-
-FastAPI dependency injection for authentication.
-
-**Core Dependencies:**
-
-#### `get_current_user`
-
-Requires authenticated user:
-
-```python
-@router.get("/protected")
-async def protected_route(
-    user: User = Depends(get_current_user)
-):
-    return {"user_id": user.id}
-```
-
-#### `get_optional_user`
-
-Optional authentication:
-
-```python
-@router.get("/public")
-async def public_route(
-    user: Optional[User] = Depends(get_optional_user)
-):
-    if user:
-        return {"message": f"Hello {user.name}"}
-    return {"message": "Hello anonymous"}
-```
-
-#### `get_current_user_with_graph`
-
-Validates graph access:
-
-```python
-@router.get("/v1/graphs/{graph_id}/data")
-async def get_graph_data(
-    graph_id: str,
-    auth: Tuple[User, str] = Depends(get_current_user_with_graph)
-):
-    user, validated_graph_id = auth
-    # User has access to this graph
-    return {"data": "..."}
-```
-
-### 2. Authentication Cache (`cache.py`)
-
-Caching using Valkey. The raw API key is never used as a cache key — its
-SHA-256 hash is. Caches both positive and negative results.
-
-**Cache Types:**
-
-- **API key validation**: hashed-key → user data + `is_active` flag
-- **Graph access**: (hashed-key, graph_id) → boolean access result
-- **JWT user data**: user_id → user data, keyed alongside `session_version` so a
-  session bump invalidates cached JWT users
-- **JWT graph access**: (user_id, graph_id) → boolean access result
-
-JWT revocation is tracked separately in Valkey by `jti`
-(`revoked_jwt:{jti}`) with a TTL equal to the token's remaining lifetime
-(see `jwt.py:revoke_jwt_token`).
-
-### 3. Rate Limiting
-
-Rate limiting is **not** implemented in this package. It lives in
-[`middleware/rate_limits/`](/robosystems/middleware/rate_limits/) —
-burst-focused, subscription-tier-aware limiting with per-tier buckets
-(`ladybug-standard`, `ladybug-large`, `ladybug-xlarge`). The auth
-`__init__.py` re-exports `graph_scoped_rate_limit_dependency` and
-`subscription_aware_rate_limit_dependency` for convenience. See that
-package's source and `config/rate_limits.py` for the actual limits and
-the credit model (only AI operations consume credits; storage is a
-separate credit line; database operations are free).
-
-### 4. Cache Validator (`cache_validator.py`)
-
-Ensures cache consistency with database.
-
-**Features:**
-
-- **Periodic Validation**: Checks cache accuracy
-- **Lazy Refresh**: Updates cache on access
-- **Batch Operations**: Validates multiple entries
-
-**Validation Flow:**
-
-1. Check cache staleness
-2. Compare with database
-3. Update if different
-4. Track validation metrics
-
-### 5. Distributed Lock (`distributed_lock.py`)
-
-Prevents cache stampedes and race conditions using a Valkey-backed lock.
-
-```python
-async with lock.acquire("user_update:123", timeout=5):
-    # Critical section
-    await update_user_cache()
-    await update_database()
-```
-
-### 6. Admin Authentication (`admin.py`)
-
-`AdminAuthMiddleware` authenticates admin requests using a bearer token
-compared (constant-time) against the admin key stored in AWS Secrets
-Manager. Exposed via the `admin_auth` singleton and the `require_admin`
-decorator. Distinct from the user-facing API key / JWT flow.
-
-### 7. API Key Maintenance (`maintenance.py`)
-
-Cleanup helpers (not request middleware): `cleanup_expired_api_keys`
-deactivates API keys past their `expires_at`, and `cleanup_jwt_cache_expired`
-reports JWT cache stats (JWT cache expiry is automatic via Valkey TTL).
-
-## Security Features
-
-### Password Security
-
-- **Algorithm**: Bcrypt with cost factor 12
-- **Validation**: Minimum 8 characters
-- **History**: Prevents reuse of last 5 passwords
-
-### Token Security
-
-- **JWT Secret**: Strong random key (minimum 32 bytes)
-- **Short-lived access tokens**: 30-minute expiry with a refresh flow
-- **Revocation**: Per-`jti` revocation list in Valkey, applied immediately on logout (with a short refresh grace window)
-
-### API Key Security
-
-- **Generation**: Cryptographically secure (`secrets.token_hex`, 64 hex chars)
-- **Prefix**: `rfs` prefix identifies the key type
-- **Hashing**: bcrypt-hashed in the database (SHA-256 used only as the cache lookup key)
-- **Rotation**: Support for key rotation
-
-### Multi-Tenant Security
-
-- **Graph Isolation**: Complete data isolation
-- **Role-Based Access**: Admin, Member, Viewer
-- **Permission Caching**: 5-minute TTL
-- **Audit Logging**: All access logged
-
-## Configuration
-
-### Required Environment Variables
-
-```bash
-# JWT Configuration
-JWT_SECRET_KEY=your-secret-key-minimum-32-bytes
-JWT_ISSUER=...
-JWT_AUDIENCE=...
-# Token lifetime is JWT_EXPIRY_HOURS in config/constants.py (0.5 = 30 min);
-# it is a constant, not an env var.
-
-# Valkey Cache
-VALKEY_URL=redis://localhost:6379
-
-# Rate limiting (configured in middleware/rate_limits/ + config/rate_limits.py)
-RATE_LIMIT_ENABLED=true
-```
-
-Cache TTLs and Valkey database allocations are managed centrally
-(`config/valkey_registry.py`) rather than via standalone env vars.
-
-## Integration Examples
-
-This package exposes FastAPI **dependencies**, not ASGI middleware classes.
-Protect endpoints by declaring the dependency in the route signature.
-
-### Protected Endpoint
+| Dependency                                      | Returns | Notes                                                                   |
+| ----------------------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `get_current_user`                              | `User`  | 401 if unauthenticated.                                                 |
+| `get_optional_user`                             | `User \| None` | Never raises for missing credentials.                             |
+| `get_current_user_with_graph`                   | `User`  | Reads `graph_id` from the path and validates access.                    |
+| `get_current_user_with_graph_or_url_token`      | `User`  | As above, plus the `?token=` door. MCP only.                            |
+| `get_current_user_sse`                          | `User`  | As `get_current_user`, plus the `?token=` JWT door.                     |
+| `get_current_user_with_repository_access`       | `User`  | Shared repositories (SEC, etc.); resolves subgraphs to the parent.      |
+| `get_repository_user_dependency(repo, op_type)` | factory | Builds the above bound to a specific repository and operation type.     |
 
 ```python
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -307,102 +100,95 @@ async def expensive_operation(
     graph_id: str,
     user: User = Depends(get_current_user_with_graph),
 ):
-    # get_current_user_with_graph authenticates AND validates that the
-    # user has access to {graph_id} (the graph_id path param is read by
-    # the dependency). Returns the authenticated User.
     return {"status": "success"}
 ```
 
-For shared repositories (SEC, etc.) use `get_current_user_with_repository_access`
-or the `get_repository_user_dependency(repository_id, operation_type)` factory.
+`get_current_user_with_graph` returns the `User` directly — it does not return a
+tuple. The validated `graph_id` is the path parameter you already declared.
 
-### Rate Limiting
+### Membership is not write access
 
-Rate limiting is applied via dependencies from `middleware/rate_limits/`
-(e.g. `subscription_aware_rate_limit_dependency`,
-`graph_scoped_rate_limit_dependency`), not via decorators in this package.
+`get_current_user_with_graph` proves *membership*. It does not prove the user
+may mutate the graph: the `viewer` role is read-only. `require_graph_write_role(user_id, graph_id)`
+is the single shared write gate — REST command operations, the extensions
+registrar, content operations, and the hand-written lifecycle operations all
+call it, and the MCP surface enforces the same through
+`validate_mcp_access(..., "write")`. It raises 403 and emits an
+`AuthorizationDenied` audit event. Any new write path must go through it.
 
-## Monitoring
+Failed API-key validation and failed graph access return the *same* 403 with
+the same message. That conflation is intentional — it denies an attacker an
+oracle for whether a key is valid.
 
-### Key Metrics
+## Caching
 
-1. **Authentication Metrics**
+`cache.py` caches both positive and negative results in Valkey, keyed by the
+SHA-256 of the API key (never the raw key):
 
-   - Login success/failure rates
-   - Token refresh frequency
-   - API key usage by key
-   - SSO token exchanges
+- API key validation → user data and `is_active`
+- Graph access for an API key → `(hashed_key, graph_id)` → bool
+- JWT user data → keyed alongside `session_version`, so a session bump
+  invalidates it
+- JWT graph access → `(user_id, graph_id)` → bool, capped at 10 minutes even
+  when the JWT TTL is longer
 
-2. **Cache Metrics**
+TTLs come from `TuningConfig` (`get_cache_api_key_ttl()`,
+`get_cache_jwt_ttl()`), so they are SSM-tunable at runtime without a redeploy.
+Valkey database numbers come from `config/valkey_registry.py` — never hardcode
+one.
 
-   - Hit/miss ratios
-   - Eviction rates
-   - Validation frequency
-   - Lock contention
+`cache_validator.py` re-checks cached entries against the database and refreshes
+stale ones. `distributed_lock.py` provides a Valkey-backed lock used to prevent
+cache stampedes when many requests miss the same key at once.
 
-3. **Security Metrics**
-   - Failed authentication attempts
-   - Suspicious activity patterns
-   - JWT revocation list size
-   - Permission changes
+The cache is the reason a permission change may not take effect instantly.
+When revoking access, invalidate explicitly rather than waiting out the TTL:
 
-(Rate-limit metrics are emitted by `middleware/rate_limits/`.)
+```bash
+just admin dev cache info auth
+just admin dev cache keys auth --pattern "apikey:*"
+just admin dev cache keys auth --pattern "revoked_jwt:*"
+```
 
-### Health Checks
+## Admin authentication
 
-Platform health is exposed at `GET /v1/status` (not a per-subsystem
-`/health/auth` endpoint).
+`admin.py` is a separate path from the user-facing flow. `AdminAuthMiddleware`
+compares a bearer token in constant time against the admin key in AWS Secrets
+Manager, exposed via the `admin_auth` singleton and the `require_admin`
+decorator. It guards the `/admin/v1/*` surface, which the ALB additionally
+rejects from the public listener.
 
-## Troubleshooting
+## Password policy
 
-### Common Issues
+Enforced in `robosystems/security/password.py` (`PasswordSecurity`), not in this
+package. Minimum 12 characters, maximum 128, upper/lower/digit/special all
+required, at least 8 unique characters, a minimum strength score of 60, and a
+weak-pattern blocklist. Hashing is bcrypt at 14 rounds; passwords are truncated
+to bcrypt's 72-byte input explicitly so long passwords keep working under
+bcrypt 5.x.
 
-1. **"Invalid token" Errors**
+## Maintenance
 
-   ```bash
-   # Check if a token's jti has been revoked (key: revoked_jwt:{jti})
-   just admin dev cache keys auth --pattern "revoked_jwt:*"
-   ```
+`maintenance.py` holds cleanup helpers, not request middleware:
+`cleanup_expired_api_keys` deactivates keys past their `expires_at`, and
+`cleanup_jwt_cache_expired` reports JWT cache statistics (JWT cache entries
+expire on their own via Valkey TTL).
 
-2. **Rate Limit Issues**
+## Configuration
 
-   See `middleware/rate_limits/` and `config/rate_limits.py`; inspect
-   rate-limit keys via `just admin dev cache info`.
+```bash
+JWT_SECRET_KEY=...   # minimum 32 bytes
+JWT_ISSUER=...
+JWT_AUDIENCE=...
+VALKEY_URL=redis://localhost:6379
+RATE_LIMIT_ENABLED=true   # consumed by middleware/rate_limits/
+```
 
-3. **Cache Inconsistency**
+Read these through `robosystems.config.env`, never `os.getenv()`.
 
-   ```python
-   # Force cache refresh
-   await cache.invalidate_user_cache(user_id)
+## Related
 
-   # Validate all user caches
-   await validator.validate_all_users()
-   ```
-
-4. **SSO Failures**
-
-   SSO tokens are single-use JWTs (5-minute TTL) tracked by `token_id`.
-   Inspect single-use tracking keys via `just admin dev cache info auth`.
-
-## Best Practices
-
-1. **Security**
-
-   - Rotate JWT secrets regularly
-   - Monitor failed authentication attempts
-   - Use secure cookie settings in the frontend
-
-2. **Performance**
-
-   - Rely on the Valkey cache for authentication checks
-   - Monitor cache hit rates
-
-3. **Reliability**
-
-   - Have fallback authentication paths
-   - Test failover scenarios
-
-4. **Maintenance**
-   - Run periodic API key cleanup (`maintenance.py`)
-   - Monitor the JWT revocation list size
-   - Audit authentication logs
+- [`../rate_limits/`](../rate_limits/) — burst limiting, tier-aware
+- [`../graph/README.md`](../graph/README.md) — graph routing and `graph_id` resolution
+- `robosystems/security/` — password policy, audit logging, auth protection
+- Platform health is `GET /v1/status`; there is no per-subsystem health route.

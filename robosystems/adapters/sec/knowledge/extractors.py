@@ -248,7 +248,7 @@ class ArcExtractor:
 
     Returns:
         Dict mapping qname to primary disclosure type (e.g., "AssetsRollUp").
-        Empty dict if Classification table does not exist (backward compatibility).
+        Empty dict when the staging DB has no Classification table.
     """
     sql = """
       WITH element_disclosures AS (
@@ -318,7 +318,7 @@ class ArcExtractor:
     Returns:
         List of (structure_id, disclosure_type, definition_hash, [element_qnames]).
         Only includes Disclosure structures with disclosure_mechanics classifications.
-        Empty list if Classification table does not exist (backward compatibility).
+        Empty list when the staging DB has no Classification table.
     """
     sql = """
       WITH disclosure_structures AS (
@@ -371,7 +371,7 @@ class ArcExtractor:
 
     Returns:
         Dict mapping root element qname to set of disclosure types.
-        Empty dict if Classification table does not exist (backward compatibility).
+        Empty dict when the staging DB has no Classification table.
     """
     sql = """
       SELECT DISTINCT e.qname, c.type AS disclosure_type
@@ -408,14 +408,12 @@ class ArcExtractor:
     """Extract structure canonical_type membership counts per element.
 
     For each element, counts how many structures of each canonical_type
-    contain it. Used to determine primary_statement via majority vote
-    across structure types, replacing BFS-based classification which
-    suffers from cross-statement arc pollution in the deduped graph
-    (e.g., indirect cash flow method creates IS→CF calculation arcs).
+    contain it. `primary_statement` comes from a majority vote over these
+    counts rather than a graph BFS: the deduped graph has cross-statement arc
+    pollution (the indirect cash flow method creates IS→CF calculation arcs).
 
-    Returns:
-        Dict mapping qname to {canonical_type: structure_count}.
-        Only includes elements appearing in structures with non-null canonical_type.
+    Returns qname → {canonical_type: structure_count}, covering only elements
+    that appear in a structure with a non-null canonical_type.
     """
     sql = """
       WITH element_structures AS (

@@ -4,9 +4,7 @@ Translates a RoboSystems-side `Event` row's `metadata` payload into a
 `quickbooks.objects.JournalEntry` and posts it via the QB API with a
 RequestId for idempotency. Returns the `qb_txn_id` on success.
 
-Used by `operations/event_block/commands.execute_event_block`. Kept
-out of `commands.py` because the JE-build + Element-lookup logic is
-focused and worth isolating from the command orchestrator.
+Used by `operations/event_block/commands.execute_event_block`.
 
 The QB SDK's `JournalEntry.save(qb=client, request_id=event.id)`
 treats `request_id` as the RequestId header — QB recognises duplicate
@@ -66,17 +64,13 @@ class QBWritebackError(Exception):
 
 
 def _validated_cents(value: Any, field: str) -> int:
-  """Coerce a line-item amount field to an integer cent value, raising
-  `QBWritebackError` if the value isn't already an `int` (or `None`).
+  """Coerce a line-item amount to integer cents (``None`` maps to 0).
 
-  RL stores amounts as integer cents end-to-end. A float would lose
-  precision via `int(125.50)` → `125` (50 cents silently dropped). A
-  string would coerce to a different surface bug entirely. Either is
-  a contract violation we'd rather surface than swallow.
-
-  ``bool`` is treated as invalid even though `isinstance(bool, int)`
-  is True in Python — a True / False sneaking in as an amount is
-  almost certainly a caller bug.
+  Amounts are integer cents end-to-end. A float would silently lose
+  precision via `int(125.50)` → `125`, so any non-``int`` type raises
+  `QBWritebackError` rather than being coerced. ``bool`` counts as invalid
+  even though `isinstance(True, int)` is True in Python — a True/False
+  arriving as an amount is a caller bug.
   """
   if value is None:
     return 0
@@ -304,12 +298,11 @@ def post_event_to_qb(
     qb_id = _save_with_retry(je, qb_client, request_id, event.id)
     qb_txn_ids.append(f"JournalEntry_{qb_id}")
 
-  # Prefix the bare QB Id with the entity type ("JournalEntry_") so the
-  # stamped value matches the format the QB importer uses for incoming
-  # rows (`utils.py:389` builds `f"{qb_class}_{tx_id}"` as the
-  # external_id). The cross-source matcher in `loader.py` compares
-  # incoming external_ids against `metadata.qb_external_id`, so the
-  # two must use the same convention.
+  # The bare QB Id is prefixed with the entity type ("JournalEntry_") above so
+  # the stamped value matches the external_id format the QB importer builds
+  # for incoming rows (`f"{qb_class}_{tx_id}"`). The cross-source matcher in
+  # the extensions loader compares incoming external_ids against
+  # `metadata.qb_external_id`, so the two must use the same convention.
   return qb_txn_ids
 
 

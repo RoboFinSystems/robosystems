@@ -1,21 +1,19 @@
 """Chart View projection — panel/series config over a rendering.
 
-The 7th ``type-of View`` arm (A-2), and the second real server-shaped
-one after ``rendering``. The server's value-add is the grouping logic:
-mixed-unit catalogs are unplottable on one y-axis, so rows group into
-one panel per ``item_type`` format family (NULL falls back to the
-``is_monetary`` binary), panel order following first appearance in
-presentation-arc order. The projection carries structure only — series
-values live in ``rendering.rows`` (joined by ``element_id``) and the
-x-axis is ``rendering.periods`` — so the chart arm never duplicates the
+A ``type-of View`` arm, server-shaped like ``rendering``. The server's
+value-add is the grouping logic: mixed-unit catalogs are unplottable on one
+y-axis, so rows group into one panel per ``item_type`` format family (NULL
+falls back to the ``is_monetary`` binary), panel order following first
+appearance in presentation-arc order. The projection carries structure only
+— series values live in ``rendering.rows`` (joined by ``element_id``) and
+the x-axis is ``rendering.periods`` — so the chart arm never duplicates the
 value matrix.
 
-Rendering-generic by design: A-2 invokes it from the metric envelope
-builder only, but any builder whose rendering rows carry plottable
-per-period values (statements, schedules) can adopt it without
-redesign. Subtotal rows are excluded — statement charts need subtotal
-curation first, which is the adopting builder's problem, not this
-helper's.
+Rendering-generic: the metric envelope builder is the only caller today, but
+any builder whose rendering rows carry plottable per-period values
+(statements, schedules) can adopt it unchanged. Subtotal rows are excluded —
+statement charts need subtotal curation first, which is the adopting
+builder's problem, not this helper's.
 """
 
 from __future__ import annotations

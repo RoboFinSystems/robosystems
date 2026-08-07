@@ -62,20 +62,15 @@ def get_render_network(
   reads as missing (forces the caller to author a replacement rather
   than silently rendering against a stale Network).
 
-  Args:
-      session: Extensions database session (tenant schema active via
-          ``SET search_path``). The same session that holds the rest of
-          the renderer's reads — no fan-out to platform DB.
-      reporting_style_id: The entity's ``entities.reporting_style_id``
-          (resolve via ``load_entity_reporting_style`` /
-          ``load_primary_reporting_style``). NOT NULL, so pass it verbatim.
-      statement_type: One of ``balance_sheet`` / ``income_statement`` /
-          ``cash_flow_statement`` / ``equity_statement`` /
-          ``comprehensive_income``.
+  ``session`` must have the tenant schema active via ``SET search_path``;
+  everything resolves in it with no fan-out to the platform DB.
+  ``reporting_style_id`` comes from ``entities.reporting_style_id`` (see
+  :func:`load_entity_reporting_style` / :func:`load_primary_reporting_style`).
+  ``statement_type`` is one of ``balance_sheet`` / ``income_statement`` /
+  ``cash_flow_statement`` / ``equity_statement`` / ``comprehensive_income``.
 
-  Raises:
-      NoNetworkForStatementTypeError: when the composition row is
-          missing or the target Network is inactive.
+  Raises ``NoNetworkForStatementTypeError`` when the composition row is
+  missing or the target Network is inactive.
   """
   row = session.execute(
     text(
@@ -104,12 +99,11 @@ def get_render_network(
 def load_entity_reporting_style(session: Session, entity_id: str) -> str:
   """The Reporting Style pinned on a specific entity (tenant schema).
 
-  The style now lives on the entity, co-located with the ``structures`` /
+  The style lives on the entity, co-located with the ``structures`` /
   ``reporting_style_networks`` it points at — no cross-DB hop. Used by the
   render path once it has resolved which entity a report belongs to.
 
-  Raises:
-      LookupError: when the entity doesn't exist in the tenant schema.
+  Raises ``LookupError`` when the entity doesn't exist in the tenant schema.
   """
   row = session.execute(
     text("SELECT reporting_style_id FROM entities WHERE id = :eid"),
@@ -117,8 +111,8 @@ def load_entity_reporting_style(session: Session, entity_id: str) -> str:
   ).fetchone()
   if row is None:
     raise LookupError(f"Entity {entity_id!r} not found in tenant schema.")
-  # NOT NULL in the model, but tolerate a legacy null by falling back to the
-  # corporate Default rather than handing a null id to the picker.
+  # NOT NULL in the model, but a null falls back to the corporate Default
+  # rather than handing a null id to the picker.
   return str(row.reporting_style_id) if row.reporting_style_id else DEFAULT_STYLE_ID
 
 
@@ -130,8 +124,7 @@ def load_primary_reporting_style(session: Session) -> str:
   up with the entity whose facts it walks. Callers that already know the
   target entity should prefer ``load_entity_reporting_style``.
 
-  Raises:
-      LookupError: when the tenant has no entity yet (import data first).
+  Raises ``LookupError`` when the tenant has no entity yet.
   """
   row = session.execute(
     text("SELECT reporting_style_id FROM entities ORDER BY created_at ASC LIMIT 1")
@@ -142,8 +135,8 @@ def load_primary_reporting_style(session: Session) -> str:
 
 
 # Corporate default — the form whose accumulated earnings get their own
-# named line. Partnership/LLC/etc. Styles override this in their metadata
-# (stamped from the package's ``retainedEarningsConcept`` by migration 0008).
+# named line. Partnership/LLC/etc. Styles override this in their metadata,
+# stamped from the package's ``retainedEarningsConcept``.
 DEFAULT_CLOSE_TARGET_CONCEPT = "rs-gaap:RetainedEarningsAccumulatedDeficit"
 
 
@@ -152,14 +145,12 @@ def load_close_target_concept(session: Session, reporting_style_id: str) -> str:
 
   Each Reporting Style declares exactly one earnings-home concept
   (``retainedEarningsConcept`` in the package, stamped into
-  ``structures.metadata.retained_earnings_concept`` by migration 0008):
-  CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity. A single
-  authoritative value per Style — never a runtime scan. Falls back to the
-  corporate default for unstamped/legacy Styles so behavior is unchanged.
+  ``structures.metadata.retained_earnings_concept``): CORP→RetainedEarnings,
+  PART→PartnersCapital, LLC→MembersEquity. A single authoritative value per
+  Style — never a runtime scan. An unstamped Style falls back to
+  ``DEFAULT_CLOSE_TARGET_CONCEPT``.
 
-  Args:
-      session: Extensions session with the tenant schema active.
-      reporting_style_id: The entity's ``entities.reporting_style_id``.
+  ``session`` must have the tenant schema active.
   """
   # Read from the tenant's ``structures`` (search_path), NOT ``public`` —
   # the Style row is mirrored into each tenant with its stamped metadata by

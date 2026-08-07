@@ -1,19 +1,21 @@
-"""
-Extensions Materialization — PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
+"""Extensions materialization: PostgreSQL OLTP -> DuckDB staging -> LadybugDB.
 
-Connector-agnostic: materializes whatever is in the extensions tenant schema,
-regardless of which connector (QuickBooks, Xero, Plaid, native) put it there.
+Connector-agnostic — it materializes whatever is in the extensions tenant
+schema, whichever connector (QuickBooks, Xero, Plaid, native) wrote it.
 
-Uses DuckDB's postgres_scanner extension to read directly from the extensions
-database, transform OLTP rows into graph-shaped staging tables, then materialize
-via the Arrow record-batch streaming handoff (DuckDB result vectors → Arrow →
-LadybugDB COPY, no intermediate file).
+DuckDB's ``postgres_scanner`` reads the extensions database directly and shapes
+each OLTP table into a graph-shaped staging table; the handoff to LadybugDB is
+an Arrow record-batch stream (DuckDB result vectors -> Arrow -> COPY), with no
+intermediate file. All of it runs on the instance that holds the graph::
 
-Architecture:
-  Dagster sensor / worker task → ExtensionsMaterializer.materialize(graph_id, entity_id)
-    → get_graph_client(graph_id, operation_type="write")  # routes to correct EC2
-    → client.query_table(sql)  # DuckDB postgres_scan → staging tables
-    → client.materialize_table(table_name)  # DuckDB → LadybugDB
+    ExtensionsMaterializer.materialize(graph_id, entity_id)
+      -> get_graph_client(graph_id, operation_type="write")   # routes to EC2
+      -> client.query_table(sql)                              # -> staging table
+      -> client.materialize_table(table_name)                 # -> LadybugDB
+
+Order is a correctness constraint, not an optimization: ``NODE_TABLES`` runs
+before ``RELATIONSHIP_TABLES``, and both lists are ordered so an edge's
+endpoints are always staged first.
 """
 
 import time
@@ -26,7 +28,11 @@ if TYPE_CHECKING:
 
 from robosystems.logger import logger
 
-# Association types that downstream graph queries might need:
+# Association types the graph renderer needs. Anything omitted here exists in
+# OLTP but is invisible to the graph — dropping `mapping`, for instance, empties
+# every report while the CoA mappings still sit in PostgreSQL. Used as
+# ``WHERE association_type IN <_MATERIALIZED_ASSOCIATION_TYPES>`` in the four
+# SQL strings below.
 #   presentation     — rendering hierarchies on Reporting Style structures
 #   mapping          — CoA → rs-gaap projection
 #   calculation      — XBRL rollup arcs
@@ -34,12 +40,7 @@ from robosystems.logger import logger
 #   equivalence      — FAC ↔ rs-gaap bridge
 #   definition       — XBRL definition arcs (dimensions, hypercubes)
 #   derivation       — derived-from arcs
-#   has-part         — cm:Debit/cm:Credit posting-role arcs (schedule debit/credit legs)
-# Limiting to a single type makes any of these invisible to the graph
-# renderer. Originally scoped to 'presentation' only, which made CoA→rs-gaap
-# mappings invisible (and reports empty) even when the mappings existed in
-# OLTP. Used as ``WHERE association_type IN <_MATERIALIZED_ASSOCIATION_TYPES>``
-# in each of the four SQL strings below.
+#   has-part         — cm:Debit/cm:Credit posting-role arcs (schedule legs)
 _MATERIALIZED_ASSOCIATION_TYPES: tuple[str, ...] = (
   "presentation",
   "mapping",
@@ -358,16 +359,12 @@ def validate_materializer_against_schema() -> None:
 
 
 def build_postgres_connstr() -> str:
-  """Build a postgres_scanner connection string for the extensions database.
+  """Connection string for ``postgres_scan()`` against the extensions database.
 
-  IMPORTANT: This connection string is used by DuckDB's postgres_scanner
-  running INSIDE the Graph API process. The host must be reachable from
-  that process's network context:
-  - Production: RDS endpoint (via DATABASE_ENDPOINT env var on graph instances)
-  - Local dev: Docker service hostname (via DATABASE_ENDPOINT in container .env)
-
-  Returns:
-      Connection string for DuckDB's postgres_scan() function.
+  The scanner runs inside the *Graph API* process, so the host has to be
+  reachable from there, not from the caller: the RDS endpoint in production,
+  the Docker service hostname locally. Both come from ``DATABASE_ENDPOINT`` in
+  that process's environment.
   """
   from robosystems.config import env
 
@@ -386,17 +383,13 @@ def build_postgres_connstr() -> str:
 
 
 def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
-  """Build staging SQL for all node and relationship tables.
+  """``{table_name: CREATE TABLE SQL}`` for every node and relationship table.
 
-  Each SQL statement creates a DuckDB table from postgres_scan() that
-  matches the graph schema column layout. The materialization endpoint
-  will then COPY these into LadybugDB.
-
-  Returns:
-      Dict mapping table name → CREATE TABLE SQL.
+  Each statement builds a DuckDB table from ``postgres_scan()`` whose columns
+  match the graph schema exactly, ready to COPY into LadybugDB.
   """
   c = connstr  # shorthand for SQL interpolation
-  s = graph_id  # schema name (tenant schema in extensions database)
+  s = graph_id  # tenant schema name in the extensions database
 
   tables: dict[str, str] = {}
 
@@ -443,10 +436,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
         WHEN e.external_source = 'plaid' THEN 'plaid:' || e.code
         -- Library/taxonomy concepts (rs-gaap, fac, us-gaap, cm, disclosures,
         -- styles, …) already carry a canonical namespaced qname; emit it
-        -- verbatim so report-concept facts stay rs-gaap:X, not rl:rs-gaap:X
-        -- (the double prefix broke build-fact-grid and every canonical
-        -- consumer on tenant graphs). Native/import/system CoA accounts keep
-        -- the 'rl:' tenant prefix.
+        -- verbatim. Re-prefixing would yield rl:rs-gaap:X, which no canonical
+        -- consumer (build-fact-grid included) recognises. Native/import/system
+        -- CoA accounts do take the 'rl:' tenant prefix.
         WHEN e.source NOT IN ('native', 'import', 'system')
           THEN COALESCE(e.qname, e.code)
         ELSE 'rl:' || e.code
@@ -1328,22 +1320,16 @@ class ExtensionsMaterializer:
     entity_id: str | None = None,
     rebuild: bool = True,
   ) -> MaterializeResult:
-    """Run full materialization: stage from PostgreSQL, then materialize to LadybugDB.
+    """Stage from PostgreSQL, then materialize into the graph.
 
-    Uses blue-green swap when the database already exists: builds a WIP copy
-    alongside the active graph, swaps on success. The active graph serves
-    queries throughout the rebuild — downtime is milliseconds.
+    ``graph_id`` is both the graph database and the tenant schema name;
+    ``entity_id`` defaults to ``entity_{graph_id}``.
 
-    For first-time creation, uses direct creation (no swap needed).
-
-    Args:
-        graph_id: Graph database identifier (also the tenant schema name).
-        entity_id: Entity node identifier in the graph. Defaults to "entity_{graph_id}".
-        rebuild: If True, rebuild the graph. Blue-green swap when database exists,
-                 direct creation when it doesn't.
-
-    Returns:
-        MaterializeResult with staging and materialization statistics.
+    An existing database takes the blue-green path: a WIP copy is built
+    alongside the live graph and swapped in on success, so the live graph keeps
+    serving queries and downtime is the length of a file rename. First-time
+    creation builds in place. Errors are collected on the result rather than
+    raised — check ``status``.
     """
     from robosystems.graph_api.client.factory import get_graph_client
 
@@ -1361,10 +1347,9 @@ class ExtensionsMaterializer:
       result.duration_ms = (time.time() - start_time) * 1000
       return result
 
-    # Publish busy counter on the target instance for GHA pre-refresh
-    # coordination. Per-graph materialization lock is already handled by
-    # _materialize_blue_green below; this is the complementary per-instance
-    # signal that tells GHA refresh workflows to wait.
+    # Per-instance busy signal so ASG refresh workflows wait rather than
+    # cycling the node mid-rebuild. The per-graph lock is separate and lives in
+    # _materialize_blue_green.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_EXTENSIONS_MATERIALIZE,
       begin_destructive_op,
@@ -1379,10 +1364,8 @@ class ExtensionsMaterializer:
         db_exists = await client.database_exists(graph_id)
 
         if db_exists and rebuild:
-          # Blue-green path: build WIP, swap on success
           await self._materialize_blue_green(client, graph_id, entity_id, result)
         else:
-          # Direct path: first-time creation or non-rebuild
           await self._materialize_direct(client, graph_id, entity_id, rebuild, result)
 
     except Exception as e:
@@ -1412,22 +1395,22 @@ class ExtensionsMaterializer:
     rebuild: bool,
     result: MaterializeResult,
   ) -> None:
-    """Direct materialization path (first-time creation or non-rebuild)."""
-    # Step 1: Ensure LadybugDB database exists with schema
+    """Build in place — for first-time creation, or when ``rebuild`` is False.
+
+    Unlike the blue-green path there is no fallback copy: a failure part-way
+    leaves the graph in whatever state it reached.
+    """
     await self._ensure_database(client, graph_id, rebuild)
 
-    # Step 2: Build connection string for postgres_scanner
     connstr = build_postgres_connstr()
 
-    # Step 3: Look up which extensions are enabled on this graph so we only
-    # stage and materialize tables whose graph node/rel tables actually exist.
+    # Only stage tables whose extension is enabled — the others have no
+    # node/rel table in LadybugDB to materialize into.
     enabled_extensions = set(await self._get_graph_extensions(graph_id))
 
-    # Step 4: Stage the filtered table set from PostgreSQL → DuckDB
     staging_sql = _staging_sql(graph_id, entity_id, connstr)
     await self._stage_tables(client, graph_id, staging_sql, result, enabled_extensions)
 
-    # Step 5: Materialize from DuckDB → LadybugDB
     await self._materialize_tables(client, graph_id, result)
 
   async def _materialize_blue_green(
@@ -1437,12 +1420,14 @@ class ExtensionsMaterializer:
     entity_id: str,
     result: MaterializeResult,
   ) -> None:
-    """Blue-green materialization: build WIP alongside active, swap on success.
+    """Build ``{graph_id}-wip`` alongside the live graph and swap on success.
 
-    The active graph serves queries throughout. Downtime is only the
-    milliseconds of the file rename swap.
+    The live graph serves queries throughout; downtime is the length of the
+    file rename. Only a fully clean build is swapped in — a partial one is
+    discarded so the last good graph stays active.
 
-    Acquires a per-graph materialization lock to prevent concurrent rebuilds.
+    Holds a per-graph materialization lock. If Valkey is unavailable the
+    rebuild proceeds unlocked, so concurrent rebuilds become possible.
     """
     from robosystems.graph_api.core.ladybug.materialization_lock import (
       MaterializationLock,
@@ -1454,7 +1439,6 @@ class ExtensionsMaterializer:
     logger.info(f"Blue-green materialization: building WIP {wip_id}")
 
     try:
-      # Step 0: Acquire per-graph materialization lock
       try:
         from robosystems.config.valkey_registry import (
           ValkeyDatabase,
@@ -1476,7 +1460,7 @@ class ExtensionsMaterializer:
       except Exception as e:
         logger.warning(f"Could not acquire materialization lock: {e}")
 
-      # Step 1: Clean up any leftover WIP from a previous failed run
+      # A leftover WIP means a previous run died before cleanup.
       wip_exists = await client.database_exists(wip_id)
       if wip_exists:
         logger.info(f"Cleaning up leftover WIP database {wip_id}")
@@ -1484,39 +1468,33 @@ class ExtensionsMaterializer:
           wip_id, preserve_duckdb=True, lock_token=lock.token if lock else None
         )
 
-      # Step 2: Create fresh WIP database with schema. Mark it is_subgraph so
-      # its creation bypasses the per-node max_databases cap — on a dedicated
-      # single-database instance the live primary already fills the quota, and
-      # the transient WIP would otherwise be rejected ("Maximum database
-      # capacity reached"). The WIP is deleted after the swap.
+      # is_subgraph exempts the WIP from the per-node max_databases cap: on a
+      # dedicated single-database instance the live primary already fills the
+      # quota, so the transient WIP would otherwise be rejected outright.
       await self._ensure_database(client, wip_id, rebuild=False, is_subgraph=True)
 
-      # Step 3: Look up which extensions are enabled on this graph so we only
-      # stage and materialize tables whose graph node/rel tables actually exist.
+      # Only stage tables whose extension is enabled — the others have no
+      # node/rel table in LadybugDB to materialize into.
       enabled_extensions = set(await self._get_graph_extensions(graph_id))
 
-      # Step 4: Stage from PostgreSQL → DuckDB (writes to graph_id's DuckDB)
+      # Staging writes into graph_id's DuckDB, so the WIP materializes with
+      # source_graph_id pointing back at it.
       connstr = build_postgres_connstr()
       staging_sql = _staging_sql(graph_id, entity_id, connstr)
       await self._stage_tables(
         client, graph_id, staging_sql, result, enabled_extensions
       )
 
-      # Step 5: Materialize from DuckDB → WIP LadybugDB
-      # Use source_graph_id so the WIP reads from the original graph's DuckDB
       await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
 
-      # Step 6: Swap WIP → active (milliseconds of downtime). Only a fully
-      # clean build ships: a 'partial' WIP (an edge table failed to COPY)
-      # would swap in a ledger whose statements silently render empty, so
-      # the last good graph stays active instead and staleness is left set
-      # for a retry.
+      # Only a clean build ships. A 'partial' WIP — one where an edge table
+      # failed to COPY — would swap in a ledger whose statements render empty,
+      # so the last good graph stays active and staleness is left set to retry.
       if result.status == "success":
         logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
         await client.swap_database(graph_id, lock_token=lock.token if lock else None)
         logger.info(f"Blue-green swap complete for {graph_id}")
       else:
-        # Materialization had errors — abandon WIP, active is untouched
         logger.warning(
           f"Blue-green materialization {result.status} for {graph_id} "
           f"({len(result.errors)} errors), abandoning WIP (active graph untouched)"
@@ -1529,7 +1507,6 @@ class ExtensionsMaterializer:
           logger.warning(f"Failed to clean up WIP {wip_id} after errors: {cleanup_err}")
 
     except Exception as e:
-      # Clean up WIP on failure — active graph is untouched
       logger.error(f"Blue-green materialization failed for {graph_id}: {e}")
       try:
         wip_exists = await client.database_exists(wip_id)
@@ -1543,7 +1520,6 @@ class ExtensionsMaterializer:
         )
       raise
     finally:
-      # Always release the lock
       if lock is not None and lock.acquired:
         await lock.release()
 
@@ -1576,7 +1552,6 @@ class ExtensionsMaterializer:
         graph_id, schema_type="entity", is_subgraph=is_subgraph
       )
 
-      # Install schemas for all extensions on this graph
       extensions = await self._get_graph_extensions(graph_id)
       ddl_parts = []
 
@@ -1597,15 +1572,13 @@ class ExtensionsMaterializer:
         logger.info(f"Installed schema on {graph_id} (extensions: {extensions})")
 
   async def _get_graph_extensions(self, graph_id: str) -> list[str]:
-    """Look up schema_extensions for a graph from the platform database."""
+    """The graph's ``schema_extensions``, defaulting to ``["roboledger"]``."""
     from robosystems.db.platform import SessionFactory
     from robosystems.models.core import Graph
 
-    # Blue-green builds a transient "{graph_id}-wip" database that is not itself
-    # a row in the platform DB. Resolve the source graph so the WIP inherits the
-    # source's full extension set (e.g. roboinvestor) — otherwise the lookup
-    # misses and we fall back to roboledger-only, leaving the WIP without the
-    # roboinvestor node tables and breaking materialization of Portfolio et al.
+    # The blue-green WIP database has no row in the platform DB, so resolve it
+    # back to its source; otherwise the lookup misses, the fallback applies,
+    # and the WIP is built without (say) the roboinvestor node tables.
     graph_id = graph_id.removesuffix("-wip")
 
     try:
@@ -1618,7 +1591,6 @@ class ExtensionsMaterializer:
     except Exception as e:
       logger.warning(f"Could not look up extensions for {graph_id}: {e}")
 
-    # Fallback: at minimum assume roboledger
     return ["roboledger"]
 
   async def _stage_tables(
@@ -1629,12 +1601,12 @@ class ExtensionsMaterializer:
     result: MaterializeResult,
     enabled_extensions: set[str],
   ) -> None:
-    """Execute staging SQL to create DuckDB tables from PostgreSQL via postgres_scanner.
+    """Create the DuckDB staging tables from PostgreSQL via postgres_scanner.
 
-    Only stages tables whose owning extension is enabled on the graph.
-    Tables for non-enabled extensions are skipped entirely — their graph
-    node/rel tables don't exist in LadybugDB, so materializing them would
-    fail with "Table does not exist."
+    Only tables whose owning extension is enabled are staged: the rest have no
+    node/rel table in LadybugDB and would fail with "Table does not exist".
+    A dimension relationship table that fails to stage is treated as
+    non-fatal — a tenant may simply have no dimension data.
     """
     all_tables = _filter_tables_for_extensions(
       NODE_TABLES + RELATIONSHIP_TABLES, enabled_extensions
@@ -1647,15 +1619,13 @@ class ExtensionsMaterializer:
 
       try:
         logger.info(f"Staging {table_name} from PostgreSQL → DuckDB")
-        # CREATE TABLE AS SELECT ... postgres_scan(...) — internal write path
-        # (read-only /tables/query rejects DDL + has postgres_scanner disabled).
+        # Must be the internal write path: the read-only /tables/query surface
+        # rejects DDL and has postgres_scanner disabled.
         await client.execute_write(graph_id, sql.strip(), timeout=120.0)
         result.tables_staged.append(table_name)
       except Exception as e:
         error_msg = f"Failed to stage {table_name}: {e!s}"
         logger.warning(error_msg)
-        # Junction tables may fail if tables don't exist (no dimensions loaded)
-        # — this is non-fatal for dimension relationship tables
         if table_name in RELATIONSHIP_TABLES and "DIMENSION" in table_name:
           logger.info(f"Skipping {table_name} (no dimension data)")
         else:
@@ -1669,24 +1639,18 @@ class ExtensionsMaterializer:
     result: MaterializeResult,
     source_graph_id: str | None = None,
   ) -> None:
-    """Materialize staged DuckDB tables into LadybugDB graph.
+    """COPY the staged DuckDB tables into LadybugDB, nodes before edges.
 
-    Args:
-        client: Graph API client.
-        graph_id: Target LadybugDB database (may be a WIP database).
-        result: MaterializeResult to populate.
-        source_graph_id: If set, read DuckDB staging from this graph instead
-            of graph_id. Used by blue-green: WIP reads from the original graph's DuckDB.
+    ``source_graph_id`` points staging reads at a different graph's DuckDB;
+    blue-green uses it so the WIP database reads the source's staging tables.
+
+    A node failure aborts the whole run. Every edge table has an FK into some
+    node table, so continuing past a missing node produces "Unable to find
+    primary key value" on each dependent edge and a graph full of zero-row edge
+    tables that still reports success. An edge failure is recorded and
+    downgrades the run to ``partial`` but does not abort — one bad edge is not
+    necessarily graph-invalidating.
     """
-    # Materialize nodes first, then relationships.
-    #
-    # Node failures are fatal: every edge table has a FK into some node
-    # table, so a missed node silently produces "Unable to find primary
-    # key value" errors on every edge that references it (the prior
-    # behavior would then log those ERRORs, swallow them, and report the
-    # overall op as a success with thousands of zero-row edge tables).
-    # Edge failures are logged into result.errors but don't abort the
-    # run — an isolated edge problem isn't necessarily graph-invalidating.
     node_tables = set(NODE_TABLES)
     for table_name in result.tables_staged:
       try:
@@ -1712,9 +1676,7 @@ class ExtensionsMaterializer:
             f"so edge tables don't silently load with broken FK targets. "
             f"Original error: {e!s}"
           ) from e
-        # Edge failure: keep going (an isolated edge problem isn't
-        # graph-invalidating for the remaining tables), but the run is no
-        # longer a clean build — callers gating on status must not treat a
-        # graph missing a relationship table as success.
+        # Downgrade to 'partial': callers gating on status must not treat a
+        # graph missing a relationship table as a clean build.
         if result.status == "success":
           result.status = "partial"

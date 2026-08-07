@@ -175,12 +175,7 @@ class LanceMemoryStore:
     return {"added": len(prepared), "total": table.count_rows()}
 
   def update(self, graph_id: str, memory_id: str, row: dict) -> dict:
-    """Update an existing memory by id (never inserts).
-
-    Uses ``when_not_matched_do_nothing`` so a concurrently-deleted memory is NOT
-    resurrected (the kernel checks existence via a separate read first, so this
-    is a strict update; the do-nothing branch closes that read→write TOCTOU).
-    """
+    """Update an existing memory by id; never inserts."""
     self._validate_id(memory_id)
     merged = self._complete_row({**row, "id": memory_id})
     self._check_vector(merged.get("vector"))
@@ -188,7 +183,8 @@ class LanceMemoryStore:
     if table is None:
       return {"id": memory_id, "updated": False}
     # No when_not_matched clause → unmatched source rows are NOT inserted, so a
-    # concurrently-deleted memory is not resurrected (update-only semantics).
+    # memory deleted between the kernel's existence read and this write is not
+    # resurrected.
     table.merge_insert("id").when_matched_update_all().execute([merged])
     updated = bool(table.search().where(f"id = '{memory_id}'").limit(1).to_list())
     return {"id": memory_id, "updated": updated}

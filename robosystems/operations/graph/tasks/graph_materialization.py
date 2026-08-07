@@ -1,11 +1,9 @@
-"""Worker task handler for direct graph materialization.
+"""Worker task for direct (non-Dagster) graph materialization.
 
-Materializes DuckDB staging tables to the graph database (LadybugDB).
-Replaces the BackgroundTasks path in the materialize router for the
-direct (non-Dagster) materialization flow.
-
-The distributed lock is acquired by the router before enqueue and
-released by this task on completion or failure.
+Copies the DuckDB staging tables into LadybugDB. The distributed lock is
+acquired by the router *before* enqueue and released here on completion or
+failure — this task must always release it, or the graph stays locked for the
+lock's full TTL.
 """
 
 from __future__ import annotations

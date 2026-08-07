@@ -1,25 +1,28 @@
-"""Memory management utilities for graph operations.
+"""Temporarily shift memory between DuckDB and LadybugDB on a graph instance.
 
-This module provides functions for temporarily boosting memory allocation
-during heavy operations like DuckDB staging and LadybugDB materialization.
+Both engines share one box, so both run with conservative defaults and only
+the engine doing the heavy work is boosted — DuckDB during staging, LadybugDB
+during materialization — with the default restored afterwards.
 
-The pattern prevents OOM by:
-1. Using conservative default memory limits for both DuckDB and LadybugDB
-2. Temporarily boosting memory ONLY for the system that needs it
-3. Automatically restoring defaults after the operation
+Two shapes, matching two call patterns:
 
-For per-table operations (like materialize endpoint called 36 times),
-use ensure_ladybug_memory_boosted() which only boosts on first call.
+- ``boost_*_memory`` context managers, for a single batch call.
+- ``ensure_*_memory_boosted`` / ``restore_*_memory``, for per-table endpoints
+  invoked many times in a row (SEC materializes ~36 tables); the boost is
+  applied on the first call only, since recreating the LadybugDB database is
+  expensive.
+
+Raising a limit and lowering it back is not the same as freeing memory:
+``release_duckdb_memory`` closes connections, which is what actually returns
+DuckDB's buffers to the OS.
 
 Usage:
-    # For batch operations (single call)
     with boost_duckdb_memory("sec"):
         create_all_staging_tables(...)
 
-    # For per-table operations (called many times)
-    ensure_ladybug_memory_boosted("sec")  # Only boosts first time
+    ensure_ladybug_memory_boosted("sec")  # boosts on the first call only
     materialize_table(...)
-    # Call restore_ladybug_memory() when batch is complete
+    restore_ladybug_memory("sec")  # once the batch is done
 """
 
 from collections.abc import AsyncGenerator, Generator
@@ -36,23 +39,14 @@ _active_ladybug_boosts: set[str] = set()
 
 @contextmanager
 def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
-  """
-  Context manager to temporarily boost DuckDB memory for staging operations.
+  """Raise DuckDB's memory limit to the tier's boost value for the block,
+  reconfiguring open connections, and restore it on exit.
 
-  This sets the DuckDB memory override to the tier's boost value, then
-  restores the previous value (usually None for default) on exit.
-
-  Args:
-      graph_id: The graph being staged (used for logging)
-
-  Yields:
-      The boost memory limit that was applied, or None if no boost configured
+  Yields the applied limit, or None when the tier configures no boost.
 
   Example:
       with boost_duckdb_memory("sec"):
-          # DuckDB now has 55GB instead of 10GB
           create_staging_tables(...)
-      # Memory restored to default 10GB
   """
   from robosystems.graph_api.core.duckdb.pool import (
     get_duckdb_pool,
@@ -69,7 +63,6 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
     logger.info(f"Boosting DuckDB memory to {boost_limit} for staging {graph_id}")
     old_override = set_duckdb_memory_override(boost_limit, graph_id)
 
-    # Reconfigure existing connections to use new limit
     try:
       pool = get_duckdb_pool()
       pool.reconfigure_memory_limit(graph_id, boost_limit)
@@ -82,7 +75,6 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
       logger.info(f"Restoring DuckDB memory to default after staging {graph_id}")
       set_duckdb_memory_override(old_override, graph_id)
 
-      # Reconfigure connections back to default
       try:
         default_limit = GraphTierConfig.get_duckdb_memory_limit(tier) if tier else "2GB"
         pool = get_duckdb_pool()
@@ -90,29 +82,23 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
       except Exception as e:
         logger.warning(f"Could not restore DuckDB memory config: {e}")
   else:
-    # No boost configured, just yield
     yield None
 
 
 @contextmanager
 def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
-  """
-  Context manager to temporarily boost LadybugDB memory for materialization.
+  """Raise LadybugDB's buffer pool to the tier's boost value for the block.
 
-  This sets the LadybugDB memory override to the tier's boost value, recreates
-  the database with the new buffer pool size, then restores on exit.
+  Buffer pool size is fixed at database open, so this recreates the database
+  on the way in and again on the way out. DuckDB connections are closed and
+  idle subgraph databases evicted first, to make the memory actually
+  available.
 
-  Args:
-      graph_id: The graph being materialized (database name)
-
-  Yields:
-      The boost memory limit in MB that was applied, or None if no boost configured
+  Yields the applied limit in MB, or None when the tier configures no boost.
 
   Example:
       with boost_ladybug_memory("sec"):
-          # LadybugDB now has 50GB buffer pool instead of 10GB
           materialize_tables(...)
-      # Memory restored to default 10GB
   """
   from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
@@ -124,8 +110,9 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
     boost_mb = GraphTierConfig.get_ladybug_memory_boost_mb(tier)
 
   if boost_mb:
-    # Free memory before boosting (safe: only reachable on shared tier today,
-    # which has no concurrent API traffic — see ensure_ladybug_memory_boosted)
+    # Free memory before boosting. Safe only because a boost is configured on
+    # the shared tier alone, which serves no concurrent API traffic — see
+    # ensure_ladybug_memory_boosted.
     try:
       release_duckdb_memory(graph_id)
     except Exception as e:
@@ -142,7 +129,6 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
     )
     old_override = set_ladybug_memory_override(boost_mb, graph_id=graph_id)
 
-    # Recreate database with new buffer pool size
     try:
       pool = get_connection_pool()
       pool.recreate_database(graph_id)
@@ -157,14 +143,12 @@ def boost_ladybug_memory(graph_id: str) -> Generator[int | None]:
       )
       set_ladybug_memory_override(old_override, graph_id=graph_id)
 
-      # Recreate database with restored memory
       try:
         pool = get_connection_pool()
         pool.recreate_database(graph_id)
       except Exception as e:
         logger.warning(f"Could not restore LadybugDB memory config: {e}")
   else:
-    # No boost configured, just yield
     yield None
 
 
@@ -183,20 +167,11 @@ async def boost_ladybug_memory_async(graph_id: str) -> AsyncGenerator[int | None
 
 
 def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
-  """
-  Ensure DuckDB memory is boosted for a graph, only boosting if not already active.
+  """Boost DuckDB memory for a graph unless it is already boosted.
 
-  This is designed for per-table operations where the endpoint is called many times
-  (e.g., staging endpoint called 36 times for SEC). It only applies the boost
-  on the first call.
-
-  Call restore_duckdb_memory(graph_id) when the batch is complete.
-
-  Args:
-      graph_id: The graph being staged
-
-  Returns:
-      The boost memory limit if newly boosted, or None if already boosted or no boost configured
+  For per-table endpoints called many times in a batch. Returns the boost
+  limit when this call applied it, None when it was already active or the tier
+  configures no boost. Pair with ``restore_duckdb_memory`` at end of batch.
   """
   from robosystems.graph_api.core.duckdb.pool import (
     get_duckdb_memory_override,
@@ -204,7 +179,6 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
     set_duckdb_memory_override,
   )
 
-  # Check if boost is configured for this tier
   tier = env.CLUSTER_TIER
   if not tier:
     return None
@@ -213,7 +187,7 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
   if not boost_limit:
     return None
 
-  # Check if override is already set for this graph (actual state, not tracking set)
+  # Trust the override itself, not the tracking set, as the state of record.
   current_override = get_duckdb_memory_override(graph_id)
   if current_override:
     logger.debug(
@@ -222,7 +196,7 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
     _active_duckdb_boosts.add(graph_id)
     return None
 
-  # Apply boost (or re-apply if tracking set was stale from a previous cancelled run)
+  # A stale tracking entry means a previous run was cancelled; re-apply.
   if graph_id in _active_duckdb_boosts:
     logger.warning(
       f"DuckDB tracking set had stale entry for {graph_id} "
@@ -233,7 +207,6 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
   set_duckdb_memory_override(boost_limit, graph_id)
   _active_duckdb_boosts.add(graph_id)
 
-  # Reconfigure existing connections
   try:
     pool = get_duckdb_pool()
     pool.reconfigure_memory_limit(graph_id, boost_limit)
@@ -244,14 +217,11 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
 
 
 def restore_duckdb_memory(graph_id: str) -> bool:
-  """
-  Restore DuckDB memory to default after staging is complete.
+  """Drop DuckDB back to the tier default after staging.
 
-  Args:
-      graph_id: The graph that was staged
-
-  Returns:
-      True if memory was restored, False if wasn't boosted or error occurred
+  Returns False if the graph was not boosted or the restore failed. This
+  lowers the cap only; use ``release_duckdb_memory`` to hand buffers back to
+  the OS.
   """
   from robosystems.graph_api.core.duckdb.pool import (
     get_duckdb_pool,
@@ -264,11 +234,9 @@ def restore_duckdb_memory(graph_id: str) -> bool:
 
   _active_duckdb_boosts.discard(graph_id)
 
-  # Clear override for this graph
   logger.info(f"Restoring DuckDB memory to default after {graph_id}")
   set_duckdb_memory_override(None, graph_id)
 
-  # Reconfigure connections back to default
   tier = env.CLUSTER_TIER
   try:
     default_limit = GraphTierConfig.get_duckdb_memory_limit(tier) if tier else "2GB"
@@ -286,28 +254,21 @@ def is_duckdb_memory_boosted(graph_id: str) -> bool:
 
 
 def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
-  """
-  Evict idle subgraph databases to free their buffer pool memory.
+  """Close idle subgraph databases so their buffer pools free up, returning the
+  names evicted.
 
-  Subgraphs are identified by containing an underscore (e.g., sec_historical).
-  The target graph and any graph with active connections are skipped.
-
-  Args:
-      pool: The LadybugDB connection pool
-      target_graph_id: The graph being boosted (will not be evicted)
-
-  Returns:
-      List of database names that were evicted
+  Subgraphs are the ones whose name carries an underscore
+  (``parent_subgraph``). The target graph and anything with live connections
+  are left alone.
   """
   evicted = []
   for db_name in pool.list_databases():
-    # Skip the target graph — it will be recreated with the boost
+    # The target is skipped — it gets recreated with the boost.
     if db_name == target_graph_id:
       continue
-    # Only evict subgraphs (contain underscore: parent_subgraph)
     if "_" not in db_name:
       continue
-    # Skip databases with active connections (someone is querying)
+    # Someone is querying it.
     if pool.has_active_connections(db_name):
       continue
     try:
@@ -324,20 +285,12 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
 
 
 def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
-  """
-  Ensure LadybugDB memory is boosted for a graph, only boosting if not already active.
+  """Boost LadybugDB memory for a graph unless it is already boosted.
 
-  This is designed for per-table operations where the endpoint is called many times
-  (e.g., materialize endpoint called 36 times for SEC). It only applies the boost
-  on the first call, avoiding expensive database recreation on subsequent calls.
-
-  Call restore_ladybug_memory(graph_id) when the batch is complete.
-
-  Args:
-      graph_id: The graph being materialized
-
-  Returns:
-      The boost memory in MB if newly boosted, or None if already boosted or no boost configured
+  For per-table endpoints called many times in a batch: boosting on the first
+  call only avoids recreating the database (and refilling its buffer pool) on
+  every subsequent one. Returns the boost in MB when this call applied it,
+  None otherwise. Pair with ``restore_ladybug_memory`` at end of batch.
   """
   from robosystems.graph_api.core.ladybug.config import (
     get_ladybug_memory_override,
@@ -345,7 +298,6 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   )
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
 
-  # Check if boost is configured for this tier
   tier = env.CLUSTER_TIER
   if not tier:
     return None
@@ -354,7 +306,7 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   if not boost_mb:
     return None
 
-  # Check if override is already set for this specific graph (actual state, not tracking set)
+  # Trust the override itself, not the tracking set, as the state of record.
   current_override = get_ladybug_memory_override(graph_id)
   if current_override:
     logger.debug(
@@ -363,24 +315,22 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
     _active_ladybug_boosts.add(graph_id)
     return None
 
-  # If tracking set says boosted but override is gone, log stale entry
+  # A stale tracking entry means a previous run was cancelled; re-apply.
   if graph_id in _active_ladybug_boosts:
     logger.warning(
       f"LadybugDB tracking set had stale entry for {graph_id} "
       f"(override was cleared but tracking set was not). Re-applying boost."
     )
 
-  # NOTE: The operations below (DuckDB release, subgraph eviction) are currently
-  # only reachable on the shared tier (the only tier with ladybug_memory_boost_mb
-  # configured). The shared master has no API traffic during Dagster builds, so
-  # closing connections and evicting databases is safe.
-  #
-  # If boost configs are added to customer tiers (standard/large/xlarge) in the
-  # future, these operations need API-aware guards because those instances serve
-  # live query traffic concurrently with ingestion/materialization.
+  # The DuckDB release and subgraph eviction below are reachable only on the
+  # shared tier, the only one with ladybug_memory_boost_mb configured, whose
+  # master serves no API traffic during Dagster builds. Adding a boost config
+  # to a customer tier (standard/large/xlarge) requires API-aware guards here
+  # first: those instances serve live queries during materialization.
 
-  # Release DuckDB connections for this graph — staging is complete by the time
-  # materialization starts, so these connections are idle but still hold buffer memory.
+  # Staging is finished by the time materialization starts, so these DuckDB
+  # connections are idle but still holding buffer memory. Closing them is what
+  # hands it back.
   try:
     result = release_duckdb_memory(graph_id)
     if result.get("connections_closed", 0) > 0:
@@ -391,9 +341,8 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   except Exception as e:
     logger.warning(f"Could not release DuckDB memory before boost: {e}")
 
-  # Evict idle subgraph databases to reclaim their buffer pool memory.
-  # Only subgraphs are evicted — the target graph will be recreated with
-  # the boost, and there's only one primary graph per instance.
+  # Only subgraphs are evicted: the target graph is recreated with the boost,
+  # and there is only one primary graph per instance.
   try:
     pool = get_connection_pool()
     evicted = _evict_idle_subgraph_databases(pool, graph_id)
@@ -404,12 +353,11 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   except Exception as e:
     logger.warning(f"Could not evict idle databases before boost: {e}")
 
-  # Apply boost (scoped to this specific database)
   logger.info(f"Boosting LadybugDB memory to {boost_mb}MB for {graph_id}")
   set_ladybug_memory_override(boost_mb, graph_id=graph_id)
   _active_ladybug_boosts.add(graph_id)
 
-  # Recreate database with new buffer pool size
+  # Buffer pool size is fixed at open, so the database must be recreated.
   try:
     pool = get_connection_pool()
     pool.recreate_database(graph_id)
@@ -420,16 +368,10 @@ def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
 
 
 def restore_ladybug_memory(graph_id: str) -> bool:
-  """
-  Restore LadybugDB memory to default after materialization is complete.
+  """Drop LadybugDB back to the tier default once a materialize batch is done,
+  recreating the database with the smaller buffer pool.
 
-  This should be called when a batch of materialize operations is complete.
-
-  Args:
-      graph_id: The graph that was materialized
-
-  Returns:
-      True if memory was restored, False if wasn't boosted or error occurred
+  Returns False if the graph was not boosted or the restore failed.
   """
   from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
@@ -440,11 +382,9 @@ def restore_ladybug_memory(graph_id: str) -> bool:
 
   _active_ladybug_boosts.discard(graph_id)
 
-  # Clear override for this specific graph (per-database scoping)
   logger.info(f"Restoring LadybugDB memory to default after {graph_id}")
   set_ladybug_memory_override(None, graph_id=graph_id)
 
-  # Recreate database with default memory
   try:
     pool = get_connection_pool()
     pool.recreate_database(graph_id)
@@ -460,36 +400,24 @@ def is_ladybug_memory_boosted(graph_id: str) -> bool:
 
 
 def release_duckdb_memory(graph_id: str) -> dict[str, int | bool]:
-  """
-  Release DuckDB memory by closing all connections for a graph.
+  """Close every DuckDB connection for a graph, returning the buffers to the OS.
 
-  Unlike restore_duckdb_memory (which only reconfigures limits), this function
-  actually closes connections to force DuckDB to release its buffer memory
-  back to the OS.
-
-  Call this after staging operations complete to free memory.
-
-  Args:
-      graph_id: The graph whose connections should be closed
-
-  Returns:
-      Dict with connections_closed count and success status
+  ``restore_duckdb_memory`` only lowers the configured limit; closing the
+  connections is what actually frees memory. Call this once staging is done,
+  before LadybugDB needs the room. Returns connections_closed and success.
   """
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
   try:
     pool = get_duckdb_pool()
 
-    # Get connection count before closing
     connections_before = 0
     if graph_id in pool._pools:
       connections_before = len(pool._pools[graph_id])
 
-    # Close all connections - this releases DuckDB's buffer memory
     pool.close_database_connections(graph_id)
 
-    # Clear the memory override so new connections use the tier default.
-    # Without this, new DuckDB connections (e.g., during materialization)
+    # Clear the override too, or new connections opened during materialization
     # pick up the stale boost and compete with LadybugDB for memory.
     from robosystems.graph_api.core.duckdb.pool import set_duckdb_memory_override
 
@@ -513,18 +441,10 @@ def release_duckdb_memory(graph_id: str) -> dict[str, int | bool]:
 
 
 def release_ladybug_memory(graph_id: str, aggressive: bool = True) -> dict[str, bool]:
-  """
-  Release LadybugDB memory by forcing database cleanup.
+  """Close a graph's LadybugDB database to release its buffer pool.
 
-  This closes connections and optionally performs aggressive cleanup
-  (GC, malloc_trim) to return memory to the OS.
-
-  Args:
-      graph_id: The graph whose memory should be released
-      aggressive: If True, run GC and malloc_trim for maximum memory release
-
-  Returns:
-      Dict with success status
+  With ``aggressive`` (the default), also runs GC and ``malloc_trim`` so glibc
+  hands the freed arenas back to the OS rather than retaining them.
   """
   from robosystems.graph_api.core.ladybug.pool import get_connection_pool
 

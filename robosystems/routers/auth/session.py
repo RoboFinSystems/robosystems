@@ -237,7 +237,6 @@ async def refresh_session(
           status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
 
-    # Get user
     user = User.get_by_id(user_id, session)
     if not user or not user.is_active:
       raise HTTPException(

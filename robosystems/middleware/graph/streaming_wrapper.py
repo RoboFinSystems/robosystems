@@ -1,8 +1,7 @@
-"""
-Streaming wrapper for Graph API clients.
+"""Streaming query support for Graph API clients.
 
-This module provides streaming query support for repositories that use
-the Graph API client, enabling memory-efficient processing of large result sets.
+Lets callers process large result sets in chunks instead of materializing
+every row.
 """
 
 import time
@@ -13,42 +12,24 @@ from robosystems.logger import logger
 
 
 class StreamingRepositoryWrapper:
-  """
-  Wrapper that adds streaming support to Graph API client repositories.
+  """Wrapper that adds streaming support to Graph API client repositories.
 
   This wrapper checks if the underlying client supports streaming and
   provides the execute_query_streaming method for the repository layer.
   """
 
   def __init__(self, client):
-    """
-    Initialize the streaming wrapper.
-
-    Args:
-        client: The Graph API client (sync or async)
-    """
+    """Initialize the streaming wrapper."""
     self.client = client
 
   async def execute_query_streaming(
     self, cypher: str, params: dict[str, Any] | None = None, chunk_size: int = 1000
   ) -> AsyncIterator[dict[str, Any]]:
-    """
-    Execute a query and stream results in chunks.
-
-    Args:
-        cypher: The Cypher query to execute
-        params: Optional query parameters
-        chunk_size: Number of rows per chunk
-
-    Yields:
-        Dict containing chunk data in streaming format
-    """
+    """Execute a query and stream results in chunks."""
     start_time = time.time()
 
-    # Check if client has the query method with streaming support
     if hasattr(self.client, "query"):
       try:
-        # Get graph_id from client if available
         graph_id = getattr(self.client, "graph_id", "unknown")
 
         # Call the query method with streaming=True
@@ -68,14 +49,11 @@ class StreamingRepositoryWrapper:
             # The graph database instance already provides properly formatted chunks
             # Just pass them through with minimal processing
             if isinstance(chunk, dict):
-              # Track total rows for logging
               total_rows = chunk.get("total_rows_sent", total_rows)
 
-              # Ensure chunk index if missing
               if "chunk_index" not in chunk:
                 chunk["chunk_index"] = chunk_count - 1
 
-              # Add timing to last chunk
               if chunk.get("is_last_chunk"):
                 if "execution_time_ms" not in chunk:
                   chunk["execution_time_ms"] = (time.time() - start_time) * 1000
@@ -128,17 +106,7 @@ class StreamingRepositoryWrapper:
   async def _convert_to_chunks(
     self, result: Any, chunk_size: int, start_time: float
   ) -> AsyncIterator[dict[str, Any]]:
-    """
-    Convert a regular query result to streaming chunks.
-
-    Args:
-        result: Query result (list of dicts or response object)
-        chunk_size: Number of rows per chunk
-        start_time: Query start time
-
-    Yields:
-        Dict containing chunk data
-    """
+    """Convert a regular query result to streaming chunks."""
     # Handle different result formats
     if isinstance(result, dict) and "data" in result:
       # Result is a response object
@@ -178,26 +146,16 @@ class StreamingRepositoryWrapper:
 
 
 def add_streaming_support(client):
-  """
-  Add streaming support to a Graph API client.
+  """Add streaming support to a Graph API client.
 
   This function wraps the client with streaming capabilities if it doesn't
   already have them.
-
-  Args:
-      client: The Graph API client to wrap
-
-  Returns:
-      Client with execute_query_streaming method
   """
-  # Check if client already has streaming support
   if hasattr(client, "execute_query_streaming"):
     return client
 
-  # Create wrapper
   wrapper = StreamingRepositoryWrapper(client)
 
-  # Add the streaming method to the client
   client.execute_query_streaming = wrapper.execute_query_streaming
 
   return client

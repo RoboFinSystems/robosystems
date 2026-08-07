@@ -76,7 +76,6 @@ def get_agent_activity(
   if agent is None:
     return None
 
-  # Recent events for this agent
   events = (
     session.execute(
       select(Event)
@@ -88,7 +87,6 @@ def get_agent_activity(
     .all()
   )
 
-  # Recent transactions triggered by those events
   event_ids = [e.id for e in events]
   transactions = []
   if event_ids:
@@ -116,7 +114,6 @@ def get_agent_activity(
       for t in txns
     ]
 
-  # Counts
   event_count = session.execute(
     select(func.count()).select_from(Event).where(Event.agent_id == agent_id)
   ).scalar_one()

@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-"""Materialize a 4-IB Report for the Seattle Method demo graph and
-render it to markdown.
+"""Materialize the four-statement rs-gaap Report and render it to markdown.
 
-Sibling to ``reconcile.py``. Where ``reconcile.py`` produces the
-*source-vocabulary* (mini) cross-check against Charlie Hoffman's
-published facts, this script produces the canonical *rs-gaap*
-presentation — driven by the Report architecture:
+The other half of the cross-taxonomy demonstration. ``reconcile.py`` checks
+the same postings in their *source* vocabulary (mini) against Charlie
+Hoffman's published facts; this script renders them in the *canonical* one
+(rs-gaap), producing a balance sheet, income statement, cash flow statement
+and statement of changes in equity from the identical 14 journal entries.
+
+Three steps:
 
 1. ``POST /extensions/roboledger/{graph_id}/operations/create-report``
-   materializes a Report with 4 attached Information Blocks (BS, IS,
-   CF, SE) and their FactSets.
-2. ``statement(reportId, blockType)`` GraphQL queries fetch each
-   rendered statement (rows with depth + is_subtotal).
-3. Markdown rendering with anchor totals and per-statement tables.
+   materializes a Report with four attached Information Blocks and their
+   FactSets.
+2. One ``statement(reportId, blockType)`` GraphQL query per block type
+   fetches the rendered rows, each with its depth and subtotal flag.
+3. Markdown rendering, with anchor totals and a table per statement.
+
+Prerequisites: ``just demo-seattle-method`` has run against the graph, so the
+CoA, mappings and journal entries are in place.
+
+Run it (the orchestrator runs this as step 8):
+    just demo-seattle-method-create-report <graph_id>
+    just demo-seattle-method-create-report          # cached graph slot
 
 Writes ``output/seattle-method-case-1-four-statements.md``.
-
-Usage:
-    uv run python -m examples.seattle_method_demo.create_report <graph_id>
-    uv run python -m examples.seattle_method_demo.create_report  # uses cached
 """
 
 from __future__ import annotations
@@ -76,7 +81,7 @@ def _post(base_url: str, api_key: str, path: str, body: dict) -> dict:
     headers={
       "X-API-Key": api_key,
       "Content-Type": "application/json",
-      # uuid4 instead of timestamp so back-to-back runs in the same
+      # uuid4 rather than a timestamp, so back-to-back runs within the same
       # second don't collide on the idempotency-key cache.
       "Idempotency-Key": f"sm-case-1-{uuid.uuid4()}",
     },
@@ -222,8 +227,8 @@ def find_value(rows: list[dict], qname: str) -> float | None:
 def _period_label(period: dict | None) -> str:
   """Format a period dict as ``YYYY-MM-DD → YYYY-MM-DD`` for the header.
 
-  Returns ``"—"`` when the period is missing — defensive guard against
-  a single-period render where no comparative is returned.
+  Returns ``"—"`` when the period is missing, as in a single-period render
+  with no comparative.
   """
   if not period:
     return "—"

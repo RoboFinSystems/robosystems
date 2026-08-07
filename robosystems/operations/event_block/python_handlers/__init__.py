@@ -21,9 +21,9 @@ Current handlers:
     `obligated_by_event_id`. Emitted by ScheduleService.create_schedule.
   - schedule_entry_due: a schedule period matured — handler drafts the
     closing entry from the schedule's pre-computed fact.
-  - asset_disposed: an asset left the business — handler atomically
-    truncates the depreciation schedule, drops its SumEquals rule, and
-    posts the balanced disposal entry.
+  - asset_disposed: an asset left the business — handler atomically voids
+    the depreciation schedule's remaining obligations, drops its SumEquals
+    rule, and posts the balanced disposal entry.
 """
 
 from .registry import EVENT_BLOCK_PYTHON_REGISTRY, get_python_handler

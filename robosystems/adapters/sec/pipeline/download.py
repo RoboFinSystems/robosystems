@@ -53,9 +53,6 @@ def sec_raw_filings(
 
   Uses BackfillPolicy.single_run() to run all partitions sequentially in a single
   run, preventing SEC rate limiting during backfills.
-
-  Returns:
-      MaterializeResult with download statistics
   """
   import asyncio
 

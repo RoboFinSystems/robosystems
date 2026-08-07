@@ -1,9 +1,9 @@
-"""
-Schema-Driven LadybugDB Database Ingestion Operations
+"""Bulk ingestion of processed parquet into a LadybugDB database.
 
-This module provides core operations for ingesting processed SEC data into graph databases.
-All mapping logic is now schema-driven - no hardcoded arrays.
-These are reusable pipeline operations, not one-off scripts.
+File-to-table mapping, primary keys, and relationship endpoints are all read
+from the compiled schema, so adding a node or relationship type needs no change
+here. Nodes are always ingested before relationships — a relationship COPY
+fails on an endpoint whose node row does not yet exist.
 """
 
 import os
@@ -28,34 +28,27 @@ _schema_adapter_cache: dict[str, XBRLSchemaConfigGenerator] = {}
 def _get_cached_schema_adapter(
   schema_config: dict | None = None,
 ) -> XBRLSchemaConfigGenerator:
-  """
-  Get a cached schema adapter to avoid recompilation.
+  """Return a schema adapter, compiling and caching it on first use.
 
-  Args:
-      schema_config: Schema configuration dict
-
-  Returns:
-      Cached or new schema adapter
+  Compilation is expensive enough that recompiling per file dominates ingest
+  time; the cache is process-local and never invalidated, so a schema change
+  needs a restart.
   """
-  # Create a cache key from the schema config
   if schema_config:
     cache_key = f"{schema_config.get('name', 'custom')}_{schema_config.get('base_schema', 'base')}_{'_'.join(schema_config.get('extensions', []))}"
   else:
     cache_key = "roboledger_default"
 
-  # Check cache
   if cache_key in _schema_adapter_cache:
     logger.debug(f"Using cached schema adapter: {cache_key}")
     return _schema_adapter_cache[cache_key]
 
-  # Create new adapter
   logger.info(f"Creating new schema adapter: {cache_key}")
   if schema_config:
     adapter = XBRLSchemaConfigGenerator(schema_config)
   else:
     adapter = create_roboledger_ingestion_processor()
 
-  # Cache it
   _schema_adapter_cache[cache_key] = adapter
 
   return adapter
@@ -67,17 +60,10 @@ def ingest_from_s3(
   s3_prefix: str = "processed/",
   schema_config: dict | None = None,
 ) -> bool:
-  """
-  Ingest processed parquet files from S3 into graph database.
+  """Download parquet under ``s3_prefix`` and ingest it into ``db_name``.
 
-  Args:
-      bucket: S3 bucket containing processed files
-      db_name: Name of the target graph database
-      s3_prefix: S3 prefix for processed files
-      schema_config: Schema configuration dict (defaults to base + roboledger)
-
-  Returns:
-      bool: True if ingestion successful, False otherwise
+  An empty prefix is success, not failure. ``schema_config`` defaults to base +
+  roboledger.
   """
   try:
     import boto3
@@ -86,12 +72,11 @@ def ingest_from_s3(
       f"Starting schema-driven LadybugDB ingestion from S3: {bucket}/{s3_prefix} -> {db_name}"
     )
 
-    # Setup S3 client with S3-specific credentials
     s3_config = env.get_s3_config()
     endpoint_url = s3_config.get("endpoint_url")
 
     if endpoint_url:
-      # LocalStack test environment
+      # LocalStack (dev/test) takes fixed dummy credentials.
       s3_client = boto3.client(
         "s3",
         endpoint_url=endpoint_url,
@@ -100,7 +85,6 @@ def ingest_from_s3(
         region_name="us-east-1",
       )
     else:
-      # Production with S3-specific credentials
       s3_client = boto3.client(
         "s3",
         aws_access_key_id=s3_config.get("aws_access_key_id"),
@@ -108,9 +92,7 @@ def ingest_from_s3(
         region_name=s3_config.get("region_name"),
       )
 
-    # Download processed files to temporary directory
     with tempfile.TemporaryDirectory() as temp_dir:
-      # List all processed parquet files
       response = s3_client.list_objects_v2(Bucket=bucket, Prefix=s3_prefix)
 
       if "Contents" not in response:
@@ -120,8 +102,7 @@ def ingest_from_s3(
       downloaded_files = []
       for obj in response["Contents"]:
         if obj["Key"].endswith(".parquet"):
-          # Extract just the filename, not the full path
-          # This preserves the original file name for proper table mapping
+          # Keep the bare filename: table mapping keys off it.
           filename = os.path.basename(obj["Key"])
           local_path = Path(temp_dir) / filename
 
@@ -134,7 +115,6 @@ def ingest_from_s3(
         logger.warning("No parquet files to ingest")
         return True
 
-      # Perform local ingestion with schema config
       return ingest_from_local_files(downloaded_files, db_name, schema_config)
 
   except Exception as e:
@@ -145,18 +125,11 @@ def ingest_from_s3(
 def ingest_from_local_files(
   file_paths: list[str], db_name: str, schema_config: dict | None = None
 ) -> bool:
-  """
-  Ingest parquet files from local filesystem into graph database.
+  """Ingest local parquet files into ``db_name``, nodes before relationships.
 
-  Uses schema-driven ingestion logic - no hardcoded mappings.
-
-  Args:
-      file_paths: List of local parquet file paths
-      db_name: Name of the target graph database
-      schema_config: Schema configuration dict (defaults to base + roboledger)
-
-  Returns:
-      bool: True if ingestion successful, False otherwise
+  Creates the schema if the database has none. Returns True when at least one
+  file loaded — a partial load is reported as success, so check the logged
+  ``ingested/total`` counts when completeness matters.
   """
   try:
     from robosystems.graph_api.core.ladybug import Engine
@@ -165,19 +138,15 @@ def ingest_from_local_files(
 
     logger.info(f"Starting LadybugDB ingestion: {len(file_paths)} files -> {db_name}")
 
-    # Initialize LadybugDB engine
     from .path_utils import (
       ensure_lbug_directory,
       get_lbug_database_path,
     )
 
-    # Get the correct database path using the utility
     db_path = get_lbug_database_path(db_name)
 
-    # Ensure database directory exists
     ensure_lbug_directory(db_path)
 
-    # Ensure schema exists (this will only create it if needed)
     logger.info("Checking if schema initialization is needed")
     schema_created = ensure_schema(db_name, schema_config)
     if schema_created:
@@ -188,11 +157,8 @@ def ingest_from_local_files(
     logger.info(f"Opening graph database at: {db_path}")
     engine = Engine(str(db_path))
 
-    # Get cached schema adapter for file pattern matching
-    # This avoids recompiling the schema on every ingestion
     schema_adapter = _get_cached_schema_adapter(schema_config)
 
-    # Categorize files using schema-driven logic
     node_files, relationship_files = _categorize_files_schema_driven(
       file_paths, schema_adapter
     )
@@ -201,7 +167,7 @@ def ingest_from_local_files(
       f"File categorization: {len(node_files)} nodes, {len(relationship_files)} relationships"
     )
 
-    # Process nodes first
+    # Nodes first: a relationship COPY fails on a missing endpoint row.
     ingested_count = 0
 
     for file_path in node_files:
@@ -211,7 +177,6 @@ def ingest_from_local_files(
       ):
         ingested_count += 1
 
-    # Process relationships second
     for file_path in relationship_files:
       table_info = _parse_filename_schema_driven(file_path, schema_adapter)
       if table_info and _ingest_relationship_schema_driven(
@@ -232,19 +197,15 @@ def ingest_from_local_files(
 def _categorize_files_schema_driven(
   file_paths: list[str], schema_adapter: XBRLSchemaConfigGenerator
 ) -> tuple[list[str], list[str]]:
-  """
-  Categorize files into nodes and relationships using schema-driven logic.
-  No hardcoded arrays - everything derived from schema.
+  """Split files into ``(node_files, relationship_files)`` using the schema.
 
-  Returns:
-      Tuple of (node_files, relationship_files)
+  The full path is passed to the adapter, not the basename — the directory
+  often carries the table name.
   """
   node_files = []
   relationship_files = []
 
   for file_path in file_paths:
-    # Use full path for schema-driven detection to leverage directory structure
-    # Pass the full path, not just the filename
     if schema_adapter.is_relationship_file(file_path):
       relationship_files.append(file_path)
     else:
@@ -256,21 +217,15 @@ def _categorize_files_schema_driven(
 def _parse_filename_schema_driven(
   file_path: str, schema_adapter: XBRLSchemaConfigGenerator
 ) -> dict | None:
-  """
-  Parse filename using schema-driven logic to extract table information.
-  No hardcoded mappings - everything derived from schema.
+  """Resolve a file to its table, or None when the schema has no mapping.
 
-  Returns:
-      Dict with table_name, is_relationship, etc.
+  Takes the full path so the directory can contribute the table name.
   """
-  # Pass the full path to preserve directory context for table mapping
-  # The directory name often contains the table name
   table_name = schema_adapter.get_table_name_from_file(file_path)
   if not table_name:
     logger.warning(f"No table mapping found for file: {file_path}")
     return None
 
-  # Get table info from schema
   table_info = schema_adapter.get_table_info(table_name)
   if not table_info:
     logger.warning(f"No table info found for: {table_name}")
@@ -290,22 +245,16 @@ def _parse_filename_schema_driven(
 def _ingest_node_schema_driven(
   engine, file_path: str, table_info: dict, schema_adapter: XBRLSchemaConfigGenerator
 ) -> bool:
-  """
-  Schema-driven node ingestion - create table from schema, then copy with appropriate settings.
-  """
-  table_name = table_info["table_name"]  # Extract early for exception handling
+  """Create the node table from the schema, then COPY the file into it."""
+  table_name = table_info["table_name"]  # Bound early for the except branch
   try:
     schema_table_info = table_info["table_info"]
 
-    # Get IngestTableInfo directly from schema table info
     ingest_info = schema_table_info
 
-    # Create table using schema definition
     if not _create_table_from_schema(engine, table_name, ingest_info, file_path):
       return False
 
-    # Always use COPY with IGNORE_ERRORS for global entities, standard COPY for others
-    # This is much faster than UPSERT operations
     return _copy_node_data_schema_driven(engine, file_path, table_name, ingest_info)
 
   except Exception as e:
@@ -316,23 +265,18 @@ def _ingest_node_schema_driven(
 def _ingest_relationship_schema_driven(
   engine, file_path: str, table_info: dict, schema_adapter: XBRLSchemaConfigGenerator
 ) -> bool:
-  """
-  Schema-driven relationship ingestion - create rel table from schema, then COPY with IGNORE_ERRORS.
-  """
-  table_name = table_info["table_name"]  # Extract early for exception handling
+  """Create the relationship table from the schema, then COPY into it."""
+  table_name = table_info["table_name"]  # Bound early for the except branch
   try:
     schema_table_info = table_info["table_info"]
 
-    # Get IngestTableInfo directly from schema table info
     ingest_info = schema_table_info
 
-    # Create relationship table using schema definition
     if not _create_relationship_table_from_schema(
       engine, table_name, ingest_info, file_path
     ):
       return False
 
-    # Use COPY for relationships (all use report-specific identifiers)
     return _copy_relationship_data_schema_driven(
       engine, file_path, table_name, ingest_info, schema_adapter
     )
@@ -345,34 +289,31 @@ def _ingest_relationship_schema_driven(
 def _create_table_from_schema(
   engine, table_name: str, ingest_info: IngestTableInfo, file_path: str
 ) -> bool:
-  """Create node table using schema definition with parquet data validation."""
+  """Create the node table for the columns the schema and parquet share.
+
+  Only the parquet metadata is read, never the data. An existing table is
+  treated as success.
+  """
   try:
     import pyarrow.parquet as pq
 
-    # Read just the parquet schema without loading data
     parquet_file = pq.ParquetFile(file_path)
     arrow_schema = parquet_file.schema_arrow
 
-    # Debug: Log what we found in the parquet file
     parquet_columns = {field.name for field in arrow_schema}
     logger.debug(
       f"Parquet file {file_path} has {len(parquet_columns)} columns: {sorted(parquet_columns)}"
     )
 
-    # Build column definitions from schema
     columns = []
 
-    # Get primary keys from schema
     primary_keys = ingest_info.primary_keys
     if not primary_keys:
-      # For relationship tables, we should not create them as node tables
-      # Check if this is actually a relationship being incorrectly treated as a node
       if ingest_info.is_relationship:
         logger.error(
           f"Relationship {table_name} being treated as node table - skipping"
         )
         return False
-      # Fallback to first column if no primary keys defined
       first_col = arrow_schema[0].name
       logger.warning(
         f"No primary keys defined in schema for {table_name}, falling back to first column: {first_col}"
@@ -383,13 +324,11 @@ def _create_table_from_schema(
         f"Using schema-defined primary key for {table_name}: {primary_keys[0]}"
       )
 
-    # Add columns from schema definition (prefer schema over parquet)
     schema_columns = set(ingest_info.columns)
     logger.debug(
       f"Schema for {table_name} expects {len(schema_columns)} columns: {sorted(schema_columns)}"
     )
 
-    # Use intersection of schema and parquet columns
     available_columns = schema_columns.intersection(parquet_columns)
     logger.debug(
       f"Intersection for {table_name}: {len(available_columns)} columns: {sorted(available_columns)}"
@@ -401,11 +340,10 @@ def _create_table_from_schema(
       logger.warning(f"  Parquet columns: {sorted(parquet_columns)}")
       return False
 
-    # Build column definitions
     for field in arrow_schema:
       if field.name in available_columns:
         lbug_type = _map_arrow_to_lbug_type(str(field.type))
-        # Handle SQL reserved words by quoting them
+        # Reserved words have to be backtick-quoted to survive DDL.
         column_name = field.name
         if column_name.lower() in [
           "order",
@@ -425,10 +363,8 @@ def _create_table_from_schema(
 
     columns_str = ",\n        ".join(columns)
 
-    # Use schema-defined primary key
     primary_key = primary_keys[0] if primary_keys else arrow_schema[0].name
 
-    # Quote the primary key if it's a reserved word
     if primary_key.lower() in [
       "order",
       "group",
@@ -460,16 +396,14 @@ def _create_table_from_schema(
 def _create_relationship_table_from_schema(
   engine, table_name: str, ingest_info: IngestTableInfo, file_path: str
 ) -> bool:
-  """Create relationship table using schema definition."""
+  """Create the relationship table. The parquet must carry `from` and `to`."""
   try:
     import pyarrow.parquet as pq
 
-    # Read parquet schema to validate columns exist
     parquet_file = pq.ParquetFile(file_path)
     arrow_schema = parquet_file.schema_arrow
     parquet_columns = {field.name for field in arrow_schema}
 
-    # Get from/to nodes from schema
     from_node = ingest_info.from_node
     to_node = ingest_info.to_node
 
@@ -477,7 +411,6 @@ def _create_relationship_table_from_schema(
       logger.error(f"Missing from_node or to_node in schema for {table_name}")
       return False
 
-    # Check if parquet has 'from' and 'to' columns
     has_from_to = "from" in parquet_columns and "to" in parquet_columns
     if not has_from_to:
       logger.warning(
@@ -485,16 +418,14 @@ def _create_relationship_table_from_schema(
       )
       return False
 
-    # Get property columns from schema
     property_columns = []
     if ingest_info.properties:
       for prop_name in ingest_info.properties:
         if prop_name in parquet_columns:
-          # Map parquet column to appropriate type
           for field in arrow_schema:
             if field.name == prop_name:
               lbug_type = _map_arrow_to_lbug_type(str(field.type))
-              # Handle SQL reserved words by quoting them
+              # Reserved words have to be backtick-quoted to survive DDL.
               column_name = prop_name
               if column_name.lower() in [
                 "order",
@@ -509,7 +440,6 @@ def _create_relationship_table_from_schema(
               property_columns.append(f"{column_name} {lbug_type}")
               break
 
-    # Create relationship table
     if property_columns:
       props_str = ",\n            ".join(property_columns)
       create_sql = f"""
@@ -541,14 +471,10 @@ VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def _is_valid_identifier(identifier: str) -> bool:
-  """
-  Validate that an identifier is safe to use in queries.
+  """True when the identifier is safe to interpolate into a query.
 
-  Args:
-      identifier: The identifier to validate
-
-  Returns:
-      bool: True if valid, False otherwise
+  Table and column names reach the query string unparameterised, so a rejection
+  is logged to the security audit trail as an injection attempt.
   """
   if not identifier or not isinstance(identifier, str):
     SecurityAuditLogger.log_input_validation_failure(
@@ -568,48 +494,27 @@ def _is_valid_identifier(identifier: str) -> bool:
 
 
 def _sanitize_parameter_name(name: str) -> str:
-  """
-  Sanitize parameter name for use in queries.
-
-  Args:
-      name: The parameter name to sanitize
-
-  Returns:
-      str: Sanitized parameter name
-  """
-  # Replace invalid characters with underscores
+  """Coerce a name into a valid query parameter identifier."""
   sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-  # Ensure it starts with a letter or underscore
   if sanitized and not sanitized[0].isalpha() and sanitized[0] != "_":
     sanitized = "_" + sanitized
   return sanitized or "param"
 
 
-# NOTE: UPSERT/MERGE functionality has been removed in favor of COPY with IGNORE_ERRORS
-# If you need to perform actual MERGE operations, use the query endpoint directly.
-# Performance comparison:
-# - COPY with IGNORE_ERRORS: ~5ms per operation (handles duplicates gracefully)
-# - Row-by-row MERGE/UPSERT: ~200ms per row (40x slower!)
-# The overhead of MERGE operations makes them unsuitable for bulk ingestion.
+# Bulk loading here is COPY only. Row-by-row MERGE/UPSERT costs ~200ms/row
+# against ~5ms for COPY with IGNORE_ERRORS, which rules it out at ingest
+# volumes. Genuine MERGE semantics belong on the query endpoint.
 
 
 def _is_global_relationship_schema_driven(relationship_name: str) -> bool:
-  """
-  Determine if a relationship involves global entities based on schema analysis.
+  """True for base-schema relationships, which may repeat across reports.
 
-  Global relationships connect to global entities (defined in base schema) and may
-  have duplicates across reports, requiring IGNORE_ERRORS for efficient bulk loading.
-
-  Args:
-      relationship_name: Name of the relationship to check
-
-  Returns:
-      bool: True if this relationship involves global entities requiring IGNORE_ERRORS
+  Those need ``IGNORE_ERRORS`` on COPY; report-specific ones are unique by
+  construction and must not swallow errors.
   """
   try:
     from ....schemas.base import BASE_RELATIONSHIPS
 
-    # Check if the relationship is defined in the base schema
     base_relationship_names = {rel.name for rel in BASE_RELATIONSHIPS}
 
     is_global = relationship_name in base_relationship_names
@@ -623,34 +528,21 @@ def _is_global_relationship_schema_driven(relationship_name: str) -> bool:
     logger.warning(
       f"Failed to determine if relationship {relationship_name} is global, defaulting to False: {e}"
     )
-    # Fail safe: default to standard COPY without IGNORE_ERRORS
+    # Fail safe: a strict COPY surfaces duplicates rather than hiding them.
     return False
 
 
 def _is_global_entity_schema_driven(table_name: str) -> bool:
-  """
-  Determine if a table represents a global entity based on schema analysis.
+  """True for base-schema nodes, which are shared across filings.
 
-  Global entities are shared across multiple reports/filings and require
-  IGNORE_ERRORS to handle duplicates efficiently during bulk ingestion.
-
-  Report-specific entities are generated uniquely per filing and should never
-  have duplicates, so they use standard COPY without IGNORE_ERRORS.
-
-  Args:
-      table_name: Name of the table to check
-
-  Returns:
-      bool: True if this is a global entity requiring IGNORE_ERRORS
+  Those repeat across reports and need ``IGNORE_ERRORS`` on COPY;
+  report-specific nodes carry per-filing identifiers and must not.
   """
   try:
     from ....schemas.base import BASE_NODES
 
-    # Base schema nodes are always global
     base_node_names = {node.name for node in BASE_NODES}
 
-    # All global entities are now properly defined in the base schema
-    # This includes: Entity, Unit, Period, Element, Label, Reference, Taxonomy, etc.
     is_global = table_name in base_node_names
 
     logger.debug(
@@ -662,62 +554,40 @@ def _is_global_entity_schema_driven(table_name: str) -> bool:
     logger.warning(
       f"Failed to determine if {table_name} is global, defaulting to False: {e}"
     )
-    # Fail safe: default to standard COPY without IGNORE_ERRORS
+    # Fail safe: a strict COPY surfaces duplicates rather than hiding them.
     return False
 
 
 def _copy_node_data_schema_driven(
   engine, file_path: str, table_name: str, ingest_info: IngestTableInfo
 ) -> bool:
-  """
-  Copy node data using schema-driven approach with LadybugDB's COPY FROM functionality.
+  """COPY a node parquet file into its table.
 
-  Performance characteristics:
-  - COPY with IGNORE_ERRORS: ~5ms per operation (handles duplicates gracefully)
-  - COPY without IGNORE_ERRORS: ~3ms per operation (fails on duplicates)
-  - Row-by-row MERGE/UPSERT: ~200ms per row (40x slower!)
-
-  Strategy:
-  - Global entities (Entity, Unit, Element, etc.): Use COPY with IGNORE_ERRORS
-    These are shared across reports and may have duplicates
-  - Report-specific nodes: Use standard COPY (no duplicates expected)
-    Each report generates unique identifiers for its nodes
-
-  The IGNORE_ERRORS flag adds minimal overhead (~2ms) while providing
-  robust duplicate handling, making it ideal for bulk ingestion.
+  Global (base-schema) entities load with ``IGNORE_ERRORS`` because the same
+  row legitimately arrives from several reports; ~5ms/op against ~3ms for a
+  strict COPY. Report-specific nodes use the strict form so a duplicate is a
+  real error. Column lists are omitted — the parquet is generated to match the
+  table exactly.
   """
   try:
-    # Validate table name to prevent injection
     if not _is_valid_identifier(table_name):
       raise ValueError(f"Invalid table name: {table_name}")
 
-    # Use COPY FROM for efficient bulk loading
-    # The parquet file should have columns matching the table schema
-
-    # Determine if this is a global entity based on schema analysis
-    # Global entities are defined in the base schema and are shared across reports
     is_global_entity = _is_global_entity_schema_driven(table_name)
 
-    # The parquet files are generated to match the table schema exactly.
-    # We can use simple COPY without specifying columns.
-
     if is_global_entity:
-      # Use IGNORE_ERRORS for global entities to handle duplicates efficiently
       copy_query = f"COPY {table_name} FROM '{file_path}' (IGNORE_ERRORS=true)"
       logger.info(
         f"Copying data from {file_path} into {table_name} using COPY FROM with IGNORE_ERRORS"
       )
     else:
-      # Standard COPY for report-specific nodes
       copy_query = f"COPY {table_name} FROM '{file_path}'"
       logger.info(f"Copying data from {file_path} into {table_name} using COPY FROM")
 
-    # Track performance metrics
     import time
 
     import pyarrow.parquet as pq
 
-    # Get row count for performance tracking
     try:
       parquet_file = pq.ParquetFile(file_path)
       row_count = parquet_file.metadata.num_rows
@@ -726,7 +596,7 @@ def _copy_node_data_schema_driven(
 
     start_time = time.time()
 
-    # Set timeout to 30 minutes for large COPY operations
+    # A large COPY easily exceeds the default query timeout.
     timeout_set = False
     if hasattr(engine, "set_query_timeout"):
       engine.set_query_timeout(1800000)  # 30 minutes
@@ -738,7 +608,6 @@ def _copy_node_data_schema_driven(
       engine.execute_query(copy_query)
       execution_time = time.time() - start_time
 
-      # Log performance metrics
       if row_count > 0:
         ms_per_row = (execution_time * 1000) / row_count
         logger.info(
@@ -746,8 +615,7 @@ def _copy_node_data_schema_driven(
           f"in {execution_time:.2f}s ({ms_per_row:.3f}ms/row)"
         )
 
-        # Warn if performance is poor
-        if ms_per_row > 0.5:  # More than 0.5ms per row is slow
+        if ms_per_row > 0.5:  # More than 0.5ms/row is slow for nodes
           logger.warning(
             f"SLOW NODE COPY: {table_name} - {ms_per_row:.3f}ms/row "
             f"({row_count} rows in {execution_time:.2f}s)"
@@ -760,20 +628,18 @@ def _copy_node_data_schema_driven(
       return True
 
     except Exception as copy_err:
-      # If COPY fails due to column mismatch, log helpful error
+      # Column mismatch is the common cause; dump both sides to compare.
       if "column" in str(copy_err).lower():
         import pyarrow.parquet as pq
 
-        # Just read schema, not data
         parquet_file = pq.ParquetFile(file_path)
         parquet_columns = [field.name for field in parquet_file.schema_arrow]
         logger.error(f"COPY failed - parquet columns: {parquet_columns}")
         logger.error(f"Expected columns for {table_name}: {ingest_info.columns}")
       raise
     finally:
-      # Always reset timeout to default after COPY operation
       if timeout_set and hasattr(engine, "set_query_timeout"):
-        engine.set_query_timeout(120000)  # Back to 2 minutes
+        engine.set_query_timeout(120000)  # Back to the 2-minute default
 
   except Exception as e:
     logger.error(f"Failed to copy node data for {table_name}: {e}")
@@ -787,49 +653,34 @@ def _copy_relationship_data_schema_driven(
   ingest_info: IngestTableInfo,
   schema_adapter: XBRLSchemaConfigGenerator,
 ) -> bool:
-  """
-  Copy relationship data using schema-driven approach with LadybugDB's COPY FROM functionality.
+  """COPY a relationship parquet file into its table.
 
-  NOTE: With report-specific identifiers, relationships are also unique per report:
-  - Each relationship references report-specific node identifiers
-  - No duplicates within a single report's relationship data
-  - Can use fast COPY FROM operations
-  - Special handling needed for entity relationships
+  The parquet must expose ``from`` and ``to`` plus any schema-declared
+  properties, in the table's order. Base-schema relationships load with
+  ``IGNORE_ERRORS`` (the same edge can arrive from several reports);
+  report-specific ones carry per-filing identifiers and use the strict form.
   """
   try:
-    # Validate table name to prevent injection
     if not _is_valid_identifier(table_name):
       raise ValueError(f"Invalid table name: {table_name}")
 
-    # Use COPY FROM for efficient bulk loading of relationships
-    # Determine if this relationship involves global entities based on schema analysis
     is_global_relationship = _is_global_relationship_schema_driven(table_name)
 
-    # For relationships in LadybugDB, the parquet file must match the table schema exactly.
-    # The parquet file should have:
-    # - "from" column: source node ID
-    # - "to" column: target node ID
-    # - Additional columns: any relationship properties defined in schema
-
     if is_global_relationship:
-      # Use IGNORE_ERRORS for relationships with global entities
       copy_query = f"COPY {table_name} FROM '{file_path}' (IGNORE_ERRORS=true)"
       logger.info(
         f"Copying relationship data from {file_path} into {table_name} using COPY FROM with IGNORE_ERRORS"
       )
     else:
-      # Standard COPY for report-specific relationships
       copy_query = f"COPY {table_name} FROM '{file_path}'"
       logger.info(
         f"Copying relationship data from {file_path} into {table_name} using COPY FROM"
       )
 
-    # Track performance metrics
     import time
 
     import pyarrow.parquet as pq
 
-    # Get row count for performance tracking
     try:
       parquet_file = pq.ParquetFile(file_path)
       row_count = parquet_file.metadata.num_rows
@@ -838,7 +689,7 @@ def _copy_relationship_data_schema_driven(
 
     start_time = time.time()
 
-    # Set timeout to 30 minutes for large COPY operations
+    # A large COPY easily exceeds the default query timeout.
     timeout_set = False
     if hasattr(engine, "set_query_timeout"):
       engine.set_query_timeout(1800000)  # 30 minutes
@@ -850,7 +701,6 @@ def _copy_relationship_data_schema_driven(
       engine.execute_query(copy_query)
       execution_time = time.time() - start_time
 
-      # Log performance metrics
       if row_count > 0:
         ms_per_row = (execution_time * 1000) / row_count
         logger.info(
@@ -858,8 +708,8 @@ def _copy_relationship_data_schema_driven(
           f"in {execution_time:.2f}s ({ms_per_row:.3f}ms/row)"
         )
 
-        # Warn if performance is poor - relationships are slower due to FK validation
-        if ms_per_row > 1.0:  # More than 1ms per row is slow for relationships
+        # Relationships are slower than nodes: endpoints are validated.
+        if ms_per_row > 1.0:
           logger.warning(
             f"SLOW RELATIONSHIP COPY: {table_name} - {ms_per_row:.3f}ms/row "
             f"({row_count} rows in {execution_time:.2f}s)"
@@ -872,11 +722,10 @@ def _copy_relationship_data_schema_driven(
       return True
 
     except Exception as copy_err:
-      # If COPY fails, log helpful error
+      # Column or endpoint mismatch is the common cause; dump both sides.
       if "column" in str(copy_err).lower() or "foreign key" in str(copy_err).lower():
         import pyarrow.parquet as pq
 
-        # Just read schema, not data
         parquet_file = pq.ParquetFile(file_path)
         parquet_columns = [field.name for field in parquet_file.schema_arrow]
         logger.error(f"COPY failed - parquet columns: {parquet_columns}")
@@ -887,9 +736,8 @@ def _copy_relationship_data_schema_driven(
           logger.error(f"Expected properties: {ingest_info.properties}")
       raise
     finally:
-      # Always reset timeout to default after COPY operation
       if timeout_set and hasattr(engine, "set_query_timeout"):
-        engine.set_query_timeout(120000)  # Back to 2 minutes
+        engine.set_query_timeout(120000)  # Back to the 2-minute default
 
   except Exception as e:
     logger.error(f"Failed to copy relationship data for {table_name}: {e}")
@@ -897,10 +745,9 @@ def _copy_relationship_data_schema_driven(
 
 
 def _map_arrow_to_lbug_type(arrow_type: str) -> str:
-  """Map Arrow types to LadybugDB types."""
+  """Map an Arrow type name to a LadybugDB type, defaulting to STRING."""
   arrow_type_lower = arrow_type.lower()
 
-  # Handle string types
   if any(x in arrow_type_lower for x in ["string", "utf8", "large_string"]):
     return "STRING"
   elif "int64" in arrow_type_lower:

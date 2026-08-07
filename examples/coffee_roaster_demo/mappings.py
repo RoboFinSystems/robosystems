@@ -7,8 +7,8 @@ Multi-step Income Statement. A fact only renders if its concept is admitted
 (or rolls up into an admitted leaf via the calc linkbase); mapping to a
 concept outside the Networks silently drops the fact as "out of structure".
 
-The coffee-specific leaves that the consulting demo never exercised — and
-that make this episode's working-capital reveal renderable — are:
+The leaves that make a roaster's working-capital story renderable, and that a
+services business never needs, are:
 
 - **Inventory** → ``rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings``
   (the exact Classified-BS inventory leaf; *not* the shorter ``InventoryNet``).
@@ -16,9 +16,11 @@ that make this episode's working-capital reveal renderable — are:
 - **COGS** → ``rs-gaap:CostOfGoodsAndServicesSold`` (Multi-step IS leaf; drives
   the ``GrossProfit`` subtotal the "P&L glows" beat leans on).
 
-PP&E gross + accumulated depreciation map to the calc inputs of the
-``PropertyPlantAndEquipmentNet`` BS leaf (Net = Gross - AD is synthesized at
-fact generation), mirroring the consulting demo's proven treatment.
+PP&E gross and accumulated depreciation map to the calc inputs of the
+``PropertyPlantAndEquipmentNet`` BS leaf rather than to the net leaf itself;
+Net = Gross - AD is synthesized at fact generation. Keeping them separate also
+lets the cash-flow derivation read ΔGross as purchases instead of conflating
+purchases with depreciation.
 """
 
 # (coa_code, rs_gaap_qname)
@@ -67,9 +69,10 @@ MAPPINGS: list[tuple[str, str]] = [
 ]
 
 
-# Equity rows tuned to the entity legal form, mirroring the consulting demo so
-# main.py's `mappings_for(entity_type)` call works unchanged. Driftline is a
-# corporation; the other forms are here for parity / future episodes.
+# Equity maps to the rs-gaap capital concept that matches the entity's legal
+# form, so the equity-form Reporting Style renders its native capital line.
+# Driftline is a corporation; the other forms are here so the same scenario can
+# be re-run as a partnership or LLC.
 _EQUITY_BY_FORM: dict[str, list[tuple[str, str]]] = {
   "corporation": [
     ("3000", "rs-gaap:AdditionalPaidInCapital"),

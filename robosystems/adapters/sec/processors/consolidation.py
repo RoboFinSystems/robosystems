@@ -32,13 +32,7 @@ def _dedup_arrow_table(
   For 250-filing batches, shared tables are typically 30-60K rows, so the
   Python set approach is fast and memory-efficient.
 
-  Args:
-      table: Arrow table to deduplicate
-      column: Column name to deduplicate on
-      label: Optional label for debug logging (e.g. table_key)
-
-  Returns:
-      Deduplicated Arrow table
+  `label` (usually the table_key) only appears in debug logging.
   """
   original_rows = table.num_rows
   identifiers = table.column(column)
@@ -65,17 +59,10 @@ def _dedup_arrow_table(
 
 
 def get_quarter_end_date(year: int, quarter: int) -> str:
-  """Get the last day of a quarter as YYYY-MM-DD string.
+  """Get the last day of a quarter as a YYYY-MM-DD string ("2024-03-31").
 
-  Used for backfill partitioning - all filings in a quarter get the same
-  partition date (end of quarter) for simpler S3 organization.
-
-  Args:
-      year: Calendar year
-      quarter: Quarter number (1-4)
-
-  Returns:
-      Date string like "2024-03-31" for Q1 2024
+  Backfill partitioning gives every filing in a quarter the same partition
+  date, so S3 lays out one prefix per quarter.
   """
   return f"{year}{QUARTER_END_DAYS[quarter]}"
 
@@ -85,18 +72,12 @@ def consolidate_parquet_tables_by_date(
 ) -> dict[str, dict[str, bytes]]:
   """Consolidate parquet tables from multiple filing results, grouped by filing date.
 
-  Takes a list of ProcessedFilingResult objects and merges all tables
-  of the same type into single consolidated parquet files, organized by filing date.
+  Merges all tables of the same type into a single parquet blob per filing
+  date, returning `{filing_date: {table_key: parquet_bytes}}` — e.g.
+  `{"2024-01-15": {"nodes/Entity": b"...", "nodes/Fact": b"..."}}`.
 
-  Note: This function is used by the local sec_pipeline.py script for development/testing.
-  The Dagster asset uses disk-buffered processing instead for memory efficiency at scale.
-
-  Args:
-      results: List of successful ProcessedFilingResult objects
-
-  Returns:
-      Dict mapping filing_date -> table_key -> consolidated parquet bytes
-      Example: {"2024-01-15": {"nodes/Entity": bytes, "nodes/Fact": bytes, ...}}
+  Used by `robosystems/scripts/sec_pipeline.py`. The Dagster asset uses
+  disk-buffered processing instead, to bound memory at corpus scale.
   """
   # Group results by filing date, then by table type
   # Structure: {filing_date: {table_key: [pa.Table, ...]}}
@@ -159,12 +140,8 @@ def consolidate_parquet_from_disk(
   on the identifier column using pure Arrow. Cross-batch deduplication is handled
   by DuckDB during staging via GROUP BY + FIRST().
 
-  Args:
-      work_dir: Directory containing parquet files
-      table_key: Table key like "nodes/Entity"
-
-  Returns:
-      Consolidated parquet bytes, or None if no data
+  `table_key` is a path fragment like "nodes/Entity". Returns None when the
+  table has no data.
   """
   table_dir = work_dir / table_key
   if not table_dir.exists():
@@ -209,15 +186,7 @@ def merge_with_existing_s3(
   For shared tables (Element, Label, etc.), deduplicates on identifier column.
   For per-filing tables, simply concatenates (no duplicates possible).
 
-  Args:
-      s3_client: boto3 S3 client
-      bucket: S3 bucket name
-      s3_key: S3 key for the existing file (may not exist)
-      new_data: New parquet bytes to merge
-      table_key: Table key like "nodes/Entity" for dedup decisions
-
-  Returns:
-      Merged parquet bytes (or new_data if no existing file)
+  `s3_key` may not exist yet; in that case `new_data` is returned unchanged.
   """
   # Try to download existing file
   existing_data: bytes | None = None
@@ -284,16 +253,9 @@ def atomic_s3_upload(
 
   Uploads to a temp key first, then copies to final location and deletes temp.
   This ensures the final key either has complete data or doesn't exist.
-
-  Args:
-      s3_client: boto3 S3 client
-      bucket: S3 bucket name
-      final_key: Final S3 key for the file
-      data: Parquet bytes to upload
   """
   import uuid
 
-  # Generate unique temp key
   temp_key = f"{final_key}.tmp.{uuid.uuid4().hex[:8]}"
 
   try:

@@ -1,25 +1,14 @@
-"""
-Query helper functions.
-
-This module provides helper utilities for query execution.
-"""
+"""Helper utilities shared by the query execution routes."""
 
 from typing import Any
 
 
 def get_query_operation_type(graph_id: str) -> str:
-  """
-  Determine the correct operation type for query operations.
+  """Determine the operation type that drives LadybugDB cluster routing.
 
-  For consistency with distributed LadybugDB architecture:
-  - User graphs: Always use 'write' to ensure writer cluster routing
-  - Shared repositories (and subgraphs): Use 'read' for reader cluster routing
-
-  Args:
-      graph_id: Graph database identifier
-
-  Returns:
-      Operation type: 'read' or 'write'
+  User graphs always resolve to `write` so they land on the writer cluster;
+  shared repositories and their subgraphs resolve to `read` for the reader
+  cluster.
   """
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
@@ -30,15 +19,7 @@ def get_query_operation_type(graph_id: str) -> str:
 
 
 def get_user_priority(user: Any) -> int:
-  """
-  Get query priority based on user subscription tier.
-
-  Args:
-      user: User object with potential subscription
-
-  Returns:
-      Priority value (lower is higher priority)
-  """
+  """Query priority for a user's subscription tier; lower sorts first."""
   from robosystems.config.query_queue import QueryQueueConfig
 
   if hasattr(user, "subscription") and user.subscription:

@@ -1,8 +1,4 @@
-"""Credit system API models.
-
-This module contains Pydantic models for credit-related API operations including
-credit balance checks, transaction history, storage limits, and usage summaries.
-"""
+"""Credit API models: balances, transaction history, storage limits, usage."""
 
 from enum import Enum
 

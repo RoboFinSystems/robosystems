@@ -2,9 +2,9 @@
 
 ``evaluate_rules_for_structure`` is the single public function. It:
 
-1. Loads all rules scoped to the structure (via the existing
-   ``load_rules_for_structure`` helper so element/association-scoped
-   rules are included alongside structure-scoped ones).
+1. Loads all rules scoped to the structure (via ``load_rules_for_structure``
+   so element/association-scoped rules are included alongside
+   structure-scoped ones).
 2. For each rule: resolves ``$Variable`` → fact value bindings by
    qname lookup, dispatches to the per-pattern evaluator, and writes
    a :class:`~robosystems.models.extensions.VerificationResult` row.
@@ -12,8 +12,8 @@
 
 The engine is side-effect-free from the caller's perspective — it
 ``session.add()``s rows and calls ``session.flush()`` to assign ids,
-but leaves ``session.commit()`` to the OperationSpec wrapper (which
-commits on success per the existing pattern).
+but leaves ``session.commit()`` to the OperationSpec wrapper, which
+commits on success.
 
 Binding semantics
 -----------------
@@ -26,8 +26,8 @@ For each ``{variable_name, variable_qname}`` entry in
 3. Resolve ``element_id`` + period window → fact value via the facts
    table (``fact_scope = 'in_scope'``, most recent ``period_end`` first).
    Facts are filtered by ``structure_id`` (or ``fact_set_id`` when the
-   caller pins one); every fact has both stamped at write time, so no
-   report-id fallback is needed. None on miss.
+   caller pins one); every fact carries both, stamped at write time.
+   None on miss.
 
 One query per variable (N+1 is fine for 3-5 variables per rule).
 """
@@ -125,7 +125,7 @@ def _bind_sum_variables(
   rule: Rule,
   structure_id: str,
 ) -> dict[str, float | None]:
-  """Aggregate SUM of duration facts per variable — used exclusively by SumEquals rules."""
+  """Aggregate SUM of duration facts per variable — SumEquals rules only."""
   bindings: dict[str, float | None] = {}
   for var in rule.rule_variables or []:
     name = var.get("variable_name", "")
@@ -181,10 +181,10 @@ def _load_period_balances(
   reconciling plug), within the period window.
 
   Scoped to a single FactSet: pinned when ``fact_set_id`` is given, else the
-  LATEST **actual** FactSet for the structure (``scenario_id IS NULL`` —
-  scenario verification is a later phase, and without the pin a computed
-  forecast month would silently become the summing unit for every rule
-  run). The FactSet is the summing unit on purpose — two coexisting
+  LATEST **actual** FactSet for the structure (``scenario_id IS NULL``;
+  without the pin a computed forecast month would silently become the
+  summing unit for every rule run). The FactSet is the summing unit — two
+  coexisting
   reports over the same period both stamp this structure, so a bare
   ``structure_id`` scope would sum across reports and double every balance.
   """
@@ -300,7 +300,7 @@ def _evaluate_rollup_arc_derived(
   a different statement's calc path (e.g. DDA as both a CF add-back and an IS
   expense) can't contaminate the sum. A rollup whose direct children aren't
   reported on this structure (e.g. an IS decomposition rule landing on the CF)
-  is skipped, matching the prior evaluator.
+  is skipped.
 
   Returns ``None`` when the parent has no calc children in the merged DAG
   (global rs-gaap-calculations overlaid with the structure's own calc arcs),
@@ -426,7 +426,7 @@ def evaluate_rules_for_structure(
 
   # Arc-derived RollUp prep. RollUp rules are re-derived from the live
   # rs-gaap-calculations DAG (mirroring the fact producer) rather than the
-  # rule's frozen child enumeration bound one-fact-per-qname, which reported
+  # rule's frozen child enumeration bound one-fact-per-qname, which reports
   # false failures when a subtotal foots over a sibling concept or over two
   # facts in one period. The global DAG is reused from ``global_calculations``
   # when the caller precomputed it (a report run evaluates many structures),

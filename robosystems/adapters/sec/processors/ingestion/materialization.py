@@ -38,22 +38,14 @@ from .models import (
 
 class LadybugMaterializer:
   """
-  LadybugDB materialization operations for XBRL graph data.
+  Stage 2: copies DuckDB staging tables into the LadybugDB graph.
 
-  This class handles Stage 2 of the ingestion pipeline - materializing
-  data from DuckDB staging tables into the LadybugDB graph database.
-
-  All data flows through DuckDB staging before materialization.
+  All data reaches the graph this way — nothing is written to LadybugDB
+  without passing through DuckDB staging first.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
-    """
-    Initialize LadybugDB materializer.
-
-    Args:
-        graph_id: Graph database identifier (default: "sec")
-        source_prefix: S3 prefix for source files (default: "sec/processed")
-    """
+    """`source_prefix` is the S3 prefix for source files ("sec/processed")."""
     self.graph_id = graph_id
     self.s3_client = S3Client()
     self.bucket = env.SHARED_PROCESSED_BUCKET
@@ -81,21 +73,14 @@ class LadybugMaterializer:
     Precondition: stage_to_duckdb() must have been run successfully, creating
     DuckDB staging tables.
 
-    Args:
-        table_names: Optional list of specific tables to materialize.
-                     If None, materializes all tables from the schema.
-        rebuild: If True, delete and recreate the LadybugDB database.
-        batch_materialization: If True (default), use hash-based batching
-                     for large tables to prevent OOM.
-        batch_size: Rows per batch (default: 20M).
-        progress_callback: Optional callback for progress logging.
-        materialize_mode: "full" (default) rebuilds the graph then COPYs every
-                     table (assumes an empty target). "incremental" skips the
-                     rebuild and COPYs only rows not already in the populated
-                     graph (per-table keyset anti-join in the Graph API).
+    `materialize_mode` selects the strategy: "full" (default) rebuilds the
+    graph then COPYs every table, assuming an empty target; "incremental"
+    skips the rebuild and COPYs only rows not already present, via a per-table
+    keyset anti-join in the Graph API.
 
-    Returns:
-        MaterializeResult with rows ingested per table
+    `table_names` narrows the run to specific tables; `rebuild` forces a
+    delete-and-recreate; `batch_materialization` keeps large tables under the
+    OOM ceiling by splitting them into `batch_size`-row hash batches.
     """
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
@@ -203,13 +188,9 @@ class LadybugMaterializer:
   async def _rebuild_ladybug_database(
     self, client: "GraphClient", reset_staging: bool = False
   ) -> None:
-    """Rebuild the LadybugDB database from scratch.
+    """Delete the LadybugDB database and recreate it with the same schema.
 
-    Deletes the existing database and recreates it with the same schema.
-
-    Args:
-        client: Graph API client instance
-        reset_staging: If True, also delete DuckDB staging.
+    `reset_staging=True` also drops the DuckDB staging tables.
     """
     from robosystems.database import SessionFactory
     from robosystems.graph_api.client.exceptions import GraphClientError
@@ -306,20 +287,11 @@ class LadybugMaterializer:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
 
-    For large tables (>batch_size rows), uses chunked materialization to avoid OOM.
+    Tables above `batch_size` rows are materialized in chunks to avoid OOM.
 
-    Args:
-        table_names: List of table names to ingest
-        graph_client: Graph API client instance
-        batch_materialization: If True (default), use batching for large tables.
-        batch_size: Rows per batch (default: 20M).
-        progress_callback: Optional callback for progress logging
-        incremental: If True, each table's COPY anti-joins against the existing
-            graph so only new rows are ingested (populated-graph append). If
-            False (default), COPY assumes an empty target (full rebuild path).
-
-    Returns:
-        Ingestion results with statistics
+    `incremental=True` makes each table's COPY anti-join against the existing
+    graph, so only new rows are ingested (populated-graph append). The default
+    assumes an empty target, as on the full-rebuild path.
     """
     log_progress = make_progress_logger(progress_callback)
 

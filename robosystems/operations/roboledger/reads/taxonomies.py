@@ -90,9 +90,7 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-# Local aliases for the shared library helpers — keep call sites terse and
-# make the import sites searchable (grep for ``_efs_by_element`` /
-# ``_liquidity_by_element``).
+# Local aliases for the shared library helpers, to keep call sites terse.
 _efs_by_element = efs_trait_by_element
 _liquidity_by_element = liquidity_by_element
 
@@ -340,7 +338,6 @@ def list_unmapped_elements(
       Association.association_type == "mapping",
     )
   else:
-    # Check all mapping structures
     mapped_query = select(Association.from_element_id).where(
       Association.association_type == "mapping",
     )
@@ -381,21 +378,21 @@ def _load_renderable_concepts(
   appears as either parent or child of a ``presentation`` association on
   those structures.
 
-  This is the **correct** "guaranteed-to-render" filter — semantically
-  matching what ``generate_report_facts`` actually traverses. The older
-  ``_load_rs_gaap_presentation_set`` used the rs-gaap-presentation
-  taxonomy as the filter set, which is a SUPERSET of what the renderer
-  actually walks (the rendering structures use a more aggregated
-  vocabulary like ``AccountsPayableAndAccruedLiabilitiesCurrent`` rather
-  than ``AccountsPayableCurrent``). MappingOperator suggestions made
-  against the wider set frequently landed on "unreachable" concepts.
+  This is the "guaranteed-to-render" filter — it matches what
+  ``generate_report_facts`` traverses. Prefer it over the
+  ``_load_rs_gaap_presentation_set`` fallback, which filters on the whole
+  rs-gaap-presentation taxonomy: a superset of what the renderer walks,
+  since rendering structures use a more aggregated vocabulary (e.g.
+  ``AccountsPayableAndAccruedLiabilitiesCurrent`` rather than
+  ``AccountsPayableCurrent``). Suggestions made against the wider set can
+  land on concepts that never render.
 
   Empty result = caller treats as "no filter" so a partially-provisioned
   tenant (no reporting_style_networks rows yet) still gets candidates.
 
-  **Cached on the session** keyed by reporting_style_id since switching
-  Style mid-session is rare and the same Style id is queried repeatedly
-  inside a single auto-map run.
+  Cached on the session keyed by reporting_style_id: switching Style
+  mid-session is rare and the same id is queried repeatedly inside a single
+  auto-map run.
   """
   cache_attr = f"{_RENDERABLE_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
   cached = getattr(session, cache_attr, None)
@@ -444,7 +441,7 @@ def _load_rollup_concepts(
   double-count). A concept that is **not** in this set is a leaf on the
   active Style, and mapping a CoA account to it is correct.
 
-  This is the structure-aware replacement for the static
+  Structure-aware, so preferred over the static
   ``RS_GAAP_SUBTOTAL_DENYLIST``: the static list over-denies on thin Style
   structures where, e.g., ``rs-gaap:Revenues`` has no rendering children
   and is itself the leaf. Empty result = no Style structures seeded →
@@ -624,12 +621,11 @@ def expand_to_rs_gaap_candidates(
   #     to be in this set, but we still walk rs-gaap-type-subtype children of
   #     equivalents that aren't.
   #
-  # Earlier this function dropped denylisted equivalents up front and
-  # returned None when none remained, which silently blanked
-  # fac:CurrentAssets / fac:CurrentLiabilities (their only equivalents
-  # are denylisted rollups) and forced every BS asset/liability CoA to
-  # the per-FAC Other bucket. Now we keep all equivalents as traversal
-  # roots, and only filter at the candidate-emission step.
+  # Hence: every equivalent stays a traversal root, and filtering happens
+  # only at candidate emission. Filtering the roots up front would return
+  # None for fac:CurrentAssets / fac:CurrentLiabilities — whose only
+  # equivalents are denylisted rollups — pushing every balance-sheet
+  # asset/liability CoA account into the per-FAC Other bucket.
   traversal_roots = list(equiv_rows)
 
   _NARROW_THRESHOLD = 3
@@ -800,7 +796,6 @@ def get_mapping_detail(
   if structure is None:
     return None
 
-  # Get associations with element names
   from_elem = Element.__table__.alias("from_elem")
   to_elem = Element.__table__.alias("to_elem")
 
@@ -1126,9 +1121,9 @@ def get_mapped_trial_balance(
 ) -> MappedTrialBalanceResponse:
   """Trial balance rolled up to reporting concepts via mapping associations.
 
-  Accepts both `date` objects (preferred, used by the GraphQL resolver
-  so the wire schema exposes a `Date` scalar) and ISO-8601 strings (used
-  by older REST callers). SQLAlchemy parameter binding handles either.
+  Accepts both `date` objects (preferred — the GraphQL resolver passes
+  these so the wire schema exposes a `Date` scalar) and ISO-8601 strings
+  (REST callers). SQLAlchemy parameter binding handles either.
   """
   result = session.execute(
     _MAPPED_TRIAL_BALANCE_SQL,

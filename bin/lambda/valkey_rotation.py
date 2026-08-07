@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Valkey Auth Token Rotation Lambda Function.
+Rotate the ElastiCache Valkey auth token held in AWS Secrets Manager.
 
-This Lambda function rotates Valkey auth tokens stored in AWS Secrets Manager.
-It follows the standard AWS Secrets Manager rotation pattern with four steps:
+Secrets Manager drives four steps against this one function, in order:
 
-1. createSecret - Generate new auth token
-2. setSecret - Update Valkey with new auth token
-3. testSecret - Verify new auth token works
-4. finishSecret - Mark new secret as current
+1. createSecret - generate a new auth token as the AWSPENDING version
+2. setSecret    - start the ElastiCache auth-token modify
+3. testSecret   - verify the new token authenticates
+4. finishSecret - promote AWSPENDING to AWSCURRENT
 
-The function is designed to work with ElastiCache Valkey replication groups
-and handles both single-node and multi-node configurations.
+Works with single-node and multi-node replication groups. Because ElastiCache
+uses the ROTATE strategy, both old and new tokens are accepted during
+propagation, which is what makes the rotation downtime-free.
 """
 
 import json
@@ -43,15 +43,9 @@ TOKEN_PROPAGATION_INTERVAL = 30
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-  """
-  Main Lambda handler for Valkey auth token rotation.
+  """Route one Secrets Manager rotation step to its handler.
 
-  Args:
-      event: Lambda event containing SecretId and Step
-      context: Lambda context (unused)
-
-  Returns:
-      Success response or raises exception on failure
+  Refuses any step whose ClientRequestToken is not staged AWSPENDING.
   """
   # Pre-initialize ``step`` so the ``except`` block can log even if the
   # ``event`` lookups below raise. Without this, a missing
@@ -110,11 +104,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def create_secret(secret_arn: str, token: str) -> None:
-  """
-  Step 1: Create a new auth token.
+  """Step 1: store a fresh random auth token as AWSPENDING.
 
-  Generates a new random auth token and stores it in the AWSPENDING version
-  of the secret without modifying the current AWSCURRENT version.
+  Leaves AWSCURRENT untouched, and is a no-op if this rotation token already
+  has a pending version.
   """
   try:
     # Check if AWSPENDING version already exists for THIS rotation token
@@ -229,8 +222,7 @@ def _token_authenticates(auth_token: str) -> bool:
 
 
 def set_secret(secret_arn: str, token: str) -> None:
-  """
-  Step 2: Apply the new auth token to ElastiCache.
+  """Step 2: apply the new auth token to ElastiCache.
 
   Initiates the auth-token rotation and returns immediately; propagation can
   exceed the Lambda timeout, so waiting happens in test_secret via connection
@@ -280,14 +272,11 @@ def set_secret(secret_arn: str, token: str) -> None:
 
 
 def test_secret(secret_arn: str, token: str) -> None:
-  """
-  Step 3: Test the new auth token.
+  """Step 3: verify the AWSPENDING auth token by round-tripping a key.
 
-  Connects to Valkey using the new auth token from AWSPENDING version to
-  verify it works. The modify initiated in set_secret propagates
-  asynchronously, so connection attempts are retried until the token is
-  accepted or the retry budget is exhausted (Secrets Manager re-drives the
-  rotation on failure).
+  The modify initiated in set_secret propagates asynchronously, so attempts are
+  retried until the token is accepted or the retry budget is exhausted; Secrets
+  Manager re-drives the rotation on failure.
   """
   try:
     # Get new auth token from AWSPENDING version
@@ -338,12 +327,10 @@ def test_secret(secret_arn: str, token: str) -> None:
 
 
 def finish_secret(secret_arn: str, token: str) -> None:
-  """
-  Step 4: Finalize the rotation.
+  """Step 4: promote AWSPENDING to AWSCURRENT and clear the AWSPENDING label.
 
-  Moves the AWSPENDING version to AWSCURRENT and removes the old version.
-  This completes the rotation process. Explicitly cleans up the AWSPENDING
-  label as a safety net (known AWS quirk where it doesn't always get removed).
+  Secrets Manager is meant to drop AWSPENDING when AWSCURRENT moves, but does
+  not always do so, hence the explicit cleanup.
   """
   metadata = secrets_client.describe_secret(SecretId=secret_arn)
   current_version = None

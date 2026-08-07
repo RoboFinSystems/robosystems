@@ -1,9 +1,7 @@
-"""Graph database storage configuration.
+"""S3 key layout for customer graph databases, plus helpers to build the keys.
 
-This module defines the S3 path structure for customer graph databases
-and provides helpers for building consistent S3 keys.
-
-All graph storage uses the USER_DATA_BUCKET with organized prefixes:
+Every storage type lives in USER_DATA_BUCKET under a fixed prefix. The
+``graph_id`` segment scopes all of them, which is what keeps tenants isolated:
 
   s3://robosystems-user-data-{env}/
     user-staging/                    # User file uploads (pre-ingestion)
@@ -39,9 +37,6 @@ All graph storage uses the USER_DATA_BUCKET with organized prefixes:
       backups/                       # Compressed backups (subscriber downloads)
         {graph_id}/
           backup-{timestamp}.tar.gz
-
-The graph_id is the primary construct that scopes all storage operations,
-ensuring multi-tenant isolation and consistent organization.
 """
 
 from dataclasses import dataclass
@@ -124,16 +119,6 @@ def get_staging_key(
 ) -> str:
   """Build S3 key for user file staging.
 
-  Args:
-      user_id: User identifier
-      graph_id: Graph database identifier
-      table_name: Target table name
-      file_id: Unique file identifier
-      filename: Original filename
-
-  Returns:
-      S3 key string (without bucket name)
-
   Example:
       >>> get_staging_key("user123", "kg456", "Entity", "f789", "data.parquet")
       'user-staging/user123/kg456/Entity/f789/data.parquet'
@@ -149,13 +134,8 @@ def get_staging_prefix(
 ) -> str:
   """Build S3 prefix for listing staged files.
 
-  Args:
-      user_id: Optional user filter
-      graph_id: Optional graph filter
-      table_name: Optional table filter
-
-  Returns:
-      S3 prefix for listing
+  Each filter narrows the prefix a level; a filter is only applied when the
+  ones above it are set.
 
   Example:
       >>> get_staging_prefix("user123", "kg456")
@@ -185,16 +165,9 @@ def get_backup_key(
   timestamp: datetime,
   extension: str = ".lbug.gz",
 ) -> str:
-  """Build S3 key for application-level backup.
+  """Build S3 key for an application-level backup.
 
-  Args:
-      graph_id: Graph database identifier
-      backup_type: Backup type ('full' or 'incremental')
-      timestamp: Backup timestamp
-      extension: File extension (default: .lbug.gz)
-
-  Returns:
-      S3 key string (without bucket name)
+  ``backup_type`` is ``full`` or ``incremental``.
 
   Example:
       >>> from datetime import datetime, UTC
@@ -209,13 +182,6 @@ def get_backup_key(
 
 def get_backup_metadata_key(graph_id: str, timestamp: datetime) -> str:
   """Build S3 key for backup metadata.
-
-  Args:
-      graph_id: Graph database identifier
-      timestamp: Backup timestamp
-
-  Returns:
-      S3 key string (without bucket name)
 
   Example:
       >>> from datetime import datetime, UTC
@@ -232,13 +198,6 @@ def get_backup_prefix(
   graph_id: str | None = None, backup_type: str | None = None
 ) -> str:
   """Build S3 prefix for listing backups.
-
-  Args:
-      graph_id: Optional graph filter
-      backup_type: Optional backup type filter ('full' or 'incremental')
-
-  Returns:
-      S3 prefix for listing
 
   Example:
       >>> get_backup_prefix("kg456", "full")
@@ -265,15 +224,7 @@ def get_instance_backup_key(
   graph_id: str,
   timestamp: datetime,
 ) -> str:
-  """Build S3 key for instance-level database backup.
-
-  Args:
-      environment: Environment name (dev/staging/prod)
-      graph_id: Graph database identifier
-      timestamp: Backup timestamp
-
-  Returns:
-      S3 key string (without bucket name)
+  """Build S3 key for an instance-level database backup.
 
   Example:
       >>> from datetime import datetime, UTC
@@ -291,13 +242,6 @@ def get_instance_backup_prefix(
   graph_id: str | None = None,
 ) -> str:
   """Build S3 prefix for listing instance backups.
-
-  Args:
-      environment: Environment name (dev/staging/prod)
-      graph_id: Optional graph filter
-
-  Returns:
-      S3 prefix for listing
 
   Example:
       >>> get_instance_backup_prefix("prod", "kg456")
@@ -325,22 +269,12 @@ def get_report_bundle_key(
 ) -> str:
   """Build S3 key for a per-Report serialization bundle.
 
-  Versioned by ``generation_count`` so prior generations stay
-  addressable in object storage even after a ``regenerate_report``
-  bump. ``Report.bundle_url`` always points at the current version;
-  history lives on S3 for restatement audit trails. The ``g`` prefix
+  Versioned by ``generation_count`` (the monotonic counter on
+  ``Report.generation_count``) so prior generations stay addressable even after
+  a ``regenerate_report`` bump. ``Report.bundle_url`` points at the current
+  version; history lives on S3 for restatement audit trails. The ``g`` prefix
   reads as "generation" — distinct from framework-version letters
   (``rs-gaap/v1``, ``fac/v1``) elsewhere in the system.
-
-  Args:
-      graph_id: Owning graph identifier.
-      report_id: Report row id (ULID, ``rpt_`` prefix).
-      generation_count: Monotonic counter from ``Report.generation_count``.
-      extension: File extension (``.jsonld`` for the JSON-LD flavor;
-          future flavors slot in by passing their own extension).
-
-  Returns:
-      S3 key string (without bucket name).
 
   Example:
       >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
@@ -356,12 +290,7 @@ def get_report_bundle_prefix(
 ) -> str:
   """Build S3 prefix for listing report bundles.
 
-  Args:
-      graph_id: Optional graph filter.
-      report_id: Optional report filter (only valid when ``graph_id`` set).
-
-  Returns:
-      S3 prefix for listing.
+  ``report_id`` only narrows the prefix when ``graph_id`` is also set.
 
   Example:
       >>> get_report_bundle_prefix("kg456", "rpt_01K8")
@@ -384,12 +313,7 @@ def get_report_bundle_prefix(
 def get_shared_repo_database_key(graph_id: str, extension: str = ".lbug") -> str:
   """Build S3 key for a published shared repository database snapshot.
 
-  Args:
-      graph_id: Graph database identifier (e.g., "sec")
-      extension: File extension (".lbug" or ".duckdb")
-
-  Returns:
-      S3 key string (without bucket name)
+  Replicas download these on boot. ``extension`` is ``.lbug`` or ``.duckdb``.
 
   Example:
       >>> get_shared_repo_database_key("sec")
@@ -404,9 +328,6 @@ def get_shared_repo_database_key(graph_id: str, extension: str = ".lbug") -> str
 def get_shared_repo_database_prefix() -> str:
   """Get S3 prefix for shared repository database snapshots.
 
-  Returns:
-      S3 prefix for listing
-
   Example:
       >>> get_shared_repo_database_prefix()
       'shared-repositories/databases/'
@@ -416,13 +337,6 @@ def get_shared_repo_database_prefix() -> str:
 
 def get_shared_repo_backup_key(graph_id: str, timestamp: datetime) -> str:
   """Build S3 key for a shared repository backup (subscriber download).
-
-  Args:
-      graph_id: Graph database identifier (e.g., "sec")
-      timestamp: Backup timestamp
-
-  Returns:
-      S3 key string (without bucket name)
 
   Example:
       >>> from datetime import datetime, UTC
@@ -437,12 +351,6 @@ def get_shared_repo_backup_key(graph_id: str, timestamp: datetime) -> str:
 
 def get_shared_repo_backup_prefix(graph_id: str | None = None) -> str:
   """Build S3 prefix for listing shared repository backups.
-
-  Args:
-      graph_id: Optional graph filter
-
-  Returns:
-      S3 prefix for listing
 
   Example:
       >>> get_shared_repo_backup_prefix("sec")
@@ -464,13 +372,6 @@ def get_r2_download_key(graph_id: str, extension: str = ".lbug") -> str:
   """Build R2 key for a subscriber download file.
 
   Uses a fixed key (no timestamp) — each publish overwrites the previous copy.
-
-  Args:
-      graph_id: Graph database identifier (e.g., "sec")
-      extension: File extension (".lbug" or ".duckdb")
-
-  Returns:
-      R2 key string (without bucket name)
 
   Example:
       >>> get_r2_download_key("sec")
@@ -509,13 +410,7 @@ def get_download_extension(s3_key: str, default: str = ".zip") -> str:
   contains, so the served filename is derived from it rather than assumed.
   Keeping the compound extension makes the download self-describing — the
   recipient sees both the payload and its compression without opening the file.
-
-  Args:
-      s3_key: Stored object key, from S3 or R2
-      default: Extension used when the key matches nothing known
-
-  Returns:
-      Extension string including the leading dot
+  Falls back to ``default`` when the key matches nothing known.
 
   Example:
       >>> get_download_extension("graph-backups/databases/kg456/full/backup-20240115_123045.lbug.zip")
@@ -536,56 +431,26 @@ def get_download_extension(s3_key: str, default: str = ".zip") -> str:
 
 
 def get_staging_uri(bucket: str, *args, **kwargs) -> str:
-  """Build full S3 URI for staged file.
-
-  Args:
-      bucket: S3 bucket name
-      *args, **kwargs: Arguments passed to get_staging_key
-
-  Returns:
-      Full S3 URI string
-  """
+  """Build full ``s3://`` URI for a staged file; forwards to get_staging_key."""
   key = get_staging_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"
 
 
 def get_backup_uri(bucket: str, *args, **kwargs) -> str:
-  """Build full S3 URI for backup.
-
-  Args:
-      bucket: S3 bucket name
-      *args, **kwargs: Arguments passed to get_backup_key
-
-  Returns:
-      Full S3 URI string
-  """
+  """Build full ``s3://`` URI for a backup; forwards to get_backup_key."""
   key = get_backup_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"
 
 
 def get_instance_backup_uri(bucket: str, *args, **kwargs) -> str:
-  """Build full S3 URI for instance backup.
-
-  Args:
-      bucket: S3 bucket name
-      *args, **kwargs: Arguments passed to get_instance_backup_key
-
-  Returns:
-      Full S3 URI string
-  """
+  """Build full ``s3://`` URI for an instance backup; forwards to
+  get_instance_backup_key."""
   key = get_instance_backup_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"
 
 
 def get_report_bundle_uri(bucket: str, *args, **kwargs) -> str:
-  """Build full S3 URI for a report bundle.
-
-  Args:
-      bucket: S3 bucket name.
-      *args, **kwargs: Arguments forwarded to ``get_report_bundle_key``.
-
-  Returns:
-      Full S3 URI string.
-  """
+  """Build full ``s3://`` URI for a report bundle; forwards to
+  get_report_bundle_key."""
   key = get_report_bundle_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"

@@ -1,15 +1,11 @@
-"""CypherOperator — agentic natural-language querying of the graph.
+"""CypherOperator — natural-language querying of the graph.
 
-Drives a bounded tool-use loop (``run_tool_loop``): the model discovers the
-schema, writes read-only Cypher, sees query errors and retries, then answers
-in natural language. Returns the last result set as structured ``rows`` so the
-console can render a real table rather than scraping the prose. Primary
-operator for the console interface.
-
-This replaced an earlier single-shot pipeline (fetch truncated schema →
-generate one query → execute once → format) that never showed the model its
-query errors and so failed on basic questions. The loop is the harness that
-makes Claude-via-MCP robust, run in-process on Bedrock.
+Drives a bounded tool-use loop (`run_tool_loop`): the model discovers the
+schema, writes read-only Cypher, sees query errors and retries, then answers in
+natural language. Seeing its own errors is the point — a single-shot pipeline
+that generates one query and formats whatever comes back fails on questions
+this handles. The last non-empty result set is returned as structured ``rows``
+so the console renders a real table instead of scraping the prose.
 """
 
 from __future__ import annotations
@@ -33,7 +29,7 @@ from robosystems.operations.operators.tool_loop import ToolLoopResult, run_tool_
 
 @register_operator("cypher")
 class CypherOperator(Operator):
-  """Converts natural language to Cypher and answers via a tool-use loop."""
+  """Answers a question by writing and running read-only Cypher."""
 
   # Read-only tool allowlist. The loop intersects this with the tools the
   # graph actually exposes (generic graphs get only schema + cypher; SEC and

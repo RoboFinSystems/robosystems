@@ -1,8 +1,8 @@
 """Fiscal calendar read operations.
 
-The FiscalCalendarService itself stays as-is — these helpers are pure
-readers and response assemblers that both the REST router and the
-future GraphQL resolver call to avoid duplication.
+Pure readers and response assemblers over `FiscalCalendarService`, shared by
+the REST router and the GraphQL resolvers so the response shape is defined
+once.
 """
 
 from __future__ import annotations

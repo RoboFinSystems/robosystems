@@ -1,4 +1,10 @@
-"""RoboSystems Service API main application module."""
+"""Compose and configure the RoboSystems FastAPI application.
+
+`create_app` wires middleware (CORS, logging, security headers, rate-limit
+headers), exception handlers, the core `/v1` routers, the flag-gated
+`/extensions` GraphQL and operation surfaces, and a custom OpenAPI generator
+that injects the shared operation error/idempotency contract.
+"""
 
 import time
 from contextlib import asynccontextmanager
@@ -99,7 +105,11 @@ def csp_variant_for_path(path: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-  """Startup + shutdown lifecycle. Replaces deprecated @on_event handlers."""
+  """Validate configuration and start/stop background subscribers.
+
+  Configuration failures are fatal in prod and staging, and logged-and-ignored
+  elsewhere so local iteration is not blocked.
+  """
   logger.info("Starting RoboSystems API...")
 
   # Validate environment configuration
@@ -150,12 +160,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-  """
-  Create the FastAPI app and include the routers.
-
-  Returns:
-      FastAPI: The configured FastAPI application.
-  """
+  """Build the configured FastAPI application."""
   # Load description from markdown file in static folder
   description_file = Path(__file__).parent / "static" / "description.md"
   api_description = (
@@ -168,8 +173,8 @@ def create_app() -> FastAPI:
     title="RoboSystems API",
     version=pkg_version("robosystems"),
     description=api_description,
-    docs_url=None,  # replaced by custom_docs below
-    redoc_url=None,  # replaced by custom_redoc below
+    docs_url=None,  # custom docs route below
+    redoc_url=None,  # custom redoc route below
     openapi_url="/openapi.json",
     openapi_tags=MAIN_API_TAGS,
     lifespan=lifespan,
@@ -507,8 +512,7 @@ def create_app() -> FastAPI:
     )
     # Serialization-bundle downloads are a READ — they live on the
     # GraphQL surface as `reportDownloadUrl(reportId, format)` on the
-    # Report type, not as a REST resource. (Removed the lone REST GET
-    # outlier; see issue #751.)
+    # Report type, not as a REST resource.
 
   # build-fact-grid mounts independently of ROBOLEDGER_ENABLED so SEC-only
   # deployments still get it. Rationale in routers/extensions/roboledger/views.py.
@@ -544,13 +548,13 @@ def create_app() -> FastAPI:
   app.include_router(admin_users_router, include_in_schema=False)
   app.include_router(admin_orgs_router, include_in_schema=False)
 
-  # Custom OpenAPI schema
   def custom_openapi():
-    """
-    Custom OpenAPI schema generator.
+    """Generate the OpenAPI schema, then layer on this API's own conventions.
 
-    Returns:
-        dict: The OpenAPI schema.
+    On top of FastAPI's output: security schemes, the shared `OperationError`
+    component and error responses applied to every operation route, the
+    `Idempotency-Key` header, rate-limit response headers, and tag ordering
+    from `openapi_tags`. Cached on `app.openapi_schema` after the first call.
     """
     if app.openapi_schema:
       return app.openapi_schema

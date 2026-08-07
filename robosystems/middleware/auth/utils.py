@@ -24,8 +24,8 @@ def _is_valid_api_key_format(api_key: str) -> bool:
 def _key_scope_allows(key_graph_id: str | None, requested_graph_id: str) -> bool:
   """Whether a key's graph scope permits the requested graph.
 
-  NULL scope = account-wide key, allowed everywhere (historical behavior).
-  A scoped key covers exactly its graph and that graph's subgraphs
+  A NULL scope means an account-wide key, allowed everywhere. A scoped key
+  covers exactly its graph and that graph's subgraphs
   (subgraph ids are ``{parent}_{name}`` and share the parent's access model).
   """
   if key_graph_id is None:
@@ -48,16 +48,12 @@ def _safe_cache_call(func_name: str, *args, **kwargs):
 
 
 def validate_api_key(api_key: str, db_session: Session | None = None) -> User | None:
-  """
-  Validate an API key and return the associated user if valid.
-  Uses secure bcrypt verification with encrypted cache.
+  """Validate an account-wide API key and return its user.
 
-  Args:
-      api_key (str): The API key to validate.
-      db_session (Session, optional): Database session to use. Defaults to global session.
-
-  Returns:
-      Optional[User]: The user associated with the API key, or None if invalid.
+  Bcrypt verification against the database, fronted by the encrypted cache.
+  Graph-scoped keys are rejected here: without a graph context they would
+  reach account-level surfaces, so they are only valid through
+  `validate_api_key_with_graph`.
   """
   if not api_key:
     return None
@@ -68,14 +64,12 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
 
   cache_key = hashlib.sha256(api_key.encode()).hexdigest()
 
-  # Try cache first (cache now uses encrypted storage)
   cached_data = _safe_cache_call("get_cached_api_key_validation", cache_key)
   if cached_data:
     if not cached_data.get("is_active", False):
       logger.debug(f"Cached API key is inactive: {cache_key[:8]}...")
       return None
 
-    # Reconstruct user from cached data
     user_data = cached_data.get("user_data", {})
     if user_data and user_data.get("id"):
       logger.debug(f"API key validation cache hit: {cache_key[:8]}...")
@@ -88,7 +82,6 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
         )
         return None
 
-      # Create a minimal User object with cached data
       user = User()
       user.id = user_data["id"]
       user.name = user_data.get("name")
@@ -104,11 +97,10 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
 
       return user
 
-  # Cache miss - fall back to database with secure bcrypt verification.
-  # Use a short-lived session so the pool connection is returned immediately
-  # after the DB work.  The scoped ``session`` proxy would hold the connection
-  # until middleware cleanup at end-of-request — disastrous for long-running
-  # endpoints like MCP tool execution (minutes).
+  # Cache miss. Use a short-lived session so the pool connection is returned
+  # right after the DB work; the scoped ``session`` proxy would hold it until
+  # middleware cleanup at end-of-request, which starves long-running endpoints
+  # like MCP tool execution.
   from ...database import SessionFactory
 
   _owns_session = db_session is None
@@ -117,10 +109,8 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
   try:
     logger.debug(f"API key cache miss, querying database: {cache_key[:8]}...")
 
-    # Use secure bcrypt verification (handles both verification and last_used update)
     key_record = UserAPIKey.get_by_key(api_key, sess)
     if not key_record:
-      # Cache negative result (with shorter TTL)
       try:
         _safe_cache_call("cache_api_key_validation", cache_key, {}, is_active=False)
       except (ConnectionError, TimeoutError) as e:
@@ -129,7 +119,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
         logger.warning(f"Unexpected error caching negative API key result: {e}")
       return None
 
-    # Grab user reference while session is active (triggers lazy load once)
+    # Load while the session is live so the lazy relationship resolves once.
     user = key_record.user
 
     # Reject keys whose owning user is deactivated. UserAPIKey.get_by_key only
@@ -139,7 +129,6 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
       return None
 
-    # Cache positive result with encrypted storage
     try:
       user_data = {
         "id": user.id,
@@ -164,10 +153,9 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       )
       return None
 
-    # Log successful API key validation
     SecurityAuditLogger.log_auth_success(user_id=str(user.id), auth_method="api_key")
 
-    # Detach from session so the pool connection is returned immediately.
+    # Detach so the pool connection is returned immediately.
     sess.expunge(user)
     return user
   finally:
@@ -182,9 +170,7 @@ def validate_api_key_with_graph(
   db_session: Session | None = None,
   require_scoped: bool = False,
 ) -> User | None:
-  """
-  Validate an API key with graph ID authorization and return the associated user.
-  Uses Valkey cache with PostgreSQL fallback for performance.
+  """Validate an API key against a graph and return its user.
 
   Graph-scoped keys (``graph_id`` set on the row) are honored only for their
   own graph and its subgraphs, regardless of how the key is carried. With
@@ -192,14 +178,8 @@ def validate_api_key_with_graph(
   additionally rejected — the account credential must never be the one that
   travels in a URL.
 
-  Args:
-      api_key (str): The API key to validate.
-      graph_id (str): The graph database ID to check access for.
-      db_session (Session, optional): Database session to use. Defaults to global session.
-      require_scoped (bool): Reject keys that are not graph-scoped.
-
-  Returns:
-      Optional[User]: The user associated with the API key, or None if invalid or unauthorized.
+  Returns None for an invalid key or an unauthorized graph, without
+  distinguishing the two.
   """
   if not api_key or not graph_id:
     return None
@@ -208,13 +188,11 @@ def validate_api_key_with_graph(
     logger.debug("API key rejected: invalid format")
     return None
 
-  # Hash the API key for cache lookup
   api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
 
-  # Try to get cached API key validation first
   cached_api_key = _safe_cache_call("get_cached_api_key_validation", api_key_hash)
 
-  # Short-circuit on cached negative API key result (key doesn't exist / inactive)
+  # Cached negative result: key is unknown or inactive.
   if cached_api_key and not cached_api_key.get("is_active", False):
     logger.debug(f"Cached API key is inactive: {api_key_hash[:8]}...")
     return None
@@ -223,13 +201,11 @@ def validate_api_key_with_graph(
     "get_cached_graph_access", api_key_hash, graph_id
   )
 
-  # If we have both cached results, use them
   if cached_api_key and cached_graph_access is not None:
     if not cached_graph_access:
       logger.debug(f"Cached graph access denied: {api_key_hash[:8]}... -> {graph_id}")
       return None
 
-    # Reconstruct user from cached data
     user_data = cached_api_key.get("user_data", {})
     if user_data and user_data.get("id"):
       logger.debug(
@@ -250,7 +226,6 @@ def validate_api_key_with_graph(
         )
         return None
 
-      # Create a minimal User object with cached data
       user = User()
       user.id = user_data["id"]
       user.name = user_data.get("name")
@@ -262,15 +237,13 @@ def validate_api_key_with_graph(
         logger.debug(f"API key rejected: owning user inactive: {api_key_hash[:8]}...")
         return None
 
-      # last_used_at is updated on cache miss (below).
-      # Skipping it on cache hits avoids DB pool contention under load —
-      # the cache TTL ensures it refreshes every few minutes anyway.
+      # last_used_at is only updated on the cache-miss path below; touching
+      # it on every cache hit would put the DB pool back in the hot path, and
+      # the cache TTL refreshes it every few minutes regardless.
 
       return user
 
-  # Cache miss - fall back to database.
-  # Use a short-lived session so the pool connection is returned immediately.
-  # See validate_api_key() for rationale.
+  # Cache miss. Short-lived session, same rationale as validate_api_key().
   from ...database import SessionFactory
 
   _owns_session = db_session is None
@@ -281,10 +254,8 @@ def validate_api_key_with_graph(
       f"API key + graph cache miss, querying database: {api_key_hash[:8]}... -> {graph_id}"
     )
 
-    # Check if API key exists and is active
     key_record = UserAPIKey.get_by_key(api_key, sess)
     if not key_record:
-      # Cache negative API key result
       try:
         _safe_cache_call("cache_api_key_validation", api_key_hash, {}, is_active=False)
       except (ConnectionError, TimeoutError) as e:
@@ -293,7 +264,7 @@ def validate_api_key_with_graph(
         logger.warning(f"Unexpected error caching negative API key result: {e}")
       return None
 
-    # Grab user reference while session is active (triggers lazy load once)
+    # Load while the session is live so the lazy relationship resolves once.
     user = key_record.user
 
     # Reject keys whose owning user is deactivated (see validate_api_key).
@@ -336,16 +307,14 @@ def validate_api_key_with_graph(
       )
       return None
 
-    # Check if the user has access to the specified graph
     from ..graph.utils import MultiTenantUtils
 
-    has_access = False  # Initialize variable
+    has_access = False
 
-    # Check shared repositories (including subgraphs like "sec_historical")
     from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
     if is_shared_repository_or_subgraph(graph_id):
-      # Use generic repository access validation (resolves subgraph to parent)
+      # Resolves a subgraph to its parent repository before checking.
       has_access = MultiTenantUtils.validate_repository_access(
         graph_id,
         key_record.user_id,
@@ -354,7 +323,7 @@ def validate_api_key_with_graph(
     else:
       has_access = GraphUser.user_has_access(key_record.user_id, graph_id, sess)
     if not has_access:
-      # Cache the API key validation (positive) but graph access (negative)
+      # Key is valid; only the graph decision is negative. Cache both.
       try:
         user_data = {
           "id": user.id,
@@ -374,10 +343,8 @@ def validate_api_key_with_graph(
         logger.error(f"Failed to cache API key + graph validation result: {e}")
       return None
 
-    # Update last used timestamp
     key_record.update_last_used(sess)
 
-    # Cache both positive results
     try:
       user_data = {
         "id": user.id,
@@ -396,10 +363,9 @@ def validate_api_key_with_graph(
     except Exception as e:
       logger.error(f"Failed to cache API key + graph validation result: {e}")
 
-    # Log successful API key with graph validation
     SecurityAuditLogger.log_auth_success(user_id=str(user.id), auth_method="api_key")
 
-    # Detach from session so the pool connection is returned immediately.
+    # Detach so the pool connection is returned immediately.
     sess.expunge(user)
     return user
   finally:
@@ -414,24 +380,12 @@ def validate_repository_access(
   operation_type: str = "read",
   db_session: Session | None = None,
 ) -> bool:
-  """
-  Validate repository access for a user using the generic repository access system.
-
-  Args:
-      user: User to validate access for
-      repository_id: Repository identifier (e.g., 'sec', 'industry')
-      operation_type: Type of operation ("read", "write", "admin")
-      db_session: Database session to use
-
-  Returns:
-      bool: True if user has the required repository access
-  """
+  """Whether `user` holds `operation_type` access to a shared repository."""
   if not user or not bool(user.is_active):
     return False
 
   from ..graph.utils import MultiTenantUtils
 
-  # Use the generic repository access validation
   return MultiTenantUtils.validate_repository_access(
     repository_id,
     user.id,

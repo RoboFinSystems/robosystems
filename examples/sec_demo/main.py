@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
 """
-SEC Repository Demo - Setup Script
+SEC Repository Demo — setup script.
 
-This script sets up access to the SEC shared repository:
+Loads real XBRL financial data from SEC EDGAR into the shared SEC repository
+and gives the demo user access to it:
+
 1. Creates or reuses demo user credentials
-2. Loads SEC data for a specific ticker and year
-3. Creates repository subscription via API
-4. Updates credentials config to include SEC as a graph
+2. Loads SEC data for a ticker and year (fetch from EDGAR, process the XBRL,
+   ingest entities / elements / facts / relationships)
+3. Subscribes the user to the SEC repository via the API
+4. Records SEC as a graph in .local/config.json
 5. Runs example queries (unless --skip-queries is set)
 
+The subscription must exist before any query resolves, which is why step 3
+runs even on --subscribe-only.
+
+Prerequisites:
+    just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
+    network access to SEC EDGAR
+
 Usage:
-    uv run main.py                              # Load NVDA 2025, run queries
-    uv run main.py --ticker AAPL --year 2024    # Load specific ticker and year
-    uv run main.py --skip-queries               # Skip running example queries
-    uv run main.py --subscribe-only             # Only create subscription (no data loading)
+    just demo-sec                                # NVDA 2025, then run queries
+    just demo-sec --ticker AAPL --year 2024      # a specific ticker and year
+    just demo-sec --skip-queries                 # load only
+    just demo-sec --subscribe-only               # subscribe, load nothing
+    just demo-sec-subscribe sec-advanced         # subscribe on the higher tier
+
+Loading a filing year takes several minutes. Query the result afterwards with
+`just demo-sec-query --list` / `--all` / `--preset <NAME>`.
 """
 
 import argparse

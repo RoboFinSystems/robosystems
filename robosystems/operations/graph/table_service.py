@@ -9,18 +9,10 @@ from robosystems.schemas.runtime.parser import parse_cypher_schema
 
 
 def infer_table_type(table_name: str) -> Literal["node", "relationship"]:
-  """
-  Infer table type from naming conventions.
+  """Classify a table by its name alone.
 
-  Convention:
-  - Relationship tables: ALL_UPPERCASE_WITH_UNDERSCORES (e.g., PERSON_WORKS_FOR_COMPANY)
-  - Node tables: PascalCase or mixed case (e.g., Company, Person, Project)
-
-  Args:
-      table_name: Name of the table
-
-  Returns:
-      "node" or "relationship"
+  ALL_UPPERCASE_WITH_UNDERSCORES (``PERSON_WORKS_FOR_COMPANY``) is a
+  relationship; anything else (``Company``, ``Person``) is a node.
   """
   if table_name.isupper() and "_" in table_name:
     return "relationship"
@@ -28,11 +20,10 @@ def infer_table_type(table_name: str) -> Literal["node", "relationship"]:
 
 
 class TableService:
-  """
-  Service for managing DuckDB staging tables tied to graph schema.
+  """DuckDB staging tables, derived from the graph schema.
 
-  Tables are schema-level constructs that map to graph node types.
-  Users manage files, not tables.
+  Tables are schema-level and created automatically from the DDL — the
+  user-facing unit is the file, not the table.
   """
 
   def __init__(self, session: Session):
@@ -41,25 +32,16 @@ class TableService:
   def create_tables_from_schema(
     self, graph_id: str, user_id: str, schema_ddl: str
   ) -> list[GraphTable]:
-    """
-    Automatically create DuckDB staging tables from graph schema.
+    """Create one staging table per node and relationship type in the DDL.
 
-    Parses the schema DDL to extract node and relationship types and creates
-    corresponding DuckDB external tables for each.
-
-    Args:
-        graph_id: Graph database identifier
-        user_id: User who owns the graph
-        schema_ddl: Cypher DDL defining the graph schema
-
-    Returns:
-        List of created GraphTable objects
+    Idempotent — an existing table is returned as-is. Rows are added to the
+    session without committing, so the caller owns the transaction. Raises
+    ValueError on unparseable DDL.
     """
     from robosystems.schemas.runtime.parser import parse_relationship_types
 
     logger.info(f"Auto-creating DuckDB tables from schema for graph {graph_id}")
 
-    # Parse schema to extract node types
     try:
       node_types = parse_cypher_schema(schema_ddl)
       relationship_types = parse_relationship_types(schema_ddl)
@@ -140,29 +122,15 @@ class TableService:
   def get_s3_pattern_for_table(
     self, graph_id: str, table_name: str, user_id: str
   ) -> str:
-    """
-    Generate S3 glob pattern for a table's files.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name (matches node type)
-        user_id: User who owns the graph
-
-    Returns:
-        S3 glob pattern for all files in this table
-    """
+    """S3 glob matching every parquet file staged for one table."""
     bucket = env.USER_DATA_BUCKET
     return f"s3://{bucket}/user-staging/{user_id}/{graph_id}/{table_name}/**/*.parquet"
 
   def delete_table(self, graph_id: str, table_name: str) -> None:
-    """
-    Delete a table (should only be used on schema changes).
+    """Delete a staging table and every file record attached to it.
 
-    This is an admin operation. Normal users manage files, not tables.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name to delete
+    Admin-only, for schema changes. Commits. The S3 objects themselves are not
+    removed — only the file records.
     """
     logger.warning(
       f"Deleting table {table_name} from graph {graph_id} - "
@@ -174,14 +142,12 @@ class TableService:
       logger.warning(f"Table {table_name} not found for graph {graph_id}")
       return
 
-    # Delete associated files first
     from robosystems.models.core import GraphFile
 
     files = GraphFile.get_all_for_table(table.id, self.session)
     for file in files:
       self.session.delete(file)
 
-    # Delete table
     self.session.delete(table)
     self.session.commit()
 

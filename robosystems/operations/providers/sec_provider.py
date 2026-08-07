@@ -1,4 +1,4 @@
-"""SEC provider-specific operations."""
+"""SEC connection provider — CIK registration and EDGAR filing sync."""
 
 from typing import Any
 
@@ -14,17 +14,13 @@ from ...operations.connection_service import ConnectionService
 
 
 async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
-  """
-  Validate CIK with SEC EDGAR API and get entity information.
+  """Look up a 10-digit CIK at SEC EDGAR, returning `is_valid` plus what's known.
 
-  Args:
-      cik: 10-digit CIK number
-
-  Returns:
-      Dict with validation results and entity info
+  Tries the ticker index first (one request covers every listed filer), then
+  falls back to the per-CIK submissions endpoint, which also carries SIC. A CIK
+  missing from both is reported invalid; an unreachable SEC raises.
   """
   try:
-    # SEC Entity Tickers API endpoint
     url = "https://www.sec.gov/files/entity_tickers.json"
 
     headers = {
@@ -38,8 +34,7 @@ async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
 
       companies_data = response.json()
 
-      # Search for the CIK in the entity tickers data
-      target_cik = int(cik)  # Convert to int for comparison
+      target_cik = int(cik)  # the ticker index stores cik_str as an int
 
       for entry in companies_data.values():
         if entry.get("cik_str") == target_cik:
@@ -52,7 +47,6 @@ async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
             "sic_description": None,
           }
 
-      # If not found in tickers, try the submissions API for more detailed info
       submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
 
       try:
@@ -70,7 +64,6 @@ async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
             "sic_description": sub_data.get("sicDescription"),
           }
         else:
-          # CIK not found
           return {
             "is_valid": False,
             "cik": cik,
@@ -78,7 +71,8 @@ async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
           }
 
       except httpx.HTTPError:
-        # If submissions API fails, but CIK wasn't in tickers, assume invalid
+        # Absent from the ticker index and the submissions endpoint is
+        # unreachable — treat as invalid rather than block registration.
         return {
           "is_valid": False,
           "cik": cik,
@@ -95,18 +89,14 @@ async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
 
 
 async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
-  """
-  Get the count of SEC filings for a CIK.
+  """Approximate how many EDGAR filings a CIK has.
 
-  Args:
-      cik: 10-digit CIK number
-      graph_id: Optional graph ID for checking local database
-
-  Returns:
-      Number of filings found
+  The submissions endpoint returns recent filings inline and older ones as
+  paged files, so anything beyond the recent page is estimated at 100 filings
+  per page. Good enough for sizing a sync, not for reporting. Returns 0 rather
+  than raising when SEC is unavailable.
   """
   try:
-    # Try SEC submissions API for recent count
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     headers = {
       "User-Agent": env.SEC_GOV_USER_AGENT,
@@ -118,21 +108,18 @@ async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
       if response.status_code == 200:
         data = response.json()
 
-        # Count recent filings
         filings = data.get("filings", {})
         recent_count = 0
 
-        # Count entries in the recent section
         if "recent" in filings:
           recent_filings = filings["recent"]
           forms = recent_filings.get("form", [])
           recent_count = len(forms)
 
-        # Also count older filings if available
         files = filings.get("files", [])
         total_files = len(files)
 
-        estimated_total = recent_count + (total_files * 100)  # Rough estimate
+        estimated_total = recent_count + (total_files * 100)
 
         logger.info(
           f"Found {recent_count} recent filings + {total_files} file batches for CIK {cik}"
@@ -146,7 +133,6 @@ async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
   except Exception as api_error:
     logger.warning(f"SEC API filing count failed for CIK {cik}: {api_error}")
 
-  # If all else fails, return 0
   return 0
 
 
@@ -166,7 +152,6 @@ async def create_sec_connection(
   """
   entity_name = None
 
-  # Optionally validate CIK with SEC API
   if SEC_VALIDATE_CIK:
     try:
       cik_info = await validate_cik_with_sec_api(config.cik)
@@ -177,7 +162,6 @@ async def create_sec_connection(
     except Exception as e:
       logger.warning(f"SEC CIK validation failed: {e}")
 
-  # Store connection — no graph operations needed
   metadata = {
     "cik": config.cik,
     "entity_name": entity_name,
@@ -198,21 +182,12 @@ async def create_sec_connection(
 async def sync_sec_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger SEC filing sync via Dagster entity sync pipeline.
+  """Submit the `sec_entity_sync` Dagster job; returns its run id.
 
-  Submits the sec_entity_sync job which discovers filings for the CIK
-  in the shared raw S3 bucket, processes XBRL into parquet, and loads
-  the data into the user's graph database.
-
-  The target graph must already exist with the RoboLedger schema.
-
-  Args:
-      connection: Connection dict with metadata (cik, etc.)
-      sync_options: Optional dict with form_types, skip_enrichment
-      graph_id: Target graph database ID
-
-  Returns:
-      Dagster run ID for progress tracking
+  The job discovers the CIK's filings in the shared raw S3 bucket, processes
+  XBRL into parquet, and loads it into `graph_id` — which must already exist
+  with the RoboLedger schema. `sync_options` accepts `form_types` and
+  `skip_enrichment`.
   """
   from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
 
@@ -226,7 +201,8 @@ async def sync_sec_connection(
   if not cik:
     raise ValueError("SEC CIK not found in connection metadata")
 
-  # Build config for all assets in the pipeline (they share SECEntitySyncConfig)
+  # Every asset in the job shares one SECEntitySyncConfig, so the same dict
+  # is bound to each op below.
   sync_config = {
     "graph_id": graph_id,
     "connection_id": connection_id,
@@ -263,8 +239,7 @@ async def sync_sec_connection(
 
 
 async def cleanup_sec_connection(connection: dict[str, Any], graph_id: str) -> None:
-  """Clean up SEC-specific data when connection is deleted."""
-  # Remove CIK from entity record
+  """Clear the CIK from the entity; already-loaded filing data is left in place."""
   repository = await get_graph_repository(graph_id, operation_type="write")
   update_query = """
     MATCH (c:Entity {identifier: $entity_id})

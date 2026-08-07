@@ -1,9 +1,9 @@
 """Worker administration commands: DLQ management and queue inspection.
 
-NOTE: These commands connect directly to Valkey (not via the admin API)
-because worker queue data lives in Valkey DB 6 with no admin API endpoints.
-This means they only work in local dev where Valkey is directly accessible.
-For staging/prod inspection, use CloudWatch metrics or Dagster UI.
+Unlike the rest of the admin CLI, these talk to Valkey directly rather than
+through the admin API — worker queues live in Valkey DB 6 and have no admin
+endpoints. They therefore work only where Valkey is reachable, i.e. local dev.
+Inspect staging and prod through CloudWatch metrics or the Dagster UI instead.
 """
 
 import json

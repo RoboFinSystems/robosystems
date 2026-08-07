@@ -50,9 +50,8 @@ def get_information_block(
 
   ``series=True`` renders a statement block as its whole report-set
   time series — one column per period, actuals-preferred at the seam
-  when combined with ``scenario_id`` (the F-4 statement-series
-  projection). Non-statement block types accept and ignore it (metric
-  envelopes are always the full series).
+  when combined with ``scenario_id``. Non-statement block types accept
+  and ignore it (metric envelopes are always the full series).
 
   ``series_history`` / ``series_forecast`` window the series to its
   seam-adjacent columns — the last N actual columns and the first N

@@ -1,8 +1,8 @@
-"""
-Database schema management endpoints for Graph API.
+"""Install and read LadybugDB database schemas.
 
-This module provides endpoints for installing and retrieving
-database schemas.
+Installed DDL is checked against an allowlist of CREATE NODE/REL TABLE, CREATE
+INDEX, and COMMENT ON forms before anything executes; everything else — DROP,
+ALTER, DML, file and system calls — is rejected.
 """
 
 import re
@@ -52,47 +52,26 @@ DANGEROUS_DDL_PATTERNS = {
 
 
 def validate_ddl_statement(statement: str) -> bool:
-  """
-  Validate DDL statement for security.
-
-  Args:
-      statement: DDL statement to validate
-
-  Returns:
-      True if statement is safe, False otherwise
-  """
+  """True if the statement is safe to execute (deny list first, then allowlist)."""
   statement_upper = statement.upper().strip()
 
-  # Check for dangerous patterns first
   for pattern in DANGEROUS_DDL_PATTERNS:
     if re.search(pattern, statement_upper):
       logger.warning(f"Blocked dangerous DDL pattern: {pattern}")
       return False
 
-  # Check if statement matches allowed patterns
   for pattern in ALLOWED_DDL_PATTERNS:
     if re.match(pattern, statement_upper):
       return True
 
-  # If no patterns match, reject for safety
   logger.warning(f"DDL statement doesn't match allowed patterns: {statement[:100]}...")
   return False
 
 
 def escape_identifier(identifier: str) -> str:
-  """
-  Safely escape an identifier for use in queries.
-
-  Args:
-      identifier: The identifier to escape
-
-  Returns:
-      Escaped identifier safe for query construction
-  """
-  # Remove any existing quotes and whitespace
+  """Return an identifier safe to interpolate into a query, or raise ValueError."""
   cleaned = identifier.strip().strip("'\"")
 
-  # Validate identifier contains only safe characters
   if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cleaned):
     raise ValueError(f"Invalid identifier: {identifier}")
 
@@ -126,7 +105,6 @@ async def install_schema(
       detail=f"Database '{graph_id}' not found",
     )
 
-  # Validate request
   if request.type not in ["custom", "ddl"]:
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -140,9 +118,7 @@ async def install_schema(
     )
 
   try:
-    # Use connection with proper resource management and transaction
     with ladybug_service.db_manager.get_connection(graph_id, read_only=False) as conn:
-      # Split DDL into statements
       statements = [stmt.strip() for stmt in request.ddl.split(";") if stmt.strip()]
       executed_count = 0
 
@@ -150,7 +126,7 @@ async def install_schema(
         f"Installing schema on database {graph_id}: {len(statements)} statements"
       )
 
-      # Validate all statements before execution
+      # Validate every statement before executing any of them.
       for i, statement in enumerate(statements):
         if not validate_ddl_statement(statement):
           error_msg = f"DDL statement {i + 1} contains forbidden operations or doesn't match allowed patterns"
@@ -160,12 +136,10 @@ async def install_schema(
             detail=error_msg,
           )
 
-      # Begin transaction for atomic schema installation
+      # Install atomically: all statements land, or none do.
       try:
-        # Execute BEGIN TRANSACTION
         conn.execute("BEGIN TRANSACTION")
 
-        # Execute validated statements within transaction
         for i, statement in enumerate(statements):
           try:
             conn.execute(statement)
@@ -174,11 +148,10 @@ async def install_schema(
               f"Executed DDL statement {i + 1}/{len(statements)} on {graph_id}"
             )
           except Exception as e:
-            # Rollback on any error
             try:
               conn.execute("ROLLBACK")
             except Exception:
-              pass  # Rollback might fail if connection is broken
+              pass  # Rollback can fail if the connection is broken
 
             error_msg = f"Failed to execute DDL statement {i + 1}: {e!s}"
             logger.error(error_msg)
@@ -188,10 +161,8 @@ async def install_schema(
               statements_executed=0,  # 0 because we rolled back
             )
 
-        # Commit transaction if all statements succeeded
         conn.execute("COMMIT")
 
-        # Log metadata if provided
         if request.metadata:
           logger.info(f"Schema metadata for {graph_id}: {request.metadata}")
 
@@ -202,7 +173,6 @@ async def install_schema(
         )
 
       except Exception:
-        # Ensure rollback on any unexpected error
         try:
           conn.execute("ROLLBACK")
         except Exception:
@@ -229,10 +199,8 @@ async def get_schema(
   Retrieves the complete schema of a database including all node tables,
   relationship tables, and their properties.
   """
-  # Validate database name
   validated_graph_id = validate_database_name(graph_id)
 
-  # Check if database exists
   if validated_graph_id not in ladybug_service.db_manager.list_databases():
     from robosystems.graph_api.routers.health import is_warming_up
 
@@ -252,7 +220,6 @@ async def get_schema(
     )
 
   try:
-    # Get schema information using LadybugDB's SHOW_TABLES
     schema_info = {
       "database": validated_graph_id,
       "tables": [],
@@ -260,7 +227,6 @@ async def get_schema(
       "rel_tables": [],
     }
 
-    # Execute SHOW_TABLES query with explicit column names
     query_request = QueryRequest(
       database=validated_graph_id,
       cypher="CALL SHOW_TABLES() RETURN id, name, type, comment",
@@ -268,7 +234,6 @@ async def get_schema(
 
     result = ladybug_service.execute_query(query_request)
 
-    # Process the results
     for row in result.data:
       table_info = {
         "id": row.get("id"),
@@ -279,7 +244,6 @@ async def get_schema(
 
       schema_info["tables"].append(table_info)
 
-      # Categorize by type
       table_type = table_info.get("type") or ""
       if table_type:
         table_type = table_type.upper()
@@ -288,14 +252,12 @@ async def get_schema(
         elif table_type == "REL":
           schema_info["rel_tables"].append(table_info["name"])
 
-    # Try to get additional schema details for each table
     for table in schema_info["tables"]:
       table_name = table.get("name", "")
       try:
-        # Safely escape table name to prevent SQL injection
+        # Escaped because the name is interpolated into the Cypher below.
         safe_table_name = escape_identifier(table_name)
 
-        # Get table properties using CALL TABLE_INFO with escaped identifier
         # TABLE_INFO returns: index, name, type, default, isPrimaryKey
         info_request = QueryRequest(
           database=validated_graph_id,
@@ -305,10 +267,9 @@ async def get_schema(
 
         properties = []
         for prop_row in info_result.data:
-          # The columns are returned as an array in the format:
-          # [index, name, type, default, isPrimaryKey]
+          # Columns arrive as [index, name, type, default, isPrimaryKey].
           if isinstance(prop_row, dict) and len(prop_row) > 0:
-            # When using RETURN *, the result is a dict with a single key
+            # RETURN * yields a dict with a single key holding that array.
             values = next(iter(prop_row.values())) if len(prop_row) == 1 else prop_row
             if isinstance(values, list) and len(values) >= 3:
               properties.append(
@@ -328,11 +289,10 @@ async def get_schema(
         table["properties"] = properties
 
       except ValueError:
-        # Invalid table name, skip this table
         logger.warning(f"Skipping table with invalid name: {table_name}")
         table["properties"] = []
       except Exception as e:
-        # If TABLE_INFO fails, just continue without properties
+        # Property detail is best-effort; the table still gets listed.
         logger.debug(f"Could not get properties for table {table_name}: {e}")
         table["properties"] = []
 

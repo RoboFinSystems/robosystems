@@ -38,13 +38,11 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
   "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "sales_receipt_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
-  # Additional QB source-class events: the
-  # QB importer used to collapse 7 transaction types into
-  # `journal_entry_recorded`, hiding the purchase / treasury semantic
-  # that QB already carries. The dbt model now routes them to these
-  # specific event_types; all still dispatch through the same journal
-  # handler because the on-approve GL shape is identical — only the
-  # inbox label, event_category, and downstream filtering change.
+  # Additional QB source-class events. The dbt model routes each QB
+  # transaction type to its own event_type so the purchase / treasury
+  # semantic QB carries survives ingest. They all dispatch through the
+  # journal handler because the on-approve GL shape is identical — only the
+  # inbox label, event_category, and downstream filtering differ.
   "cash_expense_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
   "check_written": JOURNAL_ENTRY_RECORDED_HANDLER,
   "credit_card_charge": JOURNAL_ENTRY_RECORDED_HANDLER,

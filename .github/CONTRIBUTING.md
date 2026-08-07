@@ -1,29 +1,28 @@
 # Contributing to RoboSystems
 
-Thank you for your interest in contributing to RoboSystems! This is the core API and backend service that powers the RoboSystems platform.
+Thanks for your interest in contributing. This repository is the API and backend service for the RoboSystems platform.
 
-## Community
-
-- **[Discussions](https://github.com/orgs/RoboFinSystems/discussions)** - Questions, ideas, and general conversation
-- **[Project Board](https://github.com/orgs/RoboFinSystems/projects/3)** - Track work across all RoboSystems repositories
-- **[Wiki](https://github.com/RoboFinSystems/robosystems/wiki)** - Architecture docs and guides
+- **[Discussions](https://github.com/orgs/RoboFinSystems/discussions)** — questions, ideas, and general conversation
+- **[Project Board](https://github.com/orgs/RoboFinSystems/projects/3)** — work tracked across all RoboSystems repositories
+- **[Wiki](https://github.com/RoboFinSystems/robosystems/wiki)** — architecture docs and guides
 
 ## Table of Contents
 
 - [Getting Started](#getting-started)
-- [Development Process](#development-process)
-- [How to Contribute](#how-to-contribute)
 - [Development Setup](#development-setup)
+- [How to Contribute](#how-to-contribute)
+- [Branching](#branching)
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
 - [Documentation](#documentation)
-- [Pull Request Process](#pull-request-process)
+- [Pull Requests](#pull-requests)
+- [CloudFormation](#cloudformation)
 - [Security](#security)
 
 ## Getting Started
 
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally:
+1. **Fork the repository** on GitHub.
+2. **Clone your fork**:
    ```bash
    git clone https://github.com/YOUR-USERNAME/robosystems.git
    cd robosystems
@@ -32,56 +31,43 @@ Thank you for your interest in contributing to RoboSystems! This is the core API
    ```bash
    git remote add upstream https://github.com/RoboFinSystems/robosystems.git
    ```
-4. **Set up your development environment** (see [Development Setup](#development-setup))
 
-## Development Process
+## Development Setup
 
-We use GitHub flow with automated tooling for our development process:
+### Prerequisites
 
-1. Create a feature branch using our tooling
-2. Make your changes in small, atomic commits
-3. Write or update tests for your changes
-4. Update documentation as needed
-5. Create a Claude-powered PR to the `main` branch
-
-### Branch Creation and Naming
-
-Use our automated branch creation tool with `just`:
+- Docker and Docker Compose
+- [`uv`](https://docs.astral.sh/uv/) for Python packages and versions
+- [`just`](https://just.systems) as the command runner
 
 ```bash
-# Create a new feature branch
-just create-feature feature add-user-auth main
-
-# Create a bugfix branch
-just create-feature bugfix fix-connection-timeout main
-
-# Create a hotfix branch
-just create-feature hotfix critical-security-patch main
-
-# Create a chore branch
-just create-feature chore update-dependencies main
-
-# Create a refactor branch
-just create-feature refactor improve-error-handling main
+brew install uv just jq
 ```
 
-**Branch Types:**
+### Bring up the stack
 
-- `feature/` - New features or enhancements
-- `bugfix/` - Bug fixes for existing functionality
-- `hotfix/` - Critical fixes that need immediate attention
-- `chore/` - Maintenance tasks (deps, configs, etc.)
-- `refactor/` - Code refactoring without functional changes
+```bash
+just init     # sets up the local Python environment (uv reads .python-version)
+just start    # starts the stack on the `robosystems` Docker profile
+just test     # confirm the setup works
+```
 
-**Note:** All PRs must target the `main` branch only.
+`just start` creates `.env` and `.env.local` from the `.example` templates if they are missing. `.env` holds container hostnames for services talking to each other; `.env.local` holds localhost URLs for commands run on the host (justfile recipes, migrations, scripts). Adding a secret or changing a port usually means editing both.
+
+### Conventions that trip people up
+
+- **Every Python command runs through `uv`** — `uv run pytest`, `uv run ruff check`. A bare `python`/`pytest` may pick up the system interpreter.
+- **Use the `robosystems` Docker profile**, which is what `just start` defaults to. Starting an individual service profile leaves you with a partial stack.
+- **Never hand-write a migration.** Update the SQLAlchemy model first, then autogenerate with `just migrate-create "description"`, then review the generated file — autogenerate misses enum changes, CHECK constraints, and some index changes.
+- **Two databases, two migration histories.** The platform database is the default; pass `extensions` as the second argument to operate on the extensions database (`just migrate-up extensions`).
+- **Local API testing uses `X-API-Key`**, not a bearer token. `just demo-user` writes a key to `.local/config.json`.
+- **Read the README in a directory before working in it** — each package documents its own patterns.
 
 ## How to Contribute
 
-### Issue Types
+### Issue types
 
-We use issue templates to organize work. Choose the right type based on your contribution:
-
-| Type        | When to Use                                           |
+| Type        | When to use                                           |
 | ----------- | ----------------------------------------------------- |
 | **Bug**     | Defects or unexpected behavior                        |
 | **Task**    | Specific, bounded work that fits in one PR            |
@@ -89,105 +75,46 @@ We use issue templates to organize work. Choose the right type based on your con
 | **RFC**     | Propose a design for discussion before implementation |
 | **Spec**    | Approved implementation plan ready for execution      |
 
-**Workflow for larger features:**
+For a larger change, the path is Feature (capture the need) → RFC (propose and discuss the design) → Spec (record the approved plan).
 
-1. **Feature** → Capture the need ("I wish I could...")
-2. **RFC** → Propose and discuss the design approach
-3. **Spec** → Document the approved implementation plan
+### Reporting bugs
 
-### Reporting Bugs
+Check existing issues first, then include steps to reproduce, expected versus actual behavior, environment details (OS, Python version), and any relevant logs.
 
-Before creating a bug report, check existing issues to avoid duplicates. Include:
+### First-time contributors
 
-- Steps to reproduce the issue
-- Expected vs actual behavior
-- Environment details (OS, Python version, etc.)
-- Relevant logs or error messages
+Issues labeled `good first issue` or `help wanted` are good starting points.
 
-### First-Time Contributors
+## Branching
 
-Look for issues labeled `good first issue` or `help wanted`. These are great starting points for new contributors.
+Create branches with the project tooling, which branches from `origin/<base>` and sets the upstream correctly:
 
-## Development Setup
+```bash
+just create-feature feature add-user-auth main
+just create-feature bugfix fix-connection-timeout main
+```
 
-### Prerequisites
-
-- Docker and Docker Compose
-- `uv` for Python package and version management
-- `just` command runner
-
-### Local Development Environment
-
-1. **Install development tools**:
-
-   ```bash
-   # Install uv and just
-   brew install uv just
-   ```
-
-2. **Set up Python environment**:
-
-   ```bash
-   # uv automatically handles Python version from .python-version
-   just init
-   ```
-
-3. **Start the development stack**:
-
-   ```bash
-   just start
-   ```
-
-4. **Run tests**:
-   ```bash
-   just test
-   ```
-
-### Environment Configuration
-
-Environment files are auto-created from `.example` templates by `just start` or `just init`. See CLAUDE.md for the dual `.env` / `.env.local` pattern.
+The first argument is the branch type: `feature` (new capability), `bugfix` (fix to existing behavior), `hotfix` (urgent fix), `chore` (dependencies, config), or `refactor` (no functional change). All pull requests target `main`.
 
 ## Coding Standards
 
-### Python Code Style
-
-- **Formatter/Linter**: Ruff (88 character line length, double quotes)
-- **Type checking**: basedpyright
-- **Import sorting**: Ruff's isort rules
-- **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
-
-Run code quality checks:
+- **Python 3.13**, with dependencies managed by uv
+- **Ruff** for formatting and linting (88-character lines, double quotes) and import sorting
+- **basedpyright** for type checking; add type hints to every function signature
+- **Self-documenting code** — prefer clear names over comments, and comment only non-obvious logic
+- **No emojis** in production code or logs; they belong only in the interactive scripts under `examples/`
 
 ```bash
-just lint      # Run linting and formatting
-just format    # Auto-format code
-just typecheck # Run type checking
+just lint fix    # autofix what Ruff can
+just lint        # verify linting
+just format      # verify formatting
+just typecheck   # basedpyright
+just test-code   # all of the above, matching the git hooks
 ```
 
-### Commit Messages
+### Commit messages
 
-Follow the Conventional Commits specification:
-
-```
-type(scope): subject
-
-body (optional)
-
-footer (optional)
-```
-
-Types:
-
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Test changes
-- `chore`: Maintenance tasks
-- `perf`: Performance improvements
-
-Examples:
+Follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): subject`, with an optional body and footer. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`.
 
 ```
 feat(api): add portfolio analysis endpoint
@@ -195,245 +122,92 @@ fix(graph): resolve connection pooling issue
 docs(readme): update deployment instructions
 ```
 
-### Code Organization
-
-- Follow existing project structure
-- Keep files focused and single-purpose
-- Use descriptive names for functions, variables, and classes
-- Add type hints to all function signatures
-
 ## Testing
 
-### Test Requirements
-
-- All new features must include tests
-- Bug fixes should include regression tests
-- Maintain or improve code coverage
-- Tests must pass locally before submitting PR
-
-### Running Tests
+New features need tests; bug fixes need a regression test. See [tests/README.md](/tests/README.md) for fixtures, markers, and how to write a test in this repo.
 
 ```bash
-# Run all tests
-just test-all
+just test                   # unit tests (excludes slow tests)
+just test adapters          # tests under tests/adapters/
+just test-all               # tests plus lint, format, typecheck, CloudFormation lint
+just test-cov               # tests with a coverage report
 
-# Run specific test file
-just test tests/test_specific.py
-
-# Run with coverage
-just test-cov
-
-# Run only unit tests
-uv run pytest -m unit
+uv run pytest -m unit                              # by marker
+uv run pytest tests/middleware/billing/test_enforcement.py   # one file
 ```
 
-### Writing Tests
+`just test <module>` takes a path *relative to `tests/`*, so use `just test adapters`, not `just test tests/adapters`. To run an arbitrary path, call pytest directly.
 
-- Use pytest fixtures for reusable test data
-- Mock external dependencies
-- Use descriptive test names that explain what is being tested
-- Group related tests in classes
-- Add appropriate markers (`@pytest.mark.unit`, `@pytest.mark.integration`)
-
-Example test structure:
-
-```python
-import pytest
-from unittest.mock import Mock, patch
-
-class TestFeatureName:
-    """Tests for FeatureName functionality."""
-
-    @pytest.fixture
-    def setup_data(self):
-        """Fixture for test data."""
-        return {"key": "value"}
-
-    def test_feature_success_case(self, setup_data):
-        """Test feature works correctly with valid input."""
-        # Arrange
-        expected = "expected_result"
-
-        # Act
-        result = feature_function(setup_data)
-
-        # Assert
-        assert result == expected
-
-    def test_feature_error_case(self):
-        """Test feature handles errors appropriately."""
-        with pytest.raises(ValueError):
-            feature_function(invalid_data)
-```
+Mark tests with `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, or `@pytest.mark.security` as appropriate, mock external dependencies, and give tests names that state the behavior being asserted.
 
 ## Documentation
 
-### Documentation Requirements
-
-- Update README.md for significant changes
+- Update the README for user-visible changes, and the relevant package README for changes to its patterns
 - Add docstrings to new functions and classes
-- Update API documentation for endpoint changes
-- Include inline comments for complex logic
-- Update configuration examples if needed
+- Keep configuration examples current when adding environment variables
 
-### API Documentation
+API documentation is generated from the FastAPI routes, so accurate type hints, response models, and route docstrings are what make it useful.
 
-API documentation is auto-generated from FastAPI routes. Ensure:
+## Pull Requests
 
-- Proper type hints on all parameters
-- Descriptive docstrings on route functions
-- Response models are well-defined
-- Example requests/responses where helpful
+### Before opening one
 
-## Pull Request Process
+```bash
+git add <files>
+git commit -m "feat: descriptive message"
 
-### Creating a Pull Request
+git fetch origin
+git rebase origin/main
 
-From a Claude Code session, run the `/create-pr` slash command:
+just test-all
 
-```text
-# Create a PR targeting main (default), authored from session context
-/create-pr
-
-# Target a different branch
-/create-pr staging
-
-# Also request a @claude review on the PR
-/create-pr review
+git push origin your-branch-name
 ```
 
-This will:
-
-1. Author the PR title and description from the actual work done in the session
-2. Cross-check every claim against `git diff <target>...<branch>` so the description stays truthful
-3. Run preflight checks (never PR from the default branch, push the feature branch) and detect any existing PR to update instead of duplicating
-4. Create the PR on GitHub via `gh pr create`
-
-### Before Creating a PR
-
-1. **Commit all changes**:
-
-   ```bash
-   git add .
-   git commit -m "feat: your descriptive commit message"
-   ```
-
-2. **Update from upstream**:
-
-   ```bash
-   git fetch origin
-   git rebase origin/main
-   ```
-
-3. **Run all checks locally**:
-
-   ```bash
-   just test-all
-   just lint
-   just format
-   just typecheck
-   ```
-
-4. **Push your branch**:
-   ```bash
-   git push origin your-branch-name
-   ```
-
-### PR Requirements
-
-- All tests must pass
-- Code must pass linting and formatting checks
-- Must not decrease test coverage significantly
-- Must include appropriate documentation updates
-- Claude review is recommended for complex changes
-- Must be reviewed by at least one maintainer
-
-### Manual PR Creation
-
-If needed, you can create a PR manually:
+### Opening the PR
 
 ```bash
 gh pr create --base main --title "Your PR title" --body "Your PR description"
 ```
 
-### Review Process
+From a Claude Code session, the `/create-pr` slash command does the same thing, writing the description from the work in the session and cross-checking each claim against `git diff <target>...<branch>`.
 
-1. Claude will analyze and create your PR automatically
-2. Review the generated PR description and make adjustments
-3. Address reviewer feedback promptly
-4. Keep PR focused - one feature/fix per PR
-5. Update PR based on feedback
-6. Maintainer will merge once approved
+### Requirements
 
-## Release Process
+- Tests pass, and linting, formatting, and type checking are clean
+- Coverage does not regress meaningfully
+- Documentation is updated alongside behavior changes
+- One feature or fix per PR
+- At least one maintainer approval before merge
 
-### Creating a Release
+Address review feedback with new commits rather than force-pushing, so reviewers can follow what changed.
 
-Releases are created using our automated tooling:
+## CloudFormation
+
+Templates live in [`cloudformation/`](/cloudformation/README.md). Use YAML, describe every parameter, supply sensible defaults, use conditions for environment-specific resources, and tag all resources.
 
 ```bash
-# Create a patch release and deploy to staging
-just create-release patch staging
-
-# Create a minor release and deploy to staging
-just create-release minor staging
-
-# Create a major release (no auto-deploy)
-just create-release major none
+just cf-lint api        # lint and validate one template by name
+just cf-lint-all        # lint every template (no AWS credentials needed)
 ```
 
-This will:
-
-1. Create a release branch
-2. Update version numbers
-3. Generate changelog
-4. Create a release PR
-5. Optionally deploy to staging for testing
+`just cf-lint <name>` also calls `aws cloudformation validate-template`, which requires AWS credentials. Without them, use `just cf-lint-all`, which is what CI runs.
 
 ## Security
 
-### Security Vulnerabilities
+**Do not open a public issue for a security vulnerability.** Email security@robosystems.ai with the details and steps to reproduce, and allow time for a fix before public disclosure.
 
-**DO NOT** create public issues for security vulnerabilities. Instead:
-
-1. Email security@robosystems.ai with details
-2. Include steps to reproduce if possible
-3. Allow time for the issue to be addressed before public disclosure
-
-### Security Best Practices
+When contributing:
 
 - Never commit secrets or credentials
-- Use environment variables for sensitive configuration
-- Validate and sanitize all user inputs
-- Keep dependencies up to date
-- Follow OWASP guidelines for web security
+- Keep sensitive configuration in environment variables
+- Validate and sanitize all user input
+- Keep dependencies current
 
-## CloudFormation Contributions
+## Questions
 
-### Template Guidelines
+- **[GitHub Discussions](https://github.com/orgs/RoboFinSystems/discussions)** — questions and community conversation
+- **[GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)** — bug reports and feature requests
+- **security@robosystems.ai** — security issues only
 
-- Use YAML format for CloudFormation templates
-- Include comprehensive parameter descriptions
-- Add helpful default values where appropriate
-- Use conditions for environment-specific resources
-- Include proper tags on all resources
-
-### Testing CloudFormation Changes
-
-```bash
-# Lint and validate CloudFormation templates
-just cf-lint api
-just cf-lint worker
-```
-
-## Questions and Support
-
-- **[GitHub Discussions](https://github.com/orgs/RoboFinSystems/discussions)** - Best place for questions and community conversation
-- **[GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)** - Bug reports and feature requests for this repo
-- **Email**: security@robosystems.ai for security issues only
-
-## Recognition
-
-Contributors will be recognized in our [Contributors](https://github.com/RoboFinSystems/robosystems/graphs/contributors) page.
-
-Thank you for contributing to RoboSystems! 🚀
+Contributors are credited on the [contributors page](https://github.com/RoboFinSystems/robosystems/graphs/contributors).

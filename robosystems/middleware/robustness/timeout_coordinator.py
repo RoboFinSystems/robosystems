@@ -1,8 +1,8 @@
-"""
-Timeout coordination system for hierarchical timeout management.
+"""Hierarchical timeout coordination.
 
-Provides coordinated timeout management across multiple layers to prevent
-timeout conflicts and ensure proper error handling.
+Derives each layer's timeout from the one above it, so an inner call always
+expires before the outer call it is nested in and the innermost failure is
+the one reported.
 """
 
 from dataclasses import dataclass
@@ -62,15 +62,7 @@ class TimeoutCoordinator:
     logger.debug("Initialized TimeoutCoordinator with hierarchical timeout management")
 
   def get_timeout_config(self, tool_name: str) -> TimeoutConfiguration:
-    """
-    Get timeout configuration for a specific tool.
-
-    Args:
-        tool_name: Name of the tool (e.g., 'cypher_query', 'get-graph-schema')
-
-    Returns:
-        TimeoutConfiguration for the tool
-    """
+    """Get timeout configuration for a specific tool."""
     return self.timeout_configs.get(tool_name, self.timeout_configs["default"])
 
   def get_endpoint_timeout(self, tool_name: str) -> float:
@@ -94,15 +86,7 @@ class TimeoutCoordinator:
     return config.instance_timeout
 
   def validate_timeout_hierarchy(self, tool_name: str) -> bool:
-    """
-    Validate that timeout hierarchy is properly configured.
-
-    Args:
-        tool_name: Tool to validate timeouts for
-
-    Returns:
-        True if hierarchy is valid
-    """
+    """Validate that timeout hierarchy is properly configured."""
     config = self.get_timeout_config(tool_name)
 
     # Check that timeouts decrease down the hierarchy
@@ -138,16 +122,7 @@ class TimeoutCoordinator:
   def calculate_timeout(
     self, operation_type: str, complexity_factors: dict | None = None
   ) -> float:
-    """
-    Calculate timeout based on operation type and complexity factors.
-
-    Args:
-        operation_type: Type of operation (database_query, database_write, etc.)
-        complexity_factors: Optional dict of factors that affect timeout
-
-    Returns:
-        Calculated timeout in seconds
-    """
+    """Calculate timeout based on operation type and complexity factors."""
     # Map operation types to timeout configurations
     operation_mapping = {
       "database_query": "cypher_query",
@@ -159,7 +134,6 @@ class TimeoutCoordinator:
     tool_name = operation_mapping.get(operation_type, "default")
     base_timeout = self.get_endpoint_timeout(tool_name)
 
-    # Apply complexity factors if provided
     if complexity_factors:
       multiplier = 1.0
 

@@ -461,13 +461,13 @@ class TestCascade:
 
 
 class TestLineAssertions:
-  """The manual-override path (fpa §11 #10): assertions win over carry
-  and driver rules for the months they name, articulate through the
-  calc DAG, and pin their values against the rule-delta push-down."""
+  """The manual-override path: assertions win over carry and driver rules
+  for the months they name, articulate through the calc DAG, and pin their
+  values against the rule-delta push-down."""
 
   def test_assertion_overrides_carry_forward(self) -> None:
-    """The Harbinger case: zero out a base-month one-off so carry stops
-    replicating it into every forward month."""
+    """A line assertion of 0.0 zeroes out a base-month one-off, so
+    carry-forward stops replicating it into every forward month."""
     assertions = [_assertion("rs-gaap:RentExpense", "el_rent", 0.0, ALL_MONTHS)]
     _, rec = _run(
       _mechanics(FULL_LEVERS, assertions=assertions),

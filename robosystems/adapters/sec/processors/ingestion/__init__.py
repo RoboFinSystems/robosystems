@@ -1,32 +1,23 @@
 """
 XBRL Graph Ingestion Processor (DuckDB-Based).
 
-This package provides a decoupled ingestion approach using DuckDB staging tables
-with persistent storage for independent retry of staging and materialization.
+Two decoupled stages, so a failed LadybugDB materialization doesn't discard
+2+ hours of DuckDB staging work:
 
-Architecture:
-- **Stage 1 (DuckDBStager)**: Schema-driven table creation via glob patterns
-- **Stage 2 (LadybugMaterializer)**: Schema-driven materialization to LadybugDB
+- **Stage 1 (`staging.DuckDBStager`)** — creates DuckDB tables from S3 parquet
+  via glob patterns, persisted to disk so stage 2 can be retried on its own.
+- **Stage 2 (`materialization.LadybugMaterializer`)** — materializes those
+  tables into LadybugDB.
 
-Key benefits of decoupled stages:
-- If LadybugDB materialization fails, don't lose 2+ hours of DuckDB staging work
-- Staging persists to disk, enabling independent retry of materialization
-- Schema-driven: table names come from robosystems.schemas (no manifest needed)
-
-Modules:
-    models: Result dataclasses and configuration constants
-    staging: DuckDB staging operations (DuckDBStager)
-    materialization: LadybugDB materialization operations (LadybugMaterializer)
-
-Classes:
-    XBRLDuckDBGraphProcessor: Unified processor combining staging and materialization
-                              (for backward compatibility with existing callers)
-    DuckDBStager: Handles DuckDB staging operations only
-    LadybugMaterializer: Handles LadybugDB materialization only
+Both are schema-driven: table names come from `robosystems.schemas`, so there
+is no manifest to keep in sync. `models` holds the result dataclasses, timeout
+constants, and shared helpers.
 
 Usage:
-    # New recommended usage - separate concerns
-    from robosystems.adapters.sec.processors.ingestion import DuckDBStager, LadybugMaterializer
+    from robosystems.adapters.sec.processors.ingestion import (
+        DuckDBStager,
+        LadybugMaterializer,
+    )
 
     stager = DuckDBStager(graph_id="sec")
     staging_result = await stager.stage_to_duckdb()
@@ -34,12 +25,8 @@ Usage:
     materializer = LadybugMaterializer(graph_id="sec")
     materialize_result = await materializer.materialize_from_duckdb()
 
-    # Backward compatible usage - unified interface
-    from robosystems.adapters.sec.processors.ingestion import XBRLDuckDBGraphProcessor
-
-    processor = XBRLDuckDBGraphProcessor(graph_id="sec")
-    staging_result = await processor.stage_to_duckdb()
-    materialize_result = await processor.materialize_from_duckdb()
+`XBRLDuckDBGraphProcessor` subclasses both and exposes the same methods on one
+object, for callers that run the two stages together.
 """
 
 from .materialization import LadybugMaterializer
@@ -70,42 +57,25 @@ from .models import (
 )
 from .staging import DuckDBStager
 
-# Backward compatibility aliases for underscore-prefixed names
-# These were previously private functions but are imported by tests
+# Underscore-prefixed aliases: tests import the timeout helpers by these names.
 _get_staging_timeout = get_staging_timeout
 _get_materialization_timeout = get_materialization_timeout
 
 
 class XBRLDuckDBGraphProcessor(DuckDBStager, LadybugMaterializer):
   """
-  Unified XBRL graph data processor using DuckDB-based ingestion pattern.
+  Both ingestion stages on a single object, for callers that run them together.
 
-  This class provides backward compatibility for existing callers by combining
-  both DuckDBStager (staging operations) and LadybugMaterializer (materialization
-  operations) into a single interface.
-
-  For new code, consider using DuckDBStager and LadybugMaterializer directly
-  for clearer separation of concerns.
-
-  This processor communicates with the Graph API to:
   1. Create DuckDB staging tables from processed Parquet files (Stage 1)
-  2. Trigger materialization to LadybugDB graph database (Stage 2)
+  2. Trigger materialization to LadybugDB (Stage 2)
 
-  Architecture:
-  - Uses Graph API client to communicate with Graph API container
-  - DuckDB pool lives on Graph API side, not on worker
-  - Supports both full rebuild and incremental update modes
+  Both stages drive the Graph API over HTTP — the DuckDB pool lives on the
+  Graph API side, not on the worker. Prefer `DuckDBStager` /
+  `LadybugMaterializer` directly when only one stage is needed.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
-    """
-    Initialize unified XBRL graph ingestion processor.
-
-    Args:
-        graph_id: Graph database identifier (default: "sec")
-        source_prefix: S3 prefix for source files (default: "sec/processed")
-    """
-    # Initialize both parent classes
+    """Init both stages against the same graph (`source_prefix`: "sec/processed")."""
     DuckDBStager.__init__(self, graph_id=graph_id, source_prefix=source_prefix)
     LadybugMaterializer.__init__(self, graph_id=graph_id, source_prefix=source_prefix)
 
@@ -131,8 +101,8 @@ __all__ = [
   "ProgressCallback",
   "StagingResult",
   "TableInfo",
-  "XBRLDuckDBGraphProcessor",  # Unified (backward compat)
-  # Backward compatibility aliases (underscore-prefixed)
+  "XBRLDuckDBGraphProcessor",  # Both stages on one object
+  # Underscore aliases (imported by tests)
   "_get_materialization_timeout",
   "_get_staging_timeout",
   # Helper functions

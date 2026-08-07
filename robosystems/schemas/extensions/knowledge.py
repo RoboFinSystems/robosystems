@@ -8,8 +8,7 @@ session context.
 AI agents can extend this schema dynamically using the add-node-table and
 add-relationship-table MCP tools.
 
-Formerly the "memory" extension; renamed when semantic memory moved to LanceDB.
-The legacy "memory" name still resolves here via an alias in the SchemaManager.
+The name "memory" also resolves to this extension (see `schemas/aliases.py`).
 """
 
 from ..models import Node, Property, Relationship

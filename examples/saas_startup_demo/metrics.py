@@ -1,11 +1,10 @@
-"""Cadence Labs' tenant-authored metric catalog — SaaS judgment metrics.
+"""Cadence Labs' tenant-authored metric catalog.
 
-Gross Margin % is the canonical example of why tenant metrics exist as
-the open-edges half of the metric surface: every SaaS company computes
-it, and every SaaS company argues about the definition (what lands in
-cost of revenue). The library's rs-metric catalog carries only
-formula-canonical ratios; a house margin definition belongs here —
-tenant-local, authored through the same ``reporting_extension``
+Gross Margin % is the clearest case for tenant-local metrics: every SaaS
+company computes it, and every SaaS company argues about the definition —
+specifically about what lands in cost of revenue. The library's rs-metric
+catalog carries only formula-canonical ratios, so a house margin definition
+belongs to the tenant: authored through the same ``reporting_extension``
 envelope, computed by the same structure-agnostic ``compute-metrics``.
 """
 

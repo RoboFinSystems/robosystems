@@ -11,9 +11,10 @@ Run the offline arc preview (no platform needed) to see the story bite::
 
     uv run python -m examples.coffee_roaster_demo.data
 
-This module re-exports the trio ``main.py`` consumes — ``ACCOUNTS``,
-``get_all_transactions``, ``validate_transactions`` — plus ``SCENARIO`` for
-the company metadata / schedules the platform wiring reads.
+``SCENARIO`` is what ``main.py`` hands the runner — company metadata, chart of
+accounts, and the flow parameters the platform wiring reads. ``ACCOUNTS``,
+``get_all_transactions``, and ``validate_transactions`` back the offline
+preview above.
 """
 
 from __future__ import annotations
@@ -348,7 +349,7 @@ SCENARIO = build_scenario(get_demo_start_date(MONTHS))
 
 
 # ---------------------------------------------------------------------------
-# The trio main.py consumes
+# Offline preview helpers
 # ---------------------------------------------------------------------------
 
 

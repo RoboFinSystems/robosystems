@@ -1,29 +1,27 @@
-"""``StatementBundle`` envelope — XBRL-aligned shape (v1.0).
+"""``StatementBundle`` envelope — the shape both encoder families read.
 
-The bundle is the design unit shared by both encoder families and
-(eventually) both producers (Report + LiveSnapshot). v1.0 of the
-serialization ontology treats the bundle as **XBRL expressed in RDF,
-plus our extensions**:
+The bundle is the design unit shared by the RDF and XBRL encoders and by both
+producers (Report and, eventually, LiveSnapshot). Its schema and linkbase
+slices are XBRL-aligned; its instance slice is graph-native:
 
-* The schema portion (``schema_concepts``) maps 1:1 to XBRL
-  ``<xs:element>`` declarations with ``xbrli:`` attributes.
+* The schema portion (``schema_concepts``) maps 1:1 to XBRL ``<xs:element>``
+  declarations with ``xbrli:`` attributes.
 * The linkbases portion (``linkbases.presentation_links`` /
   ``calculation_links`` / ``definition_links``) maps to XBRL
   ``<link:presentationLink>`` / ``<link:calculationLink>`` /
-  ``<link:definitionLink>`` containers, grouped by ``xlink:role``
-  (the Extended Link Role).
-* The instance portion is XBRL-native: dedupe'd ``contexts`` (one per
-  distinct entity+period combo), dedupe'd ``units``, and ``facts``
-  that reference contexts/units by id via ``xbrli:contextRef`` /
-  ``xbrli:unitRef``. Facts carry the concept qname as their type
-  (``@type: rs-gaap:Assets``) and the value as ``rdf:value`` — matching
-  XBRL's "the element name IS the type tag" pattern.
+  ``<link:definitionLink>`` containers, grouped by ``xlink:role`` (the
+  Extended Link Role).
+* The instance portion mirrors the graph, not the XBRL instance: there are no
+  ``<context>`` nodes. A ``BundleFact`` references its period, unit, and
+  entity directly, the way the graph's ``FACT_HAS_*`` edges do. The XBRL 2.1
+  encoder re-derives ``<xbrli:context>`` from the bundle entity +
+  ``period_nodes`` at emit time, because XBRL requires shared contexts
+  referenced by ``contextRef``.
 
-The ``rs:`` extension surface (IB envelopes, reporting style,
-verification, provenance) carries everything XBRL has no standard
-for. The XBRL 2.1 emitter walks the same bundle, ignores the ``rs:``
-extensions when projecting to XML, and produces a valid XBRL instance
-+ linkbase set.
+The ``rs:`` extension surface (IB envelopes, reporting style, verification,
+provenance) carries everything XBRL has no standard for. The XBRL 2.1 emitter
+walks the same bundle, ignores the ``rs:`` extensions when projecting to XML,
+and produces a valid XBRL instance + linkbase set.
 """
 
 from __future__ import annotations
@@ -76,8 +74,8 @@ class ReportMeta(BaseModel):
 
   Carries the filing-lifecycle + restatement-chain + share-provenance
   fields that distinguish a stamped Report from an ephemeral live
-  snapshot. A future importer uses these to drive cross-tenant
-  identity reconstruction.
+  snapshot — the fields a cross-tenant importer needs to reconstruct
+  identity.
   """
 
   report_id: str
@@ -106,9 +104,9 @@ class LiveMeta(BaseModel):
 class FrameworkPin(BaseModel):
   """One framework version pin carried in the bundle header.
 
-  Replaces the flat ``dict[str, str]`` so the JSON-LD output renders
-  as ``[{framework, version}]`` — friendlier to RDF consumers than a
-  bare object map.
+  A list of these rather than a flat ``dict[str, str]`` so the JSON-LD
+  output renders as ``[{framework, version}]`` — friendlier to RDF
+  consumers than a bare object map.
   """
 
   framework: str
@@ -191,10 +189,10 @@ class BundleLinkbaseLink(BaseModel):
 class BundleLinkbases(BaseModel):
   """The bundle's linkbase content, grouped by link type.
 
-  v1.0 carries presentation / calculation / definition; label and
-  reference linkbases are not yet carried here (labels live on
-  ``BundleElement.label`` for now). Each list is a sequence of
-  link-per-ELR groupings; the XBRL emitter walks each in order.
+  Carries presentation / calculation / definition. Label and reference
+  linkbases are not carried here — labels ride on ``BundleElement.label``.
+  Each list is a sequence of link-per-ELR groupings; the XBRL emitter
+  walks each in order.
   """
 
   presentation_links: list[BundleLinkbaseLink] = Field(default_factory=list)
@@ -242,9 +240,9 @@ class BundleContext(BaseModel):
 class BundleUnit(BaseModel):
   """An ``rs:Unit`` node — one per distinct measure.
 
-  The bundle carries simple-measure units only (e.g., ``iso4217:USD``). Complex
-  units (per-share with divide, ratios) are deferred until a customer
-  needs them. The XBRL encoder emits these as ``<xbrli:unit>``.
+  The bundle carries simple-measure units only (e.g. ``iso4217:USD``);
+  complex units (per-share with divide, ratios) are unsupported. The XBRL
+  encoder emits these as ``<xbrli:unit>``.
   """
 
   id: str
@@ -286,9 +284,9 @@ class StatementBundle(BaseModel):
 
   Mode-tagged: ``mode='report'`` bundles carry ``report_meta`` and are
   S3-stamped at publish; ``mode='live'`` bundles carry ``live_meta``,
-  are response-body-only, and are rejected by the (future) importer
-  by construction. The mode discriminator is a first-class JSON-LD
-  type, not a flag, which enforces the report/live split structurally.
+  are response-body-only, and cannot be imported as a Report. The mode
+  discriminator is a first-class JSON-LD type, not a flag, so the
+  report/live split is enforced structurally.
 
   ``ib_envelopes`` reuses :class:`InformationBlockEnvelope` from
   ``models/api/information_block.py`` directly. This is intentional
@@ -341,11 +339,10 @@ class StatementBundle(BaseModel):
 
 # ── Producer ────────────────────────────────────────────────────────────────
 
-# The four statement Networks the bundle attempts to resolve. Equity and
-# comprehensive-income variants slot in once their Reporting Style picker
-# rows are seeded — this mirrors ``_RENDER_TARGET_STATEMENT_TYPES`` in
-# ``operations/roboledger/commands/reports.py`` (kept in sync rather than
-# imported to avoid a cross-module dep from the serialization kernel).
+# The statement Networks the bundle attempts to resolve. Mirrors
+# ``_RENDER_TARGET_STATEMENT_TYPES`` in
+# ``operations/roboledger/commands/reports.py`` — kept in sync rather than
+# imported, to avoid a cross-module dep from the serialization kernel.
 _STATEMENT_BLOCK_TYPES: tuple[str, ...] = (
   "balance_sheet",
   "income_statement",
@@ -401,13 +398,11 @@ def build_report_bundle(
   rows are visible to ORM reads inside the assembler. ORM-only reads —
   no raw SQL pulls of newly-persisted rows.
 
-  Assembly produces the XBRL-aligned shape: concepts in
-  ``schema_concepts``; arcs grouped into
-  ``linkbases.{presentation,calculation,definition}_links``
-  by association_type, with each link wrapping arcs scoped to one
-  Structure (ELR); contexts dedupe'd by (entity, period); units
-  dedupe'd by measure; facts hold context/unit refs instead of inline
-  period/unit values.
+  Assembly produces: concepts in ``schema_concepts``; arcs grouped into
+  ``linkbases.{presentation,calculation,definition}_links`` by
+  association_type, with each link wrapping the arcs scoped to one
+  Structure (ELR); period nodes deduped by (start, end, type); units
+  deduped by measure; facts carrying period/unit/entity refs.
 
   Args:
     session: Extensions session with tenant search_path active.
@@ -582,9 +577,8 @@ def build_report_bundle(
     if envelope is not None:
       ib_envelopes.append(envelope)
 
-  # Entity header — single-entity assumption matches ``_get_entity_id``
-  # used by ``create_report``. Multi-entity graphs lock in once
-  # consolidation lands (see ``architecture_multientity_consolidation``).
+  # Entity header — single-entity assumption, matching ``_get_entity_id``
+  # in ``create_report``. Multi-entity graphs need consolidation first.
   entity = (
     session.execute(select(Entity).order_by(Entity.created_at.asc())).scalars().first()
   )

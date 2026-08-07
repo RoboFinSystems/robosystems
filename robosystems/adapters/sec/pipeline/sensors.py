@@ -108,8 +108,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   from robosystems.database import session as SessionLocal
   from robosystems.models.core import SourceFile
 
-  # Regex pattern for robust partition key parsing
-  # Format: "2024-Q1_cik_accession" -> captures "2024-Q1"
+  # Partition key format: "2024-Q1_cik_accession" -> captures "2024-Q1"
   quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
 
   # Skip in dev - use manual job triggers for testing
@@ -134,7 +133,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       .all()
     )
 
-    # Extract unique quarters from partition keys using regex for robust parsing
     quarters_with_pending: set[str] = set()
     for (partition_key,) in pending_files:
       if partition_key:

@@ -1,16 +1,8 @@
-"""
-Repository Wrapper
+"""One interface over sync and async graph repositories.
 
-This module provides a unified interface for both direct file repositories (synchronous)
-and API-based repositories (asynchronous via GraphClient), automatically detecting
-the repository type and conditionally awaiting methods as needed.
-
-Key features:
-- Automatic detection of sync vs async repository methods
-- Conditional awaiting without code duplication
-- Type-safe method proxying
-- Backward compatibility with existing code
-- Comprehensive method coverage
+Direct file access (`Repository`) is synchronous; the Graph API client
+(`GraphClient`) is asynchronous. `UniversalRepository` inspects each method
+and awaits only when it needs to, so callers write the same code either way.
 """
 
 import asyncio
@@ -25,26 +17,13 @@ from .base import GraphOperation
 
 
 class UniversalRepository:
-  """
-  Universal repository wrapper that handles both sync and async repositories.
-
-  This wrapper automatically detects whether the underlying repository is
-  synchronous (direct file) or asynchronous (API-based) and handles
-  method calls accordingly.
-  """
+  """Proxies calls to a `Repository` or `GraphClient`, awaiting as needed."""
 
   def __init__(self, repository: Repository | GraphClient):
-    """
-    Initialize the universal repository wrapper.
-
-    Args:
-        repository: Either a Repository (sync) or GraphClient (async)
-    """
     self._repository = repository
-    # Check if it's async
     self._is_async = isinstance(repository, GraphClient)
 
-    # Cache method inspection results for performance
+    # Method sync/async inspection is cached per name.
     self._method_cache = {}
 
     logger.debug(
@@ -53,24 +32,16 @@ class UniversalRepository:
 
   @property
   def is_async(self) -> bool:
-    """Check if the underlying repository is asynchronous."""
+    """Whether the underlying repository is asynchronous."""
     return self._is_async
 
   @property
   def repository_type(self) -> str:
-    """Get the type of the underlying repository."""
+    """`"api"` or `"direct"`."""
     return "api" if self._is_async else "direct"
 
   def _is_method_async(self, method_name: str) -> bool:
-    """
-    Check if a repository method is asynchronous.
-
-    Args:
-        method_name: Name of the method to check
-
-    Returns:
-        True if the method is async, False otherwise
-    """
+    """Whether a repository method is a coroutine function."""
     if method_name in self._method_cache:
       return self._method_cache[method_name]
 
@@ -85,17 +56,7 @@ class UniversalRepository:
     return is_async
 
   async def _call_method(self, method_name: str, *args, **kwargs) -> Any:
-    """
-    Call a repository method, conditionally awaiting if it's async.
-
-    Args:
-        method_name: Name of the method to call
-        *args: Positional arguments
-        **kwargs: Keyword arguments
-
-    Returns:
-        Method result
-    """
+    """Call a repository method, awaiting it when it is async."""
     if not hasattr(self._repository, method_name):
       raise AttributeError(f"Repository has no method '{method_name}'")
 
@@ -107,16 +68,8 @@ class UniversalRepository:
       return method(*args, **kwargs)
 
   def _call_method_sync(self, method_name: str, *args, **kwargs) -> Any:
-    """
-    Call a repository method synchronously, using asyncio.run for async methods.
-
-    Args:
-        method_name: Name of the method to call
-        *args: Positional arguments
-        **kwargs: Keyword arguments
-
-    Returns:
-        Method result
+    """Call a repository method from sync code, driving async ones with
+    `asyncio.run`.
     """
     if not hasattr(self._repository, method_name):
       raise AttributeError(f"Repository has no method '{method_name}'")
@@ -138,21 +91,11 @@ class UniversalRepository:
   async def execute_query_streaming(
     self, cypher: str, params: dict[str, Any] | None = None, chunk_size: int = 1000
   ):
-    """
-    Execute a query and yield results in chunks for streaming.
+    """Execute a query and yield results in chunks for streaming.
 
     This method checks if the underlying repository supports streaming,
     and falls back to chunking regular results if not.
-
-    Args:
-        cypher: The Cypher query to execute
-        params: Optional query parameters
-        chunk_size: Number of rows per chunk
-
-    Yields:
-        Dict containing chunk data
     """
-    # Check if underlying repository supports streaming
     if hasattr(self._repository, "execute_query_streaming"):
       # Use native streaming support
       streaming_method = self._repository.execute_query_streaming
@@ -213,7 +156,6 @@ class UniversalRepository:
     """Close the repository connection."""
     return await self._call_method("close")
 
-  # Backward compatibility methods (synchronous versions)
   def execute_query_sync(
     self, cypher: str, params: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
@@ -248,23 +190,19 @@ class UniversalRepository:
     """Close the repository connection (sync)."""
     return self._call_method_sync("close")
 
-  # Alias for backward compatibility
   def execute(
     self, cypher: str, params: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
-    """Alias for execute_query_sync for backward compatibility."""
+    """Alias for `execute_query_sync`."""
     return self.execute_query_sync(cypher, params)
 
-  # Context manager support (async)
   async def __aenter__(self):
-    """Async context manager entry."""
     if hasattr(self._repository, "__aenter__"):
       aenter_method = self._repository.__aenter__
       await aenter_method()
     return self
 
   async def __aexit__(self, exc_type, exc_val, exc_tb):
-    """Async context manager exit."""
     if hasattr(self._repository, "__aexit__"):
       aexit_method = self._repository.__aexit__
       await aexit_method(exc_type, exc_val, exc_tb)
@@ -329,17 +267,7 @@ class UniversalRepository:
 def create_universal_repository(
   graph_id: str, operation_type: str = "write", tier=None
 ) -> UniversalRepository:
-  """
-  Create a universal repository for the specified graph.
-
-  Args:
-      graph_id: Database identifier
-      operation_type: "read" or "write"
-      tier: Instance tier for routing
-
-  Returns:
-      UniversalRepository instance
-  """
+  """Build a `UniversalRepository` for a graph, from sync code."""
   from .router import get_graph_repository
 
   if tier is None:
@@ -347,8 +275,7 @@ def create_universal_repository(
 
     tier = GraphTier.LADYBUG_STANDARD
 
-  # Note: get_graph_repository is async, but this is a sync function
-  # This should ideally be an async function, but keeping for compatibility
+  # `get_graph_repository` is async; drive it from this sync entry point.
   import asyncio
 
   repository = asyncio.run(get_graph_repository(graph_id, operation_type, tier))
@@ -358,17 +285,7 @@ def create_universal_repository(
 async def create_universal_repository_with_auth(
   graph_id: str, current_user, operation_type: str = "write"
 ) -> UniversalRepository:
-  """
-  Create a universal repository with user authorization.
-
-  Args:
-      graph_id: Database identifier
-      current_user: Authenticated user
-      operation_type: "read" or "write"
-
-  Returns:
-      UniversalRepository instance
-  """
+  """Build a `UniversalRepository`, checking the user's graph access first."""
   from .dependencies import get_graph_repository_with_auth
 
   repository = await get_graph_repository_with_auth(
@@ -377,11 +294,10 @@ async def create_universal_repository_with_auth(
   return UniversalRepository(repository)
 
 
-# Utility functions for repository detection
 def is_api_repository(
   repository: Repository | GraphClient | UniversalRepository,
 ) -> bool:
-  """Check if a repository is an API repository."""
+  """Whether this repository talks to the Graph API."""
   if isinstance(repository, UniversalRepository):
     return repository.is_async
   return isinstance(repository, GraphClient)
@@ -390,7 +306,7 @@ def is_api_repository(
 def is_direct_repository(
   repository: Repository | GraphClient | UniversalRepository,
 ) -> bool:
-  """Check if a repository is a direct file repository."""
+  """Whether this repository opens the database file directly."""
   if isinstance(repository, UniversalRepository):
     return not repository.is_async
   return isinstance(repository, Repository)
@@ -399,7 +315,7 @@ def is_direct_repository(
 def get_repository_type(
   repository: Repository | GraphClient | UniversalRepository,
 ) -> str:
-  """Get the type of a repository."""
+  """`"api"`, `"direct"`, or `"unknown"`."""
   if isinstance(repository, UniversalRepository):
     return repository.repository_type
   elif isinstance(repository, GraphClient):

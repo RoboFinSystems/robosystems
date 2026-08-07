@@ -1,3 +1,9 @@
+"""DuckDB staging table routes, mounted under /databases/{graph_id}/tables.
+
+Staging is writer-only: replicas hold no staging file, so every route here
+returns 501 on a replica.
+"""
+
 import os
 
 from fastapi import APIRouter, Depends, HTTPException

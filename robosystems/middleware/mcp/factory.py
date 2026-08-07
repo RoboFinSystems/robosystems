@@ -1,8 +1,8 @@
-"""
-Factory module for creating Graph MCP clients.
+"""Factory functions for building Graph MCP clients.
 
-This module provides factory functions for creating GraphMCPClient instances
-with proper configuration and environment discovery.
+Endpoint discovery goes through `GraphClientFactory`, which routes shared
+repositories to the shared master/replica fleet and user graphs to their
+tier's instance.
 """
 
 from contextlib import asynccontextmanager
@@ -29,19 +29,13 @@ async def create_graph_mcp_client(
   Returns:
       Configured GraphMCPClient instance with appropriate timeouts
   """
-  # If URL not provided, use GraphClientFactory to discover the proper endpoint
   if not api_base_url:
     from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
     from robosystems.graph_api.client.factory import GraphClientFactory
 
-    # Determine operation type based on graph
-    # Shared repositories and their subgraphs (e.g. sec_historical) are read-only
+    # Shared repositories and their subgraphs (e.g. sec_historical) are read-only.
     operation_type = "read" if is_shared_repository_or_subgraph(graph_id) else "write"
 
-    # Get a client from the factory which will discover the proper endpoint
-    # The factory handles routing appropriately:
-    # - Shared repos: Routes to shared_master/shared_replica infrastructure
-    # - User graphs: Looks up the tier from the database
     graph_client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type=operation_type
     )

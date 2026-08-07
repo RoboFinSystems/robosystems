@@ -1,4 +1,9 @@
-"""Operator execution endpoints with intelligent strategy selection."""
+"""Operator execution: `POST /v1/graphs/{graph_id}/operator`.
+
+Selects an operator from the query's intent, picks an execution strategy from
+that operator's profile, and answers as JSON or SSE with progress. Operator
+runs consume AI credits.
+"""
 
 from fastapi import (
   APIRouter,

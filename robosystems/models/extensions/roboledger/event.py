@@ -1,4 +1,4 @@
-"""Event model — real-world business event layer (event-driven-ledger.md).
+"""Event model — the real-world business event layer above the GL.
 
 Status lifecycle: captured → classified → committed → pending → fulfilled,
 with voided and superseded as terminal off-ramps. The triggered_by_event_id
@@ -131,14 +131,13 @@ class Event(ExtensionsBase):
       "resource_type IN ('goods', 'services', 'money', 'right', 'obligation', 'information', 'labor') OR resource_type IS NULL",
       name="check_event_resource_type",
     ),
-    # source names where the event came from. Platform-emitted values
-    # (manual, system, schedule) are always valid; adapter and external
-    # sources validate at the ops layer against the graph's registered
-    # platform Connections (create_event_block's `_validate_event_source`)
-    # — a registration opens a source name, not a schema change. The old
-    # closed-list CHECK was dropped in extensions migration 0025; new
-    # tenant schemas provision from this metadata, so no constraint here
-    # is what keeps it dropped.
+    # `source` deliberately carries NO CHECK constraint. Platform-emitted
+    # values (manual, system, schedule) are always valid; adapter and external
+    # sources are validated at the ops layer against the graph's registered
+    # platform Connections (create_event_block's `_validate_event_source`), so
+    # registering a connection opens a source name without a schema change.
+    # New tenant schemas provision from this metadata — adding a constraint
+    # here would close the list again.
     CheckConstraint(_EVENT_ACTION_CHECK, name="check_event_action"),
     Index(
       "idx_events_action",

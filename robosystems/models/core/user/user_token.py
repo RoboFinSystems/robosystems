@@ -13,7 +13,11 @@ from robosystems.logger import logger
 
 
 class UserToken(Model):
-  """Token model for email verification and password reset."""
+  """Single-use token for email verification and password reset.
+
+  Only the SHA-256 hash is stored; the raw token exists once, in the return
+  value of ``create_token``.
+  """
 
   __tablename__ = "user_tokens"
 
@@ -29,7 +33,6 @@ class UserToken(Model):
   ip_address = Column(String(45), nullable=True)
   user_agent = Column(Text, nullable=True)
 
-  # Create composite index for efficient lookups
   __table_args__ = (
     Index("idx_user_tokens", "user_id", "token_type"),
     Index("idx_expires", "expires_at"),
@@ -37,7 +40,6 @@ class UserToken(Model):
   )
 
   def __repr__(self) -> str:
-    """String representation of the token."""
     return f"<UserToken {self.id} {self.token_type} for user {self.user_id}>"
 
   @classmethod
@@ -50,33 +52,20 @@ class UserToken(Model):
     ip_address: str | None = None,
     user_agent: str | None = None,
   ) -> str:
-    """
-    Create a new token for a user.
+    """Issue a token, returning the raw string to send to the user.
 
-    Args:
-        user_id: The user ID
-        token_type: Type of token (email_verification, password_reset)
-        hours: Token validity in hours
-        session: Database session
-        ip_address: Optional IP address of requester
-        user_agent: Optional user agent of requester
-
-    Returns:
-        The raw token string (to be sent to user)
+    Any unused token of the same type for this user is invalidated first, so
+    a user only ever holds one live verification or reset token.
     """
-    # Validate token type
     valid_types = ["email_verification", "password_reset"]
     if token_type not in valid_types:
       raise ValueError(f"Invalid token type. Must be one of: {valid_types}")
 
-    # Generate secure random token
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-    # Invalidate any existing unused tokens of this type for the user
     cls.invalidate_user_tokens(user_id, token_type, session)
 
-    # Create new token
     token = cls(
       user_id=user_id,
       token_hash=token_hash,
@@ -101,16 +90,9 @@ class UserToken(Model):
   def verify_token(
     cls, raw_token: str, token_type: str, session: Session
   ) -> str | None:
-    """
-    Verify and consume a token.
+    """Verify a token and consume it, returning its user_id or None.
 
-    Args:
-        raw_token: The raw token string from the user
-        token_type: Expected type of token
-        session: Database session
-
-    Returns:
-        The user_id if token is valid, None otherwise
+    Marks the row used, so a second call with the same token fails.
     """
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
@@ -129,7 +111,6 @@ class UserToken(Model):
       logger.warning(f"Invalid or expired {token_type} token attempted")
       return None
 
-    # Mark token as used
     token.used_at = datetime.now(UTC)
     try:
       session.commit()
@@ -145,17 +126,7 @@ class UserToken(Model):
   def validate_token(
     cls, raw_token: str, token_type: str, session: Session
   ) -> str | None:
-    """
-    Validate a token without consuming it.
-
-    Args:
-        raw_token: The raw token string from the user
-        token_type: Expected type of token
-        session: Database session
-
-    Returns:
-        The user_id if token is valid, None otherwise
-    """
+    """Check a token without consuming it, returning its user_id or None."""
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
     token = (
@@ -178,17 +149,7 @@ class UserToken(Model):
   def invalidate_user_tokens(
     cls, user_id: str, token_type: str, session: Session
   ) -> int:
-    """
-    Invalidate all unused tokens of a specific type for a user.
-
-    Args:
-        user_id: The user ID
-        token_type: Type of tokens to invalidate
-        session: Database session
-
-    Returns:
-        Number of tokens invalidated
-    """
+    """Mark every unused token of this type used; returns how many."""
     try:
       count = (
         session.query(cls)
@@ -210,19 +171,11 @@ class UserToken(Model):
 
   @classmethod
   def cleanup_expired_tokens(cls, session: Session) -> int:
-    """
-    Clean up expired and unused tokens.
+    """Delete spent tokens; returns how many.
 
-    Args:
-        session: Database session
-
-    Returns:
-        Number of tokens deleted
+    Two cases qualify: expired and never used, or used more than 30 days ago.
     """
     try:
-      # Delete tokens that are either:
-      # 1. Expired and unused
-      # 2. Used more than 30 days ago
       cutoff_date = datetime.now(UTC) - timedelta(days=30)
 
       count = (
@@ -246,17 +199,7 @@ class UserToken(Model):
   def get_active_tokens_for_user(
     cls, user_id: str, session: Session, token_type: str | None = None
   ) -> list:
-    """
-    Retrieve active tokens for a user.
-
-    Args:
-        user_id: The user ID
-        session: Database session
-        token_type: Optional token type filter
-
-    Returns:
-        List of active tokens for the user
-    """
+    """Unused, unexpired tokens for a user, optionally filtered by type."""
     query = session.query(cls).filter(
       cls.user_id == user_id,
       cls.used_at.is_(None),

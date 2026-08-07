@@ -1,4 +1,8 @@
-"""Provider registry for dynamic provider management."""
+"""Registry mapping a connection provider name to its create/sync/cleanup trio.
+
+`ConnectionService` and the connection routers dispatch through here rather than
+importing providers directly, so a feature-flagged-off provider is simply absent.
+"""
 
 import logging
 from typing import Any, Protocol
@@ -32,12 +36,12 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionProvider(Protocol):
-  """Protocol for connection providers."""
+  """The three lifecycle hooks every connection provider implements."""
 
   async def create_connection(
     self, entity_id: str | None, config: Any, user_id: str, graph_id: str, db: Session
   ) -> str:
-    """Create a connection."""
+    """Register the connection and return its id."""
     ...
 
   async def sync_connection(
@@ -46,25 +50,22 @@ class ConnectionProvider(Protocol):
     sync_options: dict[str, Any] | None,
     graph_id: str,
   ) -> str:
-    """Sync a connection."""
+    """Pull from the source; returns a run id or a human-readable status."""
     ...
 
   async def cleanup_connection(self, connection: dict[str, Any], graph_id: str) -> None:
-    """Clean up a connection."""
+    """Release provider-side state before the connection row is deleted."""
     ...
 
 
 class ProviderRegistry:
-  """Registry for connection providers."""
+  """Providers enabled by feature flag, keyed by lowercase provider name."""
 
   def __init__(self):
-    # Map provider types to their handlers - only include enabled providers
     self._providers = {}
 
-    # Track feature flag status for metrics
     self._record_feature_flag_status()
 
-    # Add SEC provider if enabled
     if env.CONNECTION_SEC_ENABLED:
       self._providers["sec"] = {
         "create": create_sec_connection,
@@ -73,7 +74,6 @@ class ProviderRegistry:
         "config_class": SECConnectionConfig,
       }
 
-    # Add QuickBooks provider if enabled
     if env.CONNECTION_QUICKBOOKS_ENABLED:
       self._providers["quickbooks"] = {
         "create": create_quickbooks_connection,
@@ -82,7 +82,7 @@ class ProviderRegistry:
         "config_class": QuickBooksConnectionConfig,
       }
 
-    # Add external provider (source-namespace registration) if enabled
+    # "external" is source-namespace registration only — see external_provider.py
     if env.CONNECTION_EXTERNAL_ENABLED:
       self._providers["external"] = {
         "create": create_external_connection,
@@ -92,10 +92,10 @@ class ProviderRegistry:
       }
 
   def _record_feature_flag_status(self):
-    """Record feature flag status at initialization for monitoring."""
+    """Emit the flag state once at construction, so dashboards can tell a
+    disabled provider from a broken one."""
     try:
       metrics = get_endpoint_metrics()
-      # Record feature flag status for each provider
       for provider, enabled in [
         ("sec", env.CONNECTION_SEC_ENABLED),
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
@@ -114,7 +114,7 @@ class ProviderRegistry:
           f"Provider {provider} feature flag: {'enabled' if enabled else 'disabled'}"
         )
     except Exception as e:
-      # Don't fail initialization if metrics fail
+      # Metrics must never keep the registry from constructing.
       logger.warning(f"Failed to record feature flag metrics: {e}")
 
   def is_enabled(self, provider_type: str) -> bool:
@@ -122,15 +122,17 @@ class ProviderRegistry:
     return provider_type.lower() in self._providers
 
   def get_provider(self, provider_type: str) -> dict[str, Any]:
-    """Get provider configuration."""
+    """Look up a provider's handler dict.
+
+    Raises ValueError either way, but distinguishes "known provider, turned
+    off" from "no such provider" so the caller-facing message is actionable.
+    """
     provider_lower = provider_type.lower()
 
-    # Record provider request metric
     self._record_provider_request(provider_lower)
 
     provider = self._providers.get(provider_lower)
     if not provider:
-      # Check if provider exists but is disabled
       if provider_lower == "sec" and not env.CONNECTION_SEC_ENABLED:
         self._record_disabled_provider_request(provider_lower)
         raise ValueError(
@@ -151,7 +153,6 @@ class ProviderRegistry:
     return provider
 
   def _record_provider_request(self, provider: str):
-    """Record metrics for provider requests."""
     try:
       metrics = get_endpoint_metrics()
       metrics.record_business_event(
@@ -166,7 +167,6 @@ class ProviderRegistry:
       logger.debug(f"Failed to record provider request metric: {e}")
 
   def _record_disabled_provider_request(self, provider: str):
-    """Record metrics for disabled provider requests."""
     try:
       metrics = get_endpoint_metrics()
       metrics.record_business_event(
@@ -190,7 +190,6 @@ class ProviderRegistry:
     graph_id: str,
     db: Session,
   ) -> str:
-    """Create a connection using the appropriate provider."""
     provider = self.get_provider(provider_type)
     create_func = provider["create"]
     return await create_func(entity_id, config, user_id, graph_id, db)
@@ -202,7 +201,6 @@ class ProviderRegistry:
     sync_options: dict[str, Any] | None,
     graph_id: str,
   ) -> str:
-    """Sync a connection using the appropriate provider."""
     provider = self.get_provider(provider_type)
     sync_func = provider["sync"]
     return await sync_func(connection, sync_options, graph_id)
@@ -210,11 +208,11 @@ class ProviderRegistry:
   async def cleanup_connection(
     self, provider_type: str, connection: dict[str, Any], graph_id: str
   ) -> None:
-    """Clean up a connection using the appropriate provider."""
     provider = self.get_provider(provider_type)
     cleanup_func = provider["cleanup"]
     return await cleanup_func(connection, graph_id)
 
 
-# Global registry instance
+# Built at import: the enabled set is a snapshot of the feature flags, so
+# flipping one takes effect only after a process restart.
 provider_registry = ProviderRegistry()

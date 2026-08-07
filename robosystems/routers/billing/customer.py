@@ -47,7 +47,6 @@ async def get_customer(
         detail="You are not a member of this organization",
       )
 
-    # Get or create customer for the org
     customer = BillingCustomerModel.get_or_create(org_id, db)
 
     # Only owners can see full payment details

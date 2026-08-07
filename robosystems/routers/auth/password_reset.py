@@ -87,7 +87,6 @@ async def forgot_password(
       user_agent=user_agent,
     )
 
-    # Detect app source
     app = detect_app_source(fastapi_request)
 
     # Queue reset email via Dagster (async with retry logic)
@@ -107,7 +106,6 @@ async def forgot_password(
 
     logger.info(f"Queued password reset email to {sanitized_email}")
 
-    # Log security event
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
       user_id=user.id,
@@ -211,7 +209,6 @@ async def reset_password(
       detail="Invalid or expired reset token",
     )
 
-  # Get user
   user = User.get_by_id(user_id, session)
   if not user:
     raise HTTPException(
@@ -227,7 +224,6 @@ async def reset_password(
       detail=f"Password requirements not met: {', '.join(password_result.errors)}",
     )
 
-  # Hash new password
   password_hash = hash_password(request.new_password)
 
   # Update user's password
@@ -248,7 +244,6 @@ async def reset_password(
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Log security event
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.PASSWORD_RESET_COMPLETED,
     user_id=user.id,

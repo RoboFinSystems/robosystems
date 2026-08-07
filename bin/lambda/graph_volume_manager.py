@@ -1,13 +1,20 @@
 """
-Enhanced Graph Volume Manager Lambda Function
+Manage the lifecycle of EBS data volumes for LadybugDB graph instances.
 
-Manages the lifecycle of EBS volumes for Graph database instances with proper
-volume reattachment on instance replacement.
+Two DynamoDB tables back this: the *volume registry* maps a volume to the
+databases it carries and its claim state, and the *graph registry* maps a graph
+to the instance and IP serving it. Both must be kept in step with EC2 reality —
+a volume that moves without a graph-registry update leaves queries routed to a
+dead instance.
 
-Key improvements:
-- Tracks database-to-volume mapping
-- Reattaches existing volumes with data on instance launch
-- Prevents data loss during instance replacement
+Volumes are pooled rather than owned. A launching instance scans the pool for a
+volume already holding one of its databases, takes an atomic claim on it
+(`available` -> `claiming`), attaches, then marks it `attached`. Claims are a
+lease: any handled failure releases its own claim, and `reclaim_stale_claims`
+sweeps volumes whose holder died mid-flight, since a volume stuck in `claiming`
+is invisible to every future scan.
+
+Dispatch is by `action` on the event; see `handler`.
 """
 
 import json
@@ -62,12 +69,11 @@ graph_table = dynamodb.Table(GRAPH_REGISTRY_TABLE)  # Graph registry
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-  """Main Lambda handler"""
+  """Dispatch on `event["action"]` to the matching volume operation."""
   action = event.get("action")
 
   try:
     if action == "instance_launch":
-      # NEW: Handle instance launch with volume reattachment
       return handle_instance_launch(event)
     elif action == "get_or_create_volume":
       return get_or_create_volume(event)
@@ -88,7 +94,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     elif action == "snapshot_for_upgrade":
       return snapshot_for_upgrade(event)
     elif action == "sync_registry":
-      # NEW: Synchronize registry with actual EC2 volumes
       return sync_registry_with_ec2(event)
     else:
       return {"statusCode": 400, "error": f"Unknown action: {action}"}
@@ -99,9 +104,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
-  """
-  Handle new instance launch - reattach existing volumes or create new ones.
-  This is the critical fix for volume persistence.
+  """Reattach the instance's existing data volume, or create one if none exists.
+
+  Preferring an existing volume is what makes graph data survive instance
+  replacement; creating a fresh one is the fallback for a genuinely new graph.
   """
   # Validate required fields (except availability_zone which we'll look up)
   required_fields = ["instance_id", "node_type"]
@@ -269,19 +275,11 @@ def find_volumes_with_database(database: str, az: str, tier: str) -> list[dict]:
 def update_graph_registry_for_instance(
   instance_id: str, databases: list[str], private_ip: str | None = None
 ) -> dict[str, int]:
-  """
-  Update graph registry entries when databases move to a new instance.
+  """Repoint graph-registry entries at the instance now serving those databases.
 
-  This is critical for routing - when an instance is replaced, we need to update
-  the graph registry so queries route to the correct IP address.
-
-  Args:
-    instance_id: The new instance ID
-    databases: List of database/graph IDs on this instance
-    private_ip: The new instance's private IP (will be fetched if not provided)
-
-  Returns:
-    Dict with counts of updated, skipped, and failed entries
+  This is the routing half of a volume move: until it runs, queries for those
+  graphs still resolve to the previous instance's IP. `private_ip` is looked up
+  from EC2 when omitted. Returns counts of updated, skipped, and failed entries.
   """
   if not databases:
     logger.info("No databases to update in graph registry")
@@ -510,10 +508,10 @@ def ordered_volume_candidates(
 ) -> list[tuple[dict, Any]]:
   """Volumes to try in preference order, each paired with the databases to register.
 
-  Order is unchanged: a volume already holding one of this instance's databases,
-  then any volume carrying data, then an empty one. What changed is that every
-  candidate is returned rather than only the best, so a caller that loses a
-  claim race falls through to the next instead of failing.
+  Preference runs: a volume already holding one of this instance's databases,
+  then any volume carrying data, then an empty one. Every candidate is returned
+  rather than only the best, so a caller that loses a claim race falls through
+  to the next instead of failing.
   """
   matching: list[tuple[dict, Any]] = []
   with_data: list[tuple[dict, Any]] = []
@@ -603,9 +601,9 @@ def attach_and_register_volume(
 
   # Preserve the registry's existing databases list when present. This list is
   # maintained by allocation_manager.py (add on graph create, remove on graph
-  # drop). Userdata for non-shared writers passes [] on every launch, so a naive
-  # overwrite wipes the volume↔graph linkage on every instance replacement —
-  # exactly the bug that orphaned kg19dcbe757481af06fc9b on 2026-05-08.
+  # drop). Userdata for non-shared writers passes [] on every launch, so
+  # overwriting unconditionally wipes the volume-to-graph linkage on every
+  # instance replacement, orphaning the graphs the volume still carries.
   current = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
   existing_dbs = current.get("databases") or []
   caller_dbs = databases if isinstance(databases, list) else [databases]
@@ -632,9 +630,9 @@ def attach_and_register_volume(
   graph_update_result = update_graph_registry_for_instance(instance_id, final_dbs)
   logger.info(f"Graph registry update result: {graph_update_result}")
 
-  # Signal the instance that volume is ready. Use final_dbs (preserved list),
-  # not the caller-provided databases — otherwise the OS-side databases.json
-  # re-introduces the orphaning bug we just fixed in the registry.
+  # Signal the instance that the volume is ready. Use final_dbs (preserved
+  # list), not the caller-provided databases — otherwise the OS-side
+  # databases.json reintroduces the orphaning the registry write just avoided.
   try:
     ssm.send_command(
       InstanceIds=[instance_id],
@@ -739,7 +737,7 @@ def create_and_attach_volume(
 
 
 def get_or_create_volume(event: dict[str, Any]) -> dict[str, Any]:
-  """Legacy function - redirects to handle_instance_launch"""
+  """Compatibility alias for `handle_instance_launch`."""
   logger.warning("get_or_create_volume called - redirecting to handle_instance_launch")
   return handle_instance_launch(event)
 
@@ -833,8 +831,8 @@ def _maybe_snapshot_pre_detach(
   retaining a window's worth accumulates expensively — and the master's real
   backup is S3 anyway, making the EBS snapshot a single last-known-good fallback
   rather than a history. Prune runs only AFTER a successful create, so there is
-  never a moment with zero fallback. Dedicated writers keep the every-detach,
-  3-day multi-snapshot history unchanged (unique data, infrequent detaches).
+  never a moment with zero fallback. Dedicated writers instead keep a full
+  3-day multi-snapshot history (unique data, infrequent detaches).
   """
   if node_type == "shared_replica":
     logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")
@@ -953,8 +951,8 @@ def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
 def snapshot_for_upgrade(event: dict[str, Any]) -> dict[str, Any]:
   """Create an EBS snapshot before a tier upgrade and wait for completion.
 
-  This provides a safety net for the upgrade process. If the volume migration
-  fails, the snapshot can be used to restore the data.
+  Blocks until the snapshot completes so a failed volume migration always has a
+  restorable point behind it.
   """
   volume_id = event["volume_id"]
   graph_id = event["graph_id"]

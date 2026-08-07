@@ -13,29 +13,20 @@ class DatabaseSessionMiddleware(BaseHTTPMiddleware):
   """Middleware to ensure database sessions are properly cleaned up after requests."""
 
   async def dispatch(self, request: Request, call_next: Callable) -> Response:
-    """
-    Process request and ensure session cleanup.
+    """Scope the shared session to this request and release it on the way out.
 
-    Args:
-        request: The incoming request
-        call_next: The next middleware/endpoint to call
-
-    Returns:
-        Response: The response from the endpoint
+    Cleanup runs whether the endpoint succeeded or raised; a cleanup failure
+    is logged rather than raised, so it can't turn a good response into a 500.
     """
     scope_token = None
     try:
       scope_token = activate_request_scope()
-      # Process the request
       response = await call_next(request)
       return response
     finally:
-      # Always clean up the session, regardless of success or failure
       try:
         session.remove()
       except Exception as e:
-        # Log the exception but don't fail the request
-        # The session cleanup failed, but we don't want to crash the response
         logger.warning(f"Database session cleanup failed: {e}")
       finally:
         deactivate_request_scope(scope_token)

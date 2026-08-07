@@ -1,16 +1,15 @@
 """GraphQL-side authorization helpers.
 
 The extensions GraphQL endpoint is mounted at
-`/extensions/{graph_id}/graphql`, so `graph_id` is a **URL path
-parameter**, not a query argument. `get_context` reads it via FastAPI's
-`Path(...)` dependency before Strawberry parses the query, then calls
-`check_graph_access` eagerly as part of building the context. By the
-time any resolver runs, access has already been enforced — resolvers
-never need to call this helper themselves.
+`/extensions/{graph_id}/graphql`, so `graph_id` is a URL path parameter,
+not a query argument. `get_context` reads it via FastAPI's `Path(...)`
+dependency before Strawberry parses the query, then calls
+`check_graph_access` as part of building the context. Access is enforced
+by the time any resolver runs, so resolvers never call this helper.
 
-This mirrors the access logic in `get_current_user_with_graph`
-(`robosystems/middleware/auth/dependencies.py`) — specifically the
-portion that runs after the user has already been authenticated.
+This mirrors the post-authentication portion of
+`get_current_user_with_graph` in
+`robosystems/middleware/auth/dependencies.py`.
 """
 
 from __future__ import annotations
@@ -22,19 +21,12 @@ from robosystems.models.core import User
 
 
 def check_graph_access(user: User, graph_id: str) -> None:
-  """Verify the authenticated user has read access to the given graph_id.
+  """Verify the authenticated user has read access to `graph_id`, else 403.
 
-  Raises:
-      HTTPException: 403 if the user lacks access to the graph.
-
-  Handles both shared repositories (SEC, etc.) and personal user graphs,
-  mirroring the logic in `get_current_user_with_graph`.
-
-  The `library` sentinel routes to the taxonomy library (shared reference
-  material). Any authenticated user has read access — no per-graph ACL
-  applies to library content.
+  Covers both shared repositories (SEC, etc.) and user graphs. The `library`
+  sentinel routes to the taxonomy library, shared reference material that
+  any authenticated user may read, so no per-graph ACL applies to it.
   """
-  # Library sentinel: accessible to any authenticated user. No ACL check.
   if graph_id == LIBRARY_GRAPH_ID:
     return
 

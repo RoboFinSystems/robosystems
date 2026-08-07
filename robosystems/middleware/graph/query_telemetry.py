@@ -75,7 +75,8 @@ def _is_shared(graph_id: str) -> bool:
 
 def api_key_prefix_from_request(request: Request | None) -> str | None:
   """Return the identification prefix of the API key that authenticated
-  this request, if one did (set by the auth dependencies)."""
+  this request, if one did (set by the auth dependencies).
+  """
   if request is None:
     return None
   return getattr(request.state, "api_key_prefix", None)
@@ -89,7 +90,8 @@ def signal_for_status(status_code: int | None) -> str | None:
 
 def is_engine_disruption(error: BaseException) -> bool:
   """True when an exception looks like the engine connection dropped
-  mid-query rather than a normal error response."""
+  mid-query rather than a normal error response.
+  """
   if type(error).__name__ in _DISRUPTION_TYPE_NAMES:
     return True
   message = str(error).lower()
@@ -98,7 +100,8 @@ def is_engine_disruption(error: BaseException) -> bool:
 
 def is_disrupted_aggregation(result: Any) -> bool:
   """True when an aggregated MCP stream ended without any terminal event —
-  the client-visible shape of an engine connection lost mid-stream."""
+  the client-visible shape of an engine connection lost mid-stream.
+  """
   return (
     isinstance(result, dict)
     and result.get("success") is False
@@ -210,7 +213,8 @@ def log_shared_query_end(
   tool_name: str | None = None,
 ) -> None:
   """Emit the end half of a cost line pair. Safe to call with a None exec_id
-  (emits nothing — the start half was off-surface or failed)."""
+  (emits nothing — the start half was off-surface or failed).
+  """
   try:
     if exec_id is None or not _is_shared(graph_id):
       return

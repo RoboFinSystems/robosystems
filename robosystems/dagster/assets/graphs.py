@@ -18,10 +18,9 @@ from dagster import AssetSpec
 # Lifecycle Assets (graph/repository provisioning)
 # ============================================================================
 
-# External asset for user graph creation (unified)
-# Materializations are reported from direct_monitor.py
-# Tracks both direct API creation and subscription-based provisioning
-# via the 'provisioning_method' metadata field ('direct' or 'subscription')
+# Materializations reported from operations/graph/tasks/graph_creation.py and
+# operations/graph/provisioning_service.py. The 'provisioning_method' metadata
+# field distinguishes direct API creation from subscription provisioning.
 user_graph_creation_source = AssetSpec(
   key="user_graph_creation",
   description=(
@@ -36,7 +35,6 @@ user_graph_creation_source = AssetSpec(
   kinds={"provision"},
 )
 
-# External asset for user repository provisioning
 user_repository_provisioning_source = AssetSpec(
   key="user_repository_provisioning",
   description=(
@@ -51,7 +49,6 @@ user_repository_provisioning_source = AssetSpec(
   kinds={"provision"},
 )
 
-# External asset for user subgraph creation
 user_subgraph_creation_source = AssetSpec(
   key="user_subgraph_creation",
   description=(
@@ -70,8 +67,8 @@ user_subgraph_creation_source = AssetSpec(
 # Data Pipeline Assets (staging → materialization)
 # ============================================================================
 
-# External asset for user graph file staging
-# Materializations reported from direct_staging.py
+# Materializations reported from
+# operations/graph/engine/direct_staging.py
 user_graph_file_staging_source = AssetSpec(
   key="user_graph_file_staging",
   description=(
@@ -87,8 +84,7 @@ user_graph_file_staging_source = AssetSpec(
   kinds={"duckdb"},
 )
 
-# External asset for user graph materialization (DuckDB → LadybugDB)
-# Materializations reported from materialize_graph_job
+# DuckDB → LadybugDB; materializations reported from materialize_graph_job
 user_graph_materialized_source = AssetSpec(
   key="user_graph_materialized",
   description=(
@@ -104,8 +100,7 @@ user_graph_materialized_source = AssetSpec(
   kinds={"ladybug"},
 )
 
-# External asset for extensions materialization (PostgreSQL OLTP → LadybugDB)
-# Materializations reported from extensions_materialize_job
+# PostgreSQL OLTP → LadybugDB; reported from extensions_materialize_job
 user_graph_extensions_materialized_source = AssetSpec(
   key="user_graph_extensions_materialized",
   description=(
@@ -124,7 +119,6 @@ user_graph_extensions_materialized_source = AssetSpec(
 # Lifecycle Assets (backup)
 # ============================================================================
 
-# External asset for user graph backup
 # Materializations reported from backup_graph_job (create_backup op)
 user_graph_backup_source = AssetSpec(
   key="user_graph_backup",

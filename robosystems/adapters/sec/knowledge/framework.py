@@ -124,16 +124,7 @@ class DuckDBAnalyticsContext:
     table_name: str,
     table_type: str = "nodes",
   ) -> Path:
-    """Write a DuckDB relation to a parquet file.
-
-    Args:
-        relation: DuckDB relation to write
-        table_name: Name for the output file (without extension)
-        table_type: "nodes" or "relationships" (organizes output subdirectory)
-
-    Returns:
-        Path to the written parquet file
-    """
+    """Write a relation to `{output_dir}/{table_type}/{table_name}.parquet`."""
     if self._output_dir is None:
       raise RuntimeError("Output directory not set — use as context manager")
     type_dir = self._output_dir / table_type
@@ -148,16 +139,10 @@ class DuckDBAnalyticsContext:
     analysis_name: str,
     bucket: str | None = None,
   ) -> dict[str, str]:
-    """Upload all parquet files from the output directory to S3.
+    """Upload every output parquet to S3, returning table_name → S3 URI.
 
-    In dev: skips upload, returns local paths instead.
-
-    Args:
-        analysis_name: Name for this analysis run (used in S3 prefix)
-        bucket: Override S3 bucket (default: SHARED_PROCESSED_BUCKET)
-
-    Returns:
-        Mapping of table_name to S3 URI (or local path in dev)
+    `analysis_name` becomes part of the S3 prefix. In dev nothing is uploaded
+    and the local paths are returned instead.
     """
     if self._output_dir is None:
       raise RuntimeError("Output directory not set — use as context manager")

@@ -2,21 +2,13 @@
 SSM Parameter Store integration for feature flags and runtime configuration.
 
 Uses a layered override model:
-1. Environment variable (highest priority - for local dev, CI, testing)
-2. SSM Parameter Store (optional override - for runtime config in AWS)
-3. Default value from env.py (lowest priority - sensible out-of-box values)
+1. Environment variable (local dev, CI, testing)
+2. SSM Parameter Store (runtime config in AWS — applies without a redeploy)
+3. Default from env.py
 
-## Why Parameter Store for Feature Flags?
-
-Feature flags differ from secrets:
-- Secrets: Sensitive credentials that must be protected (API keys, passwords)
-- Feature flags: Boolean/config values that control application behavior
-
-Benefits of SSM Parameter Store for feature flags:
-- Cost: FREE for Standard tier (vs $0.40/secret/month + API calls)
-- Performance: Optimized for frequent reads with built-in caching
-- Simplicity: String values without JSON parsing
-- Separation: Clear distinction between secrets and configuration
+Feature flags live in SSM rather than Secrets Manager because they are not
+sensitive: Standard-tier parameters are free, are optimized for frequent reads,
+and hold plain strings instead of JSON blobs.
 
 ## Parameter Naming Convention
 
@@ -34,30 +26,24 @@ Examples:
 
 ## Usage
 
-The module is designed to work seamlessly with env.py:
+Feature flags are read from env.py:
 
 ```python
 from robosystems.config.parameter_store import get_parameter_value
 
-# In env.py feature flag definitions:
 RATE_LIMIT_ENABLED = get_bool_env(
     "RATE_LIMIT_ENABLED",
     bool(get_parameter_value("RATE_LIMIT_ENABLED", "true").lower() == "true"),
 )
 ```
 
-For tuning parameters, use tuning.py which wraps this module with defaults:
+Tuning parameters go through tuning.py, which wraps this module with defaults:
 
 ```python
 from robosystems.config.tuning import TuningConfig
 
-balance_ttl = TuningConfig.get_cache_balance_ttl()  # Returns int with SSM override
+balance_ttl = TuningConfig.get_cache_balance_ttl()  # int, SSM-overridable
 ```
-
-This ensures:
-- Environment variables always win (for local dev/testing)
-- SSM provides runtime configuration for AWS environments
-- Defaults work out-of-box for new deployments
 """
 
 import logging
@@ -100,14 +86,7 @@ class ParameterStoreManager:
     region: str | None = None,
     cache_ttl_seconds: int = 300,  # 5 min cache (more frequent than secrets)
   ):
-    """
-    Initialize the parameter store manager.
-
-    Args:
-        environment: Environment name (prod/staging). Defaults to ENVIRONMENT env var.
-        region: AWS region. Defaults to AWS_REGION env var or us-east-1.
-        cache_ttl_seconds: TTL for cached parameters in seconds. Default 5 minutes.
-    """
+    """Initialize the manager; unset arguments fall back to env vars."""
     self.environment = environment or os.getenv("ENVIRONMENT", "dev")
     self.region = region or os.getenv("AWS_REGION", "us-east-1")
     self.cache_ttl_seconds = cache_ttl_seconds
@@ -125,15 +104,9 @@ class ParameterStoreManager:
     return _get_ssm_client()
 
   def get_parameter(self, name: str, default: str = "") -> str:
-    """
-    Get a single parameter value with caching.
+    """Get one feature flag by unprefixed name, e.g. "RATE_LIMIT_ENABLED".
 
-    Args:
-        name: Parameter name (without prefix, e.g., "RATE_LIMIT_ENABLED")
-        default: Default value if parameter not found
-
-    Returns:
-        Parameter value or default
+    Returns ``default`` outside prod/staging, where SSM is not consulted.
     """
     # Only use Parameter Store for prod/staging
     if self.environment not in ["prod", "staging"]:
@@ -172,14 +145,10 @@ class ParameterStoreManager:
       return default
 
   def get_all_feature_flags(self) -> dict[str, str]:
-    """
-    Batch fetch all feature flags under /robosystems/{env}/features/.
+    """Batch fetch every flag under /robosystems/{env}/features/.
 
-    This is more efficient than individual get_parameter calls when
-    loading multiple flags at startup.
-
-    Returns:
-        Dictionary of parameter names to values
+    One paginated call instead of one call per flag, which is why startup uses
+    this rather than looping over :meth:`get_parameter`.
     """
     # Only use Parameter Store for prod/staging
     if self.environment not in ["prod", "staging"]:
@@ -222,12 +191,7 @@ class ParameterStoreManager:
       return {}
 
   def refresh(self, name: str | None = None):
-    """
-    Refresh cached parameters.
-
-    Args:
-        name: Specific parameter to refresh, or None to refresh all.
-    """
+    """Drop cached parameters — one by name, or all when ``name`` is None."""
     if name:
       self._cache.pop(name, None)
     else:
@@ -244,15 +208,9 @@ class ParameterStoreManager:
     """
     Get a tuning parameter from /robosystems/{env}/tuning/{path}.
 
-    Tuning parameters are operational values that can be adjusted at runtime
-    without redeployment (cache TTLs, thresholds, limits, etc.).
-
-    Args:
-        path: Parameter path under tuning/ (e.g., "cache/BALANCE_TTL")
-        default: Default value if parameter not found
-
-    Returns:
-        Parameter value or default
+    Tuning parameters are operational values (cache TTLs, thresholds, limits)
+    adjustable at runtime without a redeploy. ``path`` is relative, e.g.
+    "cache/BALANCE_TTL".
     """
     # Only use Parameter Store for prod/staging
     if self.environment not in ["prod", "staging"]:
@@ -294,16 +252,7 @@ class ParameterStoreManager:
       return default
 
   def get_tuning_int(self, path: str, default: int) -> int:
-    """
-    Get a tuning parameter as integer.
-
-    Args:
-        path: Parameter path under tuning/ (e.g., "cache/BALANCE_TTL")
-        default: Default value if parameter not found or invalid
-
-    Returns:
-        Integer parameter value or default
-    """
+    """Get a tuning parameter as an int, falling back if unset or unparseable."""
     value = self.get_tuning_parameter(path, str(default))
     try:
       return int(value)
@@ -312,16 +261,7 @@ class ParameterStoreManager:
       return default
 
   def get_tuning_float(self, path: str, default: float) -> float:
-    """
-    Get a tuning parameter as float.
-
-    Args:
-        path: Parameter path under tuning/ (e.g., "admission/MEMORY_THRESHOLD")
-        default: Default value if parameter not found or invalid
-
-    Returns:
-        Float parameter value or default
-    """
+    """Get a tuning parameter as a float, falling back if unset or unparseable."""
     value = self.get_tuning_parameter(path, str(default))
     try:
       return float(value)
@@ -330,14 +270,9 @@ class ParameterStoreManager:
       return default
 
   def get_all_tuning_parameters(self) -> dict[str, str]:
-    """
-    Batch fetch all tuning parameters under /robosystems/{env}/tuning/.
+    """Batch fetch every parameter under /robosystems/{env}/tuning/.
 
-    This is more efficient than individual get_tuning_parameter calls when
-    loading multiple parameters at startup.
-
-    Returns:
-        Dictionary of parameter paths to values
+    Keys are paths relative to that prefix. Also warms the per-parameter cache.
     """
     # Only use Parameter Store for prod/staging
     if self.environment not in ["prod", "staging"]:
@@ -381,12 +316,7 @@ _parameter_manager: ParameterStoreManager | None = None
 
 
 def get_parameter_manager() -> ParameterStoreManager:
-  """
-  Get or create the global parameter manager instance.
-
-  Returns:
-      ParameterStoreManager instance.
-  """
+  """Get or create the process-wide ParameterStoreManager."""
   global _parameter_manager
   if _parameter_manager is None:
     _parameter_manager = ParameterStoreManager()
@@ -395,19 +325,12 @@ def get_parameter_manager() -> ParameterStoreManager:
 
 def get_parameter_value(key: str, default: str = "") -> str:
   """
-  Get a parameter value with layered fallback.
+  Get a feature flag with layered fallback.
 
   Priority order:
-  1. Environment variable (highest - for local dev, CI, testing)
-  2. SSM Parameter Store (optional - for AWS runtime config)
-  3. Default value (lowest - sensible out-of-box defaults)
-
-  Args:
-      key: The parameter key name (e.g., "RATE_LIMIT_ENABLED")
-      default: Default value if not found anywhere
-
-  Returns:
-      The parameter value
+  1. Environment variable (local dev, CI, testing)
+  2. SSM Parameter Store (prod/staging only, applies without a redeploy)
+  3. ``default``
   """
   # Priority 1: Environment variable
   env_value = os.getenv(key)
@@ -436,14 +359,11 @@ def get_parameter_value(key: str, default: str = "") -> str:
 
 
 def preload_feature_flags() -> dict[str, str]:
-  """
-  Preload all feature flags from SSM into cache.
+  """Warm the flag cache at startup with a single batched SSM call.
 
-  Call this at application startup to batch-load all flags
-  in a single API call, rather than fetching them individually.
-
-  Returns:
-      Dictionary of loaded feature flags
+  env.py calls this at import so no individual flag lookup has to hit SSM,
+  which would otherwise mean one API call per flag and a failure mode under
+  load. Returns {} outside prod/staging.
   """
   environment = os.getenv("ENVIRONMENT", "dev")
   if environment not in ["prod", "staging"]:

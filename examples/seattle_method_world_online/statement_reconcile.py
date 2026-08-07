@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
-"""Statement-level reconciliation — World Online vs Charlie's reference report.
+"""Statement-level reconciliation — World Online vs the reference report.
 
-The cell-by-cell ``reconcile.py`` validates the *GL ingestion* against Charlie's
-``SummaryOfTransactions.csv`` (the transaction pivot). This complements it at the
-*rendered-statement* level: it diffs our four-statement Report's anchor totals
-against Charlie's **published XBRL reference instance** at
-``xbrlsite.azurewebsites.net/2026/reporting-framework/mini/ref-num/instance.xml``
-— the same artifact his ``index2.html`` renders from.
+Where ``reconcile.py`` validates the *GL ingestion* cell by cell against the
+published transaction pivot, this checks the *rendered statements*: it diffs
+the four-statement Report's seven anchor totals against Charlie Hoffman's
+published XBRL reference instance at
+``xbrlsite.azurewebsites.net/2026/reporting-framework/mini/ref-num/instance.xml``,
+the same artifact his rendered report is built from.
 
-Two wrinkles the matcher handles (both confirmed by hand earlier):
-  * **Vocabulary** — Charlie's instance uses ``mini:`` concepts; our Report uses
-    ``rs-gaap:``. An explicit anchor correspondence map bridges the seven headline
-    totals (the mini→rs-gaap projection is exactly what the demo exercises).
-  * **Period labels** — his reference is labelled FY2022 (instants 2021/2022),
-    ours spans 2023→2028; the amounts tie regardless. So we match on *period
-    position* (latest instant = current, earlier = prior), not absolute date.
+The matcher bridges two differences between the two sides:
+  * **Vocabulary** — the reference instance is in ``mini:`` concepts while the
+    Report renders ``rs-gaap:``. An explicit correspondence map pairs the
+    anchors, which is the mini→rs-gaap projection the whole demo exercises.
+  * **Period labels** — his reference carries different period labels from
+    ours, but the amounts tie, so anchors are matched by *period position*
+    (latest instant = current, the one before = prior) rather than by date.
 
-Our side is read straight from the **v2 graph-native bundle** (``rs:Fact`` nodes
-in ``output/world-online.jsonld``) — the export artifact is the reconciliation
-source, which is the whole point of the canonical-ontology reshape.
+Our side is read from the exported JSON-LD bundle's ``rs:Fact`` nodes, so the
+published artifact is what gets reconciled — not an internal query behind it.
 
-Usage:
-    uv run python -m examples.seattle_method_world_online.statement_reconcile
-    uv run python -m examples.seattle_method_world_online.statement_reconcile --no-fetch
+Prerequisites: ``just demo-world-online`` has run through the download-bundles
+step, which writes ``output/world-online.jsonld``.
+
+Run it (the orchestrator runs this as step 11):
+    just demo-world-online-statement-reconcile
+    just demo-world-online-statement-reconcile --no-fetch   # use the cached reference
+
+Writes ``output/world-online-statement-reconciliation.md``.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ REF_INSTANCE_URL = "https://xbrlsite.azurewebsites.net/2026/reporting-framework/
 XBRLI_NS = "http://www.xbrl.org/2003/instance"
 
 # Anchor correspondence: (mini local name, rs-gaap qname, label). The seven
-# headline totals that tie the rendered statements to Charlie's reference.
+# headline totals that tie the rendered statements to the reference report.
 ANCHORS: list[tuple[str, str, str]] = [
   ("Assets", "rs-gaap:Assets", "Total Assets"),
   (
@@ -68,7 +72,7 @@ ANCHORS: list[tuple[str, str, str]] = [
   ),
 ]
 
-ROUNDING_TOLERANCE = 0.50  # Charlie's published summary carries per-cell rounding
+ROUNDING_TOLERANCE = 0.50  # the published summary carries per-cell rounding
 
 
 @dataclass
@@ -105,9 +109,9 @@ def _fetch_reference(no_fetch: bool) -> Path:
 
 def _load_expected(path: Path) -> dict[str, tuple[float | None, float | None]]:
   """{mini_local: (current, prior)} — current = latest-dated context."""
-  # Trusted artifact — Charlie's published reference instance over HTTPS, not
-  # user content — so the stdlib XML parser is fine (swap to defusedxml if the
-  # input source ever widens). Matches examples/seattle_method_demo/reconcile.py.
+  # A trusted artifact fetched over HTTPS from the publisher, not user
+  # content, so the stdlib XML parser is appropriate. Switch to defusedxml if
+  # the input source ever widens.
   root = ET.parse(path).getroot()  # noqa: S314
   ctx_date: dict[str, str] = {}
   for c in root.findall(f"{{{XBRLI_NS}}}context"):
@@ -136,14 +140,14 @@ def _load_expected(path: Path) -> dict[str, tuple[float | None, float | None]]:
   return out
 
 
-# ── Actual (our v2 bundle) ──────────────────────────────────────────────────
+# ── Actual (our exported bundle) ────────────────────────────────────────────
 
 
 def _load_actual(path: Path) -> dict[str, tuple[float | None, float | None]]:
   """{rs-gaap qname: (current, prior)} from the bundle's rs:Fact nodes."""
   doc = json.loads(path.read_text())
-  # auto_compact can emit a bare root object (no @graph envelope) when the
-  # graph has a single named root — fall back to treating the doc as one node.
+  # JSON-LD compaction can emit a bare root object with no @graph envelope
+  # when the graph has a single named root, so fall back to one node.
   graph = doc.get("@graph", [doc])
   period_date: dict[str, str] = {}
   for n in graph:

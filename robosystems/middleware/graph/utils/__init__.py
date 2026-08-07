@@ -1,10 +1,5 @@
-"""
-Multi-tenant utility functions for graph database operations.
-
-This module provides utilities for handling multi-tenant database operations,
-including database name resolution, validation, configuration management,
-and cluster operations.
-"""
+"""Multi-tenant graph utilities: database name resolution, graph identity
+and routing, subgraph parsing, and identifier validation."""
 
 from ..types import ConnectionPattern, GraphIdentity, GraphTypeRegistry
 from .database import (
@@ -52,7 +47,6 @@ from .validation import (
   validate_graph_id,
 )
 
-# Backward compatibility alias
 AccessPattern = ConnectionPattern
 
 
@@ -90,8 +84,7 @@ class MultiTenantUtils:
 
   @staticmethod
   def check_database_limits() -> None:
-    """
-    Check if the current number of databases exceeds the configured limit.
+    """Check if the current number of databases exceeds the configured limit.
 
     Currently implemented as a no-op. Database limits are enforced at the
     instance level based on LBUG_MAX_DATABASES_PER_NODE.
@@ -103,13 +96,10 @@ __all__ = [
   "FULL_SUBGRAPH_PATTERN",
   "PARENT_GRAPH_PATTERN",
   "SUBGRAPH_NAME_PATTERN",
-  # Backward compatibility
   "AccessPattern",
   "ConnectionPattern",
-  # Types
   "GraphIdentity",
   "GraphTypeRegistry",
-  # Main class
   "MultiTenantUtils",
   "SubgraphInfo",
   # Subgraph functions

@@ -1,4 +1,8 @@
-"""SSM executor for running commands on bastion host via AWS Systems Manager."""
+"""Run shell commands on the environment's bastion host via AWS Systems Manager.
+
+Used by admin commands that need to act from inside the VPC. Finds the bastion
+by Name tag, starts it if stopped, and returns the command's captured output.
+"""
 
 import json
 import os
@@ -25,14 +29,7 @@ class SSMExecutor:
     region: str = "us-east-1",
     timeout: int = 300,
   ):
-    """Initialize SSM executor.
-
-    Args:
-        environment: Environment name (staging/prod)
-        aws_profile: AWS CLI profile name
-        region: AWS region
-        timeout: Command execution timeout in seconds (default: 300)
-    """
+    """Configure the target environment; `timeout` is per command, in seconds."""
     self.environment = environment
     self.aws_profile = aws_profile
     self.region = region
@@ -40,14 +37,7 @@ class SSMExecutor:
     self.instance_id: str | None = None
 
   def _get_bastion_instance(self) -> str:
-    """Get bastion instance ID for the environment.
-
-    Returns:
-        Instance ID
-
-    Raises:
-        RuntimeError: If instance not found
-    """
+    """Look up the environment's bastion instance by Name tag, and cache it."""
     if self.instance_id:
       return self.instance_id
 
@@ -85,11 +75,7 @@ class SSMExecutor:
     return self.instance_id
 
   def _ensure_instance_running(self, instance_id: str) -> None:
-    """Ensure bastion instance is running, start if stopped.
-
-    Args:
-        instance_id: EC2 instance ID
-    """
+    """Start the bastion if it is stopped, then wait for SSM agent readiness."""
     cmd = [
       "aws",
       "ec2",
@@ -145,17 +131,11 @@ class SSMExecutor:
       time.sleep(10)
 
   def execute(self, command: str, stream_output: bool = True) -> tuple[str, str, int]:
-    """Execute command on bastion via SSM.
+    """Run a shell command on the bastion and return (stdout, stderr, exit_code).
 
-    Args:
-        command: Shell command to execute
-        stream_output: Whether to stream output in real-time
-
-    Returns:
-        Tuple of (stdout, stderr, exit_code)
-
-    Raises:
-        RuntimeError: If command execution fails
+    Raises `RuntimeError` on a non-zero exit code. A wait timeout is not fatal:
+    the invocation is fetched anyway, since the command may have finished just
+    after the wait gave up.
     """
     instance_id = self._get_bastion_instance()
     self._ensure_instance_running(instance_id)

@@ -13,10 +13,11 @@ from robosystems.logger import logger
 
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
-  """
-  Middleware to limit request body sizes.
+  """Reject oversized request bodies before they are read into memory.
 
-  Prevents memory exhaustion attacks by rejecting oversized requests.
+  The limit is chosen per endpoint family — queries, schema DDL, everything
+  else — since a Cypher query and a bulk body have very different reasonable
+  sizes.
   """
 
   def __init__(
@@ -27,12 +28,11 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     max_schema_size: int | None = None,
   ):
     super().__init__(app)
-    # Default limits (in bytes)
+    # All limits in bytes.
     self.max_body_size = max_body_size or GRAPH_MAX_REQUEST_SIZE
-    self.max_query_size = (
-      max_query_size or MAX_QUERY_LENGTH * 10  # Convert characters to approximate bytes
-    )  # Allow for multi-byte characters
-    self.max_schema_size = max_schema_size or 1 * 1024 * 1024  # 1MB for schema DDL
+    # MAX_QUERY_LENGTH counts characters; 10x leaves room for multi-byte ones.
+    self.max_query_size = max_query_size or MAX_QUERY_LENGTH * 10
+    self.max_schema_size = max_schema_size or 1 * 1024 * 1024
 
     logger.info(
       f"Request Size Limit Middleware initialized - "
@@ -42,13 +42,11 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     )
 
   async def dispatch(self, request: Request, call_next):
-    """Check request size before processing."""
-    # Check Content-Length header
+    """Reject the request with 413 if its Content-Length exceeds the limit."""
     content_length_str = request.headers.get("content-length")
     if content_length_str:
       content_length = int(content_length_str)
 
-      # Determine appropriate limit based on endpoint
       path = request.url.path
 
       if "/query" in path:
@@ -75,6 +73,6 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
           },
         )
 
-    # For chunked encoding or missing Content-Length, we'd need to
-    # implement streaming validation, but for now we'll proceed
+    # A chunked request carries no Content-Length and so passes unchecked;
+    # enforcing a limit there requires validating the body as it streams.
     return await call_next(request)

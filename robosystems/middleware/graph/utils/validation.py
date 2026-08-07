@@ -1,5 +1,4 @@
-"""
-Graph ID validation utilities.
+"""Graph ID validation utilities.
 
 Functions for validating graph identifiers and database names.
 """
@@ -10,18 +9,11 @@ from robosystems.logger import logger
 
 
 def is_shared_repository(graph_id: str | None) -> bool:
-  """
-  Check if the given graph_id refers to a registered shared repository.
+  """Check if the given graph_id refers to a registered shared repository.
 
   Note: This checks exact parent repository IDs only (e.g., "sec").
   For checking subgraphs too (e.g., "sec_historical"), use
   ``is_shared_repository_or_subgraph`` from the config registry.
-
-  Args:
-      graph_id: Graph identifier to check
-
-  Returns:
-      bool: True if this is a shared repository
   """
   from robosystems.config.shared_repositories import (
     is_shared_repository as _registry_check,
@@ -31,16 +23,9 @@ def is_shared_repository(graph_id: str | None) -> bool:
 
 
 def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
-  """
-  Check if the given graph_id is a shared repository OR a subgraph of one.
+  """Check if the given graph_id is a shared repository OR a subgraph of one.
 
   This checks both parent IDs (e.g., "sec") and subgraph IDs (e.g., "sec_historical").
-
-  Args:
-      graph_id: Graph identifier to check
-
-  Returns:
-      bool: True if this is a shared repository or subgraph of one
   """
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph as _registry_check,
@@ -50,23 +35,13 @@ def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
 
 
 def validate_graph_id(graph_id: str) -> str:
-  """
-  Validate graph_id meets database naming requirements.
+  """Validate graph_id meets database naming requirements.
 
   Graph database names must:
   - Not be empty
   - Be at most 64 characters long
   - Contain only alphanumeric characters, underscores, and hyphens
   - Not be reserved names
-
-  Args:
-      graph_id: The graph identifier to validate
-
-  Returns:
-      str: The validated graph_id
-
-  Raises:
-      ValueError: If graph_id doesn't meet requirements
   """
   if not graph_id:
     raise ValueError("graph_id cannot be empty")
@@ -99,20 +74,9 @@ def validate_graph_id(graph_id: str) -> str:
 
 
 def validate_database_creation(graph_id: str) -> str:
-  """
-  Validate that a new database can be created for the given graph_id.
+  """Validate that a new database can be created for the given graph_id.
 
   This combines graph_id validation with database limit checking.
-
-  Args:
-      graph_id: The graph identifier for the new database
-
-  Returns:
-      str: The validated graph_id
-
-  Raises:
-      ValueError: If graph_id is invalid
-      RuntimeError: If database limit would be exceeded
   """
   validated_graph_id = validate_graph_id(graph_id)
 

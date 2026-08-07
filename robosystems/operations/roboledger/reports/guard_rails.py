@@ -58,30 +58,22 @@ def validate_report(block_type: str, rows: list[FactRow]) -> ValidationResult:
 def _validate_income_statement(rows: list[FactRow]) -> ValidationResult:
   result = ValidationResult()
 
-  # Check: totals foot (subtotals equal sum of children)
   _check_totals_foot(rows, result)
 
   # Structural: Net Income must reconcile against EVERY income-statement
-  # line by natural balance — credit-nature items (operating AND
-  # nonoperating revenue, gains) add; debit-nature items (expenses, losses,
-  # interest, tax) subtract. Summing leaves (not subtotals) avoids
-  # double-counting, and keying on balance_type rather than classification
-  # correctly handles contras (e.g. sales returns) and nonoperating lines.
+  # line by natural balance — credit-nature lines (operating AND
+  # nonoperating revenue, gains) add; debit-nature lines (expenses, losses,
+  # interest, tax) subtract.
   #
-  # The earlier single-step identity (operating Revenue minus Expenses)
-  # spuriously failed on multi-step statements that carry nonoperating
-  # income, gains, or losses below operating income.
+  # Summing the reported LEAVES (atomic facts) rather than subtotals avoids
+  # double-counting and captures nonoperating items that a single-step
+  # "Revenue minus Expenses" identity misses on a multi-step statement.
+  # Keying on balance_type rather than classification makes contras
+  # (e.g. sales returns) net correctly.
   result.checks.append("net_income_equation")
 
   net_income_row = _net_income_row(rows)
 
-  # Reconcile Net Income against the income-statement components by natural
-  # balance: credit-nature lines (operating AND nonoperating revenue, gains)
-  # add; debit-nature lines (expenses, losses, interest, tax) subtract.
-  # Summing the reported LEAVES (atomic facts) — not subtotals — captures
-  # nonoperating items a single-step Revenue minus Expenses identity would miss,
-  # and keying on balance_type rather than classification makes contras
-  # (e.g. sales returns) net correctly.
   implied_ni = 0.0
   credit_leaves = 0
   debit_leaves = 0
@@ -239,7 +231,6 @@ def _net_income_row(rows: list[FactRow]) -> FactRow | None:
 def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   result = ValidationResult()
 
-  # Check: totals foot
   _check_totals_foot(rows, result)
 
   # Structural: Assets = Liabilities + Equity.
@@ -334,10 +325,9 @@ def _check_totals_foot(rows: list[FactRow], result: ValidationResult) -> None:
   ``_build_rows`` emits post-order — children first, then their parent
   subtotal — so a subtotal's children are the rows immediately BEFORE it
   with depth = subtotal.depth + 1, scanning back until a row at the same
-  or lower depth. (An earlier version scanned forward, which footed each
-  subtotal against the NEXT section's children — e.g. 'Revenues' against
-  Cost of Revenue's leaves — producing spurious warnings and silently
-  skipping the real check.)
+  or lower depth. Scanning FORWARD instead would foot each subtotal against
+  the next section's children (e.g. 'Revenues' against Cost of Revenue's
+  leaves), producing spurious warnings while skipping the real check.
 
   Calc-target subtotals with no presentation children (Gross Profit,
   Operating Income) have no preceding deeper rows and fall out via the
@@ -388,7 +378,6 @@ def _check_comparative_data(rows: list[FactRow], result: ValidationResult) -> No
   result.checks.append("comparative_data")
   if not rows or not rows[0].values or len(rows[0].values) < 2:
     return
-  # Check each period column beyond the first for all-zero
   for col_idx in range(1, len(rows[0].values)):
     all_zero = all(
       (r.values[col_idx] if col_idx < len(r.values) else 0.0) == 0.0 for r in rows

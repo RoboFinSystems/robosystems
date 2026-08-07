@@ -1,34 +1,32 @@
 """mini → rs-gaap concept mapping table.
 
-The canonical bridge from Charlie Hoffman's mini reporting framework
-to RoboSystems' rs-gaap canonical reporting taxonomy. Two scopes:
+The bridge from Charlie Hoffman's mini reporting framework to the rs-gaap
+canonical reporting taxonomy — the correspondence that lets one set of
+postings render as two different sets of financial statements. Two scopes:
 
-1. **BS / IS leaves** — mini's monetary instant/duration concepts that
-   appear on the Balance Sheet or Income Statement, mapped to their
-   rs-gaap equivalents. The 14 leaves needed for Test Case 1's 14 JEs
-   plus the surrounding sub-rollup concepts.
-2. **Flow concepts (TDCs)** — mini's ``TransactionDescriptionCode``
-   values from Charlie's CSV, mapped to rs-gaap CF / SE roll-forward
-   concepts. These drive the per-line ``transaction_description_code``
-   metadata that the rollforward filter engine matches against.
+1. **BS / IS leaves** — mini's monetary instant and duration concepts that
+   appear on the Balance Sheet or Income Statement, mapped to their rs-gaap
+   equivalents.
+2. **Flow concepts** — the ``TransactionDescriptionCode`` values from the
+   source CSV, mapped to rs-gaap cash-flow and equity roll-forward concepts.
+   These are what the rollforward filter engine matches on, so they are how a
+   balance-sheet movement gets attributed to the events that caused it.
 
-Mapping decisions where mini and rs-gaap diverge are flagged inline
-with ``# NOTE:``. The reconciliation report's "Their data quality" /
-"Methodology gap" sections will surface any cases where the bridge
-loses precision.
+Where mini and rs-gaap genuinely diverge, the choice is flagged inline with
+``# NOTE:``; the reconciliation report surfaces any resulting loss of
+precision under "Their data quality" or "Methodology gap".
 
-Seeded via ``seed_mappings.py`` as ``association_type='derivation'``
-arcs (the same arc type rollforward uses for default change tag
-derivation).
+``seed_mappings.py`` seeds these as ``association_type='derivation'`` arcs —
+the same arc type a rollforward uses to derive its default change tag.
 """
 
 from __future__ import annotations
 
 # ── BS / IS leaves ────────────────────────────────────────────────────────
 #
-# (mini qname, rs-gaap qname) — straight 1:1 mappings for the concepts
-# Charlie's 14-JE dataset touches. mini's instant concepts (BS) → rs-gaap
-# BS concepts; mini's duration concepts (IS) → rs-gaap IS concepts.
+# (mini qname, rs-gaap qname) — 1:1 mappings for the concepts the dataset
+# touches. mini's instant concepts (BS) map to rs-gaap BS concepts, its
+# duration concepts (IS) to rs-gaap IS concepts.
 
 BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # Balance sheet — instant / monetary. Targets must be leaves in the
@@ -55,9 +53,9 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # the right target for Charlie's lemonade-stand fixtures (contractor labor
   # in JE-205 is mis-tagged per the README's data-quality findings).
   ("mini:CostsOfSales", "rs-gaap:CostOfGoodsAndServicesSold"),
-  # SG&A — not exercised by the 14-JE lemonade stand, but the World
-  # Online dataset (examples/seattle_method_world_online) has 7,822 SG&A
-  # lines. Additive: Case 1 simply never touches this concept.
+  # SG&A — untouched by the 14-JE lemonade stand, but heavily used by the
+  # World Online dataset (examples/seattle_method_world_online), which shares
+  # this mapping table.
   (
     "mini:SalesGeneralAndAdministrativeExpenses",
     "rs-gaap:GeneralAndAdministrativeExpense",
@@ -74,22 +72,19 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
 
 # ── Flow concepts (TDCs) ──────────────────────────────────────────────────
 #
-# Every value of mini's ``TransactionDescriptionCode`` column in
-# Charlie's CSV, mapped to the rs-gaap CF / SE flow concept it
-# represents. These drive the rollforward filter targets.
+# Every value of the ``TransactionDescriptionCode`` column, mapped to the
+# rs-gaap cash-flow or equity flow concept it represents. These are the
+# rollforward filter targets.
 #
-# Some mini flow concepts appear on BOTH sides of a JE (the BS-line
-# perspective and the equity-or-flow perspective), e.g. owner
-# investment shows up as ``ProceedsFromInvestmentsByOwner`` on the
-# Cash line and ``InvestmentsByOwner`` on the equity line — both map
-# to ``rs-gaap:ProceedsFromIssuanceOfCommonStock`` (or its
-# equity-statement analog).
+# mini names both sides of a journal entry, so one economic event can arrive
+# under two concepts: an owner investment appears as
+# ``ProceedsFromInvestmentsByOwner`` on the cash line and
+# ``InvestmentsByOwner`` on the equity line. rs-gaap does not draw that
+# distinction, so both collapse onto the same target concept.
 
 FLOW_MAPPINGS: list[tuple[str, str]] = [
-  # Financing — equity contribution. Both sides of the JE (the Cash
-  # debit and the PaidInCapital credit) collapse to the same rs-gaap
-  # flow concept since rs-gaap doesn't distinguish the cash-side from
-  # the equity-side of an issuance (mini does).
+  # Financing — equity contribution. Both sides of the JE (the cash debit and
+  # the PaidInCapital credit) collapse onto one rs-gaap concept.
   ("mini:ProceedsFromInvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
   ("mini:InvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
   # Financing — debt, GROSS per ASC 230. The CF-Financing calc rollup
@@ -134,10 +129,9 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   ("mini:CollectionOfReceivables", "rs-gaap:IncreaseDecreaseInAccountsReceivable"),
   # Operating — inventory
   ("mini:PurchasesOfInventoryForSale", "rs-gaap:IncreaseDecreaseInInventories"),
-  # NOTE: mini:PurchasesInventoryForSaleOnAccount is the AP-side TDC
-  # for an inventory purchase on account — handled below in the AP
-  # operating-flow block alongside other AP-impacting TDCs (all target
-  # the combined AP+Accrued leaf).
+  # NOTE: mini:PurchasesInventoryForSaleOnAccount is the AP-side concept for
+  # an inventory purchase on account, so it belongs with the other
+  # AP-impacting flows below rather than here.
   ("mini:DecreaseInInventoriesFromSales", "rs-gaap:IncreaseDecreaseInInventories"),
   ("mini:InventoryWrittenOff", "rs-gaap:InventoryWriteDown"),
   # Operating — AP. CF-Indirect's leaf is the combined AP+Accrued change
@@ -152,26 +146,21 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
     "mini:PaymentOfAccountsPayable",
     "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
   ),
-  # PurchasesInventoryForSaleOnAccount above was also targeting the
-  # legacy AP-only concept — re-aim it at the combined leaf for the same
-  # reason.
+  # Inventory bought on account moves AP, so it targets the same combined
+  # leaf for the same reason.
   (
     "mini:PurchasesInventoryForSaleOnAccount",
     "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
   ),
   # Operating — interest accruals.
-  # NOTE: mini's canonical concept is ``PaymentInterest`` (not
-  # ``PaymentOfInterest``); Charlie's CSV has the typo. We normalize
-  # at ingest time via ``ingest_transactions.py::_KNOWN_TDC_ALIASES``
-  # so the filter targets the canonical name here.
-  # NOTE: rs-gaap doesn't carry a clean "InterestPaid" CF concept in
-  # our currently-loaded library — the canonical
-  # ``rs-gaap:InterestPaidNet`` is part of the broader rs-gaap corpus
-  # but not in our subset. We map mini:PaymentInterest to
-  # ``rs-gaap:InterestExpense`` as the closest available concept —
-  # surfaces as "Library gap" in the reconciliation report (mapping
-  # is approximate; the CF rendering will conflate the IS expense
-  # and the CF payment).
+  # NOTE: mini's canonical concept is ``PaymentInterest``, not
+  # ``PaymentOfInterest``; ``ingest_transactions.py::_KNOWN_TDC_ALIASES``
+  # normalizes the source value so the filter can target the canonical name.
+  # NOTE: the loaded rs-gaap subset carries no dedicated interest-paid
+  # cash-flow concept, so this maps to ``rs-gaap:InterestExpense`` as the
+  # closest available target. The mapping is approximate — the cash-flow
+  # rendering conflates the income-statement expense with the cash payment —
+  # and the reconciliation report flags it as a library gap.
   ("mini:PaymentInterest", "rs-gaap:InterestExpense"),
   (
     "mini:DecreaseFromPaymentOfInterest",
@@ -183,12 +172,12 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
     "mini:DecreaseFromDepreciationAndAmortization",
     "rs-gaap:DepreciationDepletionAndAmortization",
   ),
-  # PPE write-off (JE-225's nil placeholder)
+  # PPE write-off
   (
     "mini:PropertyPlantAndEquipmentWrittenOff",
     "rs-gaap:GainLossOnDispositionOfAssets",
   ),
-  # Net income roll-up (the IS-side TDC every IS line carries)
+  # Net income roll-up — the flow concept every income-statement line carries
   ("mini:NetIncomeLoss", "rs-gaap:NetIncomeLoss"),
 ]
 

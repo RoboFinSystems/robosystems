@@ -9,33 +9,19 @@ from ...models.core import UserAPIKey
 
 
 def cleanup_expired_api_keys(session: Session) -> dict:
-  """
-  Clean up expired API keys and perform auth maintenance.
+  """Deactivate API keys past their `expires_at` and return counts.
 
-  This function handles:
-  - Deactivating API keys that are past their expiration date
-  - Providing cleanup statistics
-
-  Args:
-      session: Database session for performing operations
-
-  Returns:
-      Dict with cleanup statistics including:
-      - expired_sessions_deleted: Always 0 (API key system, no sessions)
-      - expired_user_keys_deactivated: Number of API keys deactivated
-      - expired_by_date: Number of API keys expired by date
+  `expired_sessions_deleted` is always 0: authentication is API key + JWT,
+  with no persistent session table to sweep.
   """
   from ...logger import logger
 
   try:
-    # Note: This system uses API key + JWT authentication, not session-based auth
-    # No session cleanup is needed as there are no persistent session tables
     logger.debug("Skipping session cleanup - system uses API key + JWT authentication")
     expired_sessions = 0
 
     current_time = datetime.now(UTC)
 
-    # Clean up API keys that have reached their expiration date
     logger.debug("Cleaning up expired API keys (past expires_at date)")
     expired_keys = (
       session.query(UserAPIKey)
@@ -61,7 +47,7 @@ def cleanup_expired_api_keys(session: Session) -> dict:
 
     return {
       "expired_sessions_deleted": expired_sessions,
-      "expired_user_keys_deactivated": expired_by_date,  # For backward compatibility
+      "expired_user_keys_deactivated": expired_by_date,
       "expired_by_date": expired_by_date,
     }
   except Exception as exc:
@@ -70,23 +56,17 @@ def cleanup_expired_api_keys(session: Session) -> dict:
 
 
 def cleanup_jwt_cache_expired() -> dict:
-  """
-  Clean up expired JWT cache entries.
+  """Report JWT cache occupancy.
 
-  Note: This is handled automatically by Valkey TTL expiration,
-  but this function provides manual cleanup capability if needed.
-
-  Returns:
-      Dict with cleanup statistics
+  Valkey TTL expires these entries on its own; this reports counts rather
+  than deleting anything.
   """
   from ...logger import logger
   from .cache import api_key_cache
 
   try:
-    # Get current cache stats
     stats = api_key_cache.get_cache_stats()
 
-    # JWT cache cleanup is automatic via TTL, but we can provide stats
     logger.debug("JWT cache cleanup handled automatically by Valkey TTL")
 
     return {
@@ -105,30 +85,11 @@ def cleanup_jwt_cache_expired() -> dict:
     }
 
 
-# Legacy function name for backward compatibility
 def cleanup_inactive_api_keys(session: Session) -> dict:
-  """
-  Legacy function name for backward compatibility.
-  Now delegates to cleanup_expired_api_keys since we only handle expiration by date.
-
-  Args:
-      session: Database session for performing operations
-
-  Returns:
-      Dict with cleanup statistics
-  """
+  """Alias for `cleanup_expired_api_keys`."""
   return cleanup_expired_api_keys(session)
 
 
-# Legacy function name for backward compatibility
 def cleanup_api_keys(session: Session) -> dict:
-  """
-  Legacy function name for backward compatibility.
-
-  Args:
-      session: Database session for performing operations
-
-  Returns:
-      Dict with cleanup statistics
-  """
+  """Alias for `cleanup_expired_api_keys`."""
   return cleanup_expired_api_keys(session)

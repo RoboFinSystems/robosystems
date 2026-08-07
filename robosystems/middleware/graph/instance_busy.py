@@ -1,5 +1,4 @@
-"""
-Instance Busy Counter
+"""Instance Busy Counter
 
 Atomic DynamoDB counter on the instance-registry table to report when an
 EC2 graph instance is running a destructive operation (materialization,
@@ -171,15 +170,6 @@ async def instance_busy(
     - GHA readers apply stale-detection via `last_destructive_op_at`.
     - Concurrent operations on the same instance are handled by atomic
       ADD on the DynamoDB side.
-
-  Args:
-    instance_id: EC2 instance ID of the graph host (e.g. `i-0abc...`).
-      In orchestration-layer callers (API worker, Dagster), read this
-      from `GraphClient._instance_id` after
-      `GraphClientFactory.create_client(...)`.
-      In graph_api handlers running on the instance itself, use
-      `env.INSTANCE_ID`.
-    op_kind: Short label for observability (see OP_KIND_* constants).
 
   Example:
     client = await GraphClientFactory.create_client(graph_id=graph_id, ...)

@@ -69,7 +69,6 @@ async def list_tables(
       },
     )
 
-    # Get all tables for graph
     db_tables = GraphTable.get_all_for_graph(graph_id, db)
 
     from robosystems.models.core import GraphUser

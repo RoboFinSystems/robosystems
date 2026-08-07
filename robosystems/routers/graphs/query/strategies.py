@@ -1,8 +1,7 @@
-"""
-Query execution strategies and utilities.
+"""Query execution strategies.
 
-This module provides intelligent strategy selection for query execution
-based on client capabilities, system load, and query characteristics.
+Selects an execution strategy from client capabilities, current system load,
+and the shape of the query itself.
 """
 
 import re
@@ -40,7 +39,7 @@ class ExecutionStrategy(Enum):
   SYNC_TESTING = "sync_testing"  # Synchronous for testing tools
 
 
-# Re-export ResponseMode for backward compatibility
+# Alias for callers that import ResponseMode from this module.
 ResponseMode = BaseResponseMode
 
 
@@ -49,32 +48,13 @@ class QueryAnalyzer(BaseAnalyzer):
 
   @classmethod
   def analyze_query(cls, query: str) -> dict[str, Any]:
-    """
-    Analyze a Cypher query to estimate its characteristics.
-
-    Args:
-        query: The Cypher query string
-
-    Returns:
-        Dictionary with query analysis results
-    """
-    # Use base Cypher analysis
+    """Estimate the cost and shape of a Cypher query."""
     return cls.analyze_cypher_query(query)
 
   def analyze(
     self, query: str, parameters: dict[str, Any] | None = None
   ) -> dict[str, Any]:
-    """
-    Implementation of abstract analyze method.
-
-    Args:
-        query: The Cypher query string
-        parameters: Optional query parameters (unused in current implementation)
-
-    Returns:
-        Dictionary with query analysis results
-    """
-    # Use the class method for backward compatibility
+    """Implementation of the abstract `analyze` method."""
     return self.analyze_query(query)
 
   @classmethod
@@ -115,15 +95,7 @@ class ClientDetector(BaseClientDetector):
 
   @classmethod
   def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
-    """
-    Detect client type and capabilities from request headers.
-
-    Args:
-        headers: Request headers dictionary
-
-    Returns:
-        Dictionary with client detection results
-    """
+    """Detect client type and capabilities from request headers."""
     # Get base client capabilities
     base_info = cls.detect_client_capabilities(headers)
 
@@ -173,18 +145,9 @@ class StrategySelector(BaseStrategySelector):
     mode_override: ResponseMode | None = None,
     is_write_operation: bool = False,
   ) -> tuple[ExecutionStrategy, dict[str, Any]]:
-    """
-    Select the optimal execution strategy.
+    """Select the execution strategy.
 
-    Args:
-        query_analysis: Query analysis results
-        client_info: Client detection results
-        system_state: Current system state (queue size, running queries, etc.)
-        mode_override: Optional mode override from request
-        is_write_operation: Whether this is a write operation
-
-    Returns:
-        Tuple of (selected strategy, metadata for decision)
+    Returns the strategy paired with the metadata explaining the choice.
     """
     metadata = {
       "query_analysis": query_analysis,
@@ -212,7 +175,7 @@ class StrategySelector(BaseStrategySelector):
         logger.warning("Client requested streaming but doesn't support SSE or NDJSON")
         return ExecutionStrategy.NDJSON_STREAMING, metadata
 
-    # Auto mode - intelligent selection
+    # Auto mode: let the analysis and system state decide.
 
     # Testing tools get special treatment
     if client_info["is_interactive"]:
@@ -291,17 +254,8 @@ class QueryTimeoutCoordinator(TimeoutCoordinator):
   def calculate_timeouts(
     cls, requested_timeout: int, strategy: ExecutionStrategy, is_testing: bool = False
   ) -> dict[str, int]:
-    """
-    Calculate coordinated timeouts for query execution layers.
-
-    Args:
-        requested_timeout: User-requested timeout
-        strategy: Selected execution strategy
-        is_testing: Whether this is a testing context
-
-    Returns:
-        Dictionary with coordinated timeouts for each layer
-    """
+    """Derive the per-layer timeouts for one query execution, so the outer
+    budget always exceeds the inner ones."""
     # Apply context-based limits
     if is_testing:
       endpoint_timeout = min(requested_timeout, cls.MAX_TESTING_TIMEOUT)

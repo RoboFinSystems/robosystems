@@ -17,8 +17,7 @@ PERIOD_PATTERN = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])$")
 def parse_period(period: str) -> tuple[int, int]:
   """Parse a `YYYY-MM` period string into (year, month).
 
-  Raises:
-      ValueError: if the period is not in YYYY-MM format with month 01-12.
+  Raises `ValueError` unless the month is 01-12.
   """
   match = PERIOD_PATTERN.match(period)
   if not match:

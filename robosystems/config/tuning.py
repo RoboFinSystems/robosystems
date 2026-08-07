@@ -1,8 +1,7 @@
 """
 Runtime tuning configuration via SSM Parameter Store.
 
-Provides access to operational parameters that can be adjusted
-at runtime without redeployment.
+Operational parameters adjustable at runtime, without a redeploy.
 
 ## Three-Tier Model
 
@@ -103,14 +102,10 @@ class TuningConfig:
   @classmethod
   def get(cls, path: str, default: str) -> str:
     """
-    Get a tuning parameter as string.
+    Get a tuning parameter as a string.
 
-    Args:
-        path: SSM path under /tuning/ (e.g., "cache/BALANCE_TTL")
-        default: Default value if not found
-
-    Returns:
-        Parameter value or default
+    ``path`` is relative to /tuning/, e.g. "cache/BALANCE_TTL". The env var
+    ``TUNING_CACHE_BALANCE_TTL`` overrides it.
     """
     # Convert path to env var name (e.g., "cache/BALANCE_TTL" -> "TUNING_CACHE_BALANCE_TTL")
     env_key = "TUNING_" + path.upper().replace("/", "_")
@@ -128,14 +123,7 @@ class TuningConfig:
   @classmethod
   def get_int(cls, path: str, default: int) -> int:
     """
-    Get a tuning parameter as integer.
-
-    Args:
-        path: SSM path under /tuning/ (e.g., "cache/BALANCE_TTL")
-        default: Default value if not found or invalid
-
-    Returns:
-        Integer parameter value or default
+    Get a tuning parameter as an int, falling back if unset or unparseable.
     """
     # Convert path to env var name
     env_key = "TUNING_" + path.upper().replace("/", "_")
@@ -156,14 +144,7 @@ class TuningConfig:
   @classmethod
   def get_float(cls, path: str, default: float) -> float:
     """
-    Get a tuning parameter as float.
-
-    Args:
-        path: SSM path under /tuning/ (e.g., "admission/MEMORY_THRESHOLD")
-        default: Default value if not found or invalid
-
-    Returns:
-        Float parameter value or default
+    Get a tuning parameter as a float, falling back if unset or unparseable.
     """
     # Convert path to env var name
     env_key = "TUNING_" + path.upper().replace("/", "_")
@@ -405,13 +386,8 @@ class TuningConfig:
   @lru_cache(maxsize=1)
   def preload_all(cls) -> dict[str, str]:
     """
-    Preload all tuning parameters from SSM into cache.
-
-    Call this at application startup to batch-load all parameters
-    in a single API call, rather than fetching them individually.
-
-    Returns:
-        Dictionary of loaded tuning parameters
+    Warm the cache at startup with a single batched SSM call, rather than
+    one call per parameter.
     """
     manager = _get_parameter_manager()
     if manager:

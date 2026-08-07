@@ -1,18 +1,14 @@
 """Filter evaluation engine for ``rollforward`` Information Blocks.
 
-Implements **Tier 2 of the rollforward attribution design**. Decompose
-a BS account's period change across declared flow concepts by matching
-ledger LineItems on their first-class ``flow_element_id`` FK. Each
+Decomposes a BS account's period change across declared flow concepts by
+matching ledger LineItems on their first-class ``flow_element_id`` FK. Each
 filter authors flow concepts by qname; the engine resolves those to
 element_ids and matches the FK.
 
-Sibling pattern: ``fact_grid._derive_cash_flow_facts`` (Tier 1 default
-change tag derivation). Where Tier 1 derives flow facts from
-period-over-period BS deltas using ``derivation`` arcs, this module
-derives them from per-LineItem flow concepts on
-``line_items.flow_element_id``. The two are complementary — Tier 1
-handles untagged data, Tier 2 handles data with explicit flow tagging
-(Charlie Hoffman's mini data; future XBRL GL with ``GenericFlowCategory``).
+The complementary path is ``fact_grid._derive_cash_flow_facts``, which
+derives flow facts from period-over-period BS deltas using ``derivation``
+arcs. That one handles untagged data; this one handles data carrying
+explicit per-LineItem flow tags.
 
 **Sign convention**: all internal aggregations are in **debit-positive
 cents** (``debit_amount - credit_amount``). This matches the LineItem
@@ -259,10 +255,10 @@ def _evaluate_one_filter(
    - Entry.posting_date in period AND Entry.status='posted'
    - LineItem.flow_element_id ∈ the elements named by ``flow_qnames``
 
-  The filter authors flow concepts by qname; resolve them to element_ids
-  once and match the first-class ``flow_element_id`` FK (the predicate's
-  ``values`` are flow-concept qnames). Returns ``None`` when no qname
-  resolves to an element — the same no-match outcome as before.
+  The filter authors flow concepts by qname (the predicate's ``values``);
+  these resolve to element_ids once and match the first-class
+  ``flow_element_id`` FK. Returns ``None`` when no qname resolves to an
+  element.
   """
   value_ids = [
     r[0]

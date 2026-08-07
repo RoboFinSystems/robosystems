@@ -551,10 +551,10 @@ async def _change_repository_plan(
   old_plan = subscription.plan_name
   is_upgrade = new_price_cents > subscription.base_price_cents
 
-  # Fetch the access record BEFORE any write. It is keyed on the parent
-  # repository, and looking it up after update_plan committed left the
+  # Fetch the access record, which is keyed on the parent repository, BEFORE
+  # any write. Looking it up after `update_plan` commits would leave the
   # subscription mutated with credits and rate limits untouched whenever the
-  # record was missing — the partial write this order exists to prevent.
+  # record is missing.
   user_repo = UserRepository.get_by_user_and_repository(
     target_user_id, parent_repo_id, db
   )
@@ -614,7 +614,6 @@ async def _change_repository_plan(
     new_credits=new_credits,
   )
 
-  # Audit log
   BillingAuditLog.log_event(
     session=db,
     event_type=(

@@ -11,7 +11,6 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
     """Add rate limit headers to the response if they exist in request state."""
     response = await call_next(request)
 
-    # Add general rate limit headers
     if hasattr(request.state, "rate_limit_remaining"):
       response.headers["X-RateLimit-Remaining"] = str(
         request.state.rate_limit_remaining
@@ -27,7 +26,6 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
     if hasattr(request.state, "rate_limit_category"):
       response.headers["X-RateLimit-Category"] = request.state.rate_limit_category
 
-    # Add auth rate limit headers
     if hasattr(request.state, "auth_rate_limit_remaining"):
       response.headers["X-Auth-RateLimit-Remaining"] = str(
         request.state.auth_rate_limit_remaining

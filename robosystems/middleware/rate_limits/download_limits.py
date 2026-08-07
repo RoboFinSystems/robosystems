@@ -1,5 +1,4 @@
-"""
-Download rate limiting for backup downloads.
+"""Download rate limiting for backup downloads.
 
 This module implements monthly download limits for both shared repository
 and dedicated graph backup downloads. Uses Valkey DB 1 (RATE_LIMITS)
@@ -83,16 +82,7 @@ class DownloadRateLimiter:
     resource_id: str,
     monthly_limit: int,
   ) -> tuple[bool, int, datetime]:
-    """Check if user has remaining downloads for the month.
-
-    Args:
-        user_id: User ID
-        resource_id: Repository or graph ID
-        monthly_limit: Configured monthly download limit
-
-    Returns:
-        Tuple of (allowed, remaining, resets_at)
-    """
+    """Check if user has remaining downloads for the month."""
     reset_at = cls._get_reset_time()
 
     redis_client = None
@@ -121,20 +111,7 @@ class DownloadRateLimiter:
     repository: str,
     plan: str,
   ) -> tuple[bool, int, datetime]:
-    """
-    Check if user has remaining downloads for a shared repository.
-
-    Args:
-        user_id: User ID
-        repository: Repository ID (e.g., "sec")
-        plan: User's repository subscription plan
-
-    Returns:
-        Tuple of (allowed, remaining, resets_at)
-        - allowed: True if download is permitted
-        - remaining: Number of downloads remaining this month
-        - resets_at: When the limit resets (first of next month, UTC)
-    """
+    """Check if user has remaining downloads for a shared repository."""
     monthly_limit = cls.get_shared_repo_monthly_limit(repository, plan)
     return await cls._check_limit(user_id, repository, monthly_limit)
 
@@ -145,19 +122,7 @@ class DownloadRateLimiter:
     graph_id: str,
     graph_tier: str,
   ) -> tuple[bool, int, datetime]:
-    """Check if user has remaining backup downloads for a dedicated graph.
-
-    Args:
-        user_id: User ID
-        graph_id: Graph database identifier
-        graph_tier: Graph subscription tier (e.g., "ladybug-standard")
-
-    Returns:
-        Tuple of (allowed, remaining, resets_at)
-        - allowed: True if download is permitted
-        - remaining: Number of downloads remaining this month
-        - resets_at: When the limit resets (first of next month, UTC)
-    """
+    """Check if user has remaining backup downloads for a dedicated graph."""
     monthly_limit = cls.get_graph_tier_monthly_limit(graph_tier)
     return await cls._check_limit(user_id, graph_id, monthly_limit)
 
@@ -167,16 +132,7 @@ class DownloadRateLimiter:
     user_id: str,
     resource_id: str,
   ) -> int:
-    """
-    Increment the download counter for a user.
-
-    Args:
-        user_id: User ID
-        resource_id: Repository ID or graph ID
-
-    Returns:
-        New download count for this month
-    """
+    """Increment the download counter for a user."""
     redis_client = None
     try:
       redis_client = cls._get_redis_client()
@@ -205,21 +161,7 @@ class DownloadRateLimiter:
     repository: str,
     plan: str,
   ) -> dict:
-    """
-    Get the full download quota information for a user.
-
-    Args:
-        user_id: User ID
-        repository: Repository ID (e.g., "sec")
-        plan: User's repository subscription plan
-
-    Returns:
-        Dict with quota information:
-        - limit_per_month: Monthly download limit
-        - used_this_month: Downloads used this month
-        - remaining: Downloads remaining this month
-        - resets_at: ISO timestamp when limit resets
-    """
+    """Get the full download quota information for a user."""
     monthly_limit = cls.get_shared_repo_monthly_limit(repository, plan)
     reset_at = cls._get_reset_time()
 

@@ -1,9 +1,7 @@
-"""
-Dagster run monitor for SSE progress tracking.
+"""Dagster run monitor for SSE progress tracking.
 
-This module provides utilities for submitting Dagster runs and monitoring
-their progress via SSE events. It's designed to run as a FastAPI background
-task, providing lightweight polling of Dagster run status.
+Submits Dagster runs and polls their status, emitting SSE events as it
+goes. Designed to run as a FastAPI background task.
 
 Usage:
     from starlette.background import BackgroundTasks
@@ -45,12 +43,7 @@ DAGSTER_STATUS_MAP = {
 
 
 class DagsterRunMonitor:
-  """
-  Monitor Dagster runs and emit SSE progress events.
-
-  This class is designed to be used from FastAPI background tasks,
-  providing lightweight monitoring without blocking the API.
-  """
+  """Polls a Dagster run and emits SSE progress events for it."""
 
   def __init__(
     self,
@@ -59,15 +52,7 @@ class DagsterRunMonitor:
     poll_interval: float = 2.0,
     max_poll_time: float = 3600.0,  # 1 hour default timeout
   ):
-    """
-    Initialize the Dagster run monitor.
-
-    Args:
-        dagster_host: Dagster webserver hostname (default: from env)
-        dagster_port: Dagster webserver port (default: from env)
-        poll_interval: Seconds between status polls
-        max_poll_time: Maximum time to poll before timing out
-    """
+    """Host and port default to the configured Dagster webserver."""
     self.dagster_host = dagster_host or env.DAGSTER_HOST
     self.dagster_port = dagster_port or env.DAGSTER_PORT
     self.poll_interval = poll_interval
@@ -98,17 +83,7 @@ class DagsterRunMonitor:
     run_config: dict[str, Any] | None = None,
     tags: dict[str, str] | None = None,
   ) -> str:
-    """
-    Submit a Dagster job and return the run ID.
-
-    Args:
-        job_name: Name of the Dagster job to run
-        run_config: Job configuration dictionary
-        tags: Optional run tags
-
-    Returns:
-        str: The Dagster run ID
-    """
+    """Submit a Dagster job and return its run ID."""
     client = self._get_client()
 
     logger.info(f"Submitting Dagster job: {job_name}")
@@ -123,20 +98,11 @@ class DagsterRunMonitor:
     return run_id
 
   def get_run_status(self, run_id: str) -> dict[str, Any]:
-    """
-    Get the status of a Dagster run.
-
-    Args:
-        run_id: Dagster run ID
-
-    Returns:
-        dict with status, message, and step information
-    """
+    """Return a run's status mapped onto the SSE status vocabulary."""
     client = self._get_client()
 
     status = client.get_run_status(run_id)
 
-    # Map Dagster status to our status
     status_str = status.name if hasattr(status, "name") else str(status)
     mapped_status, progress = DAGSTER_STATUS_MAP.get(status_str, ("running", 50))
 
@@ -199,14 +165,13 @@ class DagsterRunMonitor:
   ):
     """Emit a completion event to the SSE stream.
 
-    This merges the stored result data from Dagster job (e.g., graph_id,
-    tables_materialized) with the monitoring result (run_id, elapsed_time).
+    Merges the result the Dagster job recorded on the operation metadata
+    (graph_id, tables_materialized, …) with the monitoring result
+    (run_id, elapsed_time).
     """
     try:
-      # Get stored result data from operation metadata (set by Dagster job)
       stored_result = self.event_storage.get_operation_result_sync(operation_id) or {}
 
-      # Merge stored result with monitoring result
       merged_result = {**stored_result, **result}
 
       self.event_storage.store_event_sync(
@@ -245,15 +210,10 @@ class DagsterRunMonitor:
     run_id: str,
     operation_id: str,
   ) -> dict[str, Any]:
-    """
-    Monitor a Dagster run and emit SSE events for progress.
+    """Poll a run to completion, emitting an event on each status change.
 
-    Args:
-        run_id: Dagster run ID to monitor
-        operation_id: SSE operation ID for progress events
-
-    Returns:
-        Final run status
+    Returns the final status, or a `"timeout"` status once `max_poll_time`
+    elapses.
     """
     import time
 
@@ -261,7 +221,6 @@ class DagsterRunMonitor:
     last_status = None
 
     while True:
-      # Check timeout
       elapsed = time.time() - start_time
       if elapsed > self.max_poll_time:
         await self.emit_error(
@@ -275,7 +234,6 @@ class DagsterRunMonitor:
           "elapsed_time": elapsed,
         }
 
-      # Get current status
       try:
         status_info = self.get_run_status(run_id)
       except Exception as e:
@@ -285,7 +243,6 @@ class DagsterRunMonitor:
 
       current_status = status_info["status"]
 
-      # Emit progress if status changed
       if current_status != last_status:
         last_status = current_status
 
@@ -320,7 +277,6 @@ class DagsterRunMonitor:
           return status_info
 
         else:
-          # Running or pending
           await self.emit_progress(
             operation_id,
             f"Job status: {status_info['dagster_status']}",
@@ -340,30 +296,18 @@ async def run_and_monitor_dagster_job(
   run_config: dict[str, Any] | None = None,
   tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-  """
-  Submit a Dagster job and monitor it via SSE.
+  """Submit a Dagster job and monitor it to completion via SSE.
 
-  This is the main function to use from FastAPI background tasks.
-
-  Args:
-      job_name: Name of the Dagster job to run
-      operation_id: SSE operation ID for progress tracking
-      run_config: Optional job configuration
-      tags: Optional run tags
-
-  Returns:
-      Final run status
+  The entry point for FastAPI background tasks; returns the final run
+  status and emits an error event before re-raising on failure.
   """
   monitor = DagsterRunMonitor()
 
   try:
-    # Submit the job
     run_id = monitor.submit_job(job_name, run_config, tags)
 
-    # Emit started event
     await monitor.emit_started(operation_id, job_name, run_id)
 
-    # Monitor until completion
     result = await monitor.monitor_run(run_id, operation_id)
 
     return result
@@ -383,19 +327,7 @@ def submit_dagster_job_sync(
   run_config: dict[str, Any] | None = None,
   tags: dict[str, str] | None = None,
 ) -> str:
-  """
-  Submit a Dagster job synchronously (without monitoring).
-
-  Useful when you just need to kick off a job and don't need SSE tracking.
-
-  Args:
-      job_name: Name of the Dagster job to run
-      run_config: Optional job configuration
-      tags: Optional run tags
-
-  Returns:
-      Dagster run ID
-  """
+  """Kick off a Dagster job without SSE tracking; returns the run ID."""
   monitor = DagsterRunMonitor()
   return monitor.submit_job(job_name, run_config, tags)
 
@@ -404,24 +336,11 @@ def build_graph_job_config(
   job_name: str,
   **kwargs,
 ) -> dict[str, Any]:
+  """Build the Dagster `run_config` for a graph operation job.
+
+  `kwargs` are applied as config to every op in the job that takes it —
+  several of these jobs have more than one.
   """
-  Build run_config for graph operation jobs.
-
-  This helper creates the proper run_config structure for Dagster jobs
-  that use Config classes. For jobs with multiple ops that share the same
-  config class, this provides config for all of them.
-
-  In local development (ENVIRONMENT=dev), uses in_process executor to avoid
-  subprocess spawning overhead which can be very slow for many small jobs.
-
-  Args:
-      job_name: Name of the job (determines which op config to build)
-      **kwargs: Configuration values
-
-  Returns:
-      run_config dictionary for Dagster
-  """
-  # Map job names to ALL ops that need config (some jobs have multiple ops)
   job_to_ops: dict[str, list[str]] = {
     "create_graph_job": ["create_graph_database", "create_graph_subscription"],
     "create_entity_graph_job": [
@@ -440,15 +359,14 @@ def build_graph_job_config(
   if not op_names:
     raise ValueError(f"Unknown job name: {job_name}")
 
-  # Build config for all ops that need it
   ops_config = {}
   for op_name in op_names:
     ops_config[op_name] = {"config": kwargs}
 
   run_config: dict[str, Any] = {"ops": ops_config}
 
-  # In local development, use in_process executor to avoid subprocess overhead
-  # This is much faster for many small jobs (e.g., staging 17 files)
+  # In-process execution avoids per-op subprocess spawn, which dominates
+  # runtime locally when a job stages many small files.
   if env.ENVIRONMENT == "dev":
     run_config["execution"] = {"config": {"in_process": {}}}
 

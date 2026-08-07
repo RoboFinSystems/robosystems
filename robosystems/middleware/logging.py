@@ -1,5 +1,4 @@
-"""
-Logging middleware for structured API request logging.
+"""Logging middleware for structured API request logging.
 
 This middleware captures all API requests and responses with structured
 logging that's optimized for CloudWatch searching and cost management.
@@ -44,15 +43,7 @@ SENSITIVE_QUERY_PARAMS = {
 
 
 def redact_sensitive_query_params(query_string: str) -> str:
-  """
-  Redact sensitive query parameters from a query string for safe logging.
-
-  Args:
-      query_string: The raw query string from a URL
-
-  Returns:
-      Query string with sensitive values replaced with REDACTED
-  """
+  """Redact sensitive query parameters from a query string for safe logging."""
   if not query_string:
     return ""
 
@@ -68,15 +59,7 @@ def redact_sensitive_query_params(query_string: str) -> str:
 
 
 def get_safe_url_for_logging(request: Request) -> str:
-  """
-  Get a URL that's safe for logging (with sensitive query params redacted).
-
-  Args:
-      request: FastAPI request object
-
-  Returns:
-      URL string safe for logging
-  """
+  """Get a URL that's safe for logging (with sensitive query params redacted)."""
   path = request.url.path
   if request.url.query:
     safe_query = redact_sensitive_query_params(str(request.url.query))
@@ -86,8 +69,7 @@ def get_safe_url_for_logging(request: Request) -> str:
 
 
 class StructuredLoggingMiddleware(BaseHTTPMiddleware):
-  """
-  Middleware that logs all API requests with structured data for CloudWatch.
+  """Middleware that logs all API requests with structured data for CloudWatch.
 
   Features:
   - Request/response timing
@@ -153,7 +135,6 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
         request_id=request_id,
       )
 
-      # Add request ID to response headers for tracing
       response.headers["X-Request-ID"] = request_id
 
       return response
@@ -193,8 +174,7 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityLoggingMiddleware(BaseHTTPMiddleware):
-  """
-  Middleware specifically for security event logging.
+  """Middleware specifically for security event logging.
 
   Logs authentication attempts, authorization failures, and suspicious activity.
   """
@@ -216,7 +196,6 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
     ]
 
     if any(suspicious_indicators):
-      # Get safe URL with redacted sensitive parameters
       safe_url = get_safe_url_for_logging(request)
       safe_query = redact_sensitive_query_params(str(request.url.query))
 
@@ -246,7 +225,6 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
       action = request.url.path.split("/")[-1]  # login, register, etc.
       success = 200 <= response.status_code < 300
 
-      # Extract user ID if available from request state
       user_id = getattr(request.state, "user_id", None)
 
       log_auth_event(

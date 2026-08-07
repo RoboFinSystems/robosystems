@@ -1,9 +1,8 @@
 """Counterparty agents for Driftline Coffee Roasters.
 
-Same shape as the consulting demo: each dict is a ``create-agent`` request
-body, referenced from the scenario by display name and resolved to an
-``Agent.id`` in ``main.py``. The cast is chosen so the working-capital reveal
-is traceable to specific counterparties:
+Each dict is a ``create-agent`` request body, referenced from the scenario by
+display name and resolved to an ``Agent.id`` during the run. The cast is chosen
+so the working-capital reveal traces to specific counterparties:
 
 - **Summit Markets** — the regional grocery chain that signs mid-window and
   then slips net-30 → net-90. The concentrated, aged wholesale AR traces here.

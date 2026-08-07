@@ -78,13 +78,11 @@ class DocumentService:
     request: DocumentUploadRequest,
     tier: str | None = None,
   ) -> tuple[Document, DocumentUploadResponse]:
-    """Create a document in PG and sync to OpenSearch.
+    """Create a document and index it, returning ``(Document, response)``.
 
-    Returns:
-        Tuple of (Document model, DocumentUploadResponse).
-
-    Raises:
-        ValueError: If tier limit exceeded or no indexable sections.
+    Upserts on ``external_id`` when one is supplied. Raises ValueError when the
+    tier's document limit is reached or the content yields no indexable
+    sections.
     """
     content, title, tags, folder = _apply_frontmatter(
       request.content, request.title, request.tags, request.folder
@@ -160,13 +158,10 @@ class DocumentService:
     tags: list[str] | None = ...,  # type: ignore[assignment]
     folder: str | None = ...,  # type: ignore[assignment]
   ) -> tuple[Document, DocumentUploadResponse]:
-    """Update a document in PG and re-sync to OpenSearch.
+    """Update a document and re-index it, returning ``(Document, response)``.
 
-    Returns:
-        Tuple of (Document model, DocumentUploadResponse).
-
-    Raises:
-        ValueError: If document not found or no indexable sections.
+    Raises KeyError when the document is not in this graph, ValueError when the
+    new content yields no indexable sections.
     """
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:

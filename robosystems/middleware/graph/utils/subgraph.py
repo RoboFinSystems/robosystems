@@ -62,12 +62,6 @@ def parse_subgraph_id(graph_id: str) -> SubgraphInfo | None:
   - Parent graph: kg5f2e5e0da65d45d69645
   - Subgraph: kg5f2e5e0da65d45d69645_dev
   - Shared repo subgraph: sec_historical
-
-  Args:
-      graph_id: The graph identifier to parse
-
-  Returns:
-      SubgraphInfo if this is a subgraph, None otherwise
   """
   # Try kg-prefix pattern first
   match = FULL_SUBGRAPH_PATTERN.match(graph_id)
@@ -108,12 +102,6 @@ def validate_subgraph_name(name: str) -> bool:
   - Must be alphanumeric only (letters and numbers)
   - Must be 1-20 characters long
   - No special characters allowed
-
-  Args:
-      name: The subgraph name to validate
-
-  Returns:
-      True if valid, False otherwise
   """
   return bool(SUBGRAPH_NAME_PATTERN.match(name))
 
@@ -122,12 +110,6 @@ def validate_parent_graph_id(graph_id: str) -> bool:
   """Validate that a graph ID can be a parent (not a subgraph).
 
   Accepts both user graph IDs (kg prefix) and shared repository IDs.
-
-  Args:
-      graph_id: The graph ID to validate
-
-  Returns:
-      True if this can be a parent graph, False otherwise
   """
   # Check it's not already a subgraph
   if parse_subgraph_id(graph_id):
@@ -141,18 +123,7 @@ def validate_parent_graph_id(graph_id: str) -> bool:
 
 
 def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:
-  """Construct a full subgraph ID from parent and name.
-
-  Args:
-      parent_graph_id: The parent graph ID
-      subgraph_name: The subgraph name
-
-  Returns:
-      The full subgraph ID using underscore notation
-
-  Raises:
-      ValueError: If parent_graph_id or subgraph_name are invalid
-  """
+  """Construct a full subgraph ID from parent and name."""
   if not validate_parent_graph_id(parent_graph_id):
     raise ValueError(f"Invalid parent graph ID: {parent_graph_id}")
 
@@ -169,12 +140,6 @@ def get_database_name(graph_id: str) -> str:
 
   For regular graphs, this is the same as the graph ID.
   For subgraphs, this uses underscore notation.
-
-  Args:
-      graph_id: The graph identifier
-
-  Returns:
-      The database name to use on disk
   """
   # Both regular graphs and subgraphs use their ID directly as database name
   # since we're using underscore notation throughout
@@ -182,14 +147,7 @@ def get_database_name(graph_id: str) -> str:
 
 
 def split_graph_hierarchy(graph_id: str) -> tuple[str, str | None]:
-  """Split a graph ID into parent and subgraph components.
-
-  Args:
-      graph_id: The graph identifier
-
-  Returns:
-      Tuple of (parent_graph_id, subgraph_name or None)
-  """
+  """Split a graph ID into parent and subgraph components."""
   subgraph_info = parse_subgraph_id(graph_id)
   if subgraph_info:
     return subgraph_info.parent_graph_id, subgraph_info.subgraph_name
@@ -198,46 +156,19 @@ def split_graph_hierarchy(graph_id: str) -> tuple[str, str | None]:
 
 
 def is_subgraph(graph_id: str) -> bool:
-  """Check if a graph ID represents a subgraph.
-
-  Args:
-      graph_id: The graph identifier
-
-  Returns:
-      True if this is a subgraph, False otherwise
-  """
+  """Check if a graph ID represents a subgraph."""
   return parse_subgraph_id(graph_id) is not None
 
 
 def is_parent_graph(graph_id: str) -> bool:
-  """Check if a graph ID represents a parent graph (not a subgraph).
-
-  Args:
-      graph_id: The graph identifier
-
-  Returns:
-      True if this is a parent graph, False otherwise
-  """
+  """Check if a graph ID represents a parent graph (not a subgraph)."""
   return validate_parent_graph_id(graph_id)
 
 
 def generate_unique_subgraph_name(
   parent_graph_id: str, base_name: str, existing_names: list[str]
 ) -> str:
-  """Generate a unique subgraph name by appending numbers if needed.
-
-  Args:
-      parent_graph_id: The parent graph ID
-      base_name: The desired base name
-      existing_names: List of existing subgraph names for this parent
-
-  Returns:
-      A unique subgraph name
-
-  Raises:
-      ValueError: If unable to generate a unique name
-  """
-  # Clean the base name to be alphanumeric
+  """Generate a unique subgraph name by appending numbers if needed."""
   clean_name = re.sub(r"[^a-zA-Z0-9]", "", base_name)[:17]  # Leave room for numbers
 
   if not clean_name:

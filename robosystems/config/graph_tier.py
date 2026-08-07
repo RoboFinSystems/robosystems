@@ -1,8 +1,9 @@
-"""Graph tier configuration and utilities.
+"""Graph tier definitions and accessors for per-tier configuration.
 
-This module defines:
-- GraphTier: Enum of all available graph database tiers
-- GraphTierConfig: Utility class for accessing tier-specific configuration from graph.yml
+``.github/configs/graph.yml`` is the authoritative source for every tier
+property read here — instance type and RAM, memory budgets, subgraph caps,
+copy/backup/graph limits. This module only reads and defaults it; change a
+tier by editing that file, not these accessors.
 """
 
 import os
@@ -30,10 +31,10 @@ class GraphTier(str, Enum):
 
 
 class GraphTierConfig:
-  """Utility class for accessing graph tier-specific configuration from graph.yml.
+  """Reads per-tier properties out of graph.yml.
 
-  Provides methods to retrieve tier properties like storage limits, monthly credits,
-  instance configuration, backup limits, and more from the centralized graph.yml file.
+  Every getter resolves the tier's block for the current environment and falls
+  back to a hardcoded default when the key or the tier is missing.
   """
 
   _config_cache: dict[str, Any] | None = None
@@ -83,12 +84,7 @@ class GraphTierConfig:
     This allows replicas to inherit the writer's settings but override
     instance-specific values like memory limits for their smaller hardware.
 
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Tier configuration dictionary
+    ``environment`` defaults to the one derived from ``env.ENVIRONMENT``.
     """
     if environment is None:
       if env.ENVIRONMENT == "prod":
@@ -131,44 +127,20 @@ class GraphTierConfig:
 
   @classmethod
   def get_max_subgraphs(cls, tier: str, environment: str | None = None) -> int | None:
-    """Get maximum subgraphs allowed for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Maximum subgraphs allowed, or None for unlimited
-    """
+    """Get maximum subgraphs allowed for a tier; None means unlimited."""
     tier_config = cls.get_tier_config(tier, environment)
     return tier_config.get("max_subgraphs")
 
   @classmethod
   def get_query_timeout(cls, tier: str, environment: str | None = None) -> int:
-    """Get query timeout for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Query timeout in seconds
-    """
+    """Get query timeout for a tier, in seconds."""
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
     return instance_config.get("query_timeout", 30)
 
   @classmethod
   def get_memory_per_db_mb(cls, tier: str, environment: str | None = None) -> int:
-    """Get memory allocation per database for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Memory per database in MB
-    """
+    """Get per-database memory allocation for a tier, in MB."""
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
     return instance_config.get("memory_per_db_mb", 2048)
@@ -180,13 +152,6 @@ class GraphTierConfig:
     1 means the tier is dedicated (single-tenant per box); >1 means packed.
     This is the packing property of the *product tier*, distinct from the
     dev-only ``LBUG_DATABASES_PER_INSTANCE`` allocation override.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Databases co-located on one instance (defaults to 1 = dedicated)
     """
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
@@ -194,14 +159,10 @@ class GraphTierConfig:
 
   @classmethod
   def get_max_memory_mb(cls, tier: str, environment: str | None = None) -> int:
-    """Get total memory allocation for a tier.
+    """Get the LadybugDB memory budget for a tier, in MB.
 
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Total memory in MB
+    This is the engine's budget after OS overhead, not the instance's physical
+    RAM (``instance_ram_gb``).
     """
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
@@ -209,15 +170,7 @@ class GraphTierConfig:
 
   @classmethod
   def get_duckdb_memory_limit(cls, tier: str, environment: str | None = None) -> str:
-    """Get DuckDB memory limit for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        DuckDB memory limit string (e.g., "2GB", "8GB", "12GB")
-    """
+    """Get DuckDB memory limit for a tier, as a size string like "8GB"."""
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
     return instance_config.get("duckdb_memory_limit", "2GB")
@@ -230,13 +183,6 @@ class GraphTierConfig:
     - m7g.medium (1 vCPU): 2 threads (DuckDB benefits from slight oversubscription)
     - m7g.large (2 vCPU): 2 threads
     - r7g.xlarge (4 vCPU): 4 threads
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        DuckDB max threads (default: 4)
     """
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
@@ -249,14 +195,8 @@ class GraphTierConfig:
     """Get DuckDB memory boost limit for staging operations.
 
     During DuckDB staging (creating external tables from parquet), memory needs
-    are high. This returns the boosted memory limit to use temporarily.
-
-    Args:
-        tier: The tier name
-        environment: Environment (defaults to current env)
-
-    Returns:
-        DuckDB memory boost string (e.g., "55GB") or None if not configured
+    are high. Returns the boosted limit to apply temporarily (a size string
+    like "55GB"), or None when the tier does not configure one.
     """
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
@@ -269,14 +209,8 @@ class GraphTierConfig:
     """Get LadybugDB memory boost limit for materialization operations.
 
     During LadybugDB materialization (COPY FROM DuckDB), memory needs are high
-    for the buffer pool. This returns the boosted memory limit in MB.
-
-    Args:
-        tier: The tier name
-        environment: Environment (defaults to current env)
-
-    Returns:
-        LadybugDB memory boost in MB (e.g., 51200 for 50GB) or None if not configured
+    for the buffer pool. Returns the boosted limit in MB, or None when the tier
+    does not configure one.
     """
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
@@ -284,15 +218,7 @@ class GraphTierConfig:
 
   @classmethod
   def get_chunk_size(cls, tier: str, environment: str | None = None) -> int:
-    """Get chunk size for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Chunk size for operations
-    """
+    """Get the per-operation chunk size for a tier, in rows."""
     tier_config = cls.get_tier_config(tier, environment)
     instance_config = tier_config.get("instance", {})
     return instance_config.get("chunk_size", 1000)
@@ -301,15 +227,7 @@ class GraphTierConfig:
   def get_instance_config(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get complete instance configuration for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Complete instance configuration dictionary
-    """
+    """Get the whole ``instance`` block for a tier."""
     tier_config = cls.get_tier_config(tier, environment)
     return tier_config.get("instance", {})
 
@@ -317,19 +235,11 @@ class GraphTierConfig:
   def get_api_rate_multiplier(cls, tier: str, environment: str | None = None) -> float:
     """Get this tier's rate limit relative to ladybug-standard.
 
-    Derived from the limits the limiter actually enforces, not from a
-    standalone knob. It used to read `api_rate_multiplier` out of graph.yml,
-    where it was 1.0/1.5/2.5 — read in several places, applied in none, so
-    /limits and /offering reported throughput no tier ever received. That key
-    is gone; the ratio now comes from SUBSCRIPTION_RATE_LIMITS, which means it
-    cannot drift from enforcement again.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Unused; retained for call-site compatibility.
-
-    Returns:
-        Multiple of the standard tier's limits (1.0 = same as standard)
+    Computed from SUBSCRIPTION_RATE_LIMITS — the table the limiter actually
+    enforces — rather than a standalone config knob, so what /limits and
+    /offering advertise cannot drift from what a caller receives. 1.0 means the
+    same throughput as standard. ``environment`` is unused, retained for
+    call-site compatibility.
     """
     from .rate_limits import EndpointCategory, RateLimitConfig
 
@@ -351,15 +261,7 @@ class GraphTierConfig:
   def get_copy_operation_limits(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get copy operation limits for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Copy operation limits dictionary
-    """
+    """Get copy operation limits for a tier."""
     tier_config = cls.get_tier_config(tier, environment)
     default_limits = {
       "max_file_size_gb": 1.0,
@@ -374,15 +276,7 @@ class GraphTierConfig:
   def get_backup_limits(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get backup limits for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Backup limits dictionary
-    """
+    """Get backup limits for a tier."""
     tier_config = cls.get_tier_config(tier, environment)
     default_limits = {
       "max_backup_size_gb": 10,
@@ -397,12 +291,8 @@ class GraphTierConfig:
   ) -> dict[str, Any]:
     """Get graph content limits for a tier.
 
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Graph limits dictionary with instance_storage_limit_gb, row limits, etc.
+    Carries ``instance_storage_limit_gb`` plus the per-copy and per-table row
+    caps.
     """
     tier_config = cls.get_tier_config(tier, environment)
     # These fire only when a tier resolves without a graph_limits block (unknown
@@ -428,29 +318,16 @@ class GraphTierConfig:
 
     This is the total storage budget for the entire dedicated instance,
     covering the parent graph, all subgraphs, DuckDB staging, and
-    future LanceDB vector indexes.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Storage limit in GB. This is the enforced cap: materialization and
-        file upload reject over it (IngestionLimitChecker, ingest_file).
+    future LanceDB vector indexes. It is enforced, not advisory:
+    materialization and file upload both reject over it (IngestionLimitChecker,
+    ingest_file).
     """
     graph_limits = cls.get_graph_limits(tier, environment)
     return float(graph_limits.get("instance_storage_limit_gb", 20))
 
   @classmethod
   def _generate_tier_features(cls, tier_config: dict[str, Any]) -> list[str]:
-    """Generate human-readable features list for a tier.
-
-    Args:
-        tier_config: Tier configuration dictionary
-
-    Returns:
-        List of feature strings
-    """
+    """Build the human-readable feature bullets advertised for a tier."""
     features = []
 
     # Add storage limit
@@ -459,9 +336,7 @@ class GraphTierConfig:
     if storage_limit is not None and storage_limit > 0:
       features.append(f"{int(storage_limit)} GB instance storage")
 
-    # Add AI credits allocation. Credits live in billing config, not
-    # graph.yml — a tier_config.get("monthly_credits") here read a key that
-    # never exists, so no tier ever advertised its credits.
+    # Credit allocations live in billing config, not graph.yml.
     feature_tier = tier_config.get("tier") or tier_config.get("name")
     if feature_tier:
       from .billing import BillingConfig
@@ -506,15 +381,13 @@ class GraphTierConfig:
         features.append("Dedicated medium instance")
 
       # Advertise the instance's physical RAM, matching /v1/offering's
-      # infrastructure line. max_memory_mb is the LadybugDB budget after OS
-      # overhead — reporting it here made the same tier claim "3GB RAM" in
-      # one response and "4 GB RAM" in another.
+      # infrastructure line. Deliberately not max_memory_mb, which is the
+      # LadybugDB budget after OS overhead and would understate the box.
       instance_ram_gb = instance.get("instance_ram_gb", 0)
       if instance_ram_gb and instance_ram_gb > 0:
         features.append(f"{instance_ram_gb:g} GB RAM")
 
-    # Add rate limit multiplier if not standard. Derived from the enforced
-    # limits — graph.yml no longer carries an api_rate_multiplier key.
+    # Add rate limit multiplier if not standard.
     tier_name = tier_config.get("tier") or tier_config.get("name")
     rate_multiplier = cls.get_api_rate_multiplier(tier_name) if tier_name else 1.0
     if rate_multiplier > 1:
@@ -532,15 +405,7 @@ class GraphTierConfig:
   def get_available_tiers(
     cls, environment: str | None = None, include_disabled: bool = False
   ) -> list[dict[str, Any]]:
-    """Get all available tiers for the environment.
-
-    Args:
-        environment: Environment (defaults to current env)
-        include_disabled: Whether to include disabled tiers (default: False)
-
-    Returns:
-        List of tier configuration dictionaries with formatted information
-    """
+    """List the tiers deployed in an environment, with display metadata."""
     if environment is None:
       if env.ENVIRONMENT == "prod":
         environment = "production"
@@ -638,29 +503,13 @@ class GraphTierConfig:
 
 
 def get_tier_max_subgraphs(tier: str, environment: str | None = None) -> int | None:
-  """Get max subgraphs for a tier.
-
-  Args:
-      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Maximum subgraphs allowed, or None for unlimited
-  """
+  """Get max subgraphs for a tier; None means unlimited."""
   return GraphTierConfig.get_max_subgraphs(tier, environment)
 
 
 @lru_cache(maxsize=32)
 def get_tier_api_rate_multiplier(tier: str, environment: str | None = None) -> float:
-  """Cached function to get rate limit multiplier for a tier.
-
-  Args:
-      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Rate limit multiplier (1.0 = base limits)
-  """
+  """Cached GraphTierConfig.get_api_rate_multiplier."""
   return GraphTierConfig.get_api_rate_multiplier(tier, environment)
 
 
@@ -668,27 +517,11 @@ def get_tier_api_rate_multiplier(tier: str, environment: str | None = None) -> f
 def get_tier_copy_operation_limits(
   tier: str, environment: str | None = None
 ) -> dict[str, Any]:
-  """Cached function to get copy operation limits for a tier.
-
-  Args:
-      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Copy operation limits dictionary
-  """
+  """Cached GraphTierConfig.get_copy_operation_limits."""
   return GraphTierConfig.get_copy_operation_limits(tier, environment)
 
 
 @lru_cache(maxsize=32)
 def get_tier_backup_limits(tier: str, environment: str | None = None) -> dict[str, Any]:
-  """Cached function to get backup limits for a tier.
-
-  Args:
-      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Backup limits dictionary
-  """
+  """Cached GraphTierConfig.get_backup_limits."""
   return GraphTierConfig.get_backup_limits(tier, environment)

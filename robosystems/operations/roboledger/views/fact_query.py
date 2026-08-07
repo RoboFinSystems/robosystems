@@ -132,10 +132,10 @@ def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
   the period are load-bearing: an XBRL duration fact is identified by
   *(start, end)*, not by end alone, so a 10-Q reports the same element for
   the 3-month AND the 9-month window ending on the same day. Keying on
-  ``period_end`` alone collapsed those into one arbitrary row — the caller
-  asked for a quarter and silently got year-to-date. Entity is in the key
-  for the same reason: without it two filers reporting the same element for
-  the same period collapse into one row.
+  ``period_end`` alone would collapse those into one arbitrary row, silently
+  handing back year-to-date to a caller who asked for a quarter. Entity is
+  in the key for the same reason: without it two filers reporting the same
+  element for the same period collapse into one row.
   """
   seen: set[tuple] = set()
   deduped: list[dict[str, Any]] = []
@@ -171,27 +171,18 @@ async def query_fact_grid(
   Shared by REST (`build-fact-grid`) and MCP (`BuildFactGridTool`). See
   module docstring for the LadybugDB-specific optimizations applied here.
 
-  Args:
-      graph_id: Graph containing facts.
-      elements: Element qnames (e.g., ``['us-gaap:Assets']``).
-      canonical_concepts: Canonical concept names (e.g., ``['revenue']``).
-      periods: Period end dates (``YYYY-MM-DD``).
-      entity: Single entity ticker, CIK, or name.
-      entities: Multiple entity tickers.
-      form: SEC filing form type (e.g., ``'10-K'``).
-      fiscal_year: Fiscal year filter.
-      fiscal_period: Fiscal period filter (e.g., ``'FY'``, ``'Q1'``).
-      period_type: ``'annual'``, ``'quarterly'``, or ``'instant'``.
-      limit: Maximum fact records to return, applied after dedup + sort so
-          truncation keeps the most recent periods.
+  ``elements`` are qnames (``us-gaap:Assets``), ``canonical_concepts`` are
+  canonical names (``revenue``), ``periods`` are ``YYYY-MM-DD`` end dates,
+  ``entity`` accepts a ticker / CIK / name while ``entities`` takes tickers,
+  and ``period_type`` is ``annual`` / ``quarterly`` / ``instant``. ``limit``
+  applies after dedup + sort, so truncation keeps the most recent periods.
 
-  Returns:
-      ``(facts, truncated)``. Each fact carries ``element_id``,
-      ``element_name``, ``period_end``, ``value``, ``unit``,
-      ``entity_ticker`` and ``entity_name`` — entity identity is always
-      returned, since without it facts from different filers are
-      indistinguishable. Deduplicated and sorted by ``period_end``
-      descending. ``truncated`` is True when ``limit`` dropped rows.
+  Returns ``(facts, truncated)``. Each fact carries ``element_id``,
+  ``element_name``, ``period_end``, ``value``, ``unit``, ``entity_ticker``
+  and ``entity_name`` — entity identity always comes back, since without it
+  facts from different filers are indistinguishable. Rows are deduplicated
+  and sorted by ``period_end`` descending; ``truncated`` is True when
+  ``limit`` dropped rows.
   """
   parameters: dict[str, Any] = {}
 
@@ -206,9 +197,9 @@ async def query_fact_grid(
   # that forces a full scan of the 100M+ Fact nodes. With an entity filter the
   # planner seeds from the ~thousands of Entity nodes (a single ticker is
   # inline-anchored to one); without one it seeds from the Element, which for
-  # a specific qname is a single node. Multi-entity / CIK / name comparisons
-  # lost the single-ticker inline anchor and degraded to a full Fact scan
-  # (25s+ timeout) before this.
+  # a specific qname is a single node. Multi-entity / CIK / name filters have
+  # no inline anchor, so without this lead they degrade to a full Fact scan
+  # (25s+ timeout).
   if entity_filter:
     lead = f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}"
   else:

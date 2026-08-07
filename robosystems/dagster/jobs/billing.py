@@ -167,7 +167,7 @@ def _extract_local_subscription_id(data: dict) -> str | None:
   The create paths write `subscription_id` into the Stripe subscription's
   metadata, and Stripe copies that onto derived objects such as invoices. It
   identifies one exact row, so it is a far better disambiguator than the
-  customer id — which now maps to an org holding many concurrent
+  customer id, which maps to an org that may hold many concurrent
   subscriptions.
   """
   candidates = [data.get("metadata")]
@@ -209,8 +209,7 @@ def _resolve_subscription(
   row. It is kept for those, but only when the org has exactly one candidate:
   `BillingCustomer.org_id` is the primary key, so one Stripe customer maps to
   an org that may hold one subscription per graph plus one per member per
-  repository. "Most recently created active subscription" stopped being a
-  reasonable guess the moment an org could have more than one member.
+  repository — with several candidates there is no safe guess.
 
   Raises SubscriptionNotFoundError if the subscription cannot be resolved.
   """
@@ -823,9 +822,9 @@ async def _trigger_resource_provisioning(
   resource_config = subscription.subscription_metadata.get("resource_config", {})
   resource_type = subscription.resource_type
 
-  # The subscriber column is authoritative; metadata is the legacy copy for
-  # rows created before it existed. The org-owner fallback is last resort —
-  # with more than one member it can provision to the wrong person.
+  # The subscriber column is authoritative; the metadata copy covers rows
+  # written before it existed. The org-owner fallback is last resort — with
+  # more than one member it can provision to the wrong person.
   user_id = subscription.user_id or subscription.subscription_metadata.get("user_id")
   if not user_id:
     owner = (
@@ -1149,7 +1148,7 @@ def monthly_credit_allocation_job():
 def generate_usage_report(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
-  """Generate comprehensive monthly usage report."""
+  """Generate the monthly usage report for the prior calendar month."""
   last_month = datetime.now(UTC).replace(day=1) - timedelta(days=1)
   year = last_month.year
   month = last_month.month

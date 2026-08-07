@@ -1,3 +1,10 @@
+"""SQL against DuckDB staging tables.
+
+``POST /query`` runs tenant SQL on a hardened read-only connection and can
+answer as JSON, NDJSON, or SSE. ``POST /execute`` is the internal read-write
+companion used by the materialization and ingestion paths.
+"""
+
 import json
 from datetime import UTC, datetime
 
@@ -53,12 +60,11 @@ async def query_tables(
   """
   start_time = datetime.now(UTC)
 
-  # Auto-detect streaming from Accept header
   accept_header = full_request.headers.get("accept", "")
   wants_sse = "text/event-stream" in accept_header
   wants_ndjson = "application/x-ndjson" in accept_header
 
-  # Override detection if streaming parameter explicitly set
+  # An explicit `streaming` query param overrides Accept-header detection.
   if streaming is None:
     streaming = wants_sse or wants_ndjson
 
@@ -72,7 +78,7 @@ async def query_tables(
   try:
     if streaming:
       if wants_sse:
-        # SSE streaming with progress updates
+
         async def sse_generator():
           try:
             yield {
@@ -90,7 +96,6 @@ async def query_tables(
             last_chunk = None
             for chunk in table_manager.query_table_streaming(request, chunk_size):
               last_chunk = chunk
-              # Check for errors
               if "error" in chunk:
                 yield {
                   "event": "error",
@@ -104,7 +109,6 @@ async def query_tables(
                 }
                 return
 
-              # Send chunk data
               yield {
                 "event": "chunk",
                 "data": json.dumps(
@@ -119,7 +123,7 @@ async def query_tables(
                 ),
               }
 
-              # Send progress event
+              # Progress is emitted on the first and last chunk only.
               if chunk_index == 0 or chunk["is_last_chunk"]:
                 progress_percent = (
                   100
@@ -142,7 +146,6 @@ async def query_tables(
 
               chunk_index += 1
 
-            # Send completion event
             execution_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             yield {
               "event": "completed",
@@ -173,7 +176,7 @@ async def query_tables(
           ping=15,
         )
       else:
-        # NDJSON streaming
+
         def generate_ndjson():
           for chunk in table_manager.query_table_streaming(request, chunk_size):
             yield json.dumps(chunk) + "\n"
@@ -188,7 +191,6 @@ async def query_tables(
           },
         )
     else:
-      # Standard JSON response
       return table_manager.query_table(request)
 
   except Exception as e:
@@ -213,7 +215,7 @@ async def execute_table_write(
   SELECT ... postgres_scan(...)`` staging and INSERT/DELETE upserts.
 
   Not proxied by the tenant ``/query/sql`` surface; only the internal graph
-  client calls it. Mirrors the existing internal write endpoints
+  client calls it, alongside the other internal write endpoints
   (``POST /tables`` create, ``POST /tables/{name}/insert``).
   """
   request.graph_id = graph_id

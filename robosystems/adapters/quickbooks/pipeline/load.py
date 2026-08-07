@@ -104,8 +104,8 @@ def _run_qb_load(
     _record_failed_sync_result(context, config, exc)
     raise
 
-  # Update last sync timestamp + persist the outcome summary the loader
-  # previously emitted only as a worker log line.
+  # Update last sync timestamp + persist the outcome summary so the operator
+  # surface can render it without reading worker logs.
   _update_last_sync(context, config, _sync_result_summary(config, result))
 
   # Advance CDC watermark only after load success.

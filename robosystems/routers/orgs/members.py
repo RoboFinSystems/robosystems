@@ -120,7 +120,6 @@ async def update_member_role(
         detail="You cannot change your own role",
       )
 
-    # Get the target member
     target_membership = OrgUser.get_by_org_and_user(org_id, user_id, db)
     if not target_membership:
       raise HTTPException(
@@ -149,7 +148,7 @@ async def update_member_role(
         ),
       )
 
-    # Ensure at least one owner remains (redundant now, but keep for safety)
+    # Defense in depth: the owner-role guards above already cover this.
     if target_membership.role == OrgRole.OWNER and request.role != OrgRole.OWNER:
       owner_count = (
         db.query(OrgUser)
@@ -238,7 +237,6 @@ async def remove_member(
         detail="Only admins and owners can remove members",
       )
 
-    # Get the target member
     target_membership = OrgUser.get_by_org_and_user(org_id, user_id, db)
     if not target_membership:
       raise HTTPException(

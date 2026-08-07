@@ -13,8 +13,10 @@ the two complementary memory modalities that share it:
 Together these show the AI-memory read split: query (exact graph traversal)
 vs. search (ranked semantic recall), both scoped to the same subgraph.
 
-The `knowledge` schema extension (formerly "memory") provides the structured
-starter schema; semantic memory is backed by a per-graph vector store.
+The `knowledge` schema extension provides the structured starter schema;
+semantic memory is backed by a per-graph vector store.
+
+Prerequisites: `just start`, then a parent graph from `just demo-custom-graph`.
 
 Usage:
     uv run memory_subgraph.py

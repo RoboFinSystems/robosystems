@@ -1,13 +1,7 @@
-"""
-LadybugDB Database Metrics Collector
+"""Disk, query and system metrics for the LadybugDB databases on this instance.
 
-This module provides metrics collection for LadybugDB databases, including:
-- Database disk usage
-- Database count per instance
-- Query statistics
-- Health metrics
-
-The metrics are exposed via OpenTelemetry for Prometheus consumption.
+Exposed through OpenTelemetry for Prometheus. When OTEL_ENABLED is off, the
+no-op meter below stands in so callers need no conditionals.
 """
 
 import logging
@@ -20,10 +14,7 @@ from robosystems.config import env
 
 logger = logging.getLogger(__name__)
 
-# OpenTelemetry imports - conditional based on OTEL_ENABLED
 
-
-# Create no-op metrics if OTEL is disabled
 class NoOpMeter:
   """No-op meter for when metrics are disabled."""
 
@@ -66,7 +57,6 @@ class NoOpHistogram:
     pass
 
 
-# Only import real metrics if OTEL is enabled
 if env.OTEL_ENABLED:
   try:
     from opentelemetry import metrics
@@ -85,28 +75,20 @@ class LadybugMetricsCollector:
   """Collects and exposes metrics for LadybugDB databases."""
 
   def __init__(self, base_path: str, node_type: str = "entity_writer"):
-    """
-    Initialize the metrics collector.
-
-    Args:
-        base_path: Base directory where LadybugDB databases are stored
-        node_type: Type of node (writer, shared_master, shared_replica)
-    """
+    """Collect over the databases under ``base_path``, tagging every metric
+    with ``node_type`` (writer, shared_master, shared_replica)."""
     self.base_path = Path(base_path)
     self.node_type = node_type
 
-    # Track query counts for the current hour
+    # Query counts for the current hour; reset by record_query.
     self._query_counts: dict[str, int] = {}
     self._query_count_reset_time = time.time()
 
-    # Get meter from OpenTelemetry
     meter = metrics.get_meter(__name__, "1.0.0")
 
-    # Create metrics instruments with callbacks (these will be no-ops if OTEL is disabled)
-    # Only register callbacks if we have real OpenTelemetry available
+    # Observable-gauge callbacks only work against a real meter.
     callbacks = None
     if env.OTEL_ENABLED and not isinstance(meter, NoOpMeter):
-      # Use type casting to ensure the callback has the correct type for OpenTelemetry
       from typing import cast
 
       from opentelemetry.metrics import CallbackT
@@ -134,7 +116,6 @@ class LadybugMetricsCollector:
       unit="1",
     )
 
-    # Create no-op counters if meter is no-op
     self.query_count = (
       meter.create_counter(
         name="lbug_query_count",
@@ -162,7 +143,7 @@ class LadybugMetricsCollector:
       or NoOpCounter()
     )
 
-    # Cache for database sizes to avoid excessive disk I/O
+    # Sizing walks every file on the data volume, so it is cached.
     self._size_cache: dict[str, int] = {}
     self._cache_timestamp: float | None = None
     self._cache_ttl = 300  # 5 minutes
@@ -182,27 +163,23 @@ class LadybugMetricsCollector:
     return total_size
 
   def _get_database_sizes(self) -> dict[str, int]:
-    """Get sizes of all databases, using cache if available."""
+    """Size every database on this instance, refreshing at most every
+    ``_cache_ttl`` seconds. A scan failure falls back to the stale cache."""
     current_time = time.time()
 
-    # Check if cache is still valid
     if self._cache_timestamp and current_time - self._cache_timestamp < self._cache_ttl:
       return self._size_cache
 
-    # Refresh cache
     logger.debug("Refreshing database size cache")
     new_cache = {}
 
     try:
-      # List all items in base path
       for item in self.base_path.iterdir():
         if item.is_dir():
-          # It's a directory-based database
           db_name = item.name
           db_size = self._get_directory_size(item)
           new_cache[db_name] = db_size
         elif item.is_file() and item.suffix == ".lbug":
-          # It's a file-based database (LadybugDB format)
           db_name = item.stem
           db_size = item.stat().st_size
           new_cache[db_name] = db_size
@@ -212,7 +189,6 @@ class LadybugMetricsCollector:
 
     except Exception as e:
       logger.error(f"Error scanning database directory: {e}")
-      # Return previous cache if available
       if self._size_cache:
         return self._size_cache
       return {}
@@ -220,45 +196,37 @@ class LadybugMetricsCollector:
     return new_cache
 
   def _observe_database_metrics(self, options):
-    """Callback for observable metrics."""
+    """Observable-gauge callback: per-database size, total disk usage, count."""
     try:
       database_sizes = self._get_database_sizes()
 
-      # Emit individual database sizes
       for db_name, size_bytes in database_sizes.items():
         yield OTelObservation(
           size_bytes, {"database": db_name, "node_type": self.node_type}
         )
 
-      # Emit total disk usage
       total_size = sum(database_sizes.values())
       yield OTelObservation(total_size, {"node_type": self.node_type})
 
-      # Emit database count
       yield OTelObservation(len(database_sizes), {"node_type": self.node_type})
 
     except Exception as e:
       logger.error(f"Error collecting database metrics: {e}")
-      # Yield empty observations when there's an error
       yield OTelObservation(0, {"database": "error", "node_type": self.node_type})
 
   def record_query(self, database: str, duration_ms: float, success: bool = True):
-    """Record a query execution."""
-    # Only record if we have a real metrics counter (not no-op)
+    """Record a query execution, both to OTEL and to the hourly local tally."""
     if hasattr(self.query_count, "add"):
       self.query_count.add(
         1, {"database": database, "node_type": self.node_type, "success": str(success)}
       )
 
-    # Track query counts for hourly reporting
     if success:
       current_time = time.time()
-      # Reset counts every hour
       if current_time - self._query_count_reset_time > 3600:
         self._query_counts = {}
         self._query_count_reset_time = current_time
 
-      # Increment counter for this database
       self._query_counts[database] = self._query_counts.get(database, 0) + 1
 
     if success and hasattr(self.query_duration, "record"):
@@ -270,7 +238,6 @@ class LadybugMetricsCollector:
     self, operation: str, database: str, success: bool = True
   ):
     """Record a database operation (create, delete, etc)."""
-    # Only record if we have a real metrics counter (not no-op)
     if hasattr(self.database_operation_count, "add"):
       self.database_operation_count.add(
         1,
@@ -283,12 +250,7 @@ class LadybugMetricsCollector:
       )
 
   async def get_database_metrics_for_usage(self) -> list[dict]:
-    """
-    Get database metrics formatted for usage tracking.
-
-    Returns:
-        List of dictionaries with database metrics
-    """
+    """One row per database, shaped for the usage/billing collector."""
     database_sizes = self._get_database_sizes()
 
     metrics_list = []
@@ -299,8 +261,8 @@ class LadybugMetricsCollector:
         {
           "database_name": db_name,
           "size_bytes": size_bytes,
-          "size_gb": size_bytes / (1024**3),  # Convert to GB
-          "query_count": self._query_counts.get(db_name, 0),  # Include query count
+          "size_gb": size_bytes / (1024**3),
+          "query_count": self._query_counts.get(db_name, 0),
           "timestamp": timestamp.isoformat(),
           "node_type": self.node_type,
         }
@@ -309,16 +271,10 @@ class LadybugMetricsCollector:
     return metrics_list
 
   def collect_system_metrics(self) -> dict[str, Any]:
-    """
-    Collect system-level metrics including CPU, memory, and disk usage.
-
-    Returns:
-        Dictionary with system metrics
-    """
+    """CPU, memory, and disk usage for this instance's data volume."""
 
     import psutil
 
-    # Get disk usage for the data volume using the configured base path
     data_path = str(self.base_path)
     disk_usage = psutil.disk_usage(data_path)
     disk_metrics = {
@@ -329,10 +285,7 @@ class LadybugMetricsCollector:
       "mount_point": data_path,
     }
 
-    # Get memory usage
     memory = psutil.virtual_memory()
-
-    # Get CPU usage
     cpu_percent = psutil.cpu_percent(interval=0.1)
 
     return {
@@ -361,12 +314,7 @@ class LadybugMetricsCollector:
     }
 
   def collect_database_metrics(self) -> dict[str, Any]:
-    """
-    Collect metrics for all databases.
-
-    Returns:
-        Dictionary with database metrics
-    """
+    """Count, total size, and per-database size/query counts."""
     database_sizes = self._get_database_sizes()
 
     total_size = sum(database_sizes.values())
@@ -385,10 +333,9 @@ class LadybugMetricsCollector:
     }
 
   def collect_database_metrics_cached(self) -> dict[str, Any]:
-    """
-    Return database metrics from cache only, without triggering a refresh.
+    """Same shape as ``collect_database_metrics`` but never rescans disk.
 
-    Used as a fallback when the full collection times out under heavy I/O.
+    The fallback when a full collection times out under heavy I/O.
     """
     database_sizes = self._size_cache
 
@@ -409,12 +356,7 @@ class LadybugMetricsCollector:
     }
 
   def get_query_metrics(self) -> dict[str, Any]:
-    """
-    Get query execution metrics.
-
-    Returns:
-        Dictionary with query metrics
-    """
+    """Query counts for the current hour, with the hour's start time."""
     total_queries = sum(self._query_counts.values())
 
     return {
@@ -426,13 +368,8 @@ class LadybugMetricsCollector:
     }
 
   async def collect_ingestion_metrics(self) -> dict[str, Any]:
-    """
-    Collect ingestion queue metrics.
-
-    Returns:
-        Dictionary with ingestion metrics
-    """
-    # For now, return empty metrics as ingestion is handled elsewhere
+    """Ingestion queue metrics — a zeroed placeholder, since ingestion is
+    orchestrated by Dagster rather than queued on the instance."""
     return {
       "queue_depth": 0,
       "active_tasks": 0,

@@ -1,11 +1,17 @@
 """
-Graph Volume Monitor and Auto-Expansion Lambda Function
+Monitor LadybugDB data-volume usage and expand volumes before they fill.
 
-This Lambda handles proactive volume monitoring and expansion for graph instances:
-- Monitors disk usage across all instances
-- Automatically expands volumes when thresholds are exceeded
-- Grows filesystems after EBS expansion
-- Handles both scheduled checks and alarm-triggered expansions
+Runs on a schedule and on disk-usage alarms. For each instance it reads usage
+(from the Graph API `/metrics` endpoint, falling back to CloudWatch when the
+API is busy), and past EXPANSION_THRESHOLD it grows the EBS volume and then the
+filesystem on top of it — EBS resize alone leaves the extra blocks unusable.
+
+Growth is bounded twice: EBS enforces a ~6 hour cooldown between modifications
+of the same volume, and each tier has a volume ceiling derived from its product
+storage cap, so a runaway tenant cannot expand toward the EBS maximum.
+
+Also reconciles the instance registry against live EC2 instances; see
+`sync_instance_registry`.
 """
 
 import json
@@ -98,7 +104,7 @@ def _get_graph_api_key() -> str:
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-  """Main Lambda handler"""
+  """Dispatch on the CloudWatch alarm source or on `event["action"]`."""
 
   # Determine the action based on event source
   if "source" in event and event["source"] == "aws.cloudwatch":
@@ -568,10 +574,10 @@ def get_data_volume_id(instance_id: str) -> str | None:
 
 
 def get_data_volume_info(instance_id: str) -> tuple[str | None, int | None]:
-  """Get the data volume ID and actual EBS size for a Graph instance.
+  """Return `(volume_id, size_gb)` for an instance's data volume.
 
-  Returns:
-      Tuple of (volume_id, size_gb). Either can be None if not found.
+  Size comes from EC2, not the registry, so it reflects a completed expansion
+  the registry has not caught up with. Either element is None if not found.
   """
 
   try:
@@ -903,7 +909,11 @@ def perform_volume_expansion(
 def wait_for_volume_modification(
   volume_id: str, modification_id: str, max_wait_seconds: int = 300
 ) -> bool:
-  """Wait for volume modification to complete with robust error handling"""
+  """Wait for an EBS volume modification to finish.
+
+  Treats `optimizing` as done: the new size is already usable at that point, so
+  the filesystem grow need not wait out the background optimization.
+  """
 
   start_time = time.time()
   last_progress = 0

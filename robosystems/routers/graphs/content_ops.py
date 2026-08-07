@@ -2,9 +2,9 @@
 
 Memory (remember / forget / update-memory), corpus documents (index-document /
 delete-document), and file staging (ingest-file / delete-file) all write through
-the operation envelope. Split out from ``operations.py`` (graph lifecycle) since
-they're a distinct surface — the "Content Operations" tag — even though they
-share the ``/operations/{op}`` path and the envelope machinery.
+the operation envelope. They share the ``/operations/{op}`` path and the
+envelope machinery with ``operations.py`` (graph lifecycle) but carry their own
+"Content Operations" tag.
 
 All handlers return ``OperationEnvelope`` with idempotency + audit, and delegate
 to the operations kernel (services / commands) — no business logic here.

@@ -1,8 +1,7 @@
-"""
-Base interface for graph database engines.
+"""Re-export of the graph engine interfaces.
 
-This module re-exports interfaces from graph_api.interfaces for backward compatibility.
-All new code should import from graph_api.interfaces directly.
+The definitions live in `robosystems.graph_api.interfaces`; import from
+there directly.
 """
 
 from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperation

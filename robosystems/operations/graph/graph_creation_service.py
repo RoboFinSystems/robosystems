@@ -1,11 +1,8 @@
-"""Unified graph creation pipeline.
+"""Graph creation, as a pipeline of discrete, independently testable steps.
 
-Replaces EntityGraphService and GenericGraphService with a single service
-that handles both entity and generic graph creation through a composable
-pipeline of discrete steps.
-
-Each step is an independently testable method. The entity-specific step
-(OLTP provisioning + entity node) is conditional on config.create_entity.
+One service covers both entity and generic graphs. The entity-specific step —
+OLTP provisioning plus the entity node — runs only when
+``config.create_entity`` is set.
 """
 
 from __future__ import annotations
@@ -33,7 +30,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class GraphCreationConfig:
-  """All inputs needed to create a graph. Replaces sprawling kwargs."""
+  """Every input the creation pipeline needs, in one object."""
 
   user_id: str
   tier: str
@@ -430,8 +427,9 @@ class GraphCreationService:
     current_time = datetime.now(UTC)
 
     # Derive the entity's Reporting Style from its legal form (an explicit
-    # reporting_style_id on the create request overrides it). The Style now
-    # lives on the entity, not the graph — see [[architecture_reporting_style]].
+    # reporting_style_id on the create request overrides it). The Style lives
+    # on the entity, not the graph, so one graph can hold entities of
+    # different legal forms.
     reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     provision_tenant_schema(graph_id)

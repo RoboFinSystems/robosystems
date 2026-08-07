@@ -80,13 +80,12 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   storage. The shape is a flat zip containing standalone files; the
   full Report Package META-INF directory is not yet wrapped around them.
 
-  Tenant-authored disclosure notes are excluded from this flavor for
-  now (:func:`_strip_disclosure_content`) — they ride in the JSON-LD /
+  Tenant-authored disclosure notes are excluded from this flavor
+  (:func:`_strip_disclosure_content`) — they ride in the JSON-LD /
   holon flavors, whose SHACL validation covers them. Belt-and-braces on
-  top of the strip: drop any remaining Nonnumeric fact — the numeric
-  emitter (``_format_value`` + mandatory unitRef/decimals) cannot
-  represent one, and today Nonnumeric facts only exist on disclosure
-  structures the strip already removed.
+  top of the strip: any remaining Nonnumeric fact is dropped, since the
+  numeric emitter (``_format_value`` + mandatory unitRef/decimals)
+  cannot represent one.
   """
   bundle = _strip_disclosure_content(bundle)
   if any(f.value is None for f in bundle.facts):
@@ -137,8 +136,8 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
   non-statement structures. Until the emitter learns those, notes are
   excluded here rather than shipping an instance Arelle rejects.
 
-  No-op (returns the same object) when the bundle has no disclosure
-  links, i.e. every pre-existing statement bundle.
+  No-op (returns the same object) when the bundle carries no disclosure
+  links.
   """
   disclosure_structure_ids = {
     link.structure_id
@@ -890,10 +889,9 @@ def _role_id(link: BundleLinkbaseLink) -> str:
   Must match the id emitted in the corresponding ``<link:roleType>``
   declaration in ``report.xsd`` so the cross-reference resolves at
   validation time. Both sides derive from ``_role_uri_to_id`` over the
-  link's ``role_uri``; we no longer key on ``link.structure_id``
-  because the same ELR (xlink:role URI) can be reused across multiple
-  Networks and the schema-side declaration is keyed on the role URI,
-  not the structure.
+  link's ``role_uri``, never from ``link.structure_id``: the same ELR
+  (xlink:role URI) can be reused across several Networks, and the
+  schema-side declaration is keyed on the role URI.
   """
   return (
     _role_uri_to_id(link.role_uri) if link.role_uri else f"role_{link.structure_id}"

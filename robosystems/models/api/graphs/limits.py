@@ -135,8 +135,7 @@ class StorageItem(BaseModel):
 class InstanceUsage(BaseModel):
   """Aggregate storage usage across the dedicated instance.
 
-  Covers the parent graph, all subgraphs, DuckDB staging, and
-  future LanceDB vector indexes.
+  Covers the parent graph, all subgraphs, DuckDB staging, and vector indexes.
   """
 
   node_count: int | None = Field(
@@ -175,7 +174,7 @@ class InstanceUsage(BaseModel):
 
 
 class GraphLimitsResponse(BaseModel):
-  """Response model for comprehensive graph operational limits."""
+  """Every operational limit that applies to a graph, and its usage."""
 
   model_config = ConfigDict(
     json_schema_extra={

@@ -1,32 +1,28 @@
-"""Forecast articulation — BS roll, schedule projection, derived CF (F-2).
+"""Forecast articulation — balance-sheet roll, schedule projection, derived CF.
 
-F-1 shipped a footing forecast IS plus rule-driven working-capital
-instants; this module articulates the rest of the model per forward
-month, all as composition over shipped machinery:
+:mod:`.forecast_compute` projects the income statement; this module supplies
+the rest of the model per forward month:
 
 - **Balance-sheet roll**: every base-month BS leaf that isn't rule- or
-  schedule-driven carries at its prior value (the workbook's
-  forward-rolling BS); Retained Earnings rolls ``RE[m] = RE[m-1] +
-  NI[m]`` (the auto-derived-RE doctrine, distributions not yet
-  modeled); **cash is the balancing roll** — with every other line
-  known, ``cash = LiabilitiesAndStockholdersEquity - Σ other assets``,
-  so A = L + E holds *by construction*.
-- **Schedule projection**: schedules already emit future ``in_scope``
-  facts (duration movements + running-balance instants) in their
-  ``factset_type='schedule'`` sets. Duration contributions delta-adjust
-  the IS carry (an ending schedule's expense stops instead of carrying
-  forever); instant movements roll the BS (accumulated depreciation
-  keeps growing; a prepaid keeps drawing down). Contributions route
-  through the CoA→rs-gaap mapping's primary target into the elements
-  the base sets actually carry — the PP&E gross/contra pair routes onto
-  ``PropertyPlantAndEquipmentNet`` exactly the way
+  schedule-driven carries at its prior value; Retained Earnings rolls
+  ``RE[m] = RE[m-1] + NI[m]`` (distributions are not modeled); **cash is the
+  balancing roll** — with every other line known,
+  ``cash = LiabilitiesAndStockholdersEquity - Σ other assets``, so
+  A = L + E holds *by construction*.
+- **Schedule projection**: schedules emit future ``in_scope`` facts (duration
+  movements + running-balance instants) in their ``factset_type='schedule'``
+  sets. Duration contributions delta-adjust the IS carry so an ending
+  schedule's expense stops instead of carrying forever; instant movements
+  roll the BS (accumulated depreciation keeps growing, a prepaid keeps
+  drawing down). Contributions route through the CoA→rs-gaap mapping's
+  primary target into the elements the base sets actually carry — the PP&E
+  gross/contra pair routes onto ``PropertyPlantAndEquipmentNet`` the way
   ``fact_grid._synthesize_ppe_net_facts`` nets it for actuals.
-- **Derived cash flow**: the actuals doctrine reused — operating CF
-  leaves derive from period-over-period BS deltas via the library's
-  ``association_type='derivation'`` arcs (a leaf with a direct IS value,
-  e.g. DDA, wins over derivation); the residual against the balancing
-  ΔCash books to ``IncreaseDecreaseInOtherOperatingCapitalNet`` (the
-  ``_reconcile_operating_to_cash`` plug), so the CF foots to ΔCash
+- **Derived cash flow**: operating CF leaves derive from period-over-period
+  BS deltas via the library's ``association_type='derivation'`` arcs (a leaf
+  with a direct IS value, e.g. DDA, wins over derivation); the residual
+  against the balancing ΔCash books to
+  ``IncreaseDecreaseInOtherOperatingCapitalNet``, so the CF foots to ΔCash
   exactly.
 
 Instant movements are computed **per schedule FactSet**, not per
@@ -89,24 +85,22 @@ _PPE_ROUTES: dict[str, float] = {
 # the Net anchor — the trial-balance path nets naturally there (the
 # contra carries a credit balance), but a schedule's running balance is
 # stored positive, so applying it at +1 marches the Net line UP by the
-# monthly amortization instead of down (June-close F14). balance_type
-# can't catch this — QB files contra-asset accounts under an asset
-# AccountType, so the loader's contra EFS trait is the only signal (see
-# the loader's contra-promotion note). Flip the sign whenever source and
-# target disagree on contra-ness; congruent pairs (contra→contra
-# concept, plain→plain) keep +1.
+# monthly amortization instead of down. balance_type can't catch this —
+# QB files contra-asset accounts under an asset AccountType, so the
+# loader's contra EFS trait is the only signal. Flip the sign whenever
+# source and target disagree on contra-ness; congruent pairs
+# (contra→contra concept, plain→plain) keep +1.
 _CONTRA_TRAIT_IDENTIFIERS = frozenset(
   {"contraAsset", "contraLiability", "contraEquity"}
 )
 
-# The library's original AP derivation arc sourced only the combined
-# AccountsPayableAndAccruedLiabilitiesCurrent anchor; tenants mapped to
-# the sibling AccountsPayableCurrent (the DPO rule's target) would land
-# their AP movement in the reconciling plug instead of the named CF
-# line. The library now carries the split-anchor arc too
-# (deriv-cf-ap-arc-2), but it reaches an existing tenant only at its
-# next resync — this alias bridges that window (the guard below makes
-# it a no-op once the arc is present).
+# Back-compat alias for tenants whose library predates the split-anchor AP
+# derivation arc (deriv-cf-ap-arc-2), which only reaches them at their next
+# resync. Without it, AP movement mapped to the sibling
+# AccountsPayableCurrent (the DPO rule's target) rather than the combined
+# AccountsPayableAndAccruedLiabilitiesCurrent anchor lands in the
+# reconciling plug instead of the named CF line. The guard below makes the
+# alias a no-op once the real arc is present.
 _AP_CF_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 _AP_ALIAS_SOURCE_QNAME = "rs-gaap:AccountsPayableCurrent"
 
@@ -218,8 +212,8 @@ def _load_schedule_projection(
   of ``closed_through``, so its schedule facts are ``historical`` — and
   they are exactly the delta/movement basis. Without them every forward
   month re-adds the base month's expense (DDA compounding by one
-  month's depreciation per month — caught live, 2026-07-23) and the
-  first month's instant movement re-adds entire running balances.
+  month's depreciation per month) and the first month's instant
+  movement re-adds entire running balances.
   """
   projection = ScheduleProjection()
   if mapping_id is None:
@@ -296,7 +290,7 @@ def _load_schedule_projection(
       weight = 1.0
       if target_id in base_bs_element_ids:
         routed_id = target_id
-        # Contra netting on the direct route (F14): a contra CoA account
+        # Contra netting on the direct route: a contra CoA account
         # mapped straight onto a Net anchor (intangibles' Accumulated
         # Amortization → IntangibleAssetsNetExcludingGoodwill) must
         # reduce it — its schedule running balance is stored positive.
@@ -437,9 +431,8 @@ def schedule_is_delta(
   value contains that month's schedule contribution, since prior values
   roll), so successive deltas telescope to ``sched[m] - sched[base]``.
   Anchoring every month at the base instead re-subtracts the gap
-  cumulatively — the compounding that marched an expense line negative
-  on coherent books (caught live, 2026-07-30). Mirrors
-  ``schedule_instant_movement``'s ``prev_end`` reference."""
+  cumulatively, compounding an expense line negative even on coherent
+  books. Mirrors ``schedule_instant_movement``'s ``prev_end`` reference."""
   per_month = ctx.schedules.duration_total.get(element_id)
   if not per_month:
     return 0.0
@@ -491,8 +484,8 @@ def roll_balance_sheet(
       continue
     bs[element_id] = prior_bs.get(element_id, 0.0)
 
-  # Rule-driven instants outside the base presentation still roll (the
-  # F-1 behavior — e.g. an AP anchor the actuals never carried).
+  # Rule-driven instants outside the base presentation still roll — e.g.
+  # an AP anchor the actuals never carried.
   for element_id in rule_instant_targets:
     if (
       element_id in rule_values

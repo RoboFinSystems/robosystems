@@ -84,7 +84,6 @@ def list_period_drafts(
     {"period_start": period_start, "period_end": period_end},
   ).fetchall()
 
-  # Group line items under their parent entry
   by_entry: dict[str, dict[str, Any]] = {}
   for row in rows:
     entry_id = row.entry_id

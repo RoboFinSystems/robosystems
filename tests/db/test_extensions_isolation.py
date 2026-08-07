@@ -19,11 +19,10 @@ The whole isolation story has two halves:
    scope would linger on the pooled connection; this is defense-in-depth for any
    future code path that reuses a connection without going through this manager.
 
-The failure mode these layers guard against is real: a prior Celery incident
-leaked a search_path across tenants and caused cross-tenant writes (see
-`worker/cleanup.py` and the `feedback_session_isolation` note). For the
-multi-company-accountant launch — N client-company graphs under one org — this
-is the #1 isolation risk, so the contract must not silently regress.
+The failure mode these layers guard against is real: a pooled connection that
+keeps a search_path set by a previous tenant will write that tenant's schema
+(see `worker/cleanup.py`). With N client-company graphs under one org, this is
+the highest-severity isolation risk, so the contract must not silently regress.
 """
 
 from __future__ import annotations

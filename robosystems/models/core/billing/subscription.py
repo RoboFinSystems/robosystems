@@ -55,12 +55,10 @@ class CancellationType(str, Enum):
 
 
 class BillingSubscription(Base):
-  """Generic subscription model for any billable resource.
+  """A subscription to any billable resource.
 
-  Designed to be polymorphic - can bill for graphs, repositories,
-  API add-ons, storage, or any future billable resource.
-
-  Separated from resource models to isolate billing concerns.
+  Polymorphic on ``(resource_type, resource_id)`` — graphs, repositories,
+  add-ons — so billing concerns live here rather than on each resource model.
   """
 
   __tablename__ = "billing_subscriptions"
@@ -192,8 +190,8 @@ class BillingSubscription(Base):
   ) -> Optional["BillingSubscription"]:
     """Get subscription for a specific resource and organization.
 
-    This is particularly useful for shared repositories where multiple orgs
-    can have separate subscriptions to the same resource.
+    Scoping by org matters for shared repositories, where several orgs hold
+    separate subscriptions to the same resource.
 
     Pass `exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES` when checking for
     a *conflicting* subscription: canceled/failed rows are never deleted, and
@@ -291,7 +289,10 @@ class BillingSubscription(Base):
   def get_by_stripe_subscription_id(
     cls, stripe_subscription_id: str, session: Session
   ) -> Optional["BillingSubscription"]:
-    """Get subscription by Stripe subscription ID (legacy support)."""
+    """Get subscription by the Stripe-specific column.
+
+    ``get_by_provider_subscription_id`` is the provider-agnostic equivalent.
+    """
     return (
       session.query(cls)
       .filter(cls.stripe_subscription_id == stripe_subscription_id)
@@ -419,7 +420,7 @@ class BillingSubscription(Base):
     """Get the timedelta for one billing period based on billing_interval."""
     if self.billing_interval == BillingInterval.ANNUAL.value:
       return timedelta(days=365)
-    # Monthly is the default for both "monthly" and "usage_based"
+    # Both "monthly" and "usage_based" bill on a monthly cadence.
     return timedelta(days=30)
 
   def renew_period(self, session: Session) -> None:

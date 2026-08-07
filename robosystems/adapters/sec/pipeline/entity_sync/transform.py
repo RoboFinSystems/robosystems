@@ -33,9 +33,6 @@ def sec_entity_transform(
   filing with XBRLGraphProcessor, consolidates parquet tables across
   filings (deduplicating shared tables like Element, Label, etc.),
   and writes the final output parquet files.
-
-  Returns:
-      MaterializeResult with processing statistics
   """
   from io import BytesIO
 

@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
 """The World Online — Seattle Method cross-taxonomy demo (orchestrator).
 
-End-to-end driver for Charlie Hoffman's *The World Online* dataset —
-22,288 GL lines across 3,389 journal entries, tagged against the MINI
-2026 reporting framework. The scaled-up sibling of
-``examples.seattle_method_demo`` (the 14-JE lemonade stand): same
-methodology (line-item + business-event tagging → rollforwards →
-statements), at a realistic mid-size-company scale, with a real chart of
-accounts and opening balances.
+The same methodology as ``examples.seattle_method_demo``, at realistic scale.
+Where the lemonade stand has 14 journal entries, Charlie Hoffman's *The World
+Online* dataset has 22,288 general-ledger lines across 3,389 entries, tagged
+against the MINI 2026 reporting framework — with a real 239-account chart of
+accounts and genuine opening balances. Every line is tagged with both its
+line-item concept and the business event behind it, which is what lets a
+balance sheet be decomposed into the events that produced it and then
+re-rendered in a second vocabulary.
 
-Shared with the lemonade-stand demo (imported, not copied):
-``load_taxonomy`` (mini parser/loader) and ``seed_mappings``
-(mini→rs-gaap). New here: the GL ingest, the rollforward authoring, and
-the reconciliation against ``SummaryOfTransactions.csv``.
+The mini parser/loader and the mini→rs-gaap mapping table are imported from
+the lemonade-stand demo rather than copied. What is specific here: the GL
+ingest, the rollforward authoring, the trial balance, and two reconciliations
+— one against the published transaction pivot, one against the published
+reference statements.
 
-Usage:
-    uv run python -m examples.seattle_method_world_online.main                  # new graph + all steps
-    uv run python -m examples.seattle_method_world_online.main --graph <id>     # existing graph
-    uv run python -m examples.seattle_method_world_online.main --step ingest --graph <id>
-    uv run python -m examples.seattle_method_world_online.main --limit 50        # smoke-test ingest subset
+Prerequisites:
+    just start        # local stack (API, PostgreSQL, Valkey, LadybugDB)
+    just demo-user    # writes credentials to .local/config.json
+
+Run it:
+    just demo-world-online                          # new graph + every step
+    just demo-world-online --graph <id>             # against an existing graph
+    just demo-world-online --step ingest --graph <id>
+    just demo-world-online --limit 50               # ingest a subset, as a smoke test
+
+The full ingest posts ~3,389 events one at a time and takes a while; ``--limit``
+is the fast path when checking the pipeline rather than the numbers. Artifacts
+land in ``examples/seattle_method_world_online/output/``.
 """
 
 from __future__ import annotations
@@ -48,25 +58,24 @@ DEMO_NAME = "world_online_test"
 GRAPH_DISPLAY_NAME = "The World Online (Seattle Method MINI 2026)"
 ENTITY_NAME = "The World Online (Charlie Hoffman demo)"
 
-# mini:OpeningBalance is NOT in the MINI 2026 taxonomy (Charlie flags
-# this in the dataset README). The 98 BBF lines tag it, and for those
-# LineItems to resolve a flow_element_id — and thus attribute in the
-# rollforward and reconcile against Charlie's OpeningBalance pivot row —
-# it must exist as a loaded Element. We add it as a small extension
-# concept on top of the pulled mini CoA. The trait is cosmetic here: the
-# rollforward sums debit-positive cents regardless of the flow concept's
-# own trait, and OpeningBalance is intentionally left unmapped to rs-gaap
-# (it's an opening position, not a cash-flow movement).
+# mini:OpeningBalance is not part of MINI 2026, but the dataset's
+# beginning-balance-forward lines tag it. Those line items need a resolvable
+# flow concept to attribute in the rollforward and to reconcile against the
+# published OpeningBalance pivot row, so it is added as a small extension
+# concept on top of the pulled mini CoA — the ordinary way a tenant extends a
+# base framework. It is deliberately left unmapped to rs-gaap: an opening
+# balance is a position carried forward, not a cash-flow movement, so it has
+# no counterpart on a cash flow statement.
 OPENING_BALANCE_PAYLOAD: dict = {
   "qname": "mini:OpeningBalance",
   "name": "Opening Balance",
   "trait": "equity",
   "balance_type": "credit",
   "element_type": "concept",
-  # The CoA validator couples trait↔period_type: an equity trait requires
-  # period_type='instant'. Semantically apt — opening balance is a
-  # position (the genesis net position), not a duration flow. period_type
-  # is irrelevant to the rollforward, which matches on flow_element_id.
+  # The CoA validator couples trait to period_type: an equity trait requires
+  # period_type='instant'. That fits — an opening balance is the genesis net
+  # position, not a duration flow — and the rollforward matches on
+  # flow_element_id regardless.
   "period_type": "instant",
   "is_monetary": True,
   "description": (
@@ -326,7 +335,7 @@ def step_create_report(graph_id: str, dry_run: bool = False) -> None:
 
 
 def step_trial_balance(graph_id: str, dry_run: bool = False) -> None:
-  """Step 9 — render the trial balance (Charlie's objective item 9)."""
+  """Step 9 — render the trial balance from the ingested ledger."""
   print("─" * 70)
   print(f"Step 9 — trial balance → graph {graph_id}")
   print("─" * 70)
@@ -352,13 +361,11 @@ def step_trial_balance(graph_id: str, dry_run: bool = False) -> None:
 def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
   """Step 10 — Render the latest filed Report's aligned artifact set.
 
-  Delegates to the shared ``render_report_artifacts`` (via
-  ``download_bundles.py``): pulls the flat JSON-LD, the native holon
-  (``.holon.jsonld`` — the viewer's input), and the XBRL 2.1 zip from the
-  report endpoint, then validates them container-free (SHACL over the JSON-LD,
-  Arelle over the XBRL 2.1) and writes the DataBook with the verdicts inlined.
-  Subprocess invocation for the same isolation reason as the other
-  rendering / download steps.
+  Pulls the flat JSON-LD, the native holon (``.holon.jsonld`` — the viewer's
+  input) and the XBRL 2.1 zip from the report endpoint, validates them
+  container-free (SHACL over the JSON-LD, Arelle over the XBRL 2.1), and
+  writes the DataBook with both verdicts inlined. Step 11 reads the JSON-LD
+  this step writes, so it must run first.
   """
   print("─" * 70)
   print(
@@ -386,12 +393,12 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
 
 
 def step_statement_reconcile(graph_id: str, dry_run: bool = False) -> None:
-  """Step 11 — statement-level reconcile vs Charlie's reference instance.xml.
+  """Step 11 — statement-level reconcile vs the published reference instance.
 
-  Reads our four-statement anchors from the v2 bundle (``output/...jsonld``,
-  written by step 10) and diffs them against Charlie's published reference
-  report. Complements the GL-pivot ``reconcile`` (step 7) at the rendered-
-  statement level.
+  Reads the four-statement anchor totals out of the JSON-LD bundle step 10
+  wrote and diffs them against Charlie Hoffman's published reference report.
+  Step 7 checks the ingestion against his transaction pivot; this checks the
+  rendered statements against his statements.
   """
   print("─" * 70)
   print(f"Step 11 — statement-level reconcile vs reference instance → {graph_id}")

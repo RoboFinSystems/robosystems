@@ -1,13 +1,9 @@
 """
-Data encryption and decryption utilities.
+Data encryption and decryption for sensitive artifacts such as backups.
 
-This module provides secure encryption/decryption for sensitive data like backups.
-Uses Fernet (symmetric encryption) from the cryptography library which provides:
-- AES 128-bit encryption in CBC mode
-- HMAC for authentication
-
-Note: The encryption key should be stored securely in AWS Secrets Manager
-or environment variables, never in code.
+Uses Fernet symmetric encryption (AES-128-CBC plus HMAC authentication) from
+the cryptography library. The key lives in AWS Secrets Manager or the
+environment — never in code.
 """
 
 import base64
@@ -22,14 +18,11 @@ def _get_encryption_key() -> bytes:
   """
   Get the encryption key for backup operations.
 
-  Uses GRAPH_BACKUP_ENCRYPTION_KEY from environment configuration.
-  The key must be set in all environments (dev, staging, prod).
-
-  Returns:
-      bytes: The encryption key
+  Reads GRAPH_BACKUP_ENCRYPTION_KEY, which must be set in every environment
+  (dev, staging, prod).
 
   Raises:
-      ValueError: If the key is not set or has invalid format
+      ValueError: If the key is unset or not base64-encoded.
   """
   encryption_key = env.GRAPH_BACKUP_ENCRYPTION_KEY
 
@@ -50,29 +43,17 @@ def _get_encryption_key() -> bytes:
 
 def encrypt_data(data: bytes | str) -> bytes:
   """
-  Encrypt data using Fernet symmetric encryption.
-
-  Args:
-      data: The data to encrypt (bytes or string)
-
-  Returns:
-      bytes: The encrypted data
+  Encrypt data using Fernet symmetric encryption. Strings are UTF-8 encoded.
 
   Raises:
-      ValueError: If encryption fails
+      ValueError: If encryption fails.
   """
   try:
-    # Convert string to bytes if necessary
     if isinstance(data, str):
       data = data.encode("utf-8")
 
-    # Get encryption key
     key = _get_encryption_key()
-
-    # Create Fernet instance
     fernet = Fernet(key)
-
-    # Encrypt the data
     encrypted_data = fernet.encrypt(data)
 
     logger.debug(f"Encrypted {len(data)} bytes to {len(encrypted_data)} bytes")
@@ -86,25 +67,14 @@ def encrypt_data(data: bytes | str) -> bytes:
 
 def decrypt_data(encrypted_data: bytes) -> bytes:
   """
-  Decrypt data that was encrypted with encrypt_data.
-
-  Args:
-      encrypted_data: The encrypted data
-
-  Returns:
-      bytes: The decrypted data
+  Decrypt data that was encrypted with :func:`encrypt_data`.
 
   Raises:
-      ValueError: If decryption fails (wrong key, corrupted data, etc.)
+      ValueError: If decryption fails — wrong key, corrupted or tampered data.
   """
   try:
-    # Get encryption key
     key = _get_encryption_key()
-
-    # Create Fernet instance
     fernet = Fernet(key)
-
-    # Decrypt the data
     decrypted_data = fernet.decrypt(encrypted_data)
 
     logger.debug(
@@ -120,25 +90,20 @@ def decrypt_data(encrypted_data: bytes) -> bytes:
 
 def generate_encryption_key() -> str:
   """
-  Generate a new Fernet encryption key.
+  Generate a new Fernet key for GRAPH_BACKUP_ENCRYPTION_KEY.
 
-  This is a utility function to generate keys for configuration.
-  The generated key should be stored securely in AWS Secrets Manager
-  or as an environment variable.
-
-  Returns:
-      str: A base64-encoded encryption key suitable for use with GRAPH_BACKUP_ENCRYPTION_KEY
+  Returns a base64-encoded key to store in AWS Secrets Manager or the
+  environment.
   """
   key = Fernet.generate_key()
   return key.decode("utf-8")
 
 
-# For backward compatibility, provide these aliases
 def encrypt(data: bytes | str) -> bytes:
-  """Alias for encrypt_data for backward compatibility."""
+  """Alias for :func:`encrypt_data`."""
   return encrypt_data(data)
 
 
 def decrypt(encrypted_data: bytes) -> bytes:
-  """Alias for decrypt_data for backward compatibility."""
+  """Alias for :func:`decrypt_data`."""
   return decrypt_data(encrypted_data)

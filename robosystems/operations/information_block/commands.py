@@ -47,8 +47,7 @@ def _coerce_payload(request_model: type[BaseModel], payload):
   Already-typed payloads (BaseModel instances supplied by a typed
   discriminated-union arm at the API boundary) are returned as-is —
   the API-level validation already checked them against the right
-  shape. Dict payloads from legacy untyped arms are validated at
-  dispatch time.
+  shape. Dict payloads from untyped arms are validated here.
   """
   if isinstance(payload, BaseModel):
     return payload
@@ -143,10 +142,10 @@ def delete_information_block(
 
   deleted_id = entry.dispatch_delete(session, typed_payload, created_by)
   # name="" only reaches callers when dispatch_delete succeeds without a
-  # pre-delete envelope — today that can't happen (Schedule's delete
-  # raises ScheduleNotFoundError on missing rows; statement types raise
-  # NotImplementedError). A future block type with an idempotent delete
-  # would land here; revisit this default when that arrives.
+  # pre-delete envelope — no registered block type does that (Schedule's
+  # delete raises ScheduleNotFoundError on missing rows; statement types
+  # raise NotImplementedError). A block type with an idempotent delete
+  # would need a better default here.
   return DeleteInformationBlockResponse(
     deleted=True,
     structure_id=deleted_id,

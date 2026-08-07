@@ -73,7 +73,7 @@ async def generate_sso_token(
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix
     elif auth_token:
-      jwt_token = auth_token  # Fallback to cookie for backward compatibility
+      jwt_token = auth_token  # Cookie fallback for clients that still send one
 
     if not jwt_token:
       raise HTTPException(
@@ -93,7 +93,6 @@ async def generate_sso_token(
       )
     user_id, token_session_version = verify_result
 
-    # Get user
     user = User.get_by_id(user_id, session)
     if not user or not user.is_active:
       raise HTTPException(
@@ -596,8 +595,8 @@ async def sso_complete(
     device_fingerprint = extract_device_fingerprint(request)
     jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-    # No longer setting auth cookies - using Bearer token authentication
-    # Token is returned in the response body for the frontend to store
+    # Bearer-token auth: the token is returned in the response body for the
+    # frontend to store. No auth cookie is set.
 
     expires_in = int(JWT_EXPIRY_HOURS * 3600)
     refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)

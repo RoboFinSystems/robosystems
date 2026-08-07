@@ -1,6 +1,5 @@
-"""
-RoboSystems Graph API Package
+"""Graph API: FastAPI service over LadybugDB embedded graph databases.
 
-FastAPI service specifically for LadybugDB embedded database queries.
-Designed to run on EC2 instances with LadybugDB databases for horizontal scaling.
+One process per EC2 instance in the graph fleet, serving the databases on that
+instance's local disk. Entry point: ``robosystems.graph_api.main``.
 """

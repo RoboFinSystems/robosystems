@@ -50,9 +50,9 @@ def load_credentials() -> dict:
 def _envelope_result(envelope) -> dict:
   """Pull the result payload out of an OperationEnvelope.
 
-  ``index-document`` returns the CQRS ``OperationEnvelope`` now; the section
-  counts live in its ``result`` payload rather than as attributes on the
-  envelope itself. ``result`` is typed ``Any``, so it arrives as a plain dict.
+  ``index-document`` returns a CQRS ``OperationEnvelope``; the section counts
+  live in its ``result`` payload rather than as attributes on the envelope
+  itself. ``result`` is typed ``Any``, so it arrives as a plain dict.
   """
   result = getattr(envelope, "result", None)
   if hasattr(result, "to_dict"):

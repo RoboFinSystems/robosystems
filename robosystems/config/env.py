@@ -1,8 +1,8 @@
-"""
-Centralized environment variable configuration.
+"""Single source of truth for environment variables.
 
-This module provides a single source of truth for all environment variables,
-with type conversions, validation, and default values.
+Read configuration through ``env`` rather than calling ``os.getenv`` directly —
+the accessors here apply the type conversion, default, and validation each
+variable is supposed to have, and tuning parameters additionally layer in SSM.
 
 Organization (mirrors .env file section order):
 - Helper functions for type-safe env var access
@@ -38,19 +38,13 @@ except ImportError:
   SECRETS_MANAGER_AVAILABLE = False
 
   def get_secret_value(key: str, default: str = "") -> str:
-    """
-    Fallback implementation when secrets_manager isn't available.
-    Simply returns environment variable or default value.
-    """
+    """Fallback when secrets_manager is unavailable: read the env var."""
     return os.getenv(key, default)
 
   def get_secret_list_value(
     key: str, default: str = "", separator: str = ","
   ) -> list[str]:
-    """
-    Fallback implementation when secrets_manager isn't available.
-    Returns environment variable split by separator or default value split.
-    """
+    """Fallback when secrets_manager is unavailable: split the env var."""
     value = os.getenv(key, default)
     if not value:
       return []
@@ -108,16 +102,7 @@ from .defaults import (
 
 
 def get_int_env(key: str, default: int) -> int:
-  """
-  Get an integer environment variable with safe type conversion.
-
-  Args:
-      key: Environment variable name
-      default: Default value if not set or invalid
-
-  Returns:
-      Integer value from environment or default
-  """
+  """Get an int env var, falling back to ``default`` if unset or unparseable."""
   try:
     return int(os.getenv(key, str(default)))
   except (ValueError, TypeError):
@@ -127,16 +112,7 @@ def get_int_env(key: str, default: int) -> int:
 
 
 def get_float_env(key: str, default: float) -> float:
-  """
-  Get a float environment variable with safe type conversion.
-
-  Args:
-      key: Environment variable name
-      default: Default value if not set or invalid
-
-  Returns:
-      Float value from environment or default
-  """
+  """Get a float env var, falling back to ``default`` if unset or unparseable."""
   try:
     return float(os.getenv(key, str(default)))
   except (ValueError, TypeError):
@@ -146,31 +122,13 @@ def get_float_env(key: str, default: float) -> float:
 
 
 def get_bool_env(key: str, default: bool = False) -> bool:
-  """
-  Get a boolean environment variable.
-
-  Args:
-      key: Environment variable name
-      default: Default value if not set
-
-  Returns:
-      Boolean value from environment or default
-  """
+  """Get a bool env var; "true", "1", "yes", and "on" are true, all else false."""
   value = os.getenv(key, str(default)).lower()
   return value in ("true", "1", "yes", "on")
 
 
 def get_str_env(key: str, default: str = "") -> str:
-  """
-  Get a string environment variable.
-
-  Args:
-      key: Environment variable name
-      default: Default value if not set
-
-  Returns:
-      String value from environment or default
-  """
+  """Get a string env var."""
   return os.getenv(key, default)
 
 
@@ -190,17 +148,11 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
   Get a float tuning parameter with layered fallback.
 
   Priority order:
-  1. Environment variable (highest - for local dev, CI, testing)
-  2. SSM Parameter Store /tuning/ path (for AWS runtime config)
-  3. Default value (lowest - sensible defaults)
-
-  Args:
-      env_key: Environment variable name (e.g., "LBUG_ADMISSION_MEMORY_THRESHOLD")
-      ssm_path: SSM path under tuning/ (e.g., "lbug_admission/MEMORY_THRESHOLD")
-      default: Default value if not found anywhere
-
-  Returns:
-      Float value from the highest-priority source
+  1. Environment variable (local dev, CI, testing) — either the raw ``env_key``
+     or the ``TUNING_{CATEGORY}_{KEY}`` form derived from ``ssm_path``
+  2. SSM Parameter Store under ``tuning/`` (prod/staging only, applies without
+     a redeploy)
+  3. ``default``
   """
   # Priority 1: Environment variable — accept both the raw env_key (backward
   # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
@@ -234,17 +186,11 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
   Get an integer tuning parameter with layered fallback.
 
   Priority order:
-  1. Environment variable (highest - for local dev, CI, testing)
-  2. SSM Parameter Store /tuning/ path (for AWS runtime config)
-  3. Default value (lowest - sensible defaults)
-
-  Args:
-      env_key: Environment variable name (e.g., "GRAPH_HTTP_TIMEOUT")
-      ssm_path: SSM path under tuning/ (e.g., "timeouts/GRAPH_HTTP")
-      default: Default value if not found anywhere
-
-  Returns:
-      Integer value from the highest-priority source
+  1. Environment variable (local dev, CI, testing) — either the raw ``env_key``
+     or the ``TUNING_{CATEGORY}_{KEY}`` form derived from ``ssm_path``
+  2. SSM Parameter Store under ``tuning/`` (prod/staging only, applies without
+     a redeploy)
+  3. ``default``
   """
   # Priority 1: Environment variable — accept both the raw env_key (backward
   # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
@@ -274,17 +220,7 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
 
 
 def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]:
-  """
-  Get a list environment variable (comma-separated by default).
-
-  Args:
-      key: Environment variable name
-      default: Default value if not set
-      separator: String separator for list items
-
-  Returns:
-      List of strings from environment or default
-  """
+  """Get a list env var, splitting on ``separator`` and trimming each item."""
   value = os.getenv(key, default)
   if not value:
     return []
@@ -352,14 +288,11 @@ def get_volume_manager_function_arn() -> str:
 
 
 def _get_shared_replica_alb_url_from_cloudformation() -> str:
-  """
-  Auto-discover shared replica ALB URL from CloudFormation.
+  """Auto-discover the shared replica ALB URL from CloudFormation.
 
-  Looks up the RoboSystemsGraphSharedReplicas{Prod|Staging} stack
-  and returns the ALBEndpoint output value.
-
-  Returns:
-      ALB endpoint URL (e.g., http://internal-...:8001) or empty string if not found
+  Reads the ``ALBEndpoint`` output of the
+  ``RoboSystemsGraphSharedReplicas{Prod|Staging}`` stack. Returns "" outside
+  prod/staging, or when the stack is not deployed.
   """
   cache_key = "shared_replica_alb_url"
   if cache_key in _cloudformation_cache:
@@ -410,11 +343,10 @@ def _get_shared_replica_alb_url_from_cloudformation() -> str:
 
 
 class EnvConfig:
-  """
-  Centralized environment variable configuration.
+  """Every environment variable, grouped to match the .env file layout.
 
-  Variables are organized into logical groups matching the .env file layout.
-  All variables use type-safe helper functions for consistent behavior.
+  Class attributes are resolved once at import; the ``get_*`` classmethods
+  compute derived configuration on each call.
   """
 
   # ==========================================================================
@@ -583,8 +515,6 @@ class EnvConfig:
   # Gates the subgraph write/DDL MCP tools (write-graph-cypher, add-node-table,
   # add-relationship-table). These operate on subgraphs only — the main graph is
   # read-only to raw statements (see StatementKernel / _validate_subgraph_context).
-  # Formerly MCP_MEMORY_ENABLED (the tools predate LanceDB semantic memory; the
-  # "memory" label moved there).
   MCP_SUBGRAPH_OPS_ENABLED = get_bool_env(
     "MCP_SUBGRAPH_OPS_ENABLED",
     get_parameter_value("MCP_SUBGRAPH_OPS_ENABLED", "true").lower() == "true",
@@ -1158,12 +1088,7 @@ class EnvConfig:
 
   @classmethod
   def get_environment_key(cls) -> str:
-    """
-    Get normalized environment key for configuration lookups.
-
-    Returns:
-        Normalized environment name: 'production', 'staging', or 'development'
-    """
+    """Normalize ENVIRONMENT to 'production', 'staging', or 'development'."""
     env_lower = cls.ENVIRONMENT.lower()
     if env_lower in ["prod", "production"]:
       return "production"
@@ -1174,12 +1099,7 @@ class EnvConfig:
 
   @classmethod
   def is_using_secrets_manager(cls) -> bool:
-    """
-    Check if AWS Secrets Manager is available and being used.
-
-    Returns:
-        True if secrets_manager module is loaded and environment is prod/staging
-    """
+    """True when the secrets_manager module loaded and the env is prod/staging."""
     return SECRETS_MANAGER_AVAILABLE and cls.ENVIRONMENT.lower() in [
       "prod",
       "production",
@@ -1190,11 +1110,11 @@ class EnvConfig:
   @classmethod
   @lru_cache(maxsize=1)
   def validate(cls) -> list[str]:
-    """
-    Validate required environment variables.
+    """Check required variables and numeric ranges.
 
-    Returns:
-        List of validation errors (empty if all valid)
+    Returns one message per problem; an empty list means the configuration is
+    usable. Production additionally requires DATABASE_URL and JWT_SECRET_KEY to
+    be set to non-default values.
     """
     errors = []
 
@@ -1218,17 +1138,12 @@ class EnvConfig:
 
   @classmethod
   def get_lbug_tier_config(cls) -> dict[str, Any]:
-    """
-    Get LadybugDB tier-specific configuration, with overrides from graph.yml.
+    """Get LadybugDB tier configuration, with graph.yml overriding env vars.
 
-    This allows the container to override environment variables with
-    tier-specific configuration from the graph.yml file, including:
-    - Memory settings (max_memory_mb, memory_per_db_mb)
-    - Performance settings (chunk_size, query_timeout, max_query_length)
-    - Connection settings (connection_pool_size, databases_per_instance)
-
-    Returns:
-        Dictionary with tier configuration values
+    Lets a container inherit its tier's memory settings (max_memory_mb,
+    memory_per_db_mb), performance settings (chunk_size, query_timeout,
+    max_query_length), and connection settings (connection_pool_size,
+    databases_per_instance) from ``.github/configs/graph.yml``.
     """
     # Import constants at function level to avoid circular imports
     from robosystems.config.constants import MAX_QUERY_LENGTH
@@ -1317,15 +1232,7 @@ class EnvConfig:
 
   @classmethod
   def get_database_url(cls, database_name: str | None = None) -> str:
-    """
-    Get database URL, optionally with a specific database name.
-
-    Args:
-        database_name: Optional database name to use
-
-    Returns:
-        Database URL string
-    """
+    """Get DATABASE_URL, optionally swapping in a different database name."""
     if not database_name:
       return cls.DATABASE_URL
 
@@ -1335,11 +1242,9 @@ class EnvConfig:
 
   @classmethod
   def get_aws_config(cls) -> dict:
-    """
-    Get AWS configuration as a dict for boto3.
+    """Get boto3 kwargs for AWS: region, plus endpoint when one is set.
 
-    Note: AWS credentials should come from IAM roles in production.
-    This method only sets region and endpoint configuration.
+    Deliberately sets no credentials — production authenticates via IAM roles.
     """
     config = {
       "region_name": cls.AWS_DEFAULT_REGION,
@@ -1352,9 +1257,10 @@ class EnvConfig:
 
   @classmethod
   def get_s3_config(cls) -> dict:
-    """
-    Get S3-specific AWS configuration as a dict for boto3.
-    Uses S3-specific credentials if provided, otherwise relies on IAM roles.
+    """Get boto3 kwargs for S3.
+
+    Uses the S3-specific credentials when set (cross-account access, local dev)
+    and otherwise relies on IAM roles.
     """
     config = {
       "region_name": cls.AWS_DEFAULT_REGION,
@@ -1374,10 +1280,9 @@ class EnvConfig:
 
   @classmethod
   def get_r2_config(cls) -> dict:
-    """
-    Get Cloudflare R2 configuration as a dict for boto3.
-    R2 uses S3-compatible API with a custom endpoint URL.
-    Returns empty dict if R2 is not configured.
+    """Get boto3 kwargs for Cloudflare R2, or {} when R2 is not configured.
+
+    R2 speaks the S3 API against a custom endpoint, with region "auto".
     """
     if not cls.R2_ENDPOINT_URL:
       return {}
@@ -1442,15 +1347,11 @@ class EnvConfig:
 
   @classmethod
   def get_valkey_url(cls, database: Union[int, "ValkeyDatabase"] | None = None) -> str:
-    """
-    Get Valkey/Redis URL with optional database number.
+    """Get the Valkey/Redis URL, optionally for a specific database.
 
-    Args:
-        database: Database number (0-15) or ValkeyDatabase enum value.
-                  If None, returns base URL without database.
-
-    Returns:
-        Valkey/Redis URL string
+    Pass a :class:`~robosystems.config.valkey_registry.ValkeyDatabase` member
+    rather than a bare int — see that module for why numbers are never
+    hardcoded. A None ``database`` returns the base URL.
 
     Example:
         >>> from robosystems.config.valkey_registry import ValkeyDatabase

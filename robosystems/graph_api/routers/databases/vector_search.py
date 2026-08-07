@@ -3,18 +3,16 @@ Vector index management endpoints for Graph API.
 
 Two backends via the `backend` field:
 
-  - **hnsw** — the LIVE path. LadybugDB-native HNSW index on a materialized
-    table. Built here (the materialize path calls build with backend='hnsw');
-    *searched in Cypher* via CALL QUERY_VECTOR_INDEX, NOT the /search route.
-    This is what supplyflow-backend uses.
+  - **hnsw** — the live path. LadybugDB-native HNSW index on a materialized
+    table. Built here (the materialize path calls build with backend='hnsw')
+    but *searched in Cypher* via CALL QUERY_VECTOR_INDEX, not the /search route.
 
-  - **lance** — DORMANT (not dead). LanceDB IVF-PQ built from a DuckDB staging
-    query + tar.gz export. Its original consumer (SEC element-vector search) was
-    retired in the 2026-07 embedding cut; it is kept as the queued IVF-PQ
-    foundation for the future `lance` vector-store subgraph — which, unlike
-    LadybugDB, exposes vector search over THESE routes rather than Cypher
-    (multimodal-knowledge-graph spec §58/§118). Distinct from Semantic Memory
-    (the incremental-CRUD specialization of the same modality).
+  - **lance** — no live consumer today. LanceDB IVF-PQ built from a DuckDB
+    staging query, plus a tar.gz export. It is the IVF-PQ foundation for the
+    planned `lance` vector-store subgraph, which — unlike LadybugDB — exposes
+    vector search over THESE routes rather than through Cypher. Distinct from
+    Semantic Memory (``semantic_memory.py``), the incremental-CRUD
+    specialization of the same modality.
 
 Endpoints:
 
@@ -260,7 +258,6 @@ def _build_hnsw_index(
         f"table may not exist or have no embedding column"
       )
 
-    # Get row count for the response
     try:
       result = conn.execute(f"MATCH (n:{table_name}) RETURN COUNT(n)")
       rows = result.get_as_list() if hasattr(result, "get_as_list") else list(result)
@@ -300,7 +297,6 @@ def _search_hnsw_index(
 
   vec_str = str(embedding)
 
-  # Build RETURN clause from select columns
   if select_columns:
     return_parts = [f"node.{col} AS {col}" for col in select_columns]
   else:
@@ -327,7 +323,6 @@ def _search_hnsw_index(
 
     result = conn.execute(query)
 
-    # Parse results
     results = []
     if hasattr(result, "get_as_list"):
       rows = result.get_as_list()
@@ -381,15 +376,11 @@ async def vector_info(
           conn.execute("INSTALL vector")
           conn.execute("LOAD EXTENSION vector")
 
-        # Verify the HNSW index exists by attempting to drop/recreate check.
-        # We can't probe with a vector without knowing the dimension, so
-        # instead check the index catalog directly.
+        # There is no non-destructive probe for an HNSW index: searching needs
+        # the embedding dimension, and the definitive check (DROP) destroys it.
+        # Treat the embedding column's presence as the index existing — builds
+        # are always explicit.
         try:
-          # TABLE_INFO lists columns; if embedding column exists the index
-          # may exist. The definitive check is to try DROP — if it fails
-          # with "doesn't have an index", the index doesn't exist.
-          # But DROP is destructive, so instead just check the column exists
-          # and trust that the index was built (build is always explicit).
           info_result = conn.execute(f"CALL TABLE_INFO('{table_name}') RETURN *")
           info_rows = (
             info_result.get_as_list()

@@ -33,9 +33,6 @@ def qb_transform(
   Reads extract parquet from the shared pipeline work directory,
   runs dbt build, producing OLTP tables in DuckDB.
   The load asset reads from this DuckDB directly.
-
-  Returns:
-      MaterializeResult with duckdb_path and table statistics
   """
   work_dir = get_pipeline_work_dir(config.graph_id)
   extract_dir = work_dir / "extract"

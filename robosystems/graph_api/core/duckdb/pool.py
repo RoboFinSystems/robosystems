@@ -1,19 +1,20 @@
-"""
-Thread-Safe DuckDB Connection Pool
+"""Thread-safe connection pool for DuckDB staging databases.
 
-This module provides a production-ready connection pool for DuckDB staging databases
-with proper thread safety, connection limits, TTL, and health checking.
+Each graph_id gets its own DuckDB file. Two connection kinds are served from
+here and they are deliberately different:
 
-Inspired by the successful LadybugConnectionPool implementation.
+- ``get_connection`` — pooled read-write connections used by staging,
+  materialization and ingestion. httpfs + parquet + postgres_scanner are
+  loaded and S3 credentials configured, so these can read S3 and PostgreSQL.
+  Pooled per database (capped, TTL'd, health-checked) and reused.
+- ``get_readonly_connection`` — one-shot hardened connection for untrusted
+  tenant SQL. External access is disabled and no httpfs/postgres_scanner is
+  loaded, so it can only read the graph's own local staging tables.
 
-Key features:
-- Thread-safe connection management using locks
-- Configurable connection limits per database
-- Connection TTL and automatic cleanup
-- Connection health checking and recovery
-- Metrics and monitoring integration
-- Graceful connection cleanup on shutdown
-- Per-database DuckDB instances (one per graph_id)
+DuckDB refuses a second connection with a different configuration to the same
+file in-process, so the read-only path evicts the read-write connections first.
+Database files persist for the life of the graph; ``force_database_cleanup``
+deletes one when a graph is dropped.
 """
 
 import os
@@ -44,15 +45,11 @@ class DuckDBConnectionInfo:
 
 
 class DuckDBConnectionPool:
-  """
-  Thread-safe connection pool for DuckDB staging databases.
+  """Thread-safe pool of DuckDB connections, one file per graph_id.
 
-  This pool manages connections with proper lifecycle management,
-  health checking, and resource limits to prevent memory leaks
-  and ensure optimal performance.
-
-  Each graph_id gets its own DuckDB database file, and connections
-  to that database are pooled and reused.
+  Connections beyond ``max_connections_per_db`` evict the oldest rather than
+  blocking, so checkout never waits. Expired and unhealthy connections are
+  reaped lazily on acquire (``_maybe_run_maintenance``).
   """
 
   def __init__(
@@ -63,20 +60,10 @@ class DuckDBConnectionPool:
     health_check_interval_minutes: int = 5,
     cleanup_interval_minutes: int = 10,
   ):
-    """
-    Initialize DuckDB connection pool.
+    """Build a pool rooted at ``base_path``.
 
-    Args:
-        base_path: Base directory for DuckDB staging databases
-        max_connections_per_db: Maximum connections per database
-        connection_ttl_minutes: Connection time-to-live in minutes
-        health_check_interval_minutes: How often to check connection health
-        cleanup_interval_minutes: How often to cleanup expired connections
-
-    Note:
-        Database files are NOT automatically deleted. They persist as long as
-        the graph exists. Use force_database_cleanup() to manually delete when
-        a graph is deleted.
+    Database files are never deleted automatically — they persist as long as
+    the graph does. Call ``force_database_cleanup`` when a graph is deleted.
     """
     self.base_path = Path(base_path)
     self.max_connections_per_db = max_connections_per_db
@@ -84,18 +71,15 @@ class DuckDBConnectionPool:
     self.health_check_interval = timedelta(minutes=health_check_interval_minutes)
     self.cleanup_interval = timedelta(minutes=cleanup_interval_minutes)
 
-    # Ensure base directory exists
     try:
       self.base_path.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError) as e:
       logger.warning(f"Could not create DuckDB staging directory: {e}")
 
-    # Thread-safe storage
     self._pools: dict[str, dict[str, DuckDBConnectionInfo]] = {}
     self._locks: dict[str, threading.RLock] = {}
     self._global_lock = threading.RLock()
 
-    # Monitoring
     self._stats = {
       "connections_created": 0,
       "connections_reused": 0,
@@ -105,11 +89,9 @@ class DuckDBConnectionPool:
       "databases_cleaned": 0,
     }
 
-    # Cleanup tracking
     self._last_cleanup = datetime.now(UTC)
     self._last_health_check = datetime.now(UTC)
 
-    # Register cleanup on process exit
     weakref.finalize(self, self._cleanup_all_connections)
 
     logger.info(
@@ -119,14 +101,11 @@ class DuckDBConnectionPool:
 
   @contextmanager
   def get_connection(self, graph_id: str):
-    """
-    Get a connection from the pool (context manager).
+    """Check out a pooled read-write connection for ``graph_id``.
 
-    Args:
-        graph_id: Graph database identifier (used as database name)
-
-    Yields:
-        duckdb.DuckDBPyConnection: Database connection
+    The connection has httpfs/parquet/postgres_scanner loaded and S3
+    credentials configured. Results must be fully materialized before the
+    block exits — the connection may be handed to another caller immediately.
 
     Example:
         with pool.get_connection("graph123") as conn:
@@ -142,29 +121,22 @@ class DuckDBConnectionPool:
 
   @contextmanager
   def get_readonly_connection(self, graph_id: str):
-    """
-    Yield a hardened, sandboxed READ-ONLY connection for untrusted tenant SQL.
+    """Open a hardened, sandboxed read-only connection for untrusted tenant SQL.
 
-    Security posture (closes the tenant-SQL isolation hole): opens the staging
-    file ``read_only`` with ``enable_external_access=false`` +
-    ``lock_configuration=true`` and does NOT load httpfs/postgres_scanner. This
+    Opens the staging file ``read_only`` with ``enable_external_access=false``
+    and ``lock_configuration=true``, and loads no httpfs/postgres_scanner. That
     blocks external ``ATTACH``, httpfs egress, ``read_text``/``read_blob``,
-    ``postgres_scan`` and ``COPY ... TO`` — the connection can only read the
-    graph's own local materialized staging tables. It is SEPARATE from the
-    read-write connection used by staging/materialization (which legitimately
-    needs external access).
+    ``postgres_scan`` and ``COPY ... TO``: the connection can only read the
+    graph's own local staging tables. It is separate from the read-write
+    connection used by staging/materialization, which needs external access.
 
     DuckDB forbids a second connection with a different configuration to the
     same file in-process, so any read-write pool connection for this graph is
-    released first, under the per-graph lock. The connection is not pooled — it
+    closed first, under the per-graph lock. This connection is not pooled — it
     is opened per query and closed on exit.
 
-    Yields:
-        duckdb.DuckDBPyConnection: A read-only, externally-sandboxed connection.
-
-    Raises:
-        FileNotFoundError: If no staging database exists for the graph yet.
-        ValueError: If the resolved path escapes the base directory.
+    Raises FileNotFoundError if no staging database exists yet, ValueError if
+    the resolved path escapes the base directory.
     """
     db_path = self._get_database_path(graph_id)
 
@@ -174,16 +146,12 @@ class DuckDBConnectionPool:
 
     with self._get_database_lock(graph_id):
       # DuckDB won't open a second connection with a different configuration to
-      # the same file, so release any read-write connection holding it first.
+      # the same file, so close any read-write connection holding it first.
       #
-      # KNOWN LIMITATION: the staging write methods (create_table /
-      # insert_into_table) execute their statements outside this per-graph lock,
-      # so evicting here can close a connection a concurrent staging run is
-      # mid-statement on, aborting that run (it is Dagster-retryable, not data
-      # loss). Exposure is low — shared repos are blocked from the tenant read
-      # surface, and interactive reads rarely overlap a graph's own
-      # materialization. A full fix (writers hold this lock for their duration)
-      # is tracked as a follow-up.
+      # LIMITATION: the staging write methods (create_table /
+      # insert_into_table) execute outside this per-graph lock, so evicting
+      # here can close a connection a concurrent staging run is mid-statement
+      # on, aborting that run (Dagster-retryable, not data loss).
       self.close_database_connections(graph_id)
 
       if not db_path.exists():
@@ -191,10 +159,10 @@ class DuckDBConnectionPool:
           f"No staging database for {graph_id} — create staging tables first."
         )
 
-      # NOTE: temp_directory (spill-to-disk) cannot be set with external access
+      # temp_directory (spill-to-disk) cannot be set with external access
       # disabled — DuckDB treats it as external file access. Read queries are
       # therefore memory-bound (memory_limit); an over-limit sort/aggregation
-      # errors out (bounded failure), which is acceptable for a read surface.
+      # errors out, which is an acceptable bounded failure for a read surface.
       config = {
         "enable_external_access": "false",
         "lock_configuration": "true",
@@ -242,9 +210,11 @@ class DuckDBConnectionPool:
       return self._create_new_connection(graph_id)
 
   def _release_connection(self, graph_id: str, _connection_info: DuckDBConnectionInfo):
-    """Release a connection back to the pool."""
-    # _connection_info is available for future use (e.g., metrics, cleanup)
-    # but currently we just log the release
+    """Return a connection to the pool.
+
+    Connections stay open and shared, so there is no state to reset here —
+    checkout hands out the least-recently-used healthy connection regardless.
+    """
     logger.debug(f"Released DuckDB connection for {graph_id}")
 
   def _get_database_lock(self, graph_id: str) -> threading.RLock:
@@ -300,13 +270,8 @@ class DuckDBConnectionPool:
           "(background S3 download may still be in progress)"
         )
 
-      # Create DuckDB connection
       conn = duckdb.connect(str(db_path))
-
-      # Configure DuckDB connection
       self._configure_connection(conn, graph_id)
-
-      # Test connection health
       is_healthy = self._test_new_connection(conn)
 
       now = datetime.now(UTC)
@@ -338,11 +303,7 @@ class DuckDBConnectionPool:
       raise
 
   def _get_database_path(self, graph_id: str) -> Path:
-    """
-    Get the database path for a graph_id.
-
-    Uses centralized path validation to prevent path traversal attacks.
-    """
+    """Resolve the staging file for a graph_id, rejecting path traversal."""
     try:
       return get_duckdb_staging_path(graph_id, base_path=str(self.base_path))
     except Exception as e:
@@ -350,24 +311,13 @@ class DuckDBConnectionPool:
       raise ValueError(f"Invalid graph_id: {e!s}") from e
 
   def _get_duckdb_memory_limit(self, graph_id: str = "sec") -> str:
-    """
-    Get DuckDB memory limit based on tier configuration.
+    """Resolve the memory limit for this graph's connections, e.g. "8GB".
 
-    Priority:
-    1. Temporary override (for staging operations that need high memory)
-    2. Tier-specific config from graph.yml (via CLUSTER_TIER)
-    3. DUCKDB_MEMORY_LIMIT environment variable
-    4. Default: "2GB"
-
-    Args:
-        graph_id: Graph ID to check for memory overrides
-
-    Returns:
-        Memory limit string (e.g., "2GB", "8GB", "12GB")
+    First match wins: per-graph override (set while staging), tier config from
+    ``.github/configs/graph.yml`` via CLUSTER_TIER, then DUCKDB_MEMORY_LIMIT.
     """
     from robosystems.config import env
 
-    # Check for temporary override first (used during staging)
     override = get_duckdb_memory_override(graph_id)
     if override:
       logger.info(f"Using DuckDB memory override: {override}")
@@ -376,7 +326,6 @@ class DuckDBConnectionPool:
     try:
       from robosystems.config.graph_tier import GraphTierConfig
 
-      # Get tier from environment (set by CloudFormation)
       tier = env.CLUSTER_TIER
 
       if tier:
@@ -388,34 +337,22 @@ class DuckDBConnectionPool:
     except Exception as e:
       logger.warning(f"Could not load tier-based DuckDB memory config: {e}")
 
-    # Fall back to environment variable or default
     memory_limit = env.DUCKDB_MEMORY_LIMIT
     logger.info(f"Using default DuckDB memory limit: {memory_limit}")
     return memory_limit
 
   def _get_duckdb_max_threads(self) -> int:
-    """
-    Get DuckDB max threads based on tier configuration.
+    """Resolve DuckDB's thread count for this instance.
 
-    Priority:
-    1. Tier-specific config from graph.yml (via CLUSTER_TIER)
-    2. DUCKDB_MAX_THREADS environment variable
-    3. Default: 4
-
-    Thread counts are aligned with instance vCPU counts:
-    - m7g.medium (1 vCPU): 2 threads
-    - m7g.large (2 vCPU): 2 threads
-    - r7g.xlarge (4 vCPU): 4 threads
-
-    Returns:
-        Max threads for DuckDB (e.g., 2, 4)
+    Tier config from ``.github/configs/graph.yml`` via CLUSTER_TIER first,
+    then DUCKDB_MAX_THREADS. Tier values track the instance's vCPU count so
+    DuckDB does not oversubscribe the box it shares with LadybugDB.
     """
     from robosystems.config import env
 
     try:
       from robosystems.config.graph_tier import GraphTierConfig
 
-      # Get tier from environment (set by CloudFormation)
       tier = env.CLUSTER_TIER
 
       if tier:
@@ -425,7 +362,6 @@ class DuckDBConnectionPool:
     except Exception as e:
       logger.warning(f"Could not load tier-based DuckDB thread config: {e}")
 
-    # Fall back to environment variable or default
     max_threads = env.DUCKDB_MAX_THREADS
     logger.info(f"Using default DuckDB max threads: {max_threads}")
     return max_threads
@@ -433,11 +369,14 @@ class DuckDBConnectionPool:
   def _configure_connection(
     self, conn: duckdb.DuckDBPyConnection, graph_id: str = "sec"
   ):
-    """Configure a DuckDB connection with extensions and settings."""
+    """Load extensions, S3 credentials, and resource caps on a read-write conn.
+
+    httpfs and postgres_scanner are loaded here and NOWHERE on the read-only
+    tenant connection — that asymmetry is the sandbox.
+    """
     from robosystems.config import env
 
     try:
-      # Install and load extensions
       conn.execute("INSTALL httpfs")
       conn.execute("LOAD httpfs")
       conn.execute("INSTALL parquet")
@@ -445,9 +384,8 @@ class DuckDBConnectionPool:
       conn.execute("INSTALL postgres_scanner")
       conn.execute("LOAD postgres_scanner")
 
-      # Configure S3 access based on environment
       if env.ENVIRONMENT in ["prod", "staging"]:
-        # Production/Staging: Always use IAM roles (ECS task roles)
+        # Production/Staging: always use IAM roles (ECS task roles)
         try:
           conn.execute("CALL load_aws_credentials()")
           conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
@@ -483,24 +421,20 @@ class DuckDBConnectionPool:
           f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL})"
         )
 
-      # Performance settings (tier-aware configuration)
       max_threads = self._get_duckdb_max_threads()
       conn.execute(f"SET threads TO {max_threads}")
 
-      # Get tier-based DuckDB memory limit
       memory_limit = self._get_duckdb_memory_limit(graph_id)
       conn.execute(f"SET memory_limit='{memory_limit}'")
 
-      # Disable insertion order preservation for staging operations
-      # This significantly reduces memory usage when creating large tables
-      # (e.g., SEC Element table with millions of rows)
+      # Insertion order is irrelevant for staging and preserving it costs a lot
+      # of memory on multi-million-row tables (e.g. the SEC Element table).
       conn.execute("SET preserve_insertion_order=false")
 
-      # Configure spill-to-disk for larger-than-memory operations
-      # This allows DuckDB to use disk when memory limit is exceeded.
-      # Use EBS-backed staging directory (large volume) instead of /tmp (small root volume).
-      # DUCKDB_STAGING_PATH is set to /app/data/staging in container, which maps to
-      # /mnt/ladybug-data/staging on the host (EBS volume with 100GB+ for shared tier).
+      # Spill larger-than-memory operations to the EBS-backed staging volume,
+      # not /tmp on the small root volume. DUCKDB_STAGING_PATH is
+      # /app/data/staging in the container, mapped to /mnt/ladybug-data/staging
+      # on the host.
       spill_dir = f"{env.DUCKDB_STAGING_PATH}/duckdb_spill"
       conn.execute(f"SET temp_directory='{spill_dir}'")
 
@@ -554,7 +488,7 @@ class DuckDBConnectionPool:
     connection_info = self._pools[graph_id][connection_id]
 
     try:
-      # Execute checkpoint to flush WAL to main database file
+      # Flush the WAL into the main database file before dropping the handle.
       try:
         connection_info.connection.execute("CHECKPOINT")
         logger.debug(f"Checkpointed DuckDB connection {connection_id} for {graph_id}")
@@ -582,9 +516,8 @@ class DuckDBConnectionPool:
       self._check_connection_health()
       self._last_health_check = now
 
-    # NOTE: Database cleanup is intentionally DISABLED by default
-    # Staging databases should persist as long as the graph exists
-    # Cleanup can be triggered manually via force_database_cleanup() if needed
+    # Database files are deliberately never reaped here — staging databases
+    # persist as long as the graph does. See force_database_cleanup().
 
   def _cleanup_expired_connections(self):
     """Clean up expired connections."""
@@ -651,19 +584,11 @@ class DuckDBConnectionPool:
         logger.info(f"Closed {total_closed} DuckDB connections on shutdown")
 
   def invalidate_connection(self, graph_id: str):
-    """
-    Invalidate all connections for a database.
-
-    This forces new connections to be created on next access.
-
-    Args:
-        graph_id: Graph database identifier
-    """
+    """Close every connection for a database so the next access reopens."""
     with self._get_database_lock(graph_id):
       if graph_id in self._pools:
         for conn_id, conn_info in self._pools[graph_id].items():
           try:
-            # Execute checkpoint to flush WAL to main database file
             try:
               conn_info.connection.execute("CHECKPOINT")
               logger.debug(f"Checkpointed DuckDB connection {conn_id} for {graph_id}")
@@ -721,47 +646,34 @@ class DuckDBConnectionPool:
         logger.debug(f"Closed all DuckDB connections for {graph_id}")
 
   def interrupt_connections(self, graph_id: str) -> int:
-    """
-    Interrupt and close all connections for a specific database.
+    """Cancel in-flight queries for a database and close their connections.
 
-    This is used to cancel long-running queries when a timeout occurs.
-    DuckDB's interrupt() method cancels any in-progress query on the connection.
+    Interrupted connections MUST also be closed, not just marked unhealthy:
+    the zombie still holds the DuckDB file lock, and new CREATE/INSERT
+    operations would hang forever waiting on it.
 
-    CRITICAL: After interruption, connections must be CLOSED to release file locks.
-    Simply marking as unhealthy is not enough - the interrupted connection still
-    holds the DuckDB file lock, which blocks new operations from acquiring it.
-    This can cause deadlocks where new CREATE/INSERT operations hang forever
-    waiting for the lock held by the zombie connection.
-
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Number of connections interrupted and closed
+    Returns the number of connections interrupted and closed.
     """
     interrupted_count = 0
     with self._get_database_lock(graph_id):
       if graph_id in self._pools:
-        # Create snapshot to avoid RuntimeError if pool is modified during iteration
+        # Snapshot: the pool is mutated inside the loop.
         pool_items = list(self._pools[graph_id].items())
         for conn_id, conn_info in pool_items:
           try:
-            # Step 1: Interrupt any running query
             conn_info.connection.interrupt()
             logger.debug(f"Interrupted DuckDB query on {conn_id} for {graph_id}")
           except Exception as e:
             logger.warning(f"Failed to interrupt connection {conn_id}: {e}")
 
           try:
-            # Step 2: Close the connection to release file locks
-            # Skip CHECKPOINT - interrupted connections may be in undefined state
-            # and CHECKPOINT could hang or fail
+            # No CHECKPOINT here: an interrupted connection is in an undefined
+            # state and the checkpoint could hang or fail.
             conn_info.connection.close()
             logger.debug(f"Closed interrupted DuckDB connection {conn_id}")
           except Exception as e:
             logger.warning(f"Failed to close interrupted connection {conn_id}: {e}")
 
-          # Step 3: Remove from pool
           if conn_id in self._pools[graph_id]:
             del self._pools[graph_id][conn_id]
             self._stats["connections_closed"] += 1
@@ -789,18 +701,14 @@ class DuckDBConnectionPool:
     self._cleanup_all_connections()
 
   def reconfigure_memory_limit(self, graph_id: str, memory_limit: str) -> int:
-    """
-    Reconfigure memory limit on all existing connections for a database.
+    """Apply a new ``memory_limit`` to every open connection for a database.
 
-    DuckDB allows changing memory_limit at runtime via SET statement.
-    This is useful for temporarily boosting memory during heavy operations.
+    DuckDB accepts memory_limit changes at runtime, so this raises or lowers
+    the cap without reconnecting. Note that lowering the limit does not hand
+    already-allocated buffers back to the OS — only closing the connections
+    does that (see ``release_duckdb_memory`` in ``core/memory_manager.py``).
 
-    Args:
-        graph_id: Graph database identifier
-        memory_limit: New memory limit (e.g., "58GB", "10GB")
-
-    Returns:
-        Number of connections reconfigured
+    Returns the number of connections reconfigured.
     """
     reconfigured = 0
     with self._get_database_lock(graph_id):
@@ -821,29 +729,21 @@ class DuckDBConnectionPool:
     return reconfigured
 
   def force_database_cleanup(self, graph_id: str) -> None:
-    """
-    Force cleanup of a specific database file and all its connections.
+    """Close all connections for a graph and delete its staging file.
 
-    This should be called when a graph is deleted to remove the staging database.
-    Since external tables use ~1KB each, storage reclamation isn't critical.
-
-    Args:
-        graph_id: Graph database identifier
+    Call this when a graph is deleted; nothing else removes the file.
     """
     with self._global_lock:
       logger.info(f"Forcing cleanup for DuckDB database: {graph_id}")
 
-      # Close all connections
       self.close_database_connections(graph_id)
 
-      # Try to delete the database file
       db_path = self._get_database_path(graph_id)
       if db_path.exists():
         try:
           db_path.unlink()
           logger.info(f"Deleted DuckDB database file: {db_path}")
 
-          # Delete WAL file if exists
           wal_file = db_path.with_suffix(".duckdb.wal")
           if wal_file.exists():
             wal_file.unlink()
@@ -862,13 +762,7 @@ def initialize_duckdb_pool(
   max_connections_per_db: int = 3,
   connection_ttl_minutes: int = 30,
 ) -> DuckDBConnectionPool:
-  """
-  Initialize the global DuckDB connection pool.
-
-  Note:
-      Database files persist with graph lifecycle. They are NOT automatically
-      deleted based on age. Call force_database_cleanup() when a graph is deleted.
-  """
+  """Create the process-global DuckDB connection pool."""
   global _duckdb_pool
   _duckdb_pool = DuckDBConnectionPool(
     base_path=base_path,
@@ -887,32 +781,25 @@ def get_duckdb_pool() -> DuckDBConnectionPool:
   return _duckdb_pool
 
 
-# Memory limit overrides per graph_id for temporary boosts during heavy operations
-# Using per-graph tracking prevents race conditions when multiple graphs stage concurrently
+# Memory limit overrides, keyed by graph_id so concurrently staging graphs
+# cannot clobber each other's boost.
 _memory_limit_overrides: dict[str, str] = {}
 
 
 def set_duckdb_memory_override(limit: str | None, graph_id: str = "sec") -> str | None:
-  """
-  Set a temporary memory limit override for DuckDB connections.
+  """Boost (or, with ``limit=None``, clear) a graph's memory limit and return
+  the previous override so the caller can restore it.
 
-  This allows temporarily boosting DuckDB memory during staging operations,
-  then restoring the default lower limit afterward.
-
-  Args:
-      limit: Memory limit string (e.g., "58GB") or None to clear override
-      graph_id: Graph ID to set override for (default: "sec")
-
-  Returns:
-      Previous override value (for restore purposes)
+  Only affects connections opened afterwards; use
+  ``DuckDBConnectionPool.reconfigure_memory_limit`` for connections already
+  open. ``core/memory_manager.py`` wraps both.
 
   Example:
-      # Boost memory for staging
       old_limit = set_duckdb_memory_override("58GB", graph_id="sec")
       try:
           # ... perform staging ...
       finally:
-          set_duckdb_memory_override(old_limit, graph_id="sec")  # Restore
+          set_duckdb_memory_override(old_limit, graph_id="sec")
   """
   global _memory_limit_overrides
   old_value = _memory_limit_overrides.get(graph_id)

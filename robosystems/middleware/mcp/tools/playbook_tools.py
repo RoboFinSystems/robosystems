@@ -4,8 +4,8 @@ These tools carry no data and touch no database. Their only job is to
 **inform a multi-step workflow** — the canonical tool sequence, the
 decisions an operator has to make, and the gotchas that aren't obvious
 from any single tool's schema. They are the generic-workflow layer of the
-three-layer guidance model (generic playbook → per-tenant procedure doc →
-per-tenant data); see ``local/RoboSystems/specs/mcp-workflow-legibility.md``.
+three-layer guidance model: generic playbook → per-tenant procedure doc →
+per-tenant data.
 
 Why a tool and not external docs: the content is **version-locked to the
 deployed build**. It ships in the same image as the tools it describes, so

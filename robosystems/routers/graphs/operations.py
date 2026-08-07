@@ -175,7 +175,6 @@ async def create_subgraph_op(
     if replay is not None:
       return replay
 
-    # Delegate to the existing handler's business logic
     result = await create_subgraph(
       request=body, graph_id=graph_id, current_user=user, db=db
     )
@@ -594,7 +593,6 @@ async def create_backup_op(
   if replay is not None:
     return replay
 
-  # Validation
   verify_admin_access(user, graph_id, db)
 
   if is_shared_repository_or_subgraph(graph_id):
@@ -631,7 +629,6 @@ async def create_backup_op(
   )
   effective_retention_days = min(body.retention_days, tier_max)
 
-  # Enqueue Dagster backup job
   run_config = build_graph_job_config(
     "backup_graph_job",
     graph_id=graph_id,
@@ -733,7 +730,6 @@ async def restore_backup_op(
   if replay is not None:
     return replay
 
-  # Validation
   verify_admin_access(user, graph_id, db)
 
   if is_shared_repository_or_subgraph(graph_id):
@@ -768,7 +764,6 @@ async def restore_backup_op(
       detail="Only encrypted backups can be restored for security reasons",
     )
 
-  # Enqueue Dagster restore job
   run_config = build_graph_job_config(
     "restore_graph_job",
     graph_id=graph_id,

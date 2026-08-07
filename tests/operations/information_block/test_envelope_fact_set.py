@@ -158,7 +158,7 @@ class TestLoadLatestFactSetForStructure:
 
 
 class TestWindowSeriesSets:
-  """Seam-adjacent series windowing — the §11 #11 server-side trim.
+  """Seam-adjacent series windowing — the server-side trim.
 
   ``history`` keeps the LAST N actual columns; ``forecast`` keeps the
   FIRST N forecast columns; ``None`` = unbounded on that side.

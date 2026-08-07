@@ -86,9 +86,6 @@ def sec_processed_filings(
     - One part file per table per batch, multiple batches per quarter
     - UUID naming prevents collisions across runs
     - DuckDB reads both old format (TABLE.parquet) and new (TABLE/*.parquet)
-
-  Returns:
-      MaterializeResult with processing statistics
   """
   import shutil
   import tempfile
@@ -464,9 +461,9 @@ def sec_processed_filings(
           f"{cache_hits} cache hits"
         )
 
-    # Release heavy objects before flush to reclaim memory.
-    # SemanticEnricher holds fastembed model (~130 MB) + taxonomy data.
-    # These are no longer needed — all filings have been processed.
+    # Release heavy objects before flush to reclaim memory. SemanticEnricher
+    # holds the fastembed model (~130 MB) + taxonomy data, and every filing in
+    # this batch has already been processed by this point.
     if shared_enricher is not None:
       del shared_enricher
       context.log.info("Released SemanticEnricher before flush")

@@ -56,24 +56,16 @@ class RepositorySubscriptionService:
   """Service for managing shared repository subscriptions and access."""
 
   def __init__(self, session: Session):
-    """Initialize repository subscription service with database session."""
     self.session = session
 
   def ensure_repository_graph_exists(self, repository_type: RepositoryType) -> None:
-    """
-    Ensure the shared repository graph exists in the database.
+    """Create the shared repository's `Graph` row if it is missing.
 
-    In production, the repository graph is created by the data loading pipeline
-    (e.g., SEC data loader). However, for development and testing, we need to
-    create the graph entry on-demand when subscriptions are triggered.
+    Idempotent. In production the data loading pipeline creates this row; the
+    on-demand path exists so a subscription can be exercised in dev and test
+    before any data has been loaded.
 
-    This method is idempotent - it only creates the graph if it doesn't exist.
-
-    Args:
-        repository_type: Type of repository (SEC, industry, economic)
-
-    Raises:
-        ValueError: If repository type is invalid or not configured
+    Raises ValueError when the repository type has no configuration.
     """
     from ...models.core.graph import Graph
 
@@ -130,36 +122,27 @@ class RepositorySubscriptionService:
     repository_type: RepositoryType,
     repository_plan: str = "starter",
   ) -> UserRepository:
-    """
-    Create a subscription for a shared repository.
+    """Subscribe a user to a shared repository.
 
-    Args:
-        user_id: User ID
-        repository_type: Type of repository (SEC, industry, etc.)
-        repository_plan: Repository plan (starter, advanced, unlimited)
-
-    Returns:
-        UserRepository instance
+    Returns the existing record unchanged when the user is already subscribed,
+    so this is safe to retry. Raises ValueError if the repository is disabled
+    or the plan is not offered for it.
     """
-    # Check if repository is enabled
     if not _is_repository_enabled(repository_type.value):
       raise ValueError(
         f"Repository type {repository_type.value} is not available for subscription"
       )
 
-    # Check if plan is available for this repository
     available_plans = get_available_plans_for_repository(repository_type)
     if repository_plan not in available_plans:
       raise ValueError(
         f"Plan {repository_plan} not available for repository {repository_type.value}"
       )
 
-    # Get plan configuration from registry
     plan_details = _get_plan_details(repository_plan, repo_id=repository_type.value)
     if not plan_details:
       raise ValueError(f"Repository {repository_type.value} configuration not found")
 
-    # Check if subscription already exists
     existing = UserRepository.get_by_user_and_repository(
       user_id=user_id, repository_name=repository_type.value, session=self.session
     )
@@ -170,7 +153,6 @@ class RepositorySubscriptionService:
       )
       return existing
 
-    # Resolve access level from plan
     monthly_price_cents = int(plan_details["price_monthly"] * 100)
     access_level_str = plan_details.get("access_level", "READ")
     try:
@@ -178,7 +160,6 @@ class RepositorySubscriptionService:
     except (ValueError, AttributeError):
       access_level = RepositoryAccessLevel.READ
 
-    # Create the subscription
     try:
       access_record = UserRepository.create_access(
         user_id=user_id,
@@ -213,18 +194,11 @@ class RepositorySubscriptionService:
     repository_type: RepositoryType,
     new_plan: str,
   ) -> UserRepository:
-    """
-    Upgrade a repository subscription to a higher plan.
+    """Move an existing subscription to a different plan.
 
-    Args:
-        user_id: User ID
-        repository_type: Repository type
-        new_plan: New repository plan
-
-    Returns:
-        Updated UserRepository instance
+    Raises ValueError when there is no subscription, the repository has since
+    been disabled, or the plan is not offered for it.
     """
-    # Get existing subscription
     access_record = UserRepository.get_by_user_and_repository(
       user_id=user_id, repository_name=repository_type.value, session=self.session
     )
@@ -232,25 +206,21 @@ class RepositorySubscriptionService:
     if not access_record:
       raise ValueError(f"No subscription found for repository {repository_type.value}")
 
-    # Check if repository is still enabled
     if not _is_repository_enabled(repository_type.value):
       raise ValueError(f"Repository {repository_type.value} is no longer available")
 
-    # Check if new plan is available
     available_plans = get_available_plans_for_repository(repository_type)
     if new_plan not in available_plans:
       raise ValueError(
         f"Plan {new_plan} not available for repository {repository_type.value}"
       )
 
-    # Get new plan pricing from registry
     plan_details = _get_plan_details(new_plan, repo_id=repository_type.value)
     if not plan_details:
       raise ValueError(f"Repository {repository_type.value} configuration not found")
     new_price_cents = int(plan_details["price_monthly"] * 100)
 
     try:
-      # Upgrade the plan
       access_record.upgrade_tier(
         new_plan=new_plan, session=self.session, new_price_cents=new_price_cents
       )
@@ -271,17 +241,7 @@ class RepositorySubscriptionService:
     user_id: str,
     repository_type: RepositoryType,
   ) -> bool:
-    """
-    Cancel a repository subscription.
-
-    Args:
-        user_id: User ID
-        repository_type: Repository type
-
-    Returns:
-        True if cancelled successfully
-    """
-    # Get existing subscription
+    """Revoke a user's access to a repository. Raises if none exists."""
     access_record = UserRepository.get_by_user_and_repository(
       user_id=user_id, repository_name=repository_type.value, session=self.session
     )
@@ -290,7 +250,6 @@ class RepositorySubscriptionService:
       raise ValueError(f"No subscription found for repository {repository_type.value}")
 
     try:
-      # Cancel the subscription
       access_record.revoke_access(session=self.session)
 
       logger.info(
@@ -307,16 +266,7 @@ class RepositorySubscriptionService:
   def get_user_repository_subscriptions(
     self, user_id: str, active_only: bool = True
   ) -> list[UserRepository]:
-    """
-    Get all repository subscriptions for a user.
-
-    Args:
-        user_id: User ID
-        active_only: Only return active subscriptions
-
-    Returns:
-        List of UserRepository records
-    """
+    """List a user's repository subscriptions."""
     return list(
       UserRepository.get_user_repositories(
         user_id=user_id, session=self.session, active_only=active_only
@@ -326,24 +276,17 @@ class RepositorySubscriptionService:
   def get_repository_credits_summary(
     self, user_id: str, repository_type: RepositoryType | None = None
   ) -> dict:
-    """
-    Get credits summary for repository subscriptions.
+    """Credit balances for one repository, or a roll-up across all of them.
 
-    Args:
-        user_id: User ID
-        repository_type: Optional specific repository type
-
-    Returns:
-        Credits summary dictionary
+    The per-repository shape is `UserRepositoryCredits.get_summary()`; the
+    roll-up shape is `{repositories, total_credits, total_subscriptions}`.
     """
     if repository_type:
-      # Get credits for specific repository
       credits = UserRepositoryCredits.get_user_repository_credits(
         user_id=user_id, repository_type=repository_type.value, session=self.session
       )
       return credits.get_summary() if credits else {}
     else:
-      # Get credits for all repositories
       access_records = self.get_user_repository_subscriptions(user_id, active_only=True)
       summary = {
         "repositories": [],
@@ -367,24 +310,11 @@ class RepositorySubscriptionService:
     repository_plan: str,
     user_id: str,
   ) -> int:
-    """
-    Allocate monthly credits to user for repository access.
+    """Create or resize the user's monthly credit pool for a repository.
 
-    This method is called during provisioning to set up the initial credit allocation
-    for a user's repository subscription. It retrieves the plan configuration to
-    determine credit amounts and creates/updates the credit pool.
-
-    Args:
-        repository_type: Type of repository (SEC, industry, etc.)
-        repository_plan: Repository plan tier (starter, advanced, unlimited)
-        user_id: User ID to allocate credits to
-
-    Returns:
-        Number of credits allocated
-
-    Raises:
-        ValueError: If repository or plan configuration is invalid
-        SQLAlchemyError: If database operation fails
+    Called during provisioning. When no access record exists yet the plan's
+    allocation is returned without persisting anything — the pool is created
+    later by `grant_access`.
     """
     plan_details = _get_plan_details(repository_plan, repo_id=repository_type.value)
     if not plan_details:
@@ -431,27 +361,10 @@ class RepositorySubscriptionService:
     user_id: str,
     repository_plan: str | None = None,
   ) -> bool:
-    """
-    Grant repository access to a user.
+    """Grant a user access to a repository after payment is confirmed.
 
-    This method creates a UserRepository access record for the user if one doesn't
-    already exist. It's called during provisioning after payment is confirmed.
-
-    This method will auto-create the repository graph entry if it doesn't exist,
-    which is necessary for dev/testing. In production, the data loading pipeline
-    should create the graph entry.
-
-    Args:
-        repository_type: Type of repository to grant access to
-        user_id: User ID to grant access to
-        repository_plan: Optional plan tier (if not provided, uses STARTER)
-
-    Returns:
-        True if access was granted or already exists
-
-    Raises:
-        ValueError: If repository configuration is invalid
-        SQLAlchemyError: If database operation fails
+    Idempotent: an existing record is reactivated rather than duplicated. Also
+    ensures the repository `Graph` row exists, defaulting to the "starter" plan.
     """
     self.ensure_repository_graph_exists(repository_type)
 
@@ -512,21 +425,10 @@ class RepositorySubscriptionService:
     repository_type: RepositoryType,
     user_id: str,
   ) -> bool:
-    """
-    Revoke repository access for a user.
+    """Revoke access, returning False when there was nothing to revoke.
 
-    This is a helper method used during error cleanup in provisioning tasks.
-
-    Args:
-        repository_type: Type of repository
-        user_id: User ID
-
-    Returns:
-        True if access was revoked
-
-    Raises:
-        ValueError: If access record doesn't exist
-        SQLAlchemyError: If database operation fails
+    Used to unwind a partially provisioned subscription, so a missing record is
+    a normal outcome rather than an error.
     """
     access_record = UserRepository.get_by_user_and_repository(
       user_id=user_id, repository_name=repository_type.value, session=self.session

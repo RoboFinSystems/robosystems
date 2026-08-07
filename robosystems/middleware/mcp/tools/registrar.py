@@ -62,21 +62,13 @@ def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
   leaf fields) is dropped for readability.
 
   Discriminated-union ``RootModel`` request bodies (e.g.
-  ``CreateInformationBlockRequest``) emit a schema with top-level
-  ``oneOf`` / ``anyOf``. Anthropic's tool-call API rejects top-level
-  unions in tool ``input_schema``; we flatten those into an object
-  envelope here — ``{<discriminator>: enum, payload: …}``. When the
-  union's arms carry **typed** payloads (the schedule arm of
-  ``CreateInformationBlockRequest`` does), the flattener preserves each
-  arm's payload schema under a nested ``payload.anyOf`` and hoists the
-  arms' ``examples`` to the envelope, so a codebase-blind MCP client can
-  see the real field names instead of an opaque blob. Nested unions are
-  safe here — Pydantic ``Optional[...]`` fields already emit nested
-  ``anyOf`` that flow through unchanged; only the *top level* is
-  forbidden. Strict validation still happens at dispatch time (the
-  registrar re-parses the payload through the original
-  ``request_model``), so the wire contract is unchanged. See
-  ``_flatten_top_level_union`` below for the envelope shape.
+  ``CreateInformationBlockRequest``) emit a top-level ``oneOf`` / ``anyOf``,
+  which Anthropic's tool-call API rejects in a tool ``input_schema``. Those
+  are flattened into an object envelope — see ``_flatten_top_level_union``
+  for the shape. Only the *top level* is forbidden: nested ``anyOf`` from
+  Pydantic ``Optional[...]`` fields flows through unchanged. Dispatch
+  re-parses the payload through the original ``request_model``, so
+  flattening the advertised schema never loosens the wire contract.
   """
   schema = request_model.model_json_schema(mode="serialization")
   defs = schema.pop("$defs", {}) or schema.pop("definitions", {}) or {}
@@ -118,8 +110,8 @@ def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
     enum: [...]}, payload: {anyOf: [<per-arm payload schema>, …]}},
     required: [<discriminator>, payload], examples: [...],
     additionalProperties: True}``. The per-arm payload schemas carry the
-    real field names so a codebase-blind MCP client can construct a valid
-    call; ``examples`` holds the arms' copy-pasteable request bodies.
+    real field names, so a caller can construct a valid call without
+    reading the codebase; ``examples`` holds copy-pasteable request bodies.
 
   - **Untyped arms** (every arm's payload is a freeform ``dict``):
     ``{type: object, properties: {<discriminator>: {type: string,
@@ -131,10 +123,6 @@ def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
     standard ``{<discriminator>, payload}`` shape: a permissive object
     envelope (``additionalProperties: True``) with the original
     ``description`` preserved.
-
-  Dispatch-time Pydantic validation still enforces the per-arm shape,
-  so callers passing an invalid payload get a clean ValidationError at
-  the boundary — same behavior as a non-union request model.
   """
   description = schema.get("description")
   flattened: dict[str, Any] = {

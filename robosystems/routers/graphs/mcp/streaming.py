@@ -1,8 +1,10 @@
-"""
-MCP streaming implementations with transparent aggregation for AI agents.
+"""MCP streaming generators and the aggregator that folds them back into a
+single result.
 
-This module provides streaming capabilities that are transparently handled
-by the Node.js MCP client, presenting a unified interface to AI agents.
+Each generator yields event dicts that a transport turns into SSE or NDJSON.
+`aggregate_streamed_results` collapses a whole event list into one result,
+which is how the JSON-RPC transport answers a `tools/call` that ran on a
+streaming strategy.
 """
 
 import json
@@ -22,23 +24,10 @@ async def stream_mcp_tool_execution(
   strategy: str,
   chunk_size: int = 1000,
 ) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Stream MCP tool execution with progress updates.
+  """Stream an MCP tool execution as progress and result events.
 
-  This generator produces events that can be:
-  - Sent as SSE to clients that support it
-  - Aggregated by the Node.js client for AI agents
-  - Converted to NDJSON for efficient transfer
-
-  Args:
-      handler: MCP handler instance
-      tool_name: Name of the tool to execute
-      arguments: Tool arguments
-      strategy: Execution strategy being used
-      chunk_size: Rows per chunk for query streaming
-
-  Yields:
-      Event dictionaries with type and data
+  Yields event dicts that a transport can deliver as SSE or NDJSON, or that
+  `aggregate_streamed_results` can fold into a single result.
   """
   start_time = datetime.now(UTC)
 
@@ -138,16 +127,10 @@ async def stream_cypher_query(
   arguments: dict[str, Any],
   chunk_size: int = 1000,
 ) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Stream Cypher query results in chunks.
-
-  For AI agents, the Node.js client will aggregate these chunks
-  into a complete result transparently.
-  """
+  """Stream Cypher query results in chunks of `chunk_size` rows."""
   query = arguments.get("query", "")
   parameters = arguments.get("parameters", {})
 
-  # Check if handler supports streaming
   if hasattr(handler, "execute_query_streaming"):
     total_rows = 0
     chunk_count = 0
@@ -268,12 +251,8 @@ async def stream_schema_retrieval(
   tool_name: str,
   arguments: dict[str, Any],
 ) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Stream schema information in digestible parts.
-
-  This helps AI agents process large schemas incrementally.
-  """
-  # Indicate schema retrieval start
+  """Stream schema information in parts, so large schemas arrive
+  incrementally."""
   yield {
     "event": "progress",
     "data": {
@@ -282,7 +261,6 @@ async def stream_schema_retrieval(
     },
   }
 
-  # Get full schema
   schema_result = await handler.call_tool(tool_name, arguments)
 
   if is_tool_error_result(schema_result):
@@ -355,26 +333,17 @@ async def stream_schema_retrieval(
 
 
 def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
+  """Fold a list of streaming events into one result.
+
+  Returns a `success: False` shape carrying the error when the stream failed
+  or ended without a terminal event.
   """
-  Aggregate streamed events into a unified result for AI agents.
-
-  This is used by the Node.js client to present a simple interface
-  to AI agents while benefiting from streaming performance.
-
-  Args:
-      events: List of streaming events
-
-  Returns:
-      Aggregated result suitable for AI agent consumption
-  """
-  # Find the tool name
   tool_name = None
   for event in events:
     if event.get("event") == "start":
       tool_name = event["data"].get("tool")
       break
 
-  # Check for errors
   for event in events:
     if event.get("event") == "error":
       failure: dict[str, Any] = {

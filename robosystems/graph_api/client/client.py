@@ -1,8 +1,8 @@
 """
-Asynchronous Graph API Client.
+Asynchronous Graph API client.
 
-Provides asynchronous interface for Graph API operations including
-SSE-based monitoring for long-running ingestion tasks.
+Wraps the Graph API HTTP surface with retry/circuit-breaker handling and
+SSE-based monitoring for long-running ingestion, backup and restore tasks.
 """
 
 import asyncio
@@ -34,24 +34,15 @@ class GraphClient(BaseGraphClient):
     config: GraphClientConfig | None = None,
     **kwargs,
   ):
-    """
-    Initialize asynchronous Graph client.
-
-    Args:
-        base_url: Base URL for the API
-        config: Client configuration
-        **kwargs: Additional config overrides
-    """
+    """Initialize the client; ``kwargs`` override individual config fields."""
     super().__init__(base_url, config, **kwargs)
 
-    # Configure httpx client limits
     limits = httpx.Limits(
       max_connections=self.config.max_connections,
       max_keepalive_connections=self.config.max_keepalive_connections,
       keepalive_expiry=self.config.keepalive_expiry,
     )
 
-    # Create httpx client
     self.client = httpx.AsyncClient(
       base_url=self.config.base_url,
       timeout=httpx.Timeout(self.config.timeout),
@@ -80,31 +71,22 @@ class GraphClient(BaseGraphClient):
     await self.client.aclose()
 
   async def _execute_with_retry(self, func, *args, **kwargs):
-    """
-    Execute an async function with retry logic.
+    """Run ``func`` under the circuit breaker, retrying transient failures.
 
-    Args:
-        func: Async function to execute
-        *args: Positional arguments for func
-        **kwargs: Keyword arguments for func
-
-    Returns:
-        Function result
-
-    Raises:
-        GraphAPIError: If all retries fail
+    httpx transport errors are mapped to ``GraphTimeoutError`` /
+    ``GraphTransientError`` before the retry decision, so only errors the
+    client considers retryable consume an attempt. The last error is re-raised
+    once ``max_retries`` is exhausted, and the failure is recorded against the
+    circuit breaker.
     """
     last_error = None
 
     for attempt in range(self.config.max_retries + 1):
       try:
-        # Check circuit breaker
         self._check_circuit_breaker()
 
-        # Execute function
         result = await func(*args, **kwargs)
 
-        # Record success
         self._record_success()
 
         return result
@@ -112,7 +94,6 @@ class GraphClient(BaseGraphClient):
       except Exception as e:
         last_error = e
 
-        # Convert to appropriate exception type
         if isinstance(e, httpx.TimeoutException):
           last_error = GraphTimeoutError(f"Request timeout: {e}")
         elif isinstance(e, httpx.ConnectError):
@@ -120,12 +101,10 @@ class GraphClient(BaseGraphClient):
         elif isinstance(e, httpx.RequestError):
           last_error = GraphTransientError(f"Request error: {e}")
 
-        # Check if we should retry
         if not self._should_retry(last_error, attempt):
           self._record_failure()
           raise last_error
 
-        # Calculate retry delay
         if attempt < self.config.max_retries:
           delay = self._calculate_retry_delay(attempt)
           logger.warning(
@@ -134,7 +113,6 @@ class GraphClient(BaseGraphClient):
           )
           await asyncio.sleep(delay)
 
-    # All retries failed
     self._record_failure()
     if last_error is None:
       raise RuntimeError("Retry logic failed without capturing an exception")
@@ -142,8 +120,11 @@ class GraphClient(BaseGraphClient):
 
   @staticmethod
   def _classify_operation(path: str) -> str:
-    """Classify a Graph API path into an operation name for metrics."""
-    # Normalize: /databases/{id}/query -> query, /databases -> create_database, etc.
+    """Classify a Graph API path into an operation name for metrics.
+
+    Collapses per-graph paths to a bounded label set (``/databases/{id}/query``
+    -> ``query``) so metric cardinality does not grow with the graph count.
+    """
     parts = path.strip("/").split("/")
     if len(parts) == 0:
       return "unknown"
@@ -212,23 +193,14 @@ class GraphClient(BaseGraphClient):
     retries: int | None = None,
     headers: dict[str, str] | None = None,
   ) -> httpx.Response:
-    """
-    Make HTTP request with optional retry logic.
+    """Make an HTTP request, timed and reported to OTel whether or not it fails.
 
-    Args:
-        method: HTTP method
-        path: API path
-        json_data: JSON body
-        params: Query parameters
-        timeout: Request timeout
-        retries: Number of retries. None uses config default, 0 disables retries.
-                 Use retries=0 for non-idempotent operations like materialization.
-        headers: Additional headers to include in the request.
-
-    Returns:
-        Response object
+    ``retries=None`` uses the config default; ``retries=0`` bypasses
+    ``_execute_with_retry`` entirely and must be used for non-idempotent
+    operations (staging inserts, materialization) where a replay would
+    duplicate data. Responses with a 4xx/5xx status are converted to the
+    matching ``Graph*Error`` before returning.
     """
-    # Build request kwargs with proper typing
     request_kwargs: dict[str, Any] = {
       "method": method,
       "url": path,
@@ -244,7 +216,6 @@ class GraphClient(BaseGraphClient):
       request_kwargs["headers"] = headers
 
     async def make_request():
-      # Debug log the request
       logger.debug(f"Making request: {method} {path}")
       if self.client.headers:
         debug_headers = dict(self.client.headers)
@@ -256,7 +227,6 @@ class GraphClient(BaseGraphClient):
 
       response = await self.client.request(**request_kwargs)
 
-      # Raise for error status codes
       if response.status_code >= 400:
         try:
           error_data = response.json()
@@ -268,14 +238,13 @@ class GraphClient(BaseGraphClient):
 
       return response
 
-    # Time the entire request including retries
+    # Timed across all retries, so the metric reflects caller-observed latency
     start_time = time.time()
     status_code = 0
     error_occurred = False
     error_type = None
 
     try:
-      # Skip retry logic if explicitly disabled (retries=0)
       if retries == 0:
         response = await make_request()
       else:
@@ -287,7 +256,6 @@ class GraphClient(BaseGraphClient):
     except Exception as e:
       error_occurred = True
       status_code = getattr(e, "status_code", 0)
-      # Classify error type for metrics
       from .exceptions import GraphClientError, GraphTimeoutError, GraphTransientError
 
       if isinstance(e, GraphTimeoutError):
@@ -325,30 +293,24 @@ class GraphClient(BaseGraphClient):
     parameters: dict[str, Any] | None = None,
     streaming: bool = False,
   ) -> dict[str, Any] | AsyncGenerator[Any]:
-    """
-    Execute a Cypher query.
+    """Execute a Cypher query.
 
-    Args:
-        cypher: Cypher query to execute
-        graph_id: Target graph database ID
-        parameters: Query parameters
-        streaming: If True, use streaming for large result sets
-
-    Returns:
-        Query results (dict for regular, async generator for streaming)
+    Returns a result dict, or — when ``streaming`` is set — an async generator
+    of NDJSON chunks produced by the server. Streaming lets the graph instance
+    do the chunking rather than materializing the full result set in memory,
+    and a malformed or empty response body degrades to an empty result rather
+    than raising.
     """
     payload: dict[str, Any] = {"cypher": cypher, "database": graph_id}
     if parameters:
       payload["parameters"] = parameters
 
-    # Add streaming parameter to URL
     params = {"streaming": "true"} if streaming else {}
 
     if not streaming:
       response = await self._request(
         "POST", f"/databases/{graph_id}/query", json_data=payload, params=params
       )
-      # Debug logging for response content
       logger.debug(f"Response status: {response.status_code}")
       logger.debug(f"Response content type: {response.headers.get('content-type')}")
       logger.debug(
@@ -358,7 +320,6 @@ class GraphClient(BaseGraphClient):
         f"Response content (first 200 chars): {repr(response.content[:200]) if response.content else 'None'}"
       )
 
-      # Handle truly empty response body (but be more careful about false positives)
       if response.content is None or len(response.content) == 0:
         logger.warning("Received empty response body from Graph API")
         return {"data": [], "columns": [], "row_count": 0}
@@ -378,8 +339,6 @@ class GraphClient(BaseGraphClient):
           "row_count": 0,
         }
 
-    # For true streaming, use the streaming endpoint
-    # This allows the graph database instance to do the chunking
     async def stream_chunks() -> AsyncGenerator[dict[str, Any]]:
       """Stream NDJSON chunks from Graph API server."""
       stream_start = time.time()
@@ -405,7 +364,8 @@ class GraphClient(BaseGraphClient):
               }
             raise self._handle_response_error(response.status_code, error_data)
 
-          # Record time-to-first-byte as the query metric
+          # Streaming has no single completion point, so time-to-first-byte
+          # stands in for query duration.
           ttfb = time.time() - stream_start
           self._emit_graph_api_metrics(
             method="POST",
@@ -417,7 +377,6 @@ class GraphClient(BaseGraphClient):
           )
           metrics_recorded = True
 
-          # Stream NDJSON lines
           async for line in response.aiter_lines():
             if line:
               try:
@@ -451,61 +410,40 @@ class GraphClient(BaseGraphClient):
     return stream_chunks()
 
   async def get_info(self) -> dict[str, Any]:
-    """
-    Get comprehensive cluster information.
-
-    Returns cluster configuration, status, and capabilities.
-    """
+    """Get cluster configuration, status and capabilities."""
     response = await self._request("GET", "/info")
     return response.json()
 
   async def _monitor_task_sse(
     self, sse_path: str, task_id: str, task_type: str, timeout: int
   ) -> dict[str, Any]:
-    """
-    Monitor any task progress via SSE stream (generic).
+    """Monitor any task (ingestion, backup, restore, staging) via its SSE stream.
 
-    Args:
-        sse_path: SSE endpoint path
-        task_id: Task ID for logging
-        task_type: Type of task (ingestion, backup, restore, etc.)
-        timeout: Maximum time to wait (seconds)
-
-    Returns:
-        Dict with results or error
+    ``task_type`` is a label used in log lines only.
     """
-    # Use the existing monitoring logic with task_type instead of table_name
     return await self._monitor_ingestion_sse(
       sse_path=sse_path,
       task_id=task_id,
-      table_name=task_type,  # Reuse existing param for task type
+      table_name=task_type,
       timeout=timeout,
     )
 
   async def _monitor_ingestion_sse(
     self, sse_path: str, task_id: str, table_name: str, timeout: int
   ) -> dict[str, Any]:
-    """
-    Monitor ingestion progress via SSE stream.
+    """Monitor ingestion progress via SSE, falling back to status polling.
 
-    Args:
-        sse_path: SSE endpoint path (e.g., "/databases/sec/ingest/monitor/task123")
-        task_id: Task ID for logging
-        table_name: Table name for logging
-        timeout: Maximum time to wait (seconds)
-
-    Returns:
-        Dict with results or error
+    Both the hard timeout and any stream error fall back to
+    :meth:`_poll_task_status_fallback` rather than failing the task: a dead
+    stream does not mean a dead task.
     """
     start_time = time.time()
 
-    # Build full SSE URL
     sse_url = f"{self.config.base_url}{sse_path}"
 
     try:
-      # Wrap entire SSE monitoring with asyncio.wait_for for hard timeout
-      # This ensures we timeout even if the server stops sending events entirely
-      # (the previous timeout checks only ran after receiving an event)
+      # The wait_for is the only timeout that fires when the server stops
+      # sending events entirely — the in-loop checks run per event.
       return await asyncio.wait_for(
         self._sse_event_loop(
           sse_url=sse_url,
@@ -542,34 +480,29 @@ class GraphClient(BaseGraphClient):
     timeout: int,
     start_time: float,
   ) -> dict[str, Any]:
-    """
-    Internal SSE event processing loop.
+    """SSE event loop, split out so the caller can wrap it in ``wait_for``.
 
-    Separated from _monitor_ingestion_sse to allow wrapping with asyncio.wait_for.
+    Uses its own httpx client so a long-lived stream does not hold a
+    connection from the shared pool for the duration of the task.
     """
     last_heartbeat = start_time
     last_progress_log = start_time
 
     try:
-      # Use a separate client for SSE to avoid interfering with main client
-      # Include authentication headers from the main client config
       async with httpx.AsyncClient(
         timeout=httpx.Timeout(timeout),
-        headers=self.config.headers,  # Include API key and other headers
+        headers=self.config.headers,
       ) as sse_client:
-        # Use aconnect_sse for async operations
         async with aconnect_sse(sse_client, "GET", sse_url) as event_source:
           async for sse_event in event_source.aiter_sse():
             current_time = time.time()
 
-            # Parse event data
             try:
               data = json.loads(sse_event.data) if sse_event.data else {}
             except json.JSONDecodeError:
               logger.warning(f"Invalid JSON in SSE event: {sse_event.data}")
               continue
 
-            # Handle different event types
             if sse_event.event == "heartbeat":
               last_heartbeat = current_time
               elapsed = current_time - start_time
@@ -578,7 +511,6 @@ class GraphClient(BaseGraphClient):
               )
 
             elif sse_event.event == "progress":
-              # Log progress every 30 seconds
               if current_time - last_progress_log > 30:
                 progress = data.get("progress_percent", 0)
                 records = data.get("records_processed", 0)
@@ -643,7 +575,6 @@ class GraphClient(BaseGraphClient):
                 "error": f"Timeout after {timeout} seconds",
               }
 
-            # Check for stale connection (no heartbeat for 2 minutes)
             if current_time - last_heartbeat > 120:
               logger.warning(
                 f"No heartbeat received for 2 minutes for task {task_id}, "
@@ -653,7 +584,6 @@ class GraphClient(BaseGraphClient):
                 task_id, table_name, timeout, start_time
               )
 
-      # If we exit the loop without a completion event
       logger.warning(
         f"SSE stream ended unexpectedly for task {task_id}, falling back to status poll"
       )
@@ -672,17 +602,16 @@ class GraphClient(BaseGraphClient):
     timeout: int,
     start_time: float,
   ) -> dict[str, Any]:
-    """
-    Fallback when SSE stream goes stale: poll task status directly via HTTP GET.
+    """Poll task status over HTTP when the SSE stream goes stale.
 
-    This handles cases where the SSE stream is starved (e.g., outbound network
-    saturated by a large S3 upload) but the task itself is still running fine.
+    An SSE stream can be starved (outbound network saturated by a large S3
+    upload, say) while the task itself is running fine, so a dead stream is
+    treated as a monitoring failure rather than a task failure.
     """
     poll_interval = 5
     max_polls = max(timeout // poll_interval, 60)  # Poll until timeout, minimum 5 min
 
     for i in range(max_polls):
-      # Check overall timeout
       if time.time() - start_time > timeout:
         logger.error(f"Task {task_id} timed out after {timeout}s during status polling")
         return {
@@ -724,7 +653,6 @@ class GraphClient(BaseGraphClient):
 
       await asyncio.sleep(poll_interval)
 
-    # Exhausted polls
     return {
       "status": "failed",
       "task_id": task_id,
@@ -749,18 +677,12 @@ class GraphClient(BaseGraphClient):
     custom_schema_ddl: str | None = None,
     is_subgraph: bool = False,
   ) -> dict[str, Any]:
-    """
-    Create a new database.
+    """Create a database.
 
-    Args:
-        graph_id: Database identifier
-        schema_type: Type of schema (entity/shared/custom)
-        repository_name: Repository name for shared databases
-        custom_schema_ddl: Custom DDL for database creation
-        is_subgraph: Whether this is a subgraph (bypasses max_databases check)
-
-    Returns:
-        Creation result
+    ``schema_type`` is one of ``entity``/``shared``/``custom``;
+    ``repository_name`` applies to shared databases. ``is_subgraph`` bypasses
+    the node's ``max_databases`` check, since a subgraph is accounted against
+    its parent's tier limit rather than the instance's.
     """
     payload = {
       "graph_id": graph_id,
@@ -782,21 +704,16 @@ class GraphClient(BaseGraphClient):
     staging_only: bool = False,
     lock_token: str | None = None,
   ) -> dict[str, Any]:
-    """Delete a database.
+    """Delete a database and, by default, its DuckDB staging.
 
-    Args:
-        graph_id: Graph database identifier to delete
-        preserve_duckdb: If True, preserve DuckDB staging database for retry scenarios.
-            Useful when you want to rebuild LadybugDB from existing staging.
-        staging_only: If True, delete only DuckDB staging, preserve LadybugDB graph.
-            Useful for re-staging with different settings.
-        lock_token: Deleting a `-wip`/`-prev` name is guarded by the base's
-            materialization lock. A caller that already holds it (the
-            materialize flow cleaning up its own WIP) passes the token so the
-            endpoint doesn't re-acquire — without it, that delete would 409
-            against the caller's own lock.
+    ``preserve_duckdb`` keeps staging so LadybugDB can be rebuilt from it;
+    ``staging_only`` does the inverse, dropping staging and keeping the graph.
+    The two are mutually exclusive.
 
-    Note: preserve_duckdb and staging_only are mutually exclusive.
+    Deleting a ``-wip``/``-prev`` name is guarded by the base graph's
+    materialization lock. A caller that already holds it (the materialize flow
+    cleaning up its own WIP) passes ``lock_token`` so the endpoint does not
+    re-acquire — without it, the delete 409s against the caller's own lock.
     """
     params = {}
     if preserve_duckdb:
@@ -819,18 +736,11 @@ class GraphClient(BaseGraphClient):
   # =========================================================================
 
   async def boost_memory(self, graph_id: str, target: str = "both") -> dict[str, Any]:
-    """
-    Boost memory for staging (DuckDB) or materialization (LadybugDB) operations.
+    """Raise memory limits for staging (DuckDB) or materialization (LadybugDB).
 
-    Call this before starting a batch of staging or materialization operations.
-    The boost will remain active until restore_memory or release_memory is called.
-
-    Args:
-        graph_id: Graph database identifier
-        target: Which system to boost - "duckdb", "ladybug", or "both"
-
-    Returns:
-        Dictionary with boost status (duckdb_boosted, ladybug_boosted, message)
+    Call before a batch of staging or materialization operations. The boost
+    stays active until :meth:`restore_memory` or :meth:`release_memory`.
+    ``target`` is ``duckdb``, ``ladybug`` or ``both``.
     """
     response = await self._request(
       "POST",
@@ -841,17 +751,10 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def restore_memory(self, graph_id: str) -> dict[str, Any]:
-    """
-    Restore memory limits to defaults after staging/materialization operations.
+    """Restore memory limits to their defaults.
 
-    This only reconfigures memory limits - connections stay open and buffers
-    remain allocated. Use release_memory() to actually free memory.
-
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Dictionary with restore status (duckdb_restored, ladybug_restored, message)
+    Reconfigures limits only — connections stay open and buffers stay
+    allocated. Use :meth:`release_memory` to actually hand memory back.
     """
     response = await self._request(
       "POST",
@@ -863,22 +766,12 @@ class GraphClient(BaseGraphClient):
   async def release_memory(
     self, graph_id: str, target: str = "both", aggressive: bool = True
   ) -> dict[str, Any]:
-    """
-    Release memory by closing connections and freeing buffers to the OS.
+    """Close connections and return buffer memory to the OS.
 
-    Unlike restore_memory (which only reconfigures limits), this actually
-    closes connections to force the database engines to release their
-    buffer memory back to the operating system.
-
-    Call this after staging or materialization operations complete.
-
-    Args:
-        graph_id: Graph database identifier
-        target: Which system to release - "duckdb", "ladybug", or "both"
-        aggressive: For LadybugDB - run GC and malloc_trim for maximum release
-
-    Returns:
-        Dictionary with release status and statistics
+    Closing connections is what forces the engines to give buffers back;
+    :meth:`restore_memory` only lowers the configured ceiling. Call after
+    staging or materialization completes. ``aggressive`` additionally runs GC
+    and ``malloc_trim`` on the LadybugDB side.
     """
     response = await self._request(
       "POST",
@@ -889,15 +782,7 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def memory_status(self, graph_id: str) -> dict[str, Any]:
-    """
-    Check if memory is currently boosted for a graph.
-
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Dictionary with boost status (duckdb_boosted, ladybug_boosted)
-    """
+    """Report whether memory is currently boosted for a graph."""
     response = await self._request(
       "GET",
       f"/databases/{graph_id}/memory/status",
@@ -916,22 +801,12 @@ class GraphClient(BaseGraphClient):
     priority: int = 5,
     ignore_errors: bool = True,
   ) -> dict[str, Any]:
-    """
-    Unified data ingestion with flexible execution modes.
+    """Ingest data, either inline or as a queued background task.
 
-    Args:
-        graph_id: Target database ID
-        file_path: Local file path (for sync mode)
-        table_name: Target table name (for sync mode)
-        pipeline_run_id: Pipeline ID (for async mode)
-        bucket: S3 bucket (for async mode)
-        files: S3 file keys (for async mode)
-        mode: Execution mode ("sync" or "async")
-        priority: Task priority (1-10)
-        ignore_errors: Use IGNORE_ERRORS for duplicates
-
-    Returns:
-        Ingestion response
+    ``mode="sync"`` ingests a local file and requires ``file_path`` and
+    ``table_name``; ``mode="async"`` queues an S3 batch and requires
+    ``pipeline_run_id``, ``bucket`` and ``files``. Sync mode gets 30x the
+    configured timeout because it blocks on the load itself.
     """
     payload = {
       "mode": mode,
@@ -951,7 +826,6 @@ class GraphClient(BaseGraphClient):
       payload["bucket"] = bucket
       payload["files"] = files
 
-    # Longer timeout for ingestion operations
     timeout = self.config.timeout * 30 if mode == "sync" else self.config.timeout
 
     response = await self._request(
@@ -988,22 +862,16 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", "/tasks/queue/info")
     return response.json()
 
-  # Additional methods for compatibility with APIRepository
+  # APIRepository-compatible surface
 
   async def execute_query(
     self, cypher: str, params: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
-    """
-    Execute a query and return data rows (APIRepository compatibility).
+    """Execute a query and return just the data rows.
 
-    Args:
-        cypher: Cypher query
-        params: Query parameters
-
-    Returns:
-        List of result rows
+    Targets ``_database_name`` when the factory set one (subgraphs route to a
+    database name distinct from the graph ID), else ``graph_id``.
     """
-    # Use _database_name if set (for subgraphs), otherwise fall back to graph_id
     database = getattr(self, "_database_name", None) or self.graph_id or "sec"
 
     result = cast(dict[str, Any], await self.query(cypher, database, params))
@@ -1012,33 +880,17 @@ class GraphClient(BaseGraphClient):
   async def execute_single(
     self, cypher: str, params: dict[str, Any] | None = None
   ) -> dict[str, Any] | None:
-    """
-    Execute a query expecting a single result.
-
-    Args:
-        cypher: Cypher query
-        params: Query parameters
-
-    Returns:
-        Single result or None
-    """
+    """Execute a query and return its first row, or None if empty."""
     results = await self.execute_query(cypher, params)
     return results[0] if results else None
 
   async def get_schema(self) -> list[dict[str, Any]]:
-    """
-    Get database schema information.
-
-    Returns:
-        Schema information including tables and properties
-    """
-    # Get graph ID from instance variable
+    """Get the bound graph's tables and their properties."""
     graph_id = self.graph_id or "sec"
 
     response = await self._request("GET", f"/databases/{graph_id}/schema")
     schema_data = response.json()
 
-    # Return just the tables array for compatibility
     return schema_data.get("tables", [])
 
   async def vector_search(
@@ -1049,21 +901,11 @@ class GraphClient(BaseGraphClient):
     limit: int = 20,
     select: list[str] | None = None,
   ) -> list[dict[str, Any]]:
-    """
-    Search for similar rows by embedding via the Graph API vector index.
+    """Search a table's LanceDB vector index for rows near ``embedding``.
 
-    Calls the LanceDB vector search endpoint on graph instances (master
-    or replicas). The index must have been built via vector_build first.
-
-    Args:
-        graph_id: Graph database identifier (e.g., "sec")
-        table_name: Table whose vector index to search (e.g., "Element")
-        embedding: Query embedding vector (e.g., 384-dim float array)
-        limit: Maximum number of results to return
-        select: Columns to include in results. If None, returns all.
-
-    Returns:
-        List of result dicts with matched columns + distance.
+    Serves from master or replica instances. The index must exist already —
+    build it with :meth:`vector_build`. Each result carries the selected
+    columns plus a ``distance``; ``select=None`` returns all columns.
     """
     json_data: dict[str, Any] = {"embedding": embedding, "limit": limit}
     if select is not None:
@@ -1085,23 +927,14 @@ class GraphClient(BaseGraphClient):
     memory_limit: str = "8GB",
     timeout: int = 900,
   ) -> dict[str, Any]:
-    """
-    Build a vector index from a DuckDB query on the graph instance.
+    """Build a LanceDB IVF-PQ index from a DuckDB staging query.
 
-    Runs the provided SQL query against the DuckDB staging database and
-    builds an IVF-PQ vector index from the results. The query must return
-    a "vector" column — all other columns become searchable metadata.
+    ``query`` must select a ``vector`` column (e.g.
+    ``embedding::FLOAT[384] AS vector``); every other column it returns
+    becomes searchable metadata on the index. Builds run on the graph instance
+    and can take 10+ minutes, hence the long default ``timeout``.
 
-    Args:
-        graph_id: Graph database identifier
-        table_name: Name for the lance index (e.g., "Element")
-        query: DuckDB SQL that selects rows to index. Must include a
-            "vector" column (e.g., ``embedding::FLOAT[384] AS vector``).
-        memory_limit: DuckDB memory limit for the query
-        timeout: Request timeout in seconds (build can take 10+ minutes)
-
-    Returns:
-        Dict with row_count, num_partitions, index_size_mb, duration_ms.
+    Returns row_count, num_partitions, index_size_mb and duration_ms.
     """
     response = await self._request(
       "POST",
@@ -1119,22 +952,12 @@ class GraphClient(BaseGraphClient):
     s3_key: str | None = None,
     timeout: int = 300,
   ) -> dict[str, Any]:
-    """
-    Export a vector index as tar.gz, optionally uploading to S3.
+    """Export a vector index as tar.gz, optionally uploading it to S3.
 
-    When s3_bucket and s3_key are provided, the Graph API instance uploads
-    the tar.gz directly to S3 (required because the caller may not have
-    access to the instance's filesystem).
+    With ``s3_bucket``/``s3_key`` the graph instance uploads the archive
+    itself, since the caller has no access to the instance filesystem.
 
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table whose index to export
-        s3_bucket: S3 bucket to upload to (optional)
-        s3_key: S3 object key (optional)
-        timeout: Request timeout in seconds
-
-    Returns:
-        Dict with size_mb, duration_ms, and s3_uri if uploaded.
+    Returns size_mb, duration_ms, and s3_uri when uploaded.
     """
     json_data: dict[str, Any] = {}
     if s3_bucket and s3_key:
@@ -1266,21 +1089,11 @@ class GraphClient(BaseGraphClient):
     extensions: list[str] | None = None,
     custom_ddl: str | None = None,
   ) -> dict[str, Any]:
-    """
-    Install or update database schema.
+    """Install or update a database schema.
 
-    Args:
-        graph_id: Target database ID
-        base_schema: Base schema type (default: "base")
-        extensions: List of schema extensions to install
-        custom_ddl: Custom DDL statements to execute
-
-    Returns:
-        Schema installation result
+    Passing ``custom_ddl`` sends the statements verbatim; otherwise the base
+    schema plus the named extensions are composed server-side.
     """
-    # The API expects a 'type' field in the request
-    # When using base_schema and extensions, the type should be 'custom'
-    # When using custom_ddl, the type should be 'ddl'
     if custom_ddl:
       payload = {"type": "ddl", "ddl": custom_ddl}
     else:
@@ -1294,66 +1107,36 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  # Additional endpoints not in original API
-
   async def export_database(self, graph_id: str) -> bytes:
-    """
-    Export a database file.
-
-    Args:
-        graph_id: Database to export
-
-    Returns:
-        Database file contents as bytes
-    """
+    """Export a database file and return its raw bytes."""
     response = await self._request("GET", f"/databases/{graph_id}/backup")
     return response.content
 
   async def get_storage_breakdown(self, graph_id: str) -> dict[str, Any]:
-    """
-    Get itemized disk usage for a graph and everything it owns.
+    """Get itemized disk usage for a graph and everything it owns.
 
     Covers the LadybugDB databases (graph, memory, subgraphs, WALs), the
-    LanceDB vector indexes and the DuckDB staging file — so the total is
-    real occupied disk, not just the primary database.
+    LanceDB vector indexes and the DuckDB staging file, so the total is real
+    occupied disk rather than just the primary database.
 
-    Args:
-        graph_id: Parent graph to measure
-
-    Returns:
-        ``{graph_id, total_bytes, items: [{type, id, bytes}]}``
+    Returns ``{graph_id, total_bytes, items: [{type, id, bytes}]}``.
     """
     response = await self._request("GET", f"/databases/{graph_id}/storage")
     return response.json()
 
   async def get_database_info(self, graph_id: str) -> dict[str, Any]:
-    """
-    Get comprehensive database information and statistics.
-
-    Args:
-        graph_id: Database to get information for
-
-    Returns:
-        Database information including size, schema, and metadata
-    """
+    """Get a database's size, schema and metadata."""
     response = await self._request("GET", f"/databases/{graph_id}")
     return response.json()
 
   async def get_database_metrics(
     self, graph_id: str, include_counts: bool = False
   ) -> dict[str, Any]:
-    """
-    Get size and modification metrics for a specific database.
+    """Get size and modification metrics for a database.
 
-    Args:
-        graph_id: Database to get metrics for
-        include_counts: Also compute node/relationship counts. These are full
-            graph scans — tens of seconds on a large database — so they are
-            off by default and come back as None. Only pass True off a
-            latency path.
-
-    Returns:
-        Database metrics including size and timestamps
+    ``include_counts`` additionally computes node/relationship counts. Those
+    are full graph scans — tens of seconds on a large database — so they are
+    off by default and come back as None. Only pass True off a latency path.
     """
     params = {"include_counts": "true"} if include_counts else None
     response = await self._request(
@@ -1362,24 +1145,16 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def get_metrics(self) -> dict[str, Any]:
-    """
-    Get comprehensive metrics for the entire cluster node.
-
-    Returns:
-        System, database, query, and ingestion metrics for monitoring
-    """
+    """Get system, database, query and ingestion metrics for this node."""
     response = await self._request("GET", "/metrics")
     return response.json()
 
-  # Helper methods for common operations
-
   async def database_exists(self, graph_id: str) -> bool:
-    """Check if a database exists."""
+    """Check if a database exists; errors other than 404 propagate."""
     try:
       await self.get_database(graph_id)
       return True
     except Exception as e:
-      # Check if it's an HTTP exception with 404 status
       if hasattr(e, "status_code") and getattr(e, "status_code", None) == 404:
         return False
       raise
@@ -1396,15 +1171,10 @@ class GraphClient(BaseGraphClient):
   ) -> dict[str, Any]:
     """Promote a WIP database to active (blue-green swap).
 
-    Requires that {graph_id}-wip.lbug exists on the Graph API node.
-
-    Args:
-        graph_id: Base graph ID (not the -wip variant).
-        lock_token: If the caller already holds the materialization lock,
-            pass the token so the swap endpoint doesn't re-acquire it.
-
-    Returns:
-        Swap result with status and message.
+    ``graph_id`` is the base ID, not the ``-wip`` variant, and
+    ``{graph_id}-wip.lbug`` must already exist on the Graph API node. Pass
+    ``lock_token`` if the caller already holds the materialization lock, so
+    the swap endpoint does not try to re-acquire it.
     """
     headers: dict[str, str] = {}
     if lock_token:
@@ -1417,17 +1187,9 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def execute_ddl(self, ddl: str, graph_id: str | None = None) -> dict[str, Any]:
-    """
-    Execute DDL (Data Definition Language) statements.
+    """Execute a DDL statement (CREATE NODE TABLE, CREATE REL TABLE, ...).
 
-    This is useful for creating tables, relationships, etc.
-
-    Args:
-        ddl: DDL statement (CREATE NODE TABLE, CREATE REL TABLE, etc.)
-        graph_id: Target graph ID (uses self.graph_id if not provided)
-
-    Returns:
-        Query result
+    Defaults to the client's bound graph when ``graph_id`` is omitted.
     """
     target_graph = graph_id or self.graph_id or "sec"
     return cast(dict[str, Any], await self.query(ddl, target_graph))
@@ -1435,19 +1197,12 @@ class GraphClient(BaseGraphClient):
   async def node_exists(
     self, label: str, filters: dict[str, Any] | None = None
   ) -> bool:
-    """
-    Check if a node exists with the given label and filters.
+    """Check whether any node with ``label`` matches ``filters``.
 
-    Args:
-        label: Node label to check
-        filters: Optional filters to match against
-
-    Returns:
-        True if node exists, False otherwise
+    Filter values are passed as query parameters, never interpolated.
     """
     database = self.graph_id or "sec"
 
-    # Build WHERE clause from filters
     where_clause = ""
     params = {}
 
@@ -1461,7 +1216,6 @@ class GraphClient(BaseGraphClient):
       if conditions:
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
-    # Build query to check existence
     cypher = f"""
       MATCH (n:{label})
       {where_clause}
@@ -1488,21 +1242,12 @@ class GraphClient(BaseGraphClient):
     checkpoint: bool = True,
     vacuum: bool = False,
   ) -> dict[str, Any]:
-    """
-    Create a backup of a database.
+    """Start a backup task and return its ``task_id`` and ``monitor_url``.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_format: Backup format (only 'full_dump' supported)
-        compression: Enable compression
-        encryption: Enable encryption
-        backup_type: "standard", "replica", "duckdb_staging", or "r2_download"
-        s3_destination: Target S3 location (required for all non-standard types)
-        checkpoint: Run CHECKPOINT before backup
-        vacuum: Run VACUUM to compact database before backup (DuckDB only)
-
-    Returns:
-        Task information including task_id and monitor_url
+    ``backup_format`` only supports ``full_dump``. ``backup_type`` is
+    ``standard``, ``replica``, ``duckdb_staging`` or ``r2_download``; every
+    non-standard type requires ``s3_destination``. ``vacuum`` compacts before
+    the dump and applies to DuckDB only.
     """
     payload = {
       "backup_format": backup_format,
@@ -1535,29 +1280,13 @@ class GraphClient(BaseGraphClient):
     checkpoint: bool = True,
     vacuum: bool = False,
   ) -> dict[str, Any]:
-    """
-    Create a backup and monitor via SSE.
+    """Create a backup and block until it finishes, monitoring via SSE.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_format: Backup format (only 'full_dump' supported)
-        compression: Enable compression
-        encryption: Enable encryption
-        timeout: Maximum time to wait for completion (seconds)
-        backup_type: "standard", "replica", "duckdb_staging", or "r2_download"
-        s3_destination: Target S3 location (required for all non-standard types)
-        checkpoint: Run CHECKPOINT before backup
-        vacuum: Run VACUUM to compact database before backup (DuckDB only)
-
-    Returns:
-        Dict with backup results:
-        - status: "completed" or "failed"
-        - backup_size_mb: Size of backup (if successful)
-        - duration_seconds: Total time taken
-        - error: Error message (if failed)
+    Takes the same arguments as :meth:`create_backup`. Never raises: failures
+    come back as ``{"status": "failed", "error": ...}``, and success carries
+    ``backup_size_mb`` and ``duration_seconds``.
     """
     try:
-      # Start the backup task
       logger.info(f"Starting backup for database {graph_id}")
 
       start_response = await self.create_backup(
@@ -1575,12 +1304,10 @@ class GraphClient(BaseGraphClient):
       monitor_url = start_response.get("monitor_url")
 
       if not monitor_url:
-        # Fallback for compatibility
         monitor_url = f"/tasks/{task_id}/monitor"
 
       logger.info(f"Started backup task {task_id}, monitoring via SSE...")
 
-      # Monitor via SSE using the generic monitor
       return await self._monitor_task_sse(
         sse_path=monitor_url, task_id=task_id, task_type="backup", timeout=timeout
       )
@@ -1593,14 +1320,10 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
   ) -> dict[str, Any]:
-    """
-    Download the current database as a backup.
+    """Download the current database, returning its bytes plus metadata.
 
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Dict containing backup_data and metadata
+    The whole dump is held in memory; prefer :meth:`create_backup` with an
+    ``s3_destination`` for anything large.
     """
     response = await self.client.post(
       f"/databases/{graph_id}/backup-download",
@@ -1625,20 +1348,11 @@ class GraphClient(BaseGraphClient):
     encrypted: bool = True,
     compressed: bool = True,
   ) -> dict[str, Any]:
-    """
-    Restore a database from S3 backup.
+    """Start a restore from an S3 backup; returns task_id and monitor_url.
 
-    Args:
-        graph_id: Graph database identifier
-        s3_bucket: S3 bucket containing the backup
-        s3_key: S3 key path to the backup
-        create_system_backup: Create system backup before restore
-        force_overwrite: Force overwrite existing database
-        encrypted: Whether the backup is encrypted
-        compressed: Whether the backup is compressed
-
-    Returns:
-        Task information including task_id and monitor_url
+    ``encrypted`` and ``compressed`` describe the stored artifact, not what to
+    do to it. ``force_overwrite`` is required to restore over an existing
+    database, and ``create_system_backup`` snapshots that database first.
     """
     data = {
       "s3_bucket": s3_bucket,
@@ -1667,30 +1381,12 @@ class GraphClient(BaseGraphClient):
     compressed: bool = True,
     timeout: int = 3600,  # 1 hour default
   ) -> dict[str, Any]:
-    """
-    Restore a database from S3 backup and monitor via SSE.
+    """Restore from an S3 backup and block until it finishes, monitoring via SSE.
 
-    This method is designed for long-running restore tasks. It uses
-    Server-Sent Events to receive real-time progress updates.
-
-    Args:
-        graph_id: Graph database identifier
-        s3_bucket: S3 bucket containing the backup
-        s3_key: S3 key path to the backup
-        create_system_backup: Create system backup before restore
-        force_overwrite: Force overwrite existing database
-        encrypted: Whether the backup is encrypted
-        compressed: Whether the backup is compressed
-        timeout: Maximum time to wait for completion (seconds)
-
-    Returns:
-        Dict with restore results:
-        - status: "completed" or "failed"
-        - duration_seconds: Total time taken
-        - error: Error message (if failed)
+    Takes the same arguments as :meth:`restore_backup`. Never raises: failures
+    come back as ``{"status": "failed", "error": ...}``.
     """
     try:
-      # Step 1: Start the restore task
       logger.info(f"Starting restore for database {graph_id} from {s3_bucket}/{s3_key}")
 
       restore_response = await self.restore_backup(
@@ -1708,7 +1404,6 @@ class GraphClient(BaseGraphClient):
 
       logger.info(f"Started restore task {task_id}, monitoring via SSE...")
 
-      # Step 2: Monitor via SSE
       return await self._monitor_task_sse(
         sse_path=monitor_url, task_id=task_id, task_type="restore", timeout=timeout
       )
@@ -1728,29 +1423,16 @@ class GraphClient(BaseGraphClient):
     null_columns: list[str] | None = None,
     timeout: int = 1800,  # 30 minutes default for large file sets
   ) -> dict[str, Any]:
-    """
-    Create a DuckDB staging table from S3 files with SSE monitoring.
+    """Create a DuckDB staging table from S3 files, monitoring via SSE.
 
-    This method starts a background table creation task and monitors it via SSE
-    until completion. This allows creating tables from thousands of S3 files
-    without HTTP timeout issues.
+    The create runs as a background task on the instance, so thousands of S3
+    files can be staged without hitting an HTTP timeout. ``s3_pattern`` is
+    either a glob or an explicit file list, and ``file_id_map`` (s3_key ->
+    file_id) carries provenance through to the staged rows.
 
-    Args:
-        graph_id: Graph database identifier
-        table_name: Name for the table
-        s3_pattern: S3 glob pattern (string) or list of S3 file paths
-        file_id_map: Optional map of s3_key -> file_id for provenance tracking
-        timeout: Maximum time to wait for completion (seconds), default 30 min
-
-    Returns:
-        Dict with creation results:
-        - status: "completed" or "failed"
-        - result: Table creation details (if successful)
-        - duration_seconds: Total time taken
-        - error: Error message (if failed)
+    Never raises: failures come back as ``{"status": "failed", "error": ...}``.
     """
     try:
-      # Step 1: Start the background table creation task
       file_count = len(s3_pattern) if isinstance(s3_pattern, list) else 1
       logger.info(
         f"Starting table creation for {table_name} ({file_count} {'files' if file_count > 1 else 'pattern'})"
@@ -1760,7 +1442,7 @@ class GraphClient(BaseGraphClient):
         "graph_id": graph_id,
         "table_name": table_name,
         "s3_pattern": s3_pattern,
-        "timeout_seconds": timeout,  # Pass timeout to server for background task
+        "timeout_seconds": timeout,
       }
       if file_id_map is not None:
         json_data["file_id_map"] = file_id_map
@@ -1781,7 +1463,6 @@ class GraphClient(BaseGraphClient):
 
       logger.info(f"Started staging task {task_id}, monitoring via SSE...")
 
-      # Step 2: Monitor via SSE
       return await self._monitor_task_sse(
         sse_path=sse_path, task_id=task_id, task_type="staging", timeout=timeout
       )
@@ -1800,35 +1481,16 @@ class GraphClient(BaseGraphClient):
     null_columns: list[str] | None = None,
     file_id_map: dict[str, str] | None = None,
   ) -> dict[str, Any]:
-    """
-    Insert data into an existing DuckDB staging table with SSE monitoring.
+    """Append S3 files to an existing DuckDB staging table, monitoring via SSE.
 
-    This method starts a background table insert task and monitors it via SSE
-    until completion. Used for incremental data append to existing tables.
+    The table must already exist (see :meth:`create_table`) with a schema
+    compatible with the incoming files. ``deduplicate`` uses NOT EXISTS on the
+    dedup key — ``identifier`` for nodes, src/dst for relationships — which is
+    safe for tables carrying FLOAT[384] embedding columns.
 
-    Deduplication uses NOT EXISTS on the dedup key (identifier for nodes,
-    src/dst for relationships). Safe for tables with FLOAT[384] embeddings.
-
-    Prerequisites:
-    - Table must already exist (created via create_table)
-    - Schema must be compatible with the new files
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Name of the existing table
-        s3_pattern: S3 glob pattern (string) or list of S3 file paths
-        timeout: Maximum time to wait for completion (seconds), default 30 min
-        deduplicate: Dedup rows using NOT EXISTS on dedup key. Default True.
-
-    Returns:
-        Dict with insert results:
-        - status: "completed" or "failed"
-        - result: Table insert details (if successful)
-        - duration_seconds: Total time taken
-        - error: Error message (if failed)
+    Never raises: failures come back as ``{"status": "failed", "error": ...}``.
     """
     try:
-      # Step 1: Start the background table insert task
       file_count = len(s3_pattern) if isinstance(s3_pattern, list) else 1
       logger.info(
         f"Starting table insert for {table_name} ({file_count} {'files' if file_count > 1 else 'pattern'})"
@@ -1839,7 +1501,7 @@ class GraphClient(BaseGraphClient):
         "table_name": table_name,
         "s3_pattern": s3_pattern,
         "deduplicate": deduplicate,
-        "timeout_seconds": timeout,  # Pass timeout to server for background task
+        "timeout_seconds": timeout,
       }
       if null_columns is not None:
         json_data["null_columns"] = null_columns
@@ -1860,7 +1522,6 @@ class GraphClient(BaseGraphClient):
 
       logger.info(f"Started insert task {task_id}, monitoring via SSE...")
 
-      # Step 2: Monitor via SSE
       return await self._monitor_task_sse(
         sse_path=sse_path, task_id=task_id, task_type="insert", timeout=timeout
       )
@@ -1870,15 +1531,7 @@ class GraphClient(BaseGraphClient):
       return {"status": "failed", "error": str(e)}
 
   async def list_tables(self, graph_id: str) -> list[dict[str, Any]]:
-    """
-    List all DuckDB staging tables for a graph.
-
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        List of table info dictionaries
-    """
+    """List the graph's DuckDB staging tables."""
     response = await self._request("GET", f"/databases/{graph_id}/tables")
     return response.json()
 
@@ -1889,18 +1542,11 @@ class GraphClient(BaseGraphClient):
     parameters: list[Any] | None = None,
     timeout: float | None = None,
   ) -> dict[str, Any]:
-    """
-    Execute SQL query on DuckDB staging tables.
+    """Run a read-only SQL query against DuckDB staging.
 
-    Args:
-        graph_id: Graph database identifier
-        sql: SQL query to execute
-        parameters: Optional query parameters for safe value substitution
-        timeout: Optional request timeout in seconds. Defaults to client config timeout.
-                 Use longer timeout for DDL operations like CREATE TABLE AS SELECT.
-
-    Returns:
-        Query results with columns and rows
+    Hits the hardened ``/tables/query`` endpoint, which accepts SELECT/WITH
+    only; use :meth:`execute_write` for DDL and writes. ``parameters`` are
+    bound rather than interpolated.
     """
     json_data = {"graph_id": graph_id, "sql": sql}
     if parameters is not None:
@@ -1923,22 +1569,11 @@ class GraphClient(BaseGraphClient):
   ) -> dict[str, Any]:
     """Execute a write/DDL statement on DuckDB staging (internal write path).
 
-    Read-write companion to :meth:`query_table`. ``query_table`` hits the
-    hardened read-only ``/tables/query`` (SELECT/WITH only); this hits
-    ``/tables/execute``, which runs on the read-write connection with
-    httpfs + postgres_scanner enabled — for ``CREATE TABLE AS SELECT ...
-    postgres_scan(...)`` staging and INSERT/DELETE upserts used by the
-    materialization and ingestion pipelines.
-
-    Args:
-        graph_id: Graph database identifier
-        sql: Write/DDL statement to execute
-        parameters: Optional query parameters for safe value substitution
-        timeout: Optional request timeout in seconds. Use a longer timeout for
-                 DDL like CREATE TABLE AS SELECT.
-
-    Returns:
-        Result payload (columns/rows for statements that return a set).
+    Read-write companion to :meth:`query_table`. Hits ``/tables/execute``,
+    which runs on the read-write connection with httpfs and postgres_scanner
+    enabled — for ``CREATE TABLE AS SELECT ... postgres_scan(...)`` staging
+    and the INSERT/DELETE upserts the materialization and ingestion pipelines
+    depend on. Give DDL like CREATE TABLE AS SELECT a longer ``timeout``.
     """
     json_data = {"graph_id": graph_id, "sql": sql}
     if parameters is not None:
@@ -1953,16 +1588,7 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def delete_table(self, graph_id: str, table_name: str) -> dict[str, Any]:
-    """
-    Delete a DuckDB staging table.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name to delete
-
-    Returns:
-        Deletion response
-    """
+    """Drop a DuckDB staging table."""
     response = await self._request(
       "DELETE", f"/databases/{graph_id}/tables/{table_name}"
     )
@@ -1971,17 +1597,7 @@ class GraphClient(BaseGraphClient):
   async def delete_file_data(
     self, graph_id: str, table_name: str, file_id: str
   ) -> dict[str, Any]:
-    """
-    Delete rows from a DuckDB table by file_id.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name to delete from
-        file_id: File ID to delete rows for
-
-    Returns:
-        Deletion response with rows_deleted count
-    """
+    """Delete a staging table's rows for one ``file_id``; returns rows_deleted."""
     response = await self._request(
       "DELETE", f"/databases/{graph_id}/tables/{table_name}/files/{file_id}"
     )
@@ -1999,29 +1615,18 @@ class GraphClient(BaseGraphClient):
     source_graph_id: str | None = None,
     incremental: bool = False,
   ) -> dict[str, Any]:
-    """
-    Materialize a DuckDB staging table into the graph database.
+    """Materialize a DuckDB staging table into the graph database.
 
-    Supports both selective materialization (filtering by file_ids) and full
-    materialization (copying entire table). For large tables, use hash-based
-    batching (batch_num/num_batches) for deterministic partitioning.
+    ``file_ids`` narrows the copy to specific files; None copies every row.
+    ``batch_num``/``num_batches`` partition a large table deterministically by
+    ``hash(key) % num_batches``, so batches can be issued one at a time
+    against LadybugDB's single writer. ``source_graph_id`` reads staging from
+    a different graph, which is how blue-green materialization feeds a
+    ``-wip`` target. ``incremental`` anti-joins against a keyset snapshot so
+    only new rows are copied — use it when the target graph is already
+    populated, otherwise the copy assumes an empty target.
 
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name to materialize
-        file_ids: Optional list of file IDs to materialize. If None, materializes all rows.
-        batch_num: Current batch number (0-indexed) for hash-based batching.
-        num_batches: Total number of batches. Each row goes to one batch based on hash(key) % num_batches.
-        materialize_embeddings: Include embedding columns in materialization. Default false.
-        timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
-        source_graph_id: Read DuckDB staging from this graph instead of graph_id.
-            Used by blue-green materialization.
-        incremental: COPY only rows not already in the target graph (anti-join
-            against a keyset snapshot) instead of assuming an empty target. Use
-            when materializing into a POPULATED graph (skips the full rebuild).
-
-    Returns:
-        Materialization response with rows materialized and timing
+    Sent with retries disabled, since a replayed materialize duplicates rows.
     """
     json_data: dict[str, Any] = {}
 
@@ -2059,18 +1664,11 @@ class GraphClient(BaseGraphClient):
     query: str | None = None,
     timeout: float = 600.0,
   ) -> dict[str, Any]:
-    """Build or rebuild a vector index on a table.
+    """Build or rebuild a table's vector index.
 
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table to index
-        backend: "hnsw" for LadybugDB HNSW, "lance" for LanceDB IVF-PQ
-        column: Embedding column name (hnsw only)
-        query: DuckDB SQL query (required for lance, ignored for hnsw)
-        timeout: Request timeout in seconds
-
-    Returns:
-        Build response with row_count, duration_ms, backend
+    ``backend="hnsw"`` indexes ``column`` in place with LadybugDB's HNSW;
+    ``backend="lance"`` builds a LanceDB IVF-PQ index from ``query`` and
+    ignores ``column``.
     """
     json_data: dict[str, Any] = {"backend": backend}
     if backend == "hnsw":
@@ -2092,21 +1690,11 @@ class GraphClient(BaseGraphClient):
     subgraph_id: str,
     tables: list[str] | None = None,
   ) -> dict[str, Any]:
-    """
-    Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
+    """Fork the parent's DuckDB staging directly into a subgraph's LadybugDB.
 
-    This operation:
-    1. Attaches parent graph's DuckDB staging database
-    2. Copies specified tables (or all tables) from parent DuckDB to subgraph LadybugDB
-    3. Runs on the same EC2 instance where both DuckDB and LadybugDB databases live
-
-    Args:
-        parent_graph_id: Parent graph to copy data from
-        subgraph_id: Subgraph to copy data to
-        tables: List of table names to copy (empty list = all tables)
-
-    Returns:
-        Fork response with tables copied, row counts, and timing
+    The instance attaches the parent's staging database and copies ``tables``
+    (empty list means all) straight across. Both databases live on the same
+    instance, so no data crosses the network.
     """
     response = await self._request(
       "POST",
@@ -2122,17 +1710,11 @@ class GraphClient(BaseGraphClient):
   async def migration_export(
     self, source_version: str, target_version: str, bucket: str
   ) -> dict[str, Any]:
-    """
-    Start migration export on this instance.
+    """Start a LadybugDB migration export on this instance.
 
-    Args:
-        source_version: Current LadybugDB version
-        target_version: Target LadybugDB version
-        bucket: S3 bucket for the system backup. The writer container does not
-            resolve USER_DATA_BUCKET itself, so the caller passes it in.
-
-    Returns:
-        Task ID and monitor URL
+    ``bucket`` is the S3 destination for the system backup — the writer
+    container does not resolve ``USER_DATA_BUCKET`` itself, so the caller
+    supplies it. Returns the task ID and monitor URL.
     """
     response = await self._request(
       "POST",
@@ -2148,12 +1730,7 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def migration_import(self) -> dict[str, Any]:
-    """
-    Start migration import on this instance.
-
-    Returns:
-        Task ID and monitor URL
-    """
+    """Start a migration import on this instance; returns task ID and monitor URL."""
     response = await self._request(
       "POST",
       "/migration/import",
@@ -2163,23 +1740,15 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def migration_status(self) -> dict[str, Any]:
-    """
-    Check migration status on this instance.
-
-    Returns:
-        Migration status including pending flag, manifest, and pre-migration files
-    """
+    """Check migration status: pending flag, manifest and pre-migration files."""
     response = await self._request("GET", "/migration/status")
     return response.json()
 
   async def migration_cleanup(self) -> dict[str, Any]:
-    """
-    Delete .pre-migration files on this instance after verifying migration success.
+    """Delete this instance's ``.pre-migration`` files once migration is verified.
 
-    System backups in S3 remain as the safety net.
-
-    Returns:
-        Cleanup result with files deleted and bytes freed
+    The S3 system backups remain as the safety net. Returns files deleted and
+    bytes freed.
     """
     response = await self._request("POST", "/migration/cleanup")
     return response.json()

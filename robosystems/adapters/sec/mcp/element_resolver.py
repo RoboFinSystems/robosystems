@@ -5,11 +5,11 @@ adapter because it relies on the **canonical concept taxonomy** curated
 inside ``adapters/sec/enrichment`` (us-gaap-oriented) — a small, in-memory
 set of concept embeddings, not a persisted per-element vector index.
 
-Resolution is canonical-first with a text-label fallback (the LanceDB
-element-vector semantic search was retired — it indexed ~8M elements
-dominated by single-filing filer extensions and returned low-signal
-noise for non-canonical concepts). The tool is manifest-gated to
-``has_semantic_enrichment`` repos, which only SEC sets.
+Resolution is canonical-first with a text-label fallback. There is no
+per-element vector index: the SEC corpus carries ~8M elements dominated by
+single-filing filer extensions, so embedding search over all of them returns
+low-signal noise for anything outside the curated concept set. The tool is
+manifest-gated to ``has_semantic_enrichment`` repos, which only SEC sets.
 
 Takes a duck-typed ``graph_client`` that exposes an ``execute_query``
 coroutine (the MCP client today). Returns a dict — variable number of

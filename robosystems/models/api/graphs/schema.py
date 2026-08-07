@@ -1,4 +1,4 @@
-"""Graph query API models."""
+"""Graph schema definition and introspection API models."""
 
 from typing import Any
 
@@ -6,11 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CustomSchemaDefinition(BaseModel):
-  """Custom schema definition for generic graphs.
+  """Custom node and relationship types for a generic graph.
 
-  This model allows you to define custom node types, relationship types, and properties
-  for graphs that don't fit the standard entity-based schema. Perfect for domain-specific
-  applications like inventory systems, org charts, project management, etc.
+  For graphs that don't fit the entity-based schema — inventory, org charts,
+  project management. ``extends`` names a base schema to build on, or is
+  omitted for a bare database.
   """
 
   model_config = ConfigDict(
@@ -628,6 +628,3 @@ class SchemaInfoResponse(BaseModel):
     description="Runtime schema information showing actual database structure",
     alias="schema",
   )
-
-
-# New API models for LadybugDB database operations

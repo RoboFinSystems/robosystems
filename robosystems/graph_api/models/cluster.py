@@ -76,7 +76,6 @@ class ClusterInfoResponse(BaseModel):
   uptime_seconds: float = Field(..., description="Node uptime")
   read_only: bool = Field(..., description="Read-only mode status")
 
-  # New comprehensive configuration section
   configuration: NodeConfiguration | None = Field(
     None, description="Complete node configuration"
   )

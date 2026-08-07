@@ -26,7 +26,6 @@ router.include_router(login_router)
 router.include_router(logout_router)
 router.include_router(session_router)
 
-# Email verification
 router.include_router(email_verification_router)
 
 # Org invitation preview (public, token-gated)
@@ -36,7 +35,6 @@ router.include_router(invitations_router)
 router.include_router(password_router)
 router.include_router(password_reset_router)
 
-# SSO
 router.include_router(sso_router)
 
 # Security

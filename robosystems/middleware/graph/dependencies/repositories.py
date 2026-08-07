@@ -1,5 +1,4 @@
-"""
-Repository factory dependencies.
+"""Repository factory dependencies.
 
 FastAPI dependency functions for creating graph repositories.
 """
@@ -26,20 +25,7 @@ async def get_graph_repository_dependency(
   current_user: User = Depends(get_current_user),
   operation_type: str = Query("read", description="Operation type: read or write"),
 ) -> Repository:
-  """
-  Get a repository for any graph type with proper routing.
-
-  Args:
-      graph_id: Graph identifier
-      current_user: Authenticated user
-      operation_type: Operation type (read/write)
-
-  Returns:
-      Configured Repository instance
-
-  Raises:
-      HTTPException: If graph not found or user doesn't have access
-  """
+  """Get a repository for any graph type with proper routing."""
   try:
     routing_info = MultiTenantUtils.get_graph_routing(graph_id)
     identity = routing_info["graph_identity"]
@@ -80,24 +66,12 @@ async def get_user_graph_repository(
   operation_type: str = Query("write", description="Operation type: read or write"),
   db: Session = Depends(get_db_session),
 ) -> Repository:
-  """
-  Get a repository specifically for user-created graphs.
+  """Get a repository specifically for user-created graphs.
 
   Validates that:
   1. The graph is a user graph (not shared repository)
   2. The user has access via GraphUser table
   3. The requested operation is allowed
-
-  Args:
-      graph_id: User graph identifier
-      current_user: Authenticated user
-      operation_type: Operation type (read/write)
-
-  Returns:
-      Repository instance for the user graph
-
-  Raises:
-      HTTPException: If not a user graph or access denied
   """
   identity = MultiTenantUtils.get_graph_identity(graph_id)
   if not identity.is_user_graph:
@@ -133,23 +107,12 @@ async def get_shared_repository(
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
 ) -> Repository:
-  """
-  Get a repository for a shared data repository.
+  """Get a repository for a shared data repository.
 
   Validates that:
   1. The repository is a known shared repository
   2. The user has read access permissions
   3. Returns read-only repository
-
-  Args:
-      repository_name: Shared repository name (sec, industry, etc.)
-      current_user: Authenticated user
-
-  Returns:
-      Read-only repository instance
-
-  Raises:
-      HTTPException: If not a valid repository or access denied
   """
   if not MultiTenantUtils.is_shared_repository(repository_name):
     raise HTTPException(
@@ -174,15 +137,7 @@ async def get_shared_repository(
 async def get_main_repository(
   current_user: User = Depends(get_current_user),
 ) -> Repository:
-  """
-  Get a repository for the main/default database.
-
-  Args:
-      current_user: Authenticated user
-
-  Returns:
-      Configured Repository instance for main database
-  """
+  """Get a repository for the main/default database."""
   try:
     repository = await get_graph_repository("default", operation_type="write")
 

@@ -1,8 +1,7 @@
-"""
-Lightweight Query Queue Manager
+"""In-process asyncio query queue for the public API layer.
 
-Provides in-memory query queuing with asyncio for the public API layer.
-No external dependencies, minimal latency overhead.
+State lives in memory, so the queue is per-process: depth and concurrency
+limits bound one API worker, not the fleet.
 """
 
 import asyncio
@@ -67,8 +66,7 @@ class QueuedQuery:
 
 
 class QueryQueueManager:
-  """
-  Lightweight query queue manager using asyncio.
+  """Lightweight query queue manager using asyncio.
 
   Features:
   - In-memory queue with size limits
@@ -85,15 +83,7 @@ class QueryQueueManager:
     max_queries_per_user: int = 10,
     query_timeout: int = 300,  # 5 minutes
   ):
-    """
-    Initialize query queue manager.
-
-    Args:
-        max_queue_size: Maximum queries in queue
-        max_concurrent_queries: Maximum simultaneous executions
-        max_queries_per_user: Maximum queries per user
-        query_timeout: Query execution timeout in seconds
-    """
+    """Initialize query queue manager."""
     self.max_queue_size = max_queue_size
     self.max_concurrent_queries = max_concurrent_queries
     self.max_queries_per_user = max_queries_per_user
@@ -137,27 +127,9 @@ class QueryQueueManager:
     credits_required: float = 0,
     priority: int = 5,
   ) -> str:
-    """
-    Submit a query to the queue.
-
-    Args:
-        cypher: Query to execute
-        parameters: Query parameters
-        graph_id: Target graph
-        user_id: User submitting query
-        credits_required: Credits to reserve (not enforced by the queue; default 0)
-        priority: Query priority (1-10, higher = more important)
-
-    Returns:
-        Query ID for tracking
-
-    Raises:
-        Exception: If queue is full or user limit exceeded
-    """
-    # Ensure worker is started
+    """Submit a query to the queue."""
     await self._ensure_started()
 
-    # Get admission controller
     admission_controller = get_admission_controller()
 
     # Check admission control first
@@ -180,7 +152,6 @@ class QueryQueueManager:
         AdmissionDecision.REJECT_LOAD_SHED: "load_shed",
       }.get(decision, "unknown")
 
-      # Record rejection metric
       record_query_queue_metrics(
         metric_type="submission",
         graph_id=graph_id,
@@ -194,7 +165,6 @@ class QueryQueueManager:
 
     # Check queue capacity
     if self._queue.qsize() >= self.max_queue_size:
-      # Record rejection metric
       record_query_queue_metrics(
         metric_type="submission",
         graph_id=graph_id,
@@ -210,7 +180,6 @@ class QueryQueueManager:
     # Check per-user limit
     user_count = self._user_query_counts.get(user_id, 0)
     if user_count >= self.max_queries_per_user:
-      # Record rejection metric
       record_query_queue_metrics(
         metric_type="submission",
         graph_id=graph_id,
@@ -224,7 +193,6 @@ class QueryQueueManager:
         "Please wait for existing queries to complete."
       )
 
-    # Create query
     query_id = f"q_{uuid.uuid4().hex[:12]}"
     query = QueuedQuery(
       id=query_id,
@@ -236,14 +204,12 @@ class QueryQueueManager:
       priority=priority,
     )
 
-    # Store query
     self._queries[query_id] = query
     self._user_query_counts[user_id] = user_count + 1
 
     # Add to priority queue (negative priority for max heap behavior)
     await self._queue.put((-priority, query.created_at.timestamp(), query_id))
 
-    # Record successful submission metric
     record_query_queue_metrics(
       metric_type="submission",
       graph_id=graph_id,
@@ -261,7 +227,6 @@ class QueryQueueManager:
 
   async def get_query_status(self, query_id: str) -> dict[str, Any] | None:
     """Get current status of a query."""
-    # Check running queries
     if query_id in self._running_queries:
       query = self._queries.get(query_id)
       if query:
@@ -272,7 +237,6 @@ class QueryQueueManager:
           "started_at": query.started_at.isoformat() if query.started_at else None,
         }
 
-    # Check completed queries
     if query_id in self._completed_queries:
       query = self._completed_queries[query_id]
       return {
@@ -301,20 +265,10 @@ class QueryQueueManager:
   async def get_query_result(
     self, query_id: str, wait_seconds: int = 0
   ) -> dict[str, Any] | None:
-    """
-    Get query result, optionally waiting for completion.
-
-    Args:
-        query_id: Query to check
-        wait_seconds: How long to wait for result (0 = don't wait)
-
-    Returns:
-        Query result if available
-    """
+    """Get query result, optionally waiting for completion."""
     start_time = time.time()
 
     while True:
-      # Check if completed
       if query_id in self._completed_queries:
         query = self._completed_queries[query_id]
         if query.status == QueryStatus.COMPLETED:
@@ -340,16 +294,7 @@ class QueryQueueManager:
       await asyncio.sleep(0.1)
 
   async def cancel_query(self, query_id: str, user_id: str) -> bool:
-    """
-    Cancel a pending query.
-
-    Args:
-        query_id: Query to cancel
-        user_id: User requesting cancellation
-
-    Returns:
-        True if cancelled, False if not found or already running
-    """
+    """Cancel a pending query."""
     query = self._queries.get(query_id)
     if not query or query.user_id != user_id:
       return False
@@ -361,7 +306,6 @@ class QueryQueueManager:
     query.status = QueryStatus.CANCELLED
     query.completed_at = datetime.now(UTC)
 
-    # Record cancellation metric
     record_query_queue_metrics(
       metric_type="execution",
       graph_id=query.graph_id,
@@ -374,7 +318,6 @@ class QueryQueueManager:
     self._completed_queries[query_id] = query
     self._cleanup_completed_queries()
 
-    # Update user count
     self._user_query_counts[user_id] = max(0, self._user_query_counts[user_id] - 1)
 
     logger.info(f"Query {query_id} cancelled by user {user_id}")
@@ -402,7 +345,6 @@ class QueryQueueManager:
         except TimeoutError:
           continue
 
-        # Get query details
         query = self._queries.get(query_id)
         if not query or query.status != QueryStatus.PENDING:
           continue  # Query was cancelled
@@ -411,7 +353,6 @@ class QueryQueueManager:
         query.status = QueryStatus.RUNNING
         query.started_at = datetime.now(UTC)
 
-        # Record wait time metric
         record_query_queue_metrics(
           metric_type="wait_time",
           graph_id=query.graph_id,
@@ -428,7 +369,6 @@ class QueryQueueManager:
           delta=1,
         )
 
-        # Create execution task
         task = asyncio.create_task(self._execute_query(query))
         self._running_queries[query_id] = task
 
@@ -501,7 +441,6 @@ class QueryQueueManager:
       self._completed_queries[query.id] = query
       self._cleanup_completed_queries()
 
-      # Remove from running
       self._running_queries.pop(query.id, None)
 
       # Update concurrent executions
@@ -512,7 +451,6 @@ class QueryQueueManager:
         delta=-1,
       )
 
-      # Update user count
       count = self._user_query_counts.get(query.user_id, 0)
       self._user_query_counts[query.user_id] = max(0, count - 1)
       if self._user_query_counts[query.user_id] == 0:
@@ -554,13 +492,11 @@ class QueryQueueManager:
     }
 
   def get_deep_health_status(self) -> dict[str, Any]:
-    """Get comprehensive health status including system resources."""
+    """Queue health plus current system resource utilization."""
     admission_controller = get_admission_controller()
 
-    # Get basic stats
     stats = self.get_stats()
 
-    # Get admission control health
     health = admission_controller.get_health_status(
       queue_depth=stats["queue_size"],
       max_queue_size=self.max_queue_size,

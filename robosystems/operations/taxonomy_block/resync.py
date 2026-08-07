@@ -3,22 +3,19 @@
 The provisioning-time copy (``taxonomy/writer.py::copy_library_into_tenant``) is
 additive-only, so in-place library fixes (rule logic, element attributes, trait
 names/bindings, calc weights, presentation order) never reach a tenant once it
-is provisioned. This module is the
-catch-up path: it runs ``resync_library_into_tenant`` (the ``DO UPDATE`` sibling)
-inside a transaction that has executed ``SET LOCAL robosystems.library_resync =
-'on'`` — the GUC the immutability trigger (migration 0016) honors so the seeder,
-and only the seeder, may update library-origin rows in tenant scope.
+is provisioned. This module is the catch-up path: it runs
+``resync_library_into_tenant`` (the ``DO UPDATE`` sibling) inside a transaction
+that has executed ``SET LOCAL robosystems.library_resync = 'on'`` — the GUC the
+immutability trigger honors so the seeder, and only the seeder, may update
+library-origin rows in tenant scope.
 
-**These two wrappers currently have no callers.** No admin CLI group, no job, no
-publish hook invokes them — an earlier version of this docstring described that
-surface as if it existed. What *does* run in production is the lower-level
-``resync_library_into_tenant`` called directly from migrations (0022 rs-metric,
-0023 rs-metric grown in place, 0024 rs-driver), each fanning one **package-pinned**
-resync across ``for_each_tenant_schema``. So the propagation machinery is proven;
-what is missing is only an operator entrypoint that does not require authoring a
-migration — and, because every migration so far pinned a single package,
-**rs-gaap core has never been re-propagated to a provisioned tenant**. Keep these
-functions: they are the intended seam for that entrypoint.
+**The two wrappers here have no callers.** Propagation in production runs the
+lower-level ``resync_library_into_tenant`` directly from a migration, each
+fanning one **package-pinned** resync across ``for_each_tenant_schema``. These
+functions are the seam for an operator entrypoint that doesn't require
+authoring a migration. Note the consequence of the package-pinned pattern: a
+package no migration has pinned has never been re-propagated to a provisioned
+tenant.
 
 Propagation policy: only safe for **in-place fixes within a framework version**
 (mapping targets stay version-stable; filed reports pin their own FactSets; live
@@ -84,9 +81,8 @@ def resync_all_tenants(
   to surface partial completion.
 
   **Sequential by design** — `O(N)` independent transactions over the tenant
-  schemas. Fine at current tenant counts (tens to low hundreds); if the fleet grows
-  enough that a full-fleet re-sync becomes slow, batch or parallelize here (each
-  schema is independent). The admin CLI / publish hook is the caller.
+  schemas. If the fleet grows enough that a full-fleet re-sync becomes slow,
+  batch or parallelize here; each schema is independent.
   """
   schemas = list_tenant_schemas()
   logger.info("[taxonomy-resync] re-syncing %d tenant schema(s)", len(schemas))

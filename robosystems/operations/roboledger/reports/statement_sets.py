@@ -17,9 +17,8 @@ different ownership semantics:
   restamped. ``delete_report`` / ``regenerate_report`` delete only by
   ``report_id`` and can never destroy canonical closed-month history.
 
-The pivot/persist helpers here were extracted from ``commands/reports.py``
-so both producers share one implementation; ``commands/reports.py``
-re-imports them, keeping its public surface unchanged.
+The pivot/persist helpers live here so both producers share one
+implementation; ``commands/reports.py`` re-exports them.
 
 Import-cycle rule: this module must not import from
 ``operations/roboledger/commands/*`` other than the leaf ``_guards``
@@ -491,14 +490,13 @@ def retract_canonical_statement_sets(
 ) -> list[str]:
   """Delete the window's canonical statement sets (reopen / replace path).
 
-  Sweeps the sets' VerificationResults first — no DB-level FK ties
-  results to fact_sets (the forecast-delete precedent), so without the
-  sweep they'd orphan invisibly and bleed into later reads. Facts
-  cascade at the DB level (``facts.fact_set_id ON DELETE CASCADE``).
+  Sweeps the sets' VerificationResults first: no DB-level FK ties results
+  to fact_sets, so without the sweep they'd orphan invisibly and bleed into
+  later reads. Facts cascade at the DB level
+  (``facts.fact_set_id ON DELETE CASCADE``).
 
-  Returns the retracted fact_set ids (empty when the window had none —
-  e.g. reopening a month closed before this stamping existed, or a
-  soft-skipped close).
+  Returns the retracted fact_set ids — empty when the window carries none,
+  as after a soft-skipped close.
   """
   set_ids = _canonical_set_ids_in_window(session, period_start, period_end)
   if not set_ids:
@@ -588,12 +586,12 @@ def stamp_canonical_statement_sets(
 
   period_label = period_end.strftime("%Y-%m")
   # The prior month rides the pivot as the indirect-CF delta basis: the
-  # working-capital derivation (``_derive_cash_flow_facts``) and the
-  # cash foot (``_reconcile_operating_to_cash``) both no-op below two
-  # periods, which is why single-period stamps used to mint a CF of
-  # NetIncome + DDA that never tied to the actual cash movement. Only
-  # the close month's facts are stamped — the prior month's are dropped
-  # after derivation (its own canonical sets, if any, are untouched).
+  # working-capital derivation (``_derive_cash_flow_facts``) and the cash
+  # foot (``_reconcile_operating_to_cash``) both no-op below two periods, so
+  # a single-period stamp would mint a CF of NetIncome + DDA that never ties
+  # to the actual cash movement. Only the close month's facts are stamped —
+  # the prior month's are dropped after derivation, and its own canonical
+  # sets, if any, are untouched.
   prior_end = period_start - timedelta(days=1)
   prior_start = prior_end.replace(day=1)
   try:

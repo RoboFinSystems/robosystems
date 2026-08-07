@@ -1,7 +1,9 @@
-"""Operator orchestrator for routing and coordination.
+"""Operator routing and multi-operator coordination.
 
-Handles dynamic operator selection, routing strategies, and multi-operator coordination.
-Uses the unified Operator protocol — operators are stateless, context is injected by adapters.
+Picks an operator for a query (by explicit type, capability, confidence score,
+or round-robin), runs it through the API adapter, and converts the result into
+the API-facing `OperatorResponse`. Operators are stateless; the adapter injects
+their context.
 """
 
 import asyncio
@@ -42,7 +44,7 @@ class RoutingStrategy(Enum):
 
 @dataclass
 class OperatorSelectionCriteria:
-  """Criteria for selecting operators."""
+  """Narrows the candidate set before a routing strategy scores it."""
 
   min_confidence: float = 0.3
   required_capabilities: list[OperatorCapability] = field(default_factory=list)
@@ -53,7 +55,7 @@ class OperatorSelectionCriteria:
 
 @dataclass
 class OrchestratorConfig:
-  """Configuration for the operator orchestrator."""
+  """Per-orchestrator settings; unset fields fall back to `OperatorConfig`."""
 
   routing_strategy: RoutingStrategy = RoutingStrategy.BEST_MATCH
   enable_rag: bool = False
@@ -73,16 +75,18 @@ class OrchestratorConfig:
       self.enable_rag = OperatorConfig.ORCHESTRATOR_CONFIG["enable_rag"]
 
 
-# ── Legacy OperatorResponse (kept for API compatibility) ────────────────────────
+# The API-facing response shape, imported here because the orchestrator is
+# where OperatorResult is converted into it.
 
 from robosystems.operations.operators.base import OperatorResponse  # noqa: E402
 
 
 class OperatorOrchestrator:
-  """Orchestrates operator selection and coordination.
+  """Selects and runs operators for one graph and user.
 
-  Uses the unified Operator protocol. Operators are instantiated without context —
-  the adapter (run_operator_api) injects tools, credits, and progress.
+  Instances hold routing state (round-robin position, per-operator metrics, an
+  optional response cache), so one orchestrator serves a conversation rather
+  than the whole process.
   """
 
   def __init__(
@@ -97,7 +101,6 @@ class OperatorOrchestrator:
     self.db_session = db_session
     self.config = config or OrchestratorConfig()
 
-    # Metrics tracking
     self._metrics: dict[str, Any] = {
       "total_queries": 0,
       "operator_usage": {},
@@ -147,7 +150,6 @@ class OperatorOrchestrator:
     mode: OperatorMode,
     execution_time: float | None = None,
   ) -> OperatorResponse:
-    """Convert OperatorResult to OperatorResponse for API compatibility."""
     return OperatorResponse(
       content=result.content,
       operator_name=operator_name,
@@ -172,12 +174,17 @@ class OperatorOrchestrator:
     stream_callback: Callable | None = None,
     ensemble_size: int | None = None,
   ) -> OperatorResponse:
-    """Route a query to the appropriate operator(s)."""
+    """Route a query to an operator and return its response.
+
+    An explicit `operator_type` bypasses routing entirely. `force_extended`
+    skips the cache in both directions, so a deliberate re-run is never served
+    a stale answer. Failures are returned as an error-bearing response rather
+    than raised — this is the boundary the API renders directly.
+    """
     start_time = time.time()
     self._metrics["total_queries"] += 1
 
     try:
-      # Check cache
       if self._cache is not None and not force_extended:
         cache_key = self._get_cache_key(query, operator_type, mode)
         if cache_key in self._cache:
@@ -193,7 +200,6 @@ class OperatorOrchestrator:
       if history:
         context["has_history"] = True
 
-      # Route based on strategy
       if operator_type:
         response = await self._route_to_specific_operator(
           query, operator_type, mode, history, context, stream_callback
@@ -233,7 +239,6 @@ class OperatorOrchestrator:
           response.metadata = {}
         response.metadata["routing_strategy"] = "best_match"
 
-      # Update metrics
       execution_time = time.time() - start_time
       response.execution_time = execution_time
       self._metrics["total_response_time"] += execution_time
@@ -244,7 +249,6 @@ class OperatorOrchestrator:
       self._metrics["operator_usage"][operator_name]["calls"] += 1
       self._metrics["operator_usage"][operator_name]["total_time"] += execution_time
 
-      # Cache response
       if self._cache is not None and not force_extended:
         cache_key = self._get_cache_key(query, operator_type, mode)
         self._cache[cache_key] = response
@@ -462,13 +466,15 @@ class OperatorOrchestrator:
     context: dict[str, Any],
     stream_callback: Callable | None = None,
   ) -> OperatorResponse:
-    """Execute an operator via the API adapter."""
+    """Execute an operator via the API adapter, converting failures to responses.
+
+    The credit pre-flight deliberately lives in the adapter, not here: the SSE
+    and background-queue strategies call the adapter directly and never build an
+    orchestrator. This layer's only job on that front is to render the refusal
+    gracefully for the sync path, which returns a body rather than an error
+    status.
+    """
     try:
-      # The credit pre-flight lives in the adapter, not here: the SSE and
-      # background-queue strategies call the adapter directly and never build
-      # an orchestrator, so a check at this layer covered one path in three.
-      # This layer's job is only to render the refusal gracefully for the sync
-      # path, which returns a body rather than an error status.
       result = await asyncio.wait_for(
         run_operator_api(
           operator=operator,

@@ -1,10 +1,10 @@
 """
 LadybugDB Schema Loader
 
-Loads schema definitions from robosystems.schemas and provides
-utilities for creating LadybugDB models from schema definitions.
-
-Supports context-aware loading for unified schemas like RoboLedger.
+Assembles a node/relationship lookup from the base schema plus a chosen set of
+extensions, and validates operations against it. Supports context-aware
+loading for schemas whose contexts expose different subsets (see
+`ContextAwareSchemaLoader`).
 """
 
 import importlib
@@ -32,13 +32,8 @@ class LadybugSchemaLoader:
     """
     Initialize schema loader with optional extension filtering.
 
-    Args:
-        extensions: List of extension names to load. If None, loads all available extensions.
-                   Example: ['roboledger'] for SEC repository, ['roboledger', 'roboinvestor'] for multi-product
-
-    Note: Schema loading is already optimized to only load requested extensions.
-    For XBRL processing, schemas are loaded on-demand based on the repository context.
-    Further lazy loading could be implemented at the field level if needed.
+    ``extensions`` names the extensions to load — ``None`` discovers and loads
+    every available one, ``[]`` yields the base schema alone.
     """
     # Start with base schemas
     all_nodes = list(BASE_NODES)
@@ -46,7 +41,6 @@ class LadybugSchemaLoader:
 
     # Determine which extensions to load
     if extensions is None:
-      # Load all available extensions (backward compatibility)
       target_extensions = self._discover_all_extensions()
       logger.info("Loading all available extensions (no filter specified)")
     else:
@@ -96,8 +90,9 @@ class LadybugSchemaLoader:
 
     # Fallback if no extensions loaded successfully
     if not loaded_extensions and extensions is not None:
-      # DISABLED: Fallback causing schema corruption in Docker
-      # Always honor the user's extension selection, even if empty
+      # No fallback here: an explicit selection is always honored, even when it
+      # resolves to nothing. Substituting a default extension set produces a
+      # schema that disagrees with the one the database was created under.
       logger.info(
         f"No extensions loaded (intentional). Using base schema only: {len(all_nodes)} nodes, {len(all_relationships)} relationships"
       )
@@ -117,7 +112,7 @@ class LadybugSchemaLoader:
     logger.debug(f"Available relationship types: {sorted(self.relationships.keys())}")
 
   def _discover_all_extensions(self) -> list[str]:
-    """Discover all available extensions for backward compatibility."""
+    """Discover every extension module exporting EXTENSION_NODES/RELATIONSHIPS."""
     available_extensions = []
 
     try:
@@ -165,12 +160,7 @@ class LadybugSchemaLoader:
     return list(self.relationships.keys())
 
   def get_node_properties(self, node_name: str) -> dict[str, dict[str, Any]]:
-    """
-    Get properties for a node type in a format suitable for LadybugDB models.
-
-    Returns:
-        Dict mapping property names to property metadata
-    """
+    """Map each property name of a node type to its metadata."""
     node = self.get_node_schema(node_name)
     if not node:
       return {}
@@ -203,14 +193,11 @@ class LadybugSchemaLoader:
     self, node_name: str, properties: dict[str, Any]
   ) -> bool:
     """
-    Validate node properties against schema.
+    Validate node properties against the schema.
 
-    Args:
-        node_name: The node type name
-        properties: Dict of property names and values
-
-    Returns:
-        True if valid, raises ValueError if invalid
+    Raises:
+        ValueError: On an unknown node type, a missing non-nullable property,
+            or a value whose type is incompatible with its declaration.
     """
     node_schema = self.get_node_schema(node_name)
     if not node_schema:
@@ -243,16 +230,11 @@ class LadybugSchemaLoader:
     properties: dict[str, Any] | None = None,
   ) -> bool:
     """
-    Validate relationship against schema.
+    Validate a relationship and its endpoints against the schema.
 
-    Args:
-        from_node: Source node type
-        to_node: Target node type
-        relationship_name: Relationship type name
-        properties: Optional relationship properties
-
-    Returns:
-        True if valid, raises ValueError if invalid
+    Raises:
+        ValueError: On an unknown relationship type, an endpoint that does not
+            match the declaration, or an incompatible property type.
     """
     rel_schema = self.get_relationship_schema(relationship_name)
     if not rel_schema:
@@ -304,12 +286,7 @@ class LadybugSchemaLoader:
     return isinstance(value, allowed_types)
 
   def get_node_relationships(self, node_name: str) -> dict[str, list[Relationship]]:
-    """
-    Get all relationships for a node type.
-
-    Returns:
-        Dict with 'outgoing' and 'incoming' lists of relationships
-    """
+    """Get a node type's relationships, split into 'outgoing' and 'incoming'."""
     outgoing = []
     incoming = []
 
@@ -329,14 +306,9 @@ _default_schema_loader = None
 
 def get_schema_loader(extensions: list[str] | None = None) -> LadybugSchemaLoader:
   """
-  Get a schema loader instance with specified extensions.
+  Get a schema loader for the given extensions, cached per selection.
 
-  Args:
-      extensions: List of extension names to load. If None, loads all available extensions.
-                 Example: ['roboledger'] for SEC repository
-
-  Returns:
-      Schema loader instance configured with the specified extensions
+  ``None`` returns the shared default loader carrying every extension.
   """
   global _default_schema_loader, _schema_loader_cache
 
@@ -362,10 +334,11 @@ def get_schema_loader(extensions: list[str] | None = None) -> LadybugSchemaLoade
 
 def get_sec_schema_loader() -> LadybugSchemaLoader:
   """
-  Get schema loader configured for SEC repository.
+  Get the schema loader for the SEC repository.
 
-  Uses context-aware loading to only include XBRL/reporting tables,
-  not transaction-level GL tables which would confuse MCP agents.
+  Includes only XBRL/reporting tables: the SEC repository holds no
+  transaction-level GL data, so exposing those tables would only mislead
+  querying agents.
   """
   return get_contextual_schema_loader("repository", "sec")
 
@@ -376,18 +349,11 @@ def get_contextual_schema_loader(
   additional_extensions: list[str] | None = None,
 ) -> LadybugSchemaLoader:
   """
-  Get schema loader based on context (repository, application, custom).
+  Get a schema loader for a context, e.g. ("repository", "sec").
 
-  Supports context-aware loading for unified schemas like RoboLedger that
-  need different table subsets based on use case.
-
-  Args:
-      context_type: Type of context ('repository', 'application', 'custom')
-      context_name: Name of the specific context ('sec', 'roboledger', etc.)
-      additional_extensions: Extra extensions to include beyond defaults
-
-  Returns:
-      LadybugSchemaLoader configured for the context
+  ``context_type`` is 'repository', 'application', or 'custom'; combinations
+  without a dedicated context fall back to plain extension loading, plus any
+  ``additional_extensions``.
   """
   # Special handling for RoboLedger unified schema contexts
   if context_type == "repository" and context_name == "sec":
@@ -444,20 +410,20 @@ def compile_repository_schema(repository_name: str) -> Schema:
 
 class ContextAwareSchemaLoader(LadybugSchemaLoader):
   """
-  Schema loader that supports context-aware loading for unified schemas.
+  Loads one section of a multi-section extension schema.
 
-  This is used for schemas like RoboLedger that contain multiple logical
-  sections (transactions + reporting) but need to expose different subsets
-  based on the use case.
+  For extensions like RoboLedger that hold several logical sections
+  (transactions + reporting) but expose different subsets per use case.
   """
 
   def __init__(self, extension: str, context: str):
     """
     Initialize context-aware loader.
 
-    Args:
-        extension: Name of the unified extension (e.g., 'roboledger_unified')
-        context: Context for loading (e.g., 'sec_repository', 'full_accounting')
+    ``extension`` is a module in `schemas/extensions/` (e.g. 'roboledger');
+    ``context`` is one of its declared contexts (e.g. 'sec_repository',
+    'full_accounting'). An extension without context support falls back to
+    standard loading.
     """
     # For SEC repository, filter out base nodes and relationships that aren't populated
     if context == "sec_repository":

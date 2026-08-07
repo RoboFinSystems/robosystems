@@ -1,8 +1,8 @@
-"""
-Database restore endpoints for Graph API.
+"""Restore LadybugDB databases from encrypted S3 backups.
 
-This module provides endpoints for restoring LadybugDB databases
-from encrypted backups.
+Restores run as background tasks; progress is monitored through the generic
+``GET /tasks/{task_id}/monitor`` SSE endpoint in
+``robosystems/graph_api/routers/tasks.py``.
 """
 
 from datetime import UTC, datetime
@@ -43,15 +43,12 @@ async def perform_restore(
   compressed: bool,
   connection_pool=None,
 ) -> None:
-  """
-  Perform the actual restore in the background.
-  Updates task status for monitoring.
+  """Run the restore in the background, updating task status for monitoring.
 
-  Args:
-      connection_pool: LadybugDB connection pool for closing connections before restore
+  ``connection_pool`` is the LadybugDB pool, needed to close open connections
+  before the database files are replaced.
   """
   try:
-    # Update task status to running
     await restore_task_manager.update_task(
       task_id,
       status="running",
@@ -62,10 +59,8 @@ async def perform_restore(
       f"[Task {task_id}] Starting restore for database '{graph_id}' from {s3_bucket}/{s3_key}"
     )
 
-    # Create backup manager
     backup_manager = create_backup_manager()
 
-    # Download actual metadata from S3
     backup_metadata = await backup_manager.s3_adapter.get_backup_metadata_by_key(s3_key)
 
     if not backup_metadata:
@@ -77,8 +72,8 @@ async def perform_restore(
       f"original_size: {backup_metadata.original_size}"
     )
 
-    # If force_overwrite, delete the existing database first
-    # This happens in the Graph API so we properly close connections and clean up
+    # Deleting here rather than in the backup manager: only this process holds
+    # the LadybugDB connections that must close before the files go away.
     if connection_pool and force_overwrite:
       import shutil
       from pathlib import Path
@@ -87,11 +82,9 @@ async def perform_restore(
 
       logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
 
-      # Close all LadybugDB connections first
       connection_pool.close_database_connections(graph_id)
       logger.info(f"[Task {task_id}] Closed LadybugDB connections")
 
-      # Delete the database files
       db_path = Path(MultiTenantUtils.get_database_path_for_graph(graph_id))
       if db_path.exists():
         if db_path.is_file():
@@ -100,8 +93,7 @@ async def perform_restore(
           shutil.rmtree(db_path)
         logger.info(f"[Task {task_id}] Deleted existing database files at {db_path}")
 
-    # Create restore job
-    # drop_existing=False because we already deleted it above if needed
+    # drop_existing=False: the force_overwrite branch above already removed it.
     restore_job = RestoreJob(
       graph_id=graph_id,
       backup_metadata=backup_metadata,
@@ -112,13 +104,11 @@ async def perform_restore(
       progress_tracker=None,
     )
 
-    # Run restore (this is async)
     success = await backup_manager.restore_backup(restore_job)
 
     if not success:
       raise RuntimeError("Restore verification failed")
 
-    # Mark task as completed
     await restore_task_manager.complete_task(
       task_id,
       result={
@@ -171,7 +161,6 @@ async def restore_database(
       detail="Restore operations not allowed on read-only nodes",
     )
 
-  # Check if database exists
   database_exists = graph_id in ladybug_service.db_manager.list_databases()
 
   if database_exists and not force_overwrite:
@@ -180,7 +169,6 @@ async def restore_database(
       detail=f"Database {graph_id} already exists. Use force_overwrite=true to replace it.",
     )
 
-  # Create task in task manager
   task_id = await restore_task_manager.create_task(
     task_type="restore",
     metadata={
@@ -194,7 +182,6 @@ async def restore_database(
     },
   )
 
-  # Add restore task to FastAPI background tasks
   background_tasks.add_task(
     perform_restore,
     task_id=task_id,
@@ -241,7 +228,6 @@ async def download_backup(
       detail="Backup operations not allowed on read-only nodes",
     )
 
-  # Validate database exists
   if graph_id not in ladybug_service.db_manager.list_databases():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
@@ -249,7 +235,6 @@ async def download_backup(
     )
 
   try:
-    # Get database path
     import os
     import shutil
     import tempfile
@@ -266,19 +251,14 @@ async def download_backup(
         detail=f"Database files not found for {graph_id}",
       )
 
-    # Create backup in temporary directory
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Copy database files
       if os.path.isfile(db_path):
-        # Single file database
         shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
       else:
-        # Directory-based database
         shutil.copytree(db_path, temp_path / graph_id)
 
-      # Create ZIP archive
       zip_file = temp_path / f"{graph_id}_backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         if os.path.isfile(db_path):
@@ -290,7 +270,6 @@ async def download_backup(
               arc_path = file_path.relative_to(temp_path)
               zf.write(file_path, arc_path)
 
-      # Read ZIP file content
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 
@@ -317,7 +296,3 @@ async def download_backup(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to create backup: {e!s}",
     )
-
-
-# NOTE: SSE monitoring has been moved to the generic /tasks/{task_id}/monitor endpoint
-# This endpoint is no longer needed as all task monitoring is centralized

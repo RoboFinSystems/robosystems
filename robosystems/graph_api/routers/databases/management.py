@@ -1,9 +1,4 @@
-"""
-Database management endpoints for Graph API.
-
-This module provides endpoints for creating, listing, retrieving,
-and deleting LadybugDB graph databases.
-"""
+"""Create, list, inspect, and delete LadybugDB graph databases."""
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from fastapi import status as http_status
@@ -53,9 +48,8 @@ async def create_database(
       detail="Database creation not allowed on read-only nodes",
     )
 
-  # With unified architecture, any node can host any database type
-  # Shared repositories are identified by metadata, not node type
-  # Just validate that shared schema types have a repository name
+  # Any node can host any database type — shared repositories are identified by
+  # metadata, not by node type. Only the repository name has to be present.
   if request.schema_type == "shared" and not request.repository_name:
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -111,7 +105,6 @@ async def delete_database(
 
   Cannot use both preserve_duckdb and staging_only at the same time.
   """
-  # Validate mutually exclusive options
   if preserve_duckdb and staging_only:
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
@@ -124,7 +117,6 @@ async def delete_database(
       detail="Database deletion not allowed on read-only nodes",
     )
 
-  # Handle staging_only mode - delete only DuckDB, preserve LadybugDB
   if staging_only:
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
@@ -143,9 +135,7 @@ async def delete_database(
         detail=f"Failed to delete DuckDB staging: {e!s}",
       )
 
-  # Additional validation for shared writer nodes
   if ladybug_service.node_type == NodeType.SHARED_MASTER:
-    # Add extra confirmation or restrictions for shared database deletion
     logger.warning(f"Attempting to delete shared database: {graph_id}")
 
   # A `-wip`/`-prev` name is a blue-green build artifact, and its base may be

@@ -1,9 +1,4 @@
-"""
-Graph MCP Client - Main client class for Model Context Protocol adapter.
-
-This module contains the GraphMCPClient class which provides MCP functionality
-using the Graph API instead of direct database connections.
-"""
+"""MCP client for graph databases, backed by the Graph API."""
 
 import asyncio
 import json
@@ -27,11 +22,10 @@ from .exceptions import (
 
 
 class GraphMCPClient:
-  """
-  MCP client that communicates with graph databases via REST API.
+  """MCP client that reaches graph databases over the Graph API.
 
-  This replaces direct graph database connections with HTTP-based Graph API calls,
-  enabling deployment in read-only cluster environments.
+  Access is HTTP rather than an embedded database handle, so the client runs
+  in processes that have no local database volume.
   """
 
   # Class-level cached configuration
@@ -70,11 +64,10 @@ class GraphMCPClient:
     self.max_query_length = max_query_length
     self.graph_id = graph_id
 
-    # Load and cache configuration
     self._load_cached_config()
 
-    # Create GraphClient with unified API key from centralized config
-    # This ensures we get the key from Secrets Manager in production
+    # Read through centralized config so production resolves the key from
+    # Secrets Manager rather than the environment.
     api_key = env.GRAPH_API_KEY
 
     self.graph_client = GraphClient(base_url=api_base_url, api_key=api_key)
@@ -104,13 +97,12 @@ class GraphMCPClient:
 
     current_time = time.time()
 
-    # Check if we need to refresh the cache
     if (
       GraphMCPClient._config_cache is None
       or current_time - GraphMCPClient._config_cache_time
       > GraphMCPClient._get_config_cache_ttl()
     ):
-      # Load configuration - max_result_rows from TuningConfig (SSM tunable)
+      # max_result_rows comes from TuningConfig so it stays SSM-tunable.
       GraphMCPClient._config_cache = {
         "max_result_rows": TuningConfig.get_mcp_max_result_rows(),
         "auto_limit_enabled": env.MCP_AUTO_LIMIT_ENABLED,
@@ -118,7 +110,6 @@ class GraphMCPClient:
       GraphMCPClient._config_cache_time = current_time
       logger.debug("Refreshed MCP configuration cache")
 
-    # Apply cached configuration to instance
     self.max_result_rows = GraphMCPClient._config_cache["max_result_rows"]
     self.auto_limit_enabled = GraphMCPClient._config_cache["auto_limit_enabled"]
 
@@ -137,30 +128,18 @@ class GraphMCPClient:
       logger.warning(f"Error closing httpx client: {e}")
 
   def _validate_query_complexity(self, cypher: str) -> None:
-    """
-    Validate query complexity to prevent resource exhaustion and protect MCP clients.
+    """Reject queries whose size or shape risks exhausting server or client.
 
-    This method implements a multi-layered defense against queries that could:
-    - Exhaust memory on the server or client
-    - Cause timeouts due to computational complexity
-    - Return result sets too large for AI agent context windows
-
-    Validation Rules:
-    1. **Length Check**: Queries over 50,000 chars likely indicate generated/malicious code
-    2. **Pattern Detection**: Identifies risky patterns like:
-       - `MATCH ()` - Matches all nodes (potential millions)
-       - `MATCH ()-[]-()` - Cartesian products without filters
-       - Multiple `UNWIND` - Exponential expansion risk
-    3. **Warning Generation**: Logs warnings for concerning patterns that don't block execution
+    Query length and subquery count are hard limits. Unfiltered scan patterns
+    are only logged — a legitimate query can look the same — so they stay
+    diagnostic rather than blocking.
 
     Args:
         cypher: Cypher query string to validate
 
     Raises:
-        GraphQueryComplexityError: If query violates hard limits or contains
-                                  patterns likely to cause resource exhaustion
+        GraphQueryComplexityError: If the query exceeds a hard limit.
     """
-    # Check query length
     if len(cypher) > self.max_query_length:
       raise GraphQueryComplexityError(
         f"Query length {len(cypher)} exceeds maximum {self.max_query_length} characters"
@@ -210,25 +189,20 @@ class GraphMCPClient:
         GraphQueryComplexityError: If query is too complex
     """
     logger.info(f"MCP execute_query called with: {cypher[:100]}...")
-    # Validate query complexity before execution
     self._validate_query_complexity(cypher)
 
-    # Auto-append LIMIT for MCP context safety
+    # Auto-append LIMIT for MCP context safety.
     original_query = cypher
     cypher_upper = cypher.strip().upper()
 
-    # Use cached configuration
     max_rows = self.max_result_rows
     auto_limit_enabled = self.auto_limit_enabled
 
-    # Check if we should auto-append LIMIT
     has_limit = "LIMIT" in cypher_upper
     has_return = "RETURN" in cypher_upper
     has_aggregation = self._has_aggregation_function(cypher_upper)
 
     if auto_limit_enabled and has_return and not has_limit and not has_aggregation:
-      # Use intelligent LIMIT injection to handle complex queries
-      # Skip injection for aggregation queries since they naturally return limited results
       cypher = self._inject_limit_intelligently(cypher, max_rows)
       logger.info(
         f"MCP safety: Auto-injected LIMIT {max_rows} to prevent context exhaustion"
@@ -314,10 +288,8 @@ class GraphMCPClient:
       return data
 
     except GraphQueryTimeoutError:
-      # Re-raise timeout errors
       raise
     except GraphQueryComplexityError:
-      # Re-raise complexity errors
       raise
     except TimeoutException as e:
       error_msg = f"HTTP timeout executing query after {self.timeout}s: {e}"
@@ -441,11 +413,8 @@ class GraphMCPClient:
   def _get_common_properties(self, node_name: str) -> list[str] | None:
     """Curated query-hint properties for well-known node types.
 
-    Returns ``None`` for node types not in the map so the caller can
-    introspect real columns from the catalog instead of emitting a generic
-    guess (the old behavior reported every uncurated node — Structure,
-    Dimension, FactSet, Taxonomy, … — as ``identifier/name/value/...``,
-    which is wrong for most of them).
+    Returns ``None`` for node types not in the map so the caller introspects
+    real columns from the catalog rather than reporting a generic guess.
     """
     common_props = {
       "Entity": [
@@ -842,30 +811,19 @@ class GraphMCPClient:
     return any(func in query_upper for func in aggregation_functions)
 
   def _inject_limit_intelligently(self, query: str, limit: int) -> str:
-    """
-    Intelligently inject LIMIT clause into Cypher query to prevent context exhaustion.
+    """Append a LIMIT clause without changing the query's semantics.
 
-    This method uses a sophisticated algorithm to safely inject LIMIT clauses into
-    complex Cypher queries without breaking their semantics. It handles:
-
-    - **UNION queries**: Adds LIMIT to each UNION branch to ensure fair sampling
-    - **Subqueries**: Preserves subquery structure while limiting final results
-    - **ORDER BY clauses**: Places LIMIT after ORDER BY to maintain sort order
-    - **WITH clauses**: Adds LIMIT after the final RETURN to avoid intermediate truncation
-
-    Algorithm:
-    1. Check if LIMIT already exists (no-op if present)
-    2. For UNION queries: Split by UNION, recursively process each part
-    3. For standard queries: Find the last RETURN statement
-    4. Place LIMIT after ORDER BY if present, otherwise at query end
-    5. Handle edge cases like comments and string literals
+    A LIMIT already present is left alone. UNION queries get a LIMIT on each
+    branch so every branch is sampled rather than only the first. Otherwise
+    the LIMIT lands at the very end, after any trailing ORDER BY, so the sort
+    still governs which rows survive.
 
     Args:
         query: The Cypher query to modify
-        limit: The limit value to inject (typically 1000 for MCP safety)
+        limit: The limit value to inject
 
     Returns:
-        Query with LIMIT intelligently injected without breaking semantics
+        Query with LIMIT appended.
 
     Examples:
         >>> _inject_limit_intelligently("MATCH (n) RETURN n", 100)
@@ -876,31 +834,26 @@ class GraphMCPClient:
     """
     import re
 
-    # Normalize query for analysis (preserve original for output)
+    # Normalize for analysis; the original is what gets returned unchanged.
     query_normalized = query.strip()
     query_upper = query_normalized.upper()
 
-    # If query already has LIMIT, return as-is
     if "LIMIT" in query_upper:
       return query
 
-    # Handle UNION queries - need to add LIMIT to each part
     if "UNION" in query_upper:
-      # Split by UNION and add LIMIT to each part
       parts = re.split(r"\bUNION\b", query_normalized, flags=re.IGNORECASE)
       limited_parts = []
 
       for part in parts:
         part_trimmed = part.strip()
         if part_trimmed and "RETURN" in part_trimmed.upper():
-          # Add LIMIT to this part
           limited_parts.append(self._inject_limit_to_simple_query(part_trimmed, limit))
         else:
           limited_parts.append(part)
 
       return " UNION ".join(limited_parts)
 
-    # For non-UNION queries, inject at the end
     return self._inject_limit_to_simple_query(query_normalized, limit)
 
   def _inject_limit_to_simple_query(self, query: str, limit: int) -> str:
@@ -913,7 +866,6 @@ class GraphMCPClient:
 
     query_trimmed = query.rstrip()
 
-    # Remove trailing semicolon if present
     if query_trimmed.endswith(";"):
       query_trimmed = query_trimmed[:-1].rstrip()
 
@@ -932,15 +884,13 @@ class GraphMCPClient:
         before_order = query_trimmed[: last.start()].rstrip()
         return f"{before_order} {order_clause} LIMIT {limit}"
 
-    # No ORDER BY, just append LIMIT
     return f"{query_trimmed} LIMIT {limit}"
 
   def _is_read_only_query(self, query: str) -> bool:
-    """
-    Enhanced validation to ensure query is read-only.
+    """Return True when the query contains no write operation.
 
-    Uses a whitelist approach with pattern matching to detect write operations.
-    Returns True if query is safe (read-only), False otherwise.
+    Keyword matching at word boundaries, so identifiers like `CREATED_AT`
+    don't read as a `CREATE`.
     """
     query_normalized = query.strip().upper()
 

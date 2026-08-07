@@ -1,9 +1,4 @@
-"""
-Query executor setup for queue manager.
-
-This module provides the initialization for the query executor
-that processes queued queries.
-"""
+"""Initialization for the query executor that drains the query queue."""
 
 import asyncio
 from typing import Any
@@ -44,17 +39,7 @@ def setup_query_executor():
   async def executor(
     cypher: str, parameters: dict[str, Any] | None, graph_id: str
   ) -> dict[str, Any]:
-    """
-    Execute a queued query.
-
-    Args:
-        cypher: The Cypher query to execute
-        parameters: Optional query parameters
-        graph_id: Target graph identifier
-
-    Returns:
-        Dictionary with query results and metadata
-    """
+    """Execute a queued query, returning results plus metadata."""
     try:
       # Get the appropriate repository
       graph_router = GraphRouter()
@@ -103,7 +88,6 @@ def setup_query_executor():
       # Re-raise to let queue manager handle the failure
       raise
 
-  # Set the executor on the queue manager
   queue_manager.set_query_executor(executor)
 
   logger.info("Query executor initialized successfully")

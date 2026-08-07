@@ -1,8 +1,7 @@
 """Pure compute helper for asset disposal.
 
-Extracted from `operations/roboledger/commands/schedules.py::dispose_schedule`
-so both the event-driven disposal handler (`asset_disposed.py`) and the
-preview path can call the same read-and-compute logic without duplicating it.
+Shared by the event-driven disposal handler (`asset_disposed.py`) and its
+preview path so both run identical read-and-compute logic.
 
 Read-only — does not flush, commit, or write any rows.
 """
@@ -52,12 +51,11 @@ def compute_disposal_plan(
 ) -> DisposalPlan:
   """Read schedule + accumulated depreciation, compute NBV/gain/loss, build line items.
 
-  Does not write. Safe to call from a preview path.
-
-  Raises:
-    ScheduleNotFoundError: if structure_id is not a schedule.
-    ValueError: if required metadata fields are missing or the disposal is
-                internally inconsistent (proceeds > 0 without proceeds_element_id, etc).
+  All amounts are integer cents. Does not write, so it is safe from a
+  preview path. Raises ``ScheduleNotFoundError`` when ``structure_id`` isn't
+  a schedule, and ``ValueError`` when required schedule metadata is missing
+  or the disposal is internally inconsistent (proceeds > 0 without a
+  ``proceeds_element_id``, and so on).
   """
   structure = session.execute(
     select(Structure).where(

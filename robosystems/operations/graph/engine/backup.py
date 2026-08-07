@@ -1,17 +1,15 @@
-"""
-LadybugDB Graph Database Backup Service
+"""Scheduled instance-level backup of customer graph databases to S3.
 
-This service handles automated backup of customer-specific LadybugDB graph databases to S3.
-Unlike shared repositories, customer graph databases require regular automated backup
-to prevent data loss from hardware failures or corruption.
+Runs *on* a writer instance and backs up the customer databases the allocation
+registry says live there. Shared repositories are excluded — they are
+reproducible from their source and do not need this.
 
-Key features:
-- Automated daily backup of all customer graph databases
-- Incremental backup based on modification times
-- S3 lifecycle management for cost optimization
-- Backup verification and integrity checks
-- Integration with DynamoDB allocation registry
-- CloudWatch metrics for backup monitoring
+A database is skipped when its newest S3 backup is newer than the database's
+mtime, or when it exceeds ``MAX_BACKUP_SIZE_GB``. Failures are per-database and
+never abort the sweep.
+
+Distinct from :mod:`robosystems.operations.graph.engine.backup_manager`, which
+is the on-demand, per-graph, restorable backup surface.
 """
 
 import hashlib
@@ -29,11 +27,10 @@ from ....config.storage import graph
 from ....logger import logger
 from ....middleware.graph.allocation_manager import LadybugAllocationManager
 
-# Backup configuration
-# Graph backups are stored in the USER_DATA_BUCKET under graph-databases/ prefix
-DEFAULT_RETENTION_DAYS = 30  # Keep customer backups longer than shared repos
+# Backups land in USER_DATA_BUCKET under the graph-databases/ prefix.
+DEFAULT_RETENTION_DAYS = 30
 DEFAULT_COMPRESSION_LEVEL = 6
-MAX_BACKUP_SIZE_GB = 10  # Skip backup if database > 10GB (log warning)
+MAX_BACKUP_SIZE_GB = 10  # Above this a database is skipped, with a warning
 
 
 class LadybugGraphBackupError(Exception):
@@ -43,13 +40,7 @@ class LadybugGraphBackupError(Exception):
 
 
 class LadybugGraphBackupService:
-  """
-  Service for backing up LadybugDB graph databases to S3.
-
-  This service runs on writer instances and backs up all customer graph databases
-  allocated to the instance. It integrates with the allocation manager to
-  discover databases and tracks backup status in CloudWatch.
-  """
+  """Back up this instance's customer graph databases to S3."""
 
   def __init__(
     self,
@@ -59,26 +50,17 @@ class LadybugGraphBackupService:
     retention_days: int = DEFAULT_RETENTION_DAYS,
     compression_level: int = DEFAULT_COMPRESSION_LEVEL,
   ):
-    """
-    Initialize graph backup service.
-
-    Args:
-        environment: Environment name (dev/staging/prod)
-        base_path: Base path where graph databases are stored
-        s3_bucket: S3 bucket for backups (defaults to env-specific bucket)
-        retention_days: Number of days to keep backups
-        compression_level: Gzip compression level (1-9)
+    """``compression_level`` is the gzip level (1-9); ``base_path`` is where the
+    graph databases live on this instance.
     """
     self.environment = environment
     self.base_path = Path(base_path)
     self.retention_days = retention_days
     self.compression_level = compression_level
 
-    # S3 configuration - use canonical USER_DATA_BUCKET for customer graph backups
     self.s3_bucket = s3_bucket or env.USER_DATA_BUCKET
     self.s3_prefix = graph.get_instance_backup_prefix(environment).rstrip("/")
 
-    # AWS clients - use S3-specific credentials
     s3_config = env.get_s3_config()
     self.s3_client = boto3.client(
       "s3",
@@ -89,19 +71,16 @@ class LadybugGraphBackupService:
     )
     self.cloudwatch = boto3.client("cloudwatch")
 
-    # Allocation manager for discovering databases
     self.allocation_manager = LadybugAllocationManager(environment)
 
-    # Get current instance ID for filtering
+    # EC2 instance metadata; unreachable off-instance, hence the dev fallback.
     try:
-      # In production, get from EC2 metadata
       import requests
 
       self.instance_id = requests.get(
         "http://169.254.169.254/latest/meta-data/instance-id", timeout=2
       ).text
     except Exception:
-      # Fallback for development
       self.instance_id = "dev-instance"
 
     logger.info(
@@ -109,17 +88,15 @@ class LadybugGraphBackupService:
     )
 
   async def backup_all_graph_databases(self) -> dict[str, Any]:
-    """
-    Backup all customer graph databases allocated to this instance.
+    """Back up every customer database on this instance, one at a time.
 
-    Returns:
-        Backup summary with success/failure counts and details
+    A per-database failure is counted and the sweep continues; the summary
+    reports ``partial_failure`` in that case.
     """
     start_time = datetime.now(UTC)
     logger.info("Starting automated backup of all graph databases")
 
     try:
-      # Get all databases allocated to this instance
       databases = await self._get_instance_databases()
 
       if not databases:
@@ -135,7 +112,6 @@ class LadybugGraphBackupService:
 
       logger.info(f"Found {len(databases)} graph databases to backup")
 
-      # Backup each database
       results = []
       backed_up = 0
       skipped = 0
@@ -158,7 +134,6 @@ class LadybugGraphBackupService:
           failed += 1
           results.append({"graph_id": graph_id, "status": "failed", "error": str(e)})
 
-      # Calculate summary
       execution_time = (datetime.now(UTC) - start_time).total_seconds() / 60
 
       summary = {
@@ -171,7 +146,6 @@ class LadybugGraphBackupService:
         "results": results,
       }
 
-      # Publish metrics to CloudWatch
       await self._publish_backup_metrics(summary)
 
       logger.info(
@@ -184,19 +158,16 @@ class LadybugGraphBackupService:
       raise LadybugGraphBackupError(f"Backup operation failed: {e}")
 
   async def backup_graph_database(self, graph_id: str) -> dict[str, Any]:
-    """
-    Backup a specific graph database to S3.
+    """Archive one database to S3. Returns ``success``, ``skipped``, or
+    ``failed``.
 
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Backup result details
+    Skips when the database is absent from this instance, exceeds
+    ``MAX_BACKUP_SIZE_GB``, or already has a backup newer than its mtime.
+    Never raises.
     """
     start_time = datetime.now(UTC)
 
     try:
-      # Construct database path
       db_path = self.base_path / f"{graph_id}.lbug"
 
       if not db_path.exists():
@@ -206,7 +177,6 @@ class LadybugGraphBackupService:
           "reason": "Database not found on this instance",
         }
 
-      # Check database size
       db_size_gb = self._get_directory_size(db_path) / (1024**3)
       if db_size_gb > MAX_BACKUP_SIZE_GB:
         logger.warning(
@@ -218,7 +188,6 @@ class LadybugGraphBackupService:
           "reason": f"Database too large ({db_size_gb:.2f}GB)",
         }
 
-      # Check if backup is needed (based on modification time)
       if await self._is_backup_current(graph_id, db_path):
         return {
           "graph_id": graph_id,
@@ -228,20 +197,16 @@ class LadybugGraphBackupService:
 
       logger.info(f"Backing up graph database {graph_id} ({db_size_gb:.2f}GB)")
 
-      # Create compressed backup
       with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         backup_file = (
           temp_path / f"{graph_id}_{start_time.strftime('%Y%m%d_%H%M%S')}.tar.gz"
         )
 
-        # Create compressed archive
         await self._create_compressed_backup(db_path, backup_file)
 
-        # Calculate checksum
         checksum = self._calculate_file_checksum(backup_file)
 
-        # Upload to S3 using centralized path helper
         s3_key = graph.get_instance_backup_key(self.environment, graph_id, start_time)
         await self._upload_backup_to_s3(backup_file, s3_key, checksum)
 
@@ -266,12 +231,10 @@ class LadybugGraphBackupService:
       return {"graph_id": graph_id, "status": "failed", "error": str(e)}
 
   async def _get_instance_databases(self) -> list[str]:
-    """Get all customer graph databases allocated to this instance."""
+    """This instance's customer databases, excluding shared repositories."""
     try:
-      # Get databases from allocation manager
       databases = await self.allocation_manager.get_instance_databases(self.instance_id)
 
-      # Filter out shared repositories (keep customer databases only)
       customer_databases = [db for db in databases if not is_shared_repository(db)]
 
       return customer_databases
@@ -281,7 +244,7 @@ class LadybugGraphBackupService:
       return []
 
   def _get_directory_size(self, path: Path) -> int:
-    """Calculate total size of directory in bytes."""
+    """Total size of a directory tree, in bytes."""
     total_size = 0
     for file_path in path.rglob("*"):
       if file_path.is_file():
@@ -289,9 +252,12 @@ class LadybugGraphBackupService:
     return total_size
 
   async def _is_backup_current(self, graph_id: str, db_path: Path) -> bool:
-    """Check if an up-to-date backup already exists."""
+    """True when the newest S3 backup is newer than the database's mtime.
+
+    False on any error, so an unreadable bucket means "back it up again"
+    rather than silently skipping.
+    """
     try:
-      # Get latest backup from S3 using centralized path helper
       s3_prefix = graph.get_instance_backup_prefix(self.environment, graph_id)
 
       response = self.s3_client.list_objects_v2(
@@ -299,16 +265,13 @@ class LadybugGraphBackupService:
       )
 
       if "Contents" not in response:
-        return False  # No backups exist
+        return False
 
-      # Get most recent backup timestamp
       latest_backup = max(response["Contents"], key=lambda x: x["LastModified"])
       backup_time = latest_backup["LastModified"].replace(tzinfo=None)
 
-      # Get database modification time
       db_modified = datetime.fromtimestamp(db_path.stat().st_mtime)
 
-      # Backup is current if it's newer than database modification
       return backup_time > db_modified
 
     except ClientError as e:
@@ -320,14 +283,14 @@ class LadybugGraphBackupService:
       return False
 
   async def _create_compressed_backup(self, db_path: Path, backup_file: Path) -> None:
-    """Create a compressed tar.gz backup of the database."""
+    """Write the database directory to ``backup_file`` as a gzipped tar."""
     import tarfile
 
     with tarfile.open(backup_file, "w:gz", compresslevel=self.compression_level) as tar:
       tar.add(db_path, arcname=db_path.name)
 
   def _calculate_file_checksum(self, file_path: Path) -> str:
-    """Calculate SHA256 checksum of a file."""
+    """SHA-256 of a file, streamed rather than read whole."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
       for chunk in iter(lambda: f.read(4096), b""):
@@ -337,7 +300,7 @@ class LadybugGraphBackupService:
   async def _upload_backup_to_s3(
     self, backup_file: Path, s3_key: str, checksum: str
   ) -> None:
-    """Upload backup file to S3 with metadata."""
+    """Upload the archive to S3 as STANDARD_IA, stamping the checksum."""
     try:
       extra_args = {
         "Metadata": {
@@ -346,7 +309,7 @@ class LadybugGraphBackupService:
           "instance_id": self.instance_id,
           "backup_type": "graph_database",
         },
-        "StorageClass": "STANDARD_IA",  # Cheaper storage for backups
+        "StorageClass": "STANDARD_IA",
       }
 
       self.s3_client.upload_file(
@@ -360,9 +323,8 @@ class LadybugGraphBackupService:
       raise LadybugGraphBackupError(f"S3 upload failed: {e}")
 
   async def _publish_backup_metrics(self, summary: dict[str, Any]) -> None:
-    """Publish backup metrics to CloudWatch."""
+    """Publish backup counts and duration to CloudWatch. Best-effort."""
     try:
-      # Use environment-specific namespace instead of Environment dimension
       metric_data = [
         {
           "MetricName": "GraphDatabaseBackups",
@@ -392,7 +354,7 @@ class LadybugGraphBackupService:
         },
       ]
 
-      # Publish to environment-specific Graph namespace
+      # Environment lives in the namespace, not as a dimension.
       namespace = f"RoboSystems/Graph/{self.environment}"
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
 
@@ -400,17 +362,14 @@ class LadybugGraphBackupService:
       logger.error(f"Failed to publish backup metrics: {e}")
 
   async def cleanup_old_backups(self) -> int:
-    """
-    Clean up old backup files based on retention policy.
+    """Delete backups past the retention window; returns the count deleted.
 
-    Returns:
-        Number of files deleted
+    Returns 0 rather than raising on failure.
     """
     try:
       cutoff_date = datetime.now(UTC) - timedelta(days=self.retention_days)
       deleted_count = 0
 
-      # List all objects in the backup prefix
       paginator = self.s3_client.get_paginator("list_objects_v2")
       pages = paginator.paginate(Bucket=self.s3_bucket, Prefix=self.s3_prefix)
 
@@ -424,13 +383,12 @@ class LadybugGraphBackupService:
           if obj["LastModified"].replace(tzinfo=None) < cutoff_date:
             objects_to_delete.append({"Key": obj["Key"]})
 
-            # Delete in batches of 1000 (S3 limit)
+            # 1000 keys is the S3 DeleteObjects limit.
             if len(objects_to_delete) >= 1000:
               self._delete_s3_objects(objects_to_delete)
               deleted_count += len(objects_to_delete)
               objects_to_delete = []
 
-      # Delete remaining objects
       if objects_to_delete:
         self._delete_s3_objects(objects_to_delete)
         deleted_count += len(objects_to_delete)
@@ -454,7 +412,6 @@ class LadybugGraphBackupService:
       logger.error(f"Failed to delete S3 objects: {e}")
 
 
-# Factory function for easy integration
 def create_graph_backup_service(
   environment: str = "prod", base_path: str = "/data/lbug-dbs"
 ) -> LadybugGraphBackupService:

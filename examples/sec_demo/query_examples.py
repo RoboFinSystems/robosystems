@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
-SEC Repository Demo - Query Examples
+SEC Repository Demo — query examples.
 
-Provides preset queries and interactive exploration for the SEC shared repository.
-Includes both graph queries (Cypher) and document search (OpenSearch).
+Preset queries and interactive exploration for the SEC shared repository,
+covering both sides of the data: graph queries (Cypher) over the XBRL facts,
+and document search (OpenSearch) over the filing text.
+
+Requires an SEC repository subscription — run `just demo-sec` first.
 
 Usage:
-    uv run query_examples.py                      # Interactive mode
-    uv run query_examples.py --all                # Run all preset queries
-    uv run query_examples.py --preset entities    # Run a specific preset
-    uv run query_examples.py --query "MATCH (n:Entity) RETURN n.name LIMIT 10"
-    uv run query_examples.py --search "tariff risk"          # Text search
-    uv run query_examples.py --search "AI strategy" --entity NVDA
+    just demo-sec-query --list                    # show the preset names
+    just demo-sec-query --all                     # run every preset
+    just demo-sec-query --preset entities         # run one preset
+    just demo-sec-query --query "MATCH (n:Entity) RETURN n.name LIMIT 10"
+    just demo-sec-query --search "tariff risk"    # full-text search
+    just demo-sec-query --search "AI strategy" --entity NVDA
+
+Run the script directly with no arguments for an interactive prompt.
 """
 
 from __future__ import annotations

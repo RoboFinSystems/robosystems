@@ -4,16 +4,17 @@ Fires when create-event-block runs with event_type='journal_entry_recorded'
 and apply_handlers=True. Creates a balanced journal entry (plus a synthetic
 Transaction when none is supplied) and links both rows to the event.
 
-Replaces the standalone `create-journal-entry` operation. The underlying
-logic (balance validation + closed-period gate + auto Transaction) lives in
-`create_journal_entry` (commands/journal_entries.py) and is reused verbatim.
+Balance validation, the closed-period gate, and auto-Transaction creation all
+come from `create_journal_entry`
+(`operations/roboledger/commands/journal_entries.py`); this handler sequences
+that call inside the event-block unit of work.
 
 Two metadata shapes are accepted:
 
 - **Flat** (native writes, manual entries, scheduled accruals): one entry
   per event — ``posting_date`` + ``memo`` + ``line_items`` at the top
-  level. Wire-compatible with the retired ``create-journal-entry`` op.
-- **Nested** (QuickBooks ingest, future multi-entry imports): a wrapping
+  level.
+- **Nested** (QuickBooks ingest, multi-entry imports): a wrapping
   ``entries`` array — each item is its own ``posting_date`` + ``memo``
   + ``line_items`` block. Used when a single business event produces
   multiple journal entries (e.g., a QB Invoice with both a revenue
@@ -75,12 +76,11 @@ class NestedJournalEntryLineItem(BaseModel):
   ``element_external_id`` (resolved at dispatch time against the
   Element table). Exactly one must be present.
 
-  ``metadata`` is an optional pass-through dict stamped on the
-  resulting ``LineItem.metadata_``. Used to carry source-system fields
-  the standard columns don't cover — e.g. mini's
-  ``transaction_description_code`` for rollforward attribution. The
-  renderer / filter engine reads keys it knows about and ignores the
-  rest.
+  ``metadata`` is an optional pass-through dict stamped on the resulting
+  ``LineItem.metadata_``. It carries source-system fields the standard
+  columns don't cover (e.g. a transaction description code used for
+  rollforward attribution); the renderer and filter engine read the keys
+  they know about and ignore the rest.
   """
 
   element_id: str | None = None
@@ -116,11 +116,8 @@ class NestedJournalEntrySpec(BaseModel):
 class JournalEntryRecordedMetadata(BaseModel):
   """Metadata for a journal_entry_recorded event.
 
-  Two accepted shapes (validated mutually exclusive — see module
-  docstring): flat (single entry, top-level fields) and nested
-  (``entries`` array). The flat shape is wire-compatible with the
-  retired ``create-journal-entry`` op so existing agent code keeps
-  working.
+  Two accepted shapes, validated mutually exclusive (see module docstring):
+  flat (single entry, top-level fields) and nested (``entries`` array).
   """
 
   # Flat shape (single-entry path — manual entries, schedules, native writes)
@@ -243,9 +240,8 @@ def _resolve_nested_line_items(
         missing.append((entry_idx, external_id))
 
   if missing:
-    # Deduplicate by external_id while preserving first-seen entry index
-    # for the user surface ("X is referenced in entry 0, 2 — and once in
-    # entry 5" is noisy; "X (first seen entry 0)" is enough).
+    # Deduplicate by external_id, keeping the first-seen entry index — one
+    # "X (entry 0)" per unmapped account reads better than every occurrence.
     seen: dict[str, int] = {}
     for idx, ext_id in missing:
       seen.setdefault(ext_id, idx)

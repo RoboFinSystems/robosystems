@@ -44,19 +44,13 @@ def _resolve_path(path: str, context: dict) -> object:
 
 
 def interpolate(expression: str, context: dict) -> int | str:
-  """Resolve a template expression to a value.
+  """Resolve a template expression such as '{{ event.amount }} / 12'.
 
-  Args:
-      expression: Raw DSL string, e.g. '{{ event.amount }}' or
-                  '{{ event.amount }} / 12'.
-      context:    Dict with keys 'event' and 'handler', each a dict of
-                  the corresponding field values.
-
-  Returns:
-      int for amount-like fields; str for string fields.
-
-  Raises:
-      TemplateInterpolationError: on missing fields, type errors, divide-by-zero.
+  ``context`` holds the keys ``event`` and ``handler``, each a dict of that
+  side's field values (see :func:`build_event_context` and
+  :func:`build_handler_context`). Returns an int for amount-like fields and
+  a str for string fields; raises ``TemplateInterpolationError`` on missing
+  fields, type errors, and divide-by-zero.
   """
   # Check for trailing division: "{{ expr }} / N"
   div_match = _DIV_RE.match(expression)

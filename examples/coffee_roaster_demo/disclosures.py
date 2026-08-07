@@ -1,4 +1,4 @@
-"""Driftline's authored disclosure notes — the report-engine proof.
+"""Driftline's tenant-authored disclosure notes.
 
 The inventory-components note is authored **per-tenant** through the
 TaxonomyBlock envelope (``reporting_extension``): three member concepts

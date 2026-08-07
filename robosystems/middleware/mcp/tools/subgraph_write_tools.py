@@ -1,10 +1,9 @@
-"""
-Subgraph write MCP tools.
+"""Subgraph write MCP tools.
 
-Provides tools for AI agents to dynamically extend schema and write data
-to subgraphs. All tools enforce subgraph-only access — the main graph is
-read-only to raw statements (writes go through structured extension ops).
-These predate LanceDB semantic memory; the "memory" label moved there.
+Lets AI agents extend schema and write data on subgraphs. All tools enforce
+subgraph-only access — the parent graph is read-only to raw statements, whose
+writes go through structured extension ops instead. For the per-graph vector
+memory store, see `semantic_memory_tools.py`.
 """
 
 import re

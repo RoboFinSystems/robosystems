@@ -40,9 +40,6 @@ def sec_duckdb_staged(
 
   Run with:
     uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_staged
-
-  Returns:
-      MaterializeResult with staging statistics
   """
   import asyncio
 
@@ -181,9 +178,6 @@ def sec_historical_duckdb_staged(
 
   Run with:
     uv run dagster asset materialize -m robosystems.dagster --select sec_historical_duckdb_staged
-
-  Returns:
-      MaterializeResult with staging statistics
   """
   import asyncio
 

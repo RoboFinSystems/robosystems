@@ -22,19 +22,17 @@ from robosystems.models.api.graphs.mcp import MCPToolsResponse
 from robosystems.models.core import User
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 
-# Import MCP components
 from .handlers import validate_mcp_access
 
 router = APIRouter()
 
-# Circuit breaker instance
 circuit_breaker = CircuitBreakerManager()
 
 
 def _get_mcp_operation_type(graph_id: str) -> str:
   # Shared repos and their subgraphs route to the reader cluster; user graphs
-  # always use the writer for consistency. Matches middleware/mcp/factory.py,
-  # which already classified sec_historical as read while this returned write.
+  # always use the writer for consistency. Kept in step with
+  # middleware/mcp/factory.py.
   if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
@@ -62,25 +60,20 @@ async def list_mcp_tools(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> MCPToolsResponse:
-  # Validate access based on graph type
   await validate_mcp_access(graph_id, current_user, db, "read")
 
-  # Use proper operation type based on graph type for consistent routing
   operation_type = _get_mcp_operation_type(graph_id)
   repository = await get_graph_repository(graph_id, operation_type)
 
-  # Check circuit breaker for list_tools operation
   circuit_breaker.check_circuit(graph_id, "list_tools")
 
   try:
-    # Create handler directly for tool discovery
     handler = MCPHandler(repository, graph_id, current_user)
     tools = await handler.get_tools()
 
     # Enhance tool definitions with capability hints for AI agents
     enhanced_tools = []
     for tool in tools:
-      # Add capability indicators
       tool_name = tool["name"]
 
       # Query tools support streaming
@@ -130,10 +123,8 @@ async def list_mcp_tools(
       )
       instructions = None
 
-    # Record successful operation
     circuit_breaker.record_success(graph_id, "list_tools")
 
-    # Record metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/mcp/tools",
@@ -159,7 +150,6 @@ async def list_mcp_tools(
     return MCPToolsResponse(tools=enhanced_tools, instructions=instructions)
 
   except Exception as e:
-    # Record failed operation
     circuit_breaker.record_failure(graph_id, "list_tools")
 
     logger.error(
@@ -171,7 +161,6 @@ async def list_mcp_tools(
       },
     )
 
-    # Record error metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/mcp/tools",
@@ -184,7 +173,6 @@ async def list_mcp_tools(
       user_id=current_user.id,
     )
 
-    # Handle exception securely
     from robosystems.security import handle_exception_securely
 
     handle_exception_securely(

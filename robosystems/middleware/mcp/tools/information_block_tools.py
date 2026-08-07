@@ -7,9 +7,8 @@ envelope for any registered block type. Two tools:
 2. ``list-information-blocks`` — list blocks, optionally filtered by
    block_type + category.
 
-These replaced the retired block-type-specific schedule reads
-(``list-schedule-structures``, ``get-schedule-facts``); schedule
-envelopes now surface here via ``block_type='schedule'``.
+These are the only block reads: schedule envelopes surface here via
+``block_type='schedule'`` rather than through block-type-specific tools.
 
 The ``create-information-block`` **write** tool is NOT in this module —
 it's auto-generated from the OperationSpec via

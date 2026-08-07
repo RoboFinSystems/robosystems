@@ -1,8 +1,4 @@
-"""
-Main entry point for the Graph API server.
-
-This module handles command-line arguments and server initialization.
-"""
+"""Graph API server entry point: argument parsing and server startup."""
 
 import argparse
 from pathlib import Path
@@ -19,7 +15,6 @@ def main():
   """Main entry point for the cluster server."""
   parser = argparse.ArgumentParser(description="Graph API Server")
 
-  # Get default base path from environment
   from robosystems.config import env
 
   default_base_path = env.LBUG_DATABASE_PATH
@@ -64,11 +59,9 @@ def main():
 
   args = parser.parse_args()
 
-  # Ensure base path exists
   base_path = Path(args.base_path).resolve()
   base_path.mkdir(parents=True, exist_ok=True)
 
-  # Map string node type to enum
   node_type_map = {
     "writer": NodeType.WRITER,
     "shared_master": NodeType.SHARED_MASTER,
@@ -76,28 +69,24 @@ def main():
   }
   node_type = node_type_map[args.node_type]
 
-  # Map string repository type to enum
   repository_type_map = {
     "entity": RepositoryType.ENTITY,
     "shared": RepositoryType.SHARED,
   }
   repository_type = repository_type_map[args.repository_type]
 
-  # Validate node/repository type combinations
   if node_type == NodeType.WRITER and repository_type != RepositoryType.ENTITY:
     parser.error("Writer nodes must use entity repository type")
   elif node_type in [NodeType.SHARED_MASTER, NodeType.SHARED_REPLICA]:
     if repository_type != RepositoryType.SHARED:
       parser.error("Shared nodes must use shared repository type")
 
-  # Get max_databases from tier configuration if available
+  # Tier config wins over --max-databases when a tier is configured.
   max_databases = args.max_databases
   try:
-    # Get tier from environment using centralized config
     cluster_tier = env.CLUSTER_TIER
     if cluster_tier and cluster_tier != "unknown":
       tier_config = env.get_lbug_tier_config()
-      # Use databases_per_instance from tier config if available
       max_databases = tier_config.get("databases_per_instance", args.max_databases)
       logger.info(
         f"Loaded max_databases={max_databases} from tier config for tier={cluster_tier}"
@@ -105,12 +94,10 @@ def main():
   except Exception as e:
     logger.warning(f"Could not load tier config, using default: {e}")
 
-  # Validate configuration before starting
   from robosystems.config.validation import EnvValidator
 
   EnvValidator.validate_required_vars(env)
 
-  # Initialize the cluster service
   init_cluster_service(
     base_path=str(base_path),
     max_databases=max_databases,
@@ -119,15 +106,12 @@ def main():
     repository_type=repository_type,
   )
 
-  # Create the FastAPI app
   app = create_app()
 
-  # Configure logging
   import logging
 
   logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
-  # Display startup info
   logger.info(f"Starting Graph API Server v{app.version}")
   logger.info(f"Base path: {base_path}")
   logger.info(
@@ -138,7 +122,6 @@ def main():
   logger.info(f"Host: {args.host}:{args.port}")
   logger.info(f"Worker processes: {args.workers}")
 
-  # Run the server
   uvicorn.run(
     app,
     host=args.host,

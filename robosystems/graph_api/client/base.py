@@ -31,23 +31,16 @@ class BaseGraphClient:
     config: GraphClientConfig | None = None,
     **kwargs,
   ):
-    """
-    Initialize the client.
+    """Initialize the client; ``kwargs`` override individual config fields.
 
-    Args:
-        base_url: Base URL for the API
-        config: Client configuration
-        **kwargs: Additional config overrides
+    The API key comes from ``kwargs["api_key"]`` or ``GRAPH_API_KEY`` and is
+    sent as the ``X-Graph-API-Key`` header on every request.
     """
-    # Use provided config or create from environment
     self.config = config or GraphClientConfig.from_env()
 
-    # Override with provided values
     if base_url:
       self.config.base_url = base_url.rstrip("/")
 
-    # Handle API key authentication
-    # Use centralized config to get from Secrets Manager
     from robosystems.config import env
 
     api_key = kwargs.pop("api_key", None) or env.GRAPH_API_KEY
@@ -57,7 +50,6 @@ class BaseGraphClient:
       kwargs["headers"]["X-Graph-API-Key"] = api_key
       logger.debug("GraphClient configured with API key")
     else:
-      # Only warn about missing API key in production environments
       if env.ENVIRONMENT in ("prod", "production", "staging"):
         logger.warning("GraphClient initialized without API key")
       else:
@@ -66,16 +58,14 @@ class BaseGraphClient:
     if kwargs:
       self.config = self.config.with_overrides(**kwargs)
 
-    # Validate configuration
     if not self.config.base_url:
       raise ValueError("base_url must be provided or set in environment")
 
-    # Circuit breaker state
     self._circuit_breaker_failures = 0
     self._circuit_breaker_last_failure = 0
     self._circuit_breaker_open = False
 
-    # Graph ID for operations (can be set for compatibility)
+    # Default graph for methods that do not take one; set by the factory.
     self.graph_id: str | None = None
 
   def _build_url(self, path: str) -> str:
@@ -85,70 +75,53 @@ class BaseGraphClient:
     return urljoin(self.config.base_url + "/", path)
 
   def _should_retry(self, error: Exception, attempt: int) -> bool:
-    """
-    Determine if request should be retried.
+    """Decide whether to retry after ``error`` on 0-based ``attempt``.
 
-    Args:
-        error: The exception that occurred
-        attempt: Current attempt number (0-based)
-
-    Returns:
-        True if should retry, False otherwise
+    Retries transient and server errors. A malformed query fails identically
+    every time, so ``GraphSyntaxError`` never retries even though it can
+    arrive as a 500; client errors and unrecognized exceptions do not retry
+    either.
     """
     if attempt >= self.config.max_retries:
       return False
 
-    # Import here to avoid circular imports
     from .exceptions import GraphSyntaxError
 
-    # Syntax errors should NEVER be retried - fail fast
     if isinstance(error, GraphSyntaxError):
       return False
 
-    # Check if error is retriable
     if isinstance(error, GraphTransientError):
       return True
 
     if isinstance(error, GraphServerError):
-      # 500 errors might be retriable
       return True
 
     if isinstance(error, GraphClientError):
-      # Client errors are not retriable
       return False
 
-    # Unknown errors - don't retry
     return False
 
   def _calculate_retry_delay(self, attempt: int) -> float:
-    """
-    Calculate delay before retry using exponential backoff with jitter.
+    """Seconds to wait before the next attempt: exponential backoff plus jitter.
 
-    Args:
-        attempt: Current attempt number (0-based)
-
-    Returns:
-        Delay in seconds
+    The jitter (up to 10% of the delay) keeps concurrent clients from
+    retrying in lockstep against an instance that just came back.
     """
     delay = self.config.retry_delay * (self.config.retry_backoff**attempt)
-    # Add jitter to prevent thundering herd
     jitter = random.uniform(0, delay * 0.1)
     return delay + jitter
 
   def _check_circuit_breaker(self) -> None:
-    """
-    Check if circuit breaker is open.
+    """Raise ``GraphTransientError`` while the breaker is open.
 
-    Raises:
-        GraphTransientError: If circuit breaker is open
+    Resets once ``circuit_breaker_timeout`` has elapsed since the last
+    failure, so the next call probes the instance again.
     """
     if not self._circuit_breaker_open:
       return
 
-    # Check if timeout has passed
     time_since_failure = time.time() - self._circuit_breaker_last_failure
     if time_since_failure > self.config.circuit_breaker_timeout:
-      # Reset circuit breaker
       self._circuit_breaker_open = False
       self._circuit_breaker_failures = 0
       logger.info("Circuit breaker reset")
@@ -176,24 +149,18 @@ class BaseGraphClient:
   def _handle_response_error(
     self, status_code: int, response_data: dict[str, Any] | None = None
   ) -> GraphAPIError:
-    """
-    Convert HTTP status code to appropriate exception.
+    """Map an HTTP status to the matching ``GraphAPIError`` subclass.
 
-    Args:
-        status_code: HTTP status code
-        response_data: Response body data
-
-    Returns:
-        Appropriate GraphAPIError subclass
+    502/503/504 become ``GraphTransientError`` (retryable), 4xx become
+    ``GraphClientError``, other 5xx become ``GraphServerError``. Query syntax
+    and schema errors are detected by message pattern first, because
+    LadybugDB surfaces them as 422 *or* 500 and they must never be retried.
     """
     error_message = "API request failed"
     if response_data and isinstance(response_data, dict):
       error_message = response_data.get("detail", error_message)
 
-    # Check for specific syntax/schema errors that should never be retried
-    # These can come as 422 (validation) or 500 (execution) errors
     if error_message and (status_code == 422 or status_code == 500):
-      # These are permanent errors that will never succeed on retry
       syntax_error_patterns = [
         "Parser exception",
         "Binder exception",

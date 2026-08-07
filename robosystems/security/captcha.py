@@ -44,15 +44,10 @@ class CaptchaService:
     idempotency_key: str | None = None,
   ) -> CaptchaVerificationResult:
     """
-    Verify a Cloudflare Turnstile CAPTCHA token.
+    Verify a Cloudflare Turnstile CAPTCHA token against the siteverify API.
 
-    Args:
-        token: The CAPTCHA token from the frontend
-        remote_ip: Optional client IP address for additional validation
-        idempotency_key: Optional idempotency key for duplicate prevention
-
-    Returns:
-        CaptchaVerificationResult with verification status and details
+    Network, API, and internal errors all resolve to an unsuccessful result
+    rather than an exception, so callers always get a decision.
     """
     if not token:
       # Only log warning in non-test environments to reduce test noise
@@ -134,19 +129,12 @@ class CaptchaService:
     self, token: str | None, remote_ip: str | None = None
   ) -> CaptchaVerificationResult:
     """
-    Verify CAPTCHA token if required, or skip if in development mode.
+    Verify a CAPTCHA token if required, skipping when CAPTCHA is disabled.
 
-    This is the main method that should be used in auth endpoints.
-
-    Args:
-        token: CAPTCHA token (can be None in development)
-        remote_ip: Client IP for additional validation
-
-    Returns:
-        CaptchaVerificationResult indicating success or failure
+    The entry point auth endpoints should call; ``token`` may be None where
+    CAPTCHA is off.
     """
     if not self.is_captcha_required():
-      # Development mode - skip CAPTCHA verification
       logger.info("CAPTCHA verification skipped (development mode)")
       return CaptchaVerificationResult(success=True, error_codes=["dev-mode-skip"])
 

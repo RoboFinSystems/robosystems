@@ -1,10 +1,13 @@
-"""
-Authentication dependencies for FastAPI.
+"""FastAPI authentication dependencies.
 
-Security Note:
-- JWT tokens can be passed via Authorization header (preferred) or query parameter (for SSE)
-- Query parameter tokens are automatically redacted in all logs via middleware/logging.py
-- Never log full request URLs; always use request.url.path for logging
+Every dependency here accepts either a JWT bearer token or an ``X-API-Key``
+header, with JWT taking precedence. Two variants also read a credential from
+a query parameter, because EventSource (SSE) and MCP connector clients cannot
+send custom headers.
+
+Query-parameter credentials are redacted from logs by the sensitive-params
+list in ``middleware/logging.py`` — log ``request.url.path``, never the full
+URL, or the credential leaks.
 """
 
 from typing import Any
@@ -30,11 +33,12 @@ from .utils import (
 
 
 def _validate_cached_user_data(user_data: dict) -> bool:
-  """Validate cached user data before creating User object."""
+  """Reject cached user payloads whose required fields are missing or the
+  wrong type, so a corrupted entry can't materialize a User.
+  """
   if not isinstance(user_data, dict):
     return False
 
-  # Validate required fields
   user_id = user_data.get("id")
   email = user_data.get("email")
 
@@ -44,7 +48,6 @@ def _validate_cached_user_data(user_data: dict) -> bool:
   if not email or not isinstance(email, str) or "@" not in email:
     return False
 
-  # Validate optional fields
   name = user_data.get("name")
   if name is not None and not isinstance(name, str):
     return False
@@ -54,7 +57,7 @@ def _validate_cached_user_data(user_data: dict) -> bool:
 
 
 def _create_user_from_cache(user_data: dict) -> User | None:
-  """Safely create User object from validated cached data."""
+  """Build a `User` from cached data, or None when the data fails validation."""
   if not _validate_cached_user_data(user_data):
     logger.warning("Invalid cached user data detected, falling back to database")
     return None
@@ -91,7 +94,7 @@ def _db_get_user_by_id(user_id: str) -> User | None:
     user = User.get_by_id(user_id, sess)
     if not user:
       return None
-    # Detach from session so the pool connection is returned immediately.
+    # Detach so the pool connection is returned immediately.
     sess.expunge(user)
     return user
   finally:
@@ -164,7 +167,6 @@ def _get_user_for_verified_jwt(user_id: str, token_session_version: int) -> User
   return user
 
 
-# Define API key header
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -210,23 +212,12 @@ async def get_optional_user(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),
 ) -> User | None:
-  """
-  Get the authenticated user if API key or JWT token is valid (optional authentication).
-
-  Args:
-      request: FastAPI request object
-      api_key (str): The API key from the X-API-Key header.
-
-  Returns:
-      Optional[User]: The authenticated user or None if no valid authentication provided.
-  """
-  # Extract JWT token from Authorization header
+  """Return the authenticated user, or None when no valid credential is sent."""
   authorization = request.headers.get("authorization")
   jwt_token = None
   if authorization and authorization.startswith("Bearer "):
-    jwt_token = authorization[7:]  # Remove "Bearer " prefix
+    jwt_token = authorization[7:]
 
-  # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
@@ -236,7 +227,6 @@ async def get_optional_user(
       if user:
         return user
 
-  # Fall back to API key authentication
   if api_key:
     user = validate_api_key(api_key)
     if user:
@@ -250,30 +240,17 @@ async def get_current_user(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),
 ) -> User:
-  """
-  Get the authenticated user, raising an exception if authentication fails.
-
-  Args:
-      request: FastAPI request object for extracting client info
-      api_key (str): The API key from the X-API-Key header.
-
-  Returns:
-      User: The authenticated user.
-
-  Raises:
-      HTTPException: If no valid authentication is provided.
-  """
+  """Return the authenticated user, raising 401 when authentication fails."""
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
   endpoint = str(request.url.path)
 
-  # Extract JWT token from Authorization header
   authorization = request.headers.get("authorization")
   jwt_token = None
   if authorization and authorization.startswith("Bearer "):
-    jwt_token = authorization[7:]  # Remove "Bearer " prefix
+    jwt_token = authorization[7:]
 
-  # Try JWT token authentication first (takes precedence)
+  # JWT takes precedence over the API key header.
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
@@ -303,7 +280,6 @@ async def get_current_user(
       headers={"WWW-Authenticate": "Bearer"},
     )
 
-  # Fall back to API key authentication
   if api_key:
     user = validate_api_key(api_key)
     if user:
@@ -330,7 +306,6 @@ async def get_current_user(
         headers={"WWW-Authenticate": "ApiKey"},
       )
 
-  # No authentication provided
   SecurityAuditLogger.log_auth_failure(
     reason="No authentication provided",
     ip_address=client_ip,
@@ -349,31 +324,24 @@ async def get_current_user_with_graph(
   graph_id: str,
   api_key: str = Security(API_KEY_HEADER),
 ) -> User:
-  """
-  Get the authenticated user with graph authorization check and security audit logging.
+  """Authenticate the caller and confirm they have access to `graph_id`.
 
-  Args:
-      request: FastAPI request object
-      graph_id (str): The graph database ID to check access for.
-      api_key (str): The API key from the X-API-Key header.
+  Proves graph *membership* only. Write operations must additionally call
+  `require_graph_write_role`, since a viewer passes this check.
 
-  Returns:
-      User: The authenticated user.
-
-  Raises:
-      HTTPException: If no valid authentication is provided or user doesn't have graph access.
+  Raises 401 when authentication fails and 403 when the graph is not the
+  caller's.
   """
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
   endpoint = str(request.url.path)
 
-  # Extract JWT token from Authorization header
   authorization = request.headers.get("authorization")
   jwt_token = None
   if authorization and authorization.startswith("Bearer "):
-    jwt_token = authorization[7:]  # Remove "Bearer " prefix
+    jwt_token = authorization[7:]
 
-  # Try JWT token authentication first (takes precedence)
+  # JWT takes precedence over the API key header.
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
@@ -384,12 +352,9 @@ async def get_current_user_with_graph(
       user = _get_user_for_verified_jwt(user_id, token_session_version)
 
       if user and bool(user.is_active):
-        # Check if user has access to the graph (try cache first)
         has_access = api_key_cache.get_cached_jwt_graph_access(str(user_id), graph_id)
 
         if has_access is None:
-          # Cache miss - check database and cache result
-          # Check shared repositories (including subgraphs like "sec_historical")
           from robosystems.config.shared_repositories import (
             is_shared_repository_or_subgraph,
           )
@@ -397,14 +362,13 @@ async def get_current_user_with_graph(
           from ..graph.utils import MultiTenantUtils
 
           if is_shared_repository_or_subgraph(graph_id):
-            # Use generic repository access validation (resolves subgraph to parent)
+            # Resolves a subgraph to its parent repository before checking.
             has_access = MultiTenantUtils.validate_repository_access(
               graph_id,
               user_id,
               "read",
             )
           else:
-            # Use GraphUser access validation for personal user graphs
             has_access = _db_check_graph_access(user_id, graph_id)
 
           api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
@@ -444,7 +408,6 @@ async def get_current_user_with_graph(
       headers={"WWW-Authenticate": "Bearer"},
     )
 
-  # Fall back to API key authentication (with graph validation)
   if api_key:
     user = validate_api_key_with_graph(api_key, graph_id)
     if user:
@@ -474,7 +437,6 @@ async def get_current_user_with_graph(
         headers={"WWW-Authenticate": "ApiKey"},
       )
 
-  # No authentication provided
   SecurityAuditLogger.log_auth_failure(
     reason="No authentication provided",
     ip_address=client_ip,
@@ -498,9 +460,8 @@ async def get_current_user_with_graph_or_url_token(
     "clients that cannot send custom headers",
   ),
 ) -> User:
-  """
-  Graph authentication that additionally accepts a graph-scoped API key via
-  the ``token`` query parameter.
+  """Graph authentication that also accepts a graph-scoped API key via the
+  ``token`` query parameter.
 
   Built for the MCP Streamable HTTP endpoint: claude.ai / Claude Desktop
   custom connectors cannot send custom headers, so the connector URL carries a
@@ -565,11 +526,10 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
   This is the single write-role authorization check the command surfaces share
   — REST command ops (the extensions registrar, content-ops) call it before
   dispatching, and the MCP surface enforces the same via
-  ``validate_mcp_access(..., "write")``. Opens a short-lived platform session
-  (``GraphUser`` lives in the platform DB, not the per-graph OLTP DB).
+  ``validate_mcp_access(..., "write")``. Raises 403 for a read-only role.
 
-  Raises:
-      HTTPException: 403 if the user's role on the graph is read-only.
+  Opens a short-lived platform session — ``GraphUser`` lives in the platform
+  DB, not the per-graph OLTP DB.
   """
   from robosystems.database import SessionFactory
   from robosystems.models.core import GraphUser
@@ -600,25 +560,11 @@ async def get_current_user_with_repository_access(
   operation_type: str = "read",
   api_key: str = Security(API_KEY_HEADER),
 ) -> User:
+  """Authenticate the caller and confirm `operation_type` access to a shared
+  repository such as `sec`. Raises 403 when access is denied.
   """
-  Get the authenticated user with repository access validation.
-
-  Args:
-      request: FastAPI request object for extracting client info
-      repository_id: Repository identifier (e.g., 'sec', 'industry')
-      operation_type: Type of operation ("read", "write", "admin")
-      api_key: The API key from the X-API-Key header
-
-  Returns:
-      User: The authenticated user with validated repository access
-
-  Raises:
-      HTTPException: If authentication fails or repository access denied
-  """
-  # First get the authenticated user
   current_user = await get_current_user(request, api_key)
 
-  # Then validate repository access
   if not validate_repository_access(current_user, repository_id, operation_type):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
@@ -629,16 +575,7 @@ async def get_current_user_with_repository_access(
 
 
 def get_repository_user_dependency(repository_id: str, operation_type: str = "read"):
-  """
-  Factory function to create repository access dependency with specific operation type.
-
-  Args:
-      repository_id: Repository identifier (e.g., 'sec', 'industry')
-      operation_type: Type of operation required
-
-  Returns:
-      Dependency function for repository access validation
-  """
+  """Build a dependency that gates on `operation_type` access to a repository."""
 
   async def _get_repository_user(
     request: Request,
@@ -651,49 +588,27 @@ def get_repository_user_dependency(repository_id: str, operation_type: str = "re
   return _get_repository_user
 
 
-# ============================================================================
-# SSE-Specific Authentication Dependencies
-# ============================================================================
-
-
 async def get_current_user_sse(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),
   authorization: str | None = Header(None),
   token: str | None = Query(None, description="JWT token for SSE authentication"),
 ) -> User:
-  """
-  Get the authenticated user for SSE endpoints (supports query parameter tokens).
+  """Authenticate an SSE caller, accepting the JWT in a `token` query param.
 
-  This is a specialized version of get_current_user that accepts JWT tokens
-  via query parameters, which is necessary for Server-Sent Events since
-  EventSource API doesn't support custom headers.
-
-  Args:
-      request: FastAPI request object for extracting client info
-      api_key: The API key from the X-API-Key header
-      authorization: The Authorization header (supports Bearer tokens)
-      token: JWT token from query parameter (for SSE connections)
-
-  Returns:
-      User: The authenticated user
-
-  Raises:
-      HTTPException: If no valid authentication is provided
+  The EventSource API cannot send custom headers, so the browser passes the
+  token in the URL. `middleware/logging.py` redacts it from logged URLs.
   """
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
   endpoint = str(request.url.path)
 
-  # Extract JWT token from Authorization header or query parameter
   jwt_token = None
   if authorization and authorization.startswith("Bearer "):
-    jwt_token = authorization[7:]  # Remove "Bearer " prefix
+    jwt_token = authorization[7:]
   elif token:
-    # Fallback to query parameter for SSE connections
     jwt_token = token
 
-  # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
     verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
@@ -723,7 +638,6 @@ async def get_current_user_sse(
       headers={"WWW-Authenticate": "Bearer"},
     )
 
-  # Fall back to API key authentication
   if api_key:
     user = validate_api_key(api_key)
     if user:
@@ -750,7 +664,6 @@ async def get_current_user_sse(
         headers={"WWW-Authenticate": "ApiKey"},
       )
 
-  # No authentication provided
   SecurityAuditLogger.log_auth_failure(
     reason="No authentication provided",
     ip_address=client_ip,

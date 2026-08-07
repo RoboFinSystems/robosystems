@@ -1,4 +1,6 @@
-"""Authentication module initialization."""
+"""Authentication middleware: FastAPI dependencies, API key and JWT
+validation, admin auth, and the encrypted auth cache.
+"""
 
 from ..rate_limits import (
   graph_scoped_rate_limit_dependency,

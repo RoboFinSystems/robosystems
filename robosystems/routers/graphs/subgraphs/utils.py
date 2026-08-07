@@ -34,21 +34,8 @@ def get_subgraph_service():
 def verify_parent_graph_access(
   graph_id: str, current_user: User, session: Session, required_role: str = "read"
 ) -> Graph:
-  """
-  Verify user has access to parent graph and return the graph.
-
-  Args:
-      graph_id: Parent graph ID
-      current_user: Current authenticated user
-      session: Database session
-      required_role: Required role ('read', 'admin')
-
-  Returns:
-      Graph object if access is granted
-
-  Raises:
-      HTTPException: If access denied or graph not found
-  """
+  """Return the parent graph after checking the user holds `required_role`
+  ('read' or 'admin') on it. Raises 403 on denial, 404 when it is missing."""
   # Enforce graph lifecycle and subscription status (write: creating a subgraph)
   from robosystems.middleware.billing.enforcement import require_graph_access
 
@@ -80,15 +67,7 @@ def verify_parent_graph_access(
 
 
 def verify_subgraph_tier_support(parent_graph: Graph):
-  """
-  Verify the parent graph tier supports subgraphs.
-
-  Args:
-      parent_graph: Parent graph object
-
-  Raises:
-      HTTPException: If tier doesn't support subgraphs
-  """
+  """Verify the parent graph's tier allows subgraphs, raising 403 if not."""
   from robosystems.config import env
   from robosystems.logger import logger
 
@@ -108,31 +87,19 @@ def verify_subgraph_tier_support(parent_graph: Graph):
 
 
 def verify_parent_graph_active(parent_graph: Graph):
-  """
-  Verify parent graph is in active state.
+  """Placeholder for a parent-graph liveness check; currently a no-op.
 
-  Args:
-      parent_graph: Parent graph object
-
-  Raises:
-      HTTPException: If graph is inactive
+  Callers must not rely on this for authorization — it performs no
+  validation and raises nothing.
   """
   pass
 
 
 def check_subgraph_quota(parent_graph: Graph, session: Session):
-  """
-  Check if parent graph can create more subgraphs.
+  """Check the parent graph's remaining subgraph quota.
 
-  Args:
-      parent_graph: Parent graph object
-      session: Database session
-
-  Returns:
-      tuple: (current_count, max_allowed, existing_subgraphs)
-
-  Raises:
-      HTTPException: If quota exceeded
+  Returns `(current_count, max_allowed, existing_subgraphs)`, raising 403 once
+  the quota is exhausted.
   """
   existing_subgraphs = Graph.get_subgraphs(parent_graph.graph_id, session)
   current_count = len(existing_subgraphs)
@@ -154,17 +121,8 @@ def check_subgraph_quota(parent_graph: Graph, session: Session):
 def validate_subgraph_name_unique(
   name: str, existing_subgraphs: list, parent_graph_id: str
 ):
-  """
-  Validate subgraph name is unique and valid.
-
-  Args:
-      name: Proposed subgraph name
-      existing_subgraphs: List of existing subgraphs
-      parent_graph_id: Parent graph ID
-
-  Raises:
-      HTTPException: If name is invalid or not unique
-  """
+  """Validate the proposed subgraph name's format and uniqueness, raising 400
+  if it is malformed or already taken."""
   # Validate name format
   if not validate_subgraph_name(name):
     raise HTTPException(
@@ -189,21 +147,8 @@ def validate_subgraph_name_unique(
 def get_subgraph_by_name(
   graph_id: str, subgraph_name: str, session: Session, current_user: User
 ) -> Graph:
-  """
-  Get subgraph by parent graph ID and subgraph name.
-
-  Args:
-      graph_id: Parent graph ID
-      subgraph_name: Subgraph name
-      session: Database session
-      current_user: Current user
-
-  Returns:
-      Subgraph object
-
-  Raises:
-      HTTPException: If subgraph not found or invalid
-  """
+  """Look up a subgraph by parent graph ID and name, raising 404 when it does
+  not exist and 400 when the name is malformed."""
   # Construct full subgraph ID
   subgraph_id = construct_subgraph_id(graph_id, subgraph_name)
 
@@ -215,7 +160,6 @@ def get_subgraph_by_name(
       detail=f"{subgraph_id} is not a valid subgraph identifier",
     )
 
-  # Get the subgraph
   subgraph = Graph.get_by_id(subgraph_id, session)
   if not subgraph or not subgraph.is_subgraph:
     raise HTTPException(
@@ -237,15 +181,7 @@ def record_operation_metrics(
   parent_graph_id: str,
   additional_tags: dict | None = None,
 ) -> None:
-  """
-  Record operation completion metrics.
-
-  Args:
-      start_time: Operation start time
-      operation_name: Name of the operation
-      parent_graph_id: Parent graph ID
-      additional_tags: Additional metric tags
-  """
+  """Record the duration of a completed subgraph operation."""
   end_time = datetime.now(UTC)
   duration_ms = (end_time - start_time).total_seconds() * 1000
 
@@ -257,14 +193,5 @@ def record_operation_metrics(
 
 
 def handle_circuit_breaker_check(graph_id: str, operation: str) -> None:
-  """
-  Check circuit breaker for an operation.
-
-  Args:
-      graph_id: Graph ID
-      operation: Operation name
-
-  Raises:
-      HTTPException: If circuit breaker is open
-  """
+  """Check the circuit breaker, raising 503 while it is open."""
   circuit_breaker.check_circuit(graph_id, operation)

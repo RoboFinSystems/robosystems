@@ -346,7 +346,8 @@ def search_elements(
 ) -> list[LibraryElementResponse]:
   """Substring search across qname + name + label text.
 
-  POC uses ILIKE; upgrade to full-text search as the library grows.
+  Matches with ILIKE — there is no full-text index on the library tables,
+  so this scales with library size rather than with the result set.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
   pattern = f"%{query_text.lower()}%"
@@ -386,10 +387,9 @@ def get_element_tree(
   When ``structure_id`` is provided, arc traversal is scoped to that one
   structure — critical for presentation seeds like ``fac-presentation``
   which define multiple variants (classified BS vs unclassified BS,
-  multi-step vs single-step IS). Without the scope, a concept reused
-  across variants returns a blended child set that corresponds to no
-  real statement layout. Omitting the argument keeps the legacy blended
-  walk behavior for callers that haven't adopted structure-scoped trees.
+  multi-step vs single-step IS). Omitting it walks every structure at once,
+  so a concept reused across variants returns a blended child set that
+  corresponds to no real statement layout.
   """
   root = session.execute(
     select(Element).where(Element.id == element_id)

@@ -88,12 +88,6 @@ class ElementKnowledgeBuilder:
     Memory-conscious: frees intermediate results aggressively between steps.
     DuckDB uses spill-to-disk with a low memory limit; Python objects are
     deleted and gc.collect()'d as soon as they're no longer needed.
-
-    Args:
-        db_path: Path to the DuckDB staging database.
-
-    Returns:
-        Path to the written element_knowledge.parquet file.
     """
     from robosystems.config.storage.shared import get_artifact_path
 
@@ -305,9 +299,9 @@ class ElementKnowledgeBuilder:
   ) -> dict[str, float]:
     """Compute fraction of neighbors sharing the same primary statement.
 
-    Uses both outgoing AND incoming neighbors (bidirectional). The original
-    outgoing-only approach gave agreement=0.0 to 92%+ of elements because
-    most elements are leaves with zero outgoing edges in the directed graph.
+    Counts both outgoing AND incoming neighbors: most elements are leaves with
+    zero outgoing edges in the directed graph, so an outgoing-only walk scores
+    92%+ of them at agreement=0.0.
     """
     graph = element_graph.graph
     result = {}
@@ -365,14 +359,11 @@ class ElementKnowledgeBuilder:
     For each element, maps its structure canonical_types to statement types
     and picks the statement with the highest total structure count.
 
-    This replaces BFS-based classification which suffers from cross-statement
-    arc pollution in the deduped graph. The indirect cash flow method creates
-    calculation arcs from IS roots (NetIncomeLoss) to CF elements, causing
-    IS BFS to reach every cash flow element before CF BFS.
-
-    Structure membership is immune to this because it uses structure-level
-    classifications (62K cash_flow_statement structures correctly identified)
-    rather than element-level graph traversal.
+    Structure membership rather than BFS traversal, because the deduped graph
+    has cross-statement arc pollution: the indirect cash flow method creates
+    calculation arcs from IS roots (NetIncomeLoss) to CF elements, so an IS BFS
+    reaches every cash flow element before the CF BFS does. Structure-level
+    classifications carry no such arcs.
     """
     mapping = ElementKnowledgeBuilder._CANONICAL_TO_STATEMENT
     result: dict[str, str] = {}
@@ -402,14 +393,7 @@ class StructureKnowledgeBuilder:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:
-    """Build both structure knowledge artifacts.
-
-    Args:
-        db_path: Path to the DuckDB staging database.
-
-    Returns:
-        Tuple of (profiles_path, consensus_path).
-    """
+    """Build both structure artifacts, returning (profiles, consensus) paths."""
     _log_memory("structure builder start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 
@@ -560,14 +544,7 @@ class DisclosureProfileBuilder:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:
-    """Build both disclosure knowledge artifacts.
-
-    Args:
-        db_path: Path to the DuckDB staging database.
-
-    Returns:
-        Tuple of (profiles_path, consensus_path).
-    """
+    """Build both disclosure artifacts, returning (profiles, consensus) paths."""
     _log_memory("disclosure builder start")
     extractor = ArcExtractor(db_path, memory_limit=self._memory_limit)
 

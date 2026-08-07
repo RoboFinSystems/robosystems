@@ -1,15 +1,8 @@
 """RoboSystems Dagster orchestration.
 
-This module provides Dagster-based data orchestration for:
-- Billing and infrastructure scheduled tasks
-- SEC EDGAR data pipeline
-- User graph operations
-
-The Dagster setup replaces background tasks for all orchestration needs, providing:
-- Better observability through the Dagster UI
-- Asset-based data lineage tracking
-- Declarative scheduling and sensors
-- Unified monitoring for all pipeline activity
+Covers billing and infrastructure schedules, the SEC EDGAR data pipeline, and
+user graph operations. See ``robosystems/dagster/README.md`` for the layout of
+assets, jobs, schedules, sensors, and resources.
 
 Note: ``defs`` is loaded lazily to avoid a circular import
 (dagster → definitions → sec.pipeline → backup → dagster.resources → dagster).

@@ -1,11 +1,10 @@
-"""
-Per-graph MCP instructions generator.
+"""Per-graph MCP instructions generator.
 
 Produces the routing guidance handed to MCP clients via the server's
-`instructions` handshake field. The
-string is always in the connected agent's context, so it stays short and points
-at the live tool *families* rather than restating each tool's schema — the
-discovery layer that tells an agent which tool to reach for, given an intent.
+`instructions` handshake field. The string sits in the connected agent's
+context for the whole session, so it stays short and points at live tool
+*families* rather than restating each tool's schema — it is the discovery
+layer that tells an agent which tool to reach for, given an intent.
 
 Two content sources, split by graph stability:
 

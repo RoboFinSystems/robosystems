@@ -1,6 +1,4 @@
-"""
-Database management routers.
-"""
+"""Per-database routers: lifecycle, query, schema, backup/restore, memory, swap."""
 
 from . import (
   backup,

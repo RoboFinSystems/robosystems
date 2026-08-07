@@ -1,4 +1,4 @@
-"""Graph query API models."""
+"""Graph health and database-info API models."""
 
 from pydantic import BaseModel, Field
 
@@ -102,7 +102,7 @@ class DatabaseInfoResponse(BaseModel):
     ..., description="Graph database identifier", examples=["kg1a2b3c4d5"]
   )
   database_name: str = Field(..., description="Database name", examples=["kg1a2b3c4d5"])
-  # database_path removed for security - no need to expose file system paths
+  # The on-disk path is deliberately not exposed.
   database_size_bytes: int = Field(
     ..., description="Database size in bytes", examples=[1048576]
   )

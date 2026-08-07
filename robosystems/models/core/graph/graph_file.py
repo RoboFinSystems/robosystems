@@ -171,21 +171,12 @@ class GraphFile(Base):
     session: Session,
     stale_hours: int = 1,
   ) -> list[str]:
-    """
-    Find files stuck in uploaded/pending state due to mid-staging crashes.
+    """Find files stranded mid-staging and return their IDs to re-stage.
 
-    Files can get stuck when the API crashes mid-staging, leaving them with
-    upload_status='uploaded' and duckdb_status='pending' permanently.
-
-    Returns the IDs of stale files so callers can re-stage them.
-
-    Args:
-        graph_id: Graph database identifier
-        session: SQLAlchemy session
-        stale_hours: Hours after which a pending file is considered stale
-
-    Returns:
-        List of stale file IDs to be re-staged by the caller
+    An API crash between upload and staging leaves a file at
+    ``upload_status='uploaded'`` / ``duckdb_status='pending'`` with nothing
+    left to advance it; anything in that state older than ``stale_hours``
+    is treated as stranded.
     """
     from datetime import timedelta
 

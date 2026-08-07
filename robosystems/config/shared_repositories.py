@@ -107,17 +107,9 @@ def is_shared_repository_or_subgraph(graph_id: str | None) -> bool:
 def resolve_shared_repository_parent(graph_id: str) -> str:
   """Resolve a graph ID to its shared repository parent.
 
-  If graph_id is already a parent repo, returns it unchanged.
-  If it's a subgraph (e.g., "sec_historical"), returns the parent ("sec").
-
-  Args:
-      graph_id: Graph identifier that is a shared repo or subgraph of one.
-
-  Returns:
-      The parent shared repository ID.
-
-  Raises:
-      ValueError: If graph_id is not a shared repository or subgraph of one.
+  A parent repo id is returned unchanged; a subgraph ("sec_historical")
+  resolves to its parent ("sec"). Raises ValueError for anything that is
+  neither.
   """
   if is_shared_repository(graph_id):
     return graph_id
@@ -158,14 +150,9 @@ def get_all_manifests() -> dict[str, SharedRepositoryManifest]:
 
 
 def get_plan_details(plan: str, repo_id: str | None = None) -> dict | None:
-  """Get details for a repository plan.
+  """Get details for a repository plan, or None if not found.
 
-  Args:
-      plan: The plan key to look up (e.g. "starter", "advanced").
-      repo_id: Optional repository ID. If None, searches all repos for the plan.
-
-  Returns:
-      Plan details dict or None if not found.
+  A None ``repo_id`` searches every repository for the plan key.
   """
   _ensure_loaded()
 

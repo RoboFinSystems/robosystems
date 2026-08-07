@@ -1,11 +1,9 @@
-"""Create-file-upload command — presign an S3 upload + register the GraphFile.
+"""Presign an S3 upload and register the ``GraphFile`` row behind it.
 
-Extracted verbatim from the former ``POST /files`` router so the file-upload
-write goes through the content-ops envelope
-(``POST /operations/create-file-upload``) like ingest-file / delete-file.
-Validates format/extension/name, auto-creates the staging table if missing,
-presigns an S3 PUT URL, and records a PENDING GraphFile. Returns the presign
-details; the caller uploads to S3 then calls ingest-file to stage.
+Validates format, extension, and name, creates the staging table if it is
+missing, presigns a PUT URL, and records the file as PENDING. Only the presign
+details come back — the caller uploads to S3 itself, then calls ``ingest-file``
+to stage the result.
 """
 
 import uuid

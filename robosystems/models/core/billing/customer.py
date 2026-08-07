@@ -13,10 +13,9 @@ logger = get_logger(__name__)
 
 
 class BillingCustomer(Base):
-  """Billing information for an organization.
+  """An org's billing identity: provider customer, payment terms, method.
 
-  Separated from IAM models to isolate billing concerns.
-  Designed for eventual extraction to billing microservice.
+  Keyed on ``org_id`` — one billing customer per organization.
   """
 
   __tablename__ = "billing_customers"
@@ -88,13 +87,10 @@ class BillingCustomer(Base):
   def can_provision_resources(
     self, environment: str, billing_enabled: bool
   ) -> tuple[bool, str | None]:
-    """Check if customer can provision new resources.
+    """Whether the customer may provision resources, with a refusal reason.
 
-    If billing is disabled, allows all provisioning (testing mode).
-    If billing is enabled, requires either invoice billing or payment method.
-
-    Returns:
-        Tuple of (can_provision, error_message)
+    With ``billing_enabled`` false everything is permitted; otherwise the org
+    needs invoice billing turned on or a payment method on file.
     """
     if not billing_enabled:
       return (True, None)

@@ -1,29 +1,41 @@
 #!/usr/bin/env python3
-"""Cascade Advisory Group LLC — RoboLedger End-to-End Demo
+"""Cascade Advisory Group LLC — RoboLedger end-to-end demo.
 
-Sets up a complete demo environment with synthetic consulting company data,
-CoA→GAAP mappings, depreciation/prepaid schedules, accounting policy
-documents, and a filed FY 2025 annual report. After running, use Claude
-Desktop or MCP tools to simulate the close workflow on the queued period.
+Builds a complete RoboLedger tenant for a synthetic boutique management
+consulting firm: chart of accounts, counterparty agents, typed REA business
+events, CoA→rs-gaap mappings, depreciation and prepaid amortization schedules,
+accounting policy documents, and a filed FY 2025 annual report. The run leaves
+exactly one fiscal period queued for close, so you can drive the month-end
+close from Claude Desktop or any MCP client the moment it finishes.
 
-Data is generated for a rolling 16-month window ending at the current month,
-so the demo stays evergreen.
+Dates are generated relative to today over a rolling 16-month window, so the
+demo stays evergreen no matter when it runs.
 
-**Transport rule**: all content goes through the HTTP API via `LedgerClient`
-— the same surface frontend UI and MCP tools use. This emulates "data
-arriving from outside the system" the way a real customer's integration
-would. The ONLY exception is `_reset.py`, which uses direct DB access for
-demo cleanup between runs — that path is intentionally NOT a product
-operation.
+**Transport rule**: every piece of content goes through the HTTP API via
+`LedgerClient` — the same surface the frontend UI and MCP tools use. That
+emulates data arriving from outside the system the way a real customer's
+integration does. The one exception is `_reset.py`, which uses direct DB access
+to clean up between runs; that path is deliberately NOT a product operation.
+
+Prerequisites:
+    just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
+    just demo-user    # writes credentials to .local/config.json
 
 Usage:
-    uv run python -m examples.roboledger_demo.main                        # Create new graph + load
-    uv run python -m examples.roboledger_demo.main <graph_id>             # Load into existing graph
-    uv run python -m examples.roboledger_demo.main --dry-run              # Validate data only
-    uv run python -m examples.roboledger_demo.main --ai                    # Use MappingOperator instead of hardcoded mappings (requires Bedrock)
-    uv run python -m examples.roboledger_demo.main --skeleton              # Create user + empty roboledger graph only; skip synthetic data load (use for manual QB sandbox connect via UI)
+    just demo-roboledger                    # create a graph and load everything
+    just demo-roboledger <graph_id>         # load into an existing graph
+    just demo-roboledger --dry-run          # validate the synthetic data only
+    just demo-roboledger --ai               # map the CoA with the MappingOperator
+                                            #   instead of the table in mappings.py
+                                            #   (requires AWS Bedrock)
+    just demo-roboledger --skeleton         # user + empty graph, no data — for
+                                            #   connecting a QuickBooks sandbox
+                                            #   by hand through the UI
+    just demo-roboledger --entity-type=llc  # corporation (default) | partnership | llc
 
-Requires: Docker stack running (just start)
+Expect a few minutes of progress output ending in a summary with the graph id,
+the period queued for close, the filed FY 2025 report id and viewer URL, and a
+numbered list of close prompts to try.
 """
 
 from __future__ import annotations
@@ -281,9 +293,11 @@ def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") 
 def reset_demo(graph_id: str) -> None:
   """Wipe prior demo state so re-runs are idempotent.
 
-  This is the ONLY direct-DB operation in the demo. Everything else
-  goes through the HTTP API. Drops the tenant schema and re-provisions
-  it with the shared taxonomy seed data.
+  The ONLY direct-DB operation in the demo — everything else goes through the
+  HTTP API. It deletes the rows a previous run created while leaving the entity
+  and the library-seeded taxonomy in place, so the graph does not have to be
+  re-provisioned between runs. See `_reset.py` for why this is deliberately not
+  a product operation.
   """
   from ._reset import reset_demo_state
 
@@ -296,13 +310,11 @@ def reset_demo(graph_id: str) -> None:
 
 
 def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
-  """Create the CoA taxonomy, its elements, and link to the entity.
+  """Create the CoA taxonomy, its elements, and the CoA→GAAP mapping structure.
 
-  Returns (element_lookup, coa_taxonomy_id, count).
-  element_lookup maps account code → element ID for downstream use.
-
-  Uses the Taxonomy Block envelope — one POST creates the taxonomy, the
-  mapping structure, and every CoA element atomically.
+  One POST through the Taxonomy Block envelope creates all three atomically.
+  Returns the account-code → element-id lookup that every later step uses to
+  address accounts, alongside the taxonomy id and element count.
   """
   from .data import ACCOUNTS
 
@@ -351,7 +363,7 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Step 2b: Create counterparty agents (via HTTP API)
+# Step 2c: Create counterparty agents (via HTTP API)
 # ---------------------------------------------------------------------------
 
 
@@ -391,7 +403,7 @@ def create_agents(graph_id: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Step 2c: Create business events (via HTTP API)
+# Step 2d: Create business events (via HTTP API)
 # ---------------------------------------------------------------------------
 
 # Account codes used by the typed-event branching logic — defined as
@@ -459,8 +471,9 @@ def create_business_events(
     `event_category=adjustment` and optional `agent_id`.
 
   All event handlers dispatch through the journal_entry_recorded Python
-  handler (per `python_handlers/registry.py`) — the event_type drives
-  inbox classification and the duality chain, not GL posting shape.
+  handler (`robosystems/operations/event_block/python_handlers/registry.py`) —
+  the event_type drives inbox classification and the duality chain, not the GL
+  posting shape.
   """
   client = _get_ledger_client()
 
@@ -756,14 +769,17 @@ def run_ai_mapping(graph_id: str) -> None:
 
 
 def initialize_fiscal_calendar(graph_id: str) -> str:
-  """Initialize the fiscal calendar with closed_through = month before last.
+  """Seed the fiscal calendar so exactly one period is ready to close.
 
-  Uses `LedgerClient.initialize_ledger()` — the HTTP API — which creates
-  the fiscal calendar, seeds FiscalPeriod rows from `earliest_data_period`
-  to the current month, and marks periods as closed/open based on
-  `closed_through`.
+  `closed_through` is set to the month *before* last, which leaves the last
+  completed month as the single open, fully-elapsed period — the demo's
+  `close_target`. The current month stays open but is still in progress, so a
+  user landing in an MCP client has one unambiguous period to close and no
+  backlog to wade through first.
 
-  Returns the `close_target` period string for use in the next-steps output.
+  `LedgerClient.initialize_ledger()` creates the calendar, seeds FiscalPeriod
+  rows from `earliest_data_period` through the current month, and marks each
+  closed or open against that boundary. Returns the `close_target` period.
   """
   from robosystems.operations.roboledger.fiscal_calendar import (
     current_month_period,
@@ -804,10 +820,19 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
 def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
   """Create depreciation and prepaid amortization schedules.
 
-  Uses `LedgerClient.create_schedule()` — the HTTP API — so schedule
-  facts inherit the fiscal calendar's `closed_through` boundary
-  automatically. Prior-run schedules are cleaned up via
-  `LedgerClient.delete_schedule()`.
+  `LedgerClient.create_schedule()` splits the generated facts against the
+  fiscal calendar's `closed_through` boundary: periods ending on or before it
+  are tagged `fact_scope='historical'` (already reflected in the opening
+  balances, so the close workflow ignores them), and everything after is
+  `in_scope` and drafts entries at close. The start offsets and useful lives
+  below are staggered so the set covers every case — schedules that straddle
+  the boundary, the year-one Business Insurance policy that has already run out
+  before it, and the year-two renewal that starts after it. That mix is what
+  makes the demo's first close draw only the months a real bookkeeper would
+  still owe.
+
+  Prior-run schedules are cleaned up via `LedgerClient.delete_schedule()` so
+  re-runs stay idempotent.
   """
   from .data import add_months as demo_add_months
   from .data import get_demo_start_date
@@ -975,13 +1000,12 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     return None
   mapping_id = structures[0].id
 
-  # Render against rs-gaap — the canonical reporting vocabulary. The
-  # CoA was mapped CoA→rs-gaap above, and the Default Reporting Style's
-  # Networks resolve rs-gaap concepts into the BS / IS / CF / Equity
-  # structures, so we pass the standard name directly: create_report
-  # resolves it to the rs-gaap reporting_standard taxonomy (this is also the
-  # request default). The old fac-presentation path predated the
-  # rs-gaap-canonical flip and is no longer copied into tenants.
+  # Render against rs-gaap — the canonical reporting vocabulary. The CoA was
+  # mapped CoA→rs-gaap above, and the Default Reporting Style's Networks
+  # resolve rs-gaap concepts into the BS / IS / CF / Equity structures, so the
+  # standard name passes straight through: create_report resolves it to the
+  # rs-gaap reporting_standard taxonomy, which is also the request default. The
+  # fac presentation is not copied into tenants.
   taxonomy_id = "rs-gaap"
 
   report = client.create_report(
@@ -1003,9 +1027,9 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   package = client.get_report_package(graph_id, report_id)
   if package:
     items = package.get("items", []) or []
-    # `block_type` lives nested at item.block.block_type — the rehydrated
-    # InformationBlockEnvelope. Earlier this read item.block_type directly
-    # and silently rendered "?" for every item.
+    # `block_type` lives nested at item.block.block_type on the rehydrated
+    # InformationBlockEnvelope; reading item.block_type directly finds nothing
+    # and silently renders "?" for every item.
     block_names = [
       (i.get("block") or {}).get("name")
       or (i.get("block") or {}).get("block_type")
@@ -1036,10 +1060,9 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   except Exception as e:
     print(f"  WARNING: file_report failed: {e}")
 
-  # Download both bundle flavors via the SDK so the demo finishes with a
-  # tangible artifact on disk that the customer can open immediately.
-  # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
-  # equivalent. Same Report, same fact set, two serializations.
+  # Pull the artifact set via the SDK so the demo finishes with something on
+  # disk to open. JSON-LD is the canonical projection and XBRL 2.1 is the
+  # filing-grade equivalent: same Report, same facts, two serializations.
   from .download_bundles import download_bundles_for_report
 
   download_bundles_for_report(client, graph_id, report_id)

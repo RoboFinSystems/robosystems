@@ -1,15 +1,15 @@
-"""
-Backup Manager for graph database operations.
+"""Backup and restore for graph databases, backed by S3.
 
-This module provides comprehensive backup and restore functionality for graph
-databases with support for multiple backup formats and storage options.
+Two families of backup, and they are not interchangeable:
 
-Key features:
-- Multiple backup formats: CSV, JSON, Parquet, Full Database Dump
-- S3 storage with compression and encryption
-- Multi-tenant database support
-- Schema-driven export/import
-- Progress tracking and monitoring
+- ``FULL_DUMP`` is the only restorable format, and the only one that may be
+  encrypted. It is the on-disk database, not a re-importable export.
+- ``CSV`` / ``JSON`` / ``PARQUET`` are export formats. They can be downloaded
+  and converted between each other, but never restored.
+
+Encryption and export are mutually exclusive: an encrypted backup cannot be
+downloaded, so ``allow_export`` must be False whenever ``encryption`` is True.
+Storage lives in :mod:`robosystems.operations.aws.s3`.
 """
 
 import asyncio
@@ -63,7 +63,7 @@ class BackupJob:
   allow_export: bool = True  # If True, backup can be exported/downloaded
 
   def __post_init__(self):
-    """Validate backup job configuration."""
+    """Fill in the timestamp and reject incompatible flag combinations."""
     if self.timestamp is None:
       self.timestamp = datetime.now(UTC)
 
@@ -73,18 +73,15 @@ class BackupJob:
     if self.backup_type not in BackupType:
       raise ValueError(f"Invalid backup_type: {self.backup_type}")
 
-    # Validate encryption constraints
     if self.encryption and self.allow_export:
       raise ValueError(
         "Encryption can only be enabled for non-exportable backups. "
         "Set allow_export=False to enable encryption."
       )
 
-    # Restore is only available for full dumps with encryption
     if self.encryption and self.backup_format != BackupFormat.FULL_DUMP:
       raise ValueError("Encryption is only supported for full dump backups")
 
-    # Validate graph_id
     MultiTenantUtils.validate_graph_id(self.graph_id)
 
 
@@ -101,8 +98,7 @@ class RestoreJob:
   progress_tracker: Any | None = None
 
   def __post_init__(self):
-    """Validate restore job configuration."""
-    # Restore is only available for full dumps with encryption
+    """Reject any format other than a full dump."""
     if self.backup_format != BackupFormat.FULL_DUMP:
       raise ValueError(
         "Restore is only supported for full dump backups. "
@@ -118,13 +114,7 @@ class BackupManager:
     s3_adapter: S3BackupAdapter | None = None,
     graph_router=None,
   ):
-    """
-    Initialize backup manager.
-
-    Args:
-        s3_adapter: S3 adapter for backup storage
-        graph_router: Graph router for API communication
-    """
+    """Both collaborators are optional and built lazily on first use."""
     self._s3_adapter = s3_adapter
     self._graph_router = graph_router
     logger.info("BackupManager initialized")
@@ -148,22 +138,15 @@ class BackupManager:
   async def get_backup_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
   ) -> str | None:
-    """
-    Get a temporary download URL for a backup.
+    """Presign a download URL, or None when the backup can't be served.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_id: Backup identifier
-        expires_in: URL expiration time in seconds
-
-    Returns:
-        Temporary download URL or None if backup not found
+    Refuses encrypted backups: the payload is only decryptable by the restore
+    path, so a signed URL would hand out unusable bytes.
     """
     try:
       from robosystems.database import session as SessionLocal
       from robosystems.models.core.graph.graph_backup import GraphBackup
 
-      # Get backup record from database
       db_session = SessionLocal()
       try:
         # Scope the lookup to graph_id — access to graph_id is authorized by
@@ -177,14 +160,12 @@ class BackupManager:
           )
           return None
 
-        # Check if backup is completed
         if not backup.is_completed:
           logger.warning(
             f"Backup {backup_id} is not completed (status: {backup.status})"
           )
           return None
 
-        # Check if backup is exportable (not encrypted)
         if backup.encryption_enabled:
           raise ValueError("Encrypted backups cannot be downloaded")
 
@@ -204,7 +185,6 @@ class BackupManager:
         extension = get_download_extension(backup.s3_key)
         filename = f"{graph_id}_{timestamp_str}{extension}"
 
-        # Choose S3 or R2 client based on backup storage type
         import asyncio
 
         if is_r2:
@@ -232,7 +212,7 @@ class BackupManager:
           ),
         )
 
-        # Replace container hostname with localhost for development (LocalStack)
+        # Dev only: the LocalStack container hostname isn't browser-reachable.
         if "localstack:" in url:
           url = url.replace("localstack:4566", "localhost:4566")
           logger.info(
@@ -253,40 +233,29 @@ class BackupManager:
   async def download_backup(
     self, graph_id: str, backup_id: str, target_format: str | None = None
   ) -> tuple[bytes, str, str]:
-    """
-    Download a backup file with optional format conversion.
+    """Fetch backup bytes as ``(data, content_type, filename)``.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_id: Backup identifier
-        target_format: Optional target format for conversion (csv, json, zip)
-
-    Returns:
-        Tuple of (file_data, content_type, filename)
+    Converts to ``target_format`` when it differs from what was stored.
+    Encrypted backups are refused.
     """
     try:
-      # Get backup metadata
       backup_metadata = await self.s3_adapter.get_backup_metadata(graph_id, backup_id)
 
       if not backup_metadata:
         raise ValueError(f"Backup {backup_id} not found")
 
-      # Check if backup is exportable
       if backup_metadata.get("encryption_enabled", False):
         raise ValueError("Encrypted backups cannot be downloaded")
 
-      # Download backup data from S3
       backup_data = await self.s3_adapter.download_backup(graph_id, backup_id)
 
       original_format = backup_metadata.get("backup_format", "unknown")
 
-      # Handle format conversion if requested
       if target_format and target_format != original_format:
         backup_data, content_type, filename = await self._convert_backup_format(
           backup_data, original_format, target_format, backup_id
         )
       else:
-        # Use original format
         content_type, filename = self._get_content_type_and_filename(
           original_format, backup_id
         )
@@ -301,26 +270,17 @@ class BackupManager:
   async def _convert_backup_format(
     self, backup_data: bytes, from_format: str, to_format: str, backup_id: str
   ) -> tuple[bytes, str, str]:
-    """
-    Convert backup data between formats.
+    """Convert between formats, returning ``(data, content_type, filename)``.
 
-    Args:
-        backup_data: Original backup data
-        from_format: Source format
-        to_format: Target format
-        backup_id: Backup identifier
-
-    Returns:
-        Tuple of (converted_data, content_type, filename)
+    Only csv→json, json→csv and full_dump→zip are supported; anything else
+    raises.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Extract original backup
       original_file = temp_path / f"original_{backup_id}"
       original_file.write_bytes(backup_data)
 
-      # Perform conversion based on format pairs
       if from_format == "csv" and to_format == "json":
         converted_data = await self._convert_csv_to_json(original_file)
         content_type = "application/json"
@@ -344,7 +304,7 @@ class BackupManager:
   def _get_content_type_and_filename(
     self, format: str, backup_id: str
   ) -> tuple[str, str]:
-    """Get appropriate content type and filename for backup format."""
+    """Content type and download filename for a stored backup format."""
     format_map = {
       "csv": ("text/csv", f"{backup_id}.csv.zip"),
       "json": ("application/json", f"{backup_id}.json.zip"),
@@ -355,45 +315,39 @@ class BackupManager:
     return format_map.get(format, ("application/octet-stream", f"{backup_id}.zip"))
 
   async def _convert_csv_to_json(self, csv_file: Path) -> bytes:
-    """Convert CSV backup to JSON format."""
+    """Convert a CSV backup to a JSON record array."""
     import pandas as pd
 
-    # Read CSV data
     df = pd.read_csv(csv_file)
 
-    # Convert to JSON
     json_data = df.to_json(orient="records", indent=2)
 
     return (json_data or "").encode("utf-8")
 
   async def _convert_json_to_csv(self, json_file: Path) -> bytes:
-    """Convert JSON backup to CSV format."""
+    """Convert a JSON backup to CSV."""
     import json
 
     import pandas as pd
 
-    # Read JSON data
     with open(json_file) as f:
       json_data = json.load(f)
 
-    # Convert to DataFrame and then CSV
     df = pd.DataFrame(json_data)
     csv_data = df.to_csv(index=False)
 
     return csv_data.encode("utf-8")
 
   async def _convert_full_dump_to_zip(self, dump_file: Path) -> bytes:
-    """Convert full dump to structured ZIP archive."""
+    """Wrap a full dump in a ZIP holding ``database/*.lbug`` plus metadata."""
     import io
     import zipfile
 
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-      # Add the database file with .lbug extension
       zip_file.write(dump_file, f"database/{dump_file.stem}.lbug")
 
-      # Add metadata file
       metadata = {
         "export_timestamp": datetime.now(UTC).isoformat(),
         "database_type": "ladybug",
@@ -406,14 +360,10 @@ class BackupManager:
     return zip_buffer.getvalue()
 
   async def create_backup(self, backup_job: BackupJob) -> BackupMetadata:
-    """
-    Create a backup of a graph database.
+    """Export a graph and upload it, returning the stored metadata.
 
-    Args:
-        backup_job: Backup job configuration
-
-    Returns:
-        BackupMetadata: Information about the created backup
+    ``backup_job.timestamp`` becomes the S3 key for both the payload and its
+    metadata sidecar, so it must be stable for the life of the job.
     """
     start_time = asyncio.get_event_loop().time()
     graph_id = backup_job.graph_id
@@ -425,18 +375,14 @@ class BackupManager:
     )
 
     try:
-      # Get database statistics
       stats = await self._get_database_stats(graph_id)
 
-      # Export database based on format
       backup_data, file_extension = await self._export_database(
         graph_id, backup_job.backup_format, backup_job.backup_type
       )
 
-      # Calculate backup duration
       backup_duration = asyncio.get_event_loop().time() - start_time
 
-      # Prepare metadata
       metadata = {
         "node_count": stats["node_count"],
         "relationship_count": stats["relationship_count"],
@@ -448,7 +394,6 @@ class BackupManager:
         "compression_enabled": backup_job.compression,
       }
 
-      # Upload to S3
       backup_metadata = await self.s3_adapter.upload_backup(
         graph_id=graph_id,
         backup_data=backup_data,
@@ -473,14 +418,12 @@ class BackupManager:
       raise
 
   async def restore_backup(self, restore_job: RestoreJob) -> bool:
-    """
-    Restore a graph database from backup.
+    """Restore a graph from a full-dump backup.
 
-    Args:
-        restore_job: Restore job configuration
-
-    Returns:
-        bool: True if restore was successful
+    Steps in order: download, checksum-verify, optionally drop/create the
+    target, import, then optionally verify. A failed checksum aborts before
+    anything touches the target database; a failed post-restore verification
+    returns False with the restored data left in place.
     """
     graph_id = restore_job.graph_id
     metadata = restore_job.backup_metadata
@@ -491,7 +434,6 @@ class BackupManager:
     )
 
     try:
-      # Download backup data
       if metadata.s3_key:
         backup_data = await self.s3_adapter.download_backup_by_key(metadata.s3_key)
       else:
@@ -501,23 +443,19 @@ class BackupManager:
           backup_type=metadata.backup_type,
         )
 
-      # Validate checksum
       if not await self._validate_backup_integrity(backup_data, metadata):
         raise ValueError("Backup integrity check failed")
 
-      # Prepare target database
       if restore_job.drop_existing:
         await self._drop_database_if_exists(graph_id)
 
       if restore_job.create_new_database:
         await self._ensure_database_exists(graph_id)
 
-      # Import backup data based on format
       await self._import_backup_data(
         graph_id, backup_data, restore_job.backup_format, restore_job.progress_tracker
       )
 
-      # Verify restore if requested
       if restore_job.verify_after_restore:
         if not await self._verify_restore(graph_id, metadata):
           logger.warning(f"Restore verification failed for graph '{graph_id}'")
@@ -531,27 +469,15 @@ class BackupManager:
       raise
 
   async def list_backups(self, graph_id: str | None = None) -> list[dict[str, Any]]:
-    """
-    List available backups.
-
-    Args:
-        graph_id: Optional filter by graph ID
-
-    Returns:
-        List of backup information
-    """
+    """List backups, newest first, optionally scoped to one graph."""
     return await self.s3_adapter.list_backups(graph_id)
 
   async def delete_old_backups(self, graph_id: str, retention_days: int) -> int:
-    """
-    Delete backups older than retention period.
+    """Delete backups past the retention window and return how many went.
 
-    Args:
-        graph_id: Graph identifier
-        retention_days: Number of days to retain backups
-
-    Returns:
-        int: Number of backups deleted
+    Deletion is per-object and best-effort: a failure is logged and skipped
+    rather than aborting the sweep, so the count can be lower than the number
+    of expired backups.
     """
     backups = await self.list_backups(graph_id)
     cutoff_date = datetime.now(UTC).timestamp() - (retention_days * 24 * 3600)
@@ -560,7 +486,6 @@ class BackupManager:
     for backup in backups:
       if backup["last_modified"].timestamp() < cutoff_date:
         try:
-          # Extract timestamp from backup key
           key_parts = backup["key"].split("/")
           filename = key_parts[-1]
           timestamp_str = filename.split("-")[1].split(".")[0]
@@ -584,11 +509,10 @@ class BackupManager:
     return deleted_count
 
   async def _get_database_stats(self, graph_id: str) -> dict[str, Any]:
-    """Get database statistics for backup metadata."""
+    """Node and relationship counts, recorded in the backup metadata."""
     repository = await get_universal_repository(graph_id, operation_type="read")
 
     async with repository:
-      # Get node and relationship counts
       node_count_result = await repository.execute_single(
         "MATCH (n) RETURN count(n) as count"
       )
@@ -607,12 +531,7 @@ class BackupManager:
   async def _export_database(
     self, graph_id: str, backup_format: BackupFormat, backup_type: BackupType
   ) -> tuple[bytes, str]:
-    """
-    Export database based on specified format.
-
-    Returns:
-        Tuple of (backup_data, file_extension)
-    """
+    """Dispatch to the per-format exporter. Returns ``(data, file_extension)``."""
     if backup_format == BackupFormat.CSV:
       return await self._export_to_csv(graph_id, backup_type)
     elif backup_format == BackupFormat.JSON:
@@ -636,11 +555,10 @@ class BackupManager:
       temp_path = Path(temp_dir)
 
       async with repository:
-        # For LadybugDB, we need to get schema from our schema loader
+        # LadybugDB has no introspection call; types come from the schema loader.
         from ....schemas.loader import LadybugSchemaLoader
 
         try:
-          # Get schema information
           schema_loader = LadybugSchemaLoader()
           node_types = schema_loader.list_node_types()
           relationship_types = schema_loader.list_relationship_types()
@@ -649,17 +567,15 @@ class BackupManager:
             f"Found {len(node_types)} node types and {len(relationship_types)} relationship types"
           )
 
-          # Export nodes by type
           for node_type in node_types:
             csv_file = temp_path / f"nodes_{node_type.lower()}.csv"
 
-            # First check if the table exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH (n:{node_type}) RETURN count(n) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # LadybugDB COPY TO syntax for exporting
                 export_query = f"""
                           COPY (MATCH (n:{node_type}) RETURN n.*)
                           TO '{csv_file}' (header=true)
@@ -672,17 +588,15 @@ class BackupManager:
               logger.warning(f"Skipping {node_type} nodes: {e}")
               continue
 
-          # Export relationships by type
           for rel_type in relationship_types:
             csv_file = temp_path / f"relationships_{rel_type.lower()}.csv"
 
-            # First check if the relationship exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # LadybugDB COPY TO syntax for exporting
                 export_query = f"""
                           COPY (MATCH ()-[r:{rel_type}]->() RETURN r.*)
                           TO '{csv_file}' (header=true)
@@ -697,7 +611,7 @@ class BackupManager:
 
         except Exception as e:
           logger.error(f"Failed to get schema information: {e}")
-          # Fallback: try to export known common tables
+          # Schema unavailable: fall back to a fixed guess at the core types.
           common_node_types = ["Entity", "Account", "Transaction", "Report", "Fact"]
           common_rel_types = [
             "HAS_ACCOUNT",
@@ -728,13 +642,11 @@ class BackupManager:
             except Exception:
               pass
 
-      # Create ZIP archive
       zip_file = temp_path / "backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for csv_file in temp_path.glob("*.csv"):
           zf.write(csv_file, csv_file.name)
 
-      # Read ZIP file content
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 
@@ -752,11 +664,10 @@ class BackupManager:
       temp_path = Path(temp_dir)
 
       async with repository:
-        # For LadybugDB, we need to get schema from our schema loader
+        # LadybugDB has no introspection call; types come from the schema loader.
         from ....schemas.loader import LadybugSchemaLoader
 
         try:
-          # Get schema information
           schema_loader = LadybugSchemaLoader()
           node_types = schema_loader.list_node_types()
           relationship_types = schema_loader.list_relationship_types()
@@ -765,18 +676,17 @@ class BackupManager:
             f"Found {len(node_types)} node types and {len(relationship_types)} relationship types for Parquet export"
           )
 
-          # Export nodes by type to Parquet
           for node_type in node_types:
             parquet_file = temp_path / f"nodes_{node_type.lower()}.parquet"
 
-            # First check if the table exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH (n:{node_type}) RETURN count(n) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # LadybugDB COPY TO syntax for exporting to Parquet
-                # Note: LadybugDB uses file extension to determine format, not FORMAT parameter
+                # LadybugDB picks the format from the file extension, not a
+                # FORMAT parameter — the ".parquet" suffix is load-bearing.
                 export_query = f"""
                           COPY (MATCH (n:{node_type}) RETURN n.*)
                           TO '{parquet_file}'
@@ -789,18 +699,17 @@ class BackupManager:
               logger.warning(f"Skipping {node_type} nodes: {e}")
               continue
 
-          # Export relationships by type to Parquet
           for rel_type in relationship_types:
             parquet_file = temp_path / f"relationships_{rel_type.lower()}.parquet"
 
-            # First check if the relationship exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # LadybugDB COPY TO syntax for exporting to Parquet
-                # Note: LadybugDB uses file extension to determine format, not FORMAT parameter
+                # LadybugDB picks the format from the file extension, not a
+                # FORMAT parameter — the ".parquet" suffix is load-bearing.
                 export_query = f"""
                           COPY (MATCH ()-[r:{rel_type}]->() RETURN r.*)
                           TO '{parquet_file}'
@@ -815,7 +724,7 @@ class BackupManager:
 
         except Exception as e:
           logger.error(f"Failed to get schema information: {e}")
-          # Fallback: try to export known common tables
+          # Schema unavailable: fall back to a fixed guess at the core types.
           common_node_types = ["Entity", "Account", "Transaction", "Report", "Fact"]
           common_rel_types = [
             "HAS_ACCOUNT",
@@ -846,13 +755,11 @@ class BackupManager:
             except Exception:
               pass
 
-      # Create ZIP archive
       zip_file = temp_path / "backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for parquet_file in temp_path.glob("*.parquet"):
           zf.write(parquet_file, parquet_file.name)
 
-      # Read ZIP file content
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 
@@ -870,11 +777,10 @@ class BackupManager:
       temp_path = Path(temp_dir)
 
       async with repository:
-        # For LadybugDB, we need to get schema from our schema loader
+        # LadybugDB has no introspection call; types come from the schema loader.
         from ....schemas.loader import LadybugSchemaLoader
 
         try:
-          # Get schema information
           schema_loader = LadybugSchemaLoader()
           node_types = schema_loader.list_node_types()
           relationship_types = schema_loader.list_relationship_types()
@@ -883,22 +789,20 @@ class BackupManager:
             f"Found {len(node_types)} node types and {len(relationship_types)} relationship types for JSON export"
           )
 
-          # Export nodes by type to JSON
           for node_type in node_types:
             json_file = temp_path / f"nodes_{node_type.lower()}.json"
 
-            # First check if the table exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH (n:{node_type}) RETURN count(n) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # Get all nodes of this type
                 nodes_result = await repository.execute_query(
                   f"MATCH (n:{node_type}) RETURN n"
                 )
 
-                # Convert to JSON manually since LadybugDB doesn't support direct JSON export
+                # LadybugDB has no JSON COPY target; serialize by hand.
                 import json
 
                 nodes_data = []
@@ -916,22 +820,19 @@ class BackupManager:
               logger.warning(f"Skipping {node_type} nodes: {e}")
               continue
 
-          # Export relationships by type to JSON
           for rel_type in relationship_types:
             json_file = temp_path / f"relationships_{rel_type.lower()}.json"
 
-            # First check if the relationship exists and has data
+            # Count first: COPY on an absent or empty type is not worth a file.
             try:
               count_result = await repository.execute_single(
                 f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count"
               )
               if count_result and count_result.get("count", 0) > 0:
-                # Get all relationships of this type with start/end node IDs
                 rels_result = await repository.execute_query(
                   f"MATCH (a)-[r:{rel_type}]->(b) RETURN a.id as start_id, r, b.id as end_id"
                 )
 
-                # Convert to JSON manually
                 import json
 
                 rels_data = []
@@ -955,7 +856,7 @@ class BackupManager:
 
         except Exception as e:
           logger.error(f"Failed to get schema information: {e}")
-          # Fallback: try to export known common tables
+          # Schema unavailable: fall back to a fixed guess at the core types.
           common_node_types = ["Entity", "Account", "Transaction", "Report", "Fact"]
           common_rel_types = [
             "HAS_ACCOUNT",
@@ -997,13 +898,11 @@ class BackupManager:
             except Exception:
               pass
 
-      # Create ZIP archive
       zip_file = temp_path / "backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for json_file in temp_path.glob("*.json"):
           zf.write(json_file, json_file.name)
 
-      # Read ZIP file content
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 
@@ -1012,24 +911,24 @@ class BackupManager:
   async def _export_full_dump(
     self, graph_id: str, backup_type: BackupType
   ) -> tuple[bytes, str]:
-    """Export full database dump via Graph API."""
+    """Pull the on-disk database through the Graph API, not the filesystem.
+
+    The worker doesn't share a volume with the graph nodes, so the dump has to
+    cross the container boundary as an HTTP response.
+    """
     logger.info(f"Creating full dump for graph '{graph_id}' via Graph API")
 
-    # Use Graph API to get the database backup
-    # This works across containers (worker -> graph-api)
     graph_client = await self.graph_router.get_repository(
       graph_id=graph_id,
       operation_type="read",
     )
 
     try:
-      # Call Graph API backup endpoint
       response = await graph_client.download_backup(graph_id=graph_id)
 
       if not response or "backup_data" not in response:
         raise RuntimeError(f"Failed to get backup from Graph API for {graph_id}")
 
-      # Get raw binary backup data from Graph API client
       backup_data = response["backup_data"]
       logger.info(
         f"Successfully retrieved backup from Graph API: {len(backup_data)} bytes"
@@ -1048,7 +947,7 @@ class BackupManager:
     backup_format: BackupFormat,
     progress_tracker=None,
   ) -> None:
-    """Import backup data based on format."""
+    """Dispatch to the per-format importer."""
     if backup_format == BackupFormat.CSV:
       await self._import_from_csv(graph_id, backup_data, progress_tracker)
     elif backup_format == BackupFormat.JSON:
@@ -1071,7 +970,6 @@ class BackupManager:
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Extract ZIP archive
       zip_file = temp_path / "backup.zip"
       with open(zip_file, "wb") as f:
         f.write(backup_data)
@@ -1080,7 +978,6 @@ class BackupManager:
         zf.extractall(temp_path)
 
       async with repository:
-        # Import node CSV files
         for csv_file in temp_path.glob("nodes_*.csv"):
           table_name = csv_file.stem.replace("nodes_", "").title()
 
@@ -1094,7 +991,6 @@ class BackupManager:
               message=f"Imported {table_name} nodes"
             )
 
-        # Import relationship CSV files
         for csv_file in temp_path.glob("relationships_*.csv"):
           rel_type = csv_file.stem.replace("relationships_", "").upper()
 
@@ -1119,7 +1015,6 @@ class BackupManager:
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Extract ZIP archive
       zip_file = temp_path / "backup.zip"
       with open(zip_file, "wb") as f:
         f.write(backup_data)
@@ -1128,7 +1023,6 @@ class BackupManager:
         zf.extractall(temp_path)
 
       async with repository:
-        # Import node JSON files
         for json_file in temp_path.glob("nodes_*.json"):
           table_name = json_file.stem.replace("nodes_", "").title()
 
@@ -1142,7 +1036,6 @@ class BackupManager:
               message=f"Imported {table_name} nodes"
             )
 
-        # Import relationship JSON files
         for json_file in temp_path.glob("relationships_*.json"):
           rel_type = json_file.stem.replace("relationships_", "").upper()
 
@@ -1167,7 +1060,6 @@ class BackupManager:
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Extract ZIP archive
       zip_file = temp_path / "backup.zip"
       with open(zip_file, "wb") as f:
         f.write(backup_data)
@@ -1176,7 +1068,6 @@ class BackupManager:
         zf.extractall(temp_path)
 
       async with repository:
-        # Import node Parquet files
         for parquet_file in temp_path.glob("nodes_*.parquet"):
           table_name = parquet_file.stem.replace("nodes_", "").title()
 
@@ -1190,7 +1081,6 @@ class BackupManager:
               message=f"Imported {table_name} nodes"
             )
 
-        # Import relationship Parquet files
         for parquet_file in temp_path.glob("relationships_*.parquet"):
           rel_type = parquet_file.stem.replace("relationships_", "").upper()
 
@@ -1211,45 +1101,43 @@ class BackupManager:
     progress_tracker=None,
     create_system_backup: bool = True,
   ) -> None:
-    """Import from full database dump with optional system backup of existing database."""
+    """Overwrite the on-disk database with a full dump.
+
+    Destructive: the target files are replaced in place. Unless
+    ``create_system_backup`` is False, the existing database is snapshotted to
+    S3 first and a snapshot failure aborts the restore — losing the old data
+    with no rollback is worse than not restoring.
+    """
     logger.info(f"Importing full dump to graph '{graph_id}'")
 
-    # Get target database path
     target_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
     target_dir = os.path.dirname(target_path)
 
-    # Ensure target directory exists
     os.makedirs(target_dir, exist_ok=True)
 
-    # Create system backup of existing database before restore
     if create_system_backup and os.path.exists(target_path):
       logger.info(f"Creating system backup of existing database for graph '{graph_id}'")
 
       try:
-        # Create a temporary directory for the backup process
         with tempfile.TemporaryDirectory() as backup_temp_dir:
           backup_temp_path = Path(backup_temp_dir)
 
-          # Copy existing database to temp location with .bak extension
+          # A LadybugDB database is a single file or a directory; both shapes
+          # are copied aside, then renamed so the archive holds the plain name.
           final_backup_file = None
           final_backup_dir = None
 
           if os.path.isfile(target_path):
-            # Single file database
             backup_file = backup_temp_path / f"{graph_id}.lbug.bak"
             shutil.copy2(target_path, backup_file)
-            # Remove .bak extension for zip
             final_backup_file = backup_temp_path / f"{graph_id}.lbug"
             shutil.move(backup_file, final_backup_file)
           else:
-            # Directory-based database
             backup_dir = backup_temp_path / f"{graph_id}.bak"
             shutil.copytree(target_path, backup_dir)
-            # Remove .bak extension for zip
             final_backup_dir = backup_temp_path / graph_id
             shutil.move(backup_dir, final_backup_dir)
 
-          # Create ZIP archive of the backup
           timestamp = datetime.now(UTC)
           timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
           system_backup_zip = backup_temp_path / f"system_backup_{timestamp_str}.zip"
@@ -1266,11 +1154,9 @@ class BackupManager:
                   arc_path = file_path.relative_to(backup_temp_path)
                   zf.write(file_path, arc_path)
 
-          # Upload system backup to S3
           with open(system_backup_zip, "rb") as f:
             system_backup_data = f.read()
 
-          # Create metadata for the system backup
           metadata = {
             "backup_type": "system_restore",
             "timestamp": timestamp_str,
@@ -1278,7 +1164,6 @@ class BackupManager:
             "encryption_enabled": False,
           }
 
-          # Upload to S3 (compression handled internally)
           backup_metadata = await self.s3_adapter.upload_backup(
             graph_id=graph_id,
             backup_data=system_backup_data,
@@ -1310,7 +1195,6 @@ class BackupManager:
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
 
-      # Extract ZIP archive
       zip_file = temp_path / "backup.zip"
       with open(zip_file, "wb") as f:
         f.write(backup_data)
@@ -1318,12 +1202,9 @@ class BackupManager:
       with zipfile.ZipFile(zip_file, "r") as zf:
         zf.extractall(temp_path)
 
-      # Copy database files to target location
       if (temp_path / f"{graph_id}.lbug").exists():
-        # Single file database
         shutil.copy2(temp_path / f"{graph_id}.lbug", target_path)
       else:
-        # Directory-based database
         if os.path.exists(target_path):
           shutil.rmtree(target_path)
         shutil.copytree(temp_path / graph_id, target_path)
@@ -1332,16 +1213,18 @@ class BackupManager:
         progress_tracker.update_import_progress(message="Restored full database dump")
 
   async def _ensure_database_exists(self, graph_id: str) -> None:
-    """Ensure database exists for import."""
-    # Database creation is handled by the repository
+    """Touch the database so the repository creates it if absent.
+
+    There is no explicit create call: the trivial query is what materialises
+    the database on first access.
+    """
     repository = await get_universal_repository(graph_id, operation_type="write")
     async with repository:
-      # Database is created automatically when first accessed
       await repository.execute_query("MATCH (n) RETURN count(n) LIMIT 1")
     logger.info(f"Database ensured for graph: {graph_id}")
 
   async def _drop_database_if_exists(self, graph_id: str) -> None:
-    """Drop database if it exists."""
+    """Delete the graph's files from disk. No-op when nothing is there."""
     db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
 
     if os.path.exists(db_path):
@@ -1354,7 +1237,7 @@ class BackupManager:
   async def _validate_backup_integrity(
     self, backup_data: bytes, metadata: BackupMetadata
   ) -> bool:
-    """Validate backup data integrity using checksum."""
+    """Compare SHA-256 against the recorded checksum of the uncompressed data."""
     import hashlib
 
     calculated_checksum = hashlib.sha256(backup_data).hexdigest()
@@ -1372,12 +1255,10 @@ class BackupManager:
   async def _verify_restore(
     self, graph_id: str, original_metadata: BackupMetadata
   ) -> bool:
-    """Verify that restore completed successfully."""
+    """Check that node and relationship counts match the backup's."""
     try:
-      # Get current database stats
       current_stats = await self._get_database_stats(graph_id)
 
-      # Compare with original backup metadata
       node_count_match = current_stats["node_count"] == original_metadata.node_count
       rel_count_match = (
         current_stats["relationship_count"] == original_metadata.relationship_count
@@ -1401,17 +1282,10 @@ class BackupManager:
   async def export_backup(
     self, backup_metadata: BackupMetadata, export_format: str = "original"
   ) -> bytes | None:
-    """
-    Export backup data for download.
+    """Download backup bytes for export, or None when export is disallowed.
 
-    Args:
-        backup_metadata: Metadata of the backup to export
-        export_format: Export format (original, csv, json)
-
-    Returns:
-        bytes: Backup data if exportable, None if encryption prevents export
+    Verifies the checksum before returning; a mismatch raises.
     """
-    # Check if backup is exportable
     if backup_metadata.metadata.get(
       "encryption_enabled"
     ) and not backup_metadata.metadata.get("allow_export", True):
@@ -1421,7 +1295,6 @@ class BackupManager:
       return None
 
     try:
-      # Download backup data
       if backup_metadata.s3_key:
         backup_data = await self.s3_adapter.download_backup_by_key(
           backup_metadata.s3_key
@@ -1433,11 +1306,9 @@ class BackupManager:
           backup_type=backup_metadata.backup_type,
         )
 
-      # Validate integrity
       if not await self._validate_backup_integrity(backup_data, backup_metadata):
         raise ValueError("Backup integrity check failed")
 
-      # Convert format if requested
       if export_format != "original":
         backup_data = await self._convert_backup_to_format(
           backup_data, export_format, backup_metadata
@@ -1455,33 +1326,28 @@ class BackupManager:
   async def _convert_backup_to_format(
     self, backup_data: bytes, target_format: str, metadata: BackupMetadata
   ) -> bytes:
-    """
-    Convert backup data to different format.
+    """Convert exported bytes to ``target_format``.
 
-    Args:
-        backup_data: Original backup data
-        target_format: Target format (csv, json)
-        metadata: Backup metadata
-
-    Returns:
-        bytes: Converted data
+    Unimplemented: any target other than "original" returns the input
+    unchanged. Use :meth:`_convert_backup_format` for the download path.
     """
     if target_format == "original":
       return backup_data
 
-    # For now, return original data - format conversion can be implemented later
     logger.info(
       f"Format conversion to {target_format} not yet implemented, returning original"
     )
     return backup_data
 
   def health_check(self) -> dict[str, Any]:
-    """Perform health check on backup system."""
+    """Report S3 and graph reachability.
+
+    Sync by design, so the graph probe can only run outside an event loop;
+    called from async code it reports the graph as healthy without checking.
+    """
     s3_health = self.s3_adapter.health_check()
 
-    # Test graph database connectivity via repository
     try:
-      # Use default graph for health check
       from ....middleware.graph import get_universal_repository
 
       async def test_connection():
@@ -1490,18 +1356,13 @@ class BackupManager:
           await repository.execute_single("RETURN 1 as test")
         return True
 
-      # Run async test, handling the case where we're already in an event loop
       import asyncio
 
       try:
-        # Try to get the current event loop
         asyncio.get_running_loop()
-        # If we're in an event loop, we can't use asyncio.run()
-        # Instead, we'll skip the async test in this case to avoid the warning
         logger.info("Already in event loop, skipping async graph health check")
-        graph_healthy = True  # Assume healthy to avoid blocking
+        graph_healthy = True
       except RuntimeError:
-        # No event loop running, safe to use asyncio.run()
         graph_healthy = asyncio.run(test_connection())
 
     except Exception as e:
@@ -1517,15 +1378,6 @@ class BackupManager:
     }
 
 
-# Factory function for creating backup manager
 def create_backup_manager(**kwargs) -> BackupManager:
-  """
-  Factory function to create backup manager with default configuration.
-
-  Args:
-      **kwargs: Optional configuration overrides
-
-  Returns:
-      BackupManager: Configured manager instance
-  """
+  """Build a :class:`BackupManager`; ``kwargs`` override the lazy defaults."""
   return BackupManager(**kwargs)

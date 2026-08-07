@@ -1,11 +1,9 @@
-"""Worker task handler for extensions OLTP → LadybugDB materialization.
+"""Worker task for user-initiated extensions OLTP -> LadybugDB materialization.
 
-Runs ExtensionsMaterializer directly without Dagster as an intermediary.
-The Dagster sensor handles automatic (staleness-driven) triggers; this
-task handles user-initiated immediate materialization with SSE progress.
-
-On completion, marks the graph fresh so the Dagster sensor does not
-re-submit the job for the same staleness event.
+Runs ``ExtensionsMaterializer`` in the worker with SSE progress, rather than
+through Dagster; the Dagster sensor still owns the automatic, staleness-driven
+path. On success the graph is marked fresh, so the sensor does not queue a
+second run for the same staleness event.
 """
 
 from __future__ import annotations
@@ -44,12 +42,11 @@ class ExtensionsMaterializeTask(BaseTask):
       )
 
       if result.status != "success":
-        # 'partial' matters as much as 'error' (same rule as the Dagster
-        # path): blue/green refused to swap the incomplete build, so the
-        # old graph generation is still active. Marking the graph fresh
-        # here would stop the staleness sensor from ever retrying while
-        # sync status reports 'fresh' — the stamp would lie about the
-        # refused swap.
+        # 'partial' is as disqualifying as 'error', the same rule the Dagster
+        # path applies: blue/green refused to swap the incomplete build, so the
+        # previous graph generation is still serving. Marking the graph fresh
+        # would both stop the staleness sensor from retrying and report
+        # 'fresh' for a swap that never happened.
         logger.error(
           f"Extensions materialization {result.status} for "
           f"{self.graph_id}: {result.errors}"

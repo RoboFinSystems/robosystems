@@ -1,14 +1,9 @@
-"""
-Graph Usage Tracking for Credit System
+"""Per-event usage records: storage snapshots, credit consumption, API calls.
 
-This model tracks comprehensive usage metrics for:
-1. Storage usage (for storage overage billing)
-2. Credit consumption analytics
-3. Operation performance metrics
-4. API usage patterns
-5. Cost optimization insights
-
-100% decoupled from subscription-based pricing logic.
+One append-only table backs storage-overage billing, credit analytics, and
+performance insight. Rows carry pre-split billing_year/month/day/hour columns
+so period rollups are index-only scans. Nothing here reads subscription
+pricing — that stays in ``config/billing/``.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -65,11 +60,7 @@ class UsageEventType(str, Enum):
 
 
 class GraphUsage(Model):
-  """
-  Comprehensive usage tracking for credit system and analytics.
-
-  This model tracks all usage events for billing, analytics, and optimization.
-  """
+  """A single usage event for a graph."""
 
   __tablename__ = "graph_usage"
 
@@ -146,7 +137,6 @@ class GraphUsage(Model):
   billing_day = Column(Integer, nullable=False, index=True)
   billing_hour = Column(Integer, nullable=False)
 
-  # Indexes for efficient querying
   __table_args__ = (
     Index("idx_user_graph_time", "user_id", "graph_id", "recorded_at"),
     Index("idx_billing_period", "billing_year", "billing_month", "user_id"),
@@ -179,26 +169,11 @@ class GraphUsage(Model):
     region: str | None = None,
     auto_commit: bool = True,
   ) -> "GraphUsage":
-    """
-    Record storage usage snapshot with breakdown by type.
+    """Record a storage snapshot, optionally broken down by storage class.
 
-    Args:
-        user_id: User ID
-        graph_id: Graph ID
-        graph_tier: Subscription tier
-        storage_bytes: Total storage in bytes
-        session: Database session
-        storage_delta_gb: Change since last snapshot
-        files_storage_gb: S3 user-uploaded files storage
-        tables_storage_gb: S3 table imports storage
-        graphs_storage_gb: EBS main database storage
-        subgraphs_storage_gb: EBS subgraph storage
-        instance_id: Infrastructure instance ID
-        region: AWS region
-        auto_commit: Whether to commit immediately
-
-    Returns:
-        Created usage record
+    The ``*_storage_gb`` breakdown splits S3 (files, table imports) from EBS
+    (graph and subgraph database files); ``storage_bytes`` is the total and
+    the only required measure.
     """
     now = datetime.now(UTC)
     storage_gb = storage_bytes / (1024**3)
@@ -313,7 +288,6 @@ class GraphUsage(Model):
 
     now = datetime.now(UTC)
 
-    # Determine event type based on operation
     event_type_map = {
       "query": UsageEventType.QUERY_EXECUTION.value,
       "mcp_call": UsageEventType.MCP_CALL.value,
@@ -371,11 +345,11 @@ class GraphUsage(Model):
   ) -> dict[str, dict]:
     """Get a graph's monthly storage summary.
 
-    Keyed by graph, not user: snapshots are written by the usage monitor
-    sensor under one arbitrary admin's user_id, so a user-keyed read
-    rendered the storage section empty for every other org member (and
-    fractured history whenever graph admins changed). Storage is a
-    property of the graph; per-graph access is enforced at the route.
+    Keyed by graph, never by user: the usage-monitor sensor writes snapshots
+    under one arbitrary admin's user_id, so a user-keyed read would return
+    nothing for every other org member and would fracture history whenever
+    graph admins change. Storage is a property of the graph; per-graph access
+    is enforced at the route.
     """
     records = (
       session.query(cls)
@@ -411,29 +385,24 @@ class GraphUsage(Model):
         }
       )
 
-      # Update storage statistics
       if record.storage_gb > graph_storage[record.graph_id]["max_storage_gb"]:
         graph_storage[record.graph_id]["max_storage_gb"] = record.storage_gb
       if record.storage_gb < graph_storage[record.graph_id]["min_storage_gb"]:
         graph_storage[record.graph_id]["min_storage_gb"] = record.storage_gb
 
-    # Calculate GB-hours for each graph
     for graph_id, data in graph_storage.items():
       measurements = data["measurements"]
       data["measurement_count"] = len(measurements)
 
-      # Calculate total GB-hours (each measurement represents 1 hour)
+      # Snapshots are hourly, so summing GB across measurements yields GB-hours.
       data["total_gb_hours"] = sum(m["storage_gb"] for m in measurements)
 
-      # Calculate average storage
       if measurements:
         data["avg_storage_gb"] = data["total_gb_hours"] / len(measurements)
 
-      # Clean up min storage if no measurements
       if data["min_storage_gb"] == float("inf"):
         data["min_storage_gb"] = 0.0
 
-      # Remove raw measurements from result
       del data["measurements"]
 
     return graph_storage
@@ -446,8 +415,7 @@ class GraphUsage(Model):
     month: int,
     session: Session,
   ) -> dict[str, dict]:
-    """Get monthly credit consumption summary."""
-    # Get credit consumption records for the month
+    """Get monthly credit consumption summary, broken down per graph."""
     records = (
       session.query(cls)
       .filter(
@@ -477,13 +445,11 @@ class GraphUsage(Model):
 
       graph_data = graph_credits[record.graph_id]
 
-      # Add to totals
       if record.credits_consumed is not None:
         graph_data["total_credits_consumed"] += record.credits_consumed
       if record.base_credit_cost is not None:
         graph_data["total_base_cost"] += record.base_credit_cost
 
-      # Track operation breakdown
       op_type = record.operation_type or "unknown"
       if op_type not in graph_data["operation_breakdown"]:
         graph_data["operation_breakdown"][op_type] = {
@@ -501,7 +467,6 @@ class GraphUsage(Model):
         op_data["total_duration_ms"] += record.duration_ms
         op_data["avg_duration_ms"] = op_data["total_duration_ms"] / op_data["count"]
 
-      # Count cached vs billable operations
       if record.cached_operation is True:
         graph_data["cached_operations"] += 1
       else:
@@ -509,9 +474,8 @@ class GraphUsage(Model):
 
       graph_data["transaction_count"] += 1
 
-    # Calculate averages
+    # Decimal is not JSON-serializable; the API surface expects floats.
     for graph_id, data in graph_credits.items():
-      # Convert Decimal to float for JSON serialization
       data["total_credits_consumed"] = float(data["total_credits_consumed"])
       data["total_base_cost"] = float(data["total_base_cost"])
 
@@ -531,7 +495,6 @@ class GraphUsage(Model):
     """Get performance insights for cost optimization."""
     cutoff_date = datetime.now(UTC) - timedelta(days=days)
 
-    # Get performance data
     records = (
       session.query(cls)
       .filter(
@@ -547,7 +510,6 @@ class GraphUsage(Model):
     if not records:
       return {"message": "No performance data available"}
 
-    # Analyze performance by operation type
     operation_stats = {}
     slow_queries = []
 
@@ -577,7 +539,6 @@ class GraphUsage(Model):
       if record.credits_consumed is not None:
         stats["total_credits"] += record.credits_consumed
 
-      # Track slow queries (over 5 seconds)
       if record.duration_ms is not None and record.duration_ms > 5000:
         slow_queries.append(
           {
@@ -590,7 +551,6 @@ class GraphUsage(Model):
           }
         )
 
-    # Calculate averages
     for op_type, stats in operation_stats.items():
       if stats["count"] > 0:
         stats["avg_duration_ms"] = stats["total_duration_ms"] / stats["count"]
@@ -599,7 +559,6 @@ class GraphUsage(Model):
       if stats["min_duration_ms"] == float("inf"):
         stats["min_duration_ms"] = 0
 
-      # Convert Decimal to float
       stats["total_credits"] = float(stats["total_credits"])
       stats["avg_credits"] = float(stats["avg_credits"])
 
@@ -608,17 +567,17 @@ class GraphUsage(Model):
       "analysis_period_days": days,
       "total_operations": len(records),
       "operation_stats": operation_stats,
-      "slow_queries": slow_queries[:10],  # Top 10 slow queries
+      "slow_queries": slow_queries[:10],
       "performance_score": cls._calculate_performance_score(operation_stats),
     }
 
   @classmethod
   def _calculate_performance_score(cls, operation_stats: dict) -> int:
-    """Calculate performance score (0-100) based on operation stats."""
+    """Score 0-100 from the call-count-weighted mean duration; lower is
+    better, and anything under 100ms scores a full 100."""
     if not operation_stats:
       return 100
 
-    # Calculate weighted average duration
     total_ops = sum(stats["count"] for stats in operation_stats.values())
     weighted_avg_duration = (
       sum(
@@ -627,8 +586,6 @@ class GraphUsage(Model):
       / total_ops
     )
 
-    # Score based on average duration (lower is better)
-    # 0-100ms = 100, 100-500ms = 90, 500-1000ms = 80, etc.
     if weighted_avg_duration < 100:
       return 100
     elif weighted_avg_duration < 500:
@@ -650,14 +607,17 @@ class GraphUsage(Model):
     keep_monthly_summaries: bool = True,
     auto_commit: bool = True,
   ) -> dict[str, int]:
-    """Clean up old usage records with optional summary preservation."""
+    """Purge usage records older than ``older_than_days``.
+
+    With ``keep_monthly_summaries`` (the default), only the high-volume
+    per-call rows — API calls and credit consumption — are dropped; storage
+    snapshots and allocations survive so period rollups stay reproducible.
+    """
     cutoff_date = datetime.now(UTC) - timedelta(days=older_than_days)
 
-    # Count records to be deleted
     total_count = session.query(cls).filter(cls.recorded_at < cutoff_date).count()
 
     if keep_monthly_summaries:
-      # Delete detailed records but keep monthly summaries
       deleted_count = (
         session.query(cls)
         .filter(
@@ -674,7 +634,6 @@ class GraphUsage(Model):
 
       summary_count = total_count - deleted_count
     else:
-      # Delete all old records
       deleted_count = session.query(cls).filter(cls.recorded_at < cutoff_date).delete()
       summary_count = 0
 

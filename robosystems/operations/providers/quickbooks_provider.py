@@ -1,4 +1,4 @@
-"""QuickBooks provider-specific operations."""
+"""QuickBooks connection provider — Intuit OAuth plus sync/disconnect."""
 
 from typing import Any
 
@@ -13,7 +13,11 @@ from .oauth_handler import OAuthHandler
 
 
 class QuickBooksOAuthProvider:
-  """QuickBooks OAuth2 provider implementation."""
+  """Intuit endpoints and credentials for `OAuthHandler`.
+
+  Only the API host differs between sandbox and production; the OAuth and
+  revocation endpoints are shared.
+  """
 
   def __init__(self):
     self.environment = env.INTUIT_ENVIRONMENT
@@ -49,19 +53,19 @@ class QuickBooksOAuthProvider:
     return ["com.intuit.quickbooks.accounting"]
 
   def get_additional_auth_params(self) -> dict[str, str]:
-    """QuickBooks-specific auth parameters."""
     return {
-      "access_type": "offline",  # To get refresh token
+      "access_type": "offline",  # without this Intuit returns no refresh token
     }
 
   def extract_provider_data(self, callback_data: dict[str, Any]) -> dict[str, Any]:
-    """Extract QuickBooks-specific data from callback."""
+    """Capture the realm id — Intuit's company identifier, needed on every
+    subsequent API call and not recoverable from the token alone."""
     return {
       "realm_id": callback_data.get("realmId", ""),
     }
 
   async def get_entity_info(self, access_token: str, realm_id: str) -> dict[str, Any]:
-    """Get QuickBooks company information."""
+    """Fetch the connected company's profile; {} on any non-200."""
     url = f"{self._base_url}/v3/company/{realm_id}/companyinfo/{realm_id}"
 
     async with httpx.AsyncClient() as client:
@@ -82,7 +86,7 @@ class QuickBooksOAuthProvider:
         return {}
 
   async def validate_connection(self, access_token: str, realm_id: str) -> bool:
-    """Validate QuickBooks connection by fetching entity info."""
+    """Prove the grant still works by actually calling Intuit."""
     try:
       entity_info = await self.get_entity_info(access_token, realm_id)
       return bool(entity_info)
@@ -122,7 +126,6 @@ class QuickBooksOAuthProvider:
     return False
 
 
-# Global QuickBooks OAuth handler
 quickbooks_oauth_provider = QuickBooksOAuthProvider()
 quickbooks_oauth_handler = OAuthHandler(quickbooks_oauth_provider)
 
@@ -134,8 +137,11 @@ async def create_quickbooks_connection(
   graph_id: str,
   db: Session,
 ) -> str:
-  """Create QuickBooks connection - initiates OAuth flow."""
-  # Create a pending connection that will be completed after OAuth
+  """Open a `pending_oauth` connection for the user to authorize.
+
+  Credentials and the realm id land later, when the OAuth callback runs
+  `OAuthHandler.store_tokens`; nothing here talks to Intuit.
+  """
   metadata = {
     "status": "pending_oauth",
     "realm_id": config.realm_id if config and config.realm_id else None,
@@ -145,7 +151,7 @@ async def create_quickbooks_connection(
     entity_id=entity_id,
     provider="quickbooks",
     user_id=user_id,
-    credentials={},  # Will be populated after OAuth
+    credentials={},
     metadata=metadata,
     graph_id=graph_id,
   )
@@ -156,18 +162,10 @@ async def create_quickbooks_connection(
 async def sync_quickbooks_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger QuickBooks sync via Dagster pipeline.
+  """Submit the `qb_sync` Dagster job; returns its run id.
 
-  Submits the qb_sync_job with configuration derived from the
-  connection metadata and sync options.
-
-  Args:
-      connection: Connection dict with metadata (realm_id, etc.)
-      sync_options: Optional dict with full_rebuild, lookback_days
-      graph_id: Target graph database ID
-
-  Returns:
-      Dagster run ID for progress tracking
+  `sync_options` accepts `full_rebuild`, `lookback_days` (default 60),
+  `since_date` (overrides the lookback), and `sync_lock_id`.
   """
   from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
 
@@ -184,9 +182,9 @@ async def sync_quickbooks_connection(
   if not realm_id:
     raise ValueError("QuickBooks realm_id not found in connection metadata")
 
-  # Build config for all assets in the pipeline (they share QBSyncConfig).
-  # `sync_lock_id` is plumbed through so `qb_load` can release the
-  # B7 sync lock on completion rather than waiting for the TTL.
+  # Every asset in the job shares one QBSyncConfig, so the same dict is bound
+  # to each op below. `sync_lock_id` rides along so `qb_load` can release the
+  # sync lock as soon as it finishes rather than waiting out the lock's TTL.
   sync_lock_id = options.get("sync_lock_id", "") or ""
   sync_config = {
     "graph_id": graph_id,
@@ -250,8 +248,8 @@ async def cleanup_quickbooks_connection(
     return
 
   try:
-    # Load + decrypt the refresh token inside a short-lived session, then close
-    # it before the network call (don't hold a DB connection across HTTP).
+    # Load + decrypt the token inside a short-lived session and close it before
+    # the network call — never hold a DB connection across an HTTP round-trip.
     token: str | None = None
     with platform_session() as db:
       creds = ConnectionCredentials.get_by_connection_id(connection_id, db)

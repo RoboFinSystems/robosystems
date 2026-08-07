@@ -15,25 +15,15 @@ from robosystems.logger import logger
 
 class DataFrameManager:
   """
-  Manages DataFrame initialization and operations for XBRL graph processing.
-
-  This class centralizes all DataFrame-related operations including:
-  - Dynamic DataFrame creation from schema definitions
-  - Schema-to-DataFrame attribute mapping
-  - Column standardization and schema completeness validation
+  Owns the DataFrames XBRLGraphProcessor accumulates during a filing run:
+  creates one per schema table, maps schema names to the processor's attribute
+  names, and validates column completeness before parquet output.
   """
 
   def __init__(
     self, schema_adapter, ingest_adapter, enable_column_standardization=False
   ):
-    """
-    Initialize DataFrame manager with schema adapters.
-
-    Args:
-        schema_adapter: SchemaProcessor instance for DataFrame creation
-        ingest_adapter: SchemaIngestionProcessor instance for filename generation
-        enable_column_standardization: Whether to enable column name standardization
-    """
+    """Wire up the `XBRLSchemaAdapter` + `XBRLSchemaConfigGenerator` pair."""
     self.schema_adapter = schema_adapter
     self.ingest_adapter = ingest_adapter
     self.enable_column_standardization = enable_column_standardization
@@ -42,14 +32,9 @@ class DataFrameManager:
     self.schema_to_dataframe_mapping: dict[str, str] = {}
 
   def initialize_all_dataframes(self) -> dict[str, pd.DataFrame]:
-    """
-    Initialize all DataFrames dynamically from schema definitions.
+    """Create one empty DataFrame per schema table, keyed by attribute name.
 
-    Returns:
-        Dictionary mapping DataFrame attribute names to initialized DataFrames
-
-    Raises:
-        ValueError: If schema-based initialization fails
+    Raises ValueError without a schema adapter — there is no manual fallback.
     """
     if not self.schema_adapter:
       raise ValueError(
@@ -163,12 +148,7 @@ class DataFrameManager:
     return self.dataframes
 
   def create_dynamic_dataframe_mapping(self) -> dict[str, str]:
-    """
-    Create mapping from schema names to DataFrame attributes for dynamic file saving.
-
-    Returns:
-        Dictionary mapping schema names to DataFrame attribute names
-    """
+    """Map each schema name to its DataFrame attribute, for parquet output."""
     self.schema_to_dataframe_mapping = {}
 
     if not self.schema_adapter:
@@ -242,40 +222,17 @@ class DataFrameManager:
     return self.schema_to_dataframe_mapping
 
   def get_dataframe(self, df_attr_name: str) -> pd.DataFrame | None:
-    """
-    Get DataFrame by attribute name.
-
-    Args:
-        df_attr_name: DataFrame attribute name (e.g., 'entities_df')
-
-    Returns:
-        DataFrame if found, None otherwise
-    """
+    """Get a DataFrame by attribute name (e.g. `entities_df`), or None."""
     return self.dataframes.get(df_attr_name)
 
   def set_dataframe(self, df_attr_name: str, df: pd.DataFrame) -> None:
-    """
-    Set or update a DataFrame.
-
-    Args:
-        df_attr_name: DataFrame attribute name
-        df: DataFrame to store
-    """
+    """Store a DataFrame under its attribute name."""
     self.dataframes[df_attr_name] = df
 
   def standardize_dataframe_columns(
     self, df: pd.DataFrame, table_name: str
   ) -> pd.DataFrame:
-    """
-    Standardize DataFrame column names to match target schema.
-
-    Args:
-        df: Input DataFrame
-        table_name: Target table name for column mapping
-
-    Returns:
-        DataFrame with standardized column names
-    """
+    """Rename columns to the target schema's names. No-op unless enabled."""
     if not self.enable_column_standardization or df.empty:
       return df
 
@@ -292,16 +249,10 @@ class DataFrameManager:
   def ensure_schema_completeness(
     self, df: pd.DataFrame, table_name: str
   ) -> pd.DataFrame:
-    """
-    Ensure DataFrame has all schema-defined columns before saving to parquet.
-    This prevents missing columns during LadybugDB ingestion.
+    """Add any schema-defined columns the DataFrame is missing.
 
-    Args:
-        df: DataFrame to validate
-        table_name: Schema table name
-
-    Returns:
-        DataFrame with all schema-defined columns
+    LadybugDB ingestion is positional, so a parquet file written with a short
+    column list fails to load.
     """
     try:
       logger.debug(f"Checking schema completeness for table: {table_name}")
@@ -382,15 +333,9 @@ class DataFrameManager:
   def _convert_schema_name_to_dataframe_attr(
     self, schema_name: str, is_node: bool
   ) -> str:
-    """
-    Convert schema name to DataFrame attribute name following current naming conventions.
+    """Convert a schema name to its DataFrame attribute name.
 
-    Args:
-        schema_name: Schema type name (e.g., 'Entity', 'FACT_HAS_ELEMENT')
-        is_node: True for node types, False for relationship types
-
-    Returns:
-        DataFrame attribute name (e.g., 'entities_df', 'fact_elements_df')
+    'Entity' → 'entities_df'; 'FACT_HAS_ELEMENT' → 'fact_elements_df'.
     """
     if is_node:
       snake_case = camel_to_snake(schema_name)

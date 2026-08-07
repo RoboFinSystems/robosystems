@@ -101,16 +101,11 @@ def build_mapping_prompt(
   elements: list[dict],
   candidates: list[dict],
 ) -> str:
-  """Build the user message for a batch mapping request.
+  """Build the user message for one batch mapping request.
 
-  Args:
-      elements: CoA elements to map (from get-unmapped-elements).
-      candidates: rs-gaap concepts to match against (from suggest-mapping;
-          EFS- and liquidity-narrowed, restricted to the concepts that render
-          under the active reporting style).
-
-  Returns:
-      Formatted user message for Bedrock.
+  `elements` comes from `get-unmapped-elements`; `candidates` comes from
+  `suggest-mapping`, already EFS- and liquidity-narrowed and restricted to
+  concepts that render under the active reporting style.
   """
   elements_text = "\n".join(
     f"- id={e['id']}, code={e.get('code', '?')}, name={e['name']}, "

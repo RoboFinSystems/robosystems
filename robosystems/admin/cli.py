@@ -1,37 +1,27 @@
-"""RoboSystems Admin CLI for remote administration via admin API.
+"""Command-line client for the admin API (`/admin/v1/*`).
 
-This CLI provides access to admin operations for subscription management, customer
-management, credit management, graph management, and user management.
+Covers subscriptions, invoices, credits, graphs, users, orgs, migrations,
+cache, instances, search, and worker operations. Commands are thin wrappers
+over HTTP calls; the API key comes from `ADMIN_API_KEY` in dev, otherwise from
+AWS Secrets Manager.
 
-For staging/prod, an SSM tunnel must be running (admin endpoints are blocked at the ALB).
-The CLI uses localhost:8000 by default, which works with both local dev and tunnels.
-
-Usage:
-    # Start tunnel first (in separate terminal)
-    ./bin/tools/tunnels.sh prod all
-
-    # Run admin commands (tunnel is assumed)
-    just admin prod stats
-    just admin prod subscriptions list
-    just admin prod credits health
+Requests go to localhost:8000 by default, which serves both local dev and an
+SSM tunnel. Against staging or prod a tunnel is required — the ALB blocks
+`/admin/v1/*` whenever the API is publicly reachable.
 
 Examples:
-    # List all subscriptions
-    just admin prod subscriptions list
-
-    # Get subscription details
-    just admin prod subscriptions get <subscription-id>
-
-    # Update org billing settings
-    just admin prod orgs update <org-id> --billing-email new@example.com
-
-    # Show statistics
-    just admin prod stats
-
-    # Local development (Docker, no tunnel needed)
+    # Local dev (Docker, no tunnel)
     just admin dev stats
 
-    # Direct API access (only works if API is in 'internal' mode)
+    # Staging/prod: start the tunnel in another terminal, then run commands
+    ./bin/tools/tunnels.sh prod all
+    just admin prod stats
+    just admin prod subscriptions list
+    just admin prod subscriptions get <subscription-id>
+    just admin prod credits health
+    just admin prod orgs update <org-id> --billing-email new@example.com
+
+    # Skip the tunnel; only works while the API is in 'internal' mode
     just admin prod --direct stats
 """
 
@@ -66,13 +56,11 @@ class AdminAPIClient:
     aws_profile: str = "robosystems-sso",
     use_direct: bool = False,
   ):
-    """Initialize the admin API client.
+    """Resolve the API base URL and fetch the admin key.
 
-    Args:
-        environment: Environment name (dev/staging/prod)
-        api_base_url: Base URL for the API (default: localhost:8000 for tunnel/dev)
-        aws_profile: AWS CLI profile name (default: robosystems-sso)
-        use_direct: Use public API URLs directly (only works if API is in internal mode)
+    `api_base_url` defaults to localhost:8000, which reaches the API through
+    an SSM tunnel. `use_direct` swaps in the environment's public URL instead,
+    which the ALB only permits while the API is in 'internal' mode.
     """
     self.environment = environment
     self.aws_profile = aws_profile

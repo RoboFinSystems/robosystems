@@ -1,8 +1,8 @@
 """Handlers for ``block_type='schedule'`` — the declarative construction
 mode reference.
 
-Two public handlers bind the generic construction machinery to the
-existing Schedule POC:
+Two public handlers bind the generic construction machinery to the Schedule
+commands in :mod:`robosystems.operations.roboledger.commands.schedules`:
 
 - :func:`create` delegates to ``cmd_create_schedule`` and returns the
   new structure's id.
@@ -86,9 +86,9 @@ def update(
 ) -> str:
   """Update a schedule via the existing command, return its structure_id.
 
-  ``updated_by`` is forwarded so any side effects of the update (Stream
-  2.E supersession of pending obligations when the entry template
-  changes) record the right actor on the freshly emitted event rows.
+  ``updated_by`` is forwarded so any side effects of the update — such as
+  superseding pending obligations when the entry template changes —
+  record the right actor on the freshly emitted event rows.
   """
   response = cmd_update_schedule(session, payload, updated_by=updated_by)
   return response.structure_id
@@ -114,10 +114,9 @@ def _load_schedule_mechanics(
 ) -> ScheduleMechanics:
   """Build the typed Schedule mechanics from a Structure row.
 
-  Reads from the typed ``artifact_mechanics`` column when populated and
-  falls back to the legacy ``metadata_`` JSONB shape for Schedule rows
-  that pre-date the typed-column backfill — both paths produce the
-  same :class:`ScheduleMechanics` envelope arm.
+  Reads the typed ``artifact_mechanics`` column when populated, falling
+  back to the ``metadata_`` JSONB shape that older Schedule rows still
+  carry — both paths produce the same :class:`ScheduleMechanics` arm.
   """
   mechanics_blob = structure.artifact_mechanics
   if mechanics_blob:
@@ -177,7 +176,7 @@ def build_envelope(
   Returns ``None`` when the structure doesn't exist or isn't a schedule,
   so the generic reader can cleanly distinguish misses from errors.
   Mechanics are read from the typed ``artifact_mechanics`` column with
-  fallback to legacy ``metadata_`` JSONB.
+  fallback to ``metadata_`` JSONB.
 
   ``scenario_id`` is accepted for dispatch-signature parity and ignored
   — schedules are physical-ledger projections with no scenario slices.

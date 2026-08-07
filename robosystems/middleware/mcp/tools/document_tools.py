@@ -1,7 +1,6 @@
 """Document management MCP tools — create, read, update, list documents.
 
-Replaces the semantic memory tools (remember-text, recall-text) with full
-document CRUD. Memories become documents with folder="memory".
+Free-form notes live here too, as documents with ``folder="memory"``.
 
 Five tools:
 1. create-document: Create a markdown document (PG + OpenSearch)

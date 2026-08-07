@@ -1,8 +1,6 @@
-"""Worker task handler for graph creation.
+"""Worker task for graph creation.
 
-Replaces run_graph_creation() and run_entity_graph_creation() in
-middleware/sse/direct_monitor.py. Handles both entity and generic
-graph creation through the unified GraphCreationService.
+Handles both entity and generic graphs through ``GraphCreationService``.
 """
 
 from __future__ import annotations

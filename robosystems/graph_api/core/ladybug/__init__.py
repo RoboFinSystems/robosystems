@@ -1,10 +1,9 @@
-"""LadybugDB core services.
+"""LadybugDB core services, in layers.
 
-This module provides LadybugDB-specific functionality including:
-- Engine: Low-level database connection and query execution
-- ConnectionPool: Connection pooling for LadybugDB
-- DatabaseManager: Multi-database lifecycle management
-- LadybugService: High-level service orchestration
+- ``Engine`` / ``Repository`` — one owned connection to one database file
+- ``LadybugConnectionPool`` — shared, thread-safe connections per database
+- ``LadybugDatabaseManager`` — database lifecycle and the blue-green swap
+- ``LadybugService`` — the query, health and metrics surface the routers use
 """
 
 from .config import get_database_memory_config

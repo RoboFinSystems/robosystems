@@ -33,12 +33,11 @@ S3_MAX_CONCURRENCY = 4
 
 
 class OnInstanceBackupService:
-  """Execute backup operations directly on the graph instance.
+  """Run backups inside the Graph API process, where the files are.
 
-  This service runs within the Graph API process and has direct access to:
-  - Local database files (.lbug)
-  - LadybugDB connection pool for CHECKPOINT
-  - boto3 for S3 multipart upload with progress
+  Having direct access to the ``.lbug`` files and the connection pool is the
+  point: CHECKPOINT costs no HTTP round trip, and the database never crosses
+  the network on its way to S3.
   """
 
   def __init__(
@@ -62,19 +61,14 @@ class OnInstanceBackupService:
     checkpoint: bool = True,
     vacuum: bool = False,
   ) -> dict[str, Any]:
-    """Execute backup entirely on-instance, upload to S3.
+    """Back up a database on-instance and upload it, reporting progress.
 
-    Args:
-        task_id: Background task ID for progress tracking
-        graph_id: Database identifier
-        backup_type: "replica", "duckdb_staging", or "r2_download"
-        s3_destination: Dict with "bucket" and "key"
-        compression: Enable compression (for r2_download/standard)
-        encryption: Enable encryption (for standard only)
-        checkpoint: Run CHECKPOINT before backup
+    ``backup_type`` selects the handler: ``replica`` and ``duckdb_staging``
+    upload the raw file to S3, ``r2_download`` compresses with zstd and
+    uploads to R2. ``s3_destination`` carries ``bucket`` and ``key``.
 
-    Returns:
-        Dict with backup result metadata
+    ``checkpoint`` flushes the WAL first, so the uploaded file is consistent
+    on its own; ``vacuum`` compacts beforehand and applies to DuckDB only.
     """
     start_time = datetime.now(UTC)
 
@@ -89,7 +83,8 @@ class OnInstanceBackupService:
         },
       )
 
-      # Step 0: VACUUM if requested (DuckDB only, before CHECKPOINT)
+      # VACUUM runs before CHECKPOINT so the checkpoint reflects the
+      # compacted file.
       is_duckdb = backup_type == "duckdb_staging"
       if vacuum and is_duckdb:
         logger.info(f"[Task {task_id}] Running VACUUM on {graph_id}")
@@ -99,7 +94,6 @@ class OnInstanceBackupService:
         self._duckdb_vacuum(graph_id)
         logger.info(f"[Task {task_id}] VACUUM completed")
 
-      # Step 1: CHECKPOINT if requested
       if checkpoint:
         logger.info(f"[Task {task_id}] Running CHECKPOINT on {graph_id}")
         await self.task_manager.update_task(
@@ -111,7 +105,6 @@ class OnInstanceBackupService:
           self._checkpoint(graph_id)
         logger.info(f"[Task {task_id}] CHECKPOINT completed")
 
-      # Step 2: Resolve database path
       if is_duckdb:
         db_path = self._resolve_duckdb_path(graph_id)
       else:
@@ -128,7 +121,6 @@ class OnInstanceBackupService:
         metadata={"stage": "uploading", "db_size_bytes": db_size},
       )
 
-      # Step 3: Route to type-specific handler
       bucket = s3_destination["bucket"]
       key = s3_destination["key"]
 
@@ -253,14 +245,14 @@ class OnInstanceBackupService:
       max_concurrency=S3_MAX_CONCURRENCY,
     )
 
-    # Upload with progress tracking
     uploaded_bytes = 0
 
     def progress_callback(bytes_transferred):
       nonlocal uploaded_bytes
       uploaded_bytes += bytes_transferred
       percent = min(10 + int((uploaded_bytes / max(db_size, 1)) * 85), 95)
-      # Fire-and-forget progress update (sync context)
+      # boto3 calls this synchronously, so progress can only be logged here,
+      # not awaited onto the task manager.
       logger.debug(
         f"[Task {task_id}] Upload progress: {uploaded_bytes / (1024**3):.2f} GB "
         f"({percent}%)"
@@ -281,7 +273,6 @@ class OnInstanceBackupService:
       },
     )
 
-    # Verify upload
     head = s3_client.head_object(Bucket=bucket, Key=key)
     uploaded_size = head["ContentLength"]
 
@@ -323,8 +314,8 @@ class OnInstanceBackupService:
     if s3_client is None:
       s3_client = self._get_r2_client()
 
-    # Use EBS-backed temp dir, not /tmp (tmpfs/RAM-backed and too small for
-    # compressing multi-GB database files)
+    # EBS-backed, not /tmp: /tmp is tmpfs (RAM) and too small to hold a
+    # compressed multi-GB database.
     ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
     ebs_temp_dir.mkdir(parents=True, exist_ok=True)
     self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
@@ -356,7 +347,6 @@ class OnInstanceBackupService:
         f"({compression_ratio:.1%}) in {compress_time:.1f}s"
       )
 
-      # Upload compressed file with multipart
       transfer_config = TransferConfig(
         multipart_chunksize=S3_MULTIPART_CHUNKSIZE,
         multipart_threshold=S3_MULTIPART_THRESHOLD,

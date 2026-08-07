@@ -137,7 +137,6 @@ class CreateConnectionRequest(ConnectionBase):
     if field_name is None:
       return v  # Should not happen in practice
 
-    # Map field names to provider types
     field_to_provider = {
       "sec_config": "sec",
       "quickbooks_config": "quickbooks",

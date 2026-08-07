@@ -116,8 +116,7 @@ class BundleSigningError(RuntimeError):
 
 
 # Presigned-URL lifetime + ceiling. Short window — clients follow the
-# URL immediately; long-lived URLs are a share path, not a download
-# path. Mirror the bounds the retired REST endpoint enforced.
+# URL immediately; long-lived URLs are a share path, not a download path.
 PRESIGN_DEFAULT_SECONDS = 300
 PRESIGN_MAX_SECONDS = 3600
 
@@ -147,11 +146,10 @@ def generate_adhoc_private_statement(
   the reporting entity's ``reporting_style_id`` (see
   ``load_entity_reporting_style`` / ``load_primary_reporting_style``).
 
-  ``generate_report_facts`` still wants a ``taxonomy_id`` to scope its
-  CoA→GAAP arc walk; rs-gaap-presentation remains the canonical target
-  taxonomy (every Default Style Network lives in it). Other Styles that
-  cite Networks in a different taxonomy will need this resolved per
-  picked Network in a future commit.
+  ``generate_report_facts`` needs a ``taxonomy_id`` to scope its CoA→GAAP arc
+  walk, and rs-gaap-presentation is hard-coded as that target because every
+  Default Style Network lives in it. A Style citing Networks from another
+  taxonomy is not yet resolved per picked Network.
 
   Returns the rendered structure grid plus an `unmapped_count` counter.
   Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
@@ -200,8 +198,8 @@ def build_periods(
 ) -> list[FactPeriodSpec]:
   """Build period specs from request data.
 
-  If `periods_json` is provided (multi-period mode), use it directly.
-  Otherwise, build from period_start/period_end/comparative (legacy mode).
+  `periods_json` (multi-period mode) is used directly when present; otherwise
+  the window comes from period_start/period_end/comparative.
   """
   if periods_json:
     result = []
@@ -581,8 +579,8 @@ def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
   """Split an ``s3://bucket/key`` URI into ``(bucket, key)``.
 
   Returns ``(None, None)`` on malformed input so the caller has a single
-  error path. No ``env.USER_DATA_BUCKET`` cross-check — bundles stamped
-  under a legacy bucket name must still resolve.
+  error path. Deliberately does not cross-check ``env.USER_DATA_BUCKET`` —
+  a bundle stamped under a different bucket name must still resolve.
   """
   if not uri.startswith("s3://"):
     return None, None
@@ -739,22 +737,19 @@ def get_statement(
       block_type=block_type,
     )
 
-  # Classification (FASB elementsOfFinancialStatements trait) is resolved via
-  # the element_traits junction table. The trait join is wrapped in a
-  # subquery to prevent fact-row duplication when an element has
-  # multiple ``is_primary=TRUE`` traits across different categories
-  # (e.g. an asset element marked primary in both EFS and liquidity
-  # axes). Without the subquery, a single fact would emit one row per
-  # primary trait and double-count downstream.
-  # Filter to FactSets whose owning structure matches the block_type
-  # being rendered. Without this filter, elements that the report
-  # persisted into multiple FactSets (e.g. ``rs-gaap:NetIncomeLoss``
-  # lives in IS + CF + SE per ``_persist_report_facts`` design) would
-  # all flow into ``_facts_to_balance_dict`` and get summed (its line-
-  # 505 ``net_balance += fact.value`` is intentional for ancestor
-  # rollup, but cross-structure duplicates inflate the value 2x/3x).
-  # Filtering on the FactSet's owning structure block_type isolates the
-  # render to the one statement's worth of facts.
+  # Two non-obvious clauses below, both guarding against double-counting:
+  #
+  # 1. The elementsOfFinancialStatements trait join is wrapped in a subquery.
+  #    An element can carry multiple ``is_primary=TRUE`` traits across
+  #    categories (e.g. primary in both the EFS and liquidity axes); joining
+  #    element_traits directly would emit one fact row per primary trait.
+  #
+  # 2. ``s.block_type = :block_type`` scopes to FactSets whose owning
+  #    Structure is the statement being rendered. A report persists some
+  #    elements into several FactSets (``rs-gaap:NetIncomeLoss`` lives in IS,
+  #    CF and SE), and ``_facts_to_balance_dict`` sums facts per element for
+  #    ancestor rollup — so unscoped, cross-structure copies would inflate
+  #    the value 2x/3x.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
@@ -818,12 +813,10 @@ def get_statement(
   validation = validate_report(block_type, grid.rows)
 
   # Drop XBRL is_abstract rows (presentation scaffolding — *Abstract,
-  # *Table, *LineItems, *RollUp wrappers that aren't themselves
-  # reportable concepts). Mirrors the live-financial-statement filter
-  # (operations/roboledger/reads/reports.py::get_live_financial_statement
-  # line ~670). Without this, the IS root abstract surfaces as a row
-  # whose value is the sum of every descendant — confusing and
-  # double-counting visually.
+  # *Table, *LineItems, *RollUp wrappers that aren't themselves reportable
+  # concepts). Same filter as :func:`get_live_financial_statement`. Without
+  # it, the IS root abstract surfaces as a row whose value is the sum of
+  # every descendant.
   rows = [
     FactRowResponse(
       element_id=r.element_id,
@@ -890,8 +883,7 @@ def resolve_reporting_window(
   - ``quarterly`` — current calendar quarter (3 months).
   - anything else (``instant`` or unset) — current calendar month.
 
-  Extracted from the old MCP financial-statement tool so the REST and
-  MCP surfaces share identical behavior.
+  Shared by the REST and MCP statement surfaces so their windows match.
   """
   today = date.today()
 

@@ -24,17 +24,10 @@ _ALERT_DEDUP_TTL_SECONDS = 7 * 24 * 3600
 # Thresholds that trigger alerts
 _ALERT_STATUSES = ("approaching", "over_limit")
 
-# RUNNING since 2026-07-27. This sensor shipped STOPPED on 2026-04-04 alongside
-# a *soft* storage cap, where "nothing enforces, nothing alerts" was coherent.
-# The cap was promoted soft -> hard on 2026-05-13 (materialize now 413s at >100%)
-# but the sensor was never started, so the hard block lost the 80% warning that
-# was supposed to give customers runway. Nobody noticed because the underlying
-# measure returned 0 for directory-shaped databases until #937 (2026-07-26) —
-# every graph read as 0% healthy, so neither the alert nor the block ever fired.
-# With the measure real, a live hard cap without its warning is not a state
-# anyone chose.
+# The storage cap is a hard block (materialize 413s above 100%), so the 80%
+# warning this sensor sends is what gives customers runway before that hits.
 #
-# NOTE: this is only the status applied when the Dagster instance first sees the
+# NOTE: this status only applies when the Dagster instance first sees the
 # sensor. On/off state then persists in Dagster's Postgres storage, so a UI
 # toggle outlives this value — which is why the runtime kill switch below is an
 # SSM flag rather than a redeploy of this constant.
@@ -85,7 +78,6 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
   db = db_session_factory()
   try:
-    # Find all active parent user graphs with a tier assigned
     parent_graphs = (
       db.query(Graph)
       .filter(
@@ -133,11 +125,10 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
         .first()
       )
 
-      # Persist the measurement as a STORAGE_SNAPSHOT row. The admin and org
-      # usage surfaces read these rows, and until this write nothing ever
-      # created one — every consumer was permanently empty. Recorded for
-      # every measured status, not just alert-worthy ones; skipped when the
-      # check returned "unknown" (nothing was measured).
+      # Persist the measurement as a STORAGE_SNAPSHOT row — this sensor is the
+      # only writer, and the admin and org usage surfaces read those rows.
+      # Recorded for every measured status, not just alert-worthy ones; skipped
+      # when the check returned "unknown" (nothing was measured).
       if storage_check.get("total_storage_gb") is not None and graph_user:
         try:
           from robosystems.models.core.graph.graph_usage import GraphUsage

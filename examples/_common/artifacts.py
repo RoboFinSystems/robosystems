@@ -20,7 +20,7 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 All three bundle flavors come from the product endpoint via the published SDK —
 the demos exercise the real download path, they don't reconstruct artifacts
 client-side. ``.holon.trig`` is intentionally not emitted: the holon travels as
-dataset-form JSON-LD now (any consumer can still derive TriG/N-Quads from it).
+dataset-form JSON-LD, from which any consumer can derive TriG or N-Quads.
 """
 
 from __future__ import annotations

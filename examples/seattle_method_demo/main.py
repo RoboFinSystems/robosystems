@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
-"""Seattle Method Cross-Taxonomy Demo — orchestrator.
+"""Seattle Method cross-taxonomy demo — orchestrator.
 
-End-to-end driver for Test Case 1 (mini / Charlie Hoffman 14-JE
-lemonade-stand dataset). Provisions a dedicated test graph, pulls
-the mini taxonomy artifacts, loads them as a CoA, seeds the
-mini→rs-gaap mappings, ingests the 14 JEs, and authors the 8
-rollforward IBs.
+Demonstrates that one ledger can be read through two vocabularies. Charlie
+Hoffman's ``mini`` reporting framework is loaded as a chart of accounts, his
+14-journal-entry lemonade-stand dataset is ingested against it, and the same
+postings are then projected into ``rs-gaap`` for a four-statement report —
+with both sides reconciled against his published figures.
 
-Mirrors the structure of ``examples.roboledger_demo.main`` — one
-``LedgerClient``-driven orchestrator with discrete steps that can be
-re-run individually via ``--step``.
+The run provisions a dedicated graph and walks nine steps: pull the upstream
+artifacts, provision, load the CoA, seed the mini→rs-gaap mappings, ingest the
+JEs, author the rollforward Information Blocks, reconcile, materialize the
+report, and download the export bundle. Every step is idempotent and can be
+re-run on its own with ``--step``.
 
-Reconciliation (the rendered comparison against
-``luca.pacioli.ai/luca/view/0f24fd35…``) lives in
-``reconcile.py`` and is invoked separately; see the README's
-"What Gets Created" section for the full step list.
+Prerequisites:
+    just start        # local stack (API, PostgreSQL, Valkey, LadybugDB)
+    just demo-user    # writes credentials to .local/config.json
 
-Usage:
-    uv run python -m examples.seattle_method_demo.main                       # Create new graph + run every step
-    uv run python -m examples.seattle_method_demo.main --graph <id>          # Run against an existing graph
-    uv run python -m examples.seattle_method_demo.main --step pull           # Run a single step
-    uv run python -m examples.seattle_method_demo.main --dry-run             # Validate + report; no API calls
+Run it:
+    just demo-seattle-method                    # new graph + every step
+    just demo-seattle-method --graph <id>       # against an existing graph
+    just demo-seattle-method --step pull        # one step only
+    just demo-seattle-method --dry-run          # validate + report; no writes
+
+Artifacts land in ``examples/seattle_method_demo/output/`` — the two markdown
+reports (mini reconciliation, rs-gaap four statements) plus the JSON-LD, holon
+and XBRL 2.1 exports with their SHACL and Arelle verdicts.
 """
 
 from __future__ import annotations
@@ -89,22 +94,21 @@ def _get_graph_client():
 
 
 def step_pull() -> None:
-  """Step 1 — Pull Charlie's upstream artifacts.
+  """Step 1 — Pull Charlie Hoffman's upstream artifacts.
 
-  Fetches three artifacts from Charlie's published sources so the
-  demo ingests AND validates against his canonical files rather than
-  committed copies:
+  Fetches three artifacts from their published sources, so the demo ingests
+  and validates against the canonical files rather than committed copies:
 
   - **mini taxonomy** (xbrlsite.azurewebsites.net) → local/taxonomies/mini/
   - **GeneralJournal.csv** (github.com/seattlemethod/prototypes) →
     local/datasets/seattle_method/
   - **Record-to-Report instance package** (xbrlsite.com/seattlemethod/
     platinum-testcases/record-to-report/) → local/datasets/seattle_method/report/
-    — the XBRL ``instance.xml`` Charlie publishes is the reconciliation
-    reference (strictly stronger than the earlier hand-derived CSV)
+    — its XBRL ``instance.xml`` is the reconciliation reference, the same
+    artifact Arelle validates.
 
-  All destinations are gitignored under ``local/`` and idempotent
-  (re-runs overwrite). Aborts on any fetch failure.
+  All destinations are gitignored under ``local/`` and idempotent (re-runs
+  overwrite). Aborts on any fetch failure.
   """
   print("─" * 70)
   print("Step 1 — pull mini taxonomy + GeneralJournal.csv + instance.xml from Charlie")
@@ -121,22 +125,16 @@ def step_pull() -> None:
 
 
 def step_provision_graph() -> str:
-  """Step 2 — Create a dedicated test graph for this run.
+  """Step 2 — Create (or reuse) a dedicated graph for this run.
 
-  Returns the new graph_id. Reuses the credentials flow from
-  ``examples.roboledger_demo.main.create_demo_graph`` — same
-  ``CredentialContext`` / ``ensure_user_credentials`` /
-  ``save_graph_id`` plumbing — but stores under its own slot
-  (``seattle_method_test``) so it doesn't collide with the
-  RoboLedger demo's graph. Idempotent: re-runs reuse the same graph
-  unless that slot is cleared in ``.local/config.json``.
+  The graph id is cached under its own ``seattle_method_test`` slot in
+  ``.local/config.json`` so it never collides with another demo's graph.
+  Idempotent: re-runs reuse the same graph until that slot is cleared.
   """
   print("─" * 70)
   print("Step 2 — provision test graph")
   print("─" * 70)
 
-  # Re-use roboledger_demo's credential helpers — generic enough to
-  # handle any per-demo slot.
   project_root = REPO_ROOT
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -314,9 +312,9 @@ def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:
 def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
   """Step 7 — Reconcile against Charlie Hoffman's published mini facts.
 
-  Produces ``output/seattle-method-case-1.md`` — the source-vocabulary
-  cross-check (17/17 exact match against `luca.pacioli.ai`). Subprocess
-  invocation to keep reconcile.py's argparse + GraphQL plumbing isolated.
+  Writes ``output/seattle-method-case-1.md`` — the source-vocabulary
+  cross-check, concept by concept, against his published XBRL instance. Run
+  as a subprocess so reconcile.py keeps its own argparse and DB session.
   """
   print("─" * 70)
   print(f"Step 7 — reconcile mini facts → graph {graph_id}")
@@ -343,14 +341,11 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
 def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
   """Step 9 — Render the latest filed Report's aligned artifact set.
 
-  Delegates to the shared ``render_report_artifacts`` (via
-  ``download_bundles.py``): pulls the flat JSON-LD, the native holon
-  (``.holon.jsonld`` — the viewer's input), and the XBRL 2.1 zip from the
-  report endpoint, then validates them container-free (SHACL over the
-  JSON-LD, Arelle over the XBRL 2.1) and writes the DataBook with the verdicts
-  inlined. Pairs with ``reconcile.py``'s value-parity check (Charlie's data →
-  our DB → export → SHACL + Arelle say it's well-formed). Subprocess
-  invocation for the same isolation reason as the other download/render steps.
+  Pulls the flat JSON-LD, the native holon (``.holon.jsonld`` — the viewer's
+  input) and the XBRL 2.1 zip from the report endpoint, validates them
+  container-free (SHACL over the JSON-LD, Arelle over the XBRL 2.1), and
+  writes the DataBook with both verdicts inlined. Where step 7 checks the
+  *numbers*, this step proves the exported *shape*.
   """
   print("─" * 70)
   print(
@@ -380,11 +375,10 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
   """Step 8 — Materialize the 4-IB rs-gaap Report + render markdown.
 
-  Produces ``output/seattle-method-case-1-four-statements.md`` — the
-  rs-gaap projection of the same 14 JEs, materialized through the
-  Report architecture (create-report + reportPackage / statement
-  GraphQL queries). Subprocess invocation for the same isolation reason
-  as step_reconcile.
+  Writes ``output/seattle-method-case-1-four-statements.md`` — the rs-gaap
+  projection of the same 14 JEs, materialized through the Report
+  architecture (create-report, then one ``statement`` GraphQL query per
+  block type).
   """
   print("─" * 70)
   print(f"Step 8 — create-report 4-IB rs-gaap Report → graph {graph_id}")

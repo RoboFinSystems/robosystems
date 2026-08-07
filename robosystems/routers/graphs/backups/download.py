@@ -95,15 +95,8 @@ async def get_backup_download_url(
     128MB long window, so plain `zstd -d` suffices — no `--long` flag required.
     Allow disk for roughly 2x the download size.
 
-  Args:
-    backup_id: Backup identifier
-    graph_id: Graph database identifier
-    expires_in: URL expiration time in seconds (5 minutes to 24 hours)
-    current_user: Authenticated user
-    session: Database session
-
-  Returns:
-    Dictionary containing the download URL and expiration information
+  Returns the download URL and its expiration. `expires_in` ranges from 5
+  minutes to 24 hours.
   """
   try:
     # Access validated by get_current_user_with_graph dependency

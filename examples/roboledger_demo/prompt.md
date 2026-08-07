@@ -18,7 +18,7 @@ Perform the month-end close for the current target period. Follow the company's 
 
 3. **Check what's pending**: Use `get-period-close-status` for the close target period. This shows every schedule's pending/drafted/posted status.
 
-4. **Draft closing entries from schedules**: For each pending schedule, call `create-closing-entry`. This tool is idempotent — safe to call repeatedly. Interpret the `outcome` field:
+4. **Draft closing entries from schedules**: Call `promote-obligations` (with `dispatch_handlers=true`) to draft every matured schedule's entry for the period in one sweep, or `create-event-block(event_type='schedule_entry_due')` to draft a single schedule. There is no `create-closing-entry` tool. Both paths are idempotent — safe to call repeatedly. Interpret the `outcome` field:
    - `created` — new draft was just made
    - `unchanged` — draft already exists and matches the schedule; no change
    - `regenerated` — draft was stale (schedule edited since it was drafted); replaced with fresh
@@ -26,7 +26,7 @@ Perform the month-end close for the current target period. Follow the company's 
    - `skipped` — no draft existed and no in-scope fact; nothing to do (e.g., a matured prepaid)
 
 5. **Handle one-off business events**: If the user mentions anything that isn't a recurring schedule — an asset sold, a correcting entry, an impairment, a customer refund — fire `create-event-block` with the right `event_type`:
-   - **Asset sold or retired** → `event_type='asset_disposed'`. The handler atomically truncates the linked schedule (no future drafts), drops the schedule's SumEquals rule, and posts the balanced disposal entry. One call replaces the old "truncate + manual entry" pair.
+   - **Asset sold or retired** → `event_type='asset_disposed'`. The handler atomically truncates the linked schedule (no future drafts), drops the schedule's SumEquals rule, and posts the balanced disposal entry.
    - **Free-form correction / impairment / one-off adjustment** → `event_type='journal_entry_recorded'` with `metadata.type='closing'` (or `'adjusting'`) and explicit `line_items`. Total debits must equal total credits. Write a clear `memo` citing the business event.
    - **Reverse a posted entry** → `event_type='journal_entry_reversed'` with `metadata.entry_id`. Handler creates the offsetting reversing entry and marks the original as `status='reversed'`.
 

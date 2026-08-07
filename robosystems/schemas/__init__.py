@@ -1,5 +1,6 @@
 """
 RoboSystems Schema Definitions
 
-This package contains schema definitions for various graph database engines.
+Declarative LadybugDB graph schemas: the base ontology (`base.py`), per-domain
+extensions (`extensions/`), and the runtime that compiles them (`runtime/`).
 """

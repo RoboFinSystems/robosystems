@@ -18,29 +18,21 @@ from robosystems.logger import logger
 
 
 def _convert_to_string_dtype(df: pd.DataFrame, col: str) -> pd.DataFrame:
-  """
-  Convert a column to proper string dtype that preserves NULL values
-  but ensures Parquet writes with string type (not null type).
+  """Force a column to pyarrow-backed string dtype, preserving NULLs.
 
-  This fixes DuckDB schema mismatch errors when reading multiple Parquet files
-  where some files have all NULL values in a string column.
+  An all-NULL object column writes to Parquet as the `null` type, which makes
+  DuckDB fail with a schema mismatch when it reads that file alongside files
+  where the same column is a string.
   """
-  # Convert to pyarrow-backed string type which properly handles nulls
-  # and writes correct type to Parquet even when all values are null
   df[col] = df[col].astype(pd.ArrowDtype(pa.string()))
   return df
 
 
 class ParquetWriter:
   """
-  Manages Parquet file output for XBRL graph processing.
-
-  This class centralizes all file I/O operations including:
-  - Directory structure creation (nodes/ and relationships/)
-  - Column type fixes for specific tables
-  - Schema completeness validation
-  - Deduplication
-  - Standardized filename generation
+  Writes the processor's DataFrames out as parquet: creates the `nodes/` and
+  `relationships/` tree, applies per-table column type fixes, fills in missing
+  schema columns, dedupes, and generates the filenames.
   """
 
   def __init__(
@@ -55,19 +47,11 @@ class ParquetWriter:
     sec_filer=None,
     sec_report=None,
   ):
-    """
-    Initialize Parquet writer with configuration.
+    """Configure output.
 
-    Args:
-        output_dir: Base output directory for parquet files
-        schema_adapter: SchemaProcessor instance for schema info
-        ingest_adapter: SchemaIngestionProcessor instance for table lists
-        df_manager: DataFrameManager instance for schema operations
-        enable_standardized_filenames: Whether to add filing metadata to filenames
-        enable_type_prefixes: Whether to prefix filenames with node_/rel_
-        enable_column_standardization: Whether to standardize column names
-        sec_filer: SEC filer information (optional)
-        sec_report: SEC report information (optional)
+    `enable_standardized_filenames` folds filing metadata into each filename;
+    `enable_type_prefixes` prefixes them with `node_` / `rel_`. `sec_filer` and
+    `sec_report` supply that filing metadata.
     """
     self.output_dir = output_dir
     self.schema_adapter = schema_adapter
@@ -80,12 +64,10 @@ class ParquetWriter:
     self.sec_report = sec_report
 
   def write_all_dataframes(self, schema_to_dataframe_mapping: dict, processor):
-    """
-    Write all DataFrames to parquet files organized in nodes/ and relationships/ subdirectories.
+    """Write every DataFrame on `processor` into `nodes/` or `relationships/`.
 
-    Args:
-        schema_to_dataframe_mapping: Dict mapping schema names to DataFrame attribute names
-        processor: XBRLGraphProcessor instance (for accessing DataFrames)
+    `schema_to_dataframe_mapping` comes from
+    `DataFrameManager.create_dynamic_dataframe_mapping()`.
     """
     logger.debug(f"Creating output directory: {self.output_dir}")
     self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -118,14 +100,7 @@ class ParquetWriter:
   def write_dataframe_schema_driven(
     self, df: pd.DataFrame, filename: str, schema_name: str
   ):
-    """
-    Save a DataFrame to parquet using schema-driven approach with correct table name and directory.
-
-    Args:
-        df: DataFrame to save
-        filename: Base filename
-        schema_name: Schema table name (e.g., 'Entity', 'FACT_HAS_ELEMENT')
-    """
+    """Save one DataFrame, routing it by its schema name (e.g. 'Entity')."""
     if not df.empty:
       df = df.copy()
 
@@ -184,12 +159,8 @@ class ParquetWriter:
       logger.debug(f"Skipping empty DataFrame for {filename}")
 
   def write_dataframe(self, df: pd.DataFrame, filename: str):
-    """
-    Save a DataFrame to parquet (fallback method with filename-based logic).
-
-    Args:
-        df: DataFrame to save
-        filename: Filename (may include subdirectory like "nodes/Entity.parquet")
+    """Save a DataFrame by filename ("nodes/Entity.parquet"), deriving the
+    table name from the file stem. Fallback for callers without a schema name.
     """
     if not df.empty:
       df = df.copy()
@@ -268,15 +239,10 @@ class ParquetWriter:
   def generate_standardized_filename(
     self, base_name: str, is_relationship: bool = False
   ) -> str:
-    """
-    Generate standardized filename based on filing information.
+    """Build the `.parquet` filename for a table.
 
-    Args:
-        base_name: Base filename (e.g., "Entity", "FACT_HAS_ELEMENT")
-        is_relationship: Whether this is relationship data
-
-    Returns:
-        Standardized filename with .parquet extension
+    Plain `{base_name}.parquet` unless type prefixes or standardized filenames
+    are enabled, in which case the filing date and CIK are folded in.
     """
     if not self.enable_standardized_filenames and not self.enable_type_prefixes:
       return f"{base_name}.parquet"
@@ -300,16 +266,7 @@ class ParquetWriter:
   def _fix_column_types_by_schema(
     self, df: pd.DataFrame, schema_name: str
   ) -> pd.DataFrame:
-    """
-    Fix column types for specific tables based on schema name.
-
-    Args:
-        df: DataFrame to fix
-        schema_name: Schema table name
-
-    Returns:
-        DataFrame with fixed column types
-    """
+    """Coerce per-table columns to stable dtypes, keyed by schema name."""
     if schema_name == "Entity":
       string_columns = [
         "ein",
@@ -374,16 +331,7 @@ class ParquetWriter:
   def _fix_column_types_by_filename(
     self, df: pd.DataFrame, filename: str
   ) -> pd.DataFrame:
-    """
-    Fix column types for specific tables based on filename.
-
-    Args:
-        df: DataFrame to fix
-        filename: Filename (e.g., "Entity.parquet")
-
-    Returns:
-        DataFrame with fixed column types
-    """
+    """Coerce per-table columns to stable dtypes, keyed by filename."""
     if "Entity" in filename:
       string_columns = [
         "tax_id",
@@ -469,15 +417,7 @@ class ParquetWriter:
     return df
 
   def _is_relationship_filename(self, base_name: str) -> bool:
-    """
-    Determine if a filename represents relationship data.
-
-    Args:
-        base_name: Base filename without extension
-
-    Returns:
-        True if this is a relationship table
-    """
+    """True when the extension-less filename names a relationship table."""
     relationship_patterns = [
       "entity_reports",
       "report_facts",
@@ -503,12 +443,7 @@ class ParquetWriter:
     return base_name in relationship_patterns
 
   def _write_all_dataframes_fallback(self, processor):
-    """
-    Fallback method to write all DataFrames without schema adapter.
-
-    Args:
-        processor: XBRLGraphProcessor instance
-    """
+    """Write the DataFrames by hardcoded path, when no schema adapter exists."""
     self.write_dataframe(processor.entities_df, "nodes/Entity.parquet")
     self.write_dataframe(processor.reports_df, "nodes/Report.parquet")
     self.write_dataframe(processor.facts_df, "nodes/Fact.parquet")

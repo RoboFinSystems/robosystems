@@ -1,525 +1,212 @@
-# LadybugDB Core Services
+# LadybugDB Core
 
-Embedded graph database services for LadybugDB, providing low-level engine access, connection pooling, database lifecycle management, and service orchestration.
+LadybugDB is an embedded columnar graph database — a MIT-licensed engine running
+in-process against a single `.lbug` file per graph. There is no server to
+connect to and no network hop; the Graph API exists to put an HTTP surface in
+front of files that only this instance can reach.
 
-## Overview
+Four layers, each wrapping the one below:
 
-The `ladybug/` directory contains all LadybugDB-specific functionality organized in four layers:
+| Layer | File | Role |
+| --- | --- | --- |
+| `LadybugService` | `service.py` | Orchestration: Cypher validation, query execution, streaming, health, cluster info |
+| `LadybugDatabaseManager` | `manager.py` | Lifecycle: create, delete, schema application, blue-green swap, capacity |
+| `LadybugConnectionPool` | `pool.py` | Per-database connection reuse, TTL, health checks, memory budget |
+| `Engine` / `Repository` | `engine.py` | The driver: parameterized Cypher, DDL, transactions |
 
-1. **Engine** (`engine.py`) - Low-level database driver
-2. **Connection Pool** (`pool.py`) - Connection lifecycle management
-3. **Database Manager** (`manager.py`) - Database operations and schema
-4. **Service** (`service.py`) - High-level orchestration
+Supporting modules: `config.py` (memory budget resolution and per-database
+overrides) and `materialization_lock.py` (the distributed write lock).
 
-## Architecture
+Application code should enter at `get_ladybug_service()`. Constructing an
+`Engine` directly in a request handler bypasses pooling, health checks, and the
+shared `Database` object — see the concurrency section below for why that
+matters.
 
-```
-┌─────────────────────────────────────────────┐
-│           LadybugService                    │  ← High-level orchestration
-│  (Query execution, health, cluster info)    │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│      LadybugDatabaseManager                 │  ← Database lifecycle
-│  (Create, delete, schema, query routing)    │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│      LadybugConnectionPool                  │  ← Connection management
-│  (Pooling, TTL, health checks, cleanup)     │
-└──────────────┬──────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────┐
-│            Engine                           │  ← Low-level driver
-│  (Cypher execution, DDL, transactions)      │
-└─────────────────────────────────────────────┘
-```
+## Single writer, shared database object
 
-## Components
+LadybugDB allows one write transaction per database file at a time. The pool
+enforces the invariant that makes this workable: **all connections for a given
+database share one `lbug.Database` object.** Two `Database` objects over the
+same file would not see each other's transactions, so the pool creates one per
+database name and hands out `lbug.Connection` instances against it.
 
-### 1. Engine (`engine.py`)
+Consequences worth internalizing:
 
-Low-level database driver providing direct access to LadybugDB.
+- Writes to one database serialize. They do not block reads of a *different*
+  database, and they do not block queries on the same instance.
+- Ingestion is sequential — one file materialized at a time per database.
+- The buffer pool is sized once, when the `Database` object is created. Changing
+  a memory budget therefore requires recreating the database object
+  (`pool.recreate_database()`), not just setting a new value.
 
-**Classes**:
-- `Engine` - Main database connection and query execution
-- `Repository` - High-level repository abstraction
-- `ConnectionError` - Connection-related exceptions
-- `QueryError` - Query execution exceptions
+## Connection pool
 
-**Key Features**:
-- Direct embedded database access
-- Cypher query execution with parameters
-- DDL schema operations
-- Transaction support
-- Error handling and logging
+`initialize_connection_pool(base_path, max_connections_per_db=3,
+connection_ttl_minutes=30)` creates the process-global pool;
+`get_connection_pool()` retrieves it. `LadybugDatabaseManager` calls
+`initialize_connection_pool` from its own constructor, so wiring the service is
+enough — there is no separate pool-init step.
 
-**Usage**:
 ```python
-from robosystems.graph_api.core.ladybug import Engine, ConnectionError, QueryError
+from robosystems.graph_api.core.ladybug import get_connection_pool
 
-# Create engine for specific database
-engine = Engine("/data/lbug-dbs/kg123.lbug")
-
-try:
-    # Execute parameterized query
-    result = engine.execute_query(
-        "MATCH (n:Entity) WHERE n.id = $id RETURN n",
-        {"id": "entity-123"}
-    )
-
-    # Process results
-    schema = result.get_schema()
-    while result.has_next():
-        row = result.get_next()
-        print(row)
-
-except QueryError as e:
-    print(f"Query failed: {e}")
-finally:
-    engine.close()
-```
-
-**Best Practices**:
-- Always close engines when done
-- Use parameterized queries to prevent injection
-- Handle `ConnectionError` and `QueryError` separately
-- Don't create engines directly in request handlers (use connection pool)
-
-### 2. Connection Pool (`pool.py`)
-
-Efficient connection pooling with automatic lifecycle management.
-
-**Classes**:
-- `LadybugConnectionPool` - Main connection pool
-- `ConnectionInfo` - Connection metadata and stats
-
-**Key Features**:
-- Per-database connection pools
-- Configurable max connections, idle timeout, TTL
-- Automatic connection cleanup
-- Thread-safe with proper locking
-- LRU eviction policy
-- Health checks before use
-
-**Configuration**:
-```python
-from robosystems.graph_api.core.ladybug import (
-    LadybugConnectionPool,
-    initialize_connection_pool
-)
-
-# Initialize global pool (recommended)
-pool = initialize_connection_pool(
-    base_path="/data/lbug-dbs",
-    max_connections_per_db=10,      # Max connections per database
-    idle_timeout_minutes=15,         # Close idle connections after 15min
-    connection_ttl_minutes=60        # Force close after 1 hour
-)
-
-# Use connection (context manager auto-returns to pool)
+pool = get_connection_pool()
 with pool.get_connection("kg123") as conn:
-    result = conn.execute("MATCH (n) RETURN n LIMIT 10")
+    result = conn.execute("MATCH (n) RETURN count(n)")
 ```
 
-**Connection Lifecycle**:
-1. **Request** - Application requests connection for database
-2. **Check Pool** - Pool checks for available connections
-3. **Reuse or Create** - Returns existing or creates new connection
-4. **Health Check** - Validates connection before returning
-5. **Use** - Application uses connection
-6. **Return** - Context manager returns connection to pool
-7. **Cleanup** - Background thread closes idle/expired connections
+Behavior at the cap: requesting a connection beyond `max_connections_per_db`
+does **not** block or raise. The pool closes its oldest connection and opens a
+fresh one. So a hot database under high concurrency churns connections rather
+than queueing, which shows up as connection-creation churn in the pool stats
+before it shows up as latency. `pool.get_stats()` reports created / reused /
+closed counts; a reuse rate well under 80% means the pool is thrashing and the
+answer is more instances, not a larger cap.
 
-**Monitoring**:
+Connections are health-checked before being handed out and closed once past
+their TTL. Always use the context manager — an un-returned connection stays
+counted against the cap until it expires.
+
+## Memory
+
+Each database gets a fixed buffer-pool budget in megabytes, resolved by
+`get_database_memory_config(database_name)` in that order of precedence:
+
+1. A per-database override set by `set_ladybug_memory_override` (used during
+   materialization).
+2. `memory_per_subgraph_mb` if the name contains an underscore — subgraphs are
+   identified structurally (`kg123_dev`, `sec_historical`) and get a smaller
+   pool, deliberately oversubscribed because they are rarely all hot at once.
+3. `memory_per_db_mb` for a parent database.
+4. The tier's total `max_memory_mb` for single-database instances.
+5. `LBUG_MAX_MEMORY_MB` (default 2048) as the local-dev fallback.
+
+Overrides are scoped to one database on purpose. A global boost leaks to every
+subgraph on the instance and OOM-kills the container, taking every database with
+it. Boost, do the work, restore, and recreate the database object each way:
+
 ```python
-# Get pool statistics
-stats = pool.get_stats()
-print(f"Total databases: {stats['total_databases']}")
-print(f"Connections created: {stats['connections_created']}")
-print(f"Connections reused: {stats['connections_reused']}")
-print(f"Current active: {stats['current_active']}")
+from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
+
+old = set_ladybug_memory_override(50000, graph_id="sec")
+try:
+    pool.recreate_database("sec")
+    ...
+finally:
+    set_ladybug_memory_override(old, graph_id="sec")
+    pool.recreate_database("sec")
 ```
 
-**Best Practices**:
-- Always use context managers for connections
-- Set `max_connections_per_db` based on expected concurrency
-- Configure TTL to prevent stale connections
-- Monitor pool stats for sizing decisions
-- Close all connections before deleting database
+Admission control (`../admission_control.py`) is the backstop: it rejects with
+503 when free memory falls below 1 GB, measured as the tighter of host-available
+and cgroup headroom. It deliberately does not gate on memory *percentage* — a
+buffer pool is meant to fill, so percent-of-total conflates a fixed allocation
+with the query working set.
 
-### 3. Database Manager (`manager.py`)
+Databases open read-only when `LBUG_ROLE=replica`, which avoids WAL recovery and
+lock contention on snapshot-restored volumes. Masters always open read-write, so
+that an early read request can't lock the file into read-only for the process
+lifetime.
 
-Complete database lifecycle management including creation, deletion, and schema operations.
+## Database lifecycle
 
-**Classes**:
-- `LadybugDatabaseManager` - Main database manager
-
-**Key Features**:
-- Database creation with schema initialization
-- Database deletion with cleanup
-- Multi-database support per instance
-- Schema DDL execution
-- Database info and health checks
-- Connection pool integration
-
-**Database Operations**:
 ```python
-from robosystems.graph_api.core.ladybug import LadybugDatabaseManager
-from robosystems.graph_api.models.database import DatabaseCreateRequest
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.models.database import DatabaseCreateRequest, QueryRequest
 
-manager = LadybugDatabaseManager(
-    base_path="/data/lbug-dbs",
-    max_databases=100,
-    read_only=False
-)
-
-# Create database
-response = manager.create_database(
-    graph_id="kg123",
-    schema_type="entity",      # or "shared", "custom"
-    read_only=False,
-    custom_schema_ddl=None     # Optional custom DDL
-)
-
-# Get database information
-info = manager.get_database_info("kg123")
-print(f"Size: {info.size_bytes} bytes")
-print(f"Healthy: {info.is_healthy}")
-
-# List all databases
-databases = manager.list_databases()
-
-# Delete database
-result = manager.delete_database("kg123", force=True)
-```
-
-**Schema Types**:
-- `entity` - Standard entity-relationship schema
-- `shared` - Shared repository schema (SEC, industry data)
-- `custom` - User-provided custom DDL
-
-**Database Limits**:
-```python
-# Check capacity
-capacity = manager.get_node_capacity()
-print(f"Max databases: {capacity['max_databases']}")
-print(f"Current: {capacity['current_databases']}")
-print(f"Remaining: {capacity['capacity_remaining']}")
-```
-
-**Best Practices**:
-- Validate schema before creation
-- Use `force=True` only when necessary for deletion
-- Close connections before deleting database
-- Monitor capacity and adjust `max_databases`
-- Use read-only mode for reader instances
-
-### 4. Service (`service.py`)
-
-High-level service orchestration coordinating all LadybugDB operations.
-
-**Classes**:
-- `LadybugService` - Main service orchestrator
-
-**Key Features**:
-- Unified API for all operations
-- Query execution with metrics
-- Health monitoring and resource tracking
-- Cluster information and topology
-- Service discovery and registration
-- Integration with database manager and connection pool
-
-**Service Initialization**:
-```python
-from robosystems.graph_api.core.ladybug import (
-    init_ladybug_service,
-    get_ladybug_service
-)
-from robosystems.middleware.graph.types import NodeType, RepositoryType
-
-# Initialize service (once at startup)
-service = init_ladybug_service(
-    base_path="/data/lbug-dbs",
-    max_databases=100,
-    read_only=False,
-    node_type=NodeType.WRITER,           # or READER, SHARED_MASTER
-    repository_type=RepositoryType.ENTITY # or SHARED
-)
-
-# Get service instance (anywhere in app)
 service = get_ladybug_service()
-```
+manager = service.db_manager
 
-**Query Execution**:
-```python
-from robosystems.graph_api.models.database import QueryRequest
-
-# Execute Cypher query
-response = service.execute_query(QueryRequest(
-    database="kg123",
-    cypher="MATCH (n:Entity) WHERE n.type = $type RETURN n",
-    parameters={"type": "Company"}
+manager.create_database(DatabaseCreateRequest(
+    graph_id="kg123",
+    schema_type="entity",       # entity | shared | custom
 ))
 
-print(f"Returned {response.row_count} rows")
-print(f"Columns: {response.columns}")
-print(f"Execution time: {response.execution_time_ms}ms")
-
-for row in response.data:
-    print(row)
+info = manager.get_database_info("kg123")   # size_bytes, is_healthy, timestamps
+manager.list_databases()
+manager.delete_database("kg123", force=True)
 ```
 
-**Health Monitoring**:
-```python
-# Get cluster health
-health = service.get_cluster_health()
-print(f"Status: {health.status}")            # healthy, warning, critical
-print(f"CPU: {health.cpu_percent}%")
-print(f"Memory: {health.memory_percent}%")
-print(f"Databases: {health.current_databases}/{health.max_databases}")
-print(f"Uptime: {health.uptime_seconds}s")
-```
+`create_database` and the other lifecycle methods take request models, not
+keyword arguments. Schema application happens inside `create_database` —
+`schema_type="custom"` uses `custom_schema_ddl` from the request. The schema
+*declarations* live in [`robosystems/schemas/`](/robosystems/schemas/README.md);
+this module is what installs them.
 
-**Cluster Information**:
-```python
-# Get cluster info
-info = service.get_cluster_info()
-print(f"Node ID: {info.node_id}")
-print(f"Node Type: {info.node_type}")
-print(f"Version: {info.cluster_version}")
-print(f"Databases: {info.databases}")
-print(f"Read-only: {info.read_only}")
-```
+Close every connection for a database before deleting it. `delete_database`
+does this, but code that unlinks files directly will find them held open.
 
-**Best Practices**:
-- Initialize service once at startup
-- Use `get_ladybug_service()` to access service instance
-- Monitor health regularly for capacity planning
-- Configure appropriate node type and repository type
-- Use read-only mode for reader instances
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# Database directory
-LBUG_DATABASE_DIR=/data/lbug-dbs
-
-# Instance limits
-LBUG_MAX_DATABASES_PER_NODE=100
-
-# Connection pooling
-LBUG_MAX_CONNECTIONS_PER_DB=10
-LBUG_IDLE_TIMEOUT_MINUTES=15
-LBUG_CONNECTION_TTL_MINUTES=60
-
-# Node configuration
-LBUG_NODE_TYPE=writer                 # writer, reader, shared_master
-LBUG_REPOSITORY_TYPE=entity           # entity, shared
-LBUG_READ_ONLY=false
-
-# Performance tuning
-LBUG_QUERY_TIMEOUT_SECONDS=300
-LBUG_MAX_QUERY_RESULT_SIZE=10000      # Max rows returned
-```
-
-### Programmatic Configuration
+## Query execution
 
 ```python
-from robosystems.graph_api.core.ladybug import (
-    init_ladybug_service,
-    initialize_connection_pool
-)
+response = service.execute_query(QueryRequest(
+    database="kg123",
+    cypher="MATCH (n:Entity) WHERE n.entity_type = $t RETURN n",
+    parameters={"t": "Company"},
+))
+# response.data, .columns, .row_count, .execution_time_ms
 
-# Initialize connection pool first
-pool = initialize_connection_pool(
-    base_path="/data/lbug-dbs",
-    max_connections_per_db=10,
-    idle_timeout_minutes=15,
-    connection_ttl_minutes=60
-)
-
-# Initialize service
-service = init_ladybug_service(
-    base_path="/data/lbug-dbs",
-    max_databases=100,
-    read_only=False,
-    node_type=NodeType.WRITER,
-    repository_type=RepositoryType.ENTITY
-)
+for chunk in service.execute_query_streaming(request, chunk_size=1000):
+    ...
 ```
 
-## Performance Tuning
+Always parameterize. `validate_cypher_query` screens statements before they
+reach the engine, and string interpolation both defeats that and prevents plan
+reuse. Lead the `MATCH` with a selective, indexed anchor — LadybugDB does not
+reorder a scan into an index lookup for you.
 
-### Connection Pool Sizing
+## Blue-green materialization
 
-```python
-# Low concurrency (< 10 concurrent requests)
-max_connections_per_db = 5
+Rebuilding a graph in place would take it offline for the duration. Instead, the
+new graph is built as `{graph_id}-wip.lbug` while the live database keeps
+serving, then promoted in one step.
 
-# Medium concurrency (10-50 concurrent requests)
-max_connections_per_db = 10
+`POST /databases/{graph_id}/swap` → `manager.swap_database(graph_id)`:
 
-# High concurrency (50+ concurrent requests)
-max_connections_per_db = 20
-```
+1. `CHECKPOINT` the WIP database to flush its WAL.
+2. Close pooled connections for both the active and WIP databases.
+3. Remove any leftover `-prev` from an earlier swap.
+4. Rename active → `-prev` (with its `.wal`).
+5. Rename WIP → active (with its `.wal`).
+6. Delete `-prev`.
 
-### Query Optimization
+The `-prev` step is crash safety, not a rollback feature: if the swap fails
+between steps 4 and 5, the handler restores active from `-prev`. Once step 6
+runs, the old database is gone. The swap is one-way by design — the API exposes
+no un-swap.
 
-```python
-# Use parameterized queries
-good = engine.execute_query(
-    "MATCH (n:Entity) WHERE n.id = $id RETURN n",
-    {"id": entity_id}
-)
+Swaps refuse to run on read-only nodes, and take the materialization lock.
 
-# Avoid string interpolation (SQL injection risk + no caching)
-bad = engine.execute_query(
-    f"MATCH (n:Entity) WHERE n.id = '{entity_id}' RETURN n"
-)
+## The materialization lock
 
-# Use LIMIT for large result sets
-query = "MATCH (n:Entity) RETURN n LIMIT 1000"
+`materialization_lock.py` holds a per-graph distributed lock in Valkey so two
+materializations of the same graph cannot interleave.
 
-# Use indexes for common queries
-schema_ddl = """
-CREATE NODE TABLE Entity (
-    id STRING PRIMARY KEY,
-    name STRING,
-    type STRING
-);
-CREATE INDEX entity_type_idx ON Entity(type);
-"""
-```
+- **Keyed on the base graph ID.** `kg123-wip` and `kg123` resolve to the same
+  lock, so a materialization writing to WIP blocks a swap of the same graph.
+  Different graphs never contend.
+- **1-hour TTL**, as a safety net for a process that dies holding it.
+- **5-second acquire timeout** — a second materialization fails fast rather than
+  queueing behind one that may run for an hour.
+- **Compare-and-delete release via Lua**, so a slow holder cannot delete a lock
+  that has since expired and been re-acquired by someone else.
+- **Token passthrough**: a caller that already holds the lock sends it in the
+  `X-Materialization-Lock-Token` header, and the swap verifies against that
+  token instead of acquiring its own.
 
-## Error Handling
+## Errors
 
-### Connection Errors
+| Exception | Meaning | Response |
+| --- | --- | --- |
+| `ConnectionError` | Database unreachable, locked, or file missing | 503, retryable |
+| `QueryError` | Cypher failed to parse or execute | 400, not retryable |
 
-```python
-from robosystems.graph_api.core.ladybug import ConnectionError
+Both are exported from `robosystems.graph_api.core.ladybug`. Handle them
+separately — retrying a syntax error is wasted work, and 400-ing a transient
+lock conflict fails a request that would have succeeded.
 
-try:
-    with pool.get_connection("kg123") as conn:
-        result = conn.execute(query)
-except ConnectionError as e:
-    logger.error(f"Connection failed: {e}")
-    # Retry or return 503 Service Unavailable
-```
+## Related
 
-### Query Errors
-
-```python
-from robosystems.graph_api.core.ladybug import QueryError
-
-try:
-    result = engine.execute_query(cypher, params)
-except QueryError as e:
-    logger.error(f"Query failed: {e}")
-    # Return 400 Bad Request or 500 Internal Server Error
-```
-
-### Database Not Found
-
-```python
-from fastapi import HTTPException
-
-if graph_id not in manager.list_databases():
-    raise HTTPException(
-        status_code=404,
-        detail=f"Database {graph_id} not found"
-    )
-```
-
-## Testing
-
-### Unit Tests
-
-```python
-from robosystems.graph_api.core.ladybug import Engine
-
-def test_engine_query_execution():
-    engine = Engine("/tmp/test.lbug")
-    result = engine.execute_query("MATCH (n) RETURN count(n) as count")
-    assert result is not None
-    engine.close()
-```
-
-### Integration Tests
-
-```python
-from robosystems.graph_api.core.ladybug import (
-    LadybugConnectionPool,
-    LadybugDatabaseManager
-)
-
-def test_connection_pool_integration():
-    pool = LadybugConnectionPool("/tmp/test-dbs", max_connections_per_db=5)
-    manager = LadybugDatabaseManager("/tmp/test-dbs", 10)
-
-    # Create database
-    manager.create_database("test", "entity", False)
-
-    # Get connection
-    with pool.get_connection("test") as conn:
-        result = conn.execute("MATCH (n) RETURN count(n)")
-        assert result is not None
-
-    # Cleanup
-    pool.close_all_connections()
-    manager.delete_database("test", force=True)
-```
-
-## Monitoring
-
-### Connection Pool Metrics
-
-```python
-stats = pool.get_stats()
-metrics = {
-    "total_databases": stats["total_databases"],
-    "connections_created": stats["connections_created"],
-    "connections_reused": stats["connections_reused"],
-    "current_active": stats["current_active"],
-    "reuse_rate": stats["connections_reused"] / stats["connections_created"]
-}
-```
-
-### Database Metrics
-
-```python
-info = manager.get_database_info(graph_id)
-metrics = {
-    "size_bytes": info.size_bytes,
-    "is_healthy": info.is_healthy,
-    "created_at": info.created_at,
-    "last_accessed": info.last_accessed
-}
-```
-
-### Service Metrics
-
-```python
-health = service.get_cluster_health()
-metrics = {
-    "status": health.status,
-    "cpu_percent": health.cpu_percent,
-    "memory_percent": health.memory_percent,
-    "database_utilization": health.current_databases / health.max_databases,
-    "uptime_seconds": health.uptime_seconds
-}
-```
-
-## Related Documentation
-
-- **[Core Services README](../README.md)** - Overview of all core services
-- **[DuckDB Staging](../duckdb/README.md)** - DuckDB staging system
-- **[Graph API README](/robosystems/graph_api/README.md)** - Complete API overview
-
-## Support
-
-- **Source Code**: `/robosystems/graph_api/core/ladybug/`
-- **Issues**: [robosystems/issues](https://github.com/RoboFinSystems/robosystems/issues)
-- **API Docs**: http://localhost:8001/docs
+- [`../README.md`](../README.md) — core services map and the ingest path
+- [`../duckdb/README.md`](../duckdb/README.md) — where data lives before it is graph
+- [`../../README.md`](../../README.md) — endpoints, tiers, deployment

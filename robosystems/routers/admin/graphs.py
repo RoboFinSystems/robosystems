@@ -28,27 +28,14 @@ router = APIRouter(prefix="/admin/v1/graphs", tags=["admin-graphs"])
 
 
 def _get_graph_backend(graph: Graph) -> str:
-  """Get the backend for a graph from its tier configuration.
-
-  Args:
-      graph: The graph model instance
-
-  Returns:
-      Backend type (currently "ladybug")
-  """
+  """The graph's backend, read from its tier configuration."""
   tier_config = GraphTierConfig.get_tier_config(graph.graph_tier)
   return tier_config.get("backend", "ladybug")
 
 
 def _get_graph_status(graph: Graph) -> str:
-  """Get the operational status for a graph.
-
-  Args:
-      graph: The graph model instance
-
-  Returns:
-      Status string (e.g., "active", "syncing", "error", "queued", "suspended")
-  """
+  """The graph's operational status: active, syncing, error, queued, or
+  suspended."""
   if graph.status and graph.status != "active":
     return graph.status
 
@@ -436,12 +423,9 @@ async def get_graph_storage(request: Request, graph_id: str):
       else 0.0
     )
 
-    # Default to the tier limit ingestion actually enforces
-    # (instance_storage_limit_gb: 20/50/100). This used to read a
-    # storage_limit_gb key that exists in no billing plan, so every graph
-    # reported a fabricated 500 GB limit — and the override read a column
-    # name that does not exist (storage_limit_override_gb), turning this
-    # endpoint into a 500 for any graph with a credit pool.
+    # Default to the tier's `instance_storage_limit_gb`, which is the limit
+    # ingestion enforces; a per-graph `storage_override_gb` on the credit
+    # pool takes precedence.
     credits = GraphCredits.get_by_graph_id(graph_id, session)
     storage_limit = (
       float(credits.storage_override_gb)

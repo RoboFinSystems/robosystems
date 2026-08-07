@@ -1,484 +1,193 @@
 # OpenTelemetry Middleware
 
-This middleware provides comprehensive observability through distributed tracing and metrics collection using OpenTelemetry and AWS Distro for OpenTelemetry (ADOT).
+Instrumentation for the API: OTLP metrics (and optionally traces) exported to a
+collector, plus a set of helpers for recording request, auth, error, business,
+and query-queue metrics from application code. `setup.py` wires the OTel SDK to
+FastAPI; `metrics.py` holds every instrument the platform defines.
 
-## Overview
+In production the API task runs an ADOT collector sidecar that remote-writes to
+Amazon Managed Prometheus. **Only metrics are exported.** Traces are off by
+default in the application, and the deployed collector defines no traces
+pipeline, so nothing lands in X-Ray today.
 
-The OpenTelemetry middleware:
+## Turning it on
 
-- Collects and exports metrics and traces to Amazon Managed Prometheus and AWS X-Ray
-- Provides automatic instrumentation for FastAPI, and database operations
-- Enables custom business metrics and event tracking
-- Supports both local development and production environments
-- Integrates with Amazon Managed Grafana for visualization
+`OTEL_ENABLED` gates everything. It is `false` unless explicitly set (env var,
+or the `OTEL_ENABLED` SSM parameter). When it is false, `setup_telemetry()`
+logs and returns — no instruments, no exporters, no overhead.
 
-## Architecture
+| Variable                      | Default                 | Effect                                                        |
+| ----------------------------- | ----------------------- | ------------------------------------------------------------- |
+| `OTEL_ENABLED`                | `false`                 | Master switch. Nothing is instrumented while false.            |
+| `OTEL_TRACES_ENABLED`         | `false`                 | Adds the OTLP span exporter. Metrics do not depend on this.    |
+| `OTEL_SERVICE_NAME`           | `robosystems`           | `service.name` resource attribute.                             |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Port `4317` is rewritten to `4318`; the exporters are HTTP.    |
+| `OTEL_RESOURCE_ATTRIBUTES`    | `""`                    | `key=value,key=value`; merged over the built-in attributes.    |
+| `OTEL_CONSOLE_EXPORT`         | `false`                 | Dev only — dumps spans to stdout.                              |
 
-```
-otel/
-├── __init__.py              # Module exports
-├── setup.py                 # OpenTelemetry initialization
-├── metrics.py               # Centralized metrics utilities
-├── config/                  # Configuration files
-│   ├── otel-collector-config.yaml   # Local OTEL Collector config
-│   ├── adot-collector-config.yaml   # AWS ADOT Collector config
-│   ├── prometheus.yaml              # Prometheus scrape config
-│   ├── datasources/                 # Grafana datasources
-│   └── dashboards/                  # Grafana dashboards
-└── README.md                # This documentation
-```
+The service version is read from the installed `robosystems` package metadata,
+not from an env var. `service.instance.id` is set to the hostname (the container
+ID on Fargate) — see "Gotchas" for why that matters.
 
-## Key Components
-
-### 1. Setup (`setup.py`)
-
-Initializes OpenTelemetry providers and auto-instrumentation.
-
-**Features:**
-
-- **Environment-Aware**: Automatically enables in staging/prod
-- **OTLP Exporters**: Sends metrics and traces to collectors
-- **Auto-Instrumentation**: FastAPI, requests, psycopg2
-- **Graceful Degradation**: Continues if collectors unavailable
-
-**Usage:**
-
-```python
-from robosystems.middleware.otel.setup import setup_telemetry
-
-# Called during application startup with the FastAPI app instance.
-# Service name comes from OTEL_SERVICE_NAME and the version is read
-# from the installed package metadata — neither is passed as an argument.
-setup_telemetry(app)
-```
-
-### 2. Metrics Collection (`metrics.py`)
-
-Provides utilities for consistent metrics collection.
-
-**Core Classes:**
-
-- `EndpointMetrics`: Singleton managing metric instruments
-- `endpoint_metrics_decorator`: Automatic metrics decorator
-- `endpoint_metrics_context`: Context manager for metrics
-
-**Key Functions:**
-
-- `record_request_metrics()`: HTTP request metrics
-- `record_auth_metrics()`: Authentication metrics
-- `record_error_metrics()`: Error tracking
-- `record_query_queue_metrics()`: Query queue metrics
-
-## Metrics Reference
-
-### Request Metrics
-
-```
-robosystems_api_requests_total{endpoint, method, status_code, status_class, user_authenticated}
-  - Type: Counter
-  - Description: Total API requests
-
-robosystems_api_request_duration_seconds{endpoint, method, status_code, status_class, user_authenticated}
-  - Type: Histogram
-  - Description: Request duration in seconds
-  - Buckets: 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
-```
-
-### Authentication Metrics
-
-```
-robosystems_auth_attempts_total{endpoint, method, auth_type}
-  - Type: Counter
-  - Auth Types: email_password_login, jwt_token, api_key, sso_token_exchange
-
-robosystems_auth_failures_total{endpoint, method, auth_type, failure_reason}
-  - Type: Counter
-  - Failure Reasons: user_not_found_or_inactive, invalid_password, invalid_token
-```
-
-### Error Metrics
-
-```
-robosystems_api_errors_total{endpoint, method, error_type, error_code, user_authenticated}
-  - Type: Counter
-  - Description: API errors by type and code
-```
-
-### Business Event Metrics
-
-```
-robosystems_business_events_total{endpoint, method, event_type, event_*, user_authenticated}
-  - Type: Counter
-  - Event Types: user_registered, user_login, entity_created, graph_created
-```
-
-### Query Queue Metrics
-
-```
-robosystems_query_queue_size{priority}
-  - Type: Gauge
-  - Description: Current queue size
-
-robosystems_query_wait_time_seconds{graph_id, user_id, priority}
-  - Type: Histogram
-  - Description: Queue wait time
-  - Buckets: 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0
-
-robosystems_query_execution_time_seconds{graph_id, user_id, status, error_type}
-  - Type: Histogram
-  - Description: Query execution time
-```
-
-## Usage Patterns
-
-### 1. Using the Decorator (Recommended)
-
-```python
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-
-@router.post("/api/endpoint")
-@endpoint_metrics_decorator(
-    endpoint="/v1/api/endpoint",
-    business_event_type="custom_event"  # Optional
-)
-async def my_endpoint(request: MyRequest):
-    # Metrics are automatically collected
-    result = await process_request(request)
-    return result
-```
-
-### 2. Using Context Manager
-
-```python
-from robosystems.middleware.otel.metrics import endpoint_metrics_context
-
-async def my_endpoint(request: MyRequest):
-    with endpoint_metrics_context(
-        endpoint="/v1/api/endpoint",
-        method="POST",
-        user_id=request.user_id
-    ) as ctx:
-        result = await some_operation()
-
-        # Record custom business events
-        ctx.record_business_event(
-            event_type="operation_completed",
-            event_data={"items_processed": 42}
-        )
-
-        return result
-```
-
-### 3. Authentication Metrics
-
-```python
-from robosystems.middleware.otel.metrics import record_auth_metrics
-
-@router.post("/login")
-async def login(credentials: LoginRequest):
-    # Record auth attempt
-    record_auth_metrics(
-        endpoint="/v1/auth/login",
-        method="POST",
-        auth_type="email_password_login",
-        success=False
-    )
-
-    try:
-        user = await authenticate_user(credentials)
-
-        # Record successful auth
-        record_auth_metrics(
-            endpoint="/v1/auth/login",
-            method="POST",
-            auth_type="email_password_login",
-            success=True,
-            user_id=user.id
-        )
-
-        return {"token": create_jwt_token(user)}
-
-    except InvalidCredentialsError:
-        # Record failed auth with reason
-        record_auth_metrics(
-            endpoint="/v1/auth/login",
-            method="POST",
-            auth_type="email_password_login",
-            success=False,
-            failure_reason="invalid_password"
-        )
-        raise
-```
-
-### 4. Query Queue Metrics
-
-```python
-from robosystems.middleware.otel.metrics import record_query_queue_metrics
-
-# Record submission
-record_query_queue_metrics(
-    metric_type="submission",
-    graph_id=graph_id,
-    user_id=user_id,
-    priority=priority,
-    success=True,
-)
-
-# Record wait time
-record_query_queue_metrics(
-    metric_type="wait_time",
-    graph_id=query.graph_id,
-    user_id=query.user_id,
-    priority=query.priority,
-    wait_time_seconds=wait_time,
-)
-
-# Record execution
-record_query_queue_metrics(
-    metric_type="execution",
-    graph_id=query.graph_id,
-    user_id=query.user_id,
-    execution_time_seconds=execution_time,
-    status="completed",
-    error_type=None,
-)
-```
-
-## Configuration
-
-### Environment Variables
+Local stack:
 
 ```bash
-# Core OTEL Configuration
-OTEL_SERVICE_NAME=robosystems-api-prod
-OTEL_SERVICE_VERSION=1.0.0
-OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod,service.namespace=robosystems
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-
-# Environment Control
-ENVIRONMENT=prod                      # prod/staging enables OTEL
-
-# Auto-instrumentation
-OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
-# setup.py instruments FastAPI with excluded_urls="status,health" to keep
-# high-frequency load-balancer health checks out of the metrics. The platform
-# health endpoint is GET /v1/status (there is no bare /health route).
-OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=status,health
-
-# AWS Integration (Production)
-AWS_PROMETHEUS_ENDPOINT=https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-xxxx/
-AWS_REGION=us-east-1
-
-# Performance Tuning
-OTEL_BSP_MAX_QUEUE_SIZE=2048
-OTEL_BSP_MAX_EXPORT_BATCH_SIZE=512
-OTEL_BSP_EXPORT_TIMEOUT_MILLIS=30000
-OTEL_METRIC_EXPORT_INTERVAL_MILLIS=60000
+docker compose --profile observability up -d
+# Grafana        http://localhost:4000
+# Prometheus     http://localhost:9090
+# OTel collector http://localhost:8889/metrics
 ```
 
-### ADOT Collector Configuration
+The dev path is otherwise a no-op: with the default `localhost:4318` endpoint
+and `ENVIRONMENT=dev`, the exporters are skipped even if `OTEL_ENABLED=true`,
+so run the `observability` profile to see anything.
 
-The ADOT collector runs as a sidecar container in ECS:
+## Setup
 
-```yaml
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
+```python
+from robosystems.middleware.otel import setup_telemetry, shutdown_telemetry
 
-processors:
-  batch:
-    timeout: 1s
-    send_batch_size: 50
-  resource:
-    attributes:
-      - key: service.name
-        value: ${OTEL_SERVICE_NAME}
-        action: upsert
-
-exporters:
-  prometheusremotewrite:
-    endpoint: ${AWS_PROMETHEUS_ENDPOINT}api/v1/remote_write
-    auth:
-      authenticator: sigv4auth
-  awsxray:
-    region: ${AWS_REGION}
-
-service:
-  pipelines:
-    metrics:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [prometheusremotewrite]
-    traces:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [awsxray]
+setup_telemetry(app)   # at startup; takes only the FastAPI app
+shutdown_telemetry()   # at shutdown; flushes providers
 ```
+
+`setup_telemetry` instruments FastAPI (with `excluded_urls="status,health"`),
+`requests`, and `psycopg2`, then installs the metric views and — if traces are
+enabled — the span processors. Every step is wrapped in `try/except`: a missing
+or unreachable collector degrades to no telemetry rather than a failed boot.
+
+## Recording metrics
+
+Three entry points, all from `robosystems.middleware.otel.metrics`.
+
+**Decorator** — for FastAPI routes. Note the first parameter is
+`endpoint_name`, and always pass `method` explicitly:
+
+```python
+@router.post("/login")
+@endpoint_metrics_decorator(
+    "/v1/auth/login",
+    method="POST",
+    business_event_type="user_login",
+)
+async def login_endpoint(request: LoginRequest):
+    return await do_login(request)
+```
+
+Without `method`, the decorator falls back to scanning the function signature
+for a `fastapi.Request` and labels the metric `"UNKNOWN"` when it finds none —
+which silently breaks any dashboard filtering by method. If the handler returns
+an object with a truthy `idempotent_replay` attribute, the business-event
+counter is suppressed for that call (request count and latency still fire), so
+"how many times did this actually execute" stays meaningful.
+
+**Context manager** — for finer-grained or non-route code:
+
+```python
+with endpoint_metrics_context("/v1/auth/login", "POST", user_id=user_id) as ctx:
+    result = await some_operation()
+    ctx.record_business_event("user_authenticated", {"success": True})
+```
+
+**Direct calls** — `record_request_metrics`, `record_auth_metrics`,
+`record_error_metrics`, `record_query_queue_metrics`. The last one dispatches on
+a `metric_type` string (`"submission"`, `"wait_time"`, `"execution"`,
+`"concurrent_update"`) with the remaining fields passed as keyword arguments:
+
+```python
+record_query_queue_metrics(
+    metric_type="execution",
+    graph_id=graph_id,
+    user_id=user_id,
+    execution_time_seconds=elapsed,
+    status="completed",
+)
+```
+
+`record_request_metrics` drops `GET /v1/status` and `GET /status` outright — the
+load-balancer health check would otherwise dominate the series.
+
+## Instruments
+
+All instrument names are prefixed `robosystems_`. The full set is defined in
+`EndpointMetrics._ensure_instruments()` in `metrics.py`; the families are:
+
+| Family        | Instruments                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| Requests      | `api_requests_total`, `api_request_duration_seconds`, `api_errors_total`                                       |
+| Auth          | `auth_attempts_total`, `auth_failures_total`                                                                   |
+| Business      | `business_events_total`                                                                                        |
+| Graph content | `graph_nodes_total`, `graph_relationships_total`, `graph_size_bytes`                                           |
+| Query queue   | `query_queue_size`, `query_submissions_total`, `query_queue_rejections_total`, `query_wait_time_seconds`, `query_execution_time_seconds`, `query_concurrent_executions`, `query_completions_total`, `query_user_limit_rejections_total` |
+| SSE           | `sse_connections_active`, `sse_connections_{opened,closed,rejected}_total`, `sse_events_{emitted,failed}_total`, `sse_redis_circuit_breaker_opens_total`, `sse_connection_queue_overflows_total` |
+| Graph API     | `graph_api_requests_total`, `graph_api_errors_total`, `graph_api_duration_seconds`                              |
+| Other         | `rate_limit_rejections_total`, `credits_consumed_total`, `db_pool_connections`                                  |
+
+Histogram buckets are set through `get_metric_views()`: `API_DURATION_BUCKETS`
+(5ms–10s, fifteen buckets) for request duration, `QUERY_DURATION_BUCKETS`
+(10ms–60s) for queue wait and execution, `GRAPH_API_DURATION_BUCKETS`
+(5ms–300s, covering fast reads through ingestion and backup) for Graph API
+proxy calls.
+
+## Gotchas
+
+**Cardinality is a cost line, not a style preference.** Amazon Managed
+Prometheus bills by sample. Two guards already exist in code and should not be
+removed casually:
+
+- `get_metric_views()` restricts the auto-generated `http.server.*` instruments
+  to a server-controlled attribute allowlist. FastAPIInstrumentor otherwise
+  records the client-supplied `Host` header, and internet scanners hitting the
+  public ALB with junk hostnames mint ~48 new series apiece.
+- `_sanitize_endpoint()` normalizes endpoint labels. Never put a UUID,
+  timestamp, or raw user input in a label.
+
+**`service.instance.id` must stay unique per process.** It defaults to the
+hostname. If every ECS task exports its cumulative counters into one shared
+series, `rate()` reads the interleaved per-task samples as constant counter
+resets and inflates volume metrics by a large factor. Setting
+`service.instance.id` in `OTEL_RESOURCE_ATTRIBUTES` overrides the default —
+only do that with something genuinely per-process.
+
+**Query strings are redacted at span start.** `QueryParamRedactionSpanProcessor`
+rewrites `http.url`, `url.full`, `http.target`, and `url.query` through the same
+redaction list as request logging (`middleware/logging.py`). OTel's built-in
+`redact_url` covers only cloud-signature parameters, not `token` or `api_key`,
+so credential-bearing query strings would otherwise reach the tracing backend.
+Add new credential parameter names to `redact_sensitive_query_params`, not here.
+
+**Health checks are filtered twice** — once in the app (`excluded_urls`, and the
+skip inside `record_request_metrics`) and once in the deployed collector (a
+`filter/healthcheck` processor dropping `/v1/status`, `/status`, `/health`).
+Both layers exist because the auto-instrumentation and the manual helpers
+produce different datapoints.
+
+**Decorator order matters.** `@endpoint_metrics_decorator` goes *below*
+`@router.post(...)`, so the router registers the wrapped function.
 
 ## Deployment
 
-### Local Development
+Local collector, Prometheus, and Grafana configs live in `config/`
+(`otel-collector-config.yaml`, `prometheus.yaml`, `datasources/`,
+`dashboards/`). The production topology is three pieces:
 
-```bash
-# Start observability stack
-docker compose --profile observability up -d
+- `cloudformation/prometheus.yaml` — the Managed Prometheus workspace.
+- `cloudformation/api.yaml` — the `adot-collector` sidecar on the API task,
+  conditional on the observability stack existing. Its config is inlined as
+  `AOT_CONFIG_CONTENT`: OTLP in on 4317/4318, a health-check filter, batching,
+  and `prometheusremotewrite` with sigv4 auth. Metrics only.
+- `cloudformation/grafana.yaml` — the Managed Grafana workspace, deployed by
+  `.github/workflows/deploy-grafana.yml`.
 
-# Enable OTEL in development
-export OTEL_ENABLED=true
-export OTEL_SERVICE_NAME=robosystems-api-dev
-
-# Access monitoring tools
-# - Grafana: http://localhost:4000 (admin/password)
-# - Prometheus: http://localhost:9090
-# - OTEL Collector: http://localhost:8889/metrics
-```
-
-### Production Deployment
-
-1. **Infrastructure**: Deploy via CloudFormation
-
-   ```bash
-   gh workflow run deploy-observability.yml
-   ```
-
-2. **ECS Integration**: ADOT collector included as sidecar
-
-3. **Access Grafana**: https://grafana.robosystems.ai (AWS SSO)
-
-## Monitoring & Dashboards
-
-### Key Metrics to Monitor
-
-1. **API Health**
-
-   - Request rate by endpoint
-   - Error rate (4xx and 5xx)
-   - P50/P90/P99 latency
-   - Authentication success rate
-
-2. **Business Metrics**
-
-   - User registrations per hour
-   - Active users
-   - API key usage
-   - Resource creation rates
-
-3. **Infrastructure**
-
-   - ECS task CPU/memory
-   - Database connections
-   - Cache hit rates
-   - Queue lengths
-
-4. **Query Queue**
-   - Queue size and utilization
-   - Wait time percentiles
-   - Execution time by status
-   - Per-user patterns
-
-### Grafana Queries
-
-```promql
-# Request Rate
-sum(rate(robosystems_api_requests_total[5m])) by (endpoint)
-
-# Error Rate
-sum(rate(robosystems_api_requests_total{status_class=~"4xx|5xx"}[5m])) by (endpoint)
-/ sum(rate(robosystems_api_requests_total[5m])) by (endpoint)
-
-# P95 Latency
-histogram_quantile(0.95,
-  sum(rate(robosystems_api_request_duration_seconds_bucket[5m])) by (endpoint, le)
-)
-
-# Authentication Success Rate
-sum(rate(robosystems_auth_attempts_total[5m])) by (auth_type)
-- sum(rate(robosystems_auth_failures_total[5m])) by (auth_type)
-```
-
-### Alerts Configuration
-
-```yaml
-groups:
-  - name: robosystems_api
-    rules:
-      - alert: HighErrorRate
-        expr: |
-          sum(rate(robosystems_api_requests_total{status_class="5xx"}[5m])) by (endpoint)
-          / sum(rate(robosystems_api_requests_total[5m])) by (endpoint)
-          > 0.05
-        for: 5m
-        labels:
-          severity: critical
-
-      - alert: HighLatency
-        expr: |
-          histogram_quantile(0.95,
-            sum(rate(robosystems_api_request_duration_seconds_bucket[5m])) by (endpoint, le)
-          ) > 5
-        for: 5m
-        labels:
-          severity: warning
-```
-
-## Best Practices
-
-1. **Use Decorators**: For standard request metrics
-2. **Record Business Events**: For important operations
-3. **Include User Context**: When available
-4. **Consistent Naming**: For endpoints and events
-5. **Avoid High Cardinality**: No UUIDs or timestamps in labels
-6. **Test Locally**: Use docker compose before deploying
-7. **Monitor Performance**: Track overhead in production
-8. **Set Up Alerts**: For critical business metrics
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Metrics Not Appearing**
-
-   - Check ENVIRONMENT is staging/prod
-   - Verify collector connectivity
-   - Review logs for errors
-
-2. **Missing Labels**
-
-   - Ensure all parameters passed
-   - Check user context included
-
-3. **High Memory Usage**
-
-   - Adjust batch processor settings
-   - Reduce queue sizes
-
-4. **Decorator Not Working**
-   - Must be after router decorator
-   - Check proper import
-
-### Debug Mode
+## Debugging
 
 ```python
 import logging
 logging.getLogger("opentelemetry").setLevel(logging.DEBUG)
 ```
 
-### Performance Impact
-
-- Request metrics: < 0.1ms per request
-- Business events: < 0.05ms per event
-- Memory: ~50MB for collector
-- CPU: < 1% under normal load
-
-## Security Considerations
-
-1. **Data Privacy**: Don't include PII in metrics
-2. **Label Cardinality**: Avoid unbounded labels
-3. **Access Control**: Grafana uses AWS SSO
-4. **Network Security**: ADOT uses IAM authentication
-5. **Metric Retention**: 90 days in Prometheus
+Metrics not appearing usually means one of: `OTEL_ENABLED` is false; the
+endpoint is still `localhost:4318` in a dev environment (exporters skipped); or
+the collector is unreachable and the failure was swallowed by the graceful
+degradation path — check the API logs for `Failed to configure OTLP` around
+startup. Traces missing is almost always `OTEL_TRACES_ENABLED` being false.

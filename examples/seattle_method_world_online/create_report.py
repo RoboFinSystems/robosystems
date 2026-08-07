@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
 """Materialize the rs-gaap four-statement Report for World Online.
 
-Sibling of ``reconcile.py`` (the source-vocabulary ``mini`` pivot
-check). This produces the canonical ``rs-gaap`` projection of the same
-22,288 GL lines, materialized through the Report architecture:
+The counterpart to ``reconcile.py``, which checks the same postings in their
+source vocabulary. This renders all 22,288 GL lines as canonical rs-gaap
+statements through the Report architecture:
 
 1. ``POST /extensions/roboledger/{graph_id}/operations/create-report``
-   materializes a Report with 4 Information Blocks (BS, IS, CF, SE).
-2. ``statement(reportId, blockType)`` GraphQL queries fetch each rendered
-   statement.
+   materializes a Report with four Information Blocks (BS, IS, CF, SE).
+2. One ``statement(reportId, blockType)`` GraphQL query per block type
+   fetches each rendered statement.
 
-Reuses the rendering + GraphQL helpers from
-``examples.seattle_method_demo.create_report`` (the building blocks are
-generic); only the period, naming, and output path differ. Writes
-``output/world-online-four-statements.md``.
+The rendering and GraphQL helpers come from
+``examples.seattle_method_demo.create_report`` — the building blocks are
+dataset-agnostic, so only the period, naming and output path differ here.
 
-Period: the World Online GL runs from an opening balance dated
-12/31/2023 through activity in 2028. ``SummaryOfTransactions.csv``
-aggregates the entire dataset, so this report is the cumulative position
-— balance sheet as of ``PERIOD_END`` with income/cash-flow/equity
-movement over ``PERIOD_START..PERIOD_END``. (Charlie's reference report
-``index2.html`` doesn't expose its exact period publicly; if it turns
-out to be a single fiscal year, narrow these constants.)
+The report is cumulative: the ledger opens on 12/31/2023 and runs through
+2028, and the published pivot aggregates the whole dataset, so the balance
+sheet is the position at ``PERIOD_END`` with income, cash-flow and equity
+movement over the full span.
 
-Usage:
-    uv run python -m examples.seattle_method_world_online.create_report <graph_id>
-    uv run python -m examples.seattle_method_world_online.create_report  # cached slot
+Prerequisites: ``just demo-world-online`` has loaded the CoA, seeded the
+mappings and ingested the GL.
+
+Run it (the orchestrator runs this as step 8):
+    just demo-world-online-create-report <graph_id>
+    just demo-world-online-create-report          # cached graph slot
+
+Writes ``output/world-online-four-statements.md``.
 """
 
 from __future__ import annotations
@@ -103,14 +104,13 @@ def create_report(base_url: str, api_key: str, graph_id: str, mapping_id: str) -
       "period_start": PERIOD_START,
       "period_end": PERIOD_END,
       "period_type": "annual",
-      # Comparative is required for the cash-flow statement: the indirect
-      # CF's operating/investing/financing flows are derived from
-      # period-over-period balance-sheet deltas (fact_grid Tier 1), so
-      # without a prior period only NetIncomeLoss + D&A survive. The
-      # 12/31/2023 opening balances fall into the prior period, so the CF
-      # correctly reports only the 2024-2028 flows (the opening itself is
-      # a position, not a flow). (Driving the CF directly from the tagged
-      # flow concepts — Tier 2, the rollforward IBs — is forward work.)
+      # A comparative period is required for the cash flow statement: the
+      # indirect method derives operating, investing and financing flows from
+      # period-over-period balance-sheet deltas, so without a prior period
+      # only net income and D&A survive. It also places the 12/31/2023
+      # opening balances in the prior period, which is correct — an opening
+      # balance is a position carried forward, not a cash movement — so the
+      # statement reports only the 2024-2028 flows.
       "comparative": True,
     },
   )

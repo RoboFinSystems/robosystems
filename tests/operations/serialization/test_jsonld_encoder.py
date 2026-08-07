@@ -190,7 +190,7 @@ class TestStructures:
     assert (assoc, LINK.weight, Literal("1.0", datatype=rdflib.XSD.decimal)) in g
 
 
-# ── Logical naming: RollUp / RollForward / Hierarchy (§6, additive) ───────
+# ── Logical naming: RollUp / RollForward / Hierarchy (additive) ───────────
 
 
 class TestStructureArrangement:

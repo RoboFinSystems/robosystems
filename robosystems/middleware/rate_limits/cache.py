@@ -44,22 +44,7 @@ class RateLimitCache:
   def check_rate_limit(
     self, identifier: str, limit: int, window: int, fail_closed: bool = False
   ) -> tuple[bool, int]:
-    """
-    Check if request is within rate limit using sliding window.
-
-    Args:
-        identifier: Unique identifier (e.g., user:123, ip:1.2.3.4)
-        limit: Maximum requests allowed
-        window: Time window in seconds
-        fail_closed: When the limiter backend errors, deny (True) instead of
-            allowing (False). Use for high-value categories such as auth /
-            brute-force where a broken limiter must not silently disable
-            protection. Defaults to False so a limiter outage doesn't take
-            down general traffic.
-
-    Returns:
-        tuple[bool, int]: (allowed, remaining_requests)
-    """
+    """Check if request is within rate limit using sliding window."""
     if not self.enabled:
       return True, limit
 
@@ -133,7 +118,6 @@ class RateLimitCache:
       return {"enabled": False}
 
     try:
-      # Get all rate limit keys
       keys = cast(list[str], self.redis.keys(f"{self.RATE_LIMIT_PREFIX}*")) or []
 
       stats = {

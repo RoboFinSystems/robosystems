@@ -1,15 +1,15 @@
 """Handlers for ``block_type='forecast'`` — the authored scenario container.
 
-The forecast block is the FP&A engine's authored surface (F-1): scenario
-identity (name + ``scenario_kind``), horizon, base period, lever
-assertions on ``rs-driver:*`` catalog elements, direct **line
-assertions** on statement leaves (manual overrides that win over driver
-rules and carry-forward for the months they name), and **line growth**
-entries (per-line month-over-month trajectories — the generic form of
-the revenue growth lever, for lines the catalog doesn't drive). The
-block IS the scenario — its structure id is the ``scenario_id`` every
-derived forward FactSet carries (NULL = actuals), and deleting the block
-removes the whole scenario slice.
+The forecast block is the FP&A engine's authored surface: scenario identity
+(name + ``scenario_kind``), horizon, base period, lever assertions on
+``rs-driver:*`` catalog elements, direct **line assertions** on statement
+leaves (manual overrides that win over driver rules and carry-forward for
+the months they name), and **line growth** entries (per-line
+month-over-month trajectories — the generic form of the revenue growth
+lever, for lines the catalog doesn't drive). The block IS the scenario —
+its structure id is the ``scenario_id`` every derived forward FactSet
+carries (NULL = actuals), and deleting the block removes the whole
+scenario slice.
 
 Persistence follows the rules-for-mechanics / **facts-for-values**
 doctrine: lever *mechanics* are the library-seeded rs-driver Derive
@@ -105,11 +105,10 @@ def _resolve_base_period(
 ) -> str:
   """Resolve the seed month the walk projects forward from.
 
-  Request value → fiscal calendar ``closed_through_period`` → the
-  entity's newest actual report month (the data-driven fallback the
-  M-2 prior-period resolver established — the calendar is not the
-  period spine for annual-comparative tenants). Stored resolved in the
-  mechanics so recompute is deterministic.
+  Request value → fiscal calendar ``closed_through_period`` → the entity's
+  newest actual report month. The last fallback is data-driven because the
+  calendar is not the period spine for annual-comparative tenants. Stored
+  resolved in the mechanics so recompute is deterministic.
   """
   if requested is not None:
     return requested
@@ -645,8 +644,8 @@ def update(
   ``levers`` — the persisted expansion can't be re-derived (the
   uniform-vs-override distinction is gone), so re-expansion needs the
   wire-level assertions. A lever replacement rewrites the lever FactSet
-  wholesale. Previously computed scenario months are NOT recomputed —
-  they go stale until the next ``compute-forecast`` run.
+  wholesale. Already-computed scenario months are NOT recomputed — they go
+  stale until the next ``compute-forecast`` run.
   """
   structure = _load_forecast_or_404(session, payload.structure_id)
   current = ForecastMechanics.model_validate(structure.artifact_mechanics or {})
@@ -749,8 +748,8 @@ def delete(
     .all()
   )
   # Verification rows pin the scenario's month sets (compute-forecast
-  # verifies each month, F-2); no DB-level FK ties them to fact_sets,
-  # so sweep them here or they orphan invisibly.
+  # verifies each month); no DB-level FK ties them to fact_sets, so sweep
+  # them here or they orphan invisibly.
   set_ids = [fs.id for fs in scenario_sets]
   if set_ids:
     from robosystems.models.extensions import VerificationResult
@@ -789,10 +788,11 @@ def build_envelope(
 
   Renders the **lever grid** metric-style: one row per lever (authoring
   order, ``item_type`` driving percent/days formatting), values from the
-  mechanics' expanded assertions. ``computed_months`` is filled from the
-  scenario's derived statement sets. No chart arm — the scenario's
-  time-series surface is the metric/statement blocks read with the
-  scenario filter, not the container itself.
+  mechanics' expanded assertions, then one row per line assertion and per
+  line-growth entry. ``computed_months`` is filled from the scenario's
+  derived statement sets. No chart arm — the scenario's time-series
+  surface is the metric/statement blocks read with the scenario filter,
+  not the container itself.
 
   Columns span the **closed months plus the horizon**, not the horizon
   alone (:mod:`.forecast_history`): behind the seam each lever shows the
@@ -800,10 +800,9 @@ def build_envelope(
   rule against the month's actuals, so an assumption reads as one series
   across the seam. Actual beats forecast at overlap — a horizon month
   that has since closed renders its realized rate, never the stale
-  assertion made for it. ``periods[].forecast`` marks the forward
-  columns exactly as the statement series does; its presence anywhere in
-  this rendering is also what tells a client the envelope carries
-  history at all (pre-history envelopes never set the flag).
+  assertion made for it. ``periods[].forecast`` marks the forward columns
+  exactly as the statement series does, and its presence anywhere in the
+  rendering is a client's signal that the envelope carries history.
 
   ``series_history`` / ``series_forecast`` window the month axis with
   statement-series semantics (last N actual months, first N forecast
@@ -954,9 +953,8 @@ def build_envelope(
         start=period_date_range(month)[0],
         end=period_date_range(month)[1],
         # The seam marker, same contract as the statement series: True
-        # only where the column is the scenario's own forward month.
-        # Absent on the realized months — and its presence anywhere is
-        # what tells a client this envelope carries history at all.
+        # only where the column is the scenario's own forward month,
+        # absent on realized months.
         forecast=True if month in forecast_months else None,
       )
       for month in months

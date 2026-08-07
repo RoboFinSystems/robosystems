@@ -1,13 +1,8 @@
-"""
-Graph Router
+"""Entry point for obtaining a graph repository.
 
-This router provides graph database access using the enhanced client factory
-for all routing decisions.
-
-Key features:
-- Tier-based routing via the enhanced client factory
-- Supports direct file access for development
-- Maintains backward compatibility with existing code
+Routing decisions belong to `GraphClientFactory`; this module picks between
+that path and direct file access, which `LBUG_ACCESS_PATTERN=direct_file`
+forces for local development.
 """
 
 from typing import Any
@@ -21,18 +16,14 @@ from .types import GraphTier
 
 
 class GraphRouter:
-  """
-  Router for graph database access.
+  """Hands out repositories, delegating routing to `GraphClientFactory`.
 
-  Delegates all routing decisions to the enhanced client factory which handles:
-  - Entity graphs: Private databases for individual companies
-  - Shared repositories: SEC, industry, economic data
-  - Dev environment: Single local instance
-  - Production: Distributed instances with tier-based routing
+  The factory covers entity graphs, shared repositories (SEC and friends),
+  the single local instance in dev, and tier-based routing across
+  distributed instances in production.
   """
 
   def __init__(self):
-    """Initialize the graph router."""
     logger.info(f"Initialized graph router (backend: {env.GRAPH_BACKEND_TYPE})")
 
   async def get_repository(
@@ -41,46 +32,34 @@ class GraphRouter:
     operation_type: str = "write",
     tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> Repository | Any:
-    """
-    Get a repository for the specified graph.
+    """Return a repository for a graph.
 
-    Args:
-        graph_id: Database identifier (entity ID or "sec")
-        operation_type: "read" or "write"
-        tier: Instance tier for routing
-
-    Returns:
-        Configured Repository instance
+    `LBUG_ACCESS_PATTERN=direct_file` bypasses the factory and opens the
+    database file directly, regardless of cluster configuration.
     """
-    # Check LBUG_ACCESS_PATTERN to force direct file access if requested
     access_pattern = env.LBUG_ACCESS_PATTERN
 
     if access_pattern == "direct_file":
-      # Force direct file access regardless of cluster configuration
       db_path = env.LBUG_DATABASE_PATH
       database_path = f"{db_path}/{graph_id}"
       logger.debug(f"Creating direct file Repository for {graph_id}: {database_path}")
       return Repository(database_path)
     else:
-      # Use the new enhanced client factory for all routing
-      # Lazy import to avoid circular dependency
+      # Lazy import to avoid a circular dependency.
       from robosystems.graph_api.client.factory import GraphClientFactory
 
       from .streaming_wrapper import add_streaming_support
 
       logger.debug(f"Using enhanced client factory for {graph_id}")
 
-      # The new factory handles all routing logic internally - use async version
       client = await GraphClientFactory.create_client(
         graph_id=graph_id,
         operation_type=operation_type,
         tier=tier,
       )
 
-      # Set graph ID on client for compatibility
       client.graph_id = graph_id
 
-      # Add streaming support
       client = add_streaming_support(client)
 
       return client
@@ -90,13 +69,11 @@ class GraphRouter:
     health_status = {"status": "healthy", "backend": {}, "errors": []}
 
     try:
-      # Check the configured graph API endpoint
       graph_api_url = env.GRAPH_API_URL
       api_key = env.GRAPH_API_KEY
 
       client = GraphClient(base_url=graph_api_url, api_key=api_key)
 
-      # Try to get health from the graph API
       try:
         health_response = await client.health()
         health_status["backend"] = {
@@ -122,7 +99,6 @@ class GraphRouter:
     return health_status
 
 
-# Global router instance
 _graph_router = None
 
 
@@ -139,19 +115,7 @@ async def get_graph_repository(
   operation_type: str = "write",
   tier: GraphTier = GraphTier.LADYBUG_STANDARD,
 ) -> Repository | Any:
-  """
-  Get a graph repository for the specified database.
-
-  This is the main entry point for graph database access.
-
-  Args:
-      graph_id: Database identifier (entity ID or "sec")
-      operation_type: "read" or "write"
-      tier: Instance tier for routing
-
-  Returns:
-      Configured repository instance
-  """
+  """The main entry point for graph database access."""
   router = get_graph_router()
   return await router.get_repository(graph_id, operation_type, tier)
 
@@ -161,19 +125,8 @@ async def get_universal_repository(
   operation_type: str = "write",
   tier: GraphTier = GraphTier.LADYBUG_STANDARD,
 ):
-  """
-  Get a universal repository wrapper for the specified database.
-
-  This provides a unified interface that handles both sync and async repositories
-  automatically, eliminating the need for conditional awaiting in application code.
-
-  Args:
-      graph_id: Database identifier (entity ID or "sec")
-      operation_type: "read" or "write"
-      tier: Instance tier for routing
-
-  Returns:
-      UniversalRepository instance
+  """Like `get_graph_repository`, wrapped so callers need not know whether
+  the underlying repository is sync or async.
   """
   from .repository import UniversalRepository
 

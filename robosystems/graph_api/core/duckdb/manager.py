@@ -18,17 +18,9 @@ from robosystems.logger import logger
 
 
 def validate_table_name(table_name: str) -> None:
-  """
-  Validate table name to prevent SQL injection.
+  """Reject any table name outside ``[A-Za-z0-9_-]+`` with a 400.
 
-  Only allows alphanumeric characters, underscores, and hyphens.
-  This prevents SQL injection attacks through table name parameters.
-
-  Args:
-      table_name: Table name to validate
-
-  Raises:
-      HTTPException: If table name contains invalid characters
+  Table names are interpolated into SQL, so this is the injection barrier.
   """
   if not table_name or not re.match(r"^[a-zA-Z0-9_-]+$", table_name):
     logger.warning(f"Invalid table name rejected: {table_name[:50]}")
@@ -39,25 +31,16 @@ def validate_table_name(table_name: str) -> None:
 
 
 def validate_table_name_decorator(func):
-  """
-  Decorator to automatically validate table_name parameters.
-
-  Ensures all table operations validate table names to prevent SQL injection.
-  Works with both positional and keyword arguments.
-  """
+  """Validate a method's ``table_name``, whether passed by keyword, on a
+  request object, or as the first positional argument."""
 
   @wraps(func)
   def wrapper(self, *args, **kwargs):
-    # Extract table_name from kwargs
     if "table_name" in kwargs:
       validate_table_name(kwargs["table_name"])
-    # Extract from request object if present
     elif "request" in kwargs and hasattr(kwargs["request"], "table_name"):
       validate_table_name(kwargs["request"].table_name)
-    # Extract from positional args if method signature has table_name
-    # (This is a fallback for positional arguments)
     elif len(args) > 0:
-      # Check if first arg after self looks like a request object with table_name
       if hasattr(args[0], "table_name"):
         validate_table_name(args[0].table_name)
 
@@ -66,8 +49,8 @@ def validate_table_name_decorator(func):
   return wrapper
 
 
-# Tenant read-query safety limits — the contract the endpoint advertises,
-# now actually enforced (alongside the hardened read-only sandbox connection).
+# Tenant read-query safety limits, enforced alongside the hardened read-only
+# sandbox connection.
 MAX_QUERY_ROWS = 10_000
 QUERY_TIMEOUT_SECONDS = 30
 
@@ -76,8 +59,8 @@ def _strip_sql_noise(sql: str) -> str:
   """Blank out comments and string/identifier literals so structural checks
   (statement count, leading keyword) can't be fooled by their contents.
 
-  Implemented as a single linear character scan (NO regex) — the tenant SQL path
-  must not be turnable into a ReDoS. Comments collapse to a space; string /
+  A single linear character scan, deliberately regex-free: the tenant SQL path
+  must not be turnable into a ReDoS. Comments collapse to a space; string and
   identifier bodies collapse to their empty delimiters.
   """
   out: list[str] = []
@@ -124,15 +107,11 @@ def _strip_sql_noise(sql: str) -> str:
 
 
 def validate_read_only_sql(sql: str) -> None:
-  """Enforce the advertised SELECT-only, single-statement contract.
+  """Enforce the SELECT-only, single-statement contract with a 400.
 
   The hardened read-only + external-access-off connection already blocks writes
   and exfiltration at the engine level; this rejects non-read statements and
-  statement chaining up front (defense-in-depth + a clear error message).
-
-  Raises:
-      HTTPException: 400 if the SQL is empty, chains statements, or does not
-          begin with SELECT/WITH.
+  statement chaining up front, for defense in depth and a clear error message.
   """
   if not sql or not sql.strip():
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty query")
@@ -175,19 +154,16 @@ def _interrupt_after(conn, timeout: float, timed_out: dict):
 
 
 class DuckDBTableManager:
-  """
-  DuckDB table manager for staging tables.
+  """Create, load, query and drop the DuckDB staging tables that feed
+  LadybugDB ingestion.
 
-  All tables are external views over S3 - zero local storage, used only
-  for transformation/staging before ingestion into LadybugDB graph database.
+  Tables are built from parquet on S3 and dropped after materialization.
+  Every method borrows a connection from ``get_duckdb_pool()``; tenant reads
+  go through the pool's hardened read-only connection, everything else
+  through the read-write one.
   """
 
   def __init__(self):
-    """
-    Initialize DuckDB Table Manager.
-
-    The connection pool manages all database paths automatically.
-    """
     logger.info(
       "Initialized DuckDB Table Manager (staging layer for LadybugDB ingestion)"
     )
@@ -201,38 +177,26 @@ class DuckDBTableManager:
     column_names: list[str] | None = None,
     null_columns: set[str] | None = None,
   ) -> str:
+    """Build CREATE TABLE SQL that deduplicates via GROUP BY + FIRST().
+
+    Deduplication is mandatory: materialization uses a plain COPY (LadybugDB
+    0.18's ignore_errors path silently drops valid rows in proportion to batch
+    size), and LadybugDB enforces unique node primary keys and unique
+    relationship (from,to) pairs — any duplicate reaching it hard-fails the
+    COPY. Dedup in staging is what keeps the clean COPY both safe and complete.
+
+    Hash aggregation, not ROW_NUMBER: DuckDB can spill aggregate state to disk
+    (https://duckdb.org/2024/03/29/external-aggregation) where the window
+    function OOMs on large datasets.
+
+    ``use_list`` selects a ``__FILES_PLACEHOLDER__`` the caller substitutes
+    with a DuckDB list literal, versus a ``?`` bound as a glob pattern.
     """
-    Build CREATE TABLE SQL with deduplication using GROUP BY + FIRST().
-
-    Uses hash aggregation instead of window functions for deduplication.
-    This approach has better memory efficiency and proper spill-to-disk support
-    via DuckDB's external aggregation, unlike ROW_NUMBER which can OOM on large datasets.
-    See: https://duckdb.org/2024/03/29/external-aggregation
-
-    NOTE: Deduplication is required here because materialization uses a plain
-    COPY (no ignore_errors — LadybugDB 0.18's ignore_errors path silently drops
-    valid rows in proportion to batch size). LadybugDB enforces unique node
-    primary keys and unique relationship (from,to) pairs, so any duplicate that
-    reached it would hard-fail the COPY. Dedup in staging is what keeps the
-    clean COPY both safe and complete.
-
-    Args:
-        quoted_table: Quoted table name (e.g., '"table_name"')
-        has_identifier: Whether table has 'identifier' column (node table)
-        has_from_to: Whether table has 'from' and 'to' columns (relationship table)
-        use_list: Whether using list (placeholder) or pattern (parameter binding)
-        column_names: List of column names from schema probe (required for dedup)
-
-    Returns:
-        SQL statement with proper deduplication
-    """
-    # Use placeholder for list (will be replaced) or ? for parameter binding
     read_pattern = "__FILES_PLACEHOLDER__" if use_list else "?"
 
     if has_identifier and column_names:
-      # Node table: deduplicate on identifier using GROUP BY + FIRST()
-      # FIRST() is an aggregate that returns an arbitrary value from the group
-      # union_by_name=true handles schema variations between files
+      # Node table: dedupe on identifier. FIRST() picks an arbitrary row from
+      # each group; union_by_name=true absorbs schema drift between files.
       null_cols = null_columns or set()
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
@@ -269,8 +233,7 @@ class DuckDBTableManager:
         GROUP BY "from", "to"
       """
     else:
-      # Unknown table type or no column names: just read without deduplication
-      # union_by_name=true handles schema variations between files
+      # Unknown table type or no column names: read without deduplication.
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
         SELECT *
@@ -287,27 +250,13 @@ class DuckDBTableManager:
     column_names: list[str] | None = None,
     null_columns: set[str] | None = None,
   ) -> str:
+    """Build CREATE TABLE SQL that UNION ALLs the files, stamping each row with
+    its source ``file_id`` so ``delete_file_data`` can remove one file's rows
+    without a full rebuild.
+
+    Dedup is the same GROUP BY + FIRST() as ``_build_table_sql``, applied over
+    the union; ``file_id_map`` maps s3_key to file_id.
     """
-    Build CREATE TABLE SQL with file_id column injection (v2 incremental ingestion).
-
-    Uses UNION ALL to combine files, injecting file_id for each source file.
-    This enables per-file deletion and provenance tracking.
-
-    Uses GROUP BY + FIRST() for deduplication instead of ROW_NUMBER for better
-    memory efficiency and spill-to-disk support.
-
-    Args:
-        quoted_table: Quoted table name
-        has_identifier: Whether table has 'identifier' column
-        has_from_to: Whether table has 'from'/'to' columns
-        s3_files: List of S3 file paths
-        file_id_map: Map of s3_key -> file_id
-        column_names: List of column names from schema probe (required for dedup)
-
-    Returns:
-        SQL with UNION ALL and file_id injection
-    """
-    # Build individual SELECT queries for each file
     selects = []
 
     for s3_key in s3_files:
@@ -318,15 +267,13 @@ class DuckDBTableManager:
       safe_file_id = file_id.replace("'", "''")
 
       if has_identifier:
-        # Node table: keep identifier, add file_id
-        # union_by_name=true handles schema variations between files
+        # Node table: keep identifier, add file_id.
         select = f"""
           SELECT *, '{safe_file_id}' as file_id
           FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
         """
       elif has_from_to:
-        # Relationship table: rename from/to to src/dst, add file_id
-        # union_by_name=true handles schema variations between files
+        # Relationship table: rename from/to to src/dst, add file_id.
         select = f"""
           SELECT
             "from" as src,
@@ -336,8 +283,7 @@ class DuckDBTableManager:
           FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
         """
       else:
-        # Unknown table: just add file_id
-        # union_by_name=true handles schema variations between files
+        # Unknown table: just add file_id.
         select = f"""
           SELECT *, '{safe_file_id}' as file_id
           FROM read_parquet('{safe_s3_key}', union_by_name=true, hive_partitioning=false)
@@ -345,16 +291,13 @@ class DuckDBTableManager:
 
       selects.append(select)
 
-    # Combine with UNION ALL
     union_query = "\n UNION ALL\n".join(selects)
 
-    # Wrap in deduplication using GROUP BY + FIRST() for better memory efficiency
     if has_identifier and column_names:
-      # Node table: dedupe on identifier, keep first file_id
+      # Node table: dedupe on identifier, keep first file_id.
       null_cols = null_columns or set()
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
-      # Include file_id in the aggregation
       select_parts = (
         [f'"{c}"' for c in dedupe_cols]
         + [
@@ -373,8 +316,8 @@ class DuckDBTableManager:
         GROUP BY {group_by_clause}
       """
     elif has_from_to and column_names:
-      # Relationship table: dedupe on src/dst (already renamed in union_query)
-      # Note: column_names has original names (from, to), but union_query renamed them
+      # Relationship table: dedupe on src/dst. column_names still carries the
+      # original from/to names, but union_query has already renamed them.
       null_cols = null_columns or set()
       other_cols = [c for c in column_names if c not in ["from", "to"]]
       select_parts = (
@@ -394,7 +337,7 @@ class DuckDBTableManager:
         GROUP BY src, dst
       """
     else:
-      # No deduplication for unknown tables
+      # No deduplication for unknown tables.
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
         {union_query}
@@ -402,29 +345,24 @@ class DuckDBTableManager:
 
   @validate_table_name_decorator
   def create_table(self, request: TableCreateRequest) -> TableCreateResponse:
-    """
-    Create an external table (materialized from S3 files).
+    """Materialize a staging table from parquet on S3.
 
-    DuckDB tables are materialized (not views) to enable LadybugDB ingestion.
+    CREATE TABLE, never CREATE VIEW: S3 credentials are session-level in
+    DuckDB and are not persisted in the .duckdb file, so when LadybugDB's
+    DuckDB extension attaches the database it opens a new session with no S3
+    config and views fail with "Unsupported duckdb type: NULL". A materialized
+    table holds the data, so ingestion needs no S3 access.
 
-    CRITICAL: We use CREATE TABLE (not CREATE VIEW) because:
-    - S3 credentials are session-level in DuckDB, not persisted in .duckdb file
-    - When LadybugDB's DuckDB extension attaches the database, it creates a new session
-    - New session = no S3 config = views fail with "Unsupported duckdb type: NULL"
-    - Materialized tables contain the actual data, so no S3 access needed during ingestion
-
-    This is a staging layer for LadybugDB ingestion - tables are dropped after use.
-
-    Supports both:
-    - s3_pattern as string: wildcard pattern (e.g., "s3://bucket/path/*.parquet")
-    - s3_pattern as list: explicit file paths (uses DuckDB list syntax)
-    - file_id_map: Optional map to inject file_id for incremental ingestion tracking
+    ``request.s3_pattern`` is either a wildcard string
+    ("s3://bucket/path/*.parquet") or an explicit list of file paths; an
+    optional ``file_id_map`` stamps each row with its source file for
+    incremental deletion.
     """
     import time
 
     start_time = time.time()
 
-    # Explicit validation (decorator provides safety net)
+    # Explicit validation; the decorator is the safety net.
     validate_table_name(request.table_name)
 
     is_list = isinstance(request.s3_pattern, list)
@@ -443,12 +381,11 @@ class DuckDBTableManager:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
 
-        # Determine if this is a node table (has identifier) or relationship table (has from/to)
-        # Peek at the first file to check schema
+        # Peek at the first file: an "identifier" column means a node table,
+        # "from"/"to" means a relationship table. hive_partitioning=false stops
+        # DuckDB auto-adding partition columns.
         sample_file = request.s3_pattern[0] if is_list else request.s3_pattern
 
-        # Check if 'identifier' column exists (node table) or 'from' column exists (relationship table)
-        # Use hive_partitioning=false to prevent DuckDB from auto-adding partition columns
         probe_result = conn.execute(
           "SELECT * FROM read_parquet(?, hive_partitioning=false) LIMIT 0",
           [sample_file],
@@ -460,7 +397,6 @@ class DuckDBTableManager:
         # Columns to NULL out (keep in schema, skip data)
         null_cols = set(request.null_columns) if request.null_columns else None
 
-        # v2 Incremental Ingestion: Build UNION ALL with file_id injection
         if has_file_id_map and is_list:
           sql = self._build_table_sql_with_file_id(
             quoted_table,
@@ -473,7 +409,7 @@ class DuckDBTableManager:
           )
           conn.execute(sql)
         else:
-          # Legacy path: without file_id tracking
+          # No file_id tracking.
           sql = self._build_table_sql(
             quoted_table,
             has_identifier,
@@ -484,8 +420,8 @@ class DuckDBTableManager:
           )
 
           if is_list:
-            # Replace placeholder with DuckDB list syntax: ['file1', 'file2', ...]
-            # Escape single quotes to prevent SQL injection via S3 paths
+            # DuckDB list syntax ['file1', 'file2', ...]; single quotes are
+            # doubled so an S3 path cannot break out of the literal.
             files_list = (
               "["
               + ", ".join(
@@ -496,20 +432,18 @@ class DuckDBTableManager:
             sql = sql.replace("__FILES_PLACEHOLDER__", files_list)
             conn.execute(sql)
           else:
-            # Use parameter binding for pattern (prevents SQL injection)
+            # Parameter binding for the glob pattern.
             conn.execute(sql, [request.s3_pattern])
 
-        # Count rows in the created table
         count_result = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         row_count = count_result[0] if count_result else 0
 
-        # Checkpoint to flush WAL and clear state after large table creation.
-        # This is important for chunked ingestion where CREATE is followed by INSERTs.
+        # Flush the WAL and clear state: chunked ingestion follows CREATE with
+        # a run of INSERTs, and the accumulated state eventually stalls.
         try:
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed DuckDB after CREATE {request.table_name}")
         except Exception as cp_err:
-          # Non-fatal - log but continue
           logger.warning(f"Could not checkpoint after CREATE: {cp_err}")
 
         execution_time_ms = (time.time() - start_time) * 1000
@@ -536,41 +470,22 @@ class DuckDBTableManager:
 
   @validate_table_name_decorator
   def insert_into_table(self, request: TableCreateRequest) -> TableCreateResponse:
-    """
-    Insert data into an existing table from S3 files.
+    """Append parquet files into a table that ``create_table`` already made.
 
-    Supports two deduplication strategies controlled by request.deduplicate:
+    ``request.deduplicate=False`` (default) is a plain INSERT INTO append; the
+    caller owns uniqueness. ``deduplicate=True`` adds
+    ``... SELECT ... WHERE NOT EXISTS`` so rows whose dedup key is already in
+    the target are skipped. The NOT EXISTS hash join holds only dedup-key
+    strings, which DuckDB can spill to disk — that matters for tables with
+    wide columns like FLOAT[384] embeddings, where aggregate state for
+    fixed-size list columns cannot spill and OOMs past ~10M unique groups.
 
-    deduplicate=False (default):
-      Simple INSERT INTO append. No dedup overhead — callers are responsible
-      for ensuring no duplicate rows.
+    Dedup key: "identifier" for node tables, src+dst (or from+to) for
+    relationship tables, none for an unrecognized schema.
 
-    deduplicate=True:
-      Uses INSERT INTO ... SELECT ... WHERE NOT EXISTS to skip rows whose
-      dedup key already exists in the target table. The NOT EXISTS hash join
-      only holds dedup key strings in memory, which DuckDB can spill to disk.
-
-      This is safe for tables with wide columns like FLOAT[384] embeddings.
-      The previous GROUP BY + FIRST() approach could not spill aggregate state
-      for fixed-size list columns, causing OOM at 10M+ unique groups.
-
-    Dedup keys:
-    - Node tables (has "identifier"): dedup on identifier
-    - Relationship tables (has src/dst or from/to): dedup on src+dst or from+to
-    - Unknown schema: no dedup (plain append)
-
-    Prerequisites:
-    - Table must already exist (created via create_table)
-    - Schema must be compatible with the new files
-
-    Args:
-        request: TableCreateRequest with graph_id, table_name, s3_pattern, deduplicate
-
-    Returns:
-        TableCreateResponse with status, timing info, and row_count (net rows added)
-
-    Raises:
-        HTTPException: If table doesn't exist or insert fails
+    Columns present in the parquet but missing from the table are added by
+    ALTER TABLE (schema evolution); columns present only in the table are
+    filled with NULL. Returns net rows added in ``row_count``.
     """
     import time
 
@@ -593,11 +508,11 @@ class DuckDBTableManager:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
 
-        # Count rows before insert
         count_before = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_before = count_before[0] if count_before else 0
 
-        # Build parquet read expression (escape single quotes to prevent SQL injection)
+        # Single quotes are doubled so an S3 path cannot break out of the
+        # literal.
         if is_list:
           files_list = (
             "["
@@ -615,18 +530,17 @@ class DuckDBTableManager:
 
         null_cols = set(request.null_columns) if request.null_columns else None
 
-        # Resolve file_id for provenance tracking.
-        # When file_id_map is provided, inject file_id into the SELECT so the
-        # INSERT matches the table schema (which includes file_id from CREATE).
+        # Inject file_id into the SELECT so the INSERT matches the table
+        # schema, which carries file_id from CREATE.
         file_id_value: str | None = None
         if request.file_id_map and is_list:
-          # Single-file INSERT: grab the file_id for the one file
+          # Single-file INSERT: take the file_id for the one file.
           for s3_key, fid in request.file_id_map.items():
             file_id_value = fid.replace("'", "''")
             break
 
         if request.deduplicate:
-          # Detect table type from existing schema for dedup key
+          # Detect table type from the existing schema to pick a dedup key.
           probe_result = conn.execute(
             f"SELECT * FROM {quoted_table} LIMIT 0"
           ).description
@@ -635,22 +549,20 @@ class DuckDBTableManager:
           has_src_dst = "src" in column_names and "dst" in column_names
           has_from_to = "from" in column_names and "to" in column_names
 
-          # Also probe the parquet schema to detect column name mismatches.
-          # Initial CREATE TABLE renames from/to → src/dst for LadybugDB compat,
-          # but parquet files still use from/to.
+          # Probe the parquet schema too: CREATE TABLE renamed from/to →
+          # src/dst for LadybugDB, but the parquet files still say from/to.
           parquet_probe = conn.execute(
             f"SELECT * FROM {parquet_read} LIMIT 0"
           ).description
           parquet_columns = [col[0] for col in parquet_probe]
           parquet_has_from_to = "from" in parquet_columns and "to" in parquet_columns
 
-          # Schema evolution: add any new parquet columns missing from the table.
-          # This handles cases where a new property was added to the schema after
-          # the table was initially created by a full rebuild.
+          # Schema evolution: add parquet columns the table lacks, which
+          # happens when a property was added to the schema after the last
+          # full rebuild created this table.
           table_col_set = set(column_names)
-          # Build a map of parquet column name → DuckDB type from the probe
           parquet_type_map = {col[0]: col[1] for col in parquet_probe}
-          # Account for from/to → src/dst rename done during initial CREATE TABLE
+          # Account for the from/to → src/dst rename done at CREATE TABLE.
           rename_map = {"from": "src", "to": "dst"}
           new_cols = [
             c
@@ -668,19 +580,18 @@ class DuckDBTableManager:
                 f"to {request.table_name}"
               )
 
-          # Build dedup: first deduplicate within the incoming batch (intra-batch),
-          # then filter out rows already in the target table (inter-batch).
-          # Intra-batch dedup is needed when multiple parquet files (e.g., from
-          # different quarters) contain the same row (e.g., Taxonomy URIs).
-
-          # Compute the actual post-evolution column order for the table:
-          # pre-evolution columns (column_names) followed by newly added columns (new_cols).
-          # Using an explicit INSERT column list avoids positional mismatches when
-          # file_id sits between original and schema-evolved columns (Bug: DOUBLE[]→DOUBLE).
+          # Dedupe twice: within the incoming batch (needed when two parquet
+          # files, e.g. different quarters, carry the same row such as a
+          # Taxonomy URI), then against rows already in the target.
+          #
+          # post_cols is the post-evolution column order: original columns
+          # followed by newly added ones. The INSERT names its columns
+          # explicitly — positional INSERT mismatches types when file_id sits
+          # between original and schema-evolved columns.
           post_cols = list(column_names) + new_cols
 
           def _explicit_col_expr(table_col: str) -> str:
-            # Maps table column → SELECT expr; handles file_id literal, src/dst rename, null_cols.
+            # Table column → SELECT expr: file_id literal, src/dst rename, NULLs.
             if table_col == "file_id":
               if file_id_value:
                 return f"'{file_id_value}' AS file_id"
@@ -695,12 +606,10 @@ class DuckDBTableManager:
               return '"to" AS dst'
             if null_cols and table_col in null_cols:
               return f'NULL AS "{table_col}"'
-            # Target has a column the source parquet lacks — e.g. a property
-            # removed from the schema after this table was first created (an
-            # older full-rebuild left the column behind; schema evolution only
-            # adds source columns, never drops stale target-only ones). NULL it
-            # rather than referencing a nonexistent source column, which would
-            # raise "Values list 't' does not have a column named ...".
+            # Target has a column the source parquet lacks — schema evolution
+            # only adds source columns, never drops stale target-only ones.
+            # NULL it rather than referencing a nonexistent source column,
+            # which raises "Values list 't' does not have a column named ...".
             if table_col not in parquet_columns:
               return f'NULL AS "{table_col}"'
             return f't."{table_col}"'
@@ -734,11 +643,12 @@ class DuckDBTableManager:
               f'WHERE a."from" = t."from" AND a."to" = t."to")'
             )
           else:
-            # Unknown schema — no dedup key, plain append
+            # Unknown schema — no dedup key, plain append.
             intra_dedup = ""
             inter_dedup = ""
 
-          # CTE deduplicates within incoming batch, outer query filters against existing rows
+          # CTE dedupes within the batch; the outer query filters against
+          # rows already in the table.
           if intra_dedup:
             sql = (
               f"INSERT INTO {quoted_table} ({insert_cols_clause}) "
@@ -751,8 +661,7 @@ class DuckDBTableManager:
               f"SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
             )
         else:
-          # Simple append — no dedup
-          # Schema evolution: add any new parquet columns missing from the table
+          # Plain append, with the same schema-evolution step.
           append_parquet_probe = conn.execute(
             f"SELECT * FROM {parquet_read} LIMIT 0"
           ).description
@@ -774,7 +683,6 @@ class DuckDBTableManager:
                 f"to {request.table_name}"
               )
 
-          # Build select expression with optional file_id injection
           file_id_suffix = f", '{file_id_value}' AS file_id" if file_id_value else ""
 
           if null_cols:
@@ -789,19 +697,16 @@ class DuckDBTableManager:
 
         conn.execute(sql)
 
-        # Count rows after insert
         count_after = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_after = count_after[0] if count_after else 0
         rows_added = rows_after - rows_before
 
-        # Checkpoint to flush WAL and clear accumulated state.
-        # Without this, chunked ingestion (multiple INSERTs in sequence) causes
-        # WAL growth and connection state accumulation that eventually stalls.
+        # Without this checkpoint, chunked ingestion (many sequential INSERTs)
+        # grows the WAL and accumulates connection state until it stalls.
         try:
           conn.execute("CHECKPOINT")
           logger.debug(f"Checkpointed DuckDB after INSERT into {request.table_name}")
         except Exception as cp_err:
-          # Non-fatal - log but continue
           logger.warning(f"Could not checkpoint after INSERT: {cp_err}")
 
         execution_time_ms = (time.time() - start_time) * 1000
@@ -828,29 +733,27 @@ class DuckDBTableManager:
       )
 
   def _fetch_readonly(self, request: TableQueryRequest) -> tuple[list[str], list]:
-    """Validate + run a tenant read query on the hardened read-only connection,
-    buffering up to MAX_QUERY_ROWS rows. Returns (columns, rows).
+    """Validate and run a tenant read query on the hardened read-only
+    connection, buffering up to MAX_QUERY_ROWS rows. Returns (columns, rows).
 
-    The per-graph lock (held inside ``get_readonly_connection``) is acquired AND
-    released here, on a single thread. Callers MUST fully consume this before
-    yielding to a streaming client: a ``threading`` lock released on a different
-    thread than it was acquired raises and would wedge the lock permanently, and
-    the streaming response driver resumes generators on arbitrary worker threads.
-    Bounded buffering is safe because results are capped at MAX_QUERY_ROWS.
+    The per-graph lock inside ``get_readonly_connection`` is acquired AND
+    released here, on one thread. Results are fully buffered before returning:
+    a ``threading`` lock released on a different thread than acquired it raises
+    and wedges the lock permanently, and the streaming response driver resumes
+    generators on arbitrary worker threads. Buffering is bounded by
+    MAX_QUERY_ROWS, so it is safe.
     """
     validate_read_only_sql(request.sql)
     pool = get_duckdb_pool()
     timed_out = {"v": False}
     try:
-      # Hardened, sandboxed read-only connection: external access disabled,
-      # config locked, no httpfs/postgres_scanner — reads local staging only.
       with pool.get_readonly_connection(request.graph_id) as conn:
         with _interrupt_after(conn, QUERY_TIMEOUT_SECONDS, timed_out):
           if request.parameters:
             cursor = conn.execute(request.sql, request.parameters)
           else:
             cursor = conn.execute(request.sql)
-          # Fetch one past the cap so we can detect + flag truncation.
+          # One past the cap, so truncation is detectable.
           result = cursor.fetchmany(MAX_QUERY_ROWS + 1)
         description = cursor.description
 
@@ -902,18 +805,15 @@ class DuckDBTableManager:
     """Execute a write/DDL statement on the read-write staging connection.
 
     Internal-only companion to ``query_table``. Where ``query_table`` runs
-    tenant SQL on the hardened, sandboxed read-only connection (SELECT/WITH
-    only, external access off, no httpfs/postgres_scanner), this runs on the
-    read-write connection with httpfs + postgres_scanner available — the
-    surface the extensions materializer and connector loaders need for
-    ``CREATE TABLE AS SELECT ... postgres_scan(...)`` staging and
-    INSERT/DELETE upserts.
+    tenant SQL on the hardened read-only connection (SELECT/WITH only,
+    external access off, no httpfs/postgres_scanner), this runs on the
+    read-write connection with httpfs + postgres_scanner loaded — what the
+    extensions materializer and connector loaders need for
+    ``CREATE TABLE AS SELECT ... postgres_scan(...)`` staging and INSERT/DELETE
+    upserts.
 
-    NOT reachable from the tenant ``/query/sql`` path: only the internal graph
-    client (materialization, ingestion) calls the ``/tables/execute`` endpoint
-    this backs. It mirrors the existing internal write endpoints
-    (``create_table``, ``insert_into_table``) that the read-only hardening left
-    in place; it adds no surface beyond them.
+    Not reachable from the tenant ``/query/sql`` path: only the internal graph
+    client calls the ``/tables/execute`` endpoint this backs.
     """
     import time
 
@@ -953,18 +853,11 @@ class DuckDBTableManager:
       )
 
   def query_table_streaming(self, request: TableQueryRequest, chunk_size: int = 1000):
-    """
-    Execute SQL query and yield results in chunks for TRUE streaming.
+    """Run a tenant read query and yield `chunk_size`-row dicts with columns,
+    rows and progress metadata.
 
-    IMPORTANT: Uses fetchmany() to avoid loading entire result set in memory.
-    This enables efficient streaming of large result sets without memory exhaustion.
-
-    Args:
-        request: Query request
-        chunk_size: Number of rows per chunk
-
-    Yields:
-        Dict containing chunk data with columns, rows, and metadata
+    Chunking is over an already-buffered result, not the live cursor — see
+    ``_fetch_readonly`` for why the connection cannot be held across a yield.
     """
     import time
 
@@ -974,14 +867,12 @@ class DuckDBTableManager:
       f"Executing streaming query for graph {request.graph_id}: {request.sql[:100]}..."
     )
 
-    # Fetch everything (bounded by MAX_QUERY_ROWS) into memory FIRST — this holds
-    # the per-graph read lock only for the duration of the fetch, on ONE thread —
-    # then stream the in-memory buffer. We must NOT hold the read-only connection
-    # or its lock across `yield`: the streaming response driver
-    # (Starlette iterate_in_threadpool) resumes this generator on arbitrary worker
-    # threads, and a threading lock released on a different thread than it was
-    # acquired raises and wedges the lock permanently. Buffering is safe because
-    # results are capped at MAX_QUERY_ROWS.
+    # Fetch everything (bounded by MAX_QUERY_ROWS) first, holding the per-graph
+    # read lock only for the fetch and only on this thread, then stream the
+    # buffer. The connection and its lock must NOT be held across a `yield`:
+    # Starlette's iterate_in_threadpool resumes this generator on arbitrary
+    # worker threads, and a threading lock released on a different thread than
+    # acquired it raises and wedges the lock permanently.
     try:
       columns, result = self._fetch_readonly(request)
     except HTTPException as e:
@@ -1032,7 +923,6 @@ class DuckDBTableManager:
 
     pool = get_duckdb_pool()
 
-    # Check if database exists by looking for connections or trying to connect
     try:
       with pool.get_connection(graph_id) as conn:
         result = conn.execute(
@@ -1071,21 +961,12 @@ class DuckDBTableManager:
 
   @validate_table_name_decorator
   def refresh_table(self, graph_id: str, table_name: str) -> dict[str, Any]:
-    """
-    Refresh an external table from current PostgreSQL file registry.
+    """Rebuild a staging table from the completed files currently registered in
+    the platform ``GraphFile`` table.
 
-    Rebuilds the table using the current list of files in GraphFile table.
-    Use this after file additions, deletions, or replacements in S3.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name to refresh
-
-    Returns:
-        Dict with refresh details
-
-    Raises:
-        HTTPException: If table doesn't exist
+    Use after files are added, deleted, or replaced in S3. Unlike
+    ``create_table`` this recreates the object as a VIEW over the parquet, so
+    it is a read surface, not an ingestion source.
     """
     import time
 
@@ -1136,7 +1017,7 @@ class DuckDBTableManager:
         s3_pattern_list = ", ".join(
           [f"'{key.replace(chr(39), chr(39) * 2)}'" for key in s3_keys]
         )
-        # union_by_name=true handles schema variations between files
+        # union_by_name=true absorbs schema drift between files.
         create_view_sql = f"CREATE VIEW {quoted_table} AS SELECT * FROM read_parquet([{s3_pattern_list}], union_by_name=true)"
         conn.execute(create_view_sql)
         logger.info(f"Recreated external table {table_name} with {len(s3_keys)} files")
@@ -1169,7 +1050,7 @@ class DuckDBTableManager:
 
   @validate_table_name_decorator
   def delete_table(self, graph_id: str, table_name: str) -> dict[str, str]:
-    # Explicit validation (decorator provides safety net)
+    # Explicit validation; the decorator is the safety net.
     validate_table_name(table_name)
 
     logger.info(f"Deleting table {table_name} from graph {graph_id}")
@@ -1196,19 +1077,11 @@ class DuckDBTableManager:
   def delete_file_data(
     self, graph_id: str, table_name: str, file_id: str
   ) -> dict[str, Any]:
-    """
-    Delete all rows for a specific file from DuckDB staging table.
+    """Delete one source file's rows from a staging table.
 
-    This is the core of incremental deletion - remove data from specific
-    files without rebuilding the entire table.
-
-    Args:
-        graph_id: Graph database identifier
-        table_name: Table name
-        file_id: File identifier to delete
-
-    Returns:
-        Dict with status and rows_deleted count
+    This is what makes deletion incremental: no table rebuild. Requires the
+    table to carry a ``file_id`` column, which only tables created with a
+    ``file_id_map`` have; otherwise this raises 400.
     """
     validate_table_name(table_name)
 
@@ -1222,7 +1095,6 @@ class DuckDBTableManager:
       with pool.get_connection(graph_id) as conn:
         quoted_table = f'"{table_name}"'
 
-        # Check if table exists
         table_check = conn.execute(
           "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
           [table_name],
@@ -1238,7 +1110,6 @@ class DuckDBTableManager:
             "message": f"Table {table_name} does not exist",
           }
 
-        # Check if file_id column exists
         columns_result = conn.execute(
           "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
           [table_name],
@@ -1254,7 +1125,6 @@ class DuckDBTableManager:
             detail=f"Table {table_name} does not support file-level deletion (no file_id column)",
           )
 
-        # Count rows before deletion
         count_result = conn.execute(
           f"SELECT COUNT(*) FROM {quoted_table} WHERE file_id = ?", [file_id]
         ).fetchone()
@@ -1270,10 +1140,8 @@ class DuckDBTableManager:
             "message": f"No rows found for file_id={file_id}",
           }
 
-        # Delete rows by file_id
         conn.execute(f"DELETE FROM {quoted_table} WHERE file_id = ?", [file_id])
 
-        # Verify deletion
         count_result_after = conn.execute(
           f"SELECT COUNT(*) FROM {quoted_table} WHERE file_id = ?", [file_id]
         ).fetchone()

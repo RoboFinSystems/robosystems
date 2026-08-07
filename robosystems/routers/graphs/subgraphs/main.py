@@ -111,10 +111,8 @@ async def list_subgraphs(
   operation_start_time = record_operation_start()
 
   try:
-    # Circuit breaker check
     handle_circuit_breaker_check(graph_id, "list_subgraphs")
 
-    # Verify access to parent graph
     parent_graph = verify_parent_graph_access(graph_id, current_user, db, "read")
 
     # Log access event
@@ -275,7 +273,6 @@ async def create_subgraph(
   operation_start_time = record_operation_start()
   audit_logger = SecurityAuditLogger()
 
-  # Circuit breaker check
   handle_circuit_breaker_check(graph_id, "create_subgraph")
 
   # Check if subgraph creation is enabled

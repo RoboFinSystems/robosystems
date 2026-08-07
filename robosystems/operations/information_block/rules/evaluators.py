@@ -12,7 +12,9 @@ Maps each ``rule_pattern`` value to an evaluation strategy:
   ``None`` (i.e., a fact exists for that concept in the period).
 * ``CoExists`` — ``pass`` when *all* variables are bound or *all* are
   ``None``; ``fail`` on a mixed binding (some present, some absent).
-* Any other pattern — ``skipped`` with an "not yet implemented" message.
+* ``SumEquals`` — the aggregate sum bound for the first variable is
+  compared against ``metadata_['expected_total']``.
+* Any other pattern — ``skipped`` with a "not yet implemented" message.
 
 All handlers return an :class:`EvaluationOutcome` dataclass so the
 engine can persist the result without inspecting internal state.
@@ -217,7 +219,7 @@ def _evaluate_exists(rule: Any, bindings: dict[str, float | None]) -> Evaluation
 def _evaluate_sum_equals(
   rule: Any, bindings: dict[str, float | None]
 ) -> EvaluationOutcome:
-  """Pass when the aggregate sum bound for the first variable equals expected_total."""
+  """Pass when the first variable's bound sum equals ``expected_total``."""
   variable_names = [v["variable_name"] for v in (rule.rule_variables or [])]
   if not variable_names:
     return EvaluationOutcome(

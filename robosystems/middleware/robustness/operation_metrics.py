@@ -1,12 +1,9 @@
-"""
-Operation metrics for robustness middleware.
+"""Circuit breaker status tracking.
 
-Circuit breaker status tracking is handled here. All other operation metrics
-(request duration, errors, business events, query queue, SSE) are handled by
-the OpenTelemetry system in middleware/otel/metrics.py.
-
-The OperationType, OperationStatus enums and record_operation_metric function
-are retained for backward compatibility with connection operation logging.
+Everything else — request duration, errors, business events, query queue,
+SSE — is recorded through OpenTelemetry in `middleware/otel/metrics.py`.
+`OperationType`, `OperationStatus`, and `record_operation_metric` remain
+here because connection operation logging uses them.
 """
 
 import threading

@@ -72,10 +72,12 @@ _NAME_PATTERN_OVERRIDES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 
 
 def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
-  """Return a forced rs-gaap qname when the CoA element's name/code is an
-  unambiguous synthesized-detail concept (e.g. accumulated depreciation),
-  else None. The name is a stronger signal than the AI's semantic match,
-  which otherwise collapses the contra into the net parent."""
+  """Force an rs-gaap qname when the element's name/code is unambiguous.
+
+  Applies only to synthesized-detail concepts such as accumulated
+  depreciation, where the account name is a stronger signal than the model's
+  semantic match — which otherwise collapses the contra into the net parent.
+  """
   text = f"{coa_elem.get('name') or ''} {coa_elem.get('code') or ''}"
   for pattern, qname in _NAME_PATTERN_OVERRIDES:
     if pattern.search(text):
@@ -202,7 +204,6 @@ class MappingOperator(Operator):
   async def _run_single_pass(self, ctx: OperatorContext) -> OperatorResult:
     mapping_id = ctx.extra["mapping_id"]
 
-    # Import and instantiate MCP tool classes via DirectToolAccess
     from robosystems.middleware.mcp.tools.taxonomy_tools import (
       CreateMappingAssociationTool,
       GetMappingSummaryTool,
@@ -215,7 +216,6 @@ class MappingOperator(Operator):
     create_tool = ctx.tools.get_tool_instance(CreateMappingAssociationTool)
     summary_tool = ctx.tools.get_tool_instance(GetMappingSummaryTool)
 
-    # 1. Get unmapped elements
     unmapped_result = await unmapped_tool.execute({"mapping_id": mapping_id})
     if "error" in unmapped_result:
       return OperatorResult(
@@ -243,13 +243,13 @@ class MappingOperator(Operator):
     mapped, flagged, skipped = 0, 0, 0
     processed = 0
 
-    # 2. Group by (EFS trait, liquidity) for candidate lookup. Liquidity
+    # Group by (EFS trait, liquidity) for candidate lookup. Liquidity
     # (current/noncurrent) narrows asset/liability candidates to the right
     # balance-sheet section; it is None for equity/revenue/expense and for
-    # accounts that never received a liquidity trait (→ EFS-only candidates,
-    # backward compatible). Elements without an EFS trait can't be narrowed
-    # at all — collect them as ``unclassified`` and surface them to the
-    # caller rather than silently folding them into ``skipped``.
+    # accounts carrying no liquidity trait, which fall back to EFS-only
+    # candidates. Elements without an EFS trait can't be narrowed at all —
+    # collect them as ``unclassified`` and surface them to the caller rather
+    # than silently folding them into ``skipped``.
     unclassified: list[dict] = []
     by_group: dict[tuple[str, str | None], list[dict]] = defaultdict(list)
     for elem in elements:
@@ -259,10 +259,11 @@ class MappingOperator(Operator):
         continue
       by_group[(cls, elem.get("liquidity"))].append(elem)
 
-    # Build an id→element lookup for the deterministic-override path.
+    # Backs the deterministic-override path, which needs the element's name.
     elem_by_id: dict[str, dict] = {e["id"]: e for e in elements}
 
-    # 3. Get candidates per (trait, liquidity) via suggest-mapping tool.
+    # One suggest-mapping call per group, not per element: candidates depend
+    # only on (trait, liquidity), so every element in a group shares a slate.
     candidates_by_group: dict[tuple[str, str | None], list[dict]] = {}
     for (cls, liq), group_elements in by_group.items():
       suggest_result = await suggest_tool.execute(
@@ -274,13 +275,10 @@ class MappingOperator(Operator):
       )
       candidates_by_group[(cls, liq)] = suggest_result.get("candidates", [])
 
-    # 4. Process elements in batches per (trait, liquidity) group. Each
-    # confirmed / flagged mapping is persisted to coa_mapping as
-    # association_type='mapping' — the CoA → rs-gaap arc that fact_grid,
-    # trial balance, and coverage readers all consume (the rs-gaap-anchored
-    # model: the FAC view is derived from this via the fac-to-rs-gaap
-    # bridge, never stored per-tenant).
-
+    # Each confirmed / flagged mapping is persisted to coa_mapping as
+    # association_type='mapping' — the CoA → rs-gaap arc that fact_grid, trial
+    # balance, and coverage readers all consume. The FAC view is derived from
+    # this arc via the fac-to-rs-gaap bridge, never stored per-tenant.
     for (cls, liq), cls_elements in by_group.items():
       candidates = candidates_by_group.get((cls, liq), [])
       if not candidates:
@@ -297,14 +295,10 @@ class MappingOperator(Operator):
         try:
           mappings = await self._map_batch(ctx, batch, candidates)
 
-          # Dedupe by element_id — keep the highest-confidence pick per
-          # element. Claude occasionally returns the same element_id
-          # twice within a batch (or in a duplicated wrapping array
-          # that the tolerant parser correctly recovers). Without this,
-          # ``confirmed_fac`` would carry duplicates that re-fire the
-          # rs-gaap refinement AI call N times for the same CoA → same
-          # equivalence-arc insert → an N-fold loop of duplicate-key
-          # warnings until the worker timeout fires.
+          # Dedupe by element_id, keeping the highest-confidence pick. The
+          # model occasionally returns the same element twice in a batch (or
+          # in a duplicated wrapping array the tolerant parser recovers), and
+          # each duplicate would re-run the write path for the same CoA arc.
           seen_in_batch: dict[str, dict] = {}
           for m in mappings:
             eid = m.get("element_id")
@@ -316,11 +310,10 @@ class MappingOperator(Operator):
             ):
               seen_in_batch[eid] = m
 
-          # Account for elements Bedrock dropped from the response
-          # entirely. Without this they disappear from the counters and
-          # the user sees no signal that an element needs attention —
-          # this was how Notes Payable silently went unmapped on the
-          # demo graph and stranded $25k of QB-balanced credit.
+          # Count elements the model dropped from its response entirely.
+          # Uncounted, they vanish from the totals and nothing tells the user
+          # an account still needs attention — an unmapped account strands its
+          # balance out of the financial statements.
           batch_ids = {e["id"] for e in batch}
           for missing_id in batch_ids - seen_in_batch.keys():
             logger.warning(
@@ -385,7 +378,6 @@ class MappingOperator(Operator):
           percent=(processed / total) * 100,
         )
 
-    # 5. Get final coverage
     try:
       summary = await summary_tool.execute({"mapping_id": mapping_id})
       coverage_percent = summary.get("coverage_percent", 0)
@@ -461,23 +453,19 @@ class MappingOperator(Operator):
     elements: list[dict],
     candidates: list[dict],
   ) -> list[dict]:
-    """Classify a batch of CoA elements against rs-gaap candidates.
+    """Ask the model to match a batch of CoA elements to rs-gaap candidates.
 
-    ``candidates`` is the EFS- (+ liquidity-) narrowed rs-gaap set from
-    ``suggest-mapping`` — a tight, section-correct slate rather than the
-    full ~2,000 rs-gaap variants. The orchestrator persists each accepted
-    result as a CoA → rs-gaap arc with ``association_type='mapping'`` — the
-    primary rollup target the renderer consumes. The FAC view is derived
-    from that arc via the fac-to-rs-gaap bridge, not stored separately.
+    ``candidates`` is the EFS- (+ liquidity-) narrowed set from
+    ``suggest-mapping``: a tight, section-correct slate rather than the full
+    ~2,000 rs-gaap variants. Returns one result per element on the happy path,
+    but callers must tolerate a short list — see `_parse_response`.
     """
     prompt = build_mapping_prompt(elements, candidates)
 
-    # 8000 tokens accommodates a full BATCH_SIZE=10 response with verbose
-    # `reasoning` fields. The previous 4000 ceiling truncated liability
-    # batches mid-string ("Unterminated string starting at: line 241")
-    # so the JSON parser raised and the entire batch was dropped — every
-    # liability CoA fell to "skipped" and the BS imbalance traced back
-    # to Notes Payable being unmapped (carrying a $25k QB credit).
+    # Sized to fit a full BATCH_SIZE=10 response including verbose `reasoning`
+    # fields. A tighter ceiling truncates the JSON mid-string, and a batch that
+    # only partially parses silently drops those accounts into "skipped" —
+    # unmapped accounts strand real balances out of the statements.
     response = await ctx.ai.create_message(
       messages=[AIMessage(role="user", content=prompt)],
       system=MAPPING_SYSTEM_PROMPT,
@@ -490,20 +478,18 @@ class MappingOperator(Operator):
     return self._parse_response(response.content, elements)
 
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
-    """Parse Bedrock JSON response into mapping results.
+    """Parse the model's JSON into mapping results, or return zero-confidence
+    placeholders for the whole batch if nothing can be recovered.
 
-    Tolerant of three failure modes Claude exhibits in the wild:
+    Deliberately tolerant of three shapes the model produces despite the
+    prompt, each of which plain ``json.loads`` rejects outright:
 
     1. Markdown fences (```json … ```) — stripped before parsing.
-    2. Multiple JSON values back-to-back (one array per element, or an
-       array followed by a trailing object). We scan with
-       ``json.JSONDecoder.raw_decode`` and accumulate every top-level
-       value, flattening lists and unwrapping single objects. This is
-       why ``json.loads`` was failing with "Extra data" on the asset
-       and liability batches — Claude was emitting one mapping object
-       per line instead of a single wrapping array.
-    3. Lines of explanatory prose between values — skipped by advancing
-       past whitespace and any non-`{`/`[` prefix between values.
+    2. Several JSON values back to back (one object per line instead of one
+       wrapping array, or an array followed by a stray object). Scanned with
+       ``json.JSONDecoder.raw_decode``, accumulating every top-level value.
+    3. Explanatory prose between values — skipped by advancing past anything
+       that isn't `{` or `[`.
     """
     try:
       text = self._strip_markdown_fences(content.strip())
@@ -544,11 +530,10 @@ class MappingOperator(Operator):
   def _strip_markdown_fences(text: str) -> str:
     """Strip a single ```json … ``` (or bare ```) wrapper if present.
 
-    Claude follows the prompt's "Respond ONLY with the JSON" rule
-    inconsistently — sometimes the response arrives wrapped in a
-    fenced code block, sometimes not, and very occasionally the
-    fences land mid-stream after a leading explanation. We only
-    strip when fences bracket the entire payload.
+    The model follows the prompt's "Respond ONLY with the JSON" rule
+    inconsistently. Only a fence that brackets the entire payload is stripped;
+    fences appearing mid-stream after a leading explanation are left for the
+    tolerant scan in `_parse_concatenated_json`.
     """
     if not text.startswith("```"):
       return text
@@ -561,25 +546,16 @@ class MappingOperator(Operator):
   def _parse_concatenated_json(text: str) -> list:
     """Decode every top-level JSON value in ``text`` and flatten lists.
 
-    Uses ``json.JSONDecoder().raw_decode`` to walk the buffer one
-    value at a time so a response like
-    ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}``
-    yields all of the contained objects rather than failing the whole
-    parse on the first leftover byte.
+    Walks the buffer one value at a time with ``json.JSONDecoder().raw_decode``
+    so ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}`` yields all the
+    contained objects instead of failing on the first leftover byte.
 
-    When raw_decode raises mid-stream (truncated array, unterminated
-    string from a max_tokens cutoff, malformed trailing object), we
-    keep whatever objects we already extracted instead of dropping
-    the whole batch. Partial recovery is the right behavior here: a
-    Bedrock truncation that yields 6 of 7 mappings is still better
-    than 0, and the orchestrator's per-element loop tolerates a
-    short result list (missing element_ids fall through to "skipped"
-    rather than corrupt the rest).
-
-    A list value parses fine but its trailing `]` may be missing on
-    truncation; in that case we attempt an inner-element scan over
-    its body so the partial array still contributes whatever complete
-    objects it has.
+    On a mid-stream decode error (truncated array, unterminated string from a
+    max_tokens cutoff, malformed trailing object) whatever was already
+    extracted is kept. Partial recovery is correct here: 6 of 7 mappings beats
+    0, and the caller tolerates a short list — missing element_ids fall through
+    to "skipped" rather than corrupting the rest. A truncated array is scanned
+    for its complete inner objects for the same reason.
     """
     decoder = json.JSONDecoder()
     out: list = []
@@ -593,11 +569,9 @@ class MappingOperator(Operator):
       try:
         value, end = decoder.raw_decode(text, i)
       except json.JSONDecodeError:
-        # Truncated value at this position. If we're inside a `[...]`
-        # whose contents are object literals, scan forward and
-        # recover each complete `{...}` we can find — typical
-        # max_tokens cutoff shape. Otherwise stop here with whatever
-        # we've accumulated.
+        # Truncated value. Inside a `[...]` of object literals — the typical
+        # max_tokens cutoff shape — scan forward for each complete `{...}`.
+        # Otherwise stop with whatever has accumulated.
         if text[i] == "[":
           inner = i + 1
           while inner < n:

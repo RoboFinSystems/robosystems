@@ -1,15 +1,14 @@
-"""
-LadybugDB Allocation Manager - DynamoDB-based
+"""Allocation of LadybugDB databases across writer instances.
 
-Manages database allocation across LadybugDB writer instances using DynamoDB for persistent state.
-This replaces the in-memory registry with a reliable, distributed storage solution.
+Two DynamoDB tables hold the state: a graph registry mapping each graph_id to
+the instance hosting it, and an instance registry tracking which writers are
+healthy. Allocation writes the graph row conditionally, so two concurrent
+allocations of the same graph_id cannot both succeed. Routing reads the graph
+registry directly — there is no load balancer in front of the writers, since a
+graph lives on exactly one instance.
 
-Key features:
-- DynamoDB-based database registry
-- Direct instance routing (no ALB)
-- Automatic instance registration/deregistration
-- Capacity-based allocation
-- Health monitoring via DynamoDB
+Subgraphs are not allocated separately: they resolve to their parent's
+instance.
 """
 
 import re
@@ -42,12 +41,11 @@ class AllocationRaceConditionError(Exception):
   """Raised when DynamoDB conditional write fails and the existing item cannot be resolved."""
 
 
-# Valid identifier patterns for security with length limits
-VALID_ENTITY_ID_PATTERN = re.compile(
-  r"^[a-zA-Z0-9_-]{1,128}$"
-)  # Entity IDs: alphanumeric, underscore, dash (max 128 chars)
+# Entity IDs: alphanumeric, underscore, dash, max 128 chars. These feed
+# DynamoDB keys and instance routing, so they are validated before use.
+VALID_ENTITY_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
-# Graph ID regex is lazy to avoid circular imports at module load time
+# Built lazily: importing GRAPH_ID_PATTERN at module load would be circular.
 _VALID_GRAPH_ID_REGEX: re.Pattern[str] | None = None
 
 
@@ -64,13 +62,10 @@ def _get_valid_graph_id_regex() -> re.Pattern[str]:
 VALID_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")  # AWS instance ID format
 
 
-# Configure DynamoDB client based on environment
 def get_dynamodb_resource():
-  """Get DynamoDB resource with proper endpoint configuration."""
-  # Get region from environment or use default
+  """DynamoDB resource, pointed at LocalStack in development."""
   region = env.AWS_REGION
 
-  # Check if we should use LocalStack in dev environment
   if env.is_development() and env.AWS_ENDPOINT_URL:
     return boto3.resource(
       "dynamodb", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
@@ -176,34 +171,26 @@ class LadybugAllocationManager:
         "databases_per_instance": 1,  # One repository per instance
       },
     }
-    # ASG name will be determined dynamically from instance data
-    # This is a fallback for tests/local development
-    # Use the standard tier ASG as default
+    # Fallback only; the real ASG name is derived from instance data.
     if asg_name:
       self.default_asg_name = asg_name
     else:
-      # Construct ASG name based on environment (kebab-case convention)
-      # Validate environment to prevent injection
+      # Validate the environment before interpolating it into a resource name.
       if not re.match(r"^[a-z]+$", environment.lower()):
         raise ValueError(f"Invalid environment name: {environment}")
       self.default_asg_name = (
         f"robosystems-ladybug-standard-writers-{environment.lower()}-asg"
       )
 
-    # Get DynamoDB resource with proper endpoint
     dynamodb = cast(Any, get_dynamodb_resource())
 
-    # DynamoDB tables - use centralized configuration
     self.graph_table = dynamodb.Table(env.GRAPH_REGISTRY_TABLE)
     self.instance_table = dynamodb.Table(env.INSTANCE_REGISTRY_TABLE)
     self.volume_table = dynamodb.Table(env.VOLUME_REGISTRY_TABLE)
 
-    # AWS clients with region configuration
     region = env.AWS_REGION
 
-    # Configure clients based on environment
     if env.is_development() and env.AWS_ENDPOINT_URL:
-      # LocalStack configuration for dev
       endpoint_url = env.AWS_ENDPOINT_URL
       self.autoscaling = boto3.client(
         "autoscaling", endpoint_url=endpoint_url, region_name=region
@@ -212,18 +199,16 @@ class LadybugAllocationManager:
         "cloudwatch", endpoint_url=endpoint_url, region_name=region
       )
     else:
-      # Production configuration
       self.autoscaling = boto3.client("autoscaling", region_name=region)
       self.cloudwatch = boto3.client("cloudwatch", region_name=region)
 
     logger.info(f"Initialized LadybugAllocationManager for environment: {environment}")
 
   def get_tier_config(self, tier: GraphTier) -> dict[str, Any]:
-    """
-    Get configuration for a specific tier.
+    """Backend type and allocation settings for a tier.
 
-    Returns backend type and database allocation settings.
-    For memory/chunk size settings, use GraphTierConfig from config/graph_tier.py.
+    Memory and chunk-size settings live in `GraphTierConfig`
+    (`config/graph_tier.py`).
     """
     return self.tier_configs.get(tier, self.tier_configs[GraphTier.LADYBUG_STANDARD])
 
@@ -234,19 +219,13 @@ class LadybugAllocationManager:
     graph_type: str | None = None,
     instance_tier: GraphTier | None = None,
   ) -> DatabaseLocation:
-    """
-    Allocate a new database for an entity.
+    """Place a new database on a writer instance and return its location.
 
-    Args:
-        entity_id: Entity identifier (entity ID, user ID, etc.)
-        graph_id: Optional custom graph ID
-        graph_type: Optional graph type (defaults to auto-detection)
-        instance_tier: Optional instance tier override
-
-    Returns:
-        DatabaseLocation with instance details
+    `graph_id` is generated when not supplied. The registry row is written
+    conditionally, so a collision with an existing graph owned by a
+    different entity raises `GraphIDCollisionError` rather than silently
+    re-pointing it.
     """
-    # Validate entity_id
     if not entity_id or not isinstance(entity_id, str):
       SecurityAuditLogger.log_input_validation_failure(
         field_name="entity_id",
@@ -265,15 +244,14 @@ class LadybugAllocationManager:
         f"Invalid entity ID format: {entity_id}. Must contain only alphanumeric characters, underscores, and dashes."
       )
 
-    # Generate graph_id if not provided
-    # All user graphs must use kg prefix with ULID for time-ordering
+    # User graphs use a kg prefix with a ULID, so IDs sort by creation time.
     if not graph_id:
       from robosystems.utils.ulid import generate_ulid_hex
 
       graph_id = f"kg{generate_ulid_hex(20)}"
 
     if not _get_valid_graph_id_regex().match(graph_id):
-      # Check if this looks like a subgraph ID - provide helpful error
+      # Subgraph IDs get a specific error rather than the generic one.
       if is_subgraph_id(graph_id):
         parent_id = graph_id.split("_")[0]
         SecurityAuditLogger.log_input_validation_failure(
@@ -287,7 +265,6 @@ class LadybugAllocationManager:
           f"Subgraphs share their parent's instance allocation."
         )
 
-      # Generic validation error for other invalid formats
       SecurityAuditLogger.log_input_validation_failure(
         field_name="graph_id",
         invalid_value=graph_id,
@@ -304,7 +281,6 @@ class LadybugAllocationManager:
         f"Detected subgraph {graph_id} - routing to parent {subgraph_info.parent_graph_id}"
       )
 
-      # Find the parent's allocation
       parent_location = await self.find_database_location(subgraph_info.parent_graph_id)
       if not parent_location:
         raise ValueError(
@@ -312,14 +288,14 @@ class LadybugAllocationManager:
           f"Cannot create subgraph without parent allocation."
         )
 
-      # Return parent's location but with subgraph ID
-      # The actual database creation happens at a higher level
+      # Parent's instance, subgraph's id. Creating the database itself
+      # happens a layer up.
       logger.info(
         f"Subgraph {graph_id} will use parent's instance {parent_location.instance_id} "
         f"({parent_location.private_ip})"
       )
 
-      # Track subgraph in volume registry (subgraphs are real databases on disk)
+      # Subgraphs are real databases on disk, so they need volume tracking.
       await self._update_volume_registry_add_database(
         parent_location.instance_id, graph_id
       )
@@ -337,14 +313,12 @@ class LadybugAllocationManager:
     logger.info(f"Allocating database {graph_id} for entity {entity_id}")
 
     try:
-      # Get graph identity for routing
       identity = GraphTypeRegistry.identify_graph(graph_id, graph_tier=instance_tier)
 
-      # Get backend type for this tier
       tier_config = self.get_tier_config(instance_tier or GraphTier.LADYBUG_STANDARD)
       backend_type = tier_config.get("backend_type", "ladybug")
 
-      # Find instance with capacity for the specified tier (do this first to fail fast)
+      # Fail fast before writing anything if no instance has capacity.
       instance = await self._find_best_instance(instance_tier)
 
       if not instance:
@@ -424,7 +398,6 @@ class LadybugAllocationManager:
                   f"Failed to rollback database entry during capacity conflict: {rollback_error}"
                 )
 
-              # Find a different instance and retry
               instance = await self._find_best_instance(
                 instance_tier, exclude_instance=instance.instance_id
               )
@@ -495,7 +468,6 @@ class LadybugAllocationManager:
             # Different DynamoDB error
             raise e
 
-      # Log successful database allocation
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTH_SUCCESS,  # Could add DATABASE_ALLOCATED
         details={
@@ -518,13 +490,12 @@ class LadybugAllocationManager:
         f"entity: {entity_id}"
       )
 
-      # Update volume registry to track database on volume (critical for instance replacement)
+      # Instance replacement reattaches volumes from this registry.
       await self._update_volume_registry_add_database(instance.instance_id, graph_id)
 
-      # Enable instance protection now that it has a database (only in prod/staging)
+      # Protect the instance from scale-in now that it holds a database.
       if self.environment not in ["dev", "test"]:
         try:
-          # Get the ASG name from the instance data
           asg_name = await self._get_asg_name_for_instance(instance.instance_id)
           if asg_name:
             self.autoscaling.set_instance_protection(
@@ -540,7 +511,7 @@ class LadybugAllocationManager:
               f"Could not determine ASG name for instance {instance.instance_id}"
             )
         except ClientError as e:
-          # Log but don't fail allocation - protection is a safety feature
+          # Protection is defense in depth; its failure must not fail allocation.
           logger.error(f"Failed to enable instance protection: {e}")
 
         # Publish metrics (only in prod/staging)
@@ -557,7 +528,6 @@ class LadybugAllocationManager:
       )
 
     except ClientError as e:
-      # Log database allocation failure
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
         details={
@@ -574,30 +544,21 @@ class LadybugAllocationManager:
       raise Exception(f"Database allocation failed: {e!s}")
 
   async def find_database_location(self, graph_id: str) -> DatabaseLocation | None:
+    """Locate an existing database, or None when it is not registered.
+
+    A subgraph resolves to its parent's instance — subgraphs have no
+    allocation of their own — and is returned carrying the subgraph's own
+    graph_id.
     """
-    Find the location of an existing database.
-
-    For subgraphs, this method automatically resolves to the parent graph's location
-    since subgraphs share the same physical instance as their parent.
-
-    Args:
-        graph_id: Graph/database identifier (can be parent or subgraph)
-
-    Returns:
-        DatabaseLocation if found, None otherwise
-    """
-    # Check if this is a subgraph - if so, look up parent instead
     subgraph_info = parse_subgraph_id(graph_id)
     if subgraph_info:
       logger.debug(
         f"Resolving subgraph {graph_id} to parent {subgraph_info.parent_graph_id}"
       )
-      # Recursively call with parent ID to get parent's location
       parent_location = await self.find_database_location(subgraph_info.parent_graph_id)
       if not parent_location:
         return None
 
-      # Return location with subgraph's graph_id but parent's instance details
       return DatabaseLocation(
         graph_id=graph_id,
         instance_id=parent_location.instance_id,
@@ -618,13 +579,13 @@ class LadybugAllocationManager:
       item = response["Item"]
       instance_id = item["instance_id"]
 
-      # Get private_ip - first try graph-registry, then fall back to instance-registry
-      # This handles cases where graph-registry entry is stale after instance replacement
+      # The graph registry's cached private_ip goes stale after instance
+      # replacement, so fall back to the instance registry.
       private_ip = item.get("private_ip")
       availability_zone = item.get("availability_zone", "unknown")
 
       if not private_ip:
-        # Look up private_ip from instance-registry (source of truth for instance info)
+        # The instance registry is authoritative for instance details.
         instance_response = self.instance_table.get_item(
           Key={"instance_id": instance_id}
         )
@@ -636,7 +597,7 @@ class LadybugAllocationManager:
             f"Resolved private_ip for {graph_id} from instance-registry: {private_ip}"
           )
 
-          # Update graph-registry with current instance info for faster future lookups
+          # Refresh the cached copy so the next lookup is one read.
           try:
             self.graph_table.update_item(
               Key={"graph_id": graph_id},
@@ -662,7 +623,6 @@ class LadybugAllocationManager:
         )
         return None
 
-      # Update last accessed time
       self.graph_table.update_item(
         Key={"graph_id": graph_id},
         UpdateExpression="SET last_accessed = :time",
@@ -684,19 +644,15 @@ class LadybugAllocationManager:
       return None
 
   async def deallocate_database(self, graph_id: str) -> bool:
-    """
-    Atomically deallocate a database using conditional writes.
+    """Release a database's registry row via a conditional write.
 
-    Args:
-        graph_id: Database to deallocate
-
-    Returns:
-        True if successful
+    The condition is what makes concurrent deallocation safe: only one
+    caller can transition the row, so the instance's database count is
+    never decremented twice.
     """
     logger.info(f"Deallocating database {graph_id}")
 
     try:
-      # Get database info first to validate it exists and get instance_id
       response = self.graph_table.get_item(Key={"graph_id": graph_id})
       if "Item" not in response:
         logger.warning(f"Database {graph_id} not found")
@@ -706,7 +662,6 @@ class LadybugAllocationManager:
       instance_id = item["instance_id"]
       current_status = item.get("status", DatabaseStatus.ACTIVE.value)
 
-      # Skip if already deleted
       if current_status == DatabaseStatus.DELETED.value:
         logger.info(f"Database {graph_id} already deleted")
         return True
@@ -793,7 +748,6 @@ class LadybugAllocationManager:
 
           return False
 
-      # Log successful database deallocation
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,  # Could add DATABASE_DEALLOCATED
         details={
@@ -808,7 +762,7 @@ class LadybugAllocationManager:
 
       logger.info(f"Deallocated database {graph_id} from instance {instance_id}")
 
-      # Update volume registry to remove database from volume tracking
+      # Keep the volume registry in step so replacement doesn't restore it.
       await self._update_volume_registry_remove_database(instance_id, graph_id)
 
       # Check if instance now has zero databases and remove protection if so (only in prod/staging)
@@ -818,9 +772,8 @@ class LadybugAllocationManager:
           if "Item" in response:
             current_count = int(response["Item"].get("database_count", 0))
             if current_count == 0:
-              # Remove instance protection since it has no databases
+              # Nothing left to protect; let the ASG scale this instance in.
               try:
-                # Get the ASG name from the instance data
                 asg_name = await self._get_asg_name_for_instance(instance_id)
                 if asg_name:
                   self.autoscaling.set_instance_protection(
@@ -836,7 +789,7 @@ class LadybugAllocationManager:
                     f"Could not determine ASG name for instance {instance_id}"
                   )
               except ClientError as e:
-                # Log but don't fail deallocation
+                # Never fail deallocation over a protection change.
                 logger.error(f"Failed to remove instance protection: {e}")
         except ClientError as e:
           logger.error(f"Failed to check instance database count: {e}")
@@ -847,7 +800,6 @@ class LadybugAllocationManager:
       return True
 
     except ClientError as e:
-      # Log database deallocation failure
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
         details={
@@ -863,19 +815,11 @@ class LadybugAllocationManager:
       return False
 
   async def get_instance_databases(self, instance_id: str) -> list[str]:
+    """List the active graph IDs on an instance.
+
+    Raises `ValueError` for a malformed instance ID rather than passing it
+    to DynamoDB.
     """
-    Get all databases on a specific instance with input validation.
-
-    Args:
-        instance_id: EC2 instance ID
-
-    Returns:
-        List of graph IDs on the instance
-
-    Raises:
-        ValueError: If input validation fails
-    """
-    # Validate instance_id
     if not instance_id or not isinstance(instance_id, str):
       raise ValueError("Instance ID must be a non-empty string")
 
@@ -901,14 +845,8 @@ class LadybugAllocationManager:
       return []
 
   async def get_all_instances(self) -> list[dict]:
-    """
-    Get all healthy instances with their metadata.
-
-    Returns:
-        List of instance dictionaries with instance_id, private_ip, status, etc.
-    """
+    """Every healthy instance with its id, private IP, and status."""
     try:
-      # Scan all healthy instances
       instance_response = self.instance_table.scan(
         FilterExpression="#status = :status",
         ExpressionAttributeNames={"#status": "status"},
@@ -924,7 +862,6 @@ class LadybugAllocationManager:
   async def get_allocation_metrics(self) -> dict:
     """Get current allocation metrics."""
     try:
-      # Get all healthy instances
       instances = await self.get_all_instances()
 
       total_capacity = 0
@@ -967,14 +904,11 @@ class LadybugAllocationManager:
       return {"error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
   async def check_tier_capacity(self, tier: GraphTier) -> str:
-    """
-    Check capacity status for a tier.
+    """Capacity status for a tier.
 
-    Returns 'ready', 'scalable', or 'at_capacity'.
-
-    - ready: Open slot on a healthy instance
-    - scalable: No slots but ASG has headroom to add instances
-    - at_capacity: No slots and ASG is at max
+    - `ready`: open slot on a healthy instance
+    - `scalable`: no slots, but the ASG can add instances
+    - `at_capacity`: no slots and the ASG is at max
     """
     instance = await self._find_best_instance(tier)
     if instance:
@@ -1011,15 +945,14 @@ class LadybugAllocationManager:
       return False
 
   def _count_allocated_graphs(self, instance_id: str) -> int:
-    """Count graphs allocated to an instance according to the graph registry.
+    """Count graphs allocated to an instance from the graph registry.
 
-    The graph registry is the authoritative allocation record — rows are
-    created with conditional writes at allocation time and re-pointed by the
-    volume-manager Lambda when instances cycle. The instance registry's
-    denormalized database_count is reset when a replacement instance
-    re-registers after ASG cycling, so capacity decisions must not trust it
-    (a drifted zero makes an occupied dedicated writer look empty and gets
-    it double-booked).
+    The graph registry is the authoritative record: rows are written
+    conditionally at allocation time and re-pointed by the volume-manager
+    Lambda when instances cycle. Capacity decisions must not use the
+    instance registry's denormalized `database_count`, which resets when a
+    replacement instance re-registers after ASG cycling — a drifted zero
+    makes an occupied dedicated writer look empty and gets it double-booked.
     """
     from boto3.dynamodb.conditions import Key
 
@@ -1053,12 +986,10 @@ class LadybugAllocationManager:
   ) -> InstanceInfo | None:
     """Find the instance with most available capacity for the specified tier."""
     try:
-      # Default to standard tier if not specified
       target_tier = (
         instance_tier.value if instance_tier else GraphTier.LADYBUG_STANDARD.value
       )
 
-      # Validate tier is supported in this environment
       if self.environment in ["prod", "staging"]:
         supported_tiers = [
           "ladybug-standard",
@@ -1084,7 +1015,6 @@ class LadybugAllocationManager:
         f"Scanning instance table: {self.instance_table.table_name} for tier: {target_tier}"
       )
 
-      # Scan for healthy instances with the specified tier
       response = self.instance_table.scan(
         FilterExpression="#status = :status AND #tier = :tier",
         ExpressionAttributeNames={"#status": "status", "#tier": "cluster_tier"},
@@ -1099,12 +1029,10 @@ class LadybugAllocationManager:
       if not instances:
         return None
 
-      # Convert to InstanceInfo objects and filter by available capacity
       instance_infos = []
       for item in instances:
         instance_id = item["instance_id"]
 
-        # Skip excluded instance if specified
         if exclude_instance and instance_id == exclude_instance:
           continue
 
@@ -1116,7 +1044,6 @@ class LadybugAllocationManager:
         database_count = self._count_allocated_graphs(instance_id)
         max_databases = int(item.get("max_databases", self.max_databases_per_instance))
 
-        # Only include instances with available capacity
         if database_count < max_databases:
           instance_infos.append(
             InstanceInfo(
@@ -1130,7 +1057,6 @@ class LadybugAllocationManager:
             )
           )
 
-      # Return instance with most available capacity
       if not instance_infos:
         logger.warning(f"No {target_tier} tier instances with available capacity found")
         return None
@@ -1188,7 +1114,6 @@ class LadybugAllocationManager:
 
   async def _publish_allocation_metrics(self):
     """Publish allocation metrics to CloudWatch (only in prod/staging)."""
-    # Skip metrics in dev/test environments
     if self.environment in ["dev", "test"]:
       return
 
@@ -1230,12 +1155,10 @@ class LadybugAllocationManager:
     self, failure_reason: str, entity_id: str, user_id: str | None = None
   ):
     """Publish allocation failure metric to CloudWatch (only in prod/staging)."""
-    # Skip metrics in dev/test environments
     if self.environment in ["dev", "test"]:
       return
 
     try:
-      # Use environment-specific namespace instead of Environment dimension
       namespace = f"RoboSystems/Graph/{self.environment}"
       metric_data = [
         {
@@ -1258,14 +1181,12 @@ class LadybugAllocationManager:
   async def _update_volume_registry_add_database(
     self, instance_id: str, graph_id: str
   ) -> None:
-    """
-    Add a database to the volume registry for the given instance.
+    """Record a database against an instance's volume.
 
-    This ensures the volume registry tracks which databases exist on each volume,
-    which is CRITICAL for proper volume reattachment during instance replacement.
-    Without this, ASG refreshes will lose track of databases on the volume.
+    Instance replacement reattaches volumes by consulting this registry, so
+    a database missing from it is lost track of on the next ASG refresh.
     """
-    # Skip in dev/test environments where volume registry may not exist
+    # The volume registry doesn't exist outside prod/staging.
     if self.environment in ["dev", "test"]:
       logger.debug(f"Skipping volume registry update in {self.environment} environment")
       return
@@ -1275,8 +1196,8 @@ class LadybugAllocationManager:
     )
 
     try:
-      # Find the volume attached to this instance using paginated scan
-      # Safety limits to prevent infinite loops
+      # Paginated scan with a hard page cap so a pathological table can't
+      # spin here forever.
       MAX_PAGES = 100  # Volume registry should never have this many pages
       all_items = []
       last_evaluated_key = None
@@ -1361,8 +1282,8 @@ class LadybugAllocationManager:
       volume_id = all_items[0]["volume_id"]
       logger.info(f"Found volume {volume_id} for instance {instance_id}")
 
-      # Use atomic list_append to avoid lost updates from concurrent writes
-      # ConditionExpression prevents duplicates; ConditionalCheckFailedException means already exists
+      # list_append is atomic, so concurrent writers don't lose each other's
+      # entries; the ConditionExpression makes a duplicate add a no-op.
       try:
         self.volume_table.update_item(
           Key={"volume_id": volume_id},
@@ -1396,13 +1317,8 @@ class LadybugAllocationManager:
   async def _update_volume_registry_remove_database(
     self, instance_id: str, graph_id: str
   ) -> None:
-    """
-    Remove a database from the volume registry for the given instance.
-
-    This ensures the volume registry accurately reflects which databases exist
-    on each volume after deletion.
-    """
-    # Skip in dev/test environments where volume registry may not exist
+    """Remove a database from an instance's volume registry."""
+    # The volume registry doesn't exist outside prod/staging.
     if self.environment in ["dev", "test"]:
       logger.debug(
         f"Skipping volume registry removal in {self.environment} environment"
@@ -1453,8 +1369,7 @@ class LadybugAllocationManager:
       volume_id = items[0]["volume_id"]
       current_databases = items[0].get("databases", [])
 
-      # Remove database if in list
-      # Use conditional write with expected state to detect concurrent modifications
+      # Conditional on the list we read, so a concurrent edit is detected.
       if graph_id in current_databases:
         updated_databases = [db for db in current_databases if db != graph_id]
         try:
@@ -1492,11 +1407,6 @@ class LadybugAllocationManager:
       # Don't fail the deallocation - volume registry is supplementary
 
 
-# Factory function for compatibility
 def create_allocation_manager(environment: str = "prod") -> LadybugAllocationManager:
-  """
-  Create allocation manager for the specified environment.
-
-  Always uses DynamoDB-based allocation (with LocalStack in development).
-  """
+  """Build an allocation manager for an environment."""
   return LadybugAllocationManager(environment=environment)

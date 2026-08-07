@@ -1,9 +1,4 @@
-"""
-Connection management routers.
-
-This module contains routers for connection operations including options,
-CRUD management, sync, and OAuth authentication.
-"""
+"""Connection routers: provider options, CRUD, sync, and OAuth."""
 
 from fastapi import APIRouter
 

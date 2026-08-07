@@ -1,11 +1,10 @@
-"""
-Shared Pydantic schemas and models for API routers.
+"""Pydantic request/response models for the API routers.
 
-This module contains reusable request/response models and schemas
-that are shared across multiple router modules.
+These shapes generate ``/openapi.json`` and, from it, the published Python and
+TypeScript SDKs — changing a field name or type here is a client-visible
+contract change.
 """
 
-# Import all API models for easy access
 from .auth import (
   AuthResponse,
   EmailResendRequest,
@@ -140,7 +139,6 @@ from .user import (
   UserResponse,
 )
 
-# Explicitly define what models are available for import from this module
 __all__ = [
   "DEFAULT_QUERY_TIMEOUT",
   # Graph models and constants

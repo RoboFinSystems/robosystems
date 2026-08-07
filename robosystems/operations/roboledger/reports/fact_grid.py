@@ -344,15 +344,14 @@ def render_structure_view(
   # Load calculation arcs. For ``arithmetic`` Disclosures we compose
   # calcs across taxonomies (fac-calculations + rs-gaap-calculations +
   # any others) — load all calcs whose subtotal target appears in the
-  # Disclosure's element set. Other CAPs use the legacy single-structure
-  # behavior so existing rendering paths don't change.
+  # Disclosure's element set. Other CAPs use single-structure calcs.
   if concept_arrangement == "arithmetic":
     calculations = _load_calculations(session, element_ids=in_structure)
   else:
     calculations = _load_calculations(session, structure_id=structure_id)
 
-  # Walk hierarchy depth-first
-  # Facts from the facts table are already natural-signed, so skip sign conversion
+  # Facts from the facts table are already natural-signed, so skip sign
+  # conversion.
   rows = _build_rows(hierarchy, period_balances, calculations, pre_signed=True)
 
   return FactGrid(
@@ -408,11 +407,10 @@ def _resolve_renderable_ancestor(
     rs-gaap-hierarchy); used to roll a specialized rs-gaap concept up
     to its in-Disclosure ancestor
 
-  All three are walked together via BFS-by-depth so the nearest
-  ancestor wins when multiple paths exist (semantic 'a' from Option C
-  planning — deterministic, mirrors XBRL renderer convention). The
-  cache memoizes per call so multiple facts on the same out-of-
-  structure element only walk once.
+  All three are walked together via BFS-by-depth so the nearest ancestor
+  wins when multiple paths exist — deterministic, and mirrors the XBRL
+  renderer convention. The cache memoizes per call so multiple facts on the
+  same out-of-structure element only walk once.
   """
   if element_id in cache:
     return cache[element_id]
@@ -738,10 +736,11 @@ def _read_mapped_balances(
   Stock) are stock balances and load cumulatively through ``:end_date``
   with no lower bound; **duration** concepts (IS / SCF flows) constrain
   by ``posting_date >= :start_date`` so they report only the period's
-  activity. (``period_type`` is preferred over the SFAC 6 trait
+  activity. ``period_type`` is preferred over the SFAC 6 trait
   ``identifier`` because the trait can be NULL or a contra-* value that
-  isn't ``asset``/``liability``/``equity`` — which previously period-
-  windowed contra balances and broke footing on non-inception periods.)
+  isn't ``asset``/``liability``/``equity``; keying off the trait would
+  period-window contra balances and break footing on non-inception
+  periods.
 
   ``classification`` (asset / liability / equity / …) is still resolved
   via ``element_traits`` → ``classifications`` with
@@ -765,7 +764,7 @@ def _read_mapped_balances(
   exactly one primary target (trait-classified targets outrank
   inferred ones; deterministic qname tiebreak). ``close_net_balance``
   carries the primary-only sum so the RE/NI close counts each posting
-  once (the Cadence revenue-by-stream double-count, 2026-07-23).
+  once instead of once per disaggregation target.
   """
   result = session.execute(
     text("""
@@ -1199,13 +1198,13 @@ def _synthesize_ppe_net_facts(
       for f in facts
     )
     if already_present:
-      # Direct PPE Net fact exists — likely the legacy "all-in-Net"
-      # mapping (1300/1310/1350 all → PropertyPlantAndEquipmentNet). The
-      # BS renders correctly via the direct fact, BUT the CF Investing
-      # derivation now sources from PropertyPlantAndEquipmentGross (per
-      # rs-gaap-calculations) and will produce 0 for PaymentsToAcquirePPE
-      # — silently omitting capital expenditures from CF Investing.
-      # Warn so operators can migrate to the split mapping.
+      # Direct PPE Net fact exists — typically an "all-in-Net" mapping
+      # (1300/1310/1350 all → PropertyPlantAndEquipmentNet). The BS renders
+      # correctly from that direct fact, but the CF Investing derivation
+      # sources from PropertyPlantAndEquipmentGross (per
+      # rs-gaap-calculations) and yields 0 for PaymentsToAcquirePPE,
+      # silently omitting capital expenditures. Warn so the operator can
+      # move to the split mapping.
       if gross_id is not None and not any(
         f.element_id == gross_id
         and f.period_start == period.start
@@ -1884,8 +1883,8 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
 
 # Anonymous element id used when no rs-gaap RE fact is present in the
 # mapping graph and the close logic has to append a fresh row. Reachable
-# only on legacy / unmapped graphs; properly-configured tenants always
-# have rs-gaap:RetainedEarningsAccumulatedDeficit materialized via
+# only on unmapped graphs; a configured tenant always has
+# rs-gaap:RetainedEarningsAccumulatedDeficit materialized via
 # _append_empty_equity_facts before the close runs.
 _ANON_RE_ELEMENT_ID = "elem_rsgaap_retained_earnings_anon"
 
@@ -1922,10 +1921,10 @@ def _find_close_target(
 
   Only when targeting the corporate default
   (``rs-gaap:RetainedEarningsAccumulatedDeficit``) does it also accept any
-  ``*RetainedEarnings*`` / ``*RetainedDeficit*`` shape — legacy support for
-  seed.py us-gaap / FAC taxonomies whose RE concept carries a different
-  qname. Non-default (form-specific) targets never widen, so they can't
-  match the wrong concept.
+  ``*RetainedEarnings*`` / ``*RetainedDeficit*`` shape, which covers seeded
+  us-gaap / FAC taxonomies whose RE concept carries a different qname.
+  Non-default (form-specific) targets never widen, so they can't match the
+  wrong concept.
 
   Returns ``None`` if no such fact exists; caller appends a fresh row
   (defensive fallback for unmapped graphs).
@@ -1961,8 +1960,8 @@ def _cumulative_closeable_sums(
   so the revenue-by-stream note renders fact-driven) joins its postings
   into N target rows, and a per-target classification sweep counts the
   same postings N times — inflating net income by exactly the
-  disaggregated amount and unbalancing the BS through retained earnings
-  (the Cadence bug, 2026-07-23). This helper groups by SOURCE element
+  disaggregated amount and unbalancing the BS through retained earnings.
+  This helper groups by SOURCE element
   and classifies each source through its targets — reducer targets
   first (the cumulative close's historical precedence), then P&L
   targets with a real trait ahead of inferred ones — so every posting
@@ -2069,10 +2068,10 @@ def _close_to_retained_earnings(
   unmapped graphs where no target fact exists, appends a fresh anonymous
   row with that qname so downstream rendering still has a bottom line.
 
-  Sums use each fact's close-eligible portion (:func:`_close_value`) so
-  accounts double-mapped to disclosure disaggregation concepts count
-  once — the Cadence revenue-by-stream bug (2026-07-23) doubled NI by
-  exactly the disaggregated amount without this.
+  Sums use each fact's close-eligible portion (:func:`_close_value`) so an
+  account double-mapped to disclosure disaggregation concepts counts once.
+  Counting the raw values instead inflates NI by exactly the disaggregated
+  amount.
 
   Mutates the facts list in place.
   """
@@ -2495,11 +2494,11 @@ def _load_calculations(
 
   Two modes:
 
-  1. **Single-structure (legacy)** — pass ``structure_id``. Returns calcs
-     authored INSIDE that structure (the older convention where presentation +
-     calculation arcs lived in the same structure).
-  2. **Cross-structure (Stage 2 disclosure rebuild)** — pass ``element_ids``
-     (the set of element ids reachable in the Disclosure hierarchy). Returns
+  1. **Single-structure** — pass ``structure_id``. Returns calcs authored
+     INSIDE that structure, for structures that carry presentation and
+     calculation arcs together.
+  2. **Cross-structure** — pass ``element_ids`` (the set of element ids
+     reachable in the Disclosure hierarchy). Returns
      calcs from ANY structure whose subtotal target (``from_element_id``) is
      in the hierarchy. This composes ``fac-calculations`` (FAC's 18 canonical
      equations) + ``rs-gaap-calculations`` (rs-gaap leaf→FAC summations) +

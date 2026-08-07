@@ -1,10 +1,15 @@
 """Synthetic chart of accounts and transactions for Cascade Advisory Group LLC.
 
-Clean double-entry data — every entry has balanced DR/CR line items.
-No CSV parsing, no QB General Ledger one-sided entries.
+Cascade is a boutique management consulting firm: three recurring client
+relationships, a payroll-and-rent cost base, and enough seasonality (a summer
+dip, a year-end push) that the statements look like a real small business
+rather than a straight line. Every entry is balanced double-entry — no
+one-sided general-ledger rows to repair on the way in.
 
-Dates are generated relative to "today" so the demo stays evergreen:
-data spans a rolling 16-month window ending at the current month.
+Dates are generated relative to "today" so the demo stays evergreen: the data
+spans a rolling 16-month window ending at the current month. Sixteen months
+gives the demo a full prior fiscal year to file a report against plus a trailing
+stretch of open activity.
 """
 
 from __future__ import annotations
@@ -486,8 +491,9 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
   # starts depreciating the month after purchase (offset 0); Office
   # Furniture ($1,500 cost / 60 mo = $25/mo) starts after offset 2.
   # Posting DR 7000 Depreciation Expense / CR 1350 Accumulated Depreciation.
-  # Replaces the schedule-based promotion path for the demo; tenants
-  # using the schedule workflow get the same posting via close-period.
+  # The synthetic history posts these directly so the loaded books already
+  # balance; a tenant running the schedule workflow gets the identical
+  # posting from close-period instead.
   dep_lines: list[tuple[str, int, int]] = []
   if offset >= 1:
     dep_lines.append(("7000", 133_33, 0))

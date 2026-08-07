@@ -373,7 +373,7 @@ def prune_empty_default_structures(session: Session) -> int:
        via associations), so a blanket "empty custom" prune deletes them and
        leaves every composition row dangling — which breaks statement/report
        rendering (the tenant-copy gate in ``taxonomy/writer.py`` then drops the
-       composition because its style endpoint no longer exists locally).
+       composition, because its style endpoint is gone locally).
 
     2. Only defaults with no associations and not targeted by any rule, so a
        default that legitimately caught an arc — or a rule target — is kept.
@@ -466,11 +466,11 @@ def _build_arc_router(
   Returns ``None`` when the package's structure set doesn't fit the
   BS/IS/CF shape — caller falls back to the default structure.
 
-  This is needed for ``rs-gaap-presentation``, whose seed file uses
-  flat ``rs:parent`` triples and declares 3 statement structures
-  without per-arc role qualifiers. Without this routing, all 1890
-  parent relationships land on the catchall "default structure" and
-  the BS/IS/CF structures stay empty.
+  Needed for ``rs-gaap-presentation``, whose seed file uses flat
+  ``rs:parent`` triples and declares three statement structures without
+  per-arc role qualifiers. Without this routing every parent
+  relationship lands on the catch-all "default structure" and the
+  BS/IS/CF structures stay empty.
   """
   if "balance_sheet" not in block_type_to_id:
     return None

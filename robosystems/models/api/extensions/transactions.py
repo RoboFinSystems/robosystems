@@ -1,9 +1,9 @@
 """Transaction read models.
 
-Standalone Transaction creation is no longer a public surface — every
-GL write goes through `create-event-block(event_type='journal_entry_recorded')`,
-which auto-creates the Transaction parent inside `create_journal_entry`.
-The read shapes below are used by ledger-display routes and GraphQL.
+Read-only by design: Transactions are created as a side effect of
+`create-event-block(event_type='journal_entry_recorded')`, which mints the
+parent Transaction inside `create_journal_entry`. These shapes serve the
+ledger-display routes and GraphQL.
 """
 
 from __future__ import annotations

@@ -54,10 +54,9 @@ CANONICAL_CONTEXT: dict = {
   "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
   "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
   "us-gaap": "http://fasb.org/us-gaap/",
-  # rs-gaap — RoboSystems's year-independent canonical reporting
-  # taxonomy. Our namespace for concepts that previously lived under
-  # us-gaap-2017; equivalence arcs bridge rs-gaap ↔ external us-gaap
-  # versions, keeping our namespace stable as FASB evolves.
+  # rs-gaap — RoboSystems's year-independent canonical reporting taxonomy.
+  # Equivalence arcs bridge rs-gaap ↔ the dated external us-gaap namespaces,
+  # keeping our namespace stable as FASB evolves.
   "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
   # rs-gaap-disclosures — named Disclosures (BalanceSheet, IncomeStatement,
   # PropertyPlantAndEquipmentDisclosure, …) anchored to the rs-gaap framework.
@@ -106,11 +105,10 @@ CANONICAL_CONTEXT: dict = {
   "source": {"@id": f"{RS_VOCAB}source"},
   # Relationships. Structural taxonomy arcs (presentation / calculation /
   # definition) are REIFIED as rs:Association nodes carrying xlink:from/to +
-  # xlink:arcrole + link:weight/order — the direct-predicate terms
-  # (parent/summationOf/generalOf/dimensionOf/hypercubeOf) are RETIRED.
-  # `equivalent` stays a direct owl:equivalentClass predicate: it is a genuine
-  # symmetric OWL relation with no weight/order/role to carry, so reifying it
-  # would gain nothing and lose the OWL semantics the bridges rely on.
+  # xlink:arcrole + link:weight/order; there is no direct predicate for them.
+  # `equivalent` is the one exception — a genuine symmetric OWL relation with
+  # no weight/order/role to carry, so reifying it would only lose the OWL
+  # semantics the bridges rely on.
   "equivalent": {"@id": "owl:equivalentClass", "@type": "@id"},
   # Reified-association predicates (one rs:Association node per arc)
   "from": {"@id": "xlink:from", "@type": "@id"},
@@ -181,8 +179,7 @@ CANONICAL_CONTEXT: dict = {
   # Every term any framework seed uses must live here so the one canonical
   # context is a true superset — undeclared terms would either drop on parse
   # or compact to ugly rs:-prefixed keys. These are pure binary relations
-  # (drules), rule/trait/style metadata, and structure annotations; none are
-  # the retired structural-arc dialect.
+  # (drules), rule/trait/style metadata, and structure annotations.
   "category": {"@id": f"{RS_VOCAB}category"},
   "classifiedAs": {"@id": f"{RS_VOCAB}classifiedAs", "@type": "@id"},
   "deprecated": {"@id": f"{RS_VOCAB}deprecated", "@type": "xsd:boolean"},

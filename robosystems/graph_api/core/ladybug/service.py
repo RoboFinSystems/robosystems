@@ -1,8 +1,9 @@
 """
-LadybugDB service.
+LadybugDB service — query execution, health and metrics for one node.
 
-This module provides the core LadybugDB service that manages multiple databases
-on a single node, handling database operations, health monitoring, and metrics.
+Wraps :class:`~.manager.LadybugDatabaseManager` with the query path (including
+validation, timeouts and streaming), node-type configuration, and the health
+and metrics surfaces the routers expose.
 """
 
 import os
@@ -108,17 +109,13 @@ def _raise_database_not_found(graph_id: str) -> None:
 
 
 def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
-  """
-  Extract column aliases from RETURN clause in Cypher query.
+  """Extract column names from a query's RETURN clause.
 
-  This function parses the RETURN clause to preserve custom column aliases
-  instead of relying on LadybugDB's internal generic column names (col0, col1, etc.).
+  Preserves the caller's aliases; without this the response carries
+  LadybugDB's generic ``col0``/``col1`` names. Returns an empty list on any
+  parse failure, which makes the caller fall back to those generic names.
 
-  Args:
-      cypher_query: The Cypher query to parse
-
-  Returns:
-      List of column aliases/names from the RETURN clause
+  Nested expressions containing commas are not handled.
 
   Examples:
       "RETURN c as entity" -> ["entity"]
@@ -126,11 +123,8 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
       "RETURN count(c) as total" -> ["total"]
   """
   try:
-    # Remove line breaks and normalize whitespace
     query = re.sub(r"\s+", " ", cypher_query.strip())
 
-    # Match RETURN clause (case insensitive)
-    # Look for RETURN followed by expressions, stopping at clause keywords or end
     return_match = re.search(
       r"\bRETURN\s+(.+?)(?:\s+(?:WHERE|ORDER|LIMIT|SKIP|WITH|UNION)|$)",
       query,
@@ -141,50 +135,37 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
 
     return_clause = return_match.group(1).strip()
 
-    # Split by comma, handling simple cases for now
-    # Note: This doesn't handle complex nested expressions with commas,
-    # but covers the majority of use cases
     column_expressions = [expr.strip() for expr in return_clause.split(",")]
 
     aliases = []
     for expr in column_expressions:
-      # Check for explicit AS clause (case insensitive)
       as_match = re.search(r"^(.+?)\s+(?:as|AS)\s+([a-zA-Z_][a-zA-Z0-9_]*)$", expr)
       if as_match:
-        # Has explicit alias
         aliases.append(as_match.group(2))
       else:
-        # No alias, use the expression itself (cleaned up)
-        # Remove extra whitespace and use as column name
         clean_expr = re.sub(r"\s+", " ", expr.strip())
         aliases.append(clean_expr)
 
     return aliases
   except Exception as e:
-    # If parsing fails, return empty list to fall back to generic names
     logger.debug(f"Failed to parse RETURN clause from query: {e}")
     return []
 
 
-# Hard backstop on rows pulled from a single streaming query (F5). Streaming is
-# the large-export path (100x the non-streaming 10k cap), but an unbounded
-# cartesian/variable-length query would otherwise pin an instance pulling rows
-# forever. When hit, the stream stops and the final chunk is flagged `truncated`
-# so the client can detect it and paginate rather than silently losing data.
+# Hard backstop on rows pulled from a single streaming query. Streaming is the
+# large-export path (100x the non-streaming 10k cap), but an unbounded
+# cartesian or variable-length query would otherwise pin an instance pulling
+# rows forever. On hit, the stream stops and the final chunk is flagged
+# `truncated` so the client can paginate rather than silently lose data.
 MAX_STREAMING_ROWS = 1_000_000
 
 
 def validate_cypher_query(cypher: str) -> None:
-  """
-  Validate Cypher query for basic safety checks.
+  """Validate a Cypher query for the ad-hoc query endpoint.
 
-  Args:
-      cypher: Cypher query to validate
-
-  Raises:
-      HTTPException: If query contains forbidden keywords or is invalid
+  Raises ``HTTPException`` when the query is empty, over ``MAX_QUERY_LENGTH``,
+  or contains an operation this endpoint does not permit.
   """
-  # Basic injection prevention
   forbidden_keywords = [
     "CREATE DATABASE",
     "DROP DATABASE",
@@ -199,7 +180,6 @@ def validate_cypher_query(cypher: str) -> None:
     "LOAD CSV",
   ]
 
-  # Check for empty query
   if not cypher or cypher.strip() == "":
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
@@ -214,17 +194,10 @@ def validate_cypher_query(cypher: str) -> None:
         detail=f"Query contains forbidden keyword: {keyword}",
       )
 
-  # Engine-adjacent hardening (F4): the substring blocklist above misses
-  # LadybugDB/Kuzu's real filesystem/cross-database verbs (LOAD FROM, COPY,
-  # ATTACH, INSTALL, CREATE NODE TABLE) and is trivially evadable. graph_api is
-  # the process holding the embedded engine with disk access; if this path is
-  # reached without the platform kernel (SSRF, misconfig, a future internal
-  # caller), those verbs become arbitrary file read / cross-db read. Reuse the
-  # shared analyzer's tokenizer-based predicates (same ones the MCP write-query
-  # guard uses) as a defense-in-depth backstop. Ordinary graph writes
-  # (CREATE/SET/MERGE/DELETE) stay allowed so writer instances still work;
-  # legitimate DDL/bulk load runs through the dedicated schema-install and
-  # table-materialize paths, which never reach this validator.
+  # Defense in depth behind the keyword list: this process holds the embedded
+  # engine and its disk access, so engine-level operations are refused here
+  # regardless of how the request arrived. The tokenizer-based predicates from
+  # the shared analyzer are the same ones the MCP write-query guard uses.
   from robosystems.security.cypher_analyzer import (
     is_admin_operation,
     is_bulk_operation,
@@ -232,11 +205,10 @@ def validate_cypher_query(cypher: str) -> None:
     is_schema_ddl,
   )
 
-  # `is_non_read_call` covers the CALL family (procedure DDL, session
-  # configuration) that the three family predicates cannot see — this
-  # validator deliberately does not use `is_write_operation`, since writer
-  # instances execute ordinary graph writes through this path. Index
-  # creation runs on the dedicated manager paths, never through here.
+  # `is_write_operation` is deliberately not among these: writer instances run
+  # ordinary graph writes (CREATE/SET/MERGE/DELETE) through this path. Bulk
+  # load, schema DDL and index creation have dedicated endpoints that do not
+  # reach this validator.
   if (
     is_bulk_operation(cypher)
     or is_admin_operation(cypher)
@@ -252,7 +224,6 @@ def validate_cypher_query(cypher: str) -> None:
       ),
     )
 
-  # Check query length
   max_query_length = MAX_QUERY_LENGTH
   if len(cypher) > max_query_length:
     raise HTTPException(
@@ -280,17 +251,14 @@ class LadybugService:
     self.start_time = time.time()
     self.last_activity: datetime | None = None
 
-    # Initialize database manager
     self.db_manager = LadybugDatabaseManager(
       base_path, max_databases, read_only=read_only
     )
 
-    # Initialize metrics collector
     self.metrics_collector = LadybugMetricsCollector(
       base_path=base_path, node_type=node_type.value
     )
 
-    # Validate configuration for node type
     self._validate_node_configuration()
 
     logger.info(
@@ -331,15 +299,12 @@ class LadybugService:
     return time.time() - self.start_time
 
   def execute_query_streaming(self, request: QueryRequest, chunk_size: int = 1000):
-    """
-    Execute a query and yield results in chunks for streaming.
+    """Execute a query and yield ``chunk_size`` rows at a time.
 
-    Args:
-        request: Query request
-        chunk_size: Number of rows per chunk
-
-    Yields:
-        Dict containing chunk data
+    Errors are yielded as a terminal chunk carrying ``error``/``error_type``
+    rather than raised — the response has already started streaming by the
+    time most of them surface. Stops at ``MAX_STREAMING_ROWS`` and flags the
+    final chunk ``truncated``.
     """
     with tracer.start_as_current_span(
       "lbug.execute_query_streaming",
@@ -353,31 +318,26 @@ class LadybugService:
       start_time = time.time()
 
       try:
-        # Validate inputs
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
 
-        # Check database exists
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
 
-        # Translate Neo4j-style queries to LadybugDB equivalents
         translated_cypher = translate_neo4j_to_lbug(request.cypher)
 
         logger.debug(
           f"Streaming query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        # Use connection with proper resource management
         with self.db_manager.get_connection(
           validated_graph_id, read_only=self.read_only
         ) as conn:
-          # Execute query with comprehensive error handling
           try:
-            # F5: bound query planning/execution with a thread-based timeout,
-            # mirroring the non-streaming path. Cancelling the HTTP coroutine
-            # does not stop the engine server-side, so without this an
-            # expensive streaming query could pin the instance.
+            # Planning and execution run on a worker thread so they can be
+            # bounded by a timeout. Cancelling the HTTP coroutine does not
+            # stop the engine, so an expensive query would otherwise pin the
+            # instance for as long as it takes.
             query_timeout = TuningConfig.get_graph_query_timeout()
 
             def _execute_streaming():
@@ -406,21 +366,21 @@ class LadybugService:
                 }
                 return
 
-            # Handle case where execute returns a list of QueryResults
+            # A multi-statement query returns a list; only the first result
+            # is streamed.
             if isinstance(query_result, list):
               if len(query_result) == 0:
                 raise RuntimeError("Query returned no results")
-              query_result = query_result[0]  # Use first result
+              query_result = query_result[0]
 
           except RuntimeError as e:
             error_msg = str(e)
-            # Handle specific LadybugDB errors gracefully
+            # Query-authoring errors are reported without a stack trace: they
+            # are the caller's, not the server's.
             if "Binder exception" in error_msg:
-              # Extract the specific binding error for cleaner logging
               logger.warning(
                 f"Query binding error for {validated_graph_id}: {error_msg}"
               )
-              # Yield error chunk without stack trace
               yield {
                 "error": error_msg,
                 "error_type": "BinderException",
@@ -458,7 +418,6 @@ class LadybugService:
               }
               return
             else:
-              # Other runtime errors
               logger.error(
                 f"Query execution error for {validated_graph_id}: {error_msg}"
               )
@@ -473,7 +432,6 @@ class LadybugService:
               }
               return
           except Exception as e:
-            # Catch-all for unexpected errors
             logger.error(f"Unexpected query error for {validated_graph_id}: {e!s}")
             yield {
               "error": str(e),
@@ -486,7 +444,8 @@ class LadybugService:
             }
             return
 
-        # Get columns - try to extract aliases from query first
+        # Caller aliases win over the engine's schema names, but only when the
+        # counts agree — a mismatch means the parse was wrong.
         columns = []
         extracted_aliases = _extract_column_aliases_from_cypher(translated_cypher)
 
@@ -494,7 +453,6 @@ class LadybugService:
           schema = query_result.get_schema()
           schema_columns = list(schema.keys())
 
-          # Use extracted aliases if available and count matches schema columns
           if extracted_aliases and len(extracted_aliases) == len(schema_columns):
             columns = extracted_aliases
           else:
@@ -502,14 +460,12 @@ class LadybugService:
         elif extracted_aliases:
           columns = extracted_aliases
 
-        # Stream results in chunks
         chunk_index = 0
         total_rows_sent = 0
         rows_buffer = []
         truncated = False
 
         while query_result.has_next():
-          # F5: hard row backstop so an unbounded query can't stream forever.
           if total_rows_sent + len(rows_buffer) >= MAX_STREAMING_ROWS:
             truncated = True
             if hasattr(query_result, "close"):
@@ -517,21 +473,19 @@ class LadybugService:
             break
           row = query_result.get_next()
 
-          # Convert row to dict
           if columns:
-            row_list = list(row)  # Ensure row is treated as a list
+            row_list = list(row)
             row_dict = {
               columns[i]: row_list[i] if i < len(row_list) else None
               for i in range(len(columns))
             }
           else:
             row_dict = {f"col{i}": val for i, val in enumerate(row)}
-            if not columns:  # Set columns on first row
+            if not columns:
               columns = list(row_dict.keys())
 
           rows_buffer.append(row_dict)
 
-          # Yield chunk when buffer is full
           if len(rows_buffer) >= chunk_size:
             chunk_data = {
               "chunk_index": chunk_index,
@@ -547,9 +501,9 @@ class LadybugService:
             total_rows_sent += len(rows_buffer)
             rows_buffer = []
 
-        # Yield final chunk with remaining rows. Always send at least one chunk,
-        # and always send a closing chunk when truncated so the client sees the
-        # flag even if the cap landed exactly on a chunk boundary (empty buffer).
+        # Always send at least one chunk, and always send a closing chunk when
+        # truncated — otherwise a cap that lands exactly on a chunk boundary
+        # leaves an empty buffer and the client never sees the flag.
         if rows_buffer or chunk_index == 0 or truncated:
           execution_time = (time.time() - start_time) * 1000
           chunk_data = {
@@ -567,7 +521,6 @@ class LadybugService:
 
         self.last_activity = datetime.now()
 
-        # Update metrics
         self.metrics_collector.record_query(
           database=validated_graph_id,
           duration_ms=(time.time() - start_time) * 1000,
@@ -582,7 +535,6 @@ class LadybugService:
         span.set_attribute("error.type", type(e).__name__)
         span.set_attribute("error.message", str(e))
 
-        # Update metrics
         self.metrics_collector.record_query(
           database=request.database,
           duration_ms=(time.time() - start_time) * 1000,
@@ -591,7 +543,11 @@ class LadybugService:
         raise
 
   def execute_query(self, request: QueryRequest) -> QueryResponse:
-    """Execute a query against a specific database."""
+    """Execute a query and return the full result set.
+
+    Buffers every row in memory; use :meth:`execute_query_streaming` for large
+    exports.
+    """
     with tracer.start_as_current_span(
       "lbug.execute_query",
       attributes={
@@ -603,16 +559,13 @@ class LadybugService:
       start_time = time.time()
 
       try:
-        # Validate inputs for security
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
         validate_query_parameters(request.parameters)
 
-        # Check if database exists
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
 
-        # Translate Neo4j-style queries to LadybugDB equivalents
         translated_cypher = translate_neo4j_to_lbug(request.cypher)
 
         if translated_cypher != request.cypher:
@@ -624,17 +577,16 @@ class LadybugService:
           f"Executing query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        # Use connection with proper resource management
         with self.db_manager.get_connection(
           validated_graph_id, read_only=self.read_only
         ) as conn:
-          # Execute query with proper thread-based timeout (runtime tunable via SSM)
+          # Tunable at runtime via SSM.
           query_timeout = TuningConfig.get_graph_query_timeout()
 
-          # Use ThreadPoolExecutor for proper timeout handling
-          # This works across all platforms and doesn't interfere with signals
+          # A worker thread, not a signal-based alarm: signals only fire on the
+          # main thread and would not survive a worker process.
           def execute_query_with_params():
-            """Execute the query in a separate thread for timeout control."""
+            """Run the query on a worker thread so it can be timed out."""
             if request.parameters:
               return conn.execute(translated_cypher, request.parameters)
             else:
@@ -647,20 +599,20 @@ class LadybugService:
               try:
                 query_result = future.result(timeout=query_timeout)
 
-                # Handle case where execute returns a list of QueryResults
+                # A multi-statement query returns a list; only the first
+                # result is returned to the caller.
                 if isinstance(query_result, list):
                   if len(query_result) == 0:
                     raise RuntimeError("Query returned no results")
-                  query_result = query_result[0]  # Use first result
+                  query_result = query_result[0]
 
               except TimeoutError:
-                # Query exceeded timeout
                 span.set_attribute("error", True)
                 span.set_attribute("error.type", "QueryTimeout")
                 logger.warning(
                   f"Query timeout for {validated_graph_id} after {query_timeout} seconds"
                 )
-                # Try to cancel the future (though LadybugDB query may continue)
+                # Frees the caller; the engine keeps running the query.
                 future.cancel()
                 raise HTTPException(
                   status_code=status.HTTP_408_REQUEST_TIMEOUT,
@@ -669,9 +621,8 @@ class LadybugService:
 
           except RuntimeError as e:
             error_msg = str(e)
-            # Handle specific LadybugDB errors gracefully
+            # Query-authoring errors map to 400s; anything else is a 500.
             if "Binder exception" in error_msg:
-              # Extract the specific binding error for cleaner logging
               logger.warning(
                 f"Query binding error for {validated_graph_id}: {error_msg}"
               )
@@ -700,7 +651,6 @@ class LadybugService:
                 detail=f"Catalog error: {error_msg}",
               )
             else:
-              # Other runtime errors
               logger.error(
                 f"Query execution error for {validated_graph_id}: {error_msg}"
               )
@@ -711,7 +661,6 @@ class LadybugService:
                 detail=f"Query execution error: {error_msg}",
               )
           except Exception as e:
-            # Catch-all for unexpected errors
             logger.error(f"Unexpected query error for {validated_graph_id}: {e!s}")
             span.set_attribute("error", True)
             span.set_attribute("error.type", type(e).__name__)
@@ -720,61 +669,56 @@ class LadybugService:
               detail=f"Unexpected error: {e!s}",
             )
 
-          # Parse results based on LadybugDB's output format
           rows = []
           columns = []
 
-          # First, try to extract column aliases from the Cypher query itself
-          # This preserves custom aliases like "RETURN c as entity"
+          # Caller aliases ("RETURN c as entity") win over the engine's
+          # generic col0/col1 names, but only when the counts agree — a
+          # mismatch means the parse was wrong.
           extracted_aliases = _extract_column_aliases_from_cypher(translated_cypher)
 
           if hasattr(query_result, "get_schema"):
-            # Get column names from schema (these are generic: col0, col1, etc.)
             schema = query_result.get_schema()
             schema_columns = list(schema.keys())
 
-            # Use extracted aliases if available and count matches schema columns
             if extracted_aliases and len(extracted_aliases) == len(schema_columns):
               columns = extracted_aliases
               logger.debug(f"Using extracted column aliases: {columns}")
             else:
-              # Fall back to schema column names
               columns = schema_columns
               if extracted_aliases:
                 logger.debug(
                   f"Column count mismatch - extracted: {len(extracted_aliases)}, schema: {len(schema_columns)}"
                 )
           else:
-            # If no schema available, try to use extracted aliases
             if extracted_aliases:
               columns = extracted_aliases
 
-          # Iterate through all results with row limit protection
+          # Non-streaming results are fully buffered, so the row cap is what
+          # keeps a broad query from exhausting the instance's memory.
           MAX_ROWS = 10000
           while query_result.has_next() and len(rows) < MAX_ROWS:
             row = query_result.get_next()
-            # Convert row to dictionary based on columns
             if columns:
-              row_list = list(row)  # Ensure row is treated as a list
+              row_list = list(row)
               row_dict = {}
               for i, col in enumerate(columns):
                 row_dict[col] = row_list[i] if i < len(row_list) else None
               rows.append(row_dict)
             else:
-              # Fallback: use generic column names
               row_dict = {f"col{i}": val for i, val in enumerate(row)}
               rows.append(row_dict)
-              if not columns:  # Set columns on first row
+              if not columns:
                 columns = list(row_dict.keys())
 
-          # If we hit the limit, close the result to free resources
+          # Abandoning a partially consumed result keeps its Arrow buffers
+          # alive; closing releases them.
           if len(rows) >= MAX_ROWS and hasattr(query_result, "close"):
             query_result.close()
 
           execution_time = (time.time() - start_time) * 1000
           self.last_activity = datetime.now()
 
-          # Update metrics
           self.metrics_collector.record_query(
             database=validated_graph_id,
             duration_ms=execution_time,
@@ -806,7 +750,6 @@ class LadybugService:
           f"(after {execution_time:.2f}ms)"
         )
 
-        # Update metrics
         self.metrics_collector.record_query(
           database=request.database,
           duration_ms=execution_time,
@@ -822,13 +765,16 @@ class LadybugService:
         )
 
   def get_cluster_health(self) -> ClusterHealthResponse:
-    """Get cluster health status."""
+    """Get node health, derived from remaining database capacity and CPU/memory.
+
+    Resource pressure overrides the capacity verdict, so a node with free
+    slots still reports critical when it is out of headroom.
+    """
     databases = self.db_manager.list_databases()
     current_databases = len(databases)
     capacity_remaining = self.max_databases - current_databases
     uptime = time.time() - self.start_time
 
-    # Determine overall status
     if capacity_remaining <= 0:
       status_str = "full"
     elif capacity_remaining < 10:
@@ -836,13 +782,11 @@ class LadybugService:
     else:
       status_str = "healthy"
 
-    # Check system resource usage
     try:
-      # Get actual CPU and memory usage
       cpu_usage = psutil.cpu_percent(interval=0.1)
       memory_usage = psutil.virtual_memory().percent
     except Exception:
-      # Fallback to safe defaults if psutil fails
+      # Unreadable metrics must not make the node look unhealthy.
       cpu_usage = 0
       memory_usage = 0
 
@@ -864,7 +808,7 @@ class LadybugService:
     )
 
   def get_cluster_info(self) -> ClusterInfoResponse:
-    """Get detailed cluster information including all configuration parameters."""
+    """Get node identity, its databases, and the full effective configuration."""
     from robosystems.config import env
     from robosystems.graph_api.models.cluster import (
       AdmissionControlConfig,
@@ -876,8 +820,7 @@ class LadybugService:
     databases = self.db_manager.list_databases()
     uptime = self.get_uptime()
 
-    # Build comprehensive configuration
-    # Memory settings come from tier config (graph.yml)
+    # Memory limits come from the tier config in .github/configs/graph.yml.
     tier_config = env.get_lbug_tier_config()
     memory_config = MemoryConfiguration(
       instance_max_mb=tier_config.get("max_memory_mb", 2048),
@@ -928,16 +871,14 @@ class LadybugService:
     compression: bool = True,
     encryption: bool = False,
   ) -> None:
-    """
-    Background task to create a database backup.
+    """Back up a database to a local ZIP under ``{base_path}/backups``.
 
-    Creates a complete backup of the LadybugDB database file.
+    The archive stays on the instance; uploading it is the caller's job.
+    Progress is reported through the task manager, not returned.
     """
     try:
       logger.info(f"Starting backup task {task_id} for database {graph_id}")
 
-      # For now, since we're just creating the backup locally on the LadybugDB instance,
-      # we'll create a simple file-based backup that can be retrieved
       import os
       import shutil
       import tempfile
@@ -951,7 +892,6 @@ class LadybugService:
       if not os.path.exists(db_path):
         raise FileNotFoundError(f"Database not found: {graph_id}")
 
-      # Create backup in temporary directory
       backup_dir = Path(self.base_path) / "backups"
       backup_dir.mkdir(exist_ok=True)
 
@@ -960,15 +900,12 @@ class LadybugService:
       with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Copy database files
+        # Older engine versions stored a database as a directory.
         if os.path.isfile(db_path):
-          # Single file database
           shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
         else:
-          # Directory-based database
           shutil.copytree(db_path, temp_path / graph_id)
 
-        # Create ZIP archive
         with zipfile.ZipFile(backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
           if os.path.isfile(db_path):
             zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
@@ -994,10 +931,11 @@ class LadybugService:
     backup_data: bytes,
     create_system_backup: bool = True,
   ) -> None:
-    """
-    Background task to restore a database from backup.
+    """Restore a database from ZIP backup bytes, replacing what is on disk.
 
-    Restores a LadybugDB database from the provided backup data.
+    ``create_system_backup`` snapshots the current database to
+    ``{base_path}/system_backups`` first — it is the only recovery path, since
+    the restore deletes the existing files before extracting.
     """
     try:
       logger.info(f"Starting restore task {task_id} for database {graph_id}")
@@ -1014,10 +952,8 @@ class LadybugService:
       db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
       db_dir = os.path.dirname(db_path)
 
-      # Ensure directory exists
       os.makedirs(db_dir, exist_ok=True)
 
-      # Create system backup if database exists
       if create_system_backup and os.path.exists(db_path):
         logger.info(f"Creating system backup before restore for {graph_id}")
 
@@ -1030,13 +966,11 @@ class LadybugService:
         with tempfile.TemporaryDirectory() as temp_dir:
           temp_path = Path(temp_dir)
 
-          # Copy existing database
           if os.path.isfile(db_path):
             shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
           else:
             shutil.copytree(db_path, temp_path / graph_id)
 
-          # Create system backup ZIP
           with zipfile.ZipFile(system_backup, "w", zipfile.ZIP_DEFLATED) as zf:
             if os.path.isfile(db_path):
               zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
@@ -1049,38 +983,32 @@ class LadybugService:
 
         logger.info(f"System backup created at: {system_backup}")
 
-      # Extract and restore the backup
       with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Write backup data to temp file
         zip_file = temp_path / "restore.zip"
         with open(zip_file, "wb") as f:
           f.write(backup_data)
 
-        # Extract backup
         with zipfile.ZipFile(zip_file, "r") as zf:
           zf.extractall(temp_path)
 
-        # Remove existing database if present
         if os.path.exists(db_path):
           if os.path.isfile(db_path):
             os.remove(db_path)
           else:
             shutil.rmtree(db_path)
 
-        # Restore database files
+        # Older engine versions stored a database as a directory.
         if (temp_path / f"{graph_id}.lbug").exists():
-          # Single file database
           shutil.copy2(temp_path / f"{graph_id}.lbug", db_path)
         elif (temp_path / graph_id).exists():
-          # Directory-based database
           shutil.copytree(temp_path / graph_id, db_path)
         else:
           raise ValueError("Invalid backup format - no database files found")
 
-      # Database files have been restored to the expected location
-      # The database manager will detect them automatically on next access
+      # The manager picks the restored files up on next access; nothing needs
+      # to be re-registered.
 
       logger.info(
         f"Restore task {task_id} completed successfully for database {graph_id}"
@@ -1091,13 +1019,12 @@ class LadybugService:
       raise
 
 
-# Global service instance with thread-safe initialization
 _ladybug_service: LadybugService | None = None
 _ladybug_service_lock = threading.Lock()
 
 
 def get_ladybug_service() -> LadybugService:
-  """Get the global LadybugDB service instance."""
+  """Get the process-wide service, raising if it has not been initialized."""
   if _ladybug_service is None:
     raise RuntimeError("LadybugDB service not initialized")
   return _ladybug_service
@@ -1110,7 +1037,7 @@ def init_ladybug_service(
   node_type: NodeType = NodeType.WRITER,
   repository_type: RepositoryType = RepositoryType.ENTITY,
 ) -> LadybugService:
-  """Initialize the global LadybugDB service instance with thread safety."""
+  """Create the process-wide service. Idempotent: a second call is a no-op."""
   global _ladybug_service
 
   with _ladybug_service_lock:

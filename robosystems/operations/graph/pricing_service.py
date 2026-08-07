@@ -1,8 +1,6 @@
-"""
-Graph database pricing service.
+"""Monthly bill calculation for a single graph.
 
-Calculates monthly bills for individual graph databases based on:
-- Fixed monthly price per database
+Pricing is a flat monthly price per graph — no usage metering.
 """
 
 import logging
@@ -19,14 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 class GraphPricingService:
-  """Service for calculating per-graph database pricing."""
+  """Calculate what a graph costs for a billing period."""
 
   def __init__(self, session: Session):
-    """Initialize pricing service with database session."""
     self.session = session
 
   def get_subscription_plan(self, user_id: str, graph_id: str) -> dict | None:
-    """Get the billing plan for a graph subscription."""
+    """The graph's billing plan, defaulting to the standard tier."""
     from ...models.core.billing import BillingCustomer
 
     customer = BillingCustomer.get_by_user_id(user_id, self.session)

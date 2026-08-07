@@ -1,5 +1,4 @@
-"""
-Helper dependency functions.
+"""Helper dependency functions.
 
 Common FastAPI dependencies for entity and graph requirements.
 """
@@ -14,18 +13,7 @@ from robosystems.models.core import User
 def require_entity(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> str:
-  """
-  Require that the user has a selected entity.
-
-  Args:
-      current_user: Authenticated user with graph info
-
-  Returns:
-      Entity identifier
-
-  Raises:
-      HTTPException: If no entity is selected
-  """
+  """The caller's selected entity, or 400 when none is selected."""
   selected_entity = getattr(current_user, "selected_entity", None)
   if not selected_entity:
     raise HTTPException(
@@ -39,33 +27,15 @@ def require_entity(
 def optional_entity(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> str | None:
-  """
-  Optionally get the user's selected entity.
-
-  Args:
-      current_user: Authenticated user with graph info
-
-  Returns:
-      Entity identifier if selected, None otherwise
-  """
+  """Optionally get the user's selected entity."""
   return getattr(current_user, "selected_entity", None)
 
 
 def require_user_graph(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> str:
-  """
-  Require that the user has a selected user graph (not shared repository).
-
-  Args:
-      current_user: Authenticated user with graph info
-
-  Returns:
-      User graph identifier
-
-  Raises:
-      HTTPException: If no graph selected or selected graph is not a user graph
-  """
+  """The caller's selected graph, or 400 when none is selected or it is a
+  shared repository rather than a user graph."""
   graph_id = getattr(current_user, "selected_graph", None)
   if not graph_id:
     raise HTTPException(
@@ -86,15 +56,7 @@ def require_user_graph(
 def optional_user_graph(
   current_user: User = Depends(get_current_user_with_graph),
 ) -> str | None:
-  """
-  Optionally get the user's selected graph if it's a user graph.
-
-  Args:
-      current_user: Authenticated user with graph info
-
-  Returns:
-      User graph identifier if selected and is a user graph, None otherwise
-  """
+  """Optionally get the user's selected graph if it's a user graph."""
   graph_id = getattr(current_user, "selected_graph", None)
   if not graph_id:
     return None
@@ -107,19 +69,7 @@ def require_graph_category(
   category: str,
   current_user: User = Depends(get_current_user_with_graph),
 ) -> str:
-  """
-  Require that the user has selected a graph of a specific category.
-
-  Args:
-      category: Required graph category (user, shared, system)
-      current_user: Authenticated user with graph info
-
-  Returns:
-      Graph identifier
-
-  Raises:
-      HTTPException: If no graph selected or wrong category
-  """
+  """The caller's selected graph, or 400 when it is not of `category`."""
   graph_id = getattr(current_user, "selected_graph", None)
   if not graph_id:
     raise HTTPException(

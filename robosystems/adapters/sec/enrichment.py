@@ -366,7 +366,8 @@ class SemanticEnricher:
       # Read columnar and transpose to row dicts
       columns = table.to_pydict()
       qnames = columns["qname"]
-      # Backward compat: disclosure_type may not exist in old artifacts
+      # Artifacts built before disclosure classification shipped omit this
+      # column, so read it optionally rather than by subscript.
       disclosure_types = columns.get("disclosure_type")
       for i, qname in enumerate(qnames):
         result[qname] = {

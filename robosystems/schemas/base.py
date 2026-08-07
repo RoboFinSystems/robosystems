@@ -1,8 +1,7 @@
 """
 Base Schema for LadybugDB
 
-Defines common nodes and relationships shared across all applications.
-This serves as the foundation that all application-specific schemas extend.
+The common nodes and relationships every extension schema builds on.
 """
 
 from .models import Node, Property, Relationship
@@ -346,11 +345,10 @@ BASE_NODES = [
 # NOTE: Platform relationships (user access, connections) are managed in PostgreSQL.
 # This schema contains only business domain relationships.
 BASE_RELATIONSHIPS = [
-  # NOTE: ENTITY_EVOLVED_FROM (M&A lineage) and ENTITY_OWNS_ENTITY
-  # (parent-subsidiary ownership) were removed 2026-07 — no writer existed on
-  # any path (SEC or OLTP materialization). Re-add ENTITY_OWNS_ENTITY when
-  # multi-entity consolidation ships (OLTP entities.parent_entity_id is the
-  # designated source).
+  # NOTE: parent-subsidiary ownership has no edge here — nothing writes one on
+  # either path (SEC or OLTP materialization). Add ENTITY_OWNS_ENTITY when
+  # multi-entity consolidation ships; OLTP entities.parent_entity_id is the
+  # designated source.
   # XBRL Core Relationships - Global relationships for shared XBRL concepts
   Relationship(
     name="ELEMENT_HAS_LABEL",
@@ -367,9 +365,9 @@ BASE_RELATIONSHIPS = [
     properties=[],
   ),
   # Global Taxonomy Structure Relationships
-  # NOTE: ELEMENT_IN_TAXONOMY was removed 2026-07 — no writer existed, and
-  # element↔taxonomy membership is derivable via Structure associations
-  # (STRUCTURE_HAS_TAXONOMY + STRUCTURE_HAS_ASSOCIATION).
+  # NOTE: there is no direct element↔taxonomy membership edge — membership is
+  # derived through Structure associations (STRUCTURE_HAS_TAXONOMY +
+  # STRUCTURE_HAS_ASSOCIATION).
   Relationship(
     name="TAXONOMY_HAS_LABEL",
     from_node="Taxonomy",
@@ -382,7 +380,7 @@ BASE_RELATIONSHIPS = [
     "lookup (taxonomy ∩ element via the content-addressed shared Label pool) "
     "bleeds cross-concept label texts. URI (not qname) is the join key so it "
     "stays exact for filer-extension elements whose prefix isn't reconstructible "
-    "downstream. See sec-label-scoping spec.",
+    "downstream.",
     properties=[
       Property(
         name="element_uri", type="STRING"

@@ -1,9 +1,9 @@
 """SQL statement execution over the graph's columnar tables (DuckDB).
 
 Peer to the Cypher endpoint in the query layer: a relational lens on the same
-graph-centric data. Read-only for now (writes gated on the DuckDB
-write-connection sandbox). Shared repositories are blocked (no user columnar
-tables). Authorization runs through the shared StatementKernel.
+graph-centric data. Read-only — writes are gated on the DuckDB
+write-connection sandbox. Shared repositories are rejected, since they have no
+user columnar tables. Authorization runs through the shared StatementKernel.
 """
 
 from datetime import UTC, datetime
@@ -70,7 +70,6 @@ async def execute_sql(
 ) -> SqlStatementResponse:
   start_time = datetime.now(UTC)
 
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "table_query")
 
   # Authorize the statement — SQL is read-only and blocked on shared repos.
@@ -131,7 +130,6 @@ async def execute_sql(
     # Calculate execution time
     execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
-    # Record success
     circuit_breaker.record_success(graph_id, "table_query")
 
     # Record business event

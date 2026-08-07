@@ -1,13 +1,11 @@
 """Platform-scoped Arelle integration.
 
-This module provides a neutral interface for ingesting XBRL taxonomies
-and serializing them to JSON-LD via rdflib. Callers include the library
-seed pipeline (Charlie Hoffman's FAC + SFAC 6 artifacts) and — in the
-future — the SEC filing processor.
+A taxonomy-neutral interface for ingesting XBRL taxonomies and serializing
+them to JSON-LD via rdflib. Its caller is the library seed pipeline (Charlie
+Hoffman's FAC + SFAC 6 artifacts).
 
-The underlying Arelle client still lives at
-`robosystems.adapters.sec.client.arelle`; promotion of that client into
-this module is not yet complete.
+The Arelle client that loads the model lives at
+`robosystems.adapters.sec.client.arelle`.
 
 Entry points:
 

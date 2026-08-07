@@ -55,9 +55,8 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
 def get_parent_entity(session: Session) -> LedgerEntityResponse | None:
   """Return the parent (non-linked) entity for this ledger, or None.
 
-  Mirrors the `entity(graphId)` GraphQL query. Returns `None` when the
-  ledger is initialized but has no entity yet — the caller decides
-  whether that's a 404.
+  Returns `None` when the ledger is initialized but has no entity yet — the
+  caller decides whether that's a 404.
   """
   entity = (
     session.query(Entity)

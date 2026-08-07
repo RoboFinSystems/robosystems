@@ -1,7 +1,8 @@
 """
-Enhanced authentication protection including progressive delays and IP monitoring.
+Authentication protection: progressive delays, per-IP threat scoring, blocking.
 
-Provides additional security layers beyond basic rate limiting.
+A layer above rate limiting — repeated failures from one IP escalate through
+delay tiers into timed blocks. IPs are keyed by hash, never stored in clear.
 """
 
 import hashlib
@@ -107,13 +108,9 @@ class AdvancedAuthProtection:
     user_agent: str | None = None,
   ) -> None:
     """
-    Record an authentication attempt for analysis.
+    Record an authentication attempt, updating history and threat assessment.
 
-    Args:
-        ip_address: Client IP address
-        success: Whether the attempt was successful
-        email: Email address attempted (if available)
-        user_agent: Client user agent
+    Failed attempts also emit an AUTH_FAILURE audit event.
     """
     attempt = AuthAttempt(
       timestamp=time.time(),
@@ -238,15 +235,7 @@ class AdvancedAuthProtection:
 
   @classmethod
   def get_ip_threat_assessment(cls, ip_address: str) -> IPThreatAssessment:
-    """
-    Get threat assessment for an IP address.
-
-    Args:
-        ip_address: IP address to assess
-
-    Returns:
-        IPThreatAssessment with current threat level and status
-    """
+    """Get the current threat assessment for an IP, or a LOW default if unseen."""
     key = cls._get_threat_key(ip_address)
 
     try:
@@ -278,13 +267,9 @@ class AdvancedAuthProtection:
   @classmethod
   def check_ip_blocked(cls, ip_address: str) -> tuple[bool, int | None]:
     """
-    Check if an IP address is currently blocked.
+    Check whether an IP address is currently blocked.
 
-    Args:
-        ip_address: IP address to check
-
-    Returns:
-        Tuple of (is_blocked, seconds_until_unblock)
+    Returns ``(is_blocked, seconds_until_unblock)``.
     """
     assessment = cls.get_ip_threat_assessment(ip_address)
 
@@ -308,13 +293,9 @@ class AdvancedAuthProtection:
   @classmethod
   def get_progressive_delay(cls, ip_address: str) -> int:
     """
-    Get progressive delay for failed authentication attempts.
+    Get the remaining progressive delay for an IP.
 
-    Args:
-        ip_address: IP address of the client
-
-    Returns:
-        Delay in seconds before next attempt is allowed
+    Returns the seconds still to wait before the next attempt is allowed, or 0.
     """
     assessment = cls.get_ip_threat_assessment(ip_address)
 
@@ -339,12 +320,7 @@ class AdvancedAuthProtection:
 
   @classmethod
   def apply_progressive_delay(cls, ip_address: str) -> None:
-    """
-    Apply progressive delay after a failed authentication attempt.
-
-    Args:
-        ip_address: IP address of the client
-    """
+    """Start the progressive delay window after a failed authentication attempt."""
     delay_key = cls._get_delay_key(ip_address)
     try:
       # Record the delay application time
@@ -354,15 +330,7 @@ class AdvancedAuthProtection:
 
   @classmethod
   def get_security_headers(cls, ip_address: str) -> dict[str, str]:
-    """
-    Get security headers to include in auth responses.
-
-    Args:
-        ip_address: Client IP address
-
-    Returns:
-        Dictionary of security headers
-    """
+    """Build the ``X-Auth-*`` headers describing an IP's threat, block, and delay."""
     assessment = cls.get_ip_threat_assessment(ip_address)
 
     headers = {

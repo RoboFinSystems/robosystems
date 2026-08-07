@@ -1,14 +1,10 @@
 """Bounded, model-driven tool-use loop for operators.
 
-Lets the model choose and call read-only MCP tools, feeds tool errors back
-so it can self-correct, and stops at a bounded iteration count. This is the
-shared harness behind CypherOperator (its first caller) and any future
-read/analysis operator — the same tool-use loop that makes Claude-via-MCP
-robust, run in-process on Bedrock with automatic per-call credit tracking.
-
-Contrast with the old single-shot pipeline: there, Python called two fixed
-tools and the model never saw a query error. Here the model drives the tools
-and every tool error comes back as an ``is_error`` tool_result it can react to.
+The model chooses which read-only MCP tools to call; every tool error comes
+back as an ``is_error`` tool_result so it can correct itself and retry. The
+loop is the shared harness behind `CypherOperator` and any other read/analysis
+operator — the Claude-via-MCP tool loop run in-process on Bedrock, with
+per-call credit tracking supplied by `TrackedAIClient`.
 """
 
 from __future__ import annotations
@@ -82,26 +78,12 @@ async def run_tool_loop(
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
-  The model is given the read-only tools named by ``tool_names`` (intersected
-  with what the graph actually exposes) and iterates: call tools → observe
-  results, or errors fed back as ``is_error`` tool_results so it can retry →
-  answer in natural language. Bounded by ``max_iterations``; on hitting the
-  cap, one final turn nudges the model to answer from what it gathered.
-
-  Args:
-      ctx: Operator context (ai, tools, progress, history, query).
-      system: System prompt.
-      tool_names: Read-only tool allowlist to request. Only names actually
-          available on the graph are passed to the model.
-      max_iterations: Maximum model round-trips that may call tools.
-      max_tokens: Max output tokens per model call.
-      temperature: Sampling temperature.
-      operator_type: For model-override lookup + credit audit.
-      operation_description: Credit audit description.
-
-  Returns:
-      ToolLoopResult with the final text, the last Cypher result set (for a
-      table), and loop diagnostics.
+  The model gets the read-only tools named by ``tool_names``, intersected with
+  what the graph actually exposes, and iterates: call tools → observe results
+  (errors included) → answer in natural language. ``max_iterations`` caps the
+  round-trips that may call tools; on hitting the cap one further turn nudges
+  the model to answer from what it has, so the loop always costs at most
+  ``max_iterations + 1`` model calls.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -138,7 +120,7 @@ async def run_tool_loop(
       tools=tools,
     )
 
-    # Model produced a final answer (no tool call) — done.
+    # No tool call means the model is answering — done.
     if response.stop_reason != "tool_use":
       return ToolLoopResult(
         text=response.content,

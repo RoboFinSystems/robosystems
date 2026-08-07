@@ -20,15 +20,7 @@ router = APIRouter(prefix="/admin/v1/orgs", tags=["admin-orgs"])
 
 
 def _get_org_total_credits(org_id: str, session) -> float:
-  """Get total credits across all graphs for an organization.
-
-  Args:
-      org_id: Organization ID
-      session: Database session
-
-  Returns:
-      Total credits as float
-  """
+  """Total credit balance across every graph in an organization."""
   total = (
     session.query(func.sum(GraphCredits.current_balance))
     .join(Graph, GraphCredits.graph_id == Graph.graph_id)
@@ -51,28 +43,12 @@ def _get_org_max_graphs(org_id: str, session) -> int:
 
 
 def _get_org_customer(org_id: str, session) -> BillingCustomer | None:
-  """Get billing customer for an organization.
-
-  Args:
-      org_id: Organization ID
-      session: Database session
-
-  Returns:
-      BillingCustomer if found, None otherwise
-  """
+  """The organization's billing customer, or None if it has none."""
   return session.query(BillingCustomer).filter(BillingCustomer.org_id == org_id).first()
 
 
 def _get_org_users(org_id: str, session) -> list[OrgUserInfo]:
-  """Get user list for an organization.
-
-  Args:
-      org_id: Organization ID
-      session: Database session
-
-  Returns:
-      List of OrgUserInfo objects
-  """
+  """The organization's members, with their roles."""
   org_users = (
     session.query(OrgUser, User)
     .join(User, OrgUser.user_id == User.id)
@@ -93,15 +69,7 @@ def _get_org_users(org_id: str, session) -> list[OrgUserInfo]:
 
 
 def _get_org_graphs(org_id: str, session) -> list[OrgGraphInfo]:
-  """Get graph list for an organization.
-
-  Args:
-      org_id: Organization ID
-      session: Database session
-
-  Returns:
-      List of OrgGraphInfo objects
-  """
+  """The graphs belonging to an organization."""
   graphs = session.query(Graph).filter(Graph.org_id == org_id).all()
 
   return [

@@ -104,14 +104,7 @@ class CreditCache:
   def cache_graph_credit_balance(
     self, graph_id: str, balance: Decimal, graph_tier: str
   ) -> None:
-    """
-    Cache graph credit balance with metadata.
-
-    Args:
-        graph_id: Graph identifier
-        balance: Current credit balance
-        graph_tier: Graph tier (ladybug-standard/ladybug-large/ladybug-xlarge)
-    """
+    """Cache graph credit balance with metadata."""
     try:
       cache_key = self._get_graph_credit_key(graph_id)
       from datetime import UTC, datetime
@@ -131,12 +124,7 @@ class CreditCache:
   def get_cached_graph_credit_balance(
     self, graph_id: str
   ) -> tuple[Decimal, str] | None:
-    """
-    Get cached graph credit balance.
-
-    Returns:
-        Tuple of (balance, graph_tier) or None if not cached
-    """
+    """Get cached graph credit balance."""
     try:
       cache_key = self._get_graph_credit_key(graph_id)
       cached_data = self._get(cache_key)
@@ -158,8 +146,7 @@ class CreditCache:
   def update_cached_balance_after_consumption(
     self, graph_id: str, credits_consumed: Decimal
   ) -> None:
-    """
-    Update cached balance after credit consumption.
+    """Update cached balance after credit consumption.
 
     This is an optimistic update - if the cache exists, we decrement it.
     If not, we let it refresh from DB on next read.
@@ -191,7 +178,7 @@ class CreditCache:
       self.invalidate_graph_credit_balance(graph_id)
 
   def cache_credit_summary(self, graph_id: str, summary: dict[str, Any]) -> None:
-    """Cache comprehensive credit summary for a graph."""
+    """Cache a graph's full credit summary."""
     try:
       cache_key = self._get_credit_summary_key(graph_id)
       # Convert Decimal values to strings for JSON serialization

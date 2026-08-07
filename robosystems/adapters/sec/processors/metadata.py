@@ -30,16 +30,7 @@ class SECMetadataLoader:
     self._cache.clear()
 
   def _load_submissions_from_s3(self, s3_client, bucket: str, cik: str) -> dict | None:
-    """Load entity submissions snapshot from S3.
-
-    Args:
-        s3_client: boto3 S3 client
-        bucket: S3 bucket name
-        cik: Company CIK
-
-    Returns:
-        Submissions data dict, or None if not found
-    """
+    """Load a CIK's submissions snapshot from S3, or None if absent."""
     try:
       s3_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
       response = s3_client.get_object(Bucket=bucket, Key=s3_key)
@@ -60,17 +51,9 @@ class SECMetadataLoader:
   ) -> tuple[dict, dict]:
     """Fetch SEC filer and report metadata for a given CIK and accession number.
 
-    Attempts to load from S3 snapshot first (stored during download phase),
-    falling back to SEC API only if no snapshot exists.
-
-    Args:
-        cik: Company CIK
-        accession: Accession number (with dashes)
-        s3_client: Optional boto3 S3 client for loading snapshots
-        bucket: Optional S3 bucket name for snapshots
-
-    Returns:
-        Tuple of (sec_filer dict, sec_report dict) with full metadata.
+    Reads the S3 snapshot stored during the download phase, falling back to a
+    live SEC API call only when no snapshot exists. `accession` carries dashes.
+    Returns `(sec_filer, sec_report)`.
     """
     from robosystems.adapters.sec import SECClient
 
@@ -117,18 +100,15 @@ class SECMetadataLoader:
       "phone": submissions.get("phone"),
     }
 
-    # Find the specific filing in filings
-    # Supports both new complete format (filings directly) and legacy format (filings.recent)
+    # Two shapes appear here: the merged snapshot written by the download
+    # phase puts the filing columns directly under "filings", while a raw SEC
+    # submissions.json nests the first page under "filings"."recent".
     sec_report: dict = {"accessionNumber": accession}
     filings_data = submissions.get("filings", {})
 
-    # New complete format: filings are directly in submissions["filings"]
-    # Legacy format: filings are in submissions["filings"]["recent"]
     if "accessionNumber" in filings_data:
-      # New complete format - filings directly at this level
       filings = filings_data
     else:
-      # Legacy format - filings nested under "recent"
       filings = filings_data.get("recent", {})
 
     def safe_get(field: str, idx: int, default=None):
@@ -140,7 +120,6 @@ class SECMetadataLoader:
       accession_numbers = filings["accessionNumber"]
       for i, acc_num in enumerate(accession_numbers):
         if acc_num == accession:
-          # Found the filing - extract all metadata
           sec_report = {
             "accessionNumber": accession,
             "form": safe_get("form", i),

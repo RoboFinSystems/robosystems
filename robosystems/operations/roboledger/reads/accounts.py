@@ -57,7 +57,6 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
   return {}
 
 
-# Local alias for the shared library helper.
 _efs_by_element = efs_trait_by_element
 
 

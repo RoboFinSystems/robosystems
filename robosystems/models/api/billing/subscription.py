@@ -1,8 +1,4 @@
-"""Subscription API models.
-
-This module contains Pydantic models for subscription-related API operations including
-repository subscriptions, credit allocation, tier management, and user subscription status.
-"""
+"""Subscription API models: repository plans, credit allocation, tier and status."""
 
 from pydantic import BaseModel, Field
 

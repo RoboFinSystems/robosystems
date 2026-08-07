@@ -1,16 +1,8 @@
-"""
-RoboSystems OpenTelemetry Middleware
+"""OpenTelemetry tracing and metrics setup.
 
-This module provides a distributed tracing solution for RoboSystems using OpenTelemetry.
-It is designed to be a drop-in replacement for the previous AWS X-Ray implementation.
-
-Features:
-- Environment-conditional tracing (dev/staging/prod)
-- Automatic instrumentation for FastAPI, requests, and psycopg2
-- OTLP exporter for sending telemetry data to a collector
-- Graceful degradation if the collector is not available
-- Resource attributes for better observability
-- Comprehensive error handling
+Instruments FastAPI, `requests`, and psycopg2, and exports over OTLP.
+Tracing is enabled per environment, and every step degrades gracefully:
+a missing or unreachable collector leaves the application running.
 """
 
 import logging
@@ -18,8 +10,6 @@ import socket
 from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI
-
-# OpenTelemetry imports
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -121,12 +111,7 @@ def _create_resource() -> Resource:
 
 
 def setup_telemetry(app: FastAPI) -> None:
-  """
-  Sets up OpenTelemetry for the application.
-
-  Args:
-      app: FastAPI application instance
-  """
+  """Sets up OpenTelemetry for the application."""
   global _tracer_provider, _meter_provider, _instrumentation_enabled
 
   if not tracing_enabled:
@@ -138,10 +123,8 @@ def setup_telemetry(app: FastAPI) -> None:
     return
 
   try:
-    # Create resource
     resource = _create_resource()
 
-    # Initialize TracerProvider
     _tracer_provider = TracerProvider(resource=resource)
     trace.set_tracer_provider(_tracer_provider)
 
@@ -252,23 +235,13 @@ def setup_telemetry(app: FastAPI) -> None:
 
 
 def get_tracer(name: str | None = None):
-  """
-  Returns a tracer instance.
-
-  Args:
-      name: Optional tracer name, defaults to module name
-
-  Returns:
-      Tracer instance
-  """
+  """Returns a tracer instance."""
   tracer_name = name or __name__
   return trace.get_tracer(tracer_name)
 
 
 def shutdown_telemetry() -> None:
-  """
-  Gracefully shutdown OpenTelemetry components.
-  """
+  """Gracefully shutdown OpenTelemetry components."""
   global _tracer_provider, _meter_provider, _instrumentation_enabled
 
   if _instrumentation_enabled:

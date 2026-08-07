@@ -8,14 +8,7 @@ from fastapi import Request
 
 
 def extract_device_fingerprint(request: Request) -> dict[str, Any]:
-  """Extract device fingerprint components from request.
-
-  Args:
-      request: FastAPI request object
-
-  Returns:
-      Dictionary containing device fingerprint components
-  """
+  """Extract device fingerprint components from a request."""
   # NOTE: We intentionally exclude client_ip from the fingerprint hash.
   # IPs change frequently due to VPNs, mobile networks, load balancer routing,
   # and network reconnections - causing false positive logouts.
@@ -34,14 +27,7 @@ def extract_device_fingerprint(request: Request) -> dict[str, Any]:
 
 
 def create_device_hash(fingerprint: dict[str, Any]) -> str:
-  """Create a hash from device fingerprint components.
-
-  Args:
-      fingerprint: Device fingerprint dictionary
-
-  Returns:
-      SHA256 hash of the fingerprint
-  """
+  """Create a SHA256 hash from device fingerprint components."""
   # Sort keys for consistent hashing
   fingerprint_json = json.dumps(fingerprint, sort_keys=True)
   return hashlib.sha256(fingerprint_json.encode()).hexdigest()
@@ -50,15 +36,7 @@ def create_device_hash(fingerprint: dict[str, Any]) -> str:
 def validate_device_fingerprint(
   stored_hash: str, current_fingerprint: dict[str, Any]
 ) -> bool:
-  """Validate if current request matches stored device fingerprint.
-
-  Args:
-      stored_hash: Previously stored device fingerprint hash
-      current_fingerprint: Current request fingerprint
-
-  Returns:
-      True if fingerprints match, False otherwise
-  """
+  """Check whether the current request matches a stored device fingerprint."""
   current_hash = create_device_hash(current_fingerprint)
   return stored_hash == current_hash
 
@@ -66,14 +44,10 @@ def validate_device_fingerprint(
 def is_fingerprint_suspicious(
   stored_fingerprint: dict[str, Any], current_fingerprint: dict[str, Any]
 ) -> tuple[bool, list[str]]:
-  """Check if device fingerprint changes indicate potential token theft.
+  """Check whether fingerprint changes indicate potential token theft.
 
-  Args:
-      stored_fingerprint: Originally stored fingerprint
-      current_fingerprint: Current request fingerprint
-
-  Returns:
-      Tuple of (is_suspicious, list_of_changes)
+  Returns ``(is_suspicious, changes)``. Language and encoding shifts are
+  reported as changes but are not on their own suspicious.
   """
   changes = []
   suspicious = False

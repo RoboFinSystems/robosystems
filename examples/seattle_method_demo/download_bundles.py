@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Render the latest filed Report's aligned artifact set — Step 9 of the
+"""Export the latest filed Report in every serialization — step 9 of the
 Seattle Method demo.
 
-Delegates to the shared ``render_report_artifacts``
-(``examples/_common/artifacts.py``) — the single definition of what a report
-demo emits: the flat JSON-LD bundle, the native holon (``.holon.jsonld``), the
-XBRL 2.1 zip, the SHACL + Arelle verdicts, and the DataBook. All flavors are
-pulled from the report endpoint via the published SDK.
+One Report, four artifacts, pulled from the report endpoint via the published
+SDK: the flat JSON-LD bundle, the native holon (``.holon.jsonld``, the holon
+viewer's input), the XBRL 2.1 report package, and the DataBook. Each
+serialization is then validated container-free — SHACL over the JSON-LD,
+Arelle over the XBRL 2.1 — and both verdicts are inlined into the DataBook.
 
-The value-parity oracle (``reconcile.py``) is a separate step: it checks the
-*numbers* against Charlie Hoffman's reference, while this step proves the
-*shape* (SHACL over JSON-LD, Arelle over XBRL 2.1) and writes the artifacts to
-disk for direct inspection — and for the holon viewer to pick up.
+Where ``reconcile.py`` checks the *numbers* against Charlie Hoffman's
+reference, this step proves the exported *shape*.
 
-Usage:
+Prerequisites: ``just demo-seattle-method`` has run against the graph, so a
+filed Report exists.
+
+Run it:
     uv run python -m examples.seattle_method_demo.download_bundles <graph_id>
-    uv run python -m examples.seattle_method_demo.download_bundles  # uses cached
+    uv run python -m examples.seattle_method_demo.download_bundles  # cached slot
+
+Writes ``output/seattle-method-case-1.{jsonld,holon.jsonld,zip}`` plus the two
+validation reports and the DataBook.
 """
 
 from __future__ import annotations

@@ -1,33 +1,15 @@
 """RoboLedger-specific OLTP models (accounting domain).
 
-## Canonical import paths
+Report, Fact, FactSet, Transaction, Entry, LineItem, FiscalCalendar,
+FiscalPeriod, PublishList, PublishListMember, ReportShare, and the three
+dimensional junction tables (transaction_dimensions, entry_dimensions,
+line_item_dimensions) are declared here.
 
-**Base ontology concepts** (Taxonomy, Element, Account, Dimension,
-Association, Structure) have their canonical home at
-`robosystems.models.extensions.*` — that is the single source of truth
-for the declaration, inheritance chain, and test coverage.
-
-This module **re-exports** those symbols as a convenience for roboledger
-code that lives under `models.extensions.roboledger.*` and naturally
-reaches for neighbor imports. The re-exports are permanent: they are not
-migration shims, and they will not be removed when the refactor settles.
-They exist because roboledger depends heavily on base ontology concepts
-and the alternative (force every roboledger file to reach back up to the
-parent namespace) adds noise without value.
-
-**New code should prefer `from robosystems.models.extensions import X`**
-for base concepts. Both import paths work and will continue to work, but
-the top-level path is the canonical one. Code inside the roboledger/
-subpackage may use either, but should lean toward the top-level path for
-files that touch base concepts and only incidentally live in roboledger.
-
-## RoboLedger-specific models
-
-Report, Fact, Transaction, Entry, LineItem, FiscalCalendar, FiscalPeriod,
-PublishList, PublishListMember, ReportShare, and the three dimensional
-junction tables (transaction_dimensions, entry_dimensions,
-line_item_dimensions) are genuinely roboledger-specific and have their
-canonical home here.
+Base ontology concepts (Taxonomy, Element, Account, Dimension, Association,
+Structure) are declared at `robosystems.models.extensions.*` and re-exported
+here so roboledger code can reach them as neighbours. Prefer the top-level
+path — `from robosystems.models.extensions import X` — in new code; both
+work.
 
 See schemas/base.py for the authoritative list of base ontology concepts
 and the two invariants governing the base-vs-extension split.

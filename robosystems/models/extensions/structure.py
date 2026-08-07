@@ -3,10 +3,10 @@
 Tenant-scoped table. The OLTP representation of Structure nodes in the graph.
 Each structure belongs to a taxonomy and contains element associations.
 
-During the metadata_ → artifact_mechanics transition, both columns are
-populated on write and the read paths prefer ``artifact_mechanics``.
-``metadata_`` remains for backward compatibility with rows written before
-the typed mechanics column landed.
+``artifact_mechanics`` is the typed mechanics column the envelope builder
+reads; ``metadata_`` carries the same content untyped. Writers must populate
+both — read paths prefer ``artifact_mechanics`` but fall back to ``metadata_``
+for rows that lack it.
 """
 
 from datetime import UTC, datetime

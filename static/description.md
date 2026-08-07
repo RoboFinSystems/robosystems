@@ -6,7 +6,7 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 - **Graph Database**: Build knowledge graphs with LadybugDB for modeling financial relationships and multi-dimensional analytics
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
 - **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming
-- **DuckDB Staging**: High-performance data validation and bulk ingestion pipeline with Parquet optimization
+- **DuckDB Staging**: Data validation and bulk ingestion pipeline with Parquet staging
 - **Data Integration**: Connect [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) and SEC XBRL filings in a unified graph
 - **Document Search**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **Shared Repositories**: Access to curated SEC filing data and other shared knowledge graphs
@@ -75,7 +75,7 @@ Domain extensions (RoboLedger, RoboInvestor) bring their own schema and OLTP tab
 
 - **Information Blocks** — reportable content (schedules, statements, metrics) bundled with period-versioned fact sets, typed mechanics, and rules; `evaluate-rules` runs arithmetic checks over materialized facts, and `assert-metrics` writes asserted metric series
 - **Event Blocks** — REA event capture: record what happened via an action-verb vocabulary, and a handler registry derives debits/credits across the three-level ledger (Transaction → Entry → LineItem); external systems post events through registered event sources
-- **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; Ships with `rs-gaap` (~2,000 curated US-GAAP concepts) as the initial base taxonomy
+- **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; ships `fac` (fundamentals) and `rs-gaap` (~2,000 curated US-GAAP concepts)
 
 Built on the blocks:
 
@@ -124,11 +124,11 @@ For claude.ai and Claude Desktop — whose custom connectors cannot send an API-
 
 ## Clients
 
-RoboSystems provides official Clients for easy integration with the API in popular languages:
+Official clients for integrating with the API:
 
 ### Python Client
 
-Full-featured Python client library for all API operations - [robosystems-client](https://pypi.org/project/robosystems-client/)
+Python client library covering the API surface - [robosystems-client](https://pypi.org/project/robosystems-client/)
 
 **Installation**: `pip install robosystems-client`
 

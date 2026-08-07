@@ -1,383 +1,183 @@
-# Testing in RoboSystems Service
+# Testing
 
-This directory contains comprehensive tests for the RoboSystems Service application. With 500+ test files covering all major components, the test suite ensures reliability across the platform.
+The test suite mirrors the application layout: `tests/<package>/` holds the tests for `robosystems/<package>/`. Put a new test where its source lives.
 
 ## Quick Start
 
 ```bash
-# Run standard test suite (unit tests only)
-just test
-
-# Run with coverage report
-just test-cov
-
-# Run all tests including linting and formatting
-just test-all
+just test                   # unit tests, excluding slow ones — the everyday loop
+just test adapters          # only tests under tests/adapters/
+just test-cov               # with a coverage report
+just test-code              # lint, format, typecheck, CloudFormation lint (no tests)
+just test-all               # test-code plus the test suite — what CI runs
+just test-full              # everything, including tests marked slow
 ```
 
-## End-to-End Validation
+`just test <module>` takes a path *relative to* `tests/`, so `just test adapters` and `just test middleware/billing` work; `just test tests/adapters` does not. To run an arbitrary path, file, or node id, call pytest directly.
 
-For complete end-to-end workflow validation, use the **examples** directory instead of traditional e2e tests:
+Always go through `uv`:
 
 ```bash
-# Run custom graph workflow
-cd examples/custom_graph_demo
-uv run main.py
-
-# Run SEC data workflow
-cd examples/sec_demo
-uv run main.py
+uv run pytest    # correct
+pytest           # wrong: may resolve to the system Python
 ```
 
-These examples validate the entire stack (authentication, graph creation, data upload, ingestion, queries) in a production-like environment while also serving as user documentation.
+## Markers
 
-## Test Structure
+Declared in `pytest.ini`:
 
-The test suite is organized by component, mirroring the application structure:
+| Marker                        | Meaning                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `@pytest.mark.unit`           | Fast and isolated — no databases, no network                            |
+| `@pytest.mark.integration`    | May use PostgreSQL, Valkey, or create LadybugDB instances               |
+| `@pytest.mark.slow`           | Long-running (XBRL processing, large datasets); excluded from `just test` |
+| `@pytest.mark.security`       | Security-focused assertions                                             |
+| `@pytest.mark.real_retry_delay` | Opts out of the zeroed Graph API client backoff (see `tests/graph_api/conftest.py`) |
 
-### Core Components
+Async tests need no marker — `asyncio_mode = auto` is set in `pytest.ini`, so `async def test_*` functions run as-is.
 
-- **`adapters/`** - External service integrations (Arelle/XBRL, OpenFIGI, QuickBooks, S3, SEC)
-- **`config/`** - Configuration validation and billing plan tests
-- **`middleware/`** - Request/response middleware layers
-  - `auth/` - Authentication, cache validation, distributed locks (20+ test files)
-  - `billing/` - Credit consumption and subscription billing middleware
-  - `graph/` - Graph database routing and multi-tenancy
-  - `mcp/` - Model Context Protocol integration
-  - `otel/` - OpenTelemetry metrics and tracing
-  - `rate_limits/` - Rate limiting and burst protection
-  - `robustness/` - Circuit breakers, retries, health checks
-  - `sse/` - Server-sent events for real-time updates
-- **`models/`** - Database models and schemas
-  - `api/` - Pydantic API request/response models
-  - `core/` - Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
-- **`operations/`** - Business logic services
-  - `operators/` - AI Operator operations and orchestration (Claude/MCP executors)
-  - `graph/` - Graph database operations (credit service, entity service)
-  - `roboledger/`, `roboinvestor/` - Extensions OLTP reads/commands/views
-  - `pipeline/` - Data processing pipelines
-  - `providers/` - External provider integrations
-
-### Adapters
-
-- **`adapters/`** - External service integrations
-  - SEC adapter (XBRL processing, filings, taxonomies)
-  - QuickBooks adapter (transaction processing)
-
-### API Layer
-
-- **`routers/`** - HTTP endpoint tests
-  - `auth/` - Authentication and authorization endpoints
-  - `graphs/` - Graph database CRUD operations
-  - `user/` - User management and subscription endpoints
-
-### Background Tasks
-
-- **`dagster/`** - Dagster pipeline tests
-  - `assets/` - Asset tests (SEC, etc.)
-  - `jobs/` - Job tests (billing, infrastructure)
-
-### Infrastructure
-
-- **`graph_api/`** - Graph API services and routing
-  - `client/` - Graph API client functionality
-  - `routers/` - Graph API HTTP endpoints
-- **`schemas/`** - Dynamic schema management
-- **`security/`** - Security implementations and validators
-- **`utils/`** - Utility functions and helpers
-
-### Test Types
-
-- **`integration/`** - Cross-component integration tests
-- **`unit/`** - Isolated unit tests for specific components
-
-## Test Categories
-
-Tests are marked with pytest markers to categorize them. Use these markers to run specific test subsets:
-
-### Primary Markers
-
-- **`@pytest.mark.unit`** - Fast, isolated unit tests (no external dependencies)
-- **`@pytest.mark.integration`** - Integration tests (may use databases, create LadybugDB instances)
-- **`@pytest.mark.slow`** - Long-running tests (XBRL processing, large datasets)
-- **`@pytest.mark.security`** - Security-focused tests
-- **`@pytest.mark.asyncio`** - Async operation tests (handled automatically)
-
-### Running Tests by Category
+For a test that legitimately needs more time than the default, use `@pytest.mark.timeout(300)` alongside `@pytest.mark.slow`.
 
 ```bash
-# Only unit tests (fast, no external services)
 uv run pytest -m unit
-
-# Only integration tests
 uv run pytest -m integration
-
-# Only security tests
 uv run pytest -m security
-
-# Exclude slow tests
-uv run pytest -m "not slow"
-
-# Exclude slow tests (default)
-uv run pytest -m "not slow"
+uv run pytest -m "unit and not slow"
 ```
 
-## Running Tests
-
-### By Directory
+## Selecting tests
 
 ```bash
-# All worker tests
-uv run pytest tests/worker/
-
-# Specific component category
-uv run pytest tests/middleware/billing/
-uv run pytest tests/dagster/
-
-# Business operations
-uv run pytest tests/operations/
-
-# Middleware components
-uv run pytest tests/middleware/auth/
-uv run pytest tests/middleware/billing/
-
-# Adapters
-uv run pytest tests/adapters/
-
-# API endpoints
-uv run pytest tests/routers/
-
-# Graph API
-uv run pytest tests/graph_api/
-```
-
-### By Specific Test
-
-```bash
-# Specific test file
+# File, class, function, parametrized case
 uv run pytest tests/middleware/billing/test_enforcement.py
-
-# Specific test class
 uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph
-
-# Specific test function
 uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph::test_can_provision_with_valid_subscription
+uv run pytest "tests/routers/auth/test_login.py::test_login[success]"
 
-# Parametrized test case
-uv run pytest tests/routers/auth/test_login.py::test_login[success]
-```
-
-### Advanced Test Selection
-
-```bash
-# Run tests matching a pattern
+# By name pattern
 uv run pytest -k "storage and billing"
 uv run pytest -k "test_auth or test_login"
 
-# Exclude specific patterns
-uv run pytest -k "not slow"
-
-# Verbose output with test names
-uv run pytest -v
-
-# Stop on first failure
-uv run pytest -x
-
-# Show local variables on failure
-uv run pytest -l
-
-# Run last failed tests
-uv run pytest --lf
-
-# Run failed tests first, then others
-uv run pytest --ff
-
-# Parallel execution (requires pytest-xdist)
-uv run pytest -n auto
+# Reruns
+uv run pytest --lf     # last failed
+uv run pytest --ff     # failed first, then the rest
 ```
 
-## Test Fixtures
+`pytest.ini` sets `addopts = -xv`, so runs are verbose and stop at the first failure by default. Pass `-p no:cacheprovider` or override with `--maxfail=N` when you want to see more than one failure at a time.
 
-Common test fixtures provide reusable test components. Fixtures are defined at multiple levels:
+## Fixtures
 
-### Global Fixtures (`tests/conftest.py`)
+### Global (`tests/conftest.py`)
 
-- **`test_db`** (session scope) - Test PostgreSQL database, auto-migrated
-- **`client`** (module scope) - FastAPI TestClient with database
-- **`client_with_mocked_auth`** (function scope) - TestClient with mocked authentication
-- **`mock_get_current_user`** (module scope) - Mock authentication dependency
-- **`test_user`** (function scope) - Test user with API key
-- **`sample_graph`** (function scope) - Sample graph database
-- **`test_user_graph`** (function scope) - Graph owned by test user
-- **`test_graph_with_credits`** (function scope) - Graph with credit allocation
-- **`db_session`** (function scope) - Database session for direct queries
+| Fixture                   | Scope    | What it gives you                                        |
+| ------------------------- | -------- | -------------------------------------------------------- |
+| `test_db`                 | session  | The test PostgreSQL database, already migrated            |
+| `db_session`              | function | A session whose transaction is rolled back after the test |
+| `client`                  | module   | FastAPI `TestClient` wired to `test_db`                   |
+| `client_with_mocked_auth` | function | `TestClient` with authentication stubbed out              |
+| `async_client`            | function | `httpx` async client for async endpoint tests             |
+| `mock_get_current_user`   | module   | Mocked authentication dependency                          |
+| `test_user`               | function | A user with an API key                                    |
+| `test_user_token`         | function | A JWT for `test_user`                                     |
+| `other_user`              | function | A second user, for cross-tenant isolation tests           |
+| `test_org`                | function | An organization owning `sample_graph`                     |
+| `sample_graph`            | function | A graph record                                            |
+| `test_user_graph`         | function | A graph owned by `test_user`                              |
+| `test_graph_with_credits` | function | A graph with a credit allocation                          |
+| `temp_lbug_db`            | function | A throwaway on-disk LadybugDB database                    |
+| `lbug_repository`         | function | A repository bound to `temp_lbug_db`                      |
+| `lbug_repository_with_schema` | function | The same, with the base schema installed                 |
+| `mock_sec_client`         | function | Stubbed SEC EDGAR client                                  |
 
-### Model Fixtures (`tests/models/conftest.py`)
-
-- Database model factories
-- Sample model instances
-- Relationship fixtures
-
-### Using Fixtures
+Packages add their own `conftest.py` — check the nearest one before writing a new fixture, and reuse rather than duplicate.
 
 ```python
-def test_with_database(test_db):
-    """Use test database directly."""
-    # test_db is already migrated and ready
-    pass
-
 def test_with_client(client):
-    """Make HTTP requests to the API."""
     response = client.get("/v1/status")
     assert response.status_code == 200
 
+
 def test_with_auth(client_with_mocked_auth):
-    """Make authenticated requests."""
     response = client_with_mocked_auth.get("/v1/user/profile")
     assert response.status_code == 200
 
+
 def test_with_user(test_user):
-    """Use a test user with API key."""
     assert test_user.api_key is not None
 ```
 
-## Test Environment
+## Test environment
 
-Tests run in an isolated environment with specific configuration:
+Configuration comes from the `env` block in `pytest.ini`, so tests get a deterministic environment without touching `.env`.
 
-### Database Configuration
+| Dependency | Where tests expect it                                          |
+| ---------- | -------------------------------------------------------------- |
+| PostgreSQL | `robosystems_test` on `localhost:5432`, auto-migrated by `test_db` |
+| Valkey     | `localhost:6379`                                               |
+| Graph API  | `localhost:8001`                                               |
+| LadybugDB  | `./data/lbug-dbs`                                              |
+| LocalStack | `http://localhost:4566` for S3 and other AWS services          |
 
-- **Test Database**: `robosystems_test` on `localhost:5432`
-- **Auto-Migration**: Alembic migrations run automatically on `test_db` fixture
-- **Isolation**: Each test using `db_session` gets a rolled-back transaction
-- **Cleanup**: Database state is cleaned between test modules
+Rate limiting, OpenTelemetry, and CAPTCHA are disabled for tests; billing, security auditing, subgraph creation, and backup creation are enabled so their code paths are exercised. External APIs — SEC EDGAR, QuickBooks, Anthropic, OpenFIGI — are mocked; tests never make live calls.
 
-### External Services
+## Writing a test
 
-- **LocalStack**: AWS services (S3, etc.) on `http://localhost:4566`
-- **Valkey**: Cache and queues on `localhost:6379`
-- **Graph API**: LadybugDB service on `localhost:8001`
-- **LadybugDB Databases**: Test databases in `./data/lbug-dbs`
-
-### Mock Services
-
-Tests mock external services by default:
-
-- SEC EDGAR API
-- QuickBooks API
-- Anthropic/Claude API
-- OpenFIGI API
-
-### Environment Variables
-
-Key test environment variables (from `pytest.ini`):
-
-```bash
-ENVIRONMENT=test
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems_test
-GRAPH_API_URL=http://localhost:8001
-LBUG_DATABASE_PATH=./data/lbug-dbs
-
-# Feature flags (mostly enabled for testing)
-RATE_LIMIT_ENABLED=false           # Disabled for easier testing
-BILLING_ENABLED=true
-SECURITY_AUDIT_ENABLED=true
-SUBGRAPH_CREATION_ENABLED=true
-BACKUP_CREATION_ENABLED=true
-
-# Mock API keys
-INTUIT_CLIENT_ID=test-intuit-client-id
-OPENFIGI_API_KEY=test-openfigi-key
-```
-
-## Test Organization Best Practices
-
-### General Principles
-
-1. **Unit tests** should be fast (<100ms) and isolated (no external dependencies)
-2. **Integration tests** can use databases but should clean up after themselves
-3. **E2E tests** require full Docker stack and test complete user workflows
-4. **Async tests** use `@pytest.mark.asyncio` (auto-detected)
-5. **Slow tests** should be marked `@pytest.mark.slow` for selective exclusion
-
-### Test File Organization
+Mirror the source layout, name the file `test_*.py`, group related cases in a `Test*` class, and name each test after the behavior it asserts.
 
 ```python
-"""Tests for [component name]."""
+"""Tests for [component]."""
 
 import pytest
 from unittest.mock import MagicMock, patch
 
-# Import code under test
 from robosystems.module import function_to_test
 
 
 class TestComponentName:
-    """Test cases for [specific component]."""
-
     def test_success_case(self):
-        """Test successful operation."""
-        # Arrange
-        # Act
-        # Assert
-        pass
+        # Arrange / Act / Assert
+        ...
 
     def test_error_case(self):
-        """Test error handling."""
-        # Arrange
-        # Act
-        # Assert
-        pass
-
-
-class TestEdgeCases:
-    """Test edge cases and boundary conditions."""
-
-    def test_empty_input(self):
-        """Test handling of empty input."""
-        pass
-
-    def test_invalid_input(self):
-        """Test handling of invalid input."""
-        pass
+        with pytest.raises(ValueError):
+            function_to_test(invalid_input)
 ```
 
-### Writing Good Tests
+A test name should say what is protected, so a failure is self-explanatory:
 
 ```python
-# ✓ GOOD: Descriptive test name
-def test_user_cannot_access_other_users_graphs():
-    pass
+# Good — names the behavior
+def test_user_cannot_access_other_users_graphs(): ...
+def test_credit_consumption_decrements_balance(): ...
 
-# ✗ BAD: Vague test name
-def test_graphs():
-    pass
-
-# ✓ GOOD: Test one thing
-def test_credit_consumption_decrements_balance():
-    # Tests only credit balance change
-    pass
-
-# ✗ BAD: Test multiple things
-def test_credit_system():
-    # Tests consumption, refills, limits, history...
-    pass
-
-# ✓ GOOD: Clear assertions
-def test_authentication_returns_jwt_token():
-    response = login(username, password)
-    assert "access_token" in response
-    assert response["token_type"] == "bearer"
-
-# ✗ BAD: Unclear assertions
-def test_authentication():
-    response = login(username, password)
-    assert response
+# Poor — names the subject only
+def test_graphs(): ...
+def test_credit_system(): ...
 ```
 
-### Common Testing Scenarios
+Assert on specifics rather than truthiness:
 
-#### Testing Error Handling
+```python
+# Good
+response = login(username, password)
+assert "access_token" in response
+assert response["token_type"] == "bearer"
+
+# Poor
+assert response
+```
+
+Guidelines that keep the suite fast and reliable:
+
+1. Unit tests should run in well under 100 ms and touch nothing external.
+2. Integration tests may use the database but must clean up what they create; prefer `db_session`, whose transaction is rolled back automatically.
+3. Mock at the boundary — the external client or the session factory — not deep inside the code under test.
+4. Use unique identifiers (UUIDs) so tests can run in any order or in parallel.
+5. Mark anything long-running `@pytest.mark.slow` so the default loop stays fast.
+
+### Mocking a session factory
+
+Session-scoped code usually goes through a context manager, so the mock has to cover the whole chain:
 
 ```python
 def test_error_handling(self, mock_engine, mock_sessionmaker, mock_func):
@@ -388,237 +188,85 @@ def test_error_handling(self, mock_engine, mock_sessionmaker, mock_func):
     mock_func.side_effect = RuntimeError("Something failed")
 
     with pytest.raises(RuntimeError) as exc_info:
-        your_task.apply(kwargs={}).get()  # type: ignore[attr-defined]
+        your_task()
 
     assert "Something failed" in str(exc_info.value)
 ```
 
-#### Testing Database Connection Failures
+### Asserting on logs
 
 ```python
-def test_database_connection_failure(self, mock_engine, mock_sessionmaker, mock_func):
-    mock_session = MagicMock()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
-    from sqlalchemy.exc import OperationalError
-    mock_session.execute.side_effect = OperationalError("Connection failed", None, None)
-
-    with pytest.raises(OperationalError):
-        your_task()  # type: ignore[call-arg]
-```
-
-#### Testing Logging
-
-```python
-def test_logging_on_success(self, mock_engine, mock_sessionmaker, mock_func):
-    mock_session = MagicMock()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
+def test_logs_completion(self, mock_func):
     mock_func.return_value = {"status": "success"}
 
     with patch("path.to.task.logger") as mock_logger:
-        your_task()  # type: ignore[call-arg]
+        your_task()
 
         mock_logger.info.assert_any_call("Starting task")
-        assert any("completed" in str(call) for call in mock_logger.info.call_args_list)
+        assert any("completed" in str(c) for c in mock_logger.info.call_args_list)
 ```
 
-#### Testing Retry Behavior
+`log_cli` is off, so logs are captured rather than streamed; pytest prints them as part of the failure context, and `caplog` works normally.
 
-```python
-def test_retry_behavior(self, mock_engine, mock_sessionmaker, mock_func):
-    mock_session = MagicMock()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
-    mock_func.side_effect = RuntimeError("Temporary error")
-
-    with patch.object(your_task, "retry") as mock_retry:
-        mock_retry.side_effect = RuntimeError("Temporary error")
-
-        with pytest.raises(RuntimeError):
-            your_task.apply(kwargs={}).get()  # type: ignore[attr-defined]
-```
-
-### Testing Async Tasks
-
-For tasks using `asyncio.run()`:
+### Testing code that calls `asyncio.run`
 
 ```python
 @patch("path.to.task.asyncio")
 def test_async_task(self, mock_asyncio):
     mock_asyncio.run.return_value = {"status": "success"}
 
-    result = your_async_task()  # type: ignore[call-arg]
+    your_async_task()
 
-    assert result is None
     mock_asyncio.run.assert_called_once()
 ```
 
-### Troubleshooting
+## End-to-end validation
 
-#### "Expected 'commit' to have been called once. Called 0 times."
+Full-stack workflows are validated by the runnable demos in [`examples/`](/examples/README.md) rather than by e2e tests. They exercise authentication, graph creation, upload, ingestion, and querying against a running stack, and double as user-facing documentation.
 
-**Solution:** Your mock session isn't being used by the task. Make sure you're mocking the full chain:
+```bash
+just demo-custom-graph
+just demo-sec
+just demo-roboledger
+```
+
+## Coverage
+
+```bash
+just test-cov                                              # terminal report
+uv run pytest --cov=robosystems --cov-report=term-missing  # with missing lines
+uv run pytest --cov=robosystems --cov-report=html && open htmlcov/index.html
+```
+
+## Debugging
+
+```bash
+uv run pytest --pdb          # debugger on failure
+uv run pytest -s             # don't capture stdout
+uv run pytest -l --tb=long   # locals plus full tracebacks
+uv run pytest --fixtures     # list every fixture visible from here
+```
+
+### Common failures
+
+**`Expected 'commit' to have been called once. Called 0 times.`** — the code under test is not using your mock session. Mock the full chain, not just one level:
 
 ```python
-# Wrong - only mocks one level
-mock_sessionmaker.return_value = mock_session
-
-# Correct - mocks the full chain
-mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
+mock_sessionmaker.return_value = mock_session                                  # wrong
+mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session  # right
 ```
 
-#### Task hangs or times out
+**A test hangs or times out** — the context manager never exits. Set `mock_sessionmaker.return_value.return_value.__exit__.return_value = False`.
 
-**Solution:** Make sure you're properly mocking the `__exit__` method:
+**Database connection errors** — check the stack is up (`docker ps | grep postgres`) and the test database exists (`psql -h localhost -U postgres -l | grep robosystems_test`).
 
-```python
-mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-```
+**Fixture not found** — fixtures must live in a `conftest.py` at or above the test's directory. `uv run pytest --fixtures` lists what is in scope.
 
-## Coverage and Quality
+## Continuous integration
 
-### Running with Coverage
+CI runs linting, formatting, type checking, and the test suite on every pull request and on pushes to `main` and `staging` — the same gate as `just test-all`. Run it locally before opening a pull request; the full suite takes several minutes.
 
-```bash
-# Coverage report in terminal
-just test-cov
+## Reference
 
-# Generate HTML coverage report
-uv run pytest --cov=robosystems --cov-report=html
-open htmlcov/index.html
-
-# Show missing lines
-uv run pytest --cov=robosystems --cov-report=term-missing
-
-# Fail if coverage below threshold
-uv run pytest --cov=robosystems --cov-fail-under=80
-```
-
-### Code Quality Checks
-
-```bash
-# Run all quality checks (includes tests)
-just test-all
-
-# Individual checks
-just lint           # Ruff linting
-just format         # Ruff formatting
-just typecheck      # Pyright type checking
-```
-
-## Continuous Integration
-
-Tests run automatically in GitHub Actions on:
-
-- Every pull request
-- Every push to `main` or `staging`
-- Manual workflow dispatch
-
-CI runs:
-
-1. Linting and formatting checks
-2. Type checking
-3. Unit tests (fast)
-4. Integration tests (with PostgreSQL)
-5. Coverage reporting
-
-E2E tests run separately as they require the full Docker stack.
-
-## Debugging Tests
-
-### Common Issues
-
-#### Import Errors
-
-```bash
-# Ensure you're using uv run
-uv run pytest  # ✓ Correct
-pytest         # ✗ Wrong - may use system Python
-```
-
-#### Database Connection Errors
-
-```bash
-# Check PostgreSQL is running
-docker ps | grep postgres
-
-# Verify test database exists
-psql -h localhost -U postgres -l | grep robosystems_test
-```
-
-#### Fixture Not Found
-
-```python
-# Check fixture scope and location
-# Fixtures must be in conftest.py or imported
-pytest --fixtures  # List all available fixtures
-```
-
-### Debug Mode
-
-```bash
-# Drop into debugger on failure
-uv run pytest --pdb
-
-# Drop into debugger on first failure
-uv run pytest -x --pdb
-
-# Print output even on success
-uv run pytest -s
-
-# Very verbose output
-uv run pytest -vv
-
-# Show local variables on failure
-uv run pytest -l --tb=long
-```
-
-## Performance Optimization
-
-### Speeding Up Tests
-
-```bash
-# Run only fast tests
-uv run pytest -m "unit and not slow"
-
-# Run in parallel (requires pytest-xdist)
-uv run pytest -n auto
-
-# Run with minimal output
-uv run pytest -q
-
-# Skip slow fixtures
-uv run pytest --no-cov  # Skip coverage collection
-```
-
-### Test Isolation
-
-- Each test using `db_session` gets a rolled-back transaction
-- Integration tests should clean up created resources
-- Use unique identifiers (UUIDs) to avoid conflicts
-- Parallel tests should not share mutable state
-
-## Contributing New Tests
-
-When adding new tests:
-
-1. **Choose the right location** - Mirror the source code structure
-2. **Add appropriate markers** - `@pytest.mark.unit`, `@pytest.mark.integration`, etc.
-3. **Follow naming conventions** - `test_*.py`, `Test*` classes, `test_*` functions
-4. **Write descriptive docstrings** - Explain what the test verifies
-5. **Use existing fixtures** - Don't duplicate fixture setup
-6. **Clean up resources** - Integration tests should clean up after themselves
-7. **Run locally first** - Ensure tests pass before committing
-8. **Check coverage** - New code should have corresponding tests
-
-## Resources
-
-- [pytest documentation](https://docs.pytest.org/)
-- [pytest-asyncio documentation](https://pytest-asyncio.readthedocs.io/)
-- [Dagster testing guide](https://docs.dagster.io/concepts/testing)
-- [FastAPI testing guide](https://fastapi.tiangolo.com/tutorial/testing/)
-- [Coverage.py documentation](https://coverage.readthedocs.io/)
+- [pytest](https://docs.pytest.org/) · [pytest-asyncio](https://pytest-asyncio.readthedocs.io/) · [Coverage.py](https://coverage.readthedocs.io/)
+- [FastAPI testing](https://fastapi.tiangolo.com/tutorial/testing/) · [Dagster testing](https://docs.dagster.io/concepts/testing)

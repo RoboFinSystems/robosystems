@@ -1,7 +1,7 @@
 """API models for subgraph management.
 
-This module defines Pydantic models for subgraph-related API requests and responses.
-Subgraphs are only available for Enterprise and Premium tier graphs.
+Every dedicated tier supports subgraphs; the per-graph maximum varies by tier
+(see ``.github/configs/graph.yml``).
 """
 
 import re

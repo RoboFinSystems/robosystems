@@ -1,7 +1,7 @@
-"""Payment provider abstraction layer for extensibility.
+"""Payment processor interface plus the Stripe implementation.
 
-This module provides an abstract interface for payment providers, making it easy
-to support multiple processors without changing business logic.
+Business logic talks to :class:`PaymentProvider`; only this module knows the
+processor's SDK. Get an instance from :func:`get_payment_provider`.
 """
 
 import threading
@@ -22,31 +22,14 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def create_customer(self, user_id: str, email: str) -> str:
-    """Create customer in payment system.
-
-    Args:
-        user_id: Internal user ID
-        email: User email address
-
-    Returns:
-        provider_customer_id: Customer ID in payment provider system
-    """
+    """Create a customer for our ``user_id`` and return the provider's ID."""
     pass
 
   @abstractmethod
   def create_checkout_session(
     self, customer_id: str, price_id: str, metadata: dict[str, Any]
   ) -> dict[str, Any]:
-    """Create checkout session for collecting payment method.
-
-    Args:
-        customer_id: Provider customer ID
-        price_id: Provider price/plan ID
-        metadata: Custom metadata to attach to session
-
-    Returns:
-        Dict with keys: checkout_url, session_id
-    """
+    """Start a hosted checkout. Returns ``{checkout_url, session_id}``."""
     pass
 
   @abstractmethod
@@ -57,84 +40,41 @@ class PaymentProvider(ABC):
     metadata: dict[str, Any],
     payment_method_id: str | None = None,
   ) -> str:
-    """Create subscription (for customers with payment method on file).
+    """Subscribe a customer who already has a payment method on file.
 
-    Args:
-        customer_id: Provider customer ID
-        price_id: Provider price/plan ID
-        metadata: Custom metadata
-        payment_method_id: Optional payment method ID to use
-
-    Returns:
-        provider_subscription_id: Subscription ID in payment provider
+    Without ``payment_method_id`` the customer's default method is used.
     """
     pass
 
   @abstractmethod
   def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]:
-    """Verify and parse webhook event.
-
-    Args:
-        payload: Raw webhook payload
-        signature: Webhook signature header
-
-    Returns:
-        Parsed webhook event
-
-    Raises:
-        ValueError: Invalid payload or signature
-    """
+    """Verify the signature and parse the event. Raises on either failure."""
     pass
 
   @abstractmethod
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
-    """List payment methods for a customer.
-
-    Args:
-        customer_id: Provider customer ID
-
-    Returns:
-        List of payment method dictionaries
-    """
+    """List a customer's payment methods, each flagged with ``is_default``."""
     pass
 
   @abstractmethod
   def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
-    """List invoices for a customer.
-
-    Args:
-        customer_id: Provider customer ID
-        limit: Maximum number of invoices to return
-
-    Returns:
-        Dict with keys: invoices (list), has_more (bool)
-    """
+    """List invoices. Returns ``{invoices, has_more}``."""
     pass
 
   @abstractmethod
   def get_upcoming_invoice(
     self, customer_id: str, subscription_id: str
   ) -> dict[str, Any] | None:
-    """Get the upcoming invoice for a customer's subscription.
+    """Preview the next invoice, or None when there is nothing to bill.
 
-    Args:
-        customer_id: Provider customer ID
-        subscription_id: Provider subscription ID to preview. Required —
-            an upcoming invoice is a property of a subscription, not of a
-            customer, so there is nothing to preview without one.
-
-    Returns:
-        Upcoming invoice details or None if no upcoming invoice
+    ``subscription_id`` is required: an upcoming invoice is a property of a
+    subscription, not of a customer.
     """
     pass
 
   @abstractmethod
   def cancel_subscription(self, subscription_id: str) -> None:
-    """Cancel a subscription immediately.
-
-    Args:
-        subscription_id: Provider subscription ID to cancel
-    """
+    """Cancel a subscription immediately."""
     pass
 
   @abstractmethod
@@ -144,29 +84,12 @@ class PaymentProvider(ABC):
     new_price_id: str,
     proration_behavior: str = "create_prorations",
   ) -> dict[str, Any]:
-    """Change the price on an existing subscription (upgrade/downgrade).
-
-    Args:
-        subscription_id: Provider subscription ID
-        new_price_id: New price ID to switch to
-        proration_behavior: How to handle prorations
-
-    Returns:
-        Updated subscription data
-    """
+    """Move a subscription to a different price (upgrade or downgrade)."""
     pass
 
   @abstractmethod
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
-    """Create a customer portal session for managing payment methods.
-
-    Args:
-        customer_id: Provider customer ID
-        return_url: URL to redirect customer after portal session
-
-    Returns:
-        Portal session URL where customer can manage payment methods
-    """
+    """Return a self-serve portal URL for managing payment methods."""
     pass
 
 
@@ -292,28 +215,21 @@ class StripePaymentProvider(PaymentProvider):
     resource_type: str = "graph",
     repository_id: str | None = None,
   ) -> str:
-    """Get or create Stripe price for a plan, with caching and auto-creation.
+    """Resolve the Stripe price ID for a plan, creating it if absent.
 
-    For graph plans: one Stripe product per plan (ladybug-standard, etc.)
-    For repository plans: one Stripe product per repository with multiple prices.
-      The product is found by the manifest's display name (e.g., "SEC EDGAR Filings")
-      and prices are matched by unit_amount.
+    Graph plans get one Stripe product per plan; repository plans share one
+    product per repository (looked up by the manifest's display name, e.g.
+    "SEC EDGAR Filings") with one price per tier. Results are cached in-process
+    for 24 hours behind a lock, so a config price change is not picked up until
+    the entry expires or the process restarts.
 
-    Args:
-        plan_name: Internal plan name (e.g., "ladybug-standard", "starter")
-        resource_type: "graph" or "repository"
-        repository_id: Required when resource_type is "repository" (e.g., "sec")
-
-    Returns:
-        Stripe price ID
-
-    Raises:
-        ValueError: Plan not found in billing config, or repository_id missing
+    Raises ValueError when the plan is missing from the billing config, or when
+    ``resource_type`` is "repository" without a ``repository_id``.
     """
     if resource_type == "repository" and not repository_id:
       raise ValueError("repository_id is required when resource_type is 'repository'")
 
-    # Include repository_id in cache key for repository plans to avoid collisions
+    # repository_id is part of the key: plan names collide across repositories.
     key_suffix = (
       f"{resource_type}:{repository_id}:{plan_name}"
       if repository_id
@@ -321,14 +237,13 @@ class StripePaymentProvider(PaymentProvider):
     )
     cache_key = f"stripe_price:{env.ENVIRONMENT}:{key_suffix}"
 
-    # Fast path: check cache without lock
     entry = self._price_cache.get(cache_key)
     if entry and entry[1] > time.time():
       logger.debug(f"Using cached Stripe price ID for {plan_name}: {entry[0]}")
       return entry[0]
 
     with self._price_lock:
-      # Double-check after acquiring lock
+      # Re-check: another thread may have populated the entry while we waited.
       entry = self._price_cache.get(cache_key)
       if entry and entry[1] > time.time():
         logger.debug(f"Found price ID after lock acquire: {entry[0]}")
@@ -365,11 +280,10 @@ class StripePaymentProvider(PaymentProvider):
     plan_config: dict[str, Any],
     target_amount: int,
   ) -> str:
-    """Find or create a price on a single-product-per-repository in Stripe.
+    """Find or create a price under a repository's single Stripe product.
 
-    Repositories use one Stripe product (found by manifest name) with a separate
-    price for each plan tier, matched by unit_amount. This enables upgrade/downgrade
-    via Stripe subscription item swap.
+    Keeping every tier on one product is what lets an upgrade or downgrade be a
+    subscription-item swap rather than a cancel-and-resubscribe.
     """
     from ...config.shared_repositories import get_manifest
 
@@ -379,7 +293,6 @@ class StripePaymentProvider(PaymentProvider):
 
     product_name = manifest.name  # e.g., "SEC EDGAR Filings"
 
-    # Search for existing product by name and environment
     search_query = (
       f'name:"{product_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
     )
@@ -389,7 +302,6 @@ class StripePaymentProvider(PaymentProvider):
       product = products.data[0]
       logger.info(f"Found existing Stripe product for {repository_id}: {product.id}")
     else:
-      # Create new unified product for this repository
       logger.info(f"Creating new Stripe product for repository {repository_id}")
       product = self.stripe.Product.create(
         name=product_name,
@@ -402,7 +314,6 @@ class StripePaymentProvider(PaymentProvider):
       )
       logger.info(f"Created Stripe product {product.id} for {repository_id}")
 
-    # Find existing price matching the target amount on this product
     prices = self.stripe.Price.list(product=product.id, active=True, limit=100)
     for price in prices.data:
       if price.unit_amount == target_amount and price.recurring:
@@ -412,7 +323,6 @@ class StripePaymentProvider(PaymentProvider):
         )
         return price.id
 
-    # No matching price found — create one
     price = self.stripe.Price.create(
       product=product.id,
       unit_amount=target_amount,
@@ -436,7 +346,13 @@ class StripePaymentProvider(PaymentProvider):
     plan_config: dict[str, Any],
     target_amount: int,
   ) -> str:
-    """Find or create a price for a graph plan (one product per plan)."""
+    """Find or create a price for a graph plan (one product per plan).
+
+    Match is on ``unit_amount``, not "first active price": Stripe prices are
+    immutable, so a change to ``base_price_cents`` can only be honoured by
+    finding the price at the new amount or creating one. Returning any active
+    price would quote the config amount and bill the old one.
+    """
     search_query = f'metadata["plan_name"]:"{plan_name}" AND metadata["environment"]:"{env.ENVIRONMENT}"'
     products = self.stripe.Product.search(query=search_query, limit=1)
 
@@ -444,12 +360,6 @@ class StripePaymentProvider(PaymentProvider):
       product = products.data[0]
       logger.info(f"Found existing Stripe product for {plan_name}: {product.id}")
 
-      # Match on unit_amount, as the repository path does. Returning the first
-      # active price regardless of amount meant a base_price_cents change never
-      # reached Stripe: the old price stayed active on the product and kept
-      # being handed back, so checkout quoted the new price from config and
-      # billed the old one. Prices are immutable in Stripe, so a repricing is
-      # always "find the one at this amount, else create it" — never a mutation.
       prices = self.stripe.Price.list(product=product.id, active=True, limit=100)
       for price in prices.data:
         if price.unit_amount == target_amount and price.recurring:
@@ -520,18 +430,10 @@ class StripePaymentProvider(PaymentProvider):
     new_price_id: str,
     proration_behavior: str = "create_prorations",
   ) -> dict[str, Any]:
-    """Change the price on an existing Stripe subscription (upgrade/downgrade).
+    """Swap the subscription's first item onto ``new_price_id``.
 
-    Swaps the subscription item to the new price. Both prices must be on the
-    same product (single-product-per-repository pattern).
-
-    Args:
-        subscription_id: Stripe subscription ID
-        new_price_id: New Stripe price ID to switch to
-        proration_behavior: How to handle prorations (default: create_prorations)
-
-    Returns:
-        Updated subscription data
+    Both prices must sit on the same Stripe product. Returns
+    ``{subscription_id, status}``.
     """
     subscription = self.stripe.Subscription.retrieve(subscription_id)
     current_item = subscription["items"]["data"][0]
@@ -636,16 +538,14 @@ class StripePaymentProvider(PaymentProvider):
   def get_upcoming_invoice(
     self, customer_id: str, subscription_id: str
   ) -> dict[str, Any] | None:
-    """Get the upcoming invoice for a Stripe subscription.
+    """Preview the next invoice for a Stripe subscription.
 
-    `Invoice.create_preview` previews a *subscription*, not a customer.
-    Called with only `customer` it returns 400 every time — Stripe requires
+    ``Invoice.create_preview`` previews a *subscription*, not a customer:
+    called with only ``customer`` it 400s every time, because Stripe requires
     one of subscription / schedule / subscription_details.items /
-    schedule_details.phases / invoice_items — so passing the subscription is
-    what makes this work at all, not an optimization.
+    schedule_details.phases / invoice_items.
     """
     try:
-      # v2026 API: Invoice.upcoming() replaced by Invoice.create_preview()
       invoice = self.stripe.Invoice.create_preview(
         customer=customer_id, subscription=subscription_id
       )
@@ -672,10 +572,9 @@ class StripePaymentProvider(PaymentProvider):
       }
 
     except self.stripe.error.InvalidRequestError as e:
-      # Reachable when the subscription is in a state with nothing to bill
-      # (already canceled, fully credited). Logged at warning rather than
-      # debug: with the subscription supplied this should be rare, and the
-      # previous debug-level swallow is why a permanent 400 went unnoticed.
+      # Reachable when the subscription has nothing to bill (already canceled,
+      # fully credited). Warning, not debug: with a subscription supplied this
+      # should be rare, and a quietly permanent 400 is easy to miss.
       logger.warning(
         f"No upcoming invoice for subscription {subscription_id}: {e}",
         extra={"customer_id": customer_id, "subscription_id": subscription_id},
@@ -691,10 +590,9 @@ class StripePaymentProvider(PaymentProvider):
   def cancel_subscription(self, subscription_id: str) -> None:
     """Cancel a Stripe subscription immediately.
 
-    Idempotent: a subscription that is already canceled or no longer exists
-    on Stripe's side counts as success, so callers can safely gate local
-    cancellation on this raising — a raise always means Stripe still has a
-    live subscription that will keep billing.
+    Idempotent: an already-canceled or missing subscription counts as success,
+    so callers can gate local cancellation on this raising — a raise always
+    means Stripe still has a live subscription that will keep billing.
     """
     try:
       self.stripe.Subscription.cancel(subscription_id)
@@ -757,11 +655,11 @@ class StripePaymentProvider(PaymentProvider):
       raise
 
   def _subscription_already_terminal(self, subscription_id: str) -> bool:
-    """True when Stripe no longer has a live subscription to cancel.
+    """True when Stripe has no live subscription left to cancel.
 
-    Retrieval is the robust check — Stripe's InvalidRequestError covers both
-    'no such subscription' and 'already canceled', and message-matching on
-    those is brittle across API versions.
+    Re-retrieving is the reliable check: Stripe's InvalidRequestError covers
+    both "no such subscription" and "already canceled", and matching on its
+    message text breaks across API versions.
     """
     try:
       subscription = self.stripe.Subscription.retrieve(subscription_id)
@@ -792,17 +690,10 @@ class StripePaymentProvider(PaymentProvider):
 
 
 def get_payment_provider(provider_name: str = "stripe") -> PaymentProvider:
-  """Factory function to get payment provider instance.
+  """Return the provider implementation for ``provider_name``.
 
-  Args:
-      provider_name: Name of payment provider (default: "stripe")
-
-  Returns:
-      PaymentProvider implementation
-
-  Raises:
-      ValueError: Unknown provider name
-      NotImplementedError: Provider not yet implemented
+  Raises ValueError for an unknown name, NotImplementedError for one that is
+  recognised but unbuilt.
   """
   if provider_name == "stripe":
     return StripePaymentProvider()

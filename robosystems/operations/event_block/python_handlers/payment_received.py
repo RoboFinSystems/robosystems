@@ -23,20 +23,18 @@ Idempotency: a re-sync that re-fires the handler skips resolution when
 ``discharges_event_id`` is already set, so handler retries are
 no-cost.
 
-What's deliberately not done in v1:
+Deliberate limitations:
 
 - Multi-invoice splits. QB's Payment.Line may carry multiple LinkedTxn
   refs (one payment settling N invoices, each line for a different
-  amount). We capture all refs in metadata but only link
-  ``discharges_event_id`` to the first match; the remaining refs stay
-  queryable in metadata for a future per-line linkage table. The
-  ``sale.amount - SUM(discharges.amount)`` AR query still works for
-  single-invoice payments and undercounts for splits; correctness for
-  splits is a follow-up once a customer actually has them.
-- Bidirectional update. We set ``discharges_event_id`` on the payment;
-  the invoice's row is left untouched. Querying "what payments
-  settled invoice X?" runs in the opposite direction off this same
-  column, so a back-reference is redundant.
+  amount). All refs are captured in metadata but only the first match
+  populates ``discharges_event_id``; the rest stay queryable in metadata.
+  The ``sale.amount - SUM(discharges.amount)`` AR query is therefore
+  correct for single-invoice payments and undercounts for splits.
+- No bidirectional update. Only the payment carries
+  ``discharges_event_id``; the invoice row is untouched. "What payments
+  settled invoice X?" reads the same column in the opposite direction, so
+  a back-reference would be redundant.
 """
 
 from __future__ import annotations
@@ -250,10 +248,8 @@ def dispatch_preview(
 ) -> HandlerPreview:
   """Preview is identical to journal_entry_recorded.
 
-  The discharge resolution only runs on real dispatch (it reads
-  committed metadata + cross-event state). Preview returns the GL plan
-  unchanged — call sites that need to verify the discharge link
-  would resolve correctly can probe via a dry-run dispatch in tests.
+  Discharge resolution runs only on real dispatch — it reads committed
+  metadata and cross-event state — so the preview is just the GL plan.
   """
   return journal_dispatch_preview(session, body, metadata)
 

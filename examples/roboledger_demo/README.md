@@ -29,7 +29,7 @@ just demo-roboledger --skeleton
 just demo-roboledger --ai
 ```
 
-The `just demo-roboledger` recipe sets `UV_ENV_FILE={{_local_env}}` so the script picks up `ROBOSYSTEMS_API_URL` and other settings from `.env.local`. `ROBOLEDGER_ENABLED=true` lives in `.env`/`env.local` and is read by the API container at startup — the script doesn't need it set on its own process.
+The `just demo-roboledger` recipe loads `.env.local` (via `UV_ENV_FILE`), so the script picks up `ROBOSYSTEMS_API_URL` and the other local settings. `ROBOLEDGER_ENABLED=true` is read by the API container at startup, not by this script — set it in `.env` before `just start`.
 
 ## What Gets Created
 
@@ -92,8 +92,9 @@ After running the setup script, use Claude Desktop or any MCP client.
 
 ```
 "Draft all closing entries for the most recent completed month"
-→ create-closing-entry for each pending schedule (amounts depend on which
-  schedules are active in that period — depreciation runs continuously,
+→ promote-obligations drafts every pending schedule in one sweep (amounts
+  depend on which schedules are active in that period — depreciation runs
+  continuously,
   while prepaid insurance / software / cloud hosting each have their own
   12-month cycles and staggered renewal dates):
   - Computer Equipment Depreciation: $133.33
@@ -149,10 +150,13 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 | File | Purpose |
 |---|---|
 | `main.py` | Single entry point — creates graph, loads everything via HTTP API |
-| `data.py` | Chart of accounts + synthetic transaction generator (evergreen dates) |
+| `data.py` | Chart of accounts + synthetic transaction generator (rolling dates) |
 | `agents.py` | Seed counterparty agents (customers, vendors, employees) referenced by event-block `agent_id` |
 | `mappings.py` | CoA → GAAP mapping definitions |
 | `policies.py` | Accounting policy document content (markdown) |
+| `validate.py` | Post-setup checks on the Information Block machinery behind the schedules; everything it creates is torn down before it returns |
+| `download_bundles.py` | Pulls the filed Report's artifact set (JSON-LD, holon, XBRL zip, validation verdicts, DataBook) into `output/` |
+| `_reset.py` | Demo-only cleanup between re-runs — the single path that touches PostgreSQL directly, deliberately with no API surface |
 | `prompt.md` | Claude prompt for the close workflow — paste into Claude Desktop |
 
 ## Output Artifacts

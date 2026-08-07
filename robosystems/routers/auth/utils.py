@@ -64,14 +64,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def detect_app_source(request) -> str:
-  """
-  Detect which app the request is coming from.
+  """Detect the calling app from the Referer and Origin headers.
 
-  Args:
-    request: FastAPI request object
-
-  Returns:
-    App identifier (roboledger, roboinvestor, robosystems)
+  Returns one of `roboledger`, `roboinvestor`, or `robosystems`.
   """
   # Check referer header
   referer = request.headers.get("referer", "").lower()

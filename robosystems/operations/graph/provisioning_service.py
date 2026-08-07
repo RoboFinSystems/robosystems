@@ -1,11 +1,11 @@
-"""Provisioning operations for graphs and repositories after payment confirmation.
+"""Resource provisioning that runs once a payment is confirmed.
 
-These functions handle resource provisioning triggered by billing webhooks
-(Stripe payment confirmation) or direct subscription creation. They are
-called synchronously from Dagster billing jobs and subscription routers.
+Driven by Stripe billing webhooks or direct subscription creation, and called
+synchronously from the Dagster billing jobs and the subscription routers.
 
-Moved from middleware/sse/direct_monitor.py — these are service-layer
-orchestration, not background tasks or SSE monitors.
+Both entry points end the same way on failure: the subscription is marked
+failed and its Stripe subscription cancelled, so a customer is never left
+paying for a resource that was never created.
 """
 
 import time
@@ -22,19 +22,11 @@ async def run_graph_provisioning(
   user_id: str,
   tier: str,
 ) -> dict[str, Any]:
-  """Provision a graph database after payment confirmation.
+  """Create the graph, activate the subscription, and report to Dagster.
 
-  Creates the graph via GraphCreationService, activates the subscription,
-  and reports to Dagster for observability.
-
-  Args:
-      operation_id: Optional SSE operation ID (None for webhook-triggered)
-      subscription_id: Subscription ID to provision
-      user_id: User who owns the subscription
-      tier: Instance tier (ladybug-standard, ladybug-large, ladybug-xlarge)
-
-  Returns:
-      Provisioning result with graph_id and status
+  ``operation_id`` streams progress over SSE; it is None on the
+  webhook-triggered path, which has no client listening. On failure the
+  subscription is marked failed and the error re-raised.
   """
   from robosystems.database import get_db_session
   from robosystems.models.core.billing import (
@@ -221,19 +213,11 @@ async def run_user_repository_provisioning(
   user_id: str,
   repository_name: str,
 ) -> dict[str, Any]:
-  """Provision user repository access after payment confirmation.
+  """Grant repository access, allocate credits, and activate the subscription.
 
-  Grants access to a shared repository, allocates credits, activates
-  the subscription, and reports to Dagster for observability.
-
-  Args:
-      operation_id: Optional SSE operation ID (None for webhook-triggered)
-      subscription_id: Subscription ID to provision
-      user_id: User who owns the subscription
-      repository_name: Repository to grant access to (sec, industry, economic)
-
-  Returns:
-      Provisioning result with access status
+  ``operation_id`` streams progress over SSE; it is None on the
+  webhook-triggered path. On failure the subscription is marked failed and the
+  error re-raised.
   """
   from robosystems.database import get_db_session
   from robosystems.models.core import RepositoryType

@@ -21,21 +21,14 @@ from robosystems.logger import logger
 
 
 class S3Client:
-  """
-  General-purpose S3 client for various operations.
+  """Sync S3 client for general object storage (XBRL textblocks, temp files).
 
-  This client provides common S3 operations like upload, download, and delete
-  for general use cases like storing XBRL textblocks, temporary files, etc.
+  All methods swallow errors and return a falsy value rather than raising,
+  so callers can translate to HTTP without try/except.
   """
 
   def __init__(self, region_name: str | None = None, endpoint_url: str | None = None):
-    """
-    Initialize S3 client.
-
-    Args:
-        region_name: AWS region (defaults to env.AWS_DEFAULT_REGION)
-        endpoint_url: Custom endpoint URL (e.g., for LocalStack)
-    """
+    """Defaults to ``env.AWS_DEFAULT_REGION`` / ``env.AWS_ENDPOINT_URL``."""
     self.region_name = region_name or env.AWS_DEFAULT_REGION
     self.endpoint_url = endpoint_url or env.AWS_ENDPOINT_URL
     # Optional second endpoint used only when *signing presigned URLs*.
@@ -107,20 +100,9 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
   ) -> bool:
-    """
-    Upload a string as an S3 object.
+    """Upload a UTF-8 string as an S3 object. False on any failure.
 
-    Retries are handled by the boto3 client's adaptive retry configuration.
-
-    Args:
-        content: String content to upload
-        bucket: S3 bucket name
-        key: S3 object key
-        content_type: MIME type for the content
-        metadata: Additional metadata for the object
-
-    Returns:
-        True if successful, False otherwise
+    Retries come from the boto3 client's adaptive retry configuration.
     """
     content_bytes = content.encode("utf-8")
 
@@ -168,21 +150,10 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
   ) -> bool:
-    """Upload raw bytes as an S3 object.
+    """Upload raw bytes as an S3 object. False on any failure.
 
-    The binary sibling of :meth:`upload_string` — for artifacts that
-    aren't UTF-8 text (e.g. the XBRL serialization zip). Retries are
-    handled by the boto3 client's adaptive retry configuration.
-
-    Args:
-        content: Byte content to upload.
-        bucket: S3 bucket name.
-        key: S3 object key.
-        content_type: MIME type for the content.
-        metadata: Additional metadata for the object.
-
-    Returns:
-        True if successful, False otherwise.
+    The binary sibling of :meth:`upload_string`, for artifacts that aren't
+    UTF-8 text (e.g. the XBRL serialization zip).
     """
     put_args: dict[str, Any] = {
       "Bucket": bucket,
@@ -226,21 +197,7 @@ class S3Client:
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
   ) -> bool:
-    """
-    Upload a file to S3.
-
-    Retries are handled by the boto3 client's adaptive retry configuration.
-
-    Args:
-        file_path: Path to the file to upload
-        bucket: S3 bucket name
-        key: S3 object key
-        content_type: MIME type for the content
-        metadata: Additional metadata for the object
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Upload a local file to S3. False on any failure."""
     extra_args = {}
     if content_type:
       extra_args["ContentType"] = content_type
@@ -269,19 +226,7 @@ class S3Client:
     key: str,
     file_path: str,
   ) -> bool:
-    """
-    Download an S3 object to a local file.
-
-    Retries are handled by the boto3 client's adaptive retry configuration.
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-        file_path: Local path to write the file to
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Download an S3 object to a local path. False if absent or unreadable."""
     try:
       self.s3_client.download_file(bucket, key, file_path)
       logger.debug(f"Downloaded s3://{bucket}/{key} to {file_path}")
@@ -300,18 +245,7 @@ class S3Client:
       return False
 
   def download_string(self, bucket: str, key: str) -> str | None:
-    """
-    Download an S3 object as a string.
-
-    Retries are handled by the boto3 client's adaptive retry configuration.
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-
-    Returns:
-        Content as string if successful, None otherwise
-    """
+    """Download an S3 object as a UTF-8 string, or None if unavailable."""
     try:
       response = self.s3_client.get_object(Bucket=bucket, Key=key)
       content = response["Body"].read().decode("utf-8")
@@ -333,16 +267,7 @@ class S3Client:
       return None
 
   def delete_object(self, bucket: str, key: str) -> bool:
-    """
-    Delete an S3 object.
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Delete an S3 object. Denials are logged at CRITICAL for the audit trail."""
     try:
       self.s3_client.delete_object(Bucket=bucket, Key=key)
       logger.debug(f"Successfully deleted s3://{bucket}/{key}")
@@ -365,16 +290,7 @@ class S3Client:
       return False
 
   def object_exists(self, bucket: str, key: str) -> bool:
-    """
-    Check if an S3 object exists.
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-
-    Returns:
-        True if object exists, False otherwise
-    """
+    """True when the object exists. Errors other than 404 also return False."""
     try:
       self.s3_client.head_object(Bucket=bucket, Key=key)
       return True
@@ -396,27 +312,12 @@ class S3Client:
     response_content_type: str | None = None,
     response_content_disposition: str | None = None,
   ) -> str | None:
-    """Generate a time-limited download URL for an S3 object.
+    """Sign a time-limited download URL, or None if signing fails.
 
-    Wraps ``boto3.client.generate_presigned_url`` with the sync
-    ergonomics the rest of this class uses — returns ``None`` on
-    failure rather than raising, so callers can translate to HTTP
-    cleanly. Use the async ``S3BackupAdapter.generate_download_url``
-    when running inside an event loop.
-
-    Args:
-        bucket: S3 bucket name.
-        key: S3 object key.
-        expires_in: URL expiration window in seconds (default 5 min).
-        response_content_type: Optional MIME type to force in the
-            signed URL's ``response-content-type`` query param. Use
-            for serving artifacts whose stored ``Content-Type`` may
-            not match the desired download disposition.
-        response_content_disposition: Optional Content-Disposition
-            header (e.g. ``attachment; filename="report.jsonld"``).
-
-    Returns:
-        A presigned URL on success, ``None`` if signing fails.
+    ``response_content_type`` / ``response_content_disposition`` override the
+    headers S3 returns, for artifacts whose stored ``Content-Type`` doesn't
+    match the desired download behaviour. Use the async
+    :meth:`S3BackupAdapter.generate_download_url` inside an event loop.
     """
     params: dict[str, Any] = {"Bucket": bucket, "Key": key}
     if response_content_type:
@@ -445,17 +346,7 @@ class S3Client:
   def list_objects(
     self, bucket: str, prefix: str | None = None, max_keys: int = 1000
   ) -> list[str]:
-    """
-    List objects in an S3 bucket.
-
-    Args:
-        bucket: S3 bucket name
-        prefix: Prefix to filter objects
-        max_keys: Maximum number of keys to return
-
-    Returns:
-        List of object keys
-    """
+    """List object keys under ``prefix``. Single page — no pagination."""
     try:
       params = {
         "Bucket": bucket,
@@ -486,17 +377,11 @@ class S3Client:
     metadata: dict[str, str] | None = None,
     max_workers: int | None = None,
   ) -> dict[str, bool]:
-    """
-    Upload multiple strings to S3 in parallel.
+    """Upload ``(content, bucket, key)`` triples in parallel, keyed by S3 key.
 
-    Args:
-        items: List of tuples containing (content, bucket, key)
-        content_type: MIME type for all content
-        metadata: Additional metadata for all objects
-        max_workers: Maximum number of parallel uploads (uses SSM tunable if not specified)
-
-    Returns:
-        Dictionary mapping S3 keys to upload success status
+    ``max_workers`` defaults to the SSM-tunable ``TuningConfig`` value. An item
+    that raises rather than returning False is logged but omitted from the
+    result dict, so a caller checking coverage must compare against ``items``.
     """
     if max_workers is None:
       max_workers = TuningConfig.get_max_workers()
@@ -574,7 +459,16 @@ class BackupMetadata:
 
 
 class S3BackupAdapter:
-  """S3 adapter for graph database backup storage with encryption and lifecycle management."""
+  """Async S3 store for graph database backups, keyed by graph and timestamp.
+
+  Layout: ``graph-backups/databases/{graph_id}/{backup_type}/backup-{ts}{ext}``
+  with a sibling JSON blob at ``graph-backups/metadata/{graph_id}/backup-{ts}``.
+  Callers must pass the *same* timestamp to upload and to any later lookup —
+  the timestamp is the only join key between the two paths.
+
+  This class compresses; it does not encrypt. Encryption/decryption belongs to
+  the backup and restore tasks (``robosystems/security/encryption.py``).
+  """
 
   def __init__(
     self,
@@ -582,15 +476,7 @@ class S3BackupAdapter:
     region: str | None = None,
     enable_compression: bool = True,
   ):
-    """
-    Initialize S3 backup adapter.
-
-    Args:
-        bucket_name: S3 bucket name (defaults to USER_DATA_BUCKET env var)
-        region: AWS region (defaults to AWS_REGION env var)
-        enable_compression: Enable gzip compression
-    Note: Encryption is handled by the backup task using security/encryption.py
-    """
+    """Defaults to the ``USER_DATA_BUCKET`` / ``AWS_DEFAULT_REGION`` env vars."""
     self.bucket_name = bucket_name or env.USER_DATA_BUCKET
     self.region = region or env.AWS_DEFAULT_REGION
     self.enable_compression = enable_compression
@@ -609,12 +495,11 @@ class S3BackupAdapter:
     )
 
   def _init_s3_client(self):
-    """Initialize S3 client with credentials."""
+    """Build the boto3 client and fail fast if the bucket isn't reachable."""
     try:
-      # Get S3-specific configuration (falls back to general AWS credentials if needed)
+      # Falls back to the general AWS credentials when no S3-specific ones are set.
       s3_config = env.get_s3_config()
 
-      # Extract credentials and endpoint
       access_key = s3_config.get("aws_access_key_id")
       secret_key = s3_config.get("aws_secret_access_key")
       endpoint_url = s3_config.get("endpoint_url")
@@ -626,35 +511,30 @@ class S3BackupAdapter:
         region_name=region,
       )
 
-      # Configure S3 client with performance optimizations
       from botocore.config import Config
 
       config = Config(
-        max_pool_connections=50,  # Increase connection pool for parallel uploads
+        max_pool_connections=50,  # Sized for parallel part uploads
         retries={
-          "mode": "adaptive",  # Use adaptive retry mode
+          "mode": "adaptive",
           "max_attempts": 3,
         },
         s3={
-          "use_accelerate_endpoint": False,  # Can enable if S3 Transfer Acceleration is configured
+          "use_accelerate_endpoint": False,  # Enable if Transfer Acceleration is on
           "payload_signing_enabled": True,
         },
       )
 
-      # Create S3 client with optional endpoint override for LocalStack
+      # Endpoint override exists for LocalStack in dev; unset against real AWS.
       if endpoint_url:
         self.s3_client = session.client("s3", config=config, endpoint_url=endpoint_url)
         logger.info(f"Using custom S3 endpoint: {endpoint_url}")
       else:
         self.s3_client = session.client("s3", config=config)
 
-      # Configure multipart upload thresholds for large backups
-      self.multipart_threshold = (
-        100 * 1024 * 1024
-      )  # 100MB - start multipart for files > 100MB
-      self.multipart_chunksize = 50 * 1024 * 1024  # 50MB chunks for multipart uploads
+      self.multipart_threshold = 100 * 1024 * 1024  # Switch to multipart above 100 MB
+      self.multipart_chunksize = 50 * 1024 * 1024  # 50 MB per part
 
-      # Test connection
       self.s3_client.head_bucket(Bucket=self.bucket_name)
       logger.info(f"S3 connection established to bucket: {self.bucket_name}")
 
@@ -665,8 +545,6 @@ class S3BackupAdapter:
       logger.error(f"Failed to connect to S3 bucket {self.bucket_name}: {e}")
       raise
 
-  # Encryption methods removed - handled by security/encryption.py module
-
   def _generate_backup_path(
     self,
     graph_id: str,
@@ -674,15 +552,12 @@ class S3BackupAdapter:
     timestamp: datetime,
     file_extension: str | None = None,
   ) -> str:
-    """Generate S3 key path for backup file."""
+    """S3 key for the backup payload. ``file_extension`` wins when given."""
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
-    # Use provided extension or default to .lbug with optional compression
     if file_extension:
-      # Extension explicitly provided - use as-is
       extension = file_extension
     else:
-      # No extension provided - generate default with compression if enabled
       extension = ".lbug"
       if self.enable_compression:
         extension += ".gz"
@@ -690,28 +565,26 @@ class S3BackupAdapter:
     return f"graph-backups/databases/{graph_id}/{backup_type}/backup-{timestamp_str}{extension}"
 
   def _generate_metadata_path(self, graph_id: str, timestamp: datetime) -> str:
-    """Generate S3 key path for backup metadata."""
+    """S3 key for the sidecar metadata JSON matching the same timestamp."""
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
     return f"graph-backups/metadata/{graph_id}/backup-{timestamp_str}.json"
 
   def _compress_data(self, data: bytes) -> bytes:
-    """Compress data using gzip."""
+    """Gzip, unless compression is disabled for this adapter."""
     if not self.enable_compression:
       return data
 
     return gzip.compress(data)
 
   def _decompress_data(self, data: bytes) -> bytes:
-    """Decompress gzip data."""
+    """Inverse of :meth:`_compress_data`; must agree on ``enable_compression``."""
     if not self.enable_compression:
       return data
 
     return gzip.decompress(data)
 
-  # Encryption/decryption methods removed - handled by security/encryption.py module
-
   def _calculate_checksum(self, data: bytes) -> str:
-    """Calculate SHA-256 checksum of data."""
+    """SHA-256 of the *uncompressed* payload."""
     return hashlib.sha256(data).hexdigest()
 
   async def _multipart_upload(
@@ -721,18 +594,13 @@ class S3BackupAdapter:
     data: bytes,
     metadata: dict[str, str] | None = None,
   ) -> None:
-    """
-    Perform multipart upload for large files.
+    """Upload ``data`` in ``multipart_chunksize`` parts, aborting on failure.
 
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-        data: Data to upload
-        metadata: Optional metadata for the object
+    The abort is what keeps a failed upload from leaving billable orphan parts
+    in the bucket, so the ``except`` branch must never be skipped.
     """
     import math
 
-    # Initiate multipart upload
     response = await asyncio.get_event_loop().run_in_executor(
       None,
       lambda: self.s3_client.create_multipart_upload(
@@ -748,7 +616,6 @@ class S3BackupAdapter:
     parts = []
 
     try:
-      # Calculate number of parts
       total_size = len(data)
       num_parts = math.ceil(total_size / self.multipart_chunksize)
 
@@ -756,7 +623,6 @@ class S3BackupAdapter:
         f"Multipart upload: {num_parts} parts, {total_size / (1024 * 1024):.1f} MB total"
       )
 
-      # Upload parts
       for part_num in range(1, num_parts + 1):
         start = (part_num - 1) * self.multipart_chunksize
         end = min(start + self.multipart_chunksize, total_size)
@@ -783,7 +649,6 @@ class S3BackupAdapter:
         if part_num % 10 == 0 or part_num == num_parts:
           logger.info(f"Uploaded part {part_num}/{num_parts}")
 
-      # Complete multipart upload
       await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: self.s3_client.complete_multipart_upload(
@@ -797,7 +662,6 @@ class S3BackupAdapter:
       logger.info(f"Multipart upload completed: {key}")
 
     except Exception as e:
-      # Abort multipart upload on failure
       logger.error(f"Multipart upload failed, aborting: {e}")
       await asyncio.get_event_loop().run_in_executor(
         None,
@@ -818,21 +682,16 @@ class S3BackupAdapter:
     timestamp: datetime | None = None,
     file_extension: str | None = None,
   ) -> BackupMetadata:
-    """
-    Upload backup data to S3 with compression and encryption.
+    """Compress and store a backup plus its metadata sidecar.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_data: Raw backup data (Cypher format)
-        backup_type: 'full' or 'incremental'
-        metadata: Additional metadata for the backup
-        timestamp: Timestamp to use for consistent S3 key generation (REQUIRED for backup operations)
-        file_extension: Optional file extension to use (e.g., '.csv.zip', '.json.zip', '.parquet.zip')
+    ``backup_type`` must be ``full`` or ``incremental``. ``timestamp`` should
+    always be supplied by the caller: it is the key both S3 paths are derived
+    from, so generating one here would desynchronise the payload from the
+    metadata the caller records. ``file_extension`` overrides the default
+    ``.lbug[.gz]`` suffix (e.g. ``.csv.zip``).
 
-    Returns:
-        BackupMetadata: Metadata about the uploaded backup
+    The stored checksum covers the pre-compression bytes.
     """
-    # Input validation
     if not isinstance(backup_data, bytes):
       raise TypeError(f"backup_data must be bytes, got {type(backup_data)}")
 
@@ -859,17 +718,13 @@ class S3BackupAdapter:
       )
 
     original_size = len(backup_data)
-
-    # Calculate original checksum
     original_checksum = self._calculate_checksum(backup_data)
 
-    # Process data (compress then encrypt)
     processed_data = backup_data
 
     if self.enable_compression:
       processed_data = self._compress_data(processed_data)
       compressed_size = len(processed_data)
-      # Handle empty backup case to avoid division by zero
       if original_size > 0:
         compression_ratio = (original_size - compressed_size) / original_size
         logger.info(
@@ -884,9 +739,6 @@ class S3BackupAdapter:
       compressed_size = original_size
       compression_ratio = 0.0
 
-    # Encryption handled by backup task, not here
-
-    # Generate S3 paths
     backup_path = self._generate_backup_path(
       graph_id, backup_type, timestamp, file_extension
     )
@@ -896,11 +748,9 @@ class S3BackupAdapter:
     )
 
     try:
-      # Upload backup data - use multipart for large files
       backup_size = len(processed_data)
 
       if backup_size > self.multipart_threshold:
-        # Use multipart upload for large backups
         logger.info(
           f"Using multipart upload for large backup ({backup_size / (1024 * 1024):.1f} MB)"
         )
@@ -918,7 +768,6 @@ class S3BackupAdapter:
           },
         )
       else:
-        # Use regular upload for smaller backups
         await asyncio.get_event_loop().run_in_executor(
           None,
           lambda: self.s3_client.put_object(
@@ -938,7 +787,6 @@ class S3BackupAdapter:
           ),
         )
 
-      # Create backup metadata
       backup_metadata = BackupMetadata(
         graph_id=graph_id,
         backup_type=backup_type,
@@ -958,7 +806,6 @@ class S3BackupAdapter:
         encryption_method=metadata.get("encryption_method"),
       )
 
-      # Upload metadata
       metadata_json = json.dumps(backup_metadata.to_dict(), indent=2)
       await asyncio.get_event_loop().run_in_executor(
         None,
@@ -982,38 +829,22 @@ class S3BackupAdapter:
       logger.error(f"Failed to upload backup to S3: {e}")
       raise
 
-  # Legacy method - kept for backward compatibility
   async def download_backup_legacy(
     self, graph_id: str, timestamp: datetime, backup_type: str = "full"
   ) -> bytes:
-    """
-    Download and decrypt backup data from S3 (legacy method).
-
-    Args:
-        graph_id: Graph database identifier
-        timestamp: Backup timestamp
-        backup_type: 'full' or 'incremental'
-
-    Returns:
-        bytes: Decrypted backup data
-    """
+    """Alias for :meth:`download_backup_by_timestamp`, kept for older callers."""
     backup_path = self._generate_backup_path(graph_id, backup_type, timestamp)
     return await self.download_backup_by_key(backup_path)
 
   async def download_backup_by_key(self, s3_key: str) -> bytes:
-    """
-    Download and decrypt backup data from S3 using exact S3 key.
+    """Fetch a backup payload by exact key and decompress it.
 
-    Args:
-        s3_key: Exact S3 key path to the backup file
-
-    Returns:
-        bytes: Decrypted backup data
+    Still encrypted on return when the backup was written encrypted — the
+    restore task decrypts.
     """
     logger.info(f"Attempting to download from S3 key: {s3_key}")
 
     try:
-      # Download backup data
       response = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key),
@@ -1021,10 +852,7 @@ class S3BackupAdapter:
 
       encrypted_data = response["Body"].read()
 
-      # Process data (decrypt then decompress)
       processed_data = encrypted_data
-
-      # Decryption handled by restore task, not here
 
       if self.enable_compression:
         original_size = len(processed_data)
@@ -1039,14 +867,10 @@ class S3BackupAdapter:
       raise
 
   async def list_backups(self, graph_id: str | None = None) -> list[dict[str, Any]]:
-    """
-    List available backups in S3.
+    """List backup payloads, newest first, optionally scoped to one graph.
 
-    Args:
-        graph_id: Optional filter by graph ID
-
-    Returns:
-        List of backup information
+    Reads the object listing rather than the metadata sidecars, so entries are
+    available even when a metadata write failed.
     """
     prefix = "graph-backups/databases/"
     if graph_id:
@@ -1056,13 +880,12 @@ class S3BackupAdapter:
       paginator = self.s3_client.get_paginator("list_objects_v2")
       backups = []
 
-      # Get pages synchronously since boto3 paginator is not async
+      # boto3's paginator is sync; each page is fetched on the calling thread.
       page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
       for page in page_iterator:
         if "Contents" in page:
           for obj in page["Contents"]:
             key = obj["Key"]
-            # Check for backup files with various extensions
             if any(
               ext in key
               for ext in ["/backup-", ".zip", ".cypher", ".json", ".parquet", ".lbug"]
@@ -1089,22 +912,15 @@ class S3BackupAdapter:
   async def delete_backup(
     self, graph_id: str, timestamp: datetime, backup_type: str = "full"
   ) -> bool:
-    """
-    Delete a backup from S3.
+    """Delete a backup payload and its metadata sidecar together.
 
-    Args:
-        graph_id: Graph database identifier
-        timestamp: Backup timestamp
-        backup_type: 'full' or 'incremental'
-
-    Returns:
-        bool: True if deletion was successful
+    The default ``.lbug[.gz]`` extension is assumed, so a backup uploaded with
+    an explicit ``file_extension`` is not matched by this path.
     """
     backup_path = self._generate_backup_path(graph_id, backup_type, timestamp)
     metadata_path = self._generate_metadata_path(graph_id, timestamp)
 
     try:
-      # Delete backup data and metadata
       delete_objects = [{"Key": backup_path}, {"Key": metadata_path}]
 
       await asyncio.get_event_loop().run_in_executor(
@@ -1122,11 +938,10 @@ class S3BackupAdapter:
       return False
 
   async def setup_lifecycle_policy(self) -> bool:
-    """
-    Set up S3 lifecycle policy for cost optimization.
+    """Apply the storage-class tiering and 7-year expiry for ``graph-backups/``.
 
-    Returns:
-        bool: True if policy was set successfully
+    Overwrites the bucket's whole lifecycle configuration, so any rule not
+    declared here is dropped.
     """
     lifecycle_config = {
       "Rules": [
@@ -1164,22 +979,14 @@ class S3BackupAdapter:
   async def get_backup_metadata(
     self, graph_id: str, backup_id: str
   ) -> dict[str, Any] | None:
-    """
-    Get backup metadata by backup ID.
+    """Read the metadata sidecar. ``backup_id`` is a ``%Y%m%d_%H%M%S`` stamp.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_id: Backup identifier (timestamp string)
-
-    Returns:
-        Backup metadata dictionary or None if not found
+    Returns None (not raising) when the key is missing or unparseable.
     """
     try:
-      # Parse backup_id as timestamp
       timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
       metadata_path = self._generate_metadata_path(graph_id, timestamp)
 
-      # Download metadata from S3
       response = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=metadata_path),
@@ -1195,18 +1002,13 @@ class S3BackupAdapter:
       return None
 
   async def get_backup_metadata_by_key(self, s3_key: str) -> BackupMetadata | None:
-    """
-    Get backup metadata by extracting info from S3 backup key.
+    """Read the metadata sidecar for a payload key, or None if unresolvable.
 
-    Args:
-        s3_key: S3 key of the backup file (e.g., graph-backups/databases/graph_id/full/backup-20241115_023045.lbug.zip)
-
-    Returns:
-        BackupMetadata object or None if metadata not found
+    Reverses the key layout
+    ``graph-backups/databases/{graph_id}/{backup_type}/backup-{ts}{ext}`` to
+    recover the graph and timestamp the sidecar is filed under.
     """
     try:
-      # Extract graph_id and timestamp from backup key
-      # Format: graph-backups/databases/{graph_id}/{backup_type}/backup-{timestamp}{extension}
       parts = s3_key.split("/")
       if len(parts) < 5 or parts[0] != "graph-backups" or parts[1] != "databases":
         logger.warning(f"Invalid backup key format: {s3_key}")
@@ -1215,22 +1017,18 @@ class S3BackupAdapter:
       graph_id = parts[2]
       backup_filename = parts[4]
 
-      # Extract timestamp from filename (e.g., backup-20241115_023045.lbug.zip -> 20241115_023045)
       if not backup_filename.startswith("backup-"):
         logger.warning(f"Invalid backup filename format: {backup_filename}")
         return None
 
       timestamp_with_ext = backup_filename[7:]
-      # Remove all extensions (could be .lbug.zip, .lbug.zip.enc, etc.)
+      # Strip every suffix: extensions stack (.lbug.zip, .lbug.zip.enc, ...).
       timestamp_str = timestamp_with_ext.split(".")[0]
 
-      # Parse timestamp
       timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
 
-      # Generate metadata path
       metadata_path = self._generate_metadata_path(graph_id, timestamp)
 
-      # Download metadata from S3
       response = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=metadata_path),
@@ -1239,7 +1037,6 @@ class S3BackupAdapter:
       metadata_json = response["Body"].read().decode("utf-8")
       metadata_dict = json.loads(metadata_json)
 
-      # Convert dict to BackupMetadata object
       return BackupMetadata.from_dict(metadata_dict)
 
     except (ClientError, ValueError, json.JSONDecodeError, IndexError) as e:
@@ -1249,23 +1046,15 @@ class S3BackupAdapter:
   async def generate_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
   ) -> str:
-    """
-    Generate a presigned URL for downloading a backup.
+    """Presign a download URL for a full backup. Raises if no object matches.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_id: Backup identifier (timestamp string)
-        expires_in: URL expiration time in seconds
-
-    Returns:
-        Presigned download URL
+    Lists by key prefix because the stored extension varies by backup format,
+    so the exact key can't be reconstructed from ``backup_id`` alone.
     """
     try:
-      # Try to find the backup file with any extension
       backup_path = None
       prefix = f"graph-backups/databases/{graph_id}/full/backup-{backup_id}"
 
-      # List objects to find the actual backup file
       paginator = self.s3_client.get_paginator("list_objects_v2")
       page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
 
@@ -1281,7 +1070,6 @@ class S3BackupAdapter:
       if not backup_path:
         raise ValueError(f"Backup file not found for {backup_id}")
 
-      # Generate presigned URL
       url = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: self.s3_client.generate_presigned_url(
@@ -1304,22 +1092,13 @@ class S3BackupAdapter:
     timestamp: datetime | None = None,
     backup_type: str = "full",
   ) -> bytes:
-    """
-    Download backup data by backup ID or timestamp (unified method).
+    """Download a backup identified by either ``backup_id`` or ``timestamp``.
 
-    Args:
-        graph_id: Graph database identifier
-        backup_id: Backup identifier (timestamp string) - new API
-        timestamp: Backup timestamp - legacy API
-        backup_type: 'full' or 'incremental' - used with timestamp
-
-    Returns:
-        Decrypted backup data
+    ``backup_id`` is the ``%Y%m%d_%H%M%S`` string form and takes precedence;
+    exactly one of the two must be given.
     """
     try:
-      # Handle both new API (backup_id) and legacy API (timestamp)
       if backup_id is not None:
-        # New API: Parse backup_id as timestamp
         parsed_timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(
           tzinfo=UTC
         )
@@ -1327,7 +1106,6 @@ class S3BackupAdapter:
           graph_id, parsed_timestamp, backup_type
         )
       elif timestamp is not None:
-        # Legacy API: Use timestamp directly
         return await self.download_backup_by_timestamp(graph_id, timestamp, backup_type)
       else:
         raise ValueError("Either backup_id or timestamp must be provided")
@@ -1339,32 +1117,15 @@ class S3BackupAdapter:
   async def download_backup_by_timestamp(
     self, graph_id: str, timestamp: datetime, backup_type: str = "full"
   ) -> bytes:
-    """
-    Download backup data by timestamp (renamed from original download_backup).
-
-    Args:
-        graph_id: Graph database identifier
-        timestamp: Backup timestamp
-        backup_type: 'full' or 'incremental'
-
-    Returns:
-        Decrypted backup data
-    """
+    """Download a backup whose key uses the default extension for this adapter."""
     backup_path = self._generate_backup_path(graph_id, backup_type, timestamp)
     return await self.download_backup_by_key(backup_path)
 
   def health_check(self) -> dict[str, Any]:
-    """
-    Perform health check on S3 connectivity.
-
-    Returns:
-        Health status information
-    """
+    """Report bucket reachability and the adapter's compression setting."""
     try:
-      # Test bucket access
       self.s3_client.head_bucket(Bucket=self.bucket_name)
 
-      # Test encryption if enabled
       encryption_status = "handled by backup task"
 
       return {
@@ -1383,15 +1144,6 @@ class S3BackupAdapter:
       }
 
 
-# Factory function for creating S3 adapter
 def create_s3_backup_adapter(**kwargs) -> S3BackupAdapter:
-  """
-  Factory function to create S3 backup adapter with default configuration.
-
-  Args:
-      **kwargs: Optional configuration overrides
-
-  Returns:
-      S3BackupAdapter: Configured adapter instance
-  """
+  """Build an :class:`S3BackupAdapter`; ``kwargs`` override the env defaults."""
   return S3BackupAdapter(**kwargs)

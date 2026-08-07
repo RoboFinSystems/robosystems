@@ -91,10 +91,10 @@ class TestStagingSql:
 
   def test_element_keeps_canonical_taxonomy_qname(self):
     # Library/taxonomy concepts (rs-gaap, fac, cm, …) already carry a
-    # canonical namespaced qname; the Element staging must emit it verbatim
-    # rather than re-prefixing to 'rl:rs-gaap:X' (which broke build-fact-grid
-    # and every canonical consumer on tenant graphs). Native/import/system
-    # CoA accounts still fall through to the 'rl:' tenant prefix.
+    # canonical namespaced qname; the Element staging must emit it verbatim.
+    # Re-prefixing would yield 'rl:rs-gaap:X', which no canonical consumer
+    # recognises. Native/import/system CoA accounts still fall through to
+    # the 'rl:' tenant prefix.
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Element"]
     assert "COALESCE(e.qname, e.code)" in sql
     assert "NOT IN ('native', 'import', 'system')" in sql
