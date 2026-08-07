@@ -6,10 +6,12 @@ The static ``/options`` route must resolve ahead of the parameterized
 ``GET .../connections/options`` would be captured as ``connection_id="options"``.
 
 Prior to FastAPI 0.137 this was enforced with a manual ``.priority`` sort over
-``router.routes``. FastAPI 0.137 made ``include_router`` lazy (child routes live
-inside an ``_IncludedRouter`` wrapper) and added native static-over-parameter
-matching, so the sort was removed. This test locks the invariant in place so a
-future refactor can't silently reintroduce the ambiguity.
+``router.routes``; the sort was removed when ``include_router`` went lazy (child
+routes now live inside an ``_IncludedRouter`` wrapper). Nothing replaced it —
+registration order still decides, so this test locks the invariant in place.
+
+``tests/routers/test_route_shadowing.py`` asserts the same property across the
+whole app; this one keeps the failure legible at the router that owns it.
 """
 
 from robosystems.routers.graphs.connections import router

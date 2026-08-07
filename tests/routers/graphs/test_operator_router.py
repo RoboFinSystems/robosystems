@@ -344,27 +344,6 @@ class TestOperatorEndpoints:
 
     assert response.status_code == 200
 
-  @pytest.mark.skip(reason="Batch endpoint not implemented")
-  def test_agent_batch_queries(self, client, mock_orchestrator):
-    """Test batch query processing."""
-    request_data = {
-      "queries": [
-        {"message": "Query 1", "operator_type": "financial"},
-        {"message": "Query 2", "operator_type": "research"},
-      ]
-    }
-
-    response = client.post(
-      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator/batch",
-      json=request_data,
-      headers={"Authorization": "Bearer test_token"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "results" in data
-    assert len(data["results"]) == 2
-
   # Health endpoint test removed - endpoint was removed for security reasons
   # Metrics endpoint test removed - endpoint was removed for security reasons
 

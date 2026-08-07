@@ -6,17 +6,12 @@ import pytest
 from pydantic import ValidationError
 
 from robosystems.models.api.graphs.operator import (
-  BatchOperatorRequest,
-  BatchOperatorResponse,
   OperatorHealthResponse,
   OperatorHealthStatus,
   OperatorListResponse,
   OperatorMessage,
   OperatorMetadataResponse,
   OperatorMode,
-  OperatorRecommendation,
-  OperatorRecommendationRequest,
-  OperatorRecommendationResponse,
   OperatorRequest,
   OperatorResponse,
   SelectionCriteria,
@@ -132,29 +127,6 @@ class TestOperatorRequest:
 
 
 @pytest.mark.unit
-class TestBatchAgentRequest:
-  def test_valid_batch(self):
-    queries = [
-      OperatorRequest(message="Query 1"),
-      OperatorRequest(message="Query 2"),
-    ]
-    model = BatchOperatorRequest(queries=queries)
-    assert len(model.queries) == 2
-    assert model.parallel is False
-
-  def test_parallel_batch(self):
-    model = BatchOperatorRequest(
-      queries=[OperatorRequest(message="Q1")],
-      parallel=True,
-    )
-    assert model.parallel is True
-
-  def test_queries_required(self):
-    with pytest.raises(ValidationError):
-      BatchOperatorRequest()  # type: ignore[call-arg]
-
-
-@pytest.mark.unit
 class TestOperatorResponse:
   def test_minimal_response(self):
     model = OperatorResponse(
@@ -197,23 +169,6 @@ class TestOperatorResponse:
 
 
 @pytest.mark.unit
-class TestBatchAgentResponse:
-  def test_valid_response(self):
-    result = OperatorResponse(
-      content="Answer",
-      operator_used="financial",
-      mode_used=OperatorMode.STANDARD,
-    )
-    model = BatchOperatorResponse(
-      results=[result],
-      total_execution_time=3.5,
-      parallel_processed=False,
-    )
-    assert len(model.results) == 1
-    assert model.parallel_processed is False
-
-
-@pytest.mark.unit
 class TestOperatorListResponse:
   def test_valid_response(self):
     model = OperatorListResponse(
@@ -240,49 +195,6 @@ class TestOperatorMetadataResponse:
     assert model.requires_credits is True
     assert model.author is None
     assert model.tags == []
-
-
-@pytest.mark.unit
-class TestOperatorRecommendationRequest:
-  def test_valid_request(self):
-    model = OperatorRecommendationRequest(query="Revenue analysis for Apple")
-    assert model.context is None
-
-  def test_with_context(self):
-    model = OperatorRecommendationRequest(
-      query="Revenue analysis",
-      context={"ticker": "AAPL"},
-    )
-    assert model.context["ticker"] == "AAPL"
-
-
-@pytest.mark.unit
-class TestOperatorRecommendation:
-  def test_valid_recommendation(self):
-    model = OperatorRecommendation(
-      operator_type="financial",
-      operator_name="Financial Operator",
-      confidence=0.92,
-      capabilities=["financial_analysis"],
-    )
-    assert model.confidence == 0.92
-    assert model.reason is None
-
-
-@pytest.mark.unit
-class TestOperatorRecommendationResponse:
-  def test_valid_response(self):
-    rec = OperatorRecommendation(
-      operator_type="financial",
-      operator_name="Financial Operator",
-      confidence=0.92,
-      capabilities=["financial_analysis"],
-    )
-    model = OperatorRecommendationResponse(
-      recommendations=[rec],
-      query="Revenue analysis",
-    )
-    assert len(model.recommendations) == 1
 
 
 @pytest.mark.unit

@@ -73,6 +73,30 @@ class DocumentLimits(BaseModel):
   )
 
 
+class SubgraphLimits(BaseModel):
+  """Subgraph count against the parent graph tier's cap.
+
+  Subgraphs are refused at the tier cap regardless of how small they are,
+  so this is a count axis independent of the storage one — ``instance``
+  already itemizes their footprint.
+  """
+
+  current_count: int = Field(
+    ..., description="Subgraphs currently provisioned under this graph", ge=0
+  )
+  max_allowed: int | None = Field(
+    None,
+    description="Maximum subgraphs for this tier (null when uncapped)",
+  )
+  remaining: int | None = Field(
+    None,
+    description="Subgraphs that can still be created (null when uncapped)",
+  )
+  approaching_limit: bool = Field(
+    ..., description="Whether approaching subgraph limit (>80%)"
+  )
+
+
 class ContentLimits(BaseModel):
   """Per-operation materialization limits."""
 
@@ -185,6 +209,12 @@ class GraphLimitsResponse(BaseModel):
             "max_documents": 100,
             "approaching_limit": False,
           },
+          "subgraphs": {
+            "current_count": 1,
+            "max_allowed": 3,
+            "remaining": 2,
+            "approaching_limit": False,
+          },
           "content": {
             "max_rows_per_copy": 1000000,
             "max_single_table_rows": 2500000,
@@ -261,6 +291,10 @@ class GraphLimitsResponse(BaseModel):
   )
   documents: DocumentLimits | None = Field(
     None, description="Knowledge-base document usage and tier cap (user graphs only)"
+  )
+  subgraphs: SubgraphLimits | None = Field(
+    None,
+    description="Subgraph count and tier cap (parent user graphs only)",
   )
   content: ContentLimits | None = Field(
     None, description="Per-operation materialization limits (if applicable)"

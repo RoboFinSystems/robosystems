@@ -13,7 +13,6 @@ from robosystems.models.api.graphs.subgraphs import (
   CreateSubgraphRequest,
   DeleteSubgraphRequest,
   ListSubgraphsResponse,
-  SubgraphQuotaResponse,
   SubgraphType,
 )
 from robosystems.models.api.graphs.tier import (
@@ -343,27 +342,6 @@ class TestDeleteSubgraphRequest:
     model = DeleteSubgraphRequest(force=True, backup_first=False)
     assert model.force is True
     assert model.backup_first is False
-
-
-@pytest.mark.unit
-class TestSubgraphQuotaResponse:
-  def test_valid_response(self):
-    model = SubgraphQuotaResponse(
-      parent_graph_id="kg1234567890abcdef",
-      tier="ladybug-large",
-      current_count=3,
-      max_allowed=10,
-      remaining=7,
-    )
-    assert model.remaining == 7
-
-  def test_ge_zero_constraint(self):
-    with pytest.raises(ValidationError):
-      SubgraphQuotaResponse(
-        parent_graph_id="kg123",
-        tier="ladybug-large",
-        current_count=-1,
-      )
 
 
 @pytest.mark.unit

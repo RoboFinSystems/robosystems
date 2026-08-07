@@ -171,6 +171,99 @@ async def list_graphs(
     session.close()
 
 
+# Declared ahead of `/{graph_id}`: routes match in registration order and
+# path params are validated only after a route is chosen, so a literal
+# segment registered after a param sibling is unreachable — every call
+# would resolve as graph_id="analytics" and 404.
+@router.get("/analytics", response_model=GraphAnalyticsResponse)
+@require_admin(permissions=["graphs:read"])
+async def get_graph_analytics(
+  request: Request,
+  tier: str | None = Query(None, description="Filter by tier"),
+):
+  """Get cross-graph analytics."""
+  session = next(get_db_session())
+  try:
+    query = session.query(Graph)
+
+    if tier:
+      query = query.filter(Graph.graph_tier == tier)
+
+    all_graphs = query.all()
+
+    total_graphs = len(all_graphs)
+
+    by_tier = {}
+    by_backend = {}
+    by_status = {}
+
+    for graph in all_graphs:
+      tier_name = graph.graph_tier
+      by_tier[tier_name] = by_tier.get(tier_name, 0) + 1
+
+      backend = _get_graph_backend(graph)
+      by_backend[backend] = by_backend.get(backend, 0) + 1
+
+      status = _get_graph_status(graph)
+      by_status[status] = by_status.get(status, 0) + 1
+
+    storage_query = (
+      session.query(
+        GraphUsage.graph_id,
+        func.max(GraphUsage.storage_gb).label("storage_gb"),
+      )
+      .filter(GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value)
+      .group_by(GraphUsage.graph_id)
+      .all()
+    )
+
+    storage_map = {g.graph_id: float(g.storage_gb or 0) for g in storage_query}
+    total_storage_gb = sum(storage_map.values())
+
+    largest_graphs = sorted(
+      [
+        {"graph_id": gid, "storage_gb": size}
+        for gid, size in storage_map.items()
+        if size > 0
+      ],
+      key=lambda x: x["storage_gb"],
+      reverse=True,
+    )[:10]
+
+    most_recently_updated = sorted(
+      [
+        {
+          "graph_id": g.graph_id,
+          "name": g.graph_name,
+          "updated_at": g.updated_at.isoformat() if g.updated_at else None,
+        }
+        for g in all_graphs
+      ],
+      key=lambda x: x["updated_at"] or "",
+      reverse=True,
+    )[:10]
+
+    logger.info(
+      "Admin retrieved graph analytics",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "total_graphs": total_graphs,
+      },
+    )
+
+    return GraphAnalyticsResponse(
+      total_graphs=total_graphs,
+      by_tier=by_tier,
+      by_backend=by_backend,
+      by_status=by_status,
+      total_storage_gb=total_storage_gb,
+      largest_graphs=largest_graphs,
+      most_active_graphs=most_recently_updated,
+    )
+  finally:
+    session.close()
+
+
 @router.get("/{graph_id}", response_model=GraphResponse)
 @require_admin(permissions=["graphs:read"])
 async def get_graph(request: Request, graph_id: str):
@@ -501,95 +594,6 @@ async def get_graph_infrastructure(request: Request, graph_id: str):
       reader_endpoint=None,
       connection_status="connected",
       health_status="healthy",
-    )
-  finally:
-    session.close()
-
-
-@router.get("/analytics", response_model=GraphAnalyticsResponse)
-@require_admin(permissions=["graphs:read"])
-async def get_graph_analytics(
-  request: Request,
-  tier: str | None = Query(None, description="Filter by tier"),
-):
-  """Get cross-graph analytics."""
-  session = next(get_db_session())
-  try:
-    query = session.query(Graph)
-
-    if tier:
-      query = query.filter(Graph.graph_tier == tier)
-
-    all_graphs = query.all()
-
-    total_graphs = len(all_graphs)
-
-    by_tier = {}
-    by_backend = {}
-    by_status = {}
-
-    for graph in all_graphs:
-      tier_name = graph.graph_tier
-      by_tier[tier_name] = by_tier.get(tier_name, 0) + 1
-
-      backend = _get_graph_backend(graph)
-      by_backend[backend] = by_backend.get(backend, 0) + 1
-
-      status = _get_graph_status(graph)
-      by_status[status] = by_status.get(status, 0) + 1
-
-    storage_query = (
-      session.query(
-        GraphUsage.graph_id,
-        func.max(GraphUsage.storage_gb).label("storage_gb"),
-      )
-      .filter(GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value)
-      .group_by(GraphUsage.graph_id)
-      .all()
-    )
-
-    storage_map = {g.graph_id: float(g.storage_gb or 0) for g in storage_query}
-    total_storage_gb = sum(storage_map.values())
-
-    largest_graphs = sorted(
-      [
-        {"graph_id": gid, "storage_gb": size}
-        for gid, size in storage_map.items()
-        if size > 0
-      ],
-      key=lambda x: x["storage_gb"],
-      reverse=True,
-    )[:10]
-
-    most_recently_updated = sorted(
-      [
-        {
-          "graph_id": g.graph_id,
-          "name": g.graph_name,
-          "updated_at": g.updated_at.isoformat() if g.updated_at else None,
-        }
-        for g in all_graphs
-      ],
-      key=lambda x: x["updated_at"] or "",
-      reverse=True,
-    )[:10]
-
-    logger.info(
-      "Admin retrieved graph analytics",
-      extra={
-        "admin_key_id": request.state.admin_key_id,
-        "total_graphs": total_graphs,
-      },
-    )
-
-    return GraphAnalyticsResponse(
-      total_graphs=total_graphs,
-      by_tier=by_tier,
-      by_backend=by_backend,
-      by_status=by_status,
-      total_storage_gb=total_storage_gb,
-      largest_graphs=largest_graphs,
-      most_active_graphs=most_recently_updated,
     )
   finally:
     session.close()
