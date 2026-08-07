@@ -83,8 +83,6 @@ from .graphs import (
   BackupListResponse,
   BackupResponse,
   BackupStatsResponse,
-  BatchOperatorRequest,
-  BatchOperatorResponse,
   ConnectionBase,
   ConnectionOptionsResponse,
   ConnectionProviderInfo,
@@ -166,8 +164,6 @@ __all__ = [
   "BackupResponse",
   "BackupStatsResponse",
   # AI Operator models
-  "BatchOperatorRequest",
-  "BatchOperatorResponse",
   "ConnectionBase",
   "ConnectionOptionsResponse",
   "ConnectionProviderInfo",

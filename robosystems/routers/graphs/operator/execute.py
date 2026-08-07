@@ -1,7 +1,5 @@
 """Operator execution endpoints with intelligent strategy selection."""
 
-import asyncio
-
 from fastapi import (
   APIRouter,
   BackgroundTasks,
@@ -24,14 +22,9 @@ from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.operator import (
-  BatchOperatorRequest,
-  BatchOperatorResponse,
   OperatorListResponse,
   OperatorMetadataResponse,
   OperatorMode,
-  OperatorRecommendation,
-  OperatorRecommendationRequest,
-  OperatorRecommendationResponse,
   OperatorRequest,
   OperatorResponse,
 )
@@ -47,7 +40,6 @@ from robosystems.operations.operators.operator_registry import (
   list_operators,
 )
 from robosystems.operations.operators.orchestrator import (
-  OperatorOrchestrator,
   OperatorSelectionCriteria,
 )
 
@@ -419,169 +411,3 @@ async def specific_operator(
       status_code=500,
       detail="An internal error occurred while executing the operator.",
     )
-
-
-@router.post(
-  "/operator/batch",
-  response_model=BatchOperatorResponse,
-  summary="Batch Process Queries",
-  description="Process up to 10 queries sequentially or in parallel. Partial failure is supported — each result has individual error handling.",
-  operation_id="batchProcessQueries",
-  responses={
-    **RESOURCE_ERROR_RESPONSES,
-    402: {"description": "Insufficient credits"},
-  },
-)
-@endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/operator/batch", business_event_type="agent_batch_query"
-)
-async def batch_operator(
-  request: BatchOperatorRequest,
-  graph_id: str = Path(
-    ...,
-    description="Graph database identifier",
-    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> BatchOperatorResponse:
-  _check_operator_post_enabled()
-  await _enforce_shared_repository_agent_limits(graph_id, current_user, db)
-
-  import time
-
-  start_time = time.time()
-  orchestrator = OperatorOrchestrator(graph_id, current_user, db)
-
-  async def process_single(query_request: OperatorRequest) -> OperatorResponse:
-    """Process a single query."""
-    history = [
-      {"role": msg.role, "content": msg.content} for msg in query_request.history
-    ]
-
-    operator_response = await orchestrator.route_query(
-      query=query_request.message,
-      operator_type=query_request.operator_type,
-      mode=_convert_operator_mode(query_request.mode),
-      history=history,
-      context=query_request.context,
-    )
-
-    return OperatorResponse(
-      content=operator_response.content,
-      operator_used=operator_response.operator_name,
-      mode_used=OperatorMode(operator_response.mode_used.value),
-      metadata=operator_response.metadata,
-      tokens_used=operator_response.tokens_used,
-      confidence_score=operator_response.confidence_score,
-      error_details=operator_response.error_details,
-      execution_time=operator_response.execution_time,
-      operation_id=None,
-      is_partial=False,
-    )
-
-  # Process queries
-  if request.parallel:
-    # Parallel processing
-    tasks = [process_single(q) for q in request.queries]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Filter out exceptions
-    valid_results = []
-    for r in results:
-      if isinstance(r, Exception):
-        logger.error(f"Batch query failed: {r!s}")
-        valid_results.append(
-          OperatorResponse(
-            content=f"Query failed: {r!s}",
-            operator_used="error",
-            mode_used=OperatorMode.STANDARD,
-            error_details={"error": str(r)},
-            metadata=None,
-            tokens_used=None,
-            confidence_score=None,
-            operation_id=None,
-            is_partial=False,
-            execution_time=None,
-          )
-        )
-      else:
-        valid_results.append(r)
-
-    results = valid_results
-  else:
-    # Sequential processing
-    results = []
-    for q in request.queries:
-      try:
-        result = await process_single(q)
-        results.append(result)
-      except Exception as e:
-        logger.error(f"Batch query failed: {e!s}")
-        results.append(
-          OperatorResponse(
-            content=f"Query failed: {e!s}",
-            operator_used="error",
-            mode_used=OperatorMode.STANDARD,
-            error_details={"error": str(e)},
-            metadata=None,
-            tokens_used=None,
-            confidence_score=None,
-            operation_id=None,
-            is_partial=False,
-            execution_time=None,
-          )
-        )
-
-  return BatchOperatorResponse(
-    results=results,
-    total_execution_time=time.time() - start_time,
-    parallel_processed=request.parallel,
-  )
-
-
-@router.post(
-  "/operator/recommend",
-  response_model=OperatorRecommendationResponse,
-  summary="Get Operator Recommendations",
-  description="Returns operators ranked by confidence score for a query, with explanations. Use before execution when unsure which operator to pick.",
-  operation_id="recommendOperator",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/operator/recommend", business_event_type="agent_recommend"
-)
-async def recommend_operator(
-  request: OperatorRecommendationRequest,
-  graph_id: str = Path(
-    ...,
-    description="Graph database identifier",
-    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  ),
-  current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> OperatorRecommendationResponse:
-  _check_operator_post_enabled()
-
-  orchestrator = OperatorOrchestrator(graph_id, current_user, db)
-  recommendations_raw = orchestrator.get_operator_recommendations(
-    request.query, request.context
-  )
-
-  # Convert to response format
-  recommendations = [
-    OperatorRecommendation(
-      operator_type=r["operator_type"],
-      operator_name=r["operator_name"],
-      confidence=r["confidence"],
-      capabilities=r["capabilities"],
-      reason=r.get("reason"),
-    )
-    for r in recommendations_raw
-  ]
-
-  return OperatorRecommendationResponse(
-    recommendations=recommendations, query=request.query
-  )

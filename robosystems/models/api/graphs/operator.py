@@ -111,49 +111,6 @@ class OperatorRequest(BaseModel):
     }
 
 
-class BatchOperatorRequest(BaseModel):
-  """Request for batch processing multiple queries."""
-
-  queries: list[OperatorRequest] = Field(
-    ..., description="List of queries to process (max 10)"
-  )
-  parallel: bool = Field(False, description="Process queries in parallel")
-
-  class Config:
-    json_schema_extra = {
-      "examples": [
-        {
-          "queries": [
-            {"message": "What was Apple's Q4 2023 revenue?", "enable_rag": True},
-            {"message": "What was Microsoft's Q4 2023 revenue?", "enable_rag": True},
-            {"message": "What was Google's Q4 2023 revenue?", "enable_rag": True},
-          ],
-          "parallel": False,
-        },
-        {
-          "queries": [
-            {
-              "message": "Analyze Tesla's financial performance",
-              "mode": "extended",
-              "enable_rag": True,
-            },
-            {
-              "message": "Analyze Ford's financial performance",
-              "mode": "extended",
-              "enable_rag": True,
-            },
-            {
-              "message": "Compare EV market trends",
-              "mode": "standard",
-              "enable_rag": True,
-            },
-          ],
-          "parallel": True,
-        },
-      ]
-    }
-
-
 class OperatorResponse(BaseModel):
   """Response model for operator interactions."""
 
@@ -229,91 +186,6 @@ class OperatorResponse(BaseModel):
     }
 
 
-class BatchOperatorResponse(BaseModel):
-  """Response for batch processing."""
-
-  results: list[OperatorResponse] = Field(
-    ..., description="List of operator responses (includes successes and failures)"
-  )
-  total_execution_time: float = Field(
-    ..., description="Total execution time in seconds"
-  )
-  parallel_processed: bool = Field(
-    ..., description="Whether queries were processed in parallel"
-  )
-
-  class Config:
-    json_schema_extra = {
-      "examples": [
-        {
-          "results": [
-            {
-              "content": "Apple's Q4 2023 revenue was $89.5 billion...",
-              "operator_used": "financial",
-              "mode_used": "standard",
-              "confidence_score": 0.92,
-              "execution_time": 3.2,
-              "timestamp": "2024-01-15T10:30:00Z",
-            },
-            {
-              "content": "Microsoft's Q4 2023 revenue was $62.0 billion...",
-              "operator_used": "financial",
-              "mode_used": "standard",
-              "confidence_score": 0.89,
-              "execution_time": 3.5,
-              "timestamp": "2024-01-15T10:30:03Z",
-            },
-            {
-              "content": "Google's Q4 2023 revenue was $86.3 billion...",
-              "operator_used": "financial",
-              "mode_used": "standard",
-              "confidence_score": 0.91,
-              "execution_time": 3.1,
-              "timestamp": "2024-01-15T10:30:07Z",
-            },
-          ],
-          "total_execution_time": 9.8,
-          "parallel_processed": False,
-        },
-        {
-          "results": [
-            {
-              "content": "Tesla's financial performance shows strong revenue growth...",
-              "operator_used": "financial",
-              "mode_used": "extended",
-              "confidence_score": 0.88,
-              "execution_time": 12.3,
-              "timestamp": "2024-01-15T10:35:12Z",
-            },
-            {
-              "content": "",
-              "operator_used": "financial",
-              "mode_used": "extended",
-              "error_details": {
-                "code": "insufficient_credits",
-                "message": "Insufficient credits for extended analysis",
-                "required_credits": 50,
-                "available_credits": 25,
-              },
-              "execution_time": 0.1,
-              "timestamp": "2024-01-15T10:35:00Z",
-            },
-            {
-              "content": "EV market trends show continued growth with 45% YoY increase...",
-              "operator_used": "research",
-              "mode_used": "standard",
-              "confidence_score": 0.85,
-              "execution_time": 8.7,
-              "timestamp": "2024-01-15T10:35:09Z",
-            },
-          ],
-          "total_execution_time": 12.5,
-          "parallel_processed": True,
-        },
-      ]
-    }
-
-
 class OperatorListResponse(BaseModel):
   """Response for listing available operators."""
 
@@ -334,32 +206,6 @@ class OperatorMetadataResponse(BaseModel):
   requires_credits: bool = Field(..., description="Whether operator requires credits")
   author: str | None = Field(None, description="Operator author")
   tags: list[str] = Field(default_factory=list, description="Operator tags")
-
-
-class OperatorRecommendationRequest(BaseModel):
-  """Request for operator recommendations."""
-
-  query: str = Field(..., description="Query to analyze")
-  context: dict[str, Any] | None = Field(None, description="Additional context")
-
-
-class OperatorRecommendation(BaseModel):
-  """Single operator recommendation."""
-
-  operator_type: str = Field(..., description="Operator type identifier")
-  operator_name: str = Field(..., description="Operator display name")
-  confidence: float = Field(..., description="Confidence score (0-1)")
-  capabilities: list[str] = Field(..., description="Operator capabilities")
-  reason: str | None = Field(None, description="Reason for recommendation")
-
-
-class OperatorRecommendationResponse(BaseModel):
-  """Response for operator recommendations."""
-
-  recommendations: list[OperatorRecommendation] = Field(
-    ..., description="List of operator recommendations sorted by confidence"
-  )
-  query: str = Field(..., description="The analyzed query")
 
 
 class OperatorHealthStatus(BaseModel):

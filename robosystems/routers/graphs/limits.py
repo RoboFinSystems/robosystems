@@ -33,6 +33,7 @@ from robosystems.models.api.graphs.limits import (
   RateLimits,
   StorageItem,
   StorageLimits,
+  SubgraphLimits,
 )
 from robosystems.models.core import User
 
@@ -248,6 +249,32 @@ async def get_graph_limits(
       except Exception as e:
         logger.warning(f"Could not get document limits for {graph_id}: {e}")
 
+    # Subgraph count against the tier cap. A count axis, not a storage one —
+    # creation is refused at the cap however small the subgraphs are, so this
+    # cannot be derived from `instance` below. Reported for parent graphs only:
+    # subgraphs do not nest, and shared repositories have no tenant-owned cap.
+    subgraph_limits = None
+    if not is_shared and graph is not None and not bool(graph.is_subgraph):
+      try:
+        from robosystems.config.graph_tier import get_tier_max_subgraphs
+
+        max_subgraphs = get_tier_max_subgraphs(graph_tier)
+        subgraph_count = len(Graph.get_subgraphs(graph_id, session))
+        subgraph_limits = SubgraphLimits(
+          current_count=subgraph_count,
+          max_allowed=max_subgraphs,
+          remaining=(
+            max(0, max_subgraphs - subgraph_count)
+            if max_subgraphs is not None
+            else None
+          ),
+          approaching_limit=(
+            max_subgraphs is not None and subgraph_count > max_subgraphs * 0.8
+          ),
+        )
+      except Exception as e:
+        logger.warning(f"Could not get subgraph limits for {graph_id}: {e}")
+
     # Get content limits and instance usage for non-shared graphs.
     # check_instance_storage is a single Graph API call covering the whole
     # instance — subgraphs live on the parent's box, so one breakdown itemizes
@@ -327,6 +354,7 @@ async def get_graph_limits(
       rate_limits=RateLimits(**rate_limits),
       credits=CreditLimits(**credit_limits) if credit_limits else None,
       documents=document_limits,
+      subgraphs=subgraph_limits,
       content=content_limits,
       instance=instance_usage,
     )

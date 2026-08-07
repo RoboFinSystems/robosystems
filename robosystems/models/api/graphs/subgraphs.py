@@ -233,30 +233,6 @@ class DeleteSubgraphResponse(BaseModel):
   )
 
 
-class SubgraphQuotaResponse(BaseModel):
-  """Response model for subgraph quota information."""
-
-  parent_graph_id: str = Field(..., description="Parent graph identifier")
-
-  tier: str = Field(
-    ..., description="Graph tier", examples=["ladybug-large", "ladybug-xlarge"]
-  )
-
-  current_count: int = Field(..., description="Current number of subgraphs", ge=0)
-
-  max_allowed: int | None = Field(
-    None, description="Maximum allowed subgraphs (None = unlimited)"
-  )
-
-  remaining: int | None = Field(
-    None, description="Remaining subgraphs that can be created"
-  )
-
-  total_size_mb: float | None = Field(None, description="Total size of all subgraphs")
-
-  max_size_mb: float | None = Field(None, description="Maximum allowed total size")
-
-
 class SubgraphAccessRequest(BaseModel):
   """Request model for granting subgraph access."""
 

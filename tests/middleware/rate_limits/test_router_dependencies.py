@@ -32,7 +32,6 @@ def _import_router(module_path: str):
     "robosystems.routers.graphs.documents",
     "robosystems.routers.graphs.subgraphs.main",
     "robosystems.routers.graphs.subgraphs.info",
-    "robosystems.routers.graphs.subgraphs.quota",
   ],
 )
 def test_router_declares_subscription_rate_limit(module_path):

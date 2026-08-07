@@ -1,6 +1,7 @@
 """Unit tests for graph limits API models."""
 
 import pytest
+from pydantic import ValidationError
 
 from robosystems.models.api.graphs.limits import (
   BackupLimits,
@@ -11,6 +12,7 @@ from robosystems.models.api.graphs.limits import (
   QueryLimits,
   RateLimits,
   StorageLimits,
+  SubgraphLimits,
 )
 
 
@@ -100,6 +102,27 @@ class TestContentLimits:
 
 
 @pytest.mark.unit
+class TestSubgraphLimits:
+  def test_valid_limits(self):
+    model = SubgraphLimits(
+      current_count=1,
+      max_allowed=3,
+      remaining=2,
+      approaching_limit=False,
+    )
+    assert model.remaining == 2
+
+  def test_uncapped_tier(self):
+    model = SubgraphLimits(current_count=7, approaching_limit=False)
+    assert model.max_allowed is None
+    assert model.remaining is None
+
+  def test_negative_count_rejected(self):
+    with pytest.raises(ValidationError):
+      SubgraphLimits(current_count=-1, approaching_limit=False)
+
+
+@pytest.mark.unit
 class TestGraphLimitsResponse:
   def test_user_graph_limits(self):
     storage = StorageLimits(
@@ -152,6 +175,7 @@ class TestGraphLimitsResponse:
     assert model.is_shared_repository is False
     assert model.credits is not None
     assert model.content is None
+    assert model.subgraphs is None
 
   def test_shared_repository_limits(self):
     storage = StorageLimits(max_storage_gb=100.0, approaching_limit=False)
