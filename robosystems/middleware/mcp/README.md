@@ -60,14 +60,13 @@ mcp/
     ├── playbook_tools.py           # get-close-playbook (close-workflow guidance)
     ├── graph_tools.py              # create-subgraph, delete-subgraph, list-subgraphs,
     │                               # materialize, get-graph-sync-status, create-backup,
-    │                               # set-write-policy, resolve-subgraph
+    │                               # set-write-policy, list-subgraphs
     │
     │ # Layer 3: Document search + management (SEMANTIC_SEARCH_ENABLED)
     ├── search_tools.py      # search-documents, get-document-section
     ├── document_tools.py    # create-document, update-document, get-document, list-documents
     │
     │ # Layer 4: Infrastructure (feature-flag gated)
-    │ # (resolve-subgraph lives in graph_tools.py; answered by the remote transport)
     └── subgraph_write_tools.py  # write-graph-cypher, add-node-table, add-relationship-table (MCP_SUBGRAPH_OPS_ENABLED)
 ```
 
@@ -207,22 +206,28 @@ Gated by `SEMANTIC_SEARCH_ENABLED`. Document management tools additionally skip 
 
 **Subgraph navigation:**
 
-`resolve-subgraph` maps a subgraph in this graph's family to the MCP
-endpoint that serves it. It does **not** switch: a connector is anchored to
-one graph by its URL, so the remote transport answers with an address and
-the caller adds that endpoint as its own connector, reusing the same API
-key. Create with `create-subgraph` (which returns the URL directly), then
-`list-subgraphs` to enumerate and `resolve-subgraph` to address.
+`list-subgraphs` is the whole navigation surface. Each row carries the
+graph's `connector_url`, so enumerating and addressing are one call.
+`create-subgraph` returns the same URL directly, which covers the other
+path — you never have to construct one.
 
-It was called `switch-workspace`. The name promised a switch it never
-performed on the remote transport, and "workspace" framed a subgraph as a
-context you inhabit rather than the lightweight artifact it is. The old
-name is still dispatched, unadvertised, so existing prompts and older
-bridge versions keep working.
+There is no tool that changes the active graph, because there is nothing to
+change: a connector is anchored to one graph by its URL. Reaching a
+subgraph means adding its endpoint as its own connector. A key scoped to a
+parent covers that parent's subgraphs, so a parent connector reuses its own
+key; going the other way (subgraph → parent or sibling) it does not, and a
+key for the target comes from the app's MCP page.
+
+Two earlier tools tried to fill this gap and neither earned its place.
+`switch-workspace` named a switch the transport never performed.
+`resolve-subgraph` renamed that honestly but still only formatted a URL out
+of an id `list-subgraphs` already returned — a tool whose output was a
+format string over another tool's output. Both are gone; the URL moved to
+where callers were already looking.
 
 | Tool | Description | Read-only OK |
 |------|-------------|--------------|
-| `resolve-subgraph` | Resolve a subgraph to its MCP endpoint | Yes |
+| `list-subgraphs` | Enumerate this family's graphs, each with its `connector_url` | Yes |
 
 **Subgraph writes** (`MCP_SUBGRAPH_OPS_ENABLED`, writable subgraphs only):
 
@@ -243,7 +248,7 @@ bridge versions keep working.
 | Manifest `has_semantic_enrichment=True` | `resolve-element` |
 | `FACT_GRID_ENABLED=true` | `build-fact-grid` |
 | `SEMANTIC_SEARCH_ENABLED=true` | Layer 3 (search + document management) |
-| `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `resolve-subgraph`) |
+| `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `list-subgraphs`) |
 | `MCP_SUBGRAPH_OPS_ENABLED=true` | Layer 4 subgraph write/DDL tools |
 
 A tool that would otherwise be unavailable due to any of these gates returns a structured error via `_tool_unavailable_reason` instead of silently no-oping — clients always see a typed reason when a tool isn't mounted in a given context.

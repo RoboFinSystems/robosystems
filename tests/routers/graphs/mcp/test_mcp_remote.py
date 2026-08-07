@@ -15,7 +15,6 @@ from robosystems.routers.graphs.mcp.remote import (
   METHOD_NOT_FOUND,
   PARSE_ERROR,
   _event_to_progress,
-  _remote_resolve_subgraph,
   _to_tool_result,
   _tool_error_payload,
   _tool_failure,
@@ -104,46 +103,41 @@ class TestEventToProgress:
 KG = "kg19fb490f76871d22e835"
 
 
-class TestRemoteResolveSubgraph:
-  def test_named_subgraph_builds_id_and_url(self):
-    text = _remote_resolve_subgraph(KG, {"subgraph": "dev"})
-    payload = json.loads(text)
-    assert payload["switched"] is False
-    assert payload["target_graph_id"] == f"{KG}_dev"
-    assert payload["connector_url"].endswith(f"/v1/graphs/{KG}_dev/mcp")
+class TestSubgraphAddressing:
+  """A subgraph is reached by its own connector URL, and only via listing.
 
-  def test_full_subgraph_id_passes_through(self):
-    payload = json.loads(_remote_resolve_subgraph(KG, {"subgraph": f"{KG}_dev"}))
-    assert payload["target_graph_id"] == f"{KG}_dev"
+  Two tools used to stand between a caller and that URL. `switch-workspace`
+  named a switch the URL-anchored transport never performed;
+  `resolve-subgraph` renamed it honestly but still only formatted a URL out
+  of an id `list-subgraphs` already returned. Both are gone — the URL now
+  rides on each `list-subgraphs` row.
 
-  def test_primary_resolves_parent_from_subgraph(self):
-    payload = json.loads(_remote_resolve_subgraph(f"{KG}_dev", {"subgraph": "primary"}))
-    assert payload["target_graph_id"] == KG
+  The deletion also removed an input surface. `resolve-subgraph` took a
+  free-form target and therefore needed its own validation: reject path
+  traversal, reject ids outside this connector's graph family. Those tests
+  lived here. `list-subgraphs` accepts no arguments at all and enumerates
+  from `parent_graph_id`, so a caller cannot aim it anywhere — the class of
+  bug is designed out rather than guarded against.
+  """
 
-  def test_shared_repo_subgraph_resolves(self):
-    payload = json.loads(_remote_resolve_subgraph("sec", {"subgraph": "historical"}))
-    assert payload["target_graph_id"] == "sec_historical"
+  def test_no_navigation_tool_survives_on_the_transport(self):
+    from robosystems.routers.graphs.mcp import remote
 
-  def test_missing_workspace_id_is_error_text(self):
-    assert _remote_resolve_subgraph(KG, {}).startswith("Error:")
+    for gone in ("_remote_resolve_subgraph", "_remote_switch_workspace"):
+      assert not hasattr(remote, gone), f"{gone} should have been removed"
 
-  def test_invalid_characters_rejected(self):
-    text = _remote_resolve_subgraph(KG, {"subgraph": "../etc/passwd"})
-    assert text.startswith("Error:")
+  def test_list_subgraphs_takes_no_input(self):
+    from unittest.mock import MagicMock
 
-  def test_foreign_graph_family_rejected(self):
-    # A full id outside this connector's family must not resolve to a URL.
-    other = "kg29fb490f76871d22e835_dev"
-    text = _remote_resolve_subgraph(KG, {"subgraph": other})
-    assert text.startswith("Error:")
-    assert "family" in text
+    from robosystems.middleware.mcp.tools.graph_tools import ListSubgraphsTool
 
-  def test_message_never_claims_current_key_transfers(self):
-    # A URL-token connector's credential may not cover the target; the
-    # guidance must point at minting one, not claim the same key works.
-    payload = json.loads(_remote_resolve_subgraph(KG, {"subgraph": "dev"}))
-    assert "same API key" not in payload["message"]
-    assert "credential" in payload["message"]
+    client = MagicMock()
+    client.graph_id = KG
+    schema = ListSubgraphsTool(client).get_tool_definition()["inputSchema"]
+
+    # No properties means no target to validate, and nothing to traverse.
+    assert schema["properties"] == {}
+    assert schema["additionalProperties"] is False
 
 
 @pytest.mark.asyncio
@@ -238,8 +232,8 @@ def _make_handler(tools=None, instructions="per-graph guidance"):
         "inputSchema": {"type": "object", "properties": {}},
       },
       {
-        "name": "resolve-subgraph",
-        "description": "client-side text",
+        "name": "read-graph-cypher",
+        "description": "cypher",
         "inputSchema": {"type": "object", "properties": {}},
       },
     ]
@@ -292,7 +286,7 @@ class TestInitialize:
 
 @pytest.mark.asyncio
 class TestToolsList:
-  async def test_shape_annotations_and_description_rewrite(self):
+  async def test_shape_and_readonly_annotations(self):
     handler = _make_handler()
     with (
       patch.object(remote, "_validate_read_access", AsyncMock()),
@@ -304,9 +298,9 @@ class TestToolsList:
 
     tools = {tool["name"]: tool for tool in body["result"]["tools"]}
     assert tools["get-graph-schema"]["annotations"] == {"readOnlyHint": True}
-    # The npx "client-side tool" text must never reach a remote client.
-    assert "client-side" not in tools["resolve-subgraph"]["description"]
-    assert "connector" in tools["resolve-subgraph"]["description"].lower()
+    # Cypher reads stay unhinted — the StatementKernel classifies them per
+    # statement, and they can carry writes on a tenant graph.
+    assert "annotations" not in tools["read-graph-cypher"]
 
 
 @pytest.mark.asyncio
@@ -342,25 +336,40 @@ class TestToolsCall:
     assert body["result"]["isError"] is True
     assert "need a sub" in body["result"]["content"][0]["text"]
 
-  async def test_resolve_subgraph_intercepted_after_gauntlet(self):
+  async def test_subgraph_urls_still_require_access_to_this_graph(self):
+    """Learning a family's connector URLs is gated by the same gauntlet.
+
+    `resolve-subgraph` used to be answered by a special case *after*
+    `authorize_mcp_tool_call`, precisely so resolving an address could not
+    bypass access control. That special case is gone; `list-subgraphs` now
+    carries the URLs and takes the ordinary tool path, so the guarantee has
+    to hold there instead.
+    """
+    handler = _make_handler()
     authorize = AsyncMock(return_value="read")
     with (
       patch.object(remote, "circuit_breaker", Mock()),
       patch.object(remote, "authorize_mcp_tool_call", authorize),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+      patch.object(
+        remote,
+        "execute_tool_to_json",
+        AsyncMock(return_value={"type": "text", "text": "{}"}),
+      ),
     ):
       request = _make_request(
         {
           "jsonrpc": "2.0",
           "id": 1,
           "method": "tools/call",
-          "params": {"name": "resolve-subgraph", "arguments": {"subgraph": "dev"}},
+          "params": {"name": "list-subgraphs", "arguments": {}},
         }
       )
       body = _body(await dispatch_jsonrpc(request, KG, _make_user()))
 
     authorize.assert_awaited_once()
-    payload = json.loads(body["result"]["content"][0]["text"])
-    assert payload["target_graph_id"] == f"{KG}_dev"
+    assert "result" in body
 
   async def test_success_maps_result_to_content(self):
     handler = _make_handler()

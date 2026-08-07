@@ -79,17 +79,18 @@ class TestSubgraphToolProfile:
       f"profile names matching no real tool: {sorted(unmatched)}"
     )
 
-  def test_the_retired_name_is_gone(self, all_flags_on):
-    """`switch-workspace` must not resurface — not advertised, not dispatched.
+  def test_the_retired_navigation_tools_are_gone(self, all_flags_on):
+    """Neither `switch-workspace` nor `resolve-subgraph` may resurface.
 
-    It was renamed rather than aliased. A tool list is re-fetched on every
-    connect, so callers pick up `resolve-subgraph` immediately, and an
-    unknown-tool error beats a dead name that outlives everyone's memory of
-    what it did.
+    The first advertised a switch the URL-anchored transport never performed;
+    the second only formatted a URL from an id `list-subgraphs` already
+    returns. `list-subgraphs` now carries `connector_url` per row, which is
+    the whole job in the place you were already looking.
     """
     names = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
-    assert "resolve-subgraph" in names
+    assert "list-subgraphs" in names
     assert "switch-workspace" not in names
+    assert "resolve-subgraph" not in names
 
   def test_the_surface_that_makes_a_subgraph_useful_survives(self, all_flags_on):
     names = {t["name"] for t in _tools_for(SUBGRAPH).get_tool_definitions_as_dict()}

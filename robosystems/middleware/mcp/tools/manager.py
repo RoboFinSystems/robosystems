@@ -39,7 +39,6 @@ from .graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
-  ResolveSubgraphTool,
   SetWritePolicyTool,
   SyncConnectionTool,
 )
@@ -98,7 +97,6 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
     "update-memory",
     # Navigation back out
     "list-subgraphs",
-    "resolve-subgraph",
   }
 )
 
@@ -226,8 +224,8 @@ class GraphMCPTools:
 
     # Layer 3: Graph lifecycle tools — subgraph navigation + lifecycle ops
     # mirroring a subset of the REST `/v1/graphs/{g}/operations/*` surface.
-    # Writes are gated by `read_only`; `resolve-subgraph` only resolves an
-    # address, so it stays available whenever the navigation flag is set.
+    # Writes are gated by `read_only`; `list-subgraphs` is a pure read, so it
+    # stays available whenever the navigation flag is set.
     #
     # Deliberately **not exposed on MCP** — both still live on REST for
     # humans:
@@ -238,12 +236,10 @@ class GraphMCPTools:
     self.create_subgraph_tool = None
     self.delete_subgraph_tool = None
     self.list_subgraphs_tool = None
-    self.resolve_subgraph_tool = None
     self.create_backup_tool = None
     if env.MCP_WORKSPACE_ENABLED:
       # Navigation tools (list / switch) — always available.
       self.list_subgraphs_tool = ListSubgraphsTool(graph_client)
-      self.resolve_subgraph_tool = ResolveSubgraphTool(graph_client)
       # Write tools — blocked on shared-repo or read-only graphs.
       if not read_only:
         self.create_subgraph_tool = CreateSubgraphTool(graph_client)
@@ -657,8 +653,6 @@ class GraphMCPTools:
         are included.
     """
     tools = []
-    if self.resolve_subgraph_tool is not None:
-      tools.append(self.resolve_subgraph_tool.get_tool_definition())
     if self.list_subgraphs_tool is not None:
       tools.append(self.list_subgraphs_tool.get_tool_definition())
     if self.create_subgraph_tool is not None:
@@ -1088,16 +1082,6 @@ class GraphMCPTools:
             "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
           )
         result = await self.list_subgraphs_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "resolve-subgraph":
-        # Answered by the remote transport, which knows the connector URL.
-        if self.resolve_subgraph_tool is None:
-          raise ValueError(
-            "resolve-subgraph tool is not available. "
-            "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
-          )
-        result = await self.resolve_subgraph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "create-backup":

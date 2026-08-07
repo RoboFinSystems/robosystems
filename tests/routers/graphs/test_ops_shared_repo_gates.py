@@ -149,24 +149,12 @@ class TestSyncConnectionMCPSharedRepoGate:
 
 
 class TestSharedRepoNavigationStillAllowed:
-  """SEC users should still be able to switch between `sec` and
-  `sec_historical`. `resolve-subgraph` only resolves an address, but
-  verify the server-side dispatch doesn't reject it on shared repos."""
+  """A SEC user must still be able to get from `sec` to `sec_historical`.
 
-  def test_resolve_subgraph_tool_registered_on_shared_repo(self) -> None:
-    from robosystems.middleware.mcp.tools.graph_tools import ResolveSubgraphTool
-
-    client = MagicMock()
-    client.graph_id = "sec"
-    client.user = _user()
-
-    tool = ResolveSubgraphTool(client)
-    defn = tool.get_tool_definition()
-
-    # The tool advertises itself normally — the MCP client intercepts
-    # before calling execute. The definition must still be emitted.
-    assert defn["name"] == "resolve-subgraph"
-    assert "subgraph" in defn["inputSchema"]["properties"]
+  The write gates above deny a lot on shared repos; navigation is not one of
+  them. `list-subgraphs` is now the whole navigation surface — it carries
+  each graph's `connector_url` — so if it were gated here, the deeper
+  historical filings would be unreachable rather than merely read-only."""
 
   def test_list_subgraphs_tool_defined_on_shared_repo(self) -> None:
     from robosystems.middleware.mcp.tools.graph_tools import ListSubgraphsTool
@@ -175,6 +163,8 @@ class TestSharedRepoNavigationStillAllowed:
     client.graph_id = "sec"
     client.user = _user()
 
-    tool = ListSubgraphsTool(client)
-    defn = tool.get_tool_definition()
+    defn = ListSubgraphsTool(client).get_tool_definition()
     assert defn["name"] == "list-subgraphs"
+    # The address is the point: naming a subgraph without saying where it
+    # lives would leave the caller exactly where the old tool pair did.
+    assert "connector_url" in defn["description"]

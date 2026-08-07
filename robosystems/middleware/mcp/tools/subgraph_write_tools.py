@@ -52,7 +52,7 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
       "message": "This tool only works on subgraphs, not the parent graph. "
       "Use create-subgraph to create a subgraph first, "
       "then connect to that subgraph's own MCP endpoint "
-      "(resolve-subgraph returns its URL).",
+      "(list-subgraphs returns each connector_url).",
     }
 
   # Shared repository subgraphs are always read-only
