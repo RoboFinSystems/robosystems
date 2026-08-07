@@ -35,6 +35,7 @@ def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
     currency="USD",
     description=None,
     metadata_={},
+    payload_drift=False,
     agent_id=None,
     resource_type=None,
     resource_element_id=None,

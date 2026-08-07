@@ -1493,7 +1493,16 @@ class OLTPLoader:
           # (bookkeeping field, not business payload) so the next
           # sync's gate comparison stays accurate. Without this update
           # the gate would re-fire indefinitely with the same comparison.
-          _drift_excluded = ("drift_payload", "drift_detected_at", "qb_sync_token")
+          # `connection_id` is excluded for the same reason: it names the
+          # connection that synced the row, not what happened upstream.
+          # A reconnect that mints a new connection id must not read as
+          # drift on every committed row in the window.
+          _drift_excluded = (
+            "drift_payload",
+            "drift_detected_at",
+            "qb_sync_token",
+            "connection_id",
+          )
           live_payload = {
             k: v for k, v in (evt.metadata_ or {}).items() if k not in _drift_excluded
           }
@@ -1519,6 +1528,14 @@ class OLTPLoader:
             qb_sync_token is not None and new_meta.get("qb_sync_token") != qb_sync_token
           ):
             new_meta["qb_sync_token"] = qb_sync_token
+            meta_changed = True
+          # Refresh `connection_id` the same way — write-back routing
+          # reads it off the event, so it must name the *live* connection
+          # after a reconnect, not the one that originally synced the row.
+          if (
+            connection_id is not None and new_meta.get("connection_id") != connection_id
+          ):
+            new_meta["connection_id"] = connection_id
             meta_changed = True
           if meta_changed:
             evt.metadata_ = new_meta

@@ -460,6 +460,54 @@ class TestSyncTokenCapture:
     # Live payload untouched — a committed event's payload is immutable.
     assert "drift_payload" not in committed.metadata_
 
+  def test_connection_id_change_alone_does_not_flag_drift(self):
+    """A re-sync under a different connection id (reconnect minted a new
+    one) must not flag drift on committed events — `connection_id` names
+    the connection that synced the row, not upstream state. The stored
+    value must refresh to the live connection, because write-back routing
+    reads it off the event."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    committed = MagicMock()
+    committed.external_id = "JE_500"
+    committed.status = "committed"
+    committed.id = "evt_committed"
+    committed.payload_drift = False
+
+    capture_session = MagicMock()
+    capture_session.query.return_value.filter.return_value.all.return_value = []
+    OLTPLoader()._capture_transactions_as_events(
+      capture_session,
+      self._dbt_data_with_sync_token(None),
+      source="quickbooks",
+      connection_id="conn_old",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    initial_event = capture_session.add_all.call_args_list[0][0][0][0]
+    committed.metadata_ = {
+      k: v for k, v in initial_event.metadata_.items() if not k.startswith("dispatch_")
+    }
+    assert committed.metadata_["connection_id"] == "conn_old"
+
+    # Re-sync the identical payload under a new connection id.
+    drift_session = MagicMock()
+    drift_session.query.return_value.filter.return_value.all.return_value = [committed]
+    result = OLTPLoader()._capture_transactions_as_events(
+      drift_session,
+      self._dbt_data_with_sync_token(None),
+      source="quickbooks",
+      connection_id="conn_new",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.drift_detected == 0
+    assert committed.payload_drift is False
+    assert "drift_payload" not in committed.metadata_
+    # Routing bookkeeping refreshed to the live connection.
+    assert committed.metadata_["connection_id"] == "conn_new"
+
 
 class TestSyncTokenGate:
   """SyncToken freshness gate on the UPSERT path.
