@@ -647,9 +647,6 @@ just lbug-query $GRAPH_ID "
 If you have an MCP client connected to the RoboSystems server (Claude Code, custom agents, etc.):
 
 ```bash
-# Set the active graph
-switch-workspace --workspace_id <graph_id>
-
 # Inspect mapping state
 get-mapping-summary --mapping_id <mapping_struct_id>
 get-unmapped-elements
