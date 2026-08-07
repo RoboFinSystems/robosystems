@@ -5,7 +5,7 @@ This module provides endpoints for creating, listing, retrieving,
 and deleting LadybugDB graph databases.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from fastapi import status as http_status
 
 from robosystems.graph_api.core.ladybug import get_ladybug_service
@@ -90,6 +90,12 @@ async def delete_database(
     False,
     description="If true, delete only DuckDB staging database, preserve LadybugDB graph",
   ),
+  x_materialization_lock_token: str | None = Header(
+    default=None,
+    description="Lock token from a materialization caller deleting its own "
+    "-wip/-prev artifact. If provided, the delete trusts the caller's lock "
+    "instead of acquiring one.",
+  ),
   ladybug_service=Depends(get_ladybug_service),
 ) -> dict:
   """
@@ -142,5 +148,51 @@ async def delete_database(
     # Add extra confirmation or restrictions for shared database deletion
     logger.warning(f"Attempting to delete shared database: {graph_id}")
 
-  ladybug_service.db_manager.delete_database(graph_id, preserve_duckdb=preserve_duckdb)
+  # A `-wip`/`-prev` name is a blue-green build artifact, and its base may be
+  # mid-materialization right now — deleting the WIP under an active build
+  # destroys the copy the build is writing into. Hold the base's
+  # materialization lock across the delete, same protocol as `swap_database`:
+  # acquiring (not just checking) closes the window where a build starts
+  # between the check and the unlink. The materialize flow deletes its own
+  # WIP (leftover cleanup, failure cleanup) while already holding this lock —
+  # it passes its token through so those deletes don't 409 against itself.
+  lock = None
+  if graph_id.endswith(("-wip", "-prev")) and not x_materialization_lock_token:
+    try:
+      from robosystems.config.valkey_registry import (
+        ValkeyDatabase,
+        create_async_redis_client,
+      )
+      from robosystems.graph_api.core.ladybug.materialization_lock import (
+        MaterializationLock,
+      )
+
+      redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+      lock = MaterializationLock(redis_client, graph_id)
+      if not await lock.acquire(timeout_seconds=5):
+        raise HTTPException(
+          status_code=http_status.HTTP_409_CONFLICT,
+          detail=(
+            f"A materialization is in progress for {graph_id}'s base database; "
+            "the build artifact cannot be deleted while it may be written to."
+          ),
+        )
+    except HTTPException:
+      raise
+    except Exception as e:
+      # Degraded mode mirrors swap_database: an unreachable Valkey should not
+      # make artifacts undeletable forever. In that state materialize also
+      # runs unlocked, so both sides accept the same residual race — and the
+      # active database is never the target either way.
+      logger.warning(f"Could not acquire materialization lock for delete: {e}")
+      lock = None
+
+  try:
+    ladybug_service.db_manager.delete_database(
+      graph_id, preserve_duckdb=preserve_duckdb
+    )
+  finally:
+    if lock is not None and lock.acquired:
+      await lock.release()
+
   return {"status": "success", "message": f"Database {graph_id} deleted successfully"}

@@ -123,8 +123,9 @@ class StorageItem(BaseModel):
     description=(
       "One of: graph, memory, subgraph, vectors, staging, transient "
       "(blue-green build artifact), orphan (a `{parent}_*` database, vector "
-      "index, or staging file with no row in the graph registry — reclaimable "
-      "leftover of a deleted subgraph)"
+      "index, or staging file with no row in the graph registry — leftover "
+      "of a deleted subgraph). Transient and orphan items are collected by "
+      "the platform's daily storage-reclaim job."
     ),
   )
   id: str = Field(..., description="Database or index identifier")
