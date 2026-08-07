@@ -490,9 +490,9 @@ class TestEventBlockResolvers:
     assert kwargs["limit"] == 10
     assert kwargs["offset"] == 0
 
-  def test_event_blocks_payload_drift_filter_and_field(self) -> None:
+  def test_event_blocks_reconciling_item_filter_and_field(self) -> None:
     drifted = self._event(id="evt_drift", status="committed")
-    drifted.payload_drift = True
+    drifted.is_reconciling_item = True
     with (
       _patch_session(),
       patch(
@@ -503,9 +503,9 @@ class TestEventBlockResolvers:
       result = schema.execute_sync(
         """
         query {
-          eventBlocks(payloadDrift: true) {
+          eventBlocks(isReconcilingItem: true) {
             id
-            payloadDrift
+            isReconcilingItem
           }
         }
         """,
@@ -516,8 +516,8 @@ class TestEventBlockResolvers:
     assert result.data is not None
     (block,) = result.data["eventBlocks"]
     assert block["id"] == "evt_drift"
-    assert block["payloadDrift"] is True
-    assert list_mock.call_args.kwargs["payload_drift"] is True
+    assert block["isReconcilingItem"] is True
+    assert list_mock.call_args.kwargs["is_reconciling_item"] is True
 
   def test_event_block_raises_typed_error_when_schema_not_initialized(self) -> None:
     with (

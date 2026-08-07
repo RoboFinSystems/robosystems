@@ -218,7 +218,7 @@ def _sync_result_summary(config: QBSyncConfig, result) -> dict:
     "counts": {
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
-      "drift_detected": result.events_drift_detected,
+      "reconciling_items": result.events_drift_detected,
       "dispatch_failed": result.events_dispatch_failed,
       "cross_source_matched": result.events_cross_source_matched,
       "skipped_same_sync_token": result.events_skipped_same_sync_token,

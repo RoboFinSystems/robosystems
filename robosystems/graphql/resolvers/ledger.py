@@ -306,7 +306,7 @@ class LedgerQuery:
     status: str | None = None,
     agent_id: str | None = None,
     source: str | None = None,
-    payload_drift: bool | None = None,
+    is_reconciling_item: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
   ) -> list[EventBlock]:
@@ -316,7 +316,7 @@ class LedgerQuery:
     (``occurred_at DESC``) with filters for ``status`` (``captured`` for
     inbox queue, ``committed`` for the audit-trail view), ``source``
     (``quickbooks`` / ``schedule`` / ``manual``), ``event_type``, and
-    ``payload_drift`` (``true`` for the post-sync reconciliation
+    ``is_reconciling_item`` (``true`` for the post-sync reconciliation
     worklist — committed events whose upstream payload changed).
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
@@ -329,7 +329,7 @@ class LedgerQuery:
           status=status,
           agent_id=agent_id,
           source=source,
-          payload_drift=payload_drift,
+          is_reconciling_item=is_reconciling_item,
           limit=limit,
           offset=offset,
         )

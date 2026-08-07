@@ -473,7 +473,7 @@ class TestGetGraphSyncStatusExecute:
     conn.last_sync = datetime(2026, 8, 6, tzinfo=UTC)
     conn.last_sync_result = {
       "status": "succeeded",
-      "counts": {"events_captured": 46, "drift_detected": 11},
+      "counts": {"events_captured": 46, "reconciling_items": 11},
     }
     mock_db.query.return_value.filter.return_value.all.return_value = [conn]
 
@@ -488,7 +488,7 @@ class TestGetGraphSyncStatusExecute:
         "last_sync_at": "2026-08-06T00:00:00+00:00",
         "last_sync_result": {
           "status": "succeeded",
-          "counts": {"events_captured": 46, "drift_detected": 11},
+          "counts": {"events_captured": 46, "reconciling_items": 11},
         },
       }
     ]

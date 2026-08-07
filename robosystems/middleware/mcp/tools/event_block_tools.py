@@ -100,10 +100,12 @@ class ListEventBlocksTool:
 - To see a counterparty's event history (filter by agent_id)
 - To audit events from a specific source (quickbooks, plaid, etc.)
 - Close workflow: find unposted events (status=captured or committed)
-- Post-sync reconciliation: payload_drift=true lists committed events whose
-  upstream payload changed after posting — the local GL no longer mirrors
-  the source for these. The stashed incoming payload is in each event's
-  metadata.drift_payload (fetch via get-event-block or include_metadata=true)
+- Post-sync reconciliation: is_reconciling_item=true lists reconciling
+  items — committed events whose upstream payload changed after posting,
+  so the local GL no longer mirrors the source. Each awaits an explicit
+  disposition (restate vs catch-up). The stashed incoming payload is in
+  the event's metadata.drift_payload (fetch via get-event-block or
+  include_metadata=true)
 
 **PARAMETERS:**
 - event_type (optional): e.g., 'invoice_issued', 'contract_signed', 'bank_transaction'
@@ -111,14 +113,14 @@ class ListEventBlocksTool:
 - status (optional): 'captured' | 'classified' | 'committed' | 'pending' | 'fulfilled' | 'voided' | 'superseded'
 - agent_id (optional): Filter to a specific counterparty
 - source (optional): 'manual' | 'schedule' | 'system', a connected provider name, or a registered external source_name
-- payload_drift (optional): true → only drifted events (the reconciliation
-  worklist); false → only non-drifted; omit for all
+- is_reconciling_item (optional): true → only reconciling items (the
+  reconciliation worklist); false → exclude them; omit for all
 - limit (optional, default 50, max 1000)
 - offset (optional, default 0)
 - include_metadata (optional, default false): When false, returns a lean
   per-event summary (id, event_type, event_category, status, occurred_at,
   source, agent_id, amount, currency, description, has_discharge_link,
-  payload_drift).
+  is_reconciling_item).
   When true, includes the full event_block metadata blob — `entries`,
   `qb_*` fields, connection_id, etc. — same shape as get-event-block.
   Default is summary-only because bulk metadata across hundreds of
@@ -139,7 +141,7 @@ class ListEventBlocksTool:
           "status": {"type": "string"},
           "agent_id": {"type": "string"},
           "source": {"type": "string"},
-          "payload_drift": {"type": "boolean"},
+          "is_reconciling_item": {"type": "boolean"},
           "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
           "offset": {"type": "integer", "minimum": 0, "default": 0},
           "include_metadata": {
@@ -179,7 +181,7 @@ class ListEventBlocksTool:
           status=arguments.get("status"),
           agent_id=arguments.get("agent_id"),
           source=arguments.get("source"),
-          payload_drift=arguments.get("payload_drift"),
+          is_reconciling_item=arguments.get("is_reconciling_item"),
           limit=limit,
           offset=offset,
         )
@@ -225,7 +227,7 @@ def _summarize_event_block(envelope) -> dict[str, Any]:
     "description": envelope.description,
     "has_discharge_link": envelope.discharges_event_id is not None,
     "has_obligation_link": envelope.obligated_by_event_id is not None,
-    "payload_drift": envelope.payload_drift,
+    "is_reconciling_item": envelope.is_reconciling_item,
   }
 
 
