@@ -27,7 +27,6 @@ Transport rules:
 
 import asyncio
 import json
-import re
 import time
 from importlib.metadata import version as pkg_version
 from typing import Any
@@ -225,97 +224,6 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     sess.close()
 
 
-# On the npx bridge the retired `switch-workspace` mutated client process
-# state. A remote connector has no client process and is URL-anchored to one
-# graph, so the remote surface answers with an address instead — which is why
-# the tool is now named for resolving rather than switching.
-_REMOTE_RESOLVE_SUBGRAPH_DESCRIPTION = (
-  "Resolve a subgraph in this graph's family (or `primary` for the parent) to "
-  "the MCP endpoint that serves it. This connector is anchored to one graph by "
-  "its URL and does not change graphs — the subgraph is a separate endpoint "
-  "you add as its own connector. Within a parent's own subgraphs, this "
-  "connector's API key already covers the target, so reuse it."
-)
-
-
-def _remote_resolve_subgraph(graph_id: str, arguments: dict[str, Any]) -> str:
-  """Answer resolve-subgraph with the target's connector URL (text result).
-
-  Targets are constrained to this connector's graph family — the parent or
-  one of its subgraphs. The URL alone carries no credential, so the caller
-  still has to supply one; what changes is whether they must *mint* one.
-
-  Scope runs one way. ``validate_api_key_with_graph`` honours a scoped key
-  for "its own graph and its subgraphs", so descending — a connector on the
-  parent, targeting one of its subgraphs — the key already in this
-  connector's URL is **guaranteed** to cover the target. Ascending or
-  sideways (subgraph → parent, subgraph → sibling) it is not: a
-  subgraph-scoped key reaches neither. An unscoped user key covers both
-  directions, but we can't tell which kind is in play from here, so the
-  message promises reuse only where it is certain and stays honest about
-  "may already work" everywhere else.
-  """
-  from robosystems.config import env
-
-  # `workspace_id` is the retired parameter name, still accepted.
-  target = str(arguments.get("subgraph") or arguments.get("workspace_id") or "").strip()
-  parent = graph_id.split("_")[0]
-  if not target:
-    return "Error: subgraph is required (an id, a short name, or 'primary')."
-
-  if target == "primary":
-    target_id = parent
-  elif "_" in target:
-    target_id = target
-  else:
-    target_id = f"{parent}_{target}"
-
-  if not re.fullmatch(GRAPH_OR_SUBGRAPH_ID_PATTERN, target_id):
-    return f"Error: '{target}' is not a valid subgraph id or name."
-
-  if target_id != parent and not target_id.startswith(f"{parent}_"):
-    return (
-      f"Error: '{target}' is outside this connector's graph family "
-      f"('{parent}' and its subgraphs). A different graph needs its own "
-      "connector, set up from that graph's MCP page."
-    )
-
-  connector_url = f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{target_id}/mcp"
-
-  # Descending within the family is the common case and the certain one.
-  descending = graph_id == parent and target_id != parent
-  credential_step = (
-    (
-      "Reuse the API key this connector already uses — a key scoped to "
-      f"'{graph_id}' covers its subgraphs, so it works on the new URL "
-      "unchanged. No new credential is needed."
-    )
-    if descending
-    else (
-      "Supply a credential the target accepts. A key scoped to a subgraph "
-      "does not reach its parent or siblings, so the current one may not "
-      f"carry over; if it doesn't, generate one from the app's MCP page "
-      f"(/connect) with '{target_id}' selected."
-    )
-  )
-
-  return json.dumps(
-    {
-      "switched": False,
-      "reason": "url_anchored_connector",
-      "target_graph_id": target_id,
-      "connector_url": connector_url,
-      "credential_reuse": "guaranteed" if descending else "depends_on_key_scope",
-      "message": (
-        f"This connector is anchored to graph '{graph_id}' by its URL and "
-        f"does not change graphs. Add an MCP connector for "
-        f"{connector_url}. {credential_step}"
-      ),
-    },
-    indent=2,
-  )
-
-
 async def _handle_initialize(
   graph_id: str, current_user: User, params: dict[str, Any]
 ) -> dict[str, Any]:
@@ -380,8 +288,6 @@ async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any
     # statement by the StatementKernel and can carry writes on tenant graphs.
     if tool["name"] in READ_ONLY_MCP_TOOLS:
       entry["annotations"] = {"readOnlyHint": True}
-    if tool["name"] in ("resolve-subgraph", "switch-workspace"):
-      entry["description"] = _REMOTE_RESOLVE_SUBGRAPH_DESCRIPTION
     mcp_tools.append(entry)
 
   return {"tools": mcp_tools}
@@ -824,19 +730,6 @@ async def _handle_tools_call(
       "access_type": access_type,
     },
   )
-
-  # resolve-subgraph never reaches the tool layer on this transport: the
-  # connector is URL-anchored (a subgraph is another connector URL), so the
-  # answer is the target's URL. Runs after the gauntlet — access to THIS
-  # graph is still required to resolve its family's URLs. The retired name
-  # stays accepted so older prompts and bridges keep working.
-  if name in ("resolve-subgraph", "switch-workspace"):
-    return _rpc_result(
-      msg_id,
-      _to_tool_result(
-        {"type": "text", "text": _remote_resolve_subgraph(graph_id, arguments)}
-      ),
-    )
 
   from robosystems.middleware.graph.query_queue import get_query_queue
 

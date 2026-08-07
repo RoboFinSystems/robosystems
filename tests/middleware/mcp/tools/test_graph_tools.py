@@ -9,7 +9,7 @@ Covers the six tools in `middleware/mcp/tools/graph_tools.py`:
 5. `CreateBackupTool`
 6. `GetGraphSyncStatusTool`
 
-Plus the client-side sentinel `ResolveSubgraphTool` and the platform-DB
+Plus the platform-DB
 connection tools `SetWritePolicyTool` and `SyncConnectionTool`.
 
 Shared-repo gate coverage (the primary defense-in-depth concern) lives
@@ -32,7 +32,6 @@ from robosystems.middleware.mcp.tools.graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
-  ResolveSubgraphTool,
   SetWritePolicyTool,
   SyncConnectionTool,
 )
@@ -497,24 +496,6 @@ class TestGetGraphSyncStatusExecute:
 # ══════════════════════════════════════════════════════════════════════════
 # ResolveSubgraphTool (client-side sentinel)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestResolveSubgraph:
-  def test_definition(self) -> None:
-    defn = ResolveSubgraphTool(_client()).get_tool_definition()
-    assert defn["name"] == "resolve-subgraph"
-    assert "subgraph" in defn["inputSchema"]["required"]
-
-  @pytest.mark.asyncio
-  async def test_base_execute_defers_to_the_remote_transport(self) -> None:
-    """Only the remote transport can answer this — it knows the connector URL.
-
-    The base class returns an explicit error rather than a wrong answer, so a
-    caller reaching it through some other path is told where the real
-    implementation lives instead of getting silence.
-    """
-    result = await ResolveSubgraphTool(_client()).execute({"subgraph": "primary"})
-    assert result["error"] == "remote_transport_only"
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -392,10 +392,19 @@ class ListSubgraphsTool:
     return {
       "name": "list-subgraphs",
       "description": (
-        "List every subgraph (workspace) under this parent graph, plus the "
-        "parent itself as the `primary` entry. Use the returned "
-        "`subgraph_id` with `resolve-subgraph` or as the `graph_id` in "
-        "future tool calls."
+        "List every subgraph under this parent graph, plus the parent itself "
+        "as the `primary` entry. Each row carries `connector_url` — the MCP "
+        "endpoint that serves that graph.\n\n"
+        "A subgraph is a separate endpoint, not a mode of this one: this "
+        "connector is anchored to its own graph by URL and cannot be "
+        "retargeted. To work in a subgraph, add its `connector_url` as its "
+        "own MCP connector.\n\n"
+        "**Credential:** a key scoped to a parent graph also covers that "
+        "parent's subgraphs, so a connector on the parent can reuse its own "
+        "key on any subgraph listed here. Going the other way — from a "
+        "subgraph to its parent or a sibling — a subgraph-scoped key does "
+        "not reach, and a key for the target is generated from the app's MCP "
+        "page (/connect)."
       ),
       "inputSchema": {
         "type": "object",
@@ -405,9 +414,14 @@ class ListSubgraphsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.config import env
     from robosystems.models.core.graph import Graph
 
     parent_id = self.client.graph_id
+
+    def connector_url(gid: str) -> str:
+      return f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{gid}/mcp"
+
     session, close = _open_platform_session()
     try:
       subgraphs = (
@@ -426,6 +440,7 @@ class ListSubgraphsTool:
           "description": parent.graph_name if parent else "Primary graph",
           "type": "primary",
           "parent_graph_id": None,
+          "connector_url": connector_url(parent_id),
         }
       )
       for sg in subgraphs:
@@ -437,6 +452,7 @@ class ListSubgraphsTool:
             "type": "subgraph",
             "parent_graph_id": parent_id,
             "created_at": sg.created_at.isoformat() if sg.created_at else None,
+            "connector_url": connector_url(sg.graph_id),
           }
         )
 
@@ -912,67 +928,6 @@ class SyncConnectionTool:
         "Sync dispatched. Poll get-fiscal-calendar until last_sync_at "
         "advances past this dispatch (and any sync_stale blocker clears) "
         "before closing."
-      ),
-    }
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# resolve-subgraph (was switch-workspace)
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class ResolveSubgraphTool:
-  """Resolve a subgraph in this graph's family to its MCP endpoint.
-
-  Named for what it does. It was `switch-workspace`, which promised a switch
-  it has never performed on the remote transport: a connector is anchored to
-  one graph by its URL, so the remote handler answers with an address rather
-  than changing anything (see `_remote_resolve_subgraph`).
-
-  The "workspace" framing went with it. A subgraph is a lightweight artifact
-  — closer to a document or a memory than to a context you inhabit — and
-  calling it a workspace invited exactly the session-switching model the URL
-  anchor rules out.
-
-  The retired wire name `switch-workspace` stays accepted at dispatch (never
-  advertised) so saved prompts and older bridges keep working.
-  """
-
-  def __init__(self, graph_client):
-    self.client = graph_client
-
-  def get_tool_definition(self) -> dict[str, Any]:
-    return {
-      "name": "resolve-subgraph",
-      "description": (
-        "Resolve a subgraph in this graph's family to the MCP endpoint that "
-        "serves it, so you can reach it. This connector is anchored to one "
-        "graph by its URL and does not change graphs — the subgraph is a "
-        "separate endpoint you add as its own connector, reusing this "
-        "connector's API key. Pair with `list-subgraphs` to see what exists."
-      ),
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "subgraph": {
-            "type": "string",
-            "description": (
-              "Subgraph id (e.g. `kg123_dev`), its short name (`dev`), or "
-              "`primary` for the parent graph."
-            ),
-          },
-        },
-        "required": ["subgraph"],
-        "additionalProperties": False,
-      },
-    }
-
-  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-      "error": "remote_transport_only",
-      "message": (
-        "resolve-subgraph is answered by the remote MCP transport, which "
-        "knows this connector's URL. Call it over the graph's /mcp endpoint."
       ),
     }
 

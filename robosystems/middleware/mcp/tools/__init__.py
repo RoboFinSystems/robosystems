@@ -16,7 +16,6 @@ from .graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
-  ResolveSubgraphTool,
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
 from .manager import GraphMCPTools
@@ -45,7 +44,6 @@ __all__ = [
   "ListSubgraphsTool",
   "MaterializeTool",
   "ResolveElementTool",
-  "ResolveSubgraphTool",
   "SchemaTool",
   "WriteCypherTool",
 ]

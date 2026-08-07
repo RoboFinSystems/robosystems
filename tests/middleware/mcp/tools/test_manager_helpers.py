@@ -223,11 +223,6 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_resolve_subgraph_raises(self, tools):
-    result = await tools.call_tool("resolve-subgraph", {})
-    assert "not available" in result or "Error" in result
-
-  @pytest.mark.asyncio
   async def test_disabled_add_node_table_raises(self, tools):
     result = await tools.call_tool("add-node-table", {})
     assert "not available" in result or "Error" in result

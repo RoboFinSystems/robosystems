@@ -69,25 +69,28 @@ class TestSubgraphToolProfile:
     """Every profile name must be a real tool, or the allowlist silently lies.
 
     A misspelled entry withholds a tool it was meant to keep, and nothing
-    fails — the filter just quietly drops it. Two entries are deliberately
-    absent from the advertised list and must stay allowed anyway:
-
-    - `get-graph-info` registers outside this manager.
-    - `switch-workspace` is the retired name of `resolve-subgraph`, still
-      dispatched so older prompts and bridges keep working; it is never
-      advertised, so it can't appear here.
+    fails — the filter just quietly drops it. `get-graph-info` is the one
+    deliberate exception: it registers outside this manager and is listed
+    only so the call_tool guard admits it.
     """
     real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
     unmatched = SUBGRAPH_TOOL_PROFILE - real
-    assert unmatched == {"get-graph-info", "switch-workspace"}, (
+    assert unmatched == {"get-graph-info"}, (
       f"profile names matching no real tool: {sorted(unmatched)}"
     )
 
-  def test_the_retired_name_still_dispatches(self, all_flags_on):
-    """The rename must not strand callers holding the old tool name."""
+  def test_the_retired_navigation_tools_are_gone(self, all_flags_on):
+    """Neither `switch-workspace` nor `resolve-subgraph` may resurface.
+
+    The first advertised a switch the URL-anchored transport never performed;
+    the second only formatted a URL from an id `list-subgraphs` already
+    returns. `list-subgraphs` now carries `connector_url` per row, which is
+    the whole job in the place you were already looking.
+    """
     names = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
-    assert "resolve-subgraph" in names
-    assert "switch-workspace" not in names, "the retired name must not be advertised"
+    assert "list-subgraphs" in names
+    assert "switch-workspace" not in names
+    assert "resolve-subgraph" not in names
 
   def test_the_surface_that_makes_a_subgraph_useful_survives(self, all_flags_on):
     names = {t["name"] for t in _tools_for(SUBGRAPH).get_tool_definitions_as_dict()}

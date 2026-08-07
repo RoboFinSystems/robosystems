@@ -91,29 +91,7 @@
       "WebFetch(domain:docs.dagster.io)",
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:astral.sh)",
-      "WebFetch(domain:aws.amazon.com)",
-      "WebFetch(domain:deepwiki.com)",
-      "WebFetch(domain:instances.vantage.sh)",
-      "Skill(staged-review)",
-      "mcp__aws-documentation__search_documentation",
-      "mcp__aws-documentation__read_documentation",
-      "mcp__aws-documentation__read_sections",
-      "mcp__aws-documentation__recommend",
-      "mcp__Context7__resolve-library-id",
-      "mcp__Context7__get-library-docs",
-      "mcp__Context7__query-docs",
-      "mcp__sequential-thinking__sequentialthinking",
-      "mcp__robosystems__get-graph-info",
-      "mcp__robosystems__get-graph-schema",
-      "mcp__robosystems__get-example-queries",
-      "mcp__robosystems__read-graph-cypher",
-      "mcp__robosystems__build-fact-grid",
-      "mcp__robosystems__resolve-element",
-      "mcp__robosystems__financial-statement-analysis",
-      "mcp__robosystems__live-financial-statement",
-      "mcp__robosystems__list-workspaces",
-      "mcp__robosystems__switch-workspace",
-      "Bash(just create-release:*)"
+      "WebFetch(domain:aws.amazon.com)"
     ],
     "ask": [
       "Bash(git branch --list:*)",
@@ -134,8 +112,7 @@
       "Bash(aws autoscaling update-auto-scaling-group:*)",
       "Bash(aws s3 cp:*)",
       "Bash(aws s3 mv:*)",
-      "Bash(aws s3 sync:*)",
-      "Bash(just create-release:*)"
+      "Bash(aws s3 sync:*)"
     ],
     "deny": [
       "Bash(just admin * migrations:*)",
