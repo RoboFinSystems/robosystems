@@ -40,9 +40,10 @@ Accounting and financial reporting extension — a ledger-grade system of record
 
 Built on the blocks:
 
-- **Close lifecycle** — fiscal calendar, close-target catch-up sequencing, and period close/reopen gated on the balance equation and [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) sync-staleness
+- **Close lifecycle** — fiscal calendar, close-target catch-up sequencing, and period close/reopen gated on the balance equation, [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) sync-staleness, and outstanding schedule obligations; every blocker names what is holding the close
 - **Mapping** — CoA→GAAP mapping associations plus AI-assisted bulk mapping via the **MappingOperator** (confidence-tiered: auto-approve / review / skip)
 - **Reporting** — multi-period reports rendered from shared facts through a Reporting Style; a report lifecycle (draft → under_review → filed → archived) with publish lists for distribution
+- **Forecasting** — operating-plan scenarios projected through the same statement structures: rule-driven forecasts, per-line growth trajectories, and manual line assertions, with forecast periods returned alongside actuals on statement reads
 - **Analytical operations** — `live-financial-statement` renders a statement straight from the OLTP ledger (no materialization required); `build-fact-grid` and `financial-statement-analysis` query the materialized XBRL hypercube in the graph
 - **Serialization** — reports serialize to web-native **JSON-LD** (stored, SHACL-validatable) and filing-grade **XBRL 2.1** (rebuilt on demand, Arelle-validated)
 - **Pipelines & data** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`, and SEC XBRL financial reporting
