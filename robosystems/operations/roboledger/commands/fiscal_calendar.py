@@ -193,6 +193,7 @@ def close_period(
   service: FiscalCalendarService,
   close_service: PeriodCloseService,
   actor_type: str = "user",
+  allow_stranded_obligations: bool = False,
 ) -> ClosePeriodResponse:
   """Close a fiscal period — the final commit action.
 
@@ -214,6 +215,7 @@ def close_period(
     has_sync_connection=has_sync,
     last_sync_at=last_sync_at,
     allow_stale_sync=allow_stale_sync,
+    allow_stranded_obligations=allow_stranded_obligations,
     note=note,
   )
   session.commit()
@@ -457,6 +459,7 @@ def backfill_plan_history(
         service=service,
         close_service=close_service,
         actor_type=actor_type,
+        allow_stranded_obligations=body.allow_stranded_obligations,
       )
       processed.append(
         BackfillPeriodOutcome(

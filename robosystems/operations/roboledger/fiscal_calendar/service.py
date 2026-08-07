@@ -92,6 +92,17 @@ class CloseableGateResult:
   # None when the blocker is not active.
   sync_stale_days: int | None = None
 
+  # Detail fields for `stranded_obligations` — matured obligations already
+  # flipped to `classified` (by a co-pilot sweep) whose closing entry was
+  # never drafted. These are always populated when such obligations exist,
+  # even when the blocker is bypassed via allow_stranded_obligations, so
+  # the close audit trail can record how many entries were knowingly
+  # omitted.
+  stranded_obligation_count: int = 0
+  stranded_obligation_sample: list[PendingObligationDetail] = field(
+    default_factory=list
+  )
+
   # Machine-readable codes
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
@@ -99,6 +110,7 @@ class CloseableGateResult:
   NO_CALENDAR = "calendar_not_initialized"
   ALREADY_CLOSED = "period_already_closed"
   PENDING_OBLIGATIONS = "pending_obligations"
+  STRANDED_OBLIGATIONS = "stranded_obligations"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -590,10 +602,11 @@ class FiscalCalendarService:
     has_sync_connection: bool = False,
     last_sync_at: datetime | None = None,
     allow_stale_sync: bool = False,
+    allow_stranded_obligations: bool = False,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed right now.
 
-    Three gates (checked in order; all blockers returned, not short-circuited):
+    The gates (checked in order; all blockers returned, not short-circuited):
 
     1. **Sequence**: `period == closed_through + 1` (or `period` is the first
        close if `closed_through` is None).
@@ -603,6 +616,15 @@ class FiscalCalendarService:
        be >= `period.end_date`. A missing `last_sync_at` with an active
        connection is treated as stale (never synced). When `has_sync_connection`
        is False the gate passes unconditionally.
+    4. **Pending obligations**: no matured `pending` `schedule_entry_due`
+       events remain (promote or void them).
+    4b. **Stranded obligations**: no matured `classified` obligation lacks a
+       drafted closing entry — the population a co-pilot sweep creates and
+       the pending count can't see; closing over them silently omits
+       adjusting entries. Bypass with `allow_stranded_obligations` (the
+       count still populates for the audit trail). The remedy is
+       `promote-obligations` with `dispatch_handlers=true`, which reaches
+       them, or voiding the obligation.
 
     Callers fetch `has_sync_connection` and `last_sync_at` from the platform
     DB (connections table). The two are distinct signals — a fresh connection
@@ -711,8 +733,6 @@ class FiscalCalendarService:
       # so callers can name what's blocking close. Cap at 5 to keep the
       # response compact; full enumeration is available via list-event-blocks
       # filtered by event_type=schedule_entry_due&status=pending.
-      from robosystems.models.extensions.roboledger import Structure
-
       pending_events = (
         session.query(Event)
         .filter(
@@ -724,38 +744,31 @@ class FiscalCalendarService:
         .limit(5)
         .all()
       )
-      schedule_ids = {
-        evt.metadata_.get("schedule_id")
-        for evt in pending_events
-        if evt.metadata_ and evt.metadata_.get("schedule_id")
-      }
-      schedule_names: dict[str, str] = {}
-      if schedule_ids:
-        for struct in (
-          session.query(Structure).filter(Structure.id.in_(schedule_ids)).all()
-        ):
-          schedule_names[str(struct.id)] = str(struct.name)
-      for evt in pending_events:
-        meta = evt.metadata_ or {}
-        sid = meta.get("schedule_id")
-        period_end_iso = meta.get("period_end") or ""
-        # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
-        # Named `evt_period` to avoid shadowing the outer `period` parameter
-        # (the one this gate is checking) — latent-bug avoidance for any
-        # post-loop logic that needs the outer value.
-        evt_period = period_end_iso[:7] if period_end_iso else ""
-        pending_sample.append(
-          PendingObligationDetail(
-            event_id=str(evt.id),
-            schedule_id=str(sid) if sid else None,
-            schedule_name=schedule_names.get(sid) if sid else None,
-            period=evt_period,
-          )
-        )
+      pending_sample = self._obligation_sample(session, pending_events)
       # earliest = the period of the first pending event (already
       # ordered ASC by occurred_at).
       if pending_sample:
         earliest_pending_period = pending_sample[0].period
+
+    # Gate 4b: stranded obligations. A co-pilot promotion sweep flips
+    # pending → classified without dispatching the drafting handler, so an
+    # obligation can sit at `classified` with no closing entry — invisible
+    # to Gate 4's pending count while representing an adjusting entry the
+    # close would silently omit. The count and sample always populate so
+    # the read surface and the close audit trail can report them; the
+    # blocker is skipped when the caller explicitly accepts the omission
+    # (allow_stranded_obligations).
+    from robosystems.operations.event_block.promotion import (
+      find_stranded_obligations,
+    )
+
+    stranded_events = find_stranded_obligations(session, as_of=period_end_dt)
+    stranded_count = len(stranded_events)
+    stranded_sample: list[PendingObligationDetail] = []
+    if stranded_count > 0:
+      if not allow_stranded_obligations:
+        blockers.append(CloseableGateResult.STRANDED_OBLIGATIONS)
+      stranded_sample = self._obligation_sample(session, stranded_events[:5])
 
     return CloseableGateResult(
       is_closeable=not blockers,
@@ -764,7 +777,46 @@ class FiscalCalendarService:
       pending_obligation_sample=pending_sample,
       earliest_pending_period=earliest_pending_period,
       sync_stale_days=sync_stale_days,
+      stranded_obligation_count=stranded_count,
+      stranded_obligation_sample=stranded_sample,
     )
+
+  @staticmethod
+  def _obligation_sample(
+    session: Session, events: list[Event]
+  ) -> list[PendingObligationDetail]:
+    """Build detail rows (with schedule names) for obligation `events`."""
+    from robosystems.models.extensions.roboledger import Structure
+
+    schedule_ids = {
+      evt.metadata_.get("schedule_id")
+      for evt in events
+      if evt.metadata_ and evt.metadata_.get("schedule_id")
+    }
+    schedule_names: dict[str, str] = {}
+    if schedule_ids:
+      for struct in (
+        session.query(Structure).filter(Structure.id.in_(schedule_ids)).all()
+      ):
+        schedule_names[str(struct.id)] = str(struct.name)
+    sample: list[PendingObligationDetail] = []
+    for evt in events:
+      meta = evt.metadata_ or {}
+      sid = meta.get("schedule_id")
+      period_end_iso = meta.get("period_end") or ""
+      # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
+      # Named `evt_period` to avoid shadowing closeable_gate's `period`
+      # parameter when this logic lived inline there; kept for clarity.
+      evt_period = period_end_iso[:7] if period_end_iso else ""
+      sample.append(
+        PendingObligationDetail(
+          event_id=str(evt.id),
+          schedule_id=str(sid) if sid else None,
+          schedule_name=schedule_names.get(sid) if sid else None,
+          period=evt_period,
+        )
+      )
+    return sample
 
   # ── Derived state ──────────────────────────────────────────────────────
 

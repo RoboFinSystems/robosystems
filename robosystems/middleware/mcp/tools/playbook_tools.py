@@ -40,7 +40,11 @@ _RECURRING_SEQUENCE: list[str] = [
   "promote-obligations (dispatch_handlers=true) — draft every matured "
   "schedule's closing entry for the period in one sweep. This is how "
   "schedule-derived drafts come into being; there is no create-closing-entry "
-  "tool. Idempotent.",
+  "tool. Reaches stranded obligations too (already 'classified' by a "
+  "flip-only background sweep but never drafted — reported via "
+  "stranded_count). Idempotent. Then verify: list-period-drafts should show "
+  "one draft per active schedule for the period; investigate any gap before "
+  "closing.",
   "(optional) create-event-block(event_type='journal_entry_recorded') — for "
   "any manual / one-off adjusting entries that aren't schedule-driven.",
   "list-period-drafts (period as YYYY-MM) — review every draft with DR/CR "
@@ -153,12 +157,16 @@ _KEY_RULES: list[str] = [
   "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
   "(month not over yet), sync_stale (QuickBooks sync older than period end "
   "— run sync-connection and poll get-fiscal-calendar until it clears), "
-  "calendar_not_initialized, and pending_obligations (matured "
+  "calendar_not_initialized, pending_obligations (matured "
   "schedule_entry_due events still 'pending' at/before the period — run "
   "promote-obligations to draft them, or, if they belong to a "
   "pre-watermark month that should never close, the schedule's "
   "closed_through was set wrong; earliest_pending_period names the oldest "
-  "one). Resolve before close-period; get-fiscal-calendar reports them.",
+  "one), and stranded_obligations (matured obligations already "
+  "'classified' but with no drafted closing entry — adjusting entries the "
+  "close would otherwise silently omit; promote-obligations with "
+  "dispatch_handlers=true drafts them, or void the obligation). Resolve "
+  "before close-period; get-fiscal-calendar reports them.",
   "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
   "'close procedures' / 'month-end' document before authoring or closing. It "
   "captures this company's specifics and should reference this playbook.",

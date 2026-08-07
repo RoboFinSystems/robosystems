@@ -115,6 +115,19 @@ def build_fiscal_calendar_response(
     if gate
     else []
   )
+  stranded_obligation_sample = (
+    [
+      PendingObligationDetailResponse(
+        event_id=d.event_id,
+        schedule_id=d.schedule_id,
+        schedule_name=d.schedule_name,
+        period=d.period,
+      )
+      for d in gate.stranded_obligation_sample
+    ]
+    if gate
+    else []
+  )
 
   return FiscalCalendarResponse(
     graph_id=graph_id,
@@ -129,6 +142,8 @@ def build_fiscal_calendar_response(
     pending_obligation_sample=pending_obligation_sample,
     earliest_pending_period=gate.earliest_pending_period if gate else None,
     sync_stale_days=gate.sync_stale_days if gate else None,
+    stranded_obligation_count=gate.stranded_obligation_count if gate else 0,
+    stranded_obligation_sample=stranded_obligation_sample,
     last_close_at=calendar.last_close_at,
     initialized_at=calendar.initialized_at,
     last_sync_at=last_sync_at,

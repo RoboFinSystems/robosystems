@@ -203,6 +203,7 @@ class PeriodCloseService:
     has_sync_connection: bool,
     last_sync_at: datetime | None,
     allow_stale_sync: bool = False,
+    allow_stranded_obligations: bool = False,
     note: str | None = None,
   ) -> PeriodCloseResult:
     """Close `period` atomically. See class docstring for the full flow."""
@@ -214,6 +215,7 @@ class PeriodCloseService:
       has_sync_connection=has_sync_connection,
       last_sync_at=last_sync_at,
       allow_stale_sync=allow_stale_sync,
+      allow_stranded_obligations=allow_stranded_obligations,
     )
     if not gate.is_closeable:
       raise CloseGateFailed(gate)
@@ -280,6 +282,9 @@ class PeriodCloseService:
     effective_note = self._audit_note(
       note,
       allow_stale_sync=allow_stale_sync and has_sync_connection,
+      stranded_overridden_count=(
+        gate.stranded_obligation_count if allow_stranded_obligations else 0
+      ),
     )
 
     # Route: latest-reopen vs older-reopen reclose vs normal advance
@@ -646,16 +651,29 @@ class PeriodCloseService:
     return tally, tuple(structure_ids)
 
   @staticmethod
-  def _audit_note(note: str | None, *, allow_stale_sync: bool) -> str | None:
-    """Annotate the audit note when the sync gate was overridden.
+  def _audit_note(
+    note: str | None,
+    *,
+    allow_stale_sync: bool,
+    stranded_overridden_count: int = 0,
+  ) -> str | None:
+    """Annotate the audit note when a close gate was overridden.
 
     This ensures the `period_closed` event reflects that a human asserted
-    "the data is complete despite the stale sync," which matters for
-    compliance review.
+    "the data is complete despite the stale sync" — or knowingly closed
+    over undrafted obligations — which matters for compliance review.
     """
-    if not allow_stale_sync:
+    suffixes: list[str] = []
+    if allow_stale_sync:
+      suffixes.append("[sync gate overridden — allow_stale_sync=true]")
+    if stranded_overridden_count > 0:
+      suffixes.append(
+        "[stranded-obligation gate overridden — "
+        f"{stranded_overridden_count} undrafted obligation(s) omitted]"
+      )
+    if not suffixes:
       return note
-    suffix = "[sync gate overridden — allow_stale_sync=true]"
+    suffix = " ".join(suffixes)
     if note:
       return f"{note} {suffix}"
     return suffix

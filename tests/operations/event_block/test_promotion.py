@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.promotion import (
   PromotionResult,
@@ -37,14 +38,25 @@ def _pending_event(
   )
 
 
+def _entry_row(schedule_id: str, posting_date: str) -> SimpleNamespace:
+  """Build a stand-in entries row for the stranded-obligation draft check."""
+  return SimpleNamespace(
+    source_structure_id=schedule_id,
+    posting_date=date.fromisoformat(posting_date),
+  )
+
+
 def _session_returning(
   events: list[SimpleNamespace],
   *,
   live_schedule_ids: set[str] | None = None,
+  entries: list[SimpleNamespace] | None = None,
 ) -> MagicMock:
   """MagicMock session that dispatches by query target.
 
   - ``query(Event)`` → candidate load (``.all()`` → events) + bulk updates.
+  - ``query(Entry)`` → the stranded check's draft-existence lookup
+    (``.all()`` → ``entries``).
   - ``query(Structure.id)`` → the orphan guard's existence check
     (``.all()`` → ``[(sid,), ...]`` for the live schedule ids).
 
@@ -61,14 +73,18 @@ def _session_returning(
   event_query = MagicMock()
   event_query.filter.return_value = event_query
   event_query.all.return_value = events
+  entry_query = MagicMock()
+  entry_query.filter.return_value = entry_query
+  entry_query.all.return_value = entries or []
   struct_query = MagicMock()
   struct_query.filter.return_value = struct_query
   struct_query.all.return_value = [(sid,) for sid in live_schedule_ids]
   session = MagicMock()
   session.query.side_effect = lambda target: (
-    event_query if target is Event else struct_query
+    event_query if target is Event else entry_query if target is Entry else struct_query
   )
   session.event_query = event_query
+  session.entry_query = entry_query
   session.struct_query = struct_query
   return session
 
@@ -338,3 +354,163 @@ class TestOrphanGuard:
 
     assert result.voided_orphan_count == 0
     assert set(result.classified_event_ids) == {"evt_1", "evt_2"}
+
+
+class TestStrandedObligations:
+  """F9: matured `classified` obligations with no drafted closing entry are
+  reachable by the sweep — dispatched in autopilot, surfaced in co-pilot.
+  A co-pilot background sweep flips pending → classified without dispatch,
+  so these are the adjusting entries a close would otherwise silently omit.
+  """
+
+  @staticmethod
+  def _handler() -> MagicMock:
+    handler = MagicMock()
+    handler.metadata_schema.model_validate.return_value = MagicMock()
+    handler.dispatch.return_value = MagicMock()
+    return handler
+
+  def test_copilot_surfaces_stranded_without_dispatch(self) -> None:
+    stranded = _pending_event("evt_stranded", status="classified")
+    session = _session_returning([stranded])
+
+    result = promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    assert result.stranded_event_ids == ["evt_stranded"]
+    assert result.stranded_count == 1
+    assert result.dispatched_count == 0
+    # Already classified — the co-pilot flip has nothing to do.
+    assert result.classified_event_ids == []
+
+  def test_autopilot_dispatches_stranded(self) -> None:
+    stranded = _pending_event("evt_stranded", status="classified")
+    session = _session_returning([stranded])
+    handler = self._handler()
+
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    assert result.stranded_event_ids == ["evt_stranded"]
+    assert result.dispatched_event_ids == ["evt_stranded"]
+    # Not flipped this sweep — it was already classified.
+    assert result.classified_event_ids == []
+    assert handler.dispatch.call_count == 1
+
+  def test_classified_with_draft_is_not_stranded(self) -> None:
+    """An entries row for the (schedule, period) — regardless of which event
+    triggered it — means the obligation has its draft. Mirrors the reconcile
+    key in ScheduleService.create_closing_entry, so posted twins (like a
+    manually re-dispatched close) are never re-dispatched.
+    """
+    settled = _pending_event("evt_settled", status="classified")
+    session = _session_returning(
+      [settled], entries=[_entry_row("struct_a", "2026-01-31")]
+    )
+    handler = self._handler()
+
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    assert result.stranded_event_ids == []
+    assert result.dispatched_event_ids == []
+    handler.dispatch.assert_not_called()
+
+  def test_entry_outside_period_window_still_stranded(self) -> None:
+    """A draft for a *different* month doesn't settle this obligation."""
+    stranded = _pending_event(
+      "evt_stranded", status="classified", period_end="2026-01-31"
+    )
+    session = _session_returning(
+      [stranded], entries=[_entry_row("struct_a", "2025-12-31")]
+    )
+
+    result = promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    assert result.stranded_event_ids == ["evt_stranded"]
+
+  def test_classified_orphan_is_voided_not_dispatched(self) -> None:
+    """A stranded obligation whose schedule was deleted voids in place
+    (Layer 2), instead of erroring at dispatch every sweep."""
+    orphan = _pending_event(
+      "evt_orphan", schedule_id="struct_deleted", status="classified"
+    )
+    session = _session_returning([orphan], live_schedule_ids=set())
+    handler = self._handler()
+
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    assert result.voided_orphan_event_ids == ["evt_orphan"]
+    assert result.stranded_event_ids == []
+    handler.dispatch.assert_not_called()
+
+  def test_pending_and_stranded_both_dispatch_in_one_sweep(self) -> None:
+    fresh = _pending_event("evt_fresh", schedule_id="struct_a")
+    stranded = _pending_event(
+      "evt_stranded", schedule_id="struct_b", status="classified"
+    )
+    session = _session_returning([fresh, stranded])
+    handler = self._handler()
+
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    assert result.classified_event_ids == ["evt_fresh"]
+    assert result.stranded_event_ids == ["evt_stranded"]
+    assert set(result.dispatched_event_ids) == {"evt_fresh", "evt_stranded"}
+    assert handler.dispatch.call_count == 2
+
+  def test_classified_without_window_metadata_is_skipped(self) -> None:
+    """No schedule_id / period metadata → the draft check can't run; the
+    event is left alone (dispatch would reject its metadata anyway)."""
+    opaque = SimpleNamespace(
+      id="evt_opaque",
+      event_type="schedule_entry_due",
+      status="classified",
+      occurred_at=datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC),
+      metadata_=None,
+    )
+    session = _session_returning([opaque])
+
+    result = promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    assert result.stranded_event_ids == []
+    assert result.dispatched_count == 0
