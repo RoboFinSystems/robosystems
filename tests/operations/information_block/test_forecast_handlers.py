@@ -548,7 +548,7 @@ class TestCreate:
 
 class TestWriteLeverFactSet:
   def test_self_referential_scenario_set_with_asserted_provenance(self) -> None:
-    structure = SimpleNamespace(id="struct_budget_01")
+    structure = SimpleNamespace(id="struct_budget_01", name="Budget 01")
     mechanics = ForecastMechanics(
       scenario_kind="budget",
       horizon_months=2,
@@ -566,6 +566,7 @@ class TestWriteLeverFactSet:
     session.execute.return_value.scalars.return_value.all.return_value = [GROWTH]
     added_facts: list[Any] = []
     session.add.side_effect = added_facts.append
+    session.add_all.side_effect = added_facts.extend
 
     with patch.object(
       forecast_handlers,
@@ -598,7 +599,7 @@ class TestWriteLeverFactSet:
     assert first.unit == "pure"  # percent → 'pure'
 
   def test_line_assertions_ride_the_same_set_with_typed_periods(self) -> None:
-    structure = SimpleNamespace(id="struct_budget_01")
+    structure = SimpleNamespace(id="struct_budget_01", name="Budget 01")
     mechanics = ForecastMechanics(
       scenario_kind="budget",
       horizon_months=2,
@@ -625,6 +626,7 @@ class TestWriteLeverFactSet:
     session.execute.return_value.scalars.return_value.all.return_value = [GROWTH, LOAN]
     added_facts: list[Any] = []
     session.add.side_effect = added_facts.append
+    session.add_all.side_effect = added_facts.extend
 
     with patch.object(
       forecast_handlers,

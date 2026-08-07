@@ -250,6 +250,7 @@ def _session(structure: Any) -> MagicMock:
 def _structure(mechanics: dict) -> SimpleNamespace:
   return SimpleNamespace(
     id="struct_budget",
+    name="Budget Scenario",
     block_type="forecast",
     artifact_mechanics=mechanics,
   )
@@ -850,6 +851,7 @@ class TestUpsertMonthSet:
     session.execute.return_value.scalar_one_or_none.return_value = None
     added: list[Any] = []
     session.add.side_effect = added.append
+    session.add_all.side_effect = added.extend
 
     from robosystems.models.api.fact_provenance import ForecastProvenance
 
@@ -867,6 +869,7 @@ class TestUpsertMonthSet:
         structure_id="struct_is",
         entity_id="ent_1",
         scenario_id="struct_budget",
+        scenario_dimension_id="dim_scn_budget",
         period_start=date(2026, 7, 1),
         period_end=JUL,
         provenance=provenance,
@@ -898,7 +901,8 @@ class TestUpsertMonthSet:
     first.scalar_one_or_none.return_value = standing
     second = MagicMock()
     second.scalars.return_value.all.return_value = old_facts
-    session.execute.side_effect = [first, second]
+    # Third execute: the fact_dimensions junction insert.
+    session.execute.side_effect = [first, second, MagicMock()]
 
     from robosystems.models.api.fact_provenance import ForecastProvenance
 
@@ -913,6 +917,7 @@ class TestUpsertMonthSet:
       structure_id="struct_is",
       entity_id="ent_1",
       scenario_id="struct_budget",
+      scenario_dimension_id="dim_scn_budget",
       period_start=date(2026, 7, 1),
       period_end=JUL,
       provenance=provenance,
@@ -935,6 +940,7 @@ class TestUpsertMonthSet:
       structure_id="struct_bs",
       entity_id="ent_1",
       scenario_id="struct_budget",
+      scenario_dimension_id="dim_scn_budget",
       period_start=date(2026, 7, 1),
       period_end=JUL,
       provenance=ForecastProvenance(
@@ -947,3 +953,59 @@ class TestUpsertMonthSet:
     )
     assert result is None
     session.execute.assert_not_called()
+
+  def test_new_facts_are_stamped_with_the_scenario_dimension(self) -> None:
+    """Every emitted fact gets a fact_dimensions row pairing it with the
+    scenario Dimension — the explicit-member half of the default-member
+    rule. Actuals never pass through this path, so they stay unrowed."""
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+
+    from robosystems.models.api.fact_provenance import ForecastProvenance
+
+    with patch.object(fc, "create_fact_set", return_value=SimpleNamespace(id="fs_new")):
+      fc._upsert_month_set(
+        session,
+        structure_id="struct_is",
+        entity_id="ent_1",
+        scenario_id="struct_budget",
+        scenario_dimension_id="dim_scn_budget",
+        period_start=date(2026, 7, 1),
+        period_end=JUL,
+        provenance=ForecastProvenance(
+          scenario_structure_id="struct_budget",
+          base_period="2026-06",
+          month_index=1,
+        ),
+        created_by="usr_test",
+        facts=[(EL_REV, 103.0), (EL_AR, 154.5)],
+      )
+
+    (new_facts,) = session.add_all.call_args.args
+    insert_call = session.execute.call_args
+    rows = insert_call.args[1]
+    assert {r["fact_id"] for r in rows} == {f.id for f in new_facts}
+    assert {r["dimension_id"] for r in rows} == {"dim_scn_budget"}
+
+
+class TestEnsureScenarioDimension:
+  def test_returns_existing_dimension_id(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = "dim_existing"
+
+    assert fc._ensure_scenario_dimension(session, "struct_a", "Scenario A") == (
+      "dim_existing"
+    )
+    session.add.assert_not_called()
+
+  def test_creates_when_absent(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = None
+
+    fc._ensure_scenario_dimension(session, "struct_a", "Scenario A")
+
+    (dimension,) = session.add.call_args.args
+    assert dimension.dimension_type == "scenario"
+    assert dimension.value == "struct_a"
+    assert dimension.name == "Scenario A"
+    session.flush.assert_called_once()
