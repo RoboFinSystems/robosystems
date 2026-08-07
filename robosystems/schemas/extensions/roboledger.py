@@ -1,27 +1,14 @@
 """
 RoboLedger Schema Extension for LadybugDB
 
-Complete accounting system with both transaction and reporting capabilities.
+One schema covering two sections: financial reporting (XBRL, SEC filings,
+financial statements) and the general ledger (transactions, journal entries,
+accounts). Each context sees only the section it can populate — SEC
+repositories hold no transaction data, so exposing GL tables there would only
+mislead querying agents.
 
-This unified schema includes:
-- 📊 Financial Reporting (XBRL, SEC filings, financial statements)
-- 📒 General Ledger (transactions, journal entries, accounts)
+Select a context explicitly:
 
-CONTEXT-AWARE USAGE:
--------------------
-Different contexts get different views of the same schema:
-
-1. SEC Repository (reporting only):
-   - Only XBRL/reporting tables visible
-   - No transaction data (doesn't exist in SEC)
-   - Prevents MCP agent confusion
-
-2. Entity Graphs (full system):
-   - Complete accounting capabilities
-   - Both transactions AND reporting
-   - Full RoboLedger functionality
-
-For direct context control, use:
   from robosystems.schemas.loader import get_contextual_schema_loader
 
   # SEC repository - reporting only
@@ -382,7 +369,7 @@ TRANSACTION_RELATIONSHIPS = [
 
 
 class RoboLedgerContext:
-  """Context-aware schema loading for RoboLedger"""
+  """Selects the node and relationship subset a given context can populate."""
 
   SEC_REPOSITORY = "sec_repository"
   FULL_ACCOUNTING = "full_accounting"
@@ -433,13 +420,8 @@ class RoboLedgerContext:
     relationships. This ensures foreign key constraints are satisfied during
     materialization (nodes must exist before relationships can reference them).
 
-    Args:
-        context: One of SEC_REPOSITORY, FULL_ACCOUNTING, TRANSACTION_ONLY, REPORTING_ONLY
-        include_base: Whether to include base schema tables (default: True)
-
-    Returns:
-        Dictionary mapping table name to entity type ("nodes" or "relationships")
-        Order: base nodes, extension nodes, base relationships, extension relationships
+    Maps table name to entity type ("nodes" or "relationships"), ordered base
+    nodes, extension nodes, base relationships, extension relationships.
     """
     from ..base import (
       BASE_NODES,
@@ -486,7 +468,7 @@ class RoboLedgerContext:
 
 
 # ============================================================================
-# EXTENSION DEFINITION (for backward compatibility)
+# EXTENSION DEFINITION
 # ============================================================================
 
 # Default to full accounting system for entity graphs

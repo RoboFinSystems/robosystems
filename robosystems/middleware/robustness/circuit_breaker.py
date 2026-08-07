@@ -1,8 +1,8 @@
-"""
-Circuit breaker implementation for preventing cascade failures.
+"""Circuit breaker for failing dependencies.
 
-Provides circuit breaker functionality to protect against repeated failures
-and enable graceful degradation across all endpoints.
+After a threshold of failures the breaker opens and calls fail immediately
+instead of piling up against a dependency that is already down; after a
+recovery timeout it half-opens to test whether the dependency is back.
 """
 
 import time
@@ -36,14 +36,7 @@ class CircuitBreakerManager:
     recovery_timeout: int | None = None,
     half_open_max_calls: int = 3,
   ):
-    """
-    Initialize circuit breaker manager.
-
-    Args:
-        failure_threshold: Number of failures before opening circuit (default from SSM/TuningConfig)
-        recovery_timeout: Seconds before attempting recovery (default from SSM/TuningConfig)
-        half_open_max_calls: Max calls allowed in half-open state
-    """
+    """Initialize circuit breaker manager."""
     # Use TuningConfig for runtime tunability via SSM
     self.failure_threshold = (
       failure_threshold
@@ -92,19 +85,7 @@ class CircuitBreakerManager:
     return False
 
   def check_circuit(self, graph_id: str, operation: str) -> bool:
-    """
-    Check circuit breaker before operation.
-
-    Args:
-        graph_id: Target graph identifier
-        operation: Operation name (e.g., 'cypher_query', 'get-graph-schema')
-
-    Returns:
-        True if operation should proceed
-
-    Raises:
-        HTTPException: If circuit is open
-    """
+    """Check circuit breaker before operation."""
     circuit_key = self._get_circuit_key(graph_id, operation)
 
     if not self._should_allow_request(circuit_key):
@@ -130,19 +111,16 @@ class CircuitBreakerManager:
     circuit.failure_count = 0
     circuit.last_success_time = time.time()
 
-    # Close circuit if it was open
     if circuit.is_open:
       circuit.is_open = False
       logger.info(f"Circuit {circuit_key} closed after successful operation")
 
-    # Update metrics
     self._update_metrics(graph_id, operation, circuit)
 
   def record_failure(
     self, graph_id: str, operation: str, error: Exception | None = None
   ) -> None:
-    """
-    Record failed operation and potentially open circuit.
+    """Record failed operation and potentially open circuit.
 
     Only infrastructure errors (timeouts, server errors, connection failures)
     count toward the circuit breaker threshold. Client errors like bad Cypher
@@ -168,7 +146,6 @@ class CircuitBreakerManager:
         f"Circuit {circuit_key} opened after {circuit.failure_count} failures"
       )
 
-    # Update metrics
     self._update_metrics(graph_id, operation, circuit)
 
   def get_circuit_status(self, graph_id: str, operation: str) -> dict[str, Any]:

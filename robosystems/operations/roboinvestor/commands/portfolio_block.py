@@ -1,16 +1,13 @@
 """Portfolio Block write operations — molecule-level command surface.
 
-Three commands replace the atom-level portfolio + position CRUD:
-:func:`create_portfolio_block`, :func:`update_portfolio_block`,
-:func:`delete_portfolio_block`. Each validates the entire envelope
-before any DB write and applies all changes atomically — partial
-failures roll back via the caller's session.
+:func:`create_portfolio_block`, :func:`update_portfolio_block` and
+:func:`delete_portfolio_block` each validate the entire envelope before any
+DB write and apply all changes atomically — partial failures roll back via
+the caller's session.
 
-`PortfolioNotFoundError` is reused from
-``robosystems.operations.roboinvestor.reads.holdings`` so the read +
-write surface share the same 404 sentinel. `SecurityNotFoundError`
-and `PositionNotFoundError` are defined here for the FK-miss cases
-hit by the position deltas.
+`PortfolioNotFoundError` is imported from
+``robosystems.operations.roboinvestor.reads.holdings`` so the read and write
+surfaces share one 404 sentinel.
 """
 
 from __future__ import annotations

@@ -65,10 +65,10 @@ def materialize_extensions_to_graph(
   try:
     # Enforce the tier storage cap on this path too. The HTTP materialize
     # command runs the same check, but this op is also reached directly by
-    # the staleness sensor, which otherwise rebuilds over-cap graphs on
-    # every sync — the cap only ever bound manual calls. Unknown usage
-    # (Graph API unreachable) fails the run rather than proceeding
-    # unverified; the sensor resubmits after its cursor expiry.
+    # the staleness sensor, which would otherwise rebuild over-cap graphs on
+    # every sync. Unknown usage (Graph API unreachable) fails the run rather
+    # than proceeding unverified; the sensor resubmits after its cursor
+    # expiry.
     from robosystems.database import get_db_session
     from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
     from robosystems.models.core.graph.graph import Graph

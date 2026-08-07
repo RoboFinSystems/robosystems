@@ -1,7 +1,7 @@
 """Graph database resource for Dagster.
 
-Provides LadybugDB graph operations for Dagster jobs and assets,
-wrapping the existing GraphClientFactory patterns.
+Wraps the graph client factory so Dagster jobs and assets reach LadybugDB
+through the same routing, auth, and circuit-breaker path as the API.
 """
 
 from typing import Any
@@ -15,9 +15,7 @@ from robosystems.logger import logger
 class GraphResource(ConfigurableResource):
   """LadybugDB graph resource for Dagster operations.
 
-  This resource provides graph database operations using the
-  existing GraphClientFactory infrastructure, ensuring consistency
-  with the rest of the RoboSystems codebase.
+  Defaults to env.GRAPH_API_URL when ``graph_api_url`` is left empty.
   """
 
   graph_api_url: str = ""
@@ -30,12 +28,8 @@ class GraphResource(ConfigurableResource):
   async def get_client(self, graph_id: str, operation_type: str = "read"):
     """Get a graph client for the specified graph.
 
-    Args:
-        graph_id: The graph ID to connect to
-        operation_type: Either "read" or "write"
-
-    Returns:
-        GraphClient instance
+    ``operation_type`` is "read" or "write" and selects how the graph
+    middleware routes the request.
     """
     from robosystems.middleware.graph import get_universal_repository
 
@@ -44,34 +38,17 @@ class GraphResource(ConfigurableResource):
   async def execute_query(
     self, graph_id: str, query: str, params: dict[str, Any] | None = None
   ) -> list[dict[str, Any]]:
-    """Execute a Cypher query against a graph.
-
-    Args:
-        graph_id: Target graph ID
-        query: Cypher query string
-        params: Query parameters
-
-    Returns:
-        List of result dictionaries
-    """
+    """Execute a read-routed Cypher query against a graph."""
     client = await self.get_client(graph_id, "read")
     async with client:
       result = await client.execute_query(query, params or {})
       return result
 
   async def get_graph_info(self, graph_id: str) -> dict[str, Any]:
-    """Get information about a graph database.
-
-    Args:
-        graph_id: Target graph ID
-
-    Returns:
-        Dictionary with graph metadata
-    """
+    """Return node and relationship counts, or an ``error`` key on failure."""
     try:
       client = await self.get_client(graph_id, "read")
       async with client:
-        # Get basic graph statistics
         node_count = await client.execute_single(
           "MATCH (n) RETURN count(n) as count", {}
         )
@@ -94,16 +71,7 @@ class GraphResource(ConfigurableResource):
     table_name: str,
     file_ids: list[str],
   ) -> dict[str, Any]:
-    """Materialize a staging table to the graph.
-
-    Args:
-        graph_id: Target graph ID
-        table_name: Name of the staging table
-        file_ids: List of file IDs to materialize
-
-    Returns:
-        Materialization result
-    """
+    """Materialize the named staging table into the graph (write-routed)."""
     client = await self.get_client(graph_id, "write")
     async with client:
       result = await client.materialize_table(

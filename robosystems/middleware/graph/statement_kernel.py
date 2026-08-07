@@ -1,15 +1,15 @@
 """Transport-independent authorization kernel for graph statements.
 
-Extracted from the Cypher ``/query`` handler so REST (``/query/cypher``,
-``/query/sql``), MCP, and Operators share **one** policy path — write
-detection, the three-tier write policy (main-graph reads-only / subgraph
-read+write / shared-repo reads-only), per-engine validation, and role-based
-write access — instead of each surface re-implementing it inline and drifting.
+REST (``/query/cypher``, ``/query/sql``), MCP, and Operators all run
+statements through this one policy path: write detection, the three-tier
+write policy (main graph reads-only, subgraph read+write, shared repository
+reads-only), per-engine validation, and role-based write access. One
+implementation means the surfaces cannot drift apart.
 
-See the content-ops cutover plan, Phase B. This module owns the authorization
-gauntlet only; circuit-breaker checks, dual-layer rate limiting, repository
-acquisition, execution-strategy selection, and streaming stay in the callers
-(they are transport/engine-specific and position-sensitive in the hot path).
+Scope is the authorization gauntlet only. Circuit-breaker checks, dual-layer
+rate limiting, repository acquisition, execution-strategy selection, and
+streaming stay with the callers — they are transport- and engine-specific,
+and their position in the hot path matters.
 """
 
 import logging

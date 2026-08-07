@@ -181,16 +181,15 @@ class GraphUser(Model):
   def get_effective_role(
     cls, user_id: str, graph_id: str, session: Session
   ) -> tuple[GraphRole | None, bool]:
-    """Resolve the user's effective role on a graph.
+    """Resolve the user's effective role on a graph, as ``(role, implicit)``.
 
-    Subgraphs resolve to their parent graph (subgraphs inherit permissions).
-    Org OWNER/ADMIN of the owning org hold implicit graph admin — "if they
-    are paying for it, they should be able to manage it" — so the effective
-    role is the max of the explicit row and the implicit org grant.
+    ``role`` is None when the user has no access; ``implicit`` is True when the
+    role comes from the owning org rather than an explicit GraphUser row.
 
-    Returns:
-        (role, implicit): the effective role (None = no access) and whether
-        it came from org role rather than an explicit GraphUser row.
+    Subgraphs resolve to their parent graph — subgraphs inherit permissions.
+    Org OWNER/ADMIN hold implicit graph admin on graphs their org owns (paying
+    for a graph carries the right to manage it), so the effective role is the
+    stronger of the explicit row and that implicit grant.
     """
     from robosystems.middleware.graph.types import parse_graph_id
 

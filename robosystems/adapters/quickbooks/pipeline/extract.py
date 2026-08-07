@@ -88,9 +88,6 @@ def qb_extract(
   The JournalReport includes invoices, bills, payments, purchases,
   deposits, and manual journal entries — everything needed for a
   complete accounting graph.
-
-  Returns:
-      MaterializeResult with extract_path metadata
   """
   from datetime import datetime, timedelta
 

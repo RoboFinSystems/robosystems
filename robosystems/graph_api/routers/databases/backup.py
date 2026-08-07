@@ -1,13 +1,9 @@
-"""
-Database backup and restore endpoints for Graph API.
+"""Database backup endpoints. Restore lives in ``restore.py``.
 
-This module provides endpoints for creating backups and restoring
-LadybugDB databases.
-
-Supports four backup types:
-- standard: Existing BackupManager flow (ZIP, optional encrypt, S3 upload)
-- replica: Raw .lbug upload to S3 via OnInstanceBackupService (for replica fleet download)
-- duckdb_staging: Raw .duckdb upload to S3 via OnInstanceBackupService
+Four backup types:
+- standard: BackupManager flow (ZIP, optional encrypt, S3 upload)
+- replica: raw .lbug to S3 via OnInstanceBackupService (replica fleet downloads it)
+- duckdb_staging: raw .duckdb to S3 via OnInstanceBackupService
 - r2_download: zstd-compressed .lbug.zst to R2 via OnInstanceBackupService
 """
 
@@ -43,12 +39,10 @@ async def perform_backup(
   db_manager=None,
   duckdb_pool=None,
 ) -> None:
-  """
-  Perform the actual backup in the background.
-  Updates task status for monitoring.
+  """Run the backup in the background, updating task status for monitoring.
 
-  Routes to OnInstanceBackupService for replica/duckdb_staging/r2_download types,
-  or to BackupManager for standard backups.
+  Routes to OnInstanceBackupService for replica/duckdb_staging/r2_download,
+  and to BackupManager for standard backups.
   """
   try:
     if backup_type in ("replica", "duckdb_staging", "r2_download") and s3_destination:
@@ -76,7 +70,7 @@ async def perform_backup(
       logger.info(f"[Task {task_id}] On-instance backup completed successfully")
 
     else:
-      # Standard backup via BackupManager (existing flow)
+      # Standard backup via BackupManager
       await backup_task_manager.update_task(
         task_id,
         status="running",
@@ -146,7 +140,7 @@ async def create_backup(
       detail="Backup operations not allowed on read-only nodes",
     )
 
-  # Validate database exists (DuckDB staging uses its own file, not LadybugDB)
+  # DuckDB staging lives in its own file, not in LadybugDB.
   if request.backup_type == "duckdb_staging":
     import re
     from pathlib import Path
@@ -173,7 +167,6 @@ async def create_backup(
         detail=f"Database {graph_id} not found",
       )
 
-  # Validate s3_destination for non-standard backup types
   if (
     request.backup_type in ("replica", "duckdb_staging", "r2_download")
     and not request.s3_destination
@@ -183,7 +176,6 @@ async def create_backup(
       detail=f"s3_destination is required for backup_type '{request.backup_type}'",
     )
 
-  # Create task in task manager
   task_id = await backup_task_manager.create_task(
     task_type="backup",
     metadata={
@@ -195,7 +187,6 @@ async def create_backup(
     },
   )
 
-  # Serialize s3_destination for background task
   s3_dest_dict = None
   if request.s3_destination:
     s3_dest_dict = {
@@ -203,14 +194,12 @@ async def create_backup(
       "key": request.s3_destination.key,
     }
 
-  # Get DuckDB pool for duckdb_staging backups
   duckdb_pool = None
   if request.backup_type == "duckdb_staging":
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
 
-  # Add backup task to FastAPI background tasks
   background_tasks.add_task(
     perform_backup,
     task_id=task_id,

@@ -1,8 +1,9 @@
 """
-Generic SSE task monitoring for background operations.
+SSE streaming for background-task progress.
 
-This module provides a reusable SSE streaming interface for monitoring
-any long-running background task (ingestion, backup, restore, etc.).
+Polls a task manager and emits `connected`, `heartbeat`, `progress`,
+`completed` and `failed` events. The client half lives in
+``robosystems/graph_api/client/client.py``.
 """
 
 import asyncio
@@ -22,27 +23,16 @@ async def generate_task_sse_events(
   task_type: TaskType = TaskType.INGESTION,
   heartbeat_interval: int = 30,
 ) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Generate SSE events for any background task with progress monitoring.
+  """Stream SSE events for a background task until it completes or fails.
 
-  This is a generic implementation that can be used for:
-  - Database backups
-  - Database restores
-  - Any other long-running task
-
-  Args:
-      task_manager: Task manager instance with get_task method
-      task_id: Unique task identifier
-      task_type: Type of task being monitored
-      heartbeat_interval: Seconds between heartbeat events
-
-  Yields:
-      SSE event dictionaries with event type and data
+  ``task_manager`` is anything exposing ``get_task``. Heartbeats every
+  ``heartbeat_interval`` seconds keep intermediaries from closing an idle
+  connection during a long, quiet task; progress events are emitted only when
+  the percentage changes.
   """
   last_heartbeat = time.time()
   last_progress = -1
 
-  # Send initial connection event
   yield {
     "event": "connected",
     "data": json.dumps(
@@ -57,7 +47,6 @@ async def generate_task_sse_events(
 
   while True:
     try:
-      # Get current task status
       task = await task_manager.get_task(task_id)
 
       if not task:
@@ -69,7 +58,6 @@ async def generate_task_sse_events(
         }
         break
 
-      # Send heartbeat every interval to prevent timeout
       current_time = time.time()
       if current_time - last_heartbeat > heartbeat_interval:
         yield {
@@ -87,7 +75,6 @@ async def generate_task_sse_events(
         last_heartbeat = current_time
         logger.debug(f"[SSE] Sent heartbeat for {task_type.value} task {task_id}")
 
-      # Send progress updates
       current_progress = task.get("progress_percent", 0)
       if current_progress != last_progress:
         yield {
@@ -108,7 +95,6 @@ async def generate_task_sse_events(
         }
         last_progress = current_progress
 
-      # Check for completion
       if task["status"] == "completed":
         yield {
           "event": "completed",
@@ -126,7 +112,6 @@ async def generate_task_sse_events(
         }
         break
 
-      # Check for failure
       if task["status"] == "failed":
         yield {
           "event": "failed",
@@ -143,7 +128,6 @@ async def generate_task_sse_events(
         }
         break
 
-      # Wait a bit before checking again
       await asyncio.sleep(2)
 
     except Exception as e:
@@ -247,7 +231,7 @@ def _get_failure_message(task_type: TaskType, task: dict[str, Any]) -> str:
 
 
 def _calculate_duration(task: dict[str, Any]) -> float:
-  """Calculate task duration in seconds."""
+  """Task duration in seconds; 0.0 when either timestamp is missing."""
   if task.get("completed_at") and task.get("started_at"):
     try:
       completed = datetime.fromisoformat(task["completed_at"])

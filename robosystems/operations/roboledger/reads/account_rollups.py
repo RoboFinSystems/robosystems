@@ -118,7 +118,6 @@ def get_account_rollups(
   exists at all. Raises `MappingNotFoundError` if a caller-supplied
   `mapping_id` does not resolve to a structure.
   """
-  # Auto-discover mapping if not provided
   if not mapping_id:
     mapping = session.execute(
       select(Structure)
@@ -145,7 +144,6 @@ def get_account_rollups(
       raise MappingNotFoundError("Mapping not found")
     mapping_name = str(mapping.name)
 
-  # Single query: mapping associations + trial balance balances
   result = session.execute(
     _ROLLUP_SQL,
     {
@@ -155,7 +153,6 @@ def get_account_rollups(
     },
   )
 
-  # Group rows by reporting element
   groups_dict: dict[str, AccountRollupGroup] = {}
   for row in result:
     debits = cents_to_dollars(row.total_debits)
@@ -187,7 +184,6 @@ def get_account_rollups(
     )
     groups_dict[key].total += natural
 
-  # Sort groups by classification order
   groups = sorted(
     groups_dict.values(),
     key=lambda g: (
@@ -196,7 +192,6 @@ def get_account_rollups(
     ),
   )
 
-  # Count unmapped CoA elements
   unmapped_result = session.execute(
     _UNMAPPED_SQL,
     {"mapping_id": mapping_id, "sources": list(COA_SOURCES)},

@@ -6,9 +6,8 @@ Write operations (create, delete) live at
 ``POST /v1/graphs/{graph_id}/operations/{create-subgraph,delete-subgraph}``.
 
 Subgraph quota is reported by ``GET /v1/graphs/{graph_id}/limits`` under
-``subgraphs``. It used to have a dedicated ``/quota`` route here, which
-``GET /{subgraph_name}`` shadowed for its entire life — ``quota`` matches
-``SUBGRAPH_NAME_PATTERN``, so every call 404'd.
+``subgraphs``. It cannot live on a fixed path here: ``GET /{subgraph_name}``
+shadows any literal segment matching ``SUBGRAPH_NAME_PATTERN``.
 """
 
 from fastapi import APIRouter

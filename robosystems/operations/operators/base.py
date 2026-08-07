@@ -1,13 +1,11 @@
-"""
-Base AI Operator abstract class and core structures.
+"""Base classes for AI Operators.
 
-Provides the foundation for all Operator implementations in the multi-operator
-system.
+Two protocols coexist:
 
-This module contains both the new unified Operator protocol (Operator,
-OperatorSpec, OperatorResult) and the legacy BaseOperator/OperatorMetadata/
-OperatorResponse classes. The legacy classes are used by the existing
-orchestrator and routers during migration.
+- ``Operator`` / ``OperatorSpec`` / ``OperatorResult`` — the unified protocol.
+  Write new operators against this one.
+- ``BaseOperator`` / ``OperatorMetadata`` / ``OperatorResponse`` — the older
+  protocol still driving ``CypherOperator`` and the orchestrator.
 
 "Operator" is the AI-executor concept (Claude/MCP), distinct from the REA
 ``Agent`` (counterparty) modeled in ``models/extensions/roboledger/agent.py``.
@@ -103,10 +101,10 @@ def matches_graph_scope(
 
 @dataclass
 class OperatorSpec:
-  """Declarative operator metadata. Set as a class attribute on Operator subclasses.
+  """Declarative operator metadata, set as a class attribute on subclasses.
 
-  Unlike the legacy OperatorMetadata, this is readable without instantiation,
-  which enables routing decisions without constructing operator objects.
+  Readable without instantiation, so the orchestrator can route without
+  constructing operator objects.
   """
 
   name: str
@@ -192,15 +190,9 @@ class Operator(ABC):
   async def run(self, ctx: OperatorContext) -> OperatorResult:
     """Execute the operator's logic.
 
-    All services (AI, tools, progress, credits) are accessed through `ctx`.
-    Credit consumption is automatic — every `ctx.ai.create_message()` call
-    tracks tokens and deducts credits.
-
-    Args:
-        ctx: Operator context with identity, services, and task parameters.
-
-    Returns:
-        OperatorResult with domain-specific content and metadata.
+    All services (AI, tools, progress, credits) come from ``ctx``. Credit
+    consumption is automatic — every ``ctx.ai.create_message()`` call tracks
+    tokens and deducts credits.
     """
 
   def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
@@ -217,10 +209,8 @@ class Operator(ABC):
 
 @dataclass
 class OperatorMetadata:
-  """Metadata describing an operator's capabilities and configuration.
-
-  Legacy: Used by the old BaseOperator protocol. New operators use
-  OperatorSpec instead.
+  """Capability metadata for a ``BaseOperator``. New operators use
+  :class:`OperatorSpec`.
   """
 
   name: str
@@ -257,10 +247,8 @@ class OperatorMetadata:
 
 @dataclass
 class OperatorResponse:
-  """Standard response structure from operator analysis.
-
-  Legacy: Used by the old BaseOperator protocol. New operators return
-  OperatorResult.
+  """Response from a ``BaseOperator``. New operators return
+  :class:`OperatorResult`.
   """
 
   content: str
@@ -277,10 +265,8 @@ class OperatorResponse:
 
 
 class BaseOperator(ABC):
-  """Abstract base class for operators using the legacy protocol.
-
-  Legacy: New operators should inherit from Operator instead.
-  This class is used by CypherOperator and the orchestrator during migration.
+  """Base class for the older operator protocol, used by ``CypherOperator``
+  and the orchestrator. New operators inherit from :class:`Operator`.
   """
 
   def __init__(
@@ -289,14 +275,7 @@ class BaseOperator(ABC):
     user: User,
     db_session=None,
   ):
-    """
-    Initialize the base operator.
-
-    Args:
-        graph_id: The graph database identifier
-        user: The authenticated user
-        db_session: Optional database session for operations
-    """
+    """Without ``db_session`` credit consumption is skipped, not deferred."""
     self.graph_id = graph_id
     self.user = user
     self.db_session = db_session
@@ -320,33 +299,12 @@ class BaseOperator(ABC):
     context: dict[str, Any] | None = None,
     callback: Any | None = None,
   ) -> OperatorResponse:
-    """
-    Perform analysis on the query.
-
-    Args:
-        query: The user's query to analyze
-        mode: Execution mode (quick, standard, extended, streaming)
-        history: Conversation history
-        context: Additional context for analysis
-        callback: Optional callback for progress updates
-
-    Returns:
-        OperatorResponse with analysis results
-    """
+    """Answer ``query``, optionally reporting progress through ``callback``."""
     pass
 
   @abstractmethod
   def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
-    """
-    Return confidence score (0-1) for handling this query.
-
-    Args:
-        query: The query to evaluate
-        context: Optional context for evaluation
-
-    Returns:
-        Float between 0 and 1 indicating confidence
-    """
+    """Return 0-1 confidence that this operator should handle the query."""
     pass
 
   def supports_mode(self, mode: OperatorMode) -> bool:
@@ -358,7 +316,7 @@ class BaseOperator(ABC):
     return capability in self.metadata.capabilities
 
   async def initialize_tools(self):
-    """Initialize MCP tools for the operator."""
+    """Open the graph MCP client and build the tool set for this graph."""
     try:
       from robosystems.middleware.mcp import (
         GraphMCPTools,
@@ -381,7 +339,7 @@ class BaseOperator(ABC):
       raise
 
   async def close(self):
-    """Clean up operator resources."""
+    """Close the graph MCP client. Safe to call when it was never opened."""
     if self.graph_client:
       try:
         await self.graph_client.close()
@@ -401,17 +359,10 @@ class BaseOperator(ABC):
     model: str = "claude-3-sonnet",
     operation_description: str = "Operator analysis",
   ) -> dict[str, Any] | None:
-    """
-    Consume credits based on token usage.
+    """Deduct credits for token usage; None when there is no DB session.
 
-    Args:
-        input_tokens: Number of input tokens used
-        output_tokens: Number of output tokens generated
-        model: AI model used
-        operation_description: Description of the operation
-
-    Returns:
-        Credit consumption result or None if no session
+    Never raises: a credit failure is logged and swallowed so it cannot lose an
+    already-completed analysis.
     """
     if not self.db_session:
       self.logger.warning(
@@ -453,15 +404,7 @@ class BaseOperator(ABC):
       return None
 
   def validate_mode(self, mode: OperatorMode) -> None:
-    """
-    Validate that the operator supports the requested mode.
-
-    Args:
-        mode: The mode to validate
-
-    Raises:
-        ValueError: If mode is not supported
-    """
+    """Raise ValueError when the operator does not support ``mode``."""
     if not self.supports_mode(mode):
       supported = ", ".join(m.value for m in self.metadata.supported_modes)
       raise ValueError(
@@ -470,15 +413,7 @@ class BaseOperator(ABC):
       )
 
   def get_mode_limits(self, mode: OperatorMode) -> dict[str, Any]:
-    """
-    Get operational limits for the specified mode.
-
-    Args:
-        mode: The execution mode
-
-    Returns:
-        Dict with limits like max_tools, timeout, etc.
-    """
+    """Per-mode limits (max tools, timeout) from ``OperatorConfig``."""
     from robosystems.config import OperatorConfig
 
     return OperatorConfig.get_mode_limits(mode.value)
@@ -488,19 +423,12 @@ class BaseOperator(ABC):
     query: str,
     context: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
-    """
-    Prepare and enhance context for analysis.
+    """Merge identity, operator, and timestamp fields into ``context``.
 
-    Args:
-        query: The query being analyzed
-        context: Initial context
-
-    Returns:
-        Enhanced context dictionary
+    Mutates and returns the caller's dict when one is passed.
     """
     enhanced_context = context or {}
 
-    # Add standard context elements
     enhanced_context.update(
       {
         "graph_id": self.graph_id,
@@ -514,7 +442,6 @@ class BaseOperator(ABC):
     return enhanced_context
 
   def __repr__(self) -> str:
-    """String representation of the operator."""
     return (
       f"<{self.__class__.__name__} "
       f"name='{self.metadata.name}' "

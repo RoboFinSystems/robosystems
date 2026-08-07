@@ -14,8 +14,8 @@ Producers populate the bundle:
 * ``build_report_bundle(session, report_id)`` — assembles a published
   Report (FactSets + Facts + framework slice + IB envelopes) into a
   mode='report' ``StatementBundle``. Stamped at publish, stored in S3.
-* ``build_live_bundle`` is the future producer for mode='live'
-  ephemeral snapshots; not yet implemented.
+* ``mode='live'`` ephemeral snapshots have no producer — the bundle
+  shape supports the mode, nothing builds one.
 """
 
 from robosystems.operations.serialization.bundle import (

@@ -43,10 +43,10 @@ class Portfolio(ExtensionsBase):
   description = Column(String, nullable=True)
 
   # Entity linkage (ENTITY_HAS_PORTFOLIO in graph) — the investing entity
-  # that owns or manages this portfolio. Nullable because legacy portfolios
-  # may not have an entity linked yet. ondelete='RESTRICT' blocks entity
-  # deletion if portfolios reference it — portfolios should never silently
-  # disappear because an entity was removed.
+  # that owns or manages this portfolio. Nullable: a portfolio can exist
+  # before its entity is identified. ondelete='RESTRICT' blocks entity
+  # deletion while portfolios reference it, so a portfolio never disappears
+  # as a side effect of removing an entity.
   entity_id = Column(
     String, ForeignKey("entities.id", ondelete="RESTRICT"), nullable=True
   )

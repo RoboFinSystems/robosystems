@@ -4,9 +4,8 @@ These jobs handle:
 - Backup and restore
 - DuckDB staging and graph materialization
 
-Graph creation is handled by the background worker (worker/tasks/graph_creation.py)
-via GraphCreationService. When capacity is unavailable, the graph_creation_queue_sensor
-re-enqueues worker tasks on each cycle until capacity appears.
+Graph creation is not here: it runs in the background worker
+(operations/graph/tasks/graph_creation.py) via GraphCreationService.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -36,12 +35,10 @@ def _emit_graph_result_to_sse(
   operation_id: str,
   result: dict[str, Any],
 ) -> None:
-  """
-  Update SSE operation metadata with the job result.
+  """Store the job result on the SSE operation metadata.
 
-  This stores the graph_id in the operation metadata so that when the
-  monitor emits the final OPERATION_COMPLETED event, it includes the
-  graph_id in the result.
+  The monitor reads this metadata when it emits the final
+  OPERATION_COMPLETED event, so the graph_id reaches the client.
   """
   try:
     from robosystems.middleware.sse.event_storage import SSEEventStorage
@@ -111,12 +108,6 @@ def _emit_completion_sync(operation_id: str, result: dict[str, Any]) -> None:
 # ============================================================================
 
 
-# NOTE: WaitAndCreateGraphConfig, _wait_and_create, wait_for_capacity_and_create_graph,
-# and wait_and_create_graph_job have been removed. Queued graph creation is now handled
-# by the graph_creation_queue_sensor enqueuing worker tasks directly, rather than
-# launching a Dagster job that polls for capacity. See worker/tasks/graph_creation.py.
-
-
 class BackupGraphConfig(Config):
   """Configuration for graph backup."""
 
@@ -169,7 +160,6 @@ class MaterializeGraphConfig(Config):
 
 # ============================================================================
 # Backup Operations
-# Replaces: robosystems.tasks.graph_operations.backup
 # ============================================================================
 
 
@@ -195,13 +185,11 @@ def create_backup(
 
   context.log.info(f"Creating backup for graph {config.graph_id}")
 
-  # Validate graph_id
   if not MultiTenantUtils.is_shared_repository_or_subgraph(config.graph_id):
     MultiTenantUtils.validate_graph_id(config.graph_id)
 
   database_name = MultiTenantUtils.get_database_name(config.graph_id)
 
-  # Generate S3 key
   timestamp = datetime.now(UTC)
   timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
@@ -220,7 +208,6 @@ def create_backup(
 
   s3_key = f"graph-backups/databases/{config.graph_id}/{config.backup_type}/backup-{timestamp_str}{extension}"
 
-  # Create backup record
   with db.get_session() as session:
     s3_adapter = S3BackupAdapter(enable_compression=config.compression)
 
@@ -242,7 +229,6 @@ def create_backup(
 
   context.log.info(f"Created backup record {backup_id}, starting backup...")
 
-  # Create the actual backup
   backup_manager = create_backup_manager()
 
   backup_job = BackupJob(
@@ -261,7 +247,6 @@ def create_backup(
   finally:
     loop.close()
 
-  # Update backup record with results
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(backup_id, session)
     if backup_record:
@@ -358,7 +343,6 @@ def restore_backup(
 
   context.log.info(f"Restoring graph {config.graph_id} from backup {config.backup_id}")
 
-  # Get backup record
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(config.backup_id, session)
     if not backup_record:
@@ -398,7 +382,6 @@ def restore_backup(
     except Exception as e:
       context.log.warning(f"Failed to create system backup: {e}")
 
-  # Perform restore via Graph API
   context.log.info(f"Restoring from {s3_bucket}/{s3_key}")
 
   loop = asyncio.new_event_loop()
@@ -425,7 +408,6 @@ def restore_backup(
   finally:
     loop.close()
 
-  # Verify restore
   verification_status = "not_verified"
   if config.verify_after_restore:
     if restore_result.get("status") == "completed":
@@ -435,7 +417,6 @@ def restore_backup(
       verification_status = "failed"
       context.log.warning(f"Restore status: {restore_result.get('status')}")
 
-  # Update backup record
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(config.backup_id, session)
     if backup_record and hasattr(backup_record, "last_restored_at"):
@@ -471,15 +452,7 @@ def restore_graph_job():
 
 
 # ============================================================================
-# Wait-for-Capacity Graph Creation
-# When allocate_database() finds no capacity but triggers ASG scale-up,
-# this job polls for the new instance then creates the graph.
-# ============================================================================
-
-
-# ============================================================================
 # DuckDB Staging and Graph Materialization
-# Replaces: robosystems.tasks.table_operations
 # ============================================================================
 
 
@@ -510,7 +483,6 @@ def stage_file_in_duckdb(
     if not table:
       raise Failure(f"Table {config.table_id} not found")
 
-    # Get all uploaded files for this table
     all_files = GraphFile.get_all_for_table(config.table_id, session)
     uploaded_files = [f for f in all_files if f.upload_status == "uploaded"]
 
@@ -522,7 +494,6 @@ def stage_file_in_duckdb(
         "file_id": config.file_id,
       }
 
-    # Build file list with S3 URIs
     bucket = env.USER_DATA_BUCKET
     s3_files = [f"s3://{bucket}/{f.s3_key}" for f in uploaded_files]
     file_id_map = {f"s3://{bucket}/{f.s3_key}": f.id for f in uploaded_files}
@@ -531,7 +502,6 @@ def stage_file_in_duckdb(
       f"Staging {len(s3_files)} files in DuckDB table {table.table_name}"
     )
 
-    # Stage via Graph API
     loop = asyncio.new_event_loop()
     try:
       client = loop.run_until_complete(
@@ -552,7 +522,6 @@ def stage_file_in_duckdb(
     finally:
       loop.close()
 
-    # Mark file as staged
     graph_file.mark_duckdb_staged(session=session, row_count=graph_file.row_count or 0)
 
     context.log.info(f"File {config.file_id} staged successfully")
@@ -612,7 +581,6 @@ def materialize_file_to_graph(
 
   rows_ingested = result.get("rows_ingested", 0)
 
-  # Mark file as ingested
   with db.get_session() as session:
     graph_file = GraphFile.get_by_id(file_id, session)
     if graph_file:
@@ -660,7 +628,6 @@ def materialize_staged_file(
 
   context.log.info(f"Materializing file {config.file_id} to graph {config.graph_id}")
 
-  # Verify file is staged
   with db.get_session() as session:
     graph_file = GraphFile.get_by_id(config.file_id, session)
     if not graph_file:
@@ -676,7 +643,6 @@ def materialize_staged_file(
         "file_id": config.file_id,
       }
 
-  # Materialize via Graph API
   loop = asyncio.new_event_loop()
   try:
     client = loop.run_until_complete(
@@ -695,7 +661,6 @@ def materialize_staged_file(
 
   rows_ingested = result.get("rows_ingested", 0)
 
-  # Mark file as ingested
   with db.get_session() as session:
     graph_file = GraphFile.get_by_id(config.file_id, session)
     if graph_file:
@@ -731,7 +696,6 @@ def materialize_file_job():
 
 # ============================================================================
 # Full Graph Materialization Job
-# Replaces: robosystems.routers.graphs.materialize synchronous endpoint logic
 # ============================================================================
 
 
@@ -787,11 +751,11 @@ def materialize_graph_tables(
   graph: GraphResource,
   config: MaterializeGraphConfig,
 ) -> dict[str, Any]:
-  """
-  Materialize all DuckDB staging tables to the graph database.
+  """Materialize all DuckDB staging tables to the graph database.
 
-  This is the Dagster equivalent of the synchronous materialize_graph API endpoint.
-  It provides full observability into the materialization process.
+  Node tables are materialized before relationship tables. A failure on any
+  table aborts the op rather than marking the graph fresh over partially
+  loaded data.
   """
   import asyncio
   import time
@@ -809,7 +773,6 @@ def materialize_graph_tables(
   )
 
   with db.get_session() as session:
-    # Verify graph exists
     graph_record = Graph.get_by_id(graph_id, session)
     if not graph_record:
       raise Failure(
@@ -825,12 +788,12 @@ def materialize_graph_tables(
       )
       _restage_stale_files_sync(context, session, graph_id, recovered_ids)
 
-    # Check staleness
     was_stale = graph_record.graph_stale or False
     stale_reason = graph_record.graph_stale_reason
 
     if not was_stale and not config.force and not config.rebuild:
-      # Check if there are any tables with staged data in DuckDB
+      # Staged-but-unmaterialized data counts as stale even when the flag is not
+      # set, so an upload that missed the staleness marker still gets picked up.
       staged_tables_count = (
         session.query(GraphTable)
         .join(GraphFile, GraphTable.id == GraphFile.table_id)
@@ -863,7 +826,6 @@ def materialize_graph_tables(
         _emit_graph_result_to_sse(context, config.operation_id, result)
       return result
 
-    # Get async event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -881,7 +843,6 @@ def materialize_graph_tables(
     busy_instance_id = ""
 
     try:
-      # Get graph client - use GraphClientFactory for materialize_table support
       from robosystems.graph_api.client.factory import get_graph_client
 
       client = loop.run_until_complete(
@@ -895,7 +856,6 @@ def materialize_graph_tables(
         begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
       )
 
-      # Handle rebuild if requested
       if config.rebuild:
         context.log.info("[10%] Rebuild requested - regenerating graph database")
 
@@ -944,8 +904,7 @@ def materialize_graph_tables(
             metadata={"graph_id": graph_id, "error": str(e)},
           )
 
-      # Get tables that have staged data in DuckDB (ready for materialization)
-      # Only materialize tables with files that have duckdb_status="staged"
+      # Only tables whose files reached duckdb_status="staged" are ready
       tables_with_staged_data = (
         session.query(GraphTable)
         .join(GraphFile, GraphTable.id == GraphFile.table_id)
@@ -971,7 +930,7 @@ def materialize_graph_tables(
           _emit_graph_result_to_sse(context, config.operation_id, result)
         return result
 
-      # Sort tables: nodes before relationships (using table_type field)
+      # Nodes before relationships: an edge cannot load before its endpoints
       node_tables = [
         t.table_name for t in tables_with_staged_data if t.table_type == "node"
       ]
@@ -985,7 +944,6 @@ def materialize_graph_tables(
         f"{len(node_tables)} nodes, {len(rel_tables)} relationships"
       )
 
-      # Materialize each table
       tables_materialized = []
       total_rows = 0
       base_progress = 50
@@ -1025,11 +983,9 @@ def materialize_graph_tables(
             },
           )
 
-      # Mark graph as fresh
       context.log.info("[95%] Marking graph as fresh")
       graph_record.mark_fresh(session=session)
 
-      # Update graph metadata if rebuild was performed
       if config.rebuild:
         graph_metadata = (
           {**graph_record.graph_metadata} if graph_record.graph_metadata else {}
@@ -1064,7 +1020,6 @@ def materialize_graph_tables(
         "message": f"Graph materialized successfully from {len(tables_materialized)} tables",
       }
 
-      # Report AssetMaterialization for observability in Dagster UI
       context.log_event(
         AssetMaterialization(
           asset_key=AssetKey("user_graph_materialized"),

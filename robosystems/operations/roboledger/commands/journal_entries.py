@@ -165,10 +165,10 @@ def resolve_flow_element_id(session: Session, metadata: dict | None) -> str | No
 
 
 def _split_flow_tag(metadata: dict | None) -> dict:
-  """Return a shallow copy of ``metadata`` with the legacy flow-tag key removed.
+  """Return a shallow copy of ``metadata`` with the flow-tag key removed.
 
-  The flow concept is now a first-class ``flow_element_id`` FK; the qname no
-  longer rides in JSONB. Other metadata keys (source-system refs, etc.) are
+  The flow concept is a first-class ``flow_element_id`` FK, so its qname must
+  not also ride in JSONB. Other metadata keys (source-system refs, etc.) are
   preserved.
   """
   meta = dict(metadata or {})

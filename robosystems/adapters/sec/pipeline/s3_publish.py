@@ -43,9 +43,6 @@ def sec_lbug_s3_published(
   - Graph Client Factory (auth, routing, circuit breakers)
   - CHECKPOINT + S3 multipart upload on-instance
   - Upload verification
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
   """
   return publish_to_s3(context, graph_id="sec")
 
@@ -64,9 +61,5 @@ def sec_lbug_s3_published(
 def sec_historical_lbug_s3_published(
   context: AssetExecutionContext,
 ) -> MaterializeResult:
-  """Publish SEC historical database to S3 for replica consumption via ATTACH.
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
-  """
+  """Publish the SEC historical database to S3, for replicas to ATTACH."""
   return publish_to_s3(context, graph_id="sec_historical")

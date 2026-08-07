@@ -1,23 +1,18 @@
-"""
-Shared Repository Service for creating and managing shared graph repositories.
+"""Creation of shared, platform-managed graph repositories (SEC, industry, …).
 
-This service handles the creation of shared repositories (SEC, industry, economic, etc.)
-that are accessible across multiple companies. These repositories contain public data
-and are created on dedicated shared instances.
+Shared repositories hold public data and are read by many users at once. They
+follow the same build sequence as a user graph
+(:mod:`robosystems.operations.graph.graph_creation_service`) but differ in
+ownership:
 
-Follows the same pattern as GraphCreationService:
-1. Create LadybugDB database via Graph API client
-2. Install schema with extensions
-3. Create Graph metadata record in PostgreSQL
-4. Persist schema DDL (GraphSchema)
-5. Auto-create DuckDB staging tables (TableService)
-6. No GraphUser (repositories use UserRepository for access control)
-7. No credit pool (repositories use UserRepositoryCredits per user)
+- routed to a fixed shared instance rather than allocated one;
+- created by the platform, never by a user;
+- access is per-user ``UserRepository`` rows, not ``GraphUser``;
+- credits come from each subscriber's ``UserRepositoryCredits``, so the
+  repository itself has no credit pool.
 
-Key differences from user graphs:
-- Fixed instance routing (ladybug-shared-prod) instead of allocation
-- System-managed, not user-created
-- Multiple users subscribe individually
+Every entry point here is idempotent — pipelines call them on each run to
+guarantee the repository exists before loading.
 """
 
 from datetime import UTC, datetime
@@ -36,24 +31,11 @@ class SharedRepositoryService:
     created_by: str | None = None,
     instance_id: str | None = None,
   ) -> dict[str, Any]:
-    """
-    Create a shared repository following the same pattern as user graphs.
+    """Create the database, schema, metadata, and staging tables in that order.
 
-    This method:
-    1. Validates repository configuration against the manifest registry
-    2. Creates LadybugDB database via Graph API
-    3. Installs schema with extensions
-    4. Creates Graph metadata record in PostgreSQL
-    5. Persists schema DDL (GraphSchema)
-    6. Auto-creates DuckDB staging tables (TableService)
-
-    Args:
-        repository_name: Name of the repository (e.g., 'sec')
-        created_by: Optional user ID who initiated creation
-        instance_id: Instance identifier (default from manifest)
-
-    Returns:
-        Dictionary containing repository creation details
+    ``repository_name`` must be registered in the manifest registry;
+    ``instance_id`` defaults to the manifest's instance. Raises ValueError for
+    an unregistered name.
     """
     from ...config.shared_repositories import get_all_repository_ids, get_manifest
 
@@ -213,29 +195,13 @@ async def ensure_shared_subgraph_exists(
   created_by: str | None = None,
   instance_id: str = "ladybug-shared-prod",
 ) -> dict[str, Any]:
-  """
-  Ensure a shared repository subgraph exists, creating it if necessary.
+  """Idempotently create a platform-managed subgraph of a shared repository.
 
-  This is used by data pipelines (e.g., sec_historical materialization) to
-  ensure a platform-managed subgraph exists before loading data. It mirrors
-  the pattern of ensure_shared_repository_exists() but creates a subgraph
-  that appears in MCP workspace listings.
-
-  Steps:
-  1. Ensure parent shared repository exists
-  2. Check if subgraph PostgreSQL record exists
-  3. Check if LadybugDB database exists on instance
-  4. Create both if missing (idempotent)
-
-  Args:
-      parent_repository_name: Parent shared repo (e.g., "sec")
-      subgraph_name: Subgraph name (e.g., "historical")
-      description: Human-readable description for the subgraph
-      created_by: User ID who initiated creation
-      instance_id: Instance identifier (default: ladybug-shared-prod)
-
-  Returns:
-      Dictionary with subgraph status
+  Data pipelines call this before loading. Ensures the parent repository
+  exists, then reconciles both halves of the subgraph — the PostgreSQL record
+  and the database on the instance — creating whichever is missing. The
+  PostgreSQL record is what makes the subgraph visible in MCP workspace
+  listings, so a database without it is invisible to users.
   """
   from ...config.shared_repositories import get_manifest, is_shared_repository
   from ...middleware.graph.utils import construct_subgraph_id
@@ -462,21 +428,11 @@ async def ensure_shared_repository_exists(
   created_by: str | None = None,
   instance_id: str = "ladybug-shared-prod",
 ) -> dict[str, Any]:
+  """Idempotently create a shared repository if it is not already there.
+
+  Checks the PostgreSQL records and the database independently, so a
+  half-created repository is completed rather than reported as present.
   """
-  Ensure a shared repository exists, creating it if necessary.
-
-  This is a convenience function that checks if a repository exists
-  and creates it if not.
-
-  Args:
-      repository_name: Name of the repository (e.g., 'sec')
-      created_by: Optional user ID who initiated creation
-      instance_id: Instance identifier (default: ladybug-shared-prod)
-
-  Returns:
-      Dictionary with repository status
-  """
-  # Check if PostgreSQL records exist (Graph and GraphSchema)
   postgres_exists = False
   try:
     from ...database import get_db_session

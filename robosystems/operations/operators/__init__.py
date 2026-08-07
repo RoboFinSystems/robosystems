@@ -1,23 +1,21 @@
-"""AI Operator operations module.
+"""AI Operators — routing, execution adapters, and credit tracking.
 
-Provides the unified Operator system with dynamic routing, execution adapters,
-and automatic credit tracking.
+## Operator protocol
 
-## Operator Protocol
+An operator subclasses `Operator`, declares an `OperatorSpec`, implements
+``run(ctx: OperatorContext) -> OperatorResult``, and registers itself with
+``@register_operator("name")``. Credit tracking is automatic: every AI call
+goes through `TrackedAIClient`, so an operator never consumes credits itself.
 
-New operators inherit from `Operator` and implement
-``run(ctx: OperatorContext) -> OperatorResult``. Credit tracking is automatic
-via `TrackedAIClient`. Register with ``@register_operator("name")``.
+## Execution adapters
 
-## Execution Adapters
+An operator is stateless — the adapter builds the context around it.
 
-- ``run_operator_api()``: Runs operators in API request context (sync/SSE)
-- ``run_operator_worker()``: Runs operators in worker context (background tasks)
+- ``run_operator_api()``: API request context (sync/SSE)
+- ``run_operator_worker()``: worker context (background tasks)
 
-## Legacy
-
-OperatorResponse is kept for API response compatibility. The orchestrator
-converts OperatorResult → OperatorResponse at the boundary.
+`OperatorResult` is the operator-facing return type; `OperatorResponse` is the
+API-facing shape. The orchestrator converts between them at the boundary.
 
 ## Naming
 
@@ -81,7 +79,7 @@ from robosystems.operations.operators.tool_access import (
 )
 from robosystems.operations.operators.tracked_ai import TrackedAIClient
 
-# Load adapter-contributed operators (empty for now — extension point)
+# Extension point for adapter-contributed operators; none registered today.
 load_adapter_operators()
 
 __all__ = [
@@ -103,7 +101,7 @@ __all__ = [
   # Shared enums
   "OperatorCapability",
   "OperatorContext",
-  # Legacy (API compat)
+  # API response shape
   "OperatorMetadata",
   "OperatorMode",
   # Orchestrator

@@ -1,15 +1,10 @@
 """
-Cost-Optimized Structured Logging Configuration for RoboSystems
+Structured JSON logging tuned for CloudWatch cost and searchability.
 
-This module provides structured logging that's optimized for AWS CloudWatch
-and designed to be AWS CLI-friendly for debugging production issues.
-
-Key Features:
-- Tiered logging (Critical/Operational/Debug) for cost optimization
-- Structured JSON output for CloudWatch Insights queries
-- AWS CLI-friendly search patterns
-- Automatic log level management by environment
-- Performance tracking and error categorization
+Records are emitted as JSON so CloudWatch Insights can query them by field, and
+are tiered (critical / operational / debug) so verbose levels can be dropped in
+production without losing the records that matter. Log level is chosen from the
+environment.
 """
 
 import json

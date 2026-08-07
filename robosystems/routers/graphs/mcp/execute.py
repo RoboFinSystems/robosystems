@@ -1,4 +1,9 @@
-"""MCP tool execution with intelligent strategy selection and streaming."""
+"""MCP tool execution: `POST /v1/graphs/{graph_id}/mcp/call-tool`.
+
+Runs the shared authorization gauntlet (`authorize_mcp_tool_call`), selects an
+execution strategy, and answers as JSON, SSE, NDJSON, or a 202 queue handle
+depending on the strategy and what the client accepts.
+"""
 
 import asyncio
 import json
@@ -57,7 +62,6 @@ from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
 from robosystems.models.core import User
 
-# Import MCP components
 from .handlers import MCPHandler, is_tool_error_result, validate_mcp_access
 from .strategies import (
   MCPClientDetector,
@@ -71,7 +75,6 @@ from .streaming import (
 
 router = APIRouter()
 
-# Circuit breaker instance
 circuit_breaker = CircuitBreakerManager()
 
 # MCP result cache TTLs (seconds).
@@ -158,8 +161,8 @@ def _get_mcp_redis_client() -> Any:
 def _mcp_cache_key(graph_id: str, tool_name: str) -> str:
   """Build a Valkey cache key for MCP tool results.
 
-  Both get-graph-schema and get-graph-info accept no arguments (empty inputSchema),
-  so the graph_id + tool_name combination is sufficient to uniquely identify results.
+  Only the argument-free tools (get-graph-schema, get-graph-info) are cached,
+  so graph_id plus tool_name identifies a result uniquely.
   """
   return f"mcp:{graph_id}:{tool_name}"
 
@@ -242,11 +245,8 @@ async def authorize_mcp_tool_call(
   per-graph role validation, shared-repo subscription lookup, and dual-layer
   volume rate limiting.
 
-  Returns:
-      The resolved access type: "read" or "write".
-
-  Raises:
-      HTTPException: 403 on access/subscription denial, 429 on volume limits.
+  Returns the resolved access type, `"read"` or `"write"`. Raises 403 on
+  access or subscription denial and 429 on volume limits.
   """
   from robosystems.config import env
   from robosystems.database import SessionFactory
@@ -256,14 +256,13 @@ async def authorize_mcp_tool_call(
     "read-neo4j-cypher",
     "read-ladybug-cypher",
   )
-  # Fail-closed write classification: a tool is a WRITE unless it is on the
-  # read-only allowlist. This makes every non-read tool — including all
+  # Fail-closed write classification: a tool is a WRITE unless it appears on
+  # the read-only allowlist, so every non-read tool — including all
   # registrar-generated OLTP command ops (update-journal-entry, close-period,
-  # execute-event-block, the content-op writes, …) — require the member/admin
-  # role via `validate_mcp_access(..., "write")` below, closing the prior
-  # fail-open gap where only three tool names were flagged as writes and a
-  # `viewer` could reach the whole command surface. Cypher read tools are
-  # classified precisely by the StatementKernel (they can carry a write).
+  # execute-event-block, the content-op writes) — requires the member/admin
+  # role via `validate_mcp_access(..., "write")` below. Cypher read tools are
+  # classified per statement by the StatementKernel, since they can carry a
+  # write.
   is_write_query = (not is_cypher_read_tool) and (
     tool_call.name not in READ_ONLY_MCP_TOOLS
   )
@@ -312,7 +311,6 @@ async def authorize_mcp_tool_call(
     sess.close()
 
   # Apply dual-layer rate limiting for shared repositories (incl. subgraphs)
-  # Rate limiting is optional - skip if disabled (dev environments)
   if (
     MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     and env.RATE_LIMIT_ENABLED
@@ -329,7 +327,6 @@ async def authorize_mcp_tool_call(
         detail=f"Access to {graph_id.upper()} repository requires a subscription. Visit {env.ROBOSYSTEMS_URL}/repositories/browse",
       )
 
-    # Get Redis client for rate limiting with proper ElastiCache support
     redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
     try:
@@ -440,7 +437,6 @@ async def stream_sse_response(request: Request, events_generator):
     if await request.is_disconnected():
       break
 
-    # Format as SSE
     if "event" in event:
       yield {"event": event["event"], "data": json.dumps(event.get("data", {}))}
     else:
@@ -521,7 +517,6 @@ async def call_mcp_tool(
 ) -> MCPToolResult | JSONResponse | StreamingResponse | EventSourceResponse:
   start_time = datetime.now(UTC)
 
-  # Import config
   from robosystems.config import env
 
   # Shared-repository telemetry context (no-ops on user graphs)
@@ -532,10 +527,6 @@ async def call_mcp_tool(
   # inline; queue submission only hands off).
   cost_outcome: str | None = None
 
-  # Initialize monitoring and logging
-  # (Operation logging is handled by circuit breaker)
-
-  # Record metrics at start
   record_operation_metric(
     operation_type=OperationType.TOOL_EXECUTION,
     status=OperationStatus.SUCCESS,  # Will be updated on completion
@@ -550,7 +541,6 @@ async def call_mcp_tool(
     },
   )
 
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, tool_call.name)
 
   try:
@@ -561,11 +551,9 @@ async def call_mcp_tool(
     access_type = await authorize_mcp_tool_call(graph_id, tool_call, current_user)
     is_write_query = access_type == "write"
 
-    # Get repository
     operation_type = _get_mcp_operation_type(graph_id)
     repository = await get_graph_repository(graph_id, operation_type)
 
-    # Log structured attempt with business context
     api_logger.info(
       f"MCP tool execution started: {tool_call.name}",
       extra={
@@ -583,20 +571,16 @@ async def call_mcp_tool(
       },
     )
 
-    # Detect client capabilities
     headers = dict(full_request.headers)
     client_info = MCPClientDetector.detect_client_type(headers)
 
-    # Override for test mode
     if test_mode:
       client_info["is_mcp_client"] = False
       client_info["prefers_streaming"] = True
 
-    # Get system state
     query_queue = get_query_queue()
     tool_stats = query_queue.get_stats()
 
-    # For cypher queries, also check query queue
     if tool_call.name in [
       "read-graph-cypher",
       "read-neo4j-cypher",
@@ -617,7 +601,6 @@ async def call_mcp_tool(
         "cache_available": True,
       }
 
-    # Select execution strategy
     user_tier = None
     if hasattr(current_user, "subscription") and current_user.subscription:
       user_tier = (
@@ -635,7 +618,6 @@ async def call_mcp_tool(
       user_tier=user_tier,
     )
 
-    # Allow format override
     if format:
       if format == "sse":
         strategy = MCPExecutionStrategy.SSE_PROGRESS
@@ -679,31 +661,28 @@ async def call_mcp_tool(
         },
       )
 
-    # Execute based on strategy
     handler = MCPHandler(repository, graph_id, current_user)
 
     try:
-      # Get timeout for strategy
       timeout = MCPStrategySelector.get_timeout_for_strategy(strategy)
 
       if strategy == MCPExecutionStrategy.JSON_IMMEDIATE:
-        # Direct execution with immediate response
+        # Cheap tool: run it inline and answer in the same response.
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
 
         return MCPToolResult(result=result)
 
       elif strategy == MCPExecutionStrategy.JSON_COMPLETE:
-        # Execute and wait for complete result
+        # Costlier tool the client did not ask to stream: run to completion
+        # and answer with the whole result.
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
 
         return MCPToolResult(result=result)
 
       elif strategy == MCPExecutionStrategy.STREAM_AGGREGATED:
-        # Stream with transparent aggregation for MCP clients
         if client_info.get("is_mcp_client"):
-          # For MCP clients, aggregate streaming results
           events = []
           async for event in stream_mcp_tool_execution(
             handler, tool_call.name, tool_call.arguments, strategy.value
@@ -712,7 +691,6 @@ async def call_mcp_tool(
 
           await handler.close()
 
-          # Aggregate and return as JSON
           aggregated = aggregate_streamed_results(events)
           cost_outcome = "completed"
           if is_disrupted_aggregation(aggregated):
@@ -729,7 +707,7 @@ async def call_mcp_tool(
             )
           return MCPToolResult(result=aggregated)
         else:
-          # For other clients, return NDJSON stream
+
           async def generate():
             try:
               async for line in stream_ndjson_response(
@@ -746,7 +724,7 @@ async def call_mcp_tool(
           return StreamingResponse(generate(), media_type="application/x-ndjson")
 
       elif strategy == MCPExecutionStrategy.SSE_PROGRESS:
-        # SSE streaming with progress updates
+
         async def generate_sse():
           try:
             async for event in stream_sse_response(
@@ -767,13 +745,11 @@ async def call_mcp_tool(
         MCPExecutionStrategy.QUEUE_WITH_MONITORING,
         MCPExecutionStrategy.QUEUE_SIMPLE,
       ]:
-        # Queue for execution
         if tool_call.name in [
           "read-graph-cypher",
           "read-neo4j-cypher",
           "read-ladybug-cypher",
         ]:
-          # Use query queue for cypher queries
           query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
           parameters = tool_call.arguments.get("parameters", {})
 
@@ -787,7 +763,6 @@ async def call_mcp_tool(
             priority=_get_user_priority(current_user),
           )
 
-          # Create unified SSE operation for monitoring
           sse_response = await create_operation_response(
             operation_type="mcp_tool_call",
             user_id=current_user.id,
@@ -795,7 +770,7 @@ async def call_mcp_tool(
           )
 
           if strategy == MCPExecutionStrategy.QUEUE_WITH_MONITORING:
-            # Return SSE stream for queue monitoring
+
             async def monitor_queue():
               while True:
                 status = await queue_manager.get_query_status(queue_id)
@@ -816,7 +791,6 @@ async def call_mcp_tool(
             cost_outcome = "queued"
             return EventSourceResponse(monitor_queue())
           else:
-            # Return queue info for polling
             await handler.close()
             cost_outcome = "queued"
             return JSONResponse(
@@ -867,7 +841,6 @@ async def call_mcp_tool(
         return MCPToolResult(result=result)
 
       else:
-        # Fallback to direct execution
         result = await execute_tool_directly(handler, tool_call, timeout)
         await handler.close()
         return MCPToolResult(result=result)
@@ -883,7 +856,6 @@ async def call_mcp_tool(
       if handler and not handler._closed and not is_streaming:
         await handler.close()
 
-      # Record success metrics
       execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       if sys.exc_info()[0] is not None:
@@ -918,11 +890,9 @@ async def call_mcp_tool(
         },
       )
 
-      # Record success in circuit breaker
       circuit_breaker.record_success(graph_id, tool_call.name)
 
   except HTTPException as exc:
-    # Record failure metrics
     execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
     record_shared_query_outcome(
       graph_id,
@@ -947,7 +917,6 @@ async def call_mcp_tool(
     )
     raise
   except Exception as e:
-    # Record failure
     circuit_breaker.record_failure(graph_id, tool_call.name)
     record_shared_query_outcome(
       graph_id,
@@ -969,7 +938,6 @@ async def call_mcp_tool(
       },
     )
 
-    # Record error metrics
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint="/v1/graphs/{graph_id}/mcp/call-tool",

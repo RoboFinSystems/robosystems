@@ -61,10 +61,9 @@ def _calendar_closed_through_date(session: Session):
 
   Used by `create_schedule` to default the historical-voiding boundary
   when the caller doesn't supply `closed_through` in the request body.
-  Returns None when no calendar is initialized or the calendar's
-  `closed_through_period` is null — preserving the existing
-  "all-periods-pending" behavior for graphs that haven't called
-  initialize-ledger yet.
+  Returns None when no calendar is initialized or its
+  `closed_through_period` is null, which leaves every period pending for a
+  graph that hasn't called initialize-ledger yet.
   """
   from robosystems.models.extensions.roboledger.fiscal_calendar import (
     FiscalCalendar,
@@ -215,10 +214,8 @@ def create_schedule(
   # `closed_through_period`. Without this default, callers who don't know
   # to thread the field end up creating schedules that emit pending
   # obligations for periods that are *already closed* — those obligations
-  # then block close-period forever because they're sealed inside a
-  # closed range yet still `pending`. The fiscal-calendar value is the
-  # source of truth; using it as the default makes the right behavior
-  # automatic.
+  # then block close-period forever because they're sealed inside a closed
+  # range yet still `pending`.
   effective_closed_through = body.closed_through
   if effective_closed_through is None:
     effective_closed_through = _calendar_closed_through_date(session)
@@ -568,11 +565,10 @@ def _reconstruct_schedule_definition(
   """Recover the generation inputs for a rebuild from a Structure row.
 
   Prefers the stored definition on ``metadata_`` (entry_template,
-  schedule_metadata, monthly_amount, period_start, period_end —
-  persisted at create time so the rebuild is unambiguous). For legacy
-  rows written before those scalar keys were stored, derives the period
-  bounds from the schedule's FactSet and ``monthly_amount`` from a
-  non-final duration debit Fact.
+  schedule_metadata, monthly_amount, period_start, period_end — persisted at
+  create time so the rebuild is unambiguous). A row missing those scalar keys
+  falls back to deriving the period bounds from the schedule's FactSet and
+  ``monthly_amount`` from a non-final duration debit Fact.
 
   Raises ``ValueError`` when the definition can't be reconstructed.
   """
@@ -605,8 +601,8 @@ def _reconstruct_schedule_definition(
   )
 
   # Audit back-ref to the source transaction — stored in artifact_mechanics
-  # at create time (legacy rows may carry it on metadata_ instead). Recovering
-  # it keeps the rebuilt schedule pointing at its originating transaction.
+  # at create time, with metadata_ as the fallback location. Recovering it
+  # keeps the rebuilt schedule pointing at its originating transaction.
   source_transaction_id = (structure.artifact_mechanics or {}).get(
     "source_transaction_id"
   ) or (structure.metadata_ or {}).get("source_transaction_id")
@@ -623,7 +619,7 @@ def _reconstruct_schedule_definition(
     date.fromisoformat(period_end_iso) if period_end_iso else None
   )
 
-  # Legacy fallback: derive period bounds from the schedule's FactSet rows.
+  # Fallback: derive period bounds from the schedule's FactSet rows.
   if period_start is None or period_end is None:
     bounds = session.execute(
       select(
@@ -644,8 +640,8 @@ def _reconstruct_schedule_definition(
     period_start = period_start or min(starts)
     period_end = period_end or max(ends)
 
-  # Legacy fallback: derive monthly_amount from a non-final duration debit
-  # fact (the per-period straight-line amount, in cents).
+  # Fallback: derive monthly_amount from a non-final duration debit fact
+  # (the per-period straight-line amount, in cents).
   if monthly_amount is None:
     debit_fact = session.execute(
       select(Fact.value)
@@ -689,9 +685,7 @@ def rebuild_schedule(
   schedule's stored definition.
 
   The historical-vs-in-scope split is re-derived from the CURRENT fiscal
-  calendar `closed_through`, re-scoping the schedule to today's close
-  state. This is the redo-after-a-generator-fix path (e.g. the
-  roll-forward direction fix).
+  calendar `closed_through`, re-scoping the schedule to today's close state.
 
   Raises:
       ScheduleNotFoundError: if the schedule does not exist.

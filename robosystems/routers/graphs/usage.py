@@ -5,8 +5,7 @@ Two distinct questions, two routes:
 - ``GET /metrics`` — what is *in* the graph (node/relationship counts, size, health)
 - ``GET /usage`` — what the graph *consumed* (storage, credits, performance, events)
 
-Neither is analytics. "Analytics" is reserved for the BI surface; these routes were
-renamed off ``/analytics`` so they stop squatting on it.
+Neither is analytics: ``/analytics`` is reserved for the BI surface.
 """
 
 import asyncio

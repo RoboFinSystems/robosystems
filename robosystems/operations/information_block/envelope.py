@@ -172,8 +172,7 @@ def fact_to_lite(
   When ``elements_by_id`` is supplied, the related Element's ``name``
   and ``qname`` are denormalized into the projection so consumers can
   render fact rows without joining back through ``envelope.elements``.
-  When omitted, ``element_name`` and ``element_qname`` are left ``None``
-  for backward compatibility.
+  When omitted, ``element_name`` and ``element_qname`` are left ``None``.
   """
   element = elements_by_id.get(fact.element_id) if elements_by_id else None
   return FactLite(
@@ -374,7 +373,7 @@ def load_statement_fact_set_series(
   The statement analog of the metric series loader
   (:func:`metric._load_metric_fact_sets` is hard-scoped to
   ``factset_type='metric'``): every ``'report'`` set for the structure,
-  ascending ``period_end`` — the monthly columns of the F-4 Plan grid.
+  ascending ``period_end`` — the monthly columns of the Plan grid.
 
   Scenario semantics mirror the metric series: ``scenario_id=None``
   loads actuals only; a scenario id loads actuals **plus** that
@@ -398,8 +397,7 @@ def load_statement_fact_set_series(
      for the same month must not flip the column onto its snapshot.
   3. ``period_start DESC NULLS LAST`` — the NARROWER window wins, so at
      the FY-end month the monthly set beats the annual report set
-     created later (the FY-capture lesson applied at series level;
-     ``created_at DESC`` alone would pick the annual).
+     created later (``created_at DESC`` alone would pick the annual).
   """
   scenario_predicate = (
     FactSet.scenario_id.is_(None)
@@ -442,14 +440,13 @@ def window_series_sets(
   ``history`` keeps the LAST N actual columns (``scenario_id`` None —
   the months nearest the close boundary); ``forecast`` keeps the FIRST
   N forecast columns (the months nearest the seam). ``None`` leaves
-  that side unbounded, so ``(None, None)`` is the identity — existing
-  callers see the full series unchanged. Column order (ascending
-  ``period_end``, the :func:`load_statement_fact_set_series` contract)
-  is preserved.
+  that side unbounded, so ``(None, None)`` is the identity. Column order
+  (ascending ``period_end``, the
+  :func:`load_statement_fact_set_series` contract) is preserved.
 
-  Counts are COLUMNS, not calendar months: post-backfill the actual
-  series is monthly so they coincide, but an annual-only tenant's
-  ``history=12`` keeps twelve annual columns rather than one year.
+  Counts are COLUMNS, not calendar months: a monthly actual series makes
+  the two coincide, but an annual-only tenant's ``history=12`` keeps
+  twelve annual columns rather than one year.
   """
   if history is None and forecast is None:
     return series_sets
@@ -666,8 +663,7 @@ def load_base_envelope_atoms(
   ``block_type`` doesn't match ``expected_block_type`` — handlers
   surface that as a clean miss to :func:`get_information_block`. Loading
   order: Structure -> taxonomy name -> associations -> elements -> rules
-  -> classifications -> fact_set -> verification_results, matching the
-  order each individual handler used to inline.
+  -> classifications -> fact_set -> verification_results.
 
   When ``fact_set_id`` is provided the atoms are pinned to that specific
   FactSet (used by Report Block rehydration) and ``scenario_id`` is
@@ -767,10 +763,8 @@ def _structure_role_uri(structure: Structure) -> str | None:
   """Read ``role_uri`` from the metadata JSONB blob.
 
   ``role_uri`` isn't a top-level column on the structures table — the
-  library_creator persists it inside ``metadata_['role_uri']`` because
-  the column was added before XBRL role semantics were first-class.
-  Returns ``None`` when the field is absent or the metadata blob is
-  malformed.
+  library_creator persists it inside ``metadata_['role_uri']``. Returns
+  ``None`` when the field is absent or the metadata blob is malformed.
   """
   metadata = structure.metadata_ or {}
   value = metadata.get("role_uri")

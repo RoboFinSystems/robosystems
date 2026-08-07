@@ -104,8 +104,8 @@ class InformationBlockClassification:
 class InformationBlockConnection:
   """A connection (association) bundled inside the envelope.
 
-  Renamed from the underlying `associations` at the API boundary to
-  match Charlie Hoffman's Seattle Method vocabulary.
+  The API term is "connection", matching Seattle Method vocabulary; the
+  underlying storage table is `associations`.
   """
 
 

@@ -23,12 +23,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# Allowed values for Entry.provenance (entry origin). Single source of truth for
-# the model CHECK constraint below AND the value any write path may assign — the
-# `event_handler` value (entries created by the event-block engine) was written
-# in code before it was permitted here, so keep this in lockstep with the write
-# paths (see tests/operations/event_block/test_engine.py). Migrations carry
-# their own static snapshot of this set (they must not import model constants).
+# Allowed values for Entry.provenance (entry origin). Single source of truth
+# for the CHECK constraint below AND for the value any write path may assign;
+# adding a provenance to a writer without adding it here fails the constraint
+# at insert time (see tests/operations/event_block/test_engine.py). Migrations
+# carry their own static snapshot — they must not import model constants.
 ENTRY_PROVENANCE_VALUES = (
   "source_sync",
   "ai_generated",
@@ -88,10 +87,10 @@ class Entry(ExtensionsBase):
   source_structure_id = Column(String, nullable=True)
 
   # Event audit chain — links this entry to the business event that caused it.
-  # Null for legacy entries; set by event handlers (e.g., asset_disposed).
-  # Parallel to transactions.triggered_by_event_id but covers the Entry-only
-  # case (closing entries created via create_manual_closing_entry have no
-  # parent Transaction row).
+  # Set by event handlers (e.g. asset_disposed); NULL when no event drove the
+  # entry. Parallel to transactions.triggered_by_event_id but covers the
+  # Entry-only case (closing entries created via create_manual_closing_entry
+  # have no parent Transaction row).
   triggered_by_event_id = Column(String, nullable=True)
 
   # Origin tracking — where this entry came from

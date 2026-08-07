@@ -1,9 +1,4 @@
-"""
-Information endpoints for graph database nodes.
-
-This module provides endpoints for retrieving detailed information
-about the node and its capabilities.
-"""
+"""Node information endpoint: identity, capacity, and hosted databases."""
 
 from fastapi import APIRouter, Depends
 
@@ -20,7 +15,7 @@ async def get_info(
   """
   Get detailed node information.
 
-  Returns comprehensive information about the node including:
+  Returns information about the node including:
   - Node identification and type
   - Software version
   - Database capacity and current usage

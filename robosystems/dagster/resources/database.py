@@ -1,7 +1,6 @@
 """PostgreSQL database resource for Dagster.
 
-Provides database session management for Dagster jobs and assets,
-matching the patterns used in the existing RoboSystems codebase.
+Provides platform-database session management for Dagster jobs and assets.
 """
 
 from collections.abc import Generator
@@ -18,9 +17,7 @@ from robosystems.config import env
 class DatabaseResource(ConfigurableResource):
   """PostgreSQL database resource for Dagster operations.
 
-  This resource provides database sessions that match the patterns
-  used throughout RoboSystems, ensuring consistency between
-  Dagster jobs and existing application code.
+  Defaults to env.DATABASE_URL when ``database_url`` is left empty.
   """
 
   database_url: str = ""
@@ -33,10 +30,7 @@ class DatabaseResource(ConfigurableResource):
 
   @contextmanager
   def get_session(self) -> Generator[Session]:
-    """Get a database session context manager.
-
-    Yields:
-        SQLAlchemy session that auto-commits on success, rolls back on error.
+    """Yield a session that commits on success and rolls back on error.
 
     Example:
         ```python
@@ -57,15 +51,7 @@ class DatabaseResource(ConfigurableResource):
       session.close()
 
   def execute_query(self, query: str, params: dict[str, Any] | None = None) -> list:
-    """Execute a raw SQL query and return results.
-
-    Args:
-        query: SQL query string
-        params: Optional query parameters
-
-    Returns:
-        List of result rows
-    """
+    """Execute a raw SQL query and return all result rows."""
     with self.get_session() as session:
       result = session.execute(query, params or {})
       return list(result.fetchall())

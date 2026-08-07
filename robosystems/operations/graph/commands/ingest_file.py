@@ -1,9 +1,7 @@
-"""Ingest-file command — mark an uploaded file + trigger DuckDB staging.
+"""Mark an uploaded file as present and stage it into DuckDB.
 
-Extracted verbatim from the old ``PATCH /files/{id}`` status=uploaded router
-branch; called by the ``ingest-file`` content-op handler. Returns a dict with
-``status`` and (for async staging) ``operation_id`` so the caller wraps it in an
-OperationEnvelope.
+Backs the ``ingest-file`` content operation. Small files stage inline; larger
+ones are dispatched and the result carries an ``operation_id`` to follow.
 """
 
 from __future__ import annotations
@@ -82,11 +80,11 @@ async def ingest_file_cmd(
       detail=f"Graph {graph_id} not found",
     )
 
-  # Gate against the measured instance footprint, not the logical staging
-  # sum: `GraphTable.total_size_bytes` counts only staging rows and is far
-  # smaller than the bytes on disk, so the old comparison could pass on an
-  # instance already at its cap. Instance scope for the same reason as
-  # materialization — a subgraph shares its parent's box.
+  # Gate on the measured instance footprint, not the logical staging sum:
+  # `GraphTable.total_size_bytes` counts staging rows only and runs far under
+  # the bytes on disk, so it would admit an upload to an instance already at
+  # its cap. Instance scope for the same reason as materialization — a subgraph
+  # shares its parent's box.
   from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
 
   scope_graph_id = str(graph.parent_graph_id) if graph.parent_graph_id else graph_id

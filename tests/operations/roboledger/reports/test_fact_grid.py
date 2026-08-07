@@ -1140,9 +1140,8 @@ class TestDefaultFamilyFooting:
   """The default family (BSC-{CORP|PART|LLC}-IS02-CF1) must foot after the
   form-aware close: Assets = Liabilities + Equity, with net income folded
   into the form's earnings home (CORP→RetainedEarnings,
-  PART→PartnersCapital, LLC→MembersEquity). Regression guard for the
-  equity-form axis — previously only demo-verified (see
-  architecture_equity_form_structures), not pinned in CI."""
+  PART→PartnersCapital, LLC→MembersEquity). Pins the equity-form axis so a
+  form's earnings never land in another form's equity account."""
 
   PS = date(2025, 1, 1)
   PE = date(2025, 12, 31)

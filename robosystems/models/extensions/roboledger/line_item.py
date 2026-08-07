@@ -52,8 +52,7 @@ class LineItem(ExtensionsBase):
 
   # Flow concept (the economic-flow / "transaction description" classification
   # this line represents — e.g. rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment).
-  # First-class replacement for the legacy metadata['transaction_description_code']
-  # string. Drives rollforward attribution + cash-flow/equity-flow rendering.
+  # Drives rollforward attribution and cash-flow/equity-flow rendering.
   # Nullable: not every line carries a flow (e.g. simple balance transfers).
   # Points at the element the source flow tag names directly (rs-gaap when the
   # enrichment classifier emits rs-gaap-valued tags; the source vocabulary in

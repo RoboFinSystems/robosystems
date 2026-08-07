@@ -1,10 +1,9 @@
 """
-Secure error handling utilities to prevent information disclosure.
+Error handling that keeps internals out of client responses.
 
-This module provides utilities for handling errors securely by:
-- Preventing detailed error messages from being exposed to clients
-- Logging full error details for debugging while returning generic messages
-- Categorizing errors to provide appropriate status codes without revealing internals
+Full exception detail goes to the logs; the client gets a generic message and
+a status code derived from the error's classification, so an error never
+reveals database, path, or configuration internals.
 """
 
 from typing import Any, NoReturn
@@ -86,18 +85,14 @@ def raise_secure_error(
   custom_detail: str | None = None,
 ) -> NoReturn:
   """
-  Raise an HTTPException with generic error message while logging full details.
+  Raise an HTTPException with a generic message while logging full details.
 
-  Args:
-      error_type: Type of error from ErrorType class
-      original_error: The original exception that caused this error
-      request_id: Request ID for tracing
-      user_id: User ID associated with the request
-      additional_context: Additional context for logging
-      custom_detail: Custom detail message (use sparingly and ensure no sensitive data)
+  ``error_type`` is a constant from :class:`ErrorType`; an unknown value falls
+  back to INTERNAL_ERROR. ``custom_detail`` bypasses the generic message — use
+  it sparingly, and only with text that carries no sensitive data.
 
   Raises:
-      HTTPException: With generic error message and appropriate status code
+      HTTPException: With the mapped status code.
   """
   if error_type not in ERROR_RESPONSES:
     logger.warning(f"Unknown error type: {error_type}, defaulting to internal error")
@@ -132,15 +127,7 @@ def raise_secure_error(
 
 
 def classify_exception(exception: Exception) -> str:
-  """
-  Classify an exception to determine the appropriate error type.
-
-  Args:
-      exception: The exception to classify
-
-  Returns:
-      Error type from ErrorType class
-  """
+  """Classify an exception into an :class:`ErrorType` constant by message and type."""
   exception_str = str(exception).lower()
   exception_type = type(exception).__name__.lower()
 
@@ -209,16 +196,10 @@ def handle_exception_securely(
   additional_context: dict[str, Any] | None = None,
 ) -> NoReturn:
   """
-  Handle an exception securely by classifying it and raising appropriate HTTPException.
-
-  Args:
-      exception: The exception to handle
-      request_id: Request ID for tracing
-      user_id: User ID associated with the request
-      additional_context: Additional context for logging
+  Classify an exception and raise the corresponding sanitized HTTPException.
 
   Raises:
-      HTTPException: With generic error message and appropriate status code
+      HTTPException: With a generic message and the mapped status code.
   """
   error_type = classify_exception(exception)
   raise_secure_error(
@@ -232,15 +213,10 @@ def handle_exception_securely(
 
 def is_safe_to_expose(detail_message: str) -> bool:
   """
-  Check if an error detail message is safe to expose to clients.
+  Check whether an error detail message is safe to expose to clients.
 
-  This function checks for common patterns that might reveal sensitive information.
-
-  Args:
-      detail_message: The error detail message to check
-
-  Returns:
-      True if safe to expose, False otherwise
+  Rejects any message naming credentials, infrastructure, or internals — the
+  patterns below are matched as substrings, so this deliberately over-rejects.
   """
   if not detail_message:
     return True
@@ -276,13 +252,10 @@ def is_safe_to_expose(detail_message: str) -> bool:
 
 def sanitize_error_detail(detail_message: str) -> str:
   """
-  Sanitize an error detail message to remove sensitive information.
+  Return a message safe for client consumption.
 
-  Args:
-      detail_message: The original error detail message
-
-  Returns:
-      Sanitized error message safe for client consumption
+  Passes the original through when :func:`is_safe_to_expose` accepts it,
+  otherwise substitutes a generic message.
   """
   if not detail_message:
     return "An error occurred"

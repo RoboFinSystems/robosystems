@@ -1,12 +1,9 @@
-"""
-Simple health check endpoint for load balancers and monitoring.
+"""Health check endpoint for load balancers and monitoring.
 
-This module provides a minimal health check endpoint that returns
-quickly for infrastructure health monitoring.
-
-For shared replicas, the health check returns 503 until databases
-are fully warmed up and ready to serve queries. This prevents ALB
-from routing traffic to instances still warming up.
+Deliberately cheap — no deep validation, so it stays fast under load. Shared
+replicas return 503 until their databases finish warming up (see the warmup
+task in ``robosystems/graph_api/app.py``), keeping the ALB from routing traffic
+to an instance that would answer from cold disk.
 """
 
 import os
@@ -34,10 +31,9 @@ def mark_replica_ready():
 
 
 def is_warming_up() -> bool:
-  """Check if the replica is still warming up.
+  """True while this node is a replica whose databases are still loading.
 
-  Returns True if we're a replica and databases haven't finished loading.
-  Use this to return 503 instead of 404 when databases aren't found during warmup.
+  Callers use it to answer 503 rather than 404 when a database is missing.
   """
   return os.getenv("LBUG_ROLE") == "replica" and not _replica_ready
 
@@ -61,7 +57,6 @@ async def health_check(
   - EC2 instance health monitoring
   - Kubernetes liveness probes
   """
-  # Replica mode: return 503 until databases are ready
   if os.getenv("LBUG_ROLE") == "replica" and not _replica_ready:
     logger.debug("Replica warmup in progress - returning 503")
     return JSONResponse(
@@ -72,7 +67,6 @@ async def health_check(
       },
     )
 
-  # Migration mode: return 503 while importing databases
   from robosystems.graph_api.core.migration_service import is_migration_in_progress
 
   if is_migration_in_progress():
@@ -86,12 +80,10 @@ async def health_check(
     )
 
   try:
-    # Basic check that service is accessible
     uptime = service.get_uptime()
 
     database_count = len(service.db_manager.list_databases())
 
-    # Include memory usage if psutil is available
     memory_info = {}
     try:
       import psutil
@@ -116,9 +108,8 @@ async def health_check(
       },
     )
   except Exception as e:
-    # Log the detailed error securely
+    # Detail goes to the log, not the response — avoid information disclosure.
     logger.error(f"Health check failed: {e!s}")
-    # Return generic error message to avoid information disclosure
     return JSONResponse(
       status_code=503,
       content={"status": "unhealthy", "error": "Service temporarily unavailable"},

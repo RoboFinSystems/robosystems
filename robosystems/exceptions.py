@@ -1,9 +1,11 @@
 """
-Custom Exception Types for RoboSystems.
+Exception hierarchy for RoboSystems.
 
-This module provides a comprehensive hierarchy of exceptions for better error handling
-and debugging throughout the application. Each exception type provides specific context
-about the nature of the error and can include additional metadata for debugging.
+Every exception derives from `RoboSystemsError`, which carries an `error_code`,
+a `details` dict, and a timestamp, and serializes via `to_dict()` for API
+responses. Subclasses set the fields their domain needs (graph id, credit
+balance, retry-after) so callers can branch on the type instead of parsing
+messages.
 """
 
 from datetime import UTC, datetime
@@ -11,14 +13,11 @@ from typing import Any
 
 
 class RoboSystemsError(Exception):
-  """
-  Base exception for all RoboSystems application errors.
+  """Base exception for all RoboSystems application errors.
 
-  Attributes:
-      message: Human-readable error message
-      error_code: Application-specific error code for categorization
-      details: Additional error context and metadata
-      timestamp: When the error occurred
+  `error_code` defaults to the exception's class name, so subclasses get a
+  stable machine-readable code without setting one. `timestamp` is stamped at
+  construction in UTC.
   """
 
   def __init__(
@@ -502,12 +501,7 @@ class CircuitBreakerOpenError(RoboSystemsError):
 
 
 def validate_graph_id(graph_id: str) -> None:
-  """
-  Validate graph ID format.
-
-  Raises:
-      GraphValidationError: If graph ID is invalid
-  """
+  """Raise `GraphError` unless `graph_id` is non-empty and `kg`-prefixed."""
   if not graph_id:
     raise GraphError("Graph ID cannot be empty", error_code="INVALID_GRAPH_ID")
 
@@ -520,12 +514,7 @@ def validate_graph_id(graph_id: str) -> None:
 
 
 def validate_entity_identifier(identifier: str, entity_type: str = "Entity") -> None:
-  """
-  Validate entity identifier format.
-
-  Raises:
-      EntityValidationError: If identifier is invalid
-  """
+  """Raise `EntityValidationError` unless `identifier` is non-empty and <= 255 chars."""
   if not identifier:
     raise EntityValidationError("identifier", identifier, "Cannot be empty")
 

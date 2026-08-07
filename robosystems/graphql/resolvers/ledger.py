@@ -931,8 +931,8 @@ class LedgerQuery:
     graph_id = require_graph_id(info)
     try:
       with _open_session(info, "roboledger") as session:
-        # Reporting Style now lives on the entity — get_statement resolves
-        # the primary entity's Style from this same session (no platform hop).
+        # get_statement resolves the primary entity's Reporting Style from
+        # this same session — no hop to the platform DB.
         response = reads_reports.get_statement(
           session,
           graph_id,

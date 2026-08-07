@@ -1,16 +1,16 @@
 """Handlers for ``block_type='metric'`` — the derivative construction mode.
 
-Typed :class:`MetricMechanics` ships as one arm of the
-``ArtifactMechanics`` discriminated union, and ``metric`` is registered
-as a known block type. The envelope builder renders the standing metric
-time series: every ``factset_type='metric'`` FactSet for the structure
-becomes one period column (they accumulate one per (entity, period_end)
-via ``compute-metrics``), and each catalog concept becomes one row with
-values aligned across the period columns. The create/update/delete
-handlers still raise :class:`NotImplementedError` via the registry's
-``make_not_implemented_handler`` factory — custom metric authoring is a
-later phase; the seeded catalog plus ``compute-metrics`` is the M-1
-surface.
+:class:`MetricMechanics` is one arm of the ``ArtifactMechanics``
+discriminated union. The envelope builder renders the standing metric time
+series: every ``factset_type='metric'`` FactSet for the structure becomes
+one period column (they accumulate one per (entity, period_end) via
+``compute-metrics``), and each catalog concept becomes one row with values
+aligned across the period columns.
+
+Custom metric authoring is not supported — the create/update/delete handlers
+raise :class:`NotImplementedError` via the registry's
+``make_not_implemented_handler`` factory. The write surface is the seeded
+catalog plus ``compute-metrics`` / ``assert-metrics``.
 """
 
 from __future__ import annotations

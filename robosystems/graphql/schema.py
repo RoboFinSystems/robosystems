@@ -1,25 +1,21 @@
 """Extensions GraphQL schema.
 
-Assembles the Strawberry Schema served at
-`/extensions/{graph_id}/graphql`. The top-level `Query` root is
-composed from per-domain resolver classes (`LedgerQuery`,
-`InvestorQuery`) **only when their respective feature flags are
-enabled**, plus a `hello` probe for auth smoke-testing.
+Assembles the Strawberry Schema served at `/extensions/{graph_id}/graphql`.
+The top-level `Query` root composes the per-domain resolver classes
+(`LedgerQuery`, `InvestorQuery`) only when their feature flags are enabled,
+plus a `hello` auth probe. A ledger-only deployment therefore exposes only
+ledger fields rather than fields that fail at runtime. The router mounts on
+`ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED`, so with both off the schema is
+never served.
 
-Per-domain gating means a ledger-only deployment exposes only
-ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors), and an
-investor-only deployment exposes only investor fields. The router
-itself is mounted on `ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED`, so if
-both are off the schema is never served at all.
-
-The endpoint is **graph-scoped at the URL level** — `graph_id` is a
-path parameter, not a query argument. Resolvers read it via
-`info.context["graph_id"]`. Auth + per-graph access are validated by
+The endpoint is graph-scoped at the URL level: `graph_id` is a path
+parameter, not a query argument, and resolvers read it via
+`info.context["graph_id"]`. Auth and per-graph access are validated by
 `get_context` before any resolver runs.
 
-Strawberry defaults (`auto_camel_case=True`) mean Python snake_case
-fields are exposed as camelCase on the wire, matching what the
-TypeScript and Python SDK facades expect without manual reshape.
+Strawberry's `auto_camel_case=True` default exposes Python snake_case fields
+as camelCase on the wire, matching what the TypeScript and Python SDK
+facades expect.
 """
 
 from __future__ import annotations
@@ -46,34 +42,22 @@ from robosystems.graphql.resolvers.taxonomy_block import TaxonomyBlockQuery
 class _BaseQuery:
   """Always-on probe field shared by every Query composition.
 
-  Lives on its own type so the dynamically-built `Query` class can
-  inherit it alongside whichever domain mixins are enabled. The probe
-  is mounted in **all environments** (not dev-only) — see the `hello`
-  resolver docstring for the rationale.
+  Lives on its own type so the dynamically-built `Query` class can inherit
+  it alongside whichever domain mixins are enabled. Mounted in all
+  environments, not just dev.
   """
 
   @strawberry.field
   def hello(self, info: Info[GraphQLContext, None]) -> str:
-    """Permanent auth probe — verifies the endpoint is live and authenticated.
+    """Auth probe: returns `hello, {user.email}` for a valid request.
 
-    Returns `"hello, {user.email}"` when the request carries valid
-    credentials. Raises `UNAUTHENTICATED` (via `require_user`) when
-    the request has no credentials. Combined with the auth contract
-    in `get_context`, this gives clients a three-way liveness check:
+    Opens no database session and touches no domain, so it gives clients a
+    three-way liveness check:
 
-    - **HTTP 200, `{ data: { hello: "hello, ..." } }`** → endpoint up,
-      auth valid, user can reach the schema
-    - **HTTP 200, `{ errors: [{ extensions: { code: "UNAUTHENTICATED" } }] }`**
-      → endpoint up, no credentials presented (anonymous introspection
-      is still allowed)
-    - **HTTP 401** → endpoint up, credentials presented but invalid
-      (expired token, bad API key)
-
-    Kept as a permanent fixture rather than a dev-only scaffold so SDK
-    codegen workflows, healthcheck integrations, and agent loops can
-    rely on it. It has no business value beyond auth probing — it
-    doesn't open a database session or touch any domain — so the
-    runtime cost is negligible.
+    - HTTP 200 with `data.hello` → endpoint up, credentials valid
+    - HTTP 200 with an `UNAUTHENTICATED` error → endpoint up, no
+      credentials presented (anonymous introspection is still allowed)
+    - HTTP 401 → endpoint up, credentials presented but invalid
     """
     user = require_user(info)
     return f"hello, {user.email}"
@@ -82,28 +66,16 @@ class _BaseQuery:
 def _build_query_type() -> type:
   """Build the Query root from whichever domain mixins are enabled.
 
-  Skipping a disabled domain entirely (rather than exposing fields
-  that would fail with `*_NOT_INITIALIZED` at runtime) keeps the
-  introspection result honest and lets clients branch on the actual
-  schema shape instead of trial-and-error against runtime errors.
+  Dropping a disabled domain entirely, rather than exposing fields that
+  fail with `*_NOT_INITIALIZED` at runtime, keeps introspection honest so
+  clients can branch on the schema shape.
 
-  The library mixin (`LibraryQuery`) is always composed — it's the
-  read surface for both the `graph_id="library"` sentinel (canonical
-  browse of the public schema) and any tenant graph_id (tenant schema
-  + public fallback via search_path). Library fields are not gated
-  by a per-graph extension flag; data visibility is driven by the
-  session's search_path, which is implicit in the URL's graph_id.
-
-  `InformationBlockQuery` is always composed for the same reason — the
-  Information Block construct is cross-domain. Schedule blocks surface
-  only on tenant graphs because their atoms live in the tenant schema;
-  on the library sentinel only block types with
-  `surfaces_in_library=True` surface (currently none — Schedule is
-  tenant-only).
-
-  `TaxonomyBlockQuery` follows the same always-on pattern. Library reporting standards
-  surface on the sentinel; tenant CoA / custom_ontology / extensions
-  surface on the tenant graph_id via search_path.
+  `LibraryQuery`, `InformationBlockQuery`, and `TaxonomyBlockQuery` are
+  always composed: they are cross-domain and not gated by a per-graph
+  extension flag. Their data visibility is driven by the session
+  `search_path`, which follows from the URL's `graph_id` — the `library`
+  sentinel browses the public schema, a tenant graph_id sees tenant rows
+  with public fallback.
   """
   bases: tuple[type, ...] = (
     InformationBlockQuery,
@@ -120,26 +92,16 @@ def _build_query_type() -> type:
 
 Query = _build_query_type()
 
-# OpenTelemetry instrumentation — Strawberry's built-in extension emits
-# one span per GraphQL operation plus one child span per resolved field.
-# Spans surface in the same OTel pipeline as the REST routes (the global
-# tracer provider is set up in `middleware/otel/setup.py`), so GraphQL
-# reads get the same Jaeger/Tempo coverage as `/extensions/*/operations/*`
-# writes without any per-resolver decorator boilerplate.
+# The limiters bound query cost against the small extensions OLTP pool, where
+# each resolved field can open a session. They are passed as factory callables
+# (not instances) per Strawberry's per-request construction contract.
+# Introspection is unaffected — the depth limiter does not count introspection
+# fields — so SDK codegen still works.
 #
-# We use the `Sync` variant of the extension because (a) it works in both
-# sync and async execution paths (important: tests run
-# `schema.execute_sync(...)` which can't host async context managers), and
-# (b) the sync path has no meaningful overhead in our mostly-I/O-bound
-# resolvers. The async variant would force every test and every sync
-# introspection call to fail with "GraphQL execution failed to complete
-# synchronously."
-# Query-bounding limiters guard the small extensions OLTP pool against
-# pathological documents (deep nesting, alias fan-out, oversized queries) —
-# each resolved field can open a session. Passed as factory callables (not
-# instances) per Strawberry's per-request construction contract. Introspection
-# is unaffected (the depth limiter does not count introspection fields), so SDK
-# codegen still works.
+# OpenTelemetry spans land in the same pipeline as the REST routes (tracer
+# provider set up in `middleware/otel/setup.py`). The `Sync` variant works on
+# both sync and async execution paths; the async variant breaks
+# `schema.execute_sync(...)`, which cannot host async context managers.
 schema = strawberry.Schema(
   query=Query,
   extensions=[

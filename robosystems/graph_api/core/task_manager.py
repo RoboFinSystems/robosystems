@@ -1,8 +1,9 @@
 """
-Generic task manager for background operations.
+Status tracking for long-running background operations.
 
-This module provides a reusable task manager for tracking
-the status of any long-running background operation.
+Task records live in Valkey with a 24-hour TTL, so a task that nothing polls
+expires on its own. One manager instance per task family (backup, restore,
+migration) keys its IDs by prefix.
 """
 
 import json
@@ -18,24 +19,20 @@ from robosystems.graph_api.models.tasks import TaskStatus
 
 
 class GenericTaskManager:
-  """Manages background tasks and their status in Redis."""
+  """Tracks background task status in Valkey.
+
+  ``task_prefix`` (``backup``, ``restore``, ``ingest``, ...) namespaces the
+  IDs this manager mints.
+  """
 
   def __init__(self, task_prefix: str = "task"):
-    """
-    Initialize task manager.
-
-    Args:
-        task_prefix: Prefix for task IDs (e.g., "backup", "restore", "ingest")
-    """
     self.task_prefix = task_prefix
     self._redis_client = None
     self._redis_url = None
 
   async def get_redis(self) -> redis_async.Redis:
-    """Get async Redis client for task storage."""
+    """Get the Valkey client, creating it on first use."""
     if not self._redis_client:
-      # Use dedicated database for LadybugDB tasks
-      # Use async factory method to handle SSL params correctly
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
@@ -49,16 +46,10 @@ class GenericTaskManager:
     metadata: dict[str, Any] | None = None,
     estimated_size: float | None = None,
   ) -> str:
-    """
-    Create a new task.
+    """Create a task in PENDING state and return its ID.
 
-    Args:
-        task_type: Type of task (backup, restore, etc.)
-        metadata: Task-specific metadata
-        estimated_size: Estimated size/duration for progress tracking
-
-    Returns:
-        Task ID
+    ``estimated_size`` is the denominator for progress reporting; without it
+    progress stays at 0 until the task completes.
     """
     task_id = f"{self.task_prefix}_{task_type}_{uuid.uuid4().hex[:8]}"
 
@@ -77,7 +68,6 @@ class GenericTaskManager:
       "metadata": metadata or {},
     }
 
-    # Store in Redis with 24-hour TTL
     redis_client = await self.get_redis()
     await redis_client.setex(
       f"lbug:task:{task_id}",
@@ -88,27 +78,23 @@ class GenericTaskManager:
     return task_id
 
   async def update_task(self, task_id: str, **updates) -> None:
-    """
-    Update task status.
+    """Merge ``updates`` into a task record and refresh its heartbeat.
 
-    Args:
-        task_id: Task identifier
-        **updates: Fields to update
+    Read-modify-write, not atomic: a single writer per task is assumed.
+    Rewriting the key also resets the 24-hour TTL, so an active task does not
+    expire mid-flight. Raises ``ValueError`` if the task is gone.
     """
     redis_client = await self.get_redis()
 
-    # Get existing task
     task_json = await redis_client.get(f"lbug:task:{task_id}")
     if not task_json:
       raise ValueError(f"Task {task_id} not found")
 
     task_data = json.loads(task_json)
 
-    # Update fields
     task_data.update(updates)
     task_data["last_heartbeat"] = time.time()
 
-    # Store back in Redis
     await redis_client.setex(
       f"lbug:task:{task_id}",
       86400,  # 24 hours
@@ -116,15 +102,7 @@ class GenericTaskManager:
     )
 
   async def get_task(self, task_id: str) -> dict[str, Any] | None:
-    """
-    Get task status.
-
-    Args:
-        task_id: Task identifier
-
-    Returns:
-        Task data or None if not found
-    """
+    """Get a task record, or None if it never existed or has expired."""
     redis_client = await self.get_redis()
     task_json = await redis_client.get(f"lbug:task:{task_id}")
 
@@ -135,13 +113,7 @@ class GenericTaskManager:
   async def complete_task(
     self, task_id: str, result: dict[str, Any] | None = None
   ) -> None:
-    """
-    Mark task as completed.
-
-    Args:
-        task_id: Task identifier
-        result: Task result data
-    """
+    """Mark a task COMPLETED, storing ``result`` and setting progress to 100."""
     await self.update_task(
       task_id,
       status=TaskStatus.COMPLETED.value,
@@ -151,13 +123,7 @@ class GenericTaskManager:
     )
 
   async def fail_task(self, task_id: str, error: str) -> None:
-    """
-    Mark task as failed.
-
-    Args:
-        task_id: Task identifier
-        error: Error message
-    """
+    """Mark a task FAILED with ``error`` as the reason."""
     await self.update_task(
       task_id,
       status=TaskStatus.FAILED.value,
@@ -166,7 +132,6 @@ class GenericTaskManager:
     )
 
 
-# Global instances for each task type
 backup_task_manager = GenericTaskManager(task_prefix="backup")
 restore_task_manager = GenericTaskManager(task_prefix="restore")
 migration_task_manager = GenericTaskManager(task_prefix="migration")

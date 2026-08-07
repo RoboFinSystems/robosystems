@@ -38,13 +38,10 @@ def create_security(
 ) -> SecurityResponse:
   """Create a security row, auto-linking the entity when possible.
 
-  Behavior mirrors the existing REST endpoint:
-  - If `body.entity_id` is provided, verify the entity exists (raise
-    `EntityNotFoundError` if not).
-  - Else if `body.source_graph_id` is provided, look up an existing
-    linked entity in this graph; if none yet, `entity_id` stays null
-    and will be auto-linked later when a report arrives.
-  - Otherwise the security is created unlinked.
+  With `body.entity_id`, the entity must exist or `EntityNotFoundError` is
+  raised. Otherwise `body.source_graph_id` is used to find an already-linked
+  entity; when none exists yet, `entity_id` stays null and is linked when a
+  report from that graph arrives. A security with neither is unlinked.
   """
   entity_id = body.entity_id
   entity_name: str | None = None

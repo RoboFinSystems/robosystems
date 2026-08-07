@@ -117,12 +117,11 @@ class PeriodCloseResult:
   """Outcome of a successful `PeriodCloseService.close()` call.
 
   ``entries_posted`` is the TOTAL entries the close transitioned to
-  posted, across both post paths: the QB pre-publish step (which
-  promotes each published draft immediately) and the bulk draft→posted
-  transition that follows. The split rides on
-  ``entries_published_to_qb`` / ``entries_posted_locally`` — counting
-  only the bulk path made the close receipt report 0 while posting
-  everything (June-close F10).
+  posted, across both post paths: the QB pre-publish step (which promotes
+  each published draft immediately) and the bulk draft→posted transition
+  that follows. Counting only the bulk path would under-report a
+  fully-published period as 0. The split rides on
+  ``entries_published_to_qb`` / ``entries_posted_locally``.
   """
 
   period: str
@@ -618,10 +617,10 @@ class PeriodCloseService:
 
     Failures from individual rule evaluations are caught and logged —
     they cannot break the close path, which has already succeeded by
-    the time this is called. The rule engine itself already converts
+    the time this is called. The rule engine itself converts
     binding/dispatch failures into ``VerificationResult`` rows with
-    ``status='error'``; this wrapper guards against an outright engine
-    exception (e.g., schema-level issue) for robustness.
+    ``status='error'``; this wrapper only guards against an outright
+    engine exception.
     """
     # Lazy import — keeps the close service free of information-block
     # dependencies at module import time.

@@ -4,7 +4,6 @@ Shared utilities for connection operations.
 
 import time
 
-# Import robustness middleware
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   OperationStatus,
@@ -13,8 +12,6 @@ from robosystems.middleware.robustness import (
   get_operation_logger,
   record_operation_metric,
 )
-
-# Import provider registry
 from robosystems.operations.providers.registry import ProviderRegistry
 
 # Initialize provider registry singleton

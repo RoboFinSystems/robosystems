@@ -1,15 +1,14 @@
 """
-API Key Rotation Lambda Function
+Rotate API keys held in AWS Secrets Manager.
 
-Generic Secrets Manager rotation for API keys. Handles:
-- Graph API keys (JSON with GRAPH_API_KEY, ENVIRONMENT fields)
-- Admin API keys (plain string)
+Handles two secret shapes, told apart by inspecting the current value: Graph
+API keys (JSON with GRAPH_API_KEY and ENVIRONMENT) and admin API keys (a plain
+string). Secrets Manager drives four steps against this one function:
 
-This function handles the 4-step rotation process:
-1. createSecret - Generate new credentials
-2. setSecret - No action needed (keys are validated at runtime)
-3. testSecret - Verify the new credentials are valid
-4. finishSecret - Complete the rotation
+1. createSecret - generate new credentials as the AWSPENDING version
+2. setSecret    - no-op; nothing outside Secrets Manager stores the key
+3. testSecret   - check the pending value's shape before promoting it
+4. finishSecret - promote AWSPENDING to AWSCURRENT
 """
 
 import json
@@ -33,41 +32,20 @@ secrets_client = boto3.client(
 
 
 def generate_api_key(prefix: str = "lbug", length: int = 32) -> str:
-  """
-  Generate a secure API key with a prefix.
-
-  Args:
-      prefix: Prefix for the API key
-      length: Length of the random portion
-
-  Returns:
-      A secure API key string
-  """
+  """Generate a `{prefix}_{random}` API key with `length` random characters."""
   alphabet = string.ascii_letters + string.digits
   random_part = "".join(secrets.choice(alphabet) for _ in range(length))
   return f"{prefix}_{random_part}"
 
 
 def generate_plain_key(length: int = 64) -> str:
-  """
-  Generate a secure plain API key (no prefix, alphanumeric only).
-
-  Args:
-      length: Length of the key
-
-  Returns:
-      A secure alphanumeric string
-  """
+  """Generate an unprefixed alphanumeric API key of `length` characters."""
   alphabet = string.ascii_letters + string.digits
   return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def _detect_secret_type(secret_string: str) -> str:
-  """
-  Detect the type of secret from its current value.
-
-  Returns one of: 'graph_api', 'plain'
-  """
+  """Classify a secret's value as 'graph_api' or 'plain'."""
   try:
     secret_dict = json.loads(secret_string)
     if isinstance(secret_dict, dict) and "GRAPH_API_KEY" in secret_dict:
@@ -79,12 +57,9 @@ def _detect_secret_type(secret_string: str) -> str:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> None:
-  """
-  AWS Lambda handler for Secrets Manager rotation.
+  """Route one Secrets Manager rotation step to its handler.
 
-  Args:
-      event: The Lambda event containing SecretId, ClientRequestToken, and Step
-      context: The Lambda context
+  Refuses any step whose ClientRequestToken is not staged AWSPENDING.
   """
   arn = event["SecretId"]
   token = event["ClientRequestToken"]
@@ -126,10 +101,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
 
 
 def create_secret(arn: str, token: str) -> None:
-  """
-  Generate new credentials based on the current secret type.
+  """Step 1: store new credentials as AWSPENDING, matching the current shape.
 
-  This step generates new credentials and stores them as the AWSPENDING version.
+  The current value decides the shape, so a Graph API secret stays JSON and an
+  admin secret stays a plain string.
   """
   # Get the current secret to determine type and preserve structure
   try:
@@ -172,11 +147,10 @@ def create_secret(arn: str, token: str) -> None:
 
 
 def set_secret(arn: str, token: str) -> None:
-  """
-  Set the pending secret in the service.
+  """Step 2: no-op.
 
-  For API keys, this step is a no-op because the keys are validated at runtime
-  by the services. The actual key validation happens during the testSecret step.
+  Nothing outside Secrets Manager stores these keys — consumers read the secret
+  at runtime — so there is no external system to update here.
   """
   logger.info(
     "setSecret: No action needed for API keys - validation happens at runtime"
@@ -184,11 +158,7 @@ def set_secret(arn: str, token: str) -> None:
 
 
 def test_secret(arn: str, token: str) -> None:
-  """
-  Test the pending secret.
-
-  This step verifies that the new credentials are properly formatted and valid.
-  """
+  """Step 3: check the pending value's format before it becomes current."""
   # Get the pending secret
   pending_secret = secrets_client.get_secret_value(
     SecretId=arn, VersionStage="AWSPENDING", VersionId=token
@@ -267,12 +237,10 @@ def _validate_plain_key(key: str) -> None:
 
 
 def finish_secret(arn: str, token: str) -> None:
-  """
-  Finish the rotation by updating version stages.
+  """Step 4: promote AWSPENDING to AWSCURRENT and clear the AWSPENDING label.
 
-  This step promotes the pending secret to current and explicitly cleans up
-  the AWSPENDING label. Secrets Manager should remove AWSPENDING automatically
-  when AWSCURRENT is moved, but this does not always happen (known AWS quirk).
+  Secrets Manager is meant to drop AWSPENDING when AWSCURRENT moves, but does
+  not always do so, hence the explicit cleanup.
   """
   metadata = secrets_client.describe_secret(SecretId=arn)
   current_version = None

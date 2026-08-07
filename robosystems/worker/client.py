@@ -30,20 +30,16 @@ async def enqueue_task(
   for stream/status/cancel endpoints, then RPUSH the task payload to
   the worker queue (Valkey DB 6). RPUSH + BLMOVE = FIFO ordering.
 
+  ``task_type`` must be a registered handler type (e.g. "graph_creation",
+  "operator") — see worker/tasks/__init__.py.
+
   Deduplication: A task_type + graph_id + user_id + params combination
   is rejected within DEDUP_TTL seconds of the previous enqueue,
   returning the existing operation response instead. Dedup is skipped
   entirely when graph_id is None (e.g. new graph creation).
 
-  Args:
-      task_type: Registered task type (e.g. "agent_mapping").
-      graph_id: The graph this task operates on, or None for creation tasks.
-      user_id: The user who initiated the task.
-      params: Optional task-specific parameters.
-
-  Returns:
-      Operation response dict suitable for returning as a 202 response.
-      Includes operation_id, status, _links (stream, status, cancel).
+  Returns an operation response dict with operation_id, status, and _links
+  (stream, status, cancel).
   """
   queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   try:

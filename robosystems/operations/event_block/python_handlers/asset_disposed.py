@@ -21,10 +21,9 @@ Event status after success: 'fulfilled' (disposal is terminal — no further wor
 All writes happen in one session. If any step raises, the outer transaction
 rolls back — nothing persists, no half-disposed state.
 
-The obligation register is the single source of truth for what is still due.
-Disposal terminates a schedule's remaining lifespan by voiding the schedule's
-pending ``schedule_entry_due`` events; forward facts are left in place as a
-historical record.
+The obligation register is the single source of truth for what is still due,
+which is why disposal terminates a schedule's remaining lifespan by voiding
+its pending obligations rather than by deleting facts.
 """
 
 from __future__ import annotations
@@ -112,8 +111,8 @@ def _delete_sum_equals_rule(session: Session, structure_id: str) -> None:
   """Delete the schedule's SumEquals rule + its verification_results rows.
 
   The auto-generated SumEquals rule (sum of periodic amounts == original cost)
-  is no longer satisfiable once we truncate forward facts, so it must be
-  removed atomically with the disposal.
+  stops being satisfiable once the schedule's remaining obligations are
+  voided, so it must be removed atomically with the disposal.
 
   Raw SQL for the verification_results DELETE because FactSet/VerificationResult
   FK chains don't cascade through rules.id by default.
@@ -213,11 +212,9 @@ def dispatch_preview(
 ) -> HandlerPreview:
   """Read + compute without writing. Returns the plan the handler would execute.
 
-  Mirrors every validation gate ``dispatch`` runs so previews surface the
-  same blockers callers will hit on real execution. Without this, a
-  preview claiming ``would_succeed=True`` could still 422 at dispatch
-  time on closed-period or balance violations — the call sites trusted
-  the preview and got surprised.
+  Mirrors every validation gate ``dispatch`` runs, so a preview reporting
+  ``would_succeed=True`` cannot still 422 at dispatch time on a
+  closed-period or balance violation.
   """
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,

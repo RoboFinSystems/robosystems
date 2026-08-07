@@ -1,19 +1,37 @@
 #!/usr/bin/env python3
-"""Driftline Coffee Roasters — RoboLedger Showcase Demo (Season 1, Episode 1).
+"""Driftline Coffee Roasters — RoboLedger showcase demo (Season 1, Episode 1).
 
-A thin wrapper over ``examples._scenario.runner`` — the company *is* the
-scenario. The Driftline arc (a profitable-but-cash-poor DTC + wholesale coffee
-roaster whose cash drains into green-coffee inventory and one slow-paying
-wholesale account) is authored as flow parameters in ``data.py``; run
-``uv run python -m examples.coffee_roaster_demo.data`` for the offline preview.
+Loads a whole synthetic company into a RoboLedger graph and leaves it ready for
+a month-end close: chart of accounts, counterparty agents, 16 months of typed
+REA events, CoA→rs-gaap mappings, fiscal calendar, schedules, disclosure notes,
+policy documents, and a filed annual report.
+
+Driftline is *profitable but cash-poor*. The P&L glows while cash drains into
+green-coffee inventory bought ahead of demand and into one large wholesale
+account (Summit Markets) that slips from net-30 to net-90. That squeeze is not
+hand-written — the arc is authored as flow parameters in ``data.py`` and the
+engine derives the balanced transactions, so the working-capital gap emerges
+mechanically from recognition running ahead of cash.
+
+This module is a thin wrapper over ``examples._scenario.runner``: the company
+*is* the scenario, so a new episode is a new set of data modules, not a fork of
+the runner. For the offline arc preview (no platform needed), run
+``uv run python -m examples.coffee_roaster_demo.data``.
+
+Prerequisites:
+    just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
+    just demo-user    # writes credentials to .local/config.json
 
 Usage:
-    uv run python -m examples.coffee_roaster_demo.main             # Create new graph + load
-    uv run python -m examples.coffee_roaster_demo.main <graph_id>  # Load into existing graph
-    uv run python -m examples.coffee_roaster_demo.main --dry-run   # Validate data only
-    uv run python -m examples.coffee_roaster_demo.main --ai        # Use MappingOperator (requires Bedrock)
+    just demo-coffee-roaster              # create a graph and load everything
+    just demo-coffee-roaster <graph_id>   # load into an existing graph
+    just demo-coffee-roaster --dry-run    # validate the synthetic data only
+    just demo-coffee-roaster --ai         # map the CoA with the MappingOperator
+                                          #   (requires AWS Bedrock)
 
-Requires: Docker stack running (just start)
+Expect several minutes of progress output ending in a summary with the graph
+id, the period queued for close, the filed report id, and the reveal prompts
+below to try against an MCP client.
 """
 
 from __future__ import annotations
@@ -30,7 +48,9 @@ from .memories import MEMORIES
 from .metrics import CUSTOM_METRICS
 from .policies import DOCUMENTS
 
-# Beat 4 — the unscripted reveal: profit up, cash down, traced to working capital.
+# Beat 4 — the analysis questions printed at the end of the run, to ask an MCP
+# client against the loaded graph. Driftline's reveal: profit is up, cash is
+# down, and the whole gap traces to working capital.
 REVEAL_PROMPTS = [
   "We look profitable — show me the income statement.",
   "But did cash go up or down over the period? Where did it go?",
@@ -38,10 +58,10 @@ REVEAL_PROMPTS = [
   "How much cash is tied up in inventory vs. receivables?",
 ]
 
-# Operating-budget scenario (FP&A F-1) — Driftline's working-capital arc as
-# lever assertions: modest growth, roaster margins, the slow-paying wholesale
-# account baked into DSO. Values follow the rs-driver catalog conventions
-# (percent levers as decimals per month, days levers as day counts).
+# Operating-budget scenario — Driftline's working-capital arc as lever
+# assertions: modest growth, roaster margins, the slow-paying wholesale account
+# baked into DSO. Values follow the rs-driver catalog conventions: percent
+# levers are decimals per month, days levers are day counts.
 FORECAST_LEVERS = {
   "rs-driver:RevenueGrowthRate": 0.03,
   "rs-driver:CostOfRevenueRate": 0.62,

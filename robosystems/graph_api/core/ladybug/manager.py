@@ -1,15 +1,11 @@
 """
-LadybugDB Database Manager - Multi-database management for Graph API
+LadybugDB database manager — the lifecycle of the databases on one node.
 
-This module provides database management capabilities for LadybugDB clusters,
-including creating, deleting, and managing multiple databases on a single node.
-
-Key features:
-- Create new databases with schema installation
-- Delete databases and cleanup files
-- List all databases on the node
-- Health checking for multiple databases
-- Schema management and validation
+Creates, deletes, inspects and health-checks the ``.lbug`` files under a base
+directory, applies schemas to new databases, and performs the blue-green swap
+that promotes a ``-wip`` database to active. Connections are handed out by the
+shared pool in ``pool.py``, never opened ad hoc, because LadybugDB permits a
+single writer per database.
 """
 
 import re
@@ -37,28 +33,18 @@ from .pool import initialize_connection_pool
 
 
 def validate_database_path(base_path: Path, db_name: str) -> Path:
-  """
-  Safely construct and validate database path to prevent directory traversal.
+  """Build the ``.lbug`` path for ``db_name``, rejecting directory traversal.
 
-  Args:
-      base_path: Base directory for databases
-      db_name: Database name to validate
-
-  Returns:
-      Safe database path
-
-  Raises:
-      HTTPException: If path is unsafe
+  Raises ``HTTPException`` if the name is not alphanumeric/underscore/hyphen,
+  or if the resolved path escapes ``base_path``.
   """
   if not db_name or not re.match(r"^[a-zA-Z0-9_-]+$", db_name):
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
 
-  # Construct safe path (LadybugDB uses .lbug files)
   db_path = base_path / f"{db_name}.lbug"
 
-  # Ensure the resolved path is still within base_path
   try:
     db_path.resolve().relative_to(base_path.resolve())
   except ValueError:
@@ -71,12 +57,10 @@ def validate_database_path(base_path: Path, db_name: str) -> Path:
 
 
 class LadybugDatabaseManager:
-  """
-  Manages multiple LadybugDB databases on a single node.
+  """Manages the LadybugDB databases on a single node.
 
-  This class handles the lifecycle of multiple databases including creation,
-  deletion, schema management, and health monitoring. Now uses a thread-safe
-  connection pool for improved performance and reliability.
+  All connections go through a thread-safe pool; the manager itself holds no
+  long-lived handles.
   """
 
   def __init__(
@@ -86,29 +70,23 @@ class LadybugDatabaseManager:
     max_connections_per_db: int = 3,
     read_only: bool = False,
   ):
-    """
-    Initialize database manager with connection pooling.
+    """Initialize the manager and its connection pool.
 
-    Args:
-        base_path: Base directory for all databases
-        max_databases: Maximum number of databases allowed on this node
-        max_connections_per_db: Maximum connections per database in pool
-        read_only: Whether this database manager operates in read-only mode
+    ``max_databases`` caps the primary databases on this node (subgraphs are
+    exempt — they share their parent's slot). ``max_connections_per_db``
+    bounds the per-database pool; pooled connections expire after 30 minutes
+    idle so a rarely used database does not pin buffer memory.
     """
     self.base_path = Path(base_path)
     self.max_databases = max_databases
     self.read_only = read_only
 
-    # Initialize thread-safe connection pool
     self.connection_pool = initialize_connection_pool(
       base_path=str(base_path),
       max_connections_per_db=max_connections_per_db,
       connection_ttl_minutes=30,
     )
 
-    # Note: All connections now managed by connection_pool for thread safety
-
-    # Ensure base directory exists
     self.base_path.mkdir(parents=True, exist_ok=True)
 
     logger.info(
@@ -116,28 +94,20 @@ class LadybugDatabaseManager:
     )
 
   def create_database(self, request: DatabaseCreateRequest) -> DatabaseCreateResponse:
-    """
-    Create a new LadybugDB database with schema.
+    """Create a database, apply its schema, and register it.
 
-    Args:
-        request: Database creation request
-
-    Returns:
-        Database creation response
-
-    Raises:
-        HTTPException: If creation fails or limits exceeded
+    A partially created database is removed on failure, so a failed create
+    never leaves a half-built file behind.
     """
     start_time = time.time()
 
-    # Validate request
     if not request.graph_id:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Graph ID is required"
       )
 
-    # Check capacity (bypass for subgraphs — they share the parent's slot)
-    # Only count primary databases, not subgraphs (which contain '_' in their name)
+    # Subgraphs are exempt from the cap: they share the parent's slot, and are
+    # identified by the "_" in their name.
     all_databases = self.list_databases()
     current_count = len([db for db in all_databases if "_" not in db])
     if not request.is_subgraph and current_count >= self.max_databases:
@@ -150,7 +120,6 @@ class LadybugDatabaseManager:
         f"Creating subgraph database {request.graph_id} (bypassing max_databases check)"
       )
 
-    # Check if database already exists (using safe path construction)
     db_path = validate_database_path(self.base_path, request.graph_id)
     if db_path.exists():
       raise HTTPException(
@@ -158,8 +127,8 @@ class LadybugDatabaseManager:
         detail=f"Database {request.graph_id} already exists",
       )
 
-    # Clean up any orphaned WAL file before creating
-    # This can happen if a previous deletion didn't clean up properly
+    # An orphaned WAL from an incomplete deletion would be replayed into the
+    # new database, so it is removed before creating.
     wal_path = self.base_path / f"{request.graph_id}.lbug.wal"
     if wal_path.exists():
       wal_path.unlink()
@@ -168,30 +137,29 @@ class LadybugDatabaseManager:
     try:
       logger.info(f"Creating database: {request.graph_id}")
 
-      # Get memory configuration from shared helper (single source of truth)
       from .config import get_database_memory_config
 
       max_memory_mb = get_database_memory_config(request.graph_id)
       buffer_pool_size = max_memory_mb * 1024 * 1024
 
-      # For SEC database, use explicit checkpoint threshold for large tables
-      # SEC has huge tables (Fact, Association) that can exhaust memory
+      # SEC's Fact and Association tables are large enough that the default
+      # threshold lets the WAL grow until it exhausts memory; checkpointing
+      # more often keeps it bounded.
       database_name = request.graph_id
       if database_name == "sec":
-        checkpoint_threshold = 134217728  # 128MB for SEC (more frequent checkpoints)
+        checkpoint_threshold = 134217728
         logger.info("Using reduced checkpoint threshold (128MB) for SEC database")
       else:
-        checkpoint_threshold = 536870912  # 512MB for regular databases
+        checkpoint_threshold = 536870912
 
-      # Create database with all optimizations
       db = lbug.Database(
         str(db_path),
         read_only=False,
         buffer_pool_size=buffer_pool_size,
-        compression=True,  # Safe: enabled by default in LadybugDB
-        max_num_threads=0,  # Use all available threads (LadybugDB decides)
-        auto_checkpoint=True,  # Enable automatic checkpointing
-        checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
+        compression=True,
+        max_num_threads=0,  # 0 lets LadybugDB use every available thread
+        auto_checkpoint=True,
+        checkpoint_threshold=checkpoint_threshold,
       )
       conn = lbug.Connection(db)
       logger.info(
@@ -199,8 +167,8 @@ class LadybugDatabaseManager:
         f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
       )
 
-      # Load vector extension for FLOAT[N] column support
-      # Pre-installed in Docker image; INSTALL is fallback for local dev
+      # FLOAT[N] columns need the vector extension. It is baked into the
+      # Docker image; the INSTALL path covers local dev only.
       try:
         try:
           conn.execute("LOAD EXTENSION vector")
@@ -211,7 +179,6 @@ class LadybugDatabaseManager:
       except Exception as vec_err:
         logger.warning(f"Could not load vector extension: {vec_err}")
 
-      # Apply schema based on type (subgraphs inherit schema from parent via fork operation)
       if request.is_subgraph:
         logger.info(
           f"Skipping schema application for subgraph {request.graph_id} "
@@ -223,10 +190,11 @@ class LadybugDatabaseManager:
           conn, request.schema_type, request.repository_name, request.custom_schema_ddl
         )
 
-      # Vector indexes are created post-materialization (not here on empty tables).
-      # See materialize_table endpoint which calls create_vector_index() after COPY.
+      # Vector indexes are built after materialization, not here: an index on
+      # an empty table is discarded by the bulk COPY. The materialize_table
+      # endpoint calls create_vector_index() once rows exist.
 
-      # Close temporary connections (pool will manage connections going forward)
+      # The pool owns connections from here on.
       conn.close()
       db.close()
 
@@ -236,11 +204,9 @@ class LadybugDatabaseManager:
         f"Database {request.graph_id} created successfully in {execution_time:.2f}ms"
       )
 
-      # Update instance registry in DynamoDB
       if env.is_development():
         self._update_instance_registry()
       elif request.schema_type == "shared" and request.repository_name:
-        # For shared repositories in production, register in DynamoDB
         self._register_shared_repository(request.graph_id)
 
       return DatabaseCreateResponse(
@@ -254,7 +220,6 @@ class LadybugDatabaseManager:
     except Exception as e:
       logger.error(f"Failed to create database {request.graph_id}: {e}")
 
-      # Cleanup on failure
       if db_path.exists():
         try:
           if db_path.is_file():
@@ -274,17 +239,10 @@ class LadybugDatabaseManager:
   def delete_database(
     self, graph_id: str, preserve_duckdb: bool = False
   ) -> dict[str, Any]:
-    """
-    Delete a database and cleanup resources.
+    """Delete a database along with its WAL, LanceDB indexes and DuckDB staging.
 
-    Args:
-        graph_id: Graph database identifier to delete
-        preserve_duckdb: If True, preserve DuckDB staging database for retry scenarios.
-            This is useful for decoupled pipelines where you want to rebuild
-            LadybugDB from existing DuckDB staging without re-running staging.
-
-    Returns:
-        Deletion status
+    ``preserve_duckdb`` keeps the staging database *and* the LanceDB indexes
+    built from it, so LadybugDB can be rebuilt without re-running staging.
     """
     db_path = self.base_path / f"{graph_id}.lbug"
 
@@ -297,25 +255,23 @@ class LadybugDatabaseManager:
     try:
       logger.info(f"Deleting database: {graph_id} (preserve_duckdb={preserve_duckdb})")
 
-      # Close any connections in the pool for this database
       self.connection_pool.close_database_connections(graph_id)
 
-      # Remove WAL file first (if it exists)
+      # The WAL goes first: left behind, it would be replayed against a
+      # database recreated under the same name.
       wal_path = self.base_path / f"{graph_id}.lbug.wal"
       if wal_path.exists():
         wal_path.unlink()
         logger.debug(f"Deleted WAL file for {graph_id}")
 
-      # Remove database file (single file in LadybugDB)
       if db_path.is_file():
         db_path.unlink()
       elif db_path.is_dir():
-        # Legacy cleanup for old .db directories
+        # Older engine versions stored a database as a directory.
         shutil.rmtree(db_path)
 
-      # Clean up lance vector indexes for this graph
-      # Skip if preserve_duckdb is True — the lance index is built from DuckDB
-      # staging data and should be preserved alongside it
+      # LanceDB indexes are derived from DuckDB staging, so they follow the
+      # same preserve decision.
       if not preserve_duckdb:
         try:
           from robosystems.graph_api.core.lance import LanceManager
@@ -329,8 +285,6 @@ class LadybugDatabaseManager:
       else:
         logger.info(f"Preserving lance indexes for {graph_id}")
 
-      # Clean up DuckDB staging database alongside LadybugDB database
-      # Skip if preserve_duckdb is True (for retry/incremental scenarios)
       if not preserve_duckdb:
         from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
@@ -366,26 +320,17 @@ class LadybugDatabaseManager:
     return db_path.exists()
 
   def swap_database(self, graph_id: str) -> dict[str, Any]:
-    """Promote a WIP database to active (one-way swap).
+    """Promote ``{graph_id}-wip`` to active (one-way blue-green swap).
 
-    The old active is temporarily renamed to -prev during the swap for
-    crash safety, then deleted on success. This is NOT a rollback
-    mechanism — the goal is zero-downtime replacement.
+    ``graph_id`` is the base ID, not the ``-wip`` variant. The sequence is:
+    checkpoint the WIP so nothing is left in its WAL, close pooled connections
+    to both databases (a rename under an open handle corrupts the file),
+    rename active to ``-prev``, rename WIP to active, then delete ``-prev``.
+    Each ``.lbug`` is moved together with its ``.lbug.wal``.
 
-    Steps:
-    1. Checkpoint WIP to flush any WAL entries
-    2. Close connections for both active and WIP databases
-    3. Rename active -> -prev (crash safety)
-    4. Rename WIP -> active
-    5. Delete -prev (swap succeeded)
-
-    On failure between steps 3-4, automatic recovery restores active from -prev.
-
-    Args:
-        graph_id: The base graph ID (not the -wip variant).
-
-    Returns:
-        Status dict with swap result.
+    ``-prev`` exists only for the instant between the two renames: if the
+    second rename fails, ``-prev`` is renamed back. It is not a rollback point
+    once the swap succeeds — the old data is gone.
     """
     wip_id = f"{graph_id}-wip"
     prev_id = f"{graph_id}-prev"
@@ -401,7 +346,6 @@ class LadybugDatabaseManager:
       )
 
     try:
-      # Step 1: Checkpoint WIP to ensure all WAL data is flushed
       try:
         with self.connection_pool.get_connection(wip_id) as conn:
           conn.execute("CHECKPOINT")
@@ -409,11 +353,10 @@ class LadybugDatabaseManager:
       except Exception as e:
         logger.warning(f"Could not checkpoint WIP database {wip_id}: {e}")
 
-      # Step 2: Close all connections for both databases
       self.connection_pool.close_database_connections(graph_id)
       self.connection_pool.close_database_connections(wip_id)
 
-      # Step 3: Clean up any prior -prev
+      # A -prev left by an interrupted earlier swap would block the rename.
       if prev_path.exists():
         prev_wal = self.base_path / f"{prev_id}.lbug.wal"
         prev_path.unlink()
@@ -421,24 +364,19 @@ class LadybugDatabaseManager:
           prev_wal.unlink()
         logger.debug(f"Cleaned up prior -prev database for {graph_id}")
 
-      # Step 4: Rename active -> -prev (if active exists)
       if active_path.exists():
         active_path.rename(prev_path)
-        # Move WAL too
         active_wal = self.base_path / f"{graph_id}.lbug.wal"
         if active_wal.exists():
           active_wal.rename(self.base_path / f"{prev_id}.lbug.wal")
         logger.info(f"Moved active {graph_id} to {prev_id}")
 
-      # Step 5: Rename WIP -> active
       wip_path.rename(active_path)
-      # Move WAL too
       wip_wal = self.base_path / f"{wip_id}.lbug.wal"
       if wip_wal.exists():
         wip_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
       logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
 
-      # Step 6: Clean up -prev (swap succeeded, no need for rollback)
       if prev_path.exists():
         prev_wal = self.base_path / f"{prev_id}.lbug.wal"
         prev_path.unlink()
@@ -453,7 +391,7 @@ class LadybugDatabaseManager:
       }
 
     except Exception as e:
-      # Rollback: restore active from -prev if the swap failed midway
+      # Only recoverable while active is missing and -prev still holds it.
       logger.error(f"Swap failed for {graph_id}: {e}, attempting rollback")
       try:
         if prev_path.exists() and not active_path.exists():
@@ -475,35 +413,21 @@ class LadybugDatabaseManager:
       )
 
   def get_connection(self, graph_id: str, read_only: bool = False):
-    """
-    Get a connection for a database from the connection pool.
-
-    Args:
-        graph_id: Database identifier
-        read_only: Whether to open connection in read-only mode
-
-    Returns:
-        LadybugDB connection from the pool
-    """
+    """Check out a pooled connection for a database."""
     return self.connection_pool.get_connection(graph_id, read_only=read_only)
 
   def list_databases(self) -> list[str]:
-    """
-    List all databases on this node by scanning for .lbug files on disk.
+    """List the node's databases by scanning for ``.lbug`` files.
 
-    Excludes blue-green temporary databases (-wip, -prev) from the listing
-    so they don't count toward capacity limits.
-
-    Returns:
-        List of database names (excludes -wip and -prev suffixes)
+    The blue-green temporaries (``-wip``, ``-prev``) are excluded so they
+    never count toward the capacity limit.
     """
     databases = []
 
     try:
       for item in self.base_path.iterdir():
         if item.is_file() and item.name.endswith(".lbug"):
-          db_name = item.name[:-5]  # Remove .lbug extension
-          # Filter out blue-green temporary databases
+          db_name = item.name[:-5]
           if db_name.endswith("-wip") or db_name.endswith("-prev"):
             continue
           databases.append(db_name)
@@ -515,28 +439,12 @@ class LadybugDatabaseManager:
       return []
 
   def get_database_path(self, graph_id: str) -> str:
-    """
-    Get the file path for a database.
-
-    Args:
-        graph_id: Graph database identifier
-
-    Returns:
-        Full path to the database file
-    """
+    """Get the validated on-disk path for a database."""
     db_path = validate_database_path(self.base_path, graph_id)
     return str(db_path)
 
   def get_database_info(self, graph_id: str) -> DatabaseInfo:
-    """
-    Get detailed information about a specific database.
-
-    Args:
-        graph_id: Graph database identifier to inspect
-
-    Returns:
-        Database information
-    """
+    """Get a database's size, timestamps and metadata."""
     db_path = self.base_path / f"{graph_id}.lbug"
 
     if not db_path.exists():
@@ -596,7 +504,6 @@ class LadybugDatabaseManager:
       except Exception as e:
         logger.error(f"Failed to get info for database {db_name}: {e}")
 
-    # Calculate node capacity
     node_capacity = {
       "max_databases": self.max_databases,
       "current_databases": len(databases),
@@ -612,12 +519,7 @@ class LadybugDatabaseManager:
     )
 
   def health_check_all(self) -> NodeDatabasesHealthResponse:
-    """
-    Perform health checks on all databases.
-
-    Returns:
-        Health status for all databases
-    """
+    """Health-check every database on the node; one failure does not abort the rest."""
     databases = []
     healthy_count = 0
 
@@ -643,17 +545,10 @@ class LadybugDatabaseManager:
     repository_name: str | None = None,
     custom_ddl: str | None = None,
   ) -> bool:
-    """
-    Apply schema to a new database based on type.
+    """Apply the ``entity``, ``shared`` or ``custom`` schema to a new database.
 
-    Args:
-        conn: Database connection
-        schema_type: Type of schema to apply
-        repository_name: Repository name for shared databases
-        custom_ddl: Custom DDL commands for custom schema type
-
-    Returns:
-        True if schema was applied successfully
+    Returns False rather than raising, so a schema failure leaves an empty but
+    usable database instead of aborting creation.
     """
     try:
       if schema_type == "entity":
@@ -671,14 +566,17 @@ class LadybugDatabaseManager:
       return False
 
   def _apply_entity_schema(self, conn: lbug.Connection) -> bool:
-    """Apply entity graph schema using dynamic schema definitions."""
+    """Create node and relationship tables from the base schema definitions.
+
+    Falls back to :meth:`_apply_fallback_entity_schema` if the schema loader
+    fails, so database creation still yields something queryable.
+    """
     try:
       from robosystems.schemas.loader import get_schema_loader
 
-      # Use base schema only for maximum stability (align with direct file access)
+      # Base schema only — extensions are installed per graph afterwards.
       schema_loader = get_schema_loader(extensions=[])
 
-      # Get all node types from the schema
       node_types = schema_loader.list_node_types()
       relationship_types = schema_loader.list_relationship_types()
 
@@ -686,14 +584,12 @@ class LadybugDatabaseManager:
         f"Applying dynamic schema: {len(node_types)} node types, {len(relationship_types)} relationship types"
       )
 
-      # Create node tables
       for node_name in node_types:
         node_schema = schema_loader.get_node_schema(node_name)
         if not node_schema:
           logger.warning(f"No schema found for node type: {node_name}")
           continue
 
-        # Build column definitions from schema
         columns = []
         primary_key = None
 
@@ -723,25 +619,22 @@ class LadybugDatabaseManager:
           if "already exists" not in str(e).lower():
             logger.warning(f"Failed to create node table {node_name}: {e}")
 
-      # Create relationship tables
       for rel_name in relationship_types:
         rel_schema = schema_loader.get_relationship_schema(rel_name)
         if not rel_schema:
           logger.warning(f"No schema found for relationship type: {rel_name}")
           continue
 
-        # Build relationship definition
         from_node = rel_schema.from_node
         to_node = rel_schema.to_node
 
-        # Check if from/to nodes exist in our schema
+        # A relationship whose endpoints are not both present would fail DDL.
         if from_node not in node_types or to_node not in node_types:
           logger.debug(
             f"Skipping relationship {rel_name}: missing nodes {from_node} or {to_node}"
           )
           continue
 
-        # Build property definitions if any
         if rel_schema.properties:
           prop_definitions = []
           for prop in rel_schema.properties:
@@ -773,14 +666,16 @@ class LadybugDatabaseManager:
 
     except Exception as e:
       logger.error(f"Failed to apply dynamic schema: {e}")
-      # Fallback to minimal hardcoded schema for backward compatibility
       logger.warning("Falling back to minimal hardcoded schema")
       return self._apply_fallback_entity_schema(conn)
 
   def _apply_fallback_entity_schema(self, conn: lbug.Connection) -> bool:
-    """Fallback to minimal hardcoded schema if dynamic schema fails."""
+    """Create the minimum tables needed for a usable database.
+
+    Used only when the schema loader fails; the graph is expected to have its
+    real schema installed afterwards via the schema endpoint.
+    """
     minimal_statements = [
-      # Only create the absolute minimum for basic functionality
       """CREATE NODE TABLE IF NOT EXISTS Entity(
           identifier STRING,
           name STRING,
@@ -862,13 +757,11 @@ class LadybugDatabaseManager:
   def rebuild_vector_index(
     self, conn: lbug.Connection, table_name: str, column: str = "embedding"
   ) -> bool:
-    """Drop and recreate HNSW vector index to cover all data.
+    """Drop and recreate a table's HNSW index so it covers every row.
 
-    Used after batched materialization where CREATE_VECTOR_INDEX during batch 1
-    only indexes batch 1's rows, and subsequent batches see "already exists".
-    Dropping first ensures the rebuilt index covers the full table.
-
-    Returns True if index was rebuilt successfully.
+    Required after batched materialization: the index created during batch 1
+    covers only batch 1's rows, and later batches see "already exists" and
+    skip. Dropping first is what makes the rebuild cover the full table.
     """
     index_name = f"{table_name.lower()}_vec_index"
 
@@ -879,7 +772,6 @@ class LadybugDatabaseManager:
         conn.execute("INSTALL vector")
         conn.execute("LOAD EXTENSION vector")
 
-      # Drop existing index (ignore if it doesn't exist)
       try:
         conn.execute(f"CALL DROP_VECTOR_INDEX('{table_name}', '{index_name}')")
         logger.info(f"Dropped existing vector index {index_name} on {table_name}")
@@ -887,11 +779,11 @@ class LadybugDatabaseManager:
         if "doesn't have an index" not in str(drop_err):
           logger.debug(f"Could not drop vector index {index_name}: {drop_err}")
 
-      # Create fresh index over all data with tuned HNSW parameters.
-      # Reduced from defaults (mu=30, ml=60, efc=200) for faster build on
-      # large tables (6M+ rows). Still accurate for top-10/20 retrieval.
-      # cache_embeddings=false avoids loading all vectors into buffer pool
-      # at once (6.6M x 384 x 4B = ~10GB), preventing OOM on large tables.
+      # HNSW parameters are tuned below the defaults (mu=30, ml=60, efc=200)
+      # to keep build time workable on 6M+ row tables while staying accurate
+      # for top-10/20 retrieval. cache_embeddings=false is an OOM guard: with
+      # it on, 6.6M x 384 x 4B (~10GB) of vectors load into the buffer pool
+      # at once.
       conn.execute(
         f"CALL CREATE_VECTOR_INDEX('{table_name}', '{index_name}', '{column}', "
         f"mu := 16, ml := 32, efc := 100, cache_embeddings := false)"
@@ -905,18 +797,16 @@ class LadybugDatabaseManager:
       return False
 
   def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:
-    """Apply custom schema DDL to database."""
+    """Execute caller-supplied DDL, split on ``;``, aborting on the first failure."""
     if not custom_ddl:
       logger.error("Custom DDL is required for custom schema type")
       return False
 
     try:
-      # Split DDL into individual statements
       statements = [stmt.strip() for stmt in custom_ddl.split(";") if stmt.strip()]
 
       logger.info(f"Applying custom schema with {len(statements)} DDL statements")
 
-      # Execute each statement
       for i, statement in enumerate(statements):
         try:
           conn.execute(statement)
@@ -937,24 +827,24 @@ class LadybugDatabaseManager:
   def _apply_shared_schema(
     self, conn: lbug.Connection, repository_name: str | None
   ) -> bool:
-    """Apply shared repository schema using appropriate extensions."""
+    """Create the tables for a shared repository, picking its schema by name.
+
+    ``sec`` gets base + roboledger; every other repository gets the base
+    schema only.
+    """
     try:
       from robosystems.schemas.loader import (
         get_schema_loader,
         get_sec_schema_loader,
       )
 
-      # Use repository-specific schema loaders
       if repository_name == "sec":
-        # SEC repository: base + roboledger only
         schema_loader = get_sec_schema_loader()
         logger.info("Using SEC-specific schema (base + roboledger)")
       else:
-        # Other repositories: use base schema only for stability
         schema_loader = get_schema_loader(extensions=[])
         logger.info(f"Using full schema for repository: {repository_name}")
 
-      # Get schema types
       node_types = schema_loader.list_node_types()
       relationship_types = schema_loader.list_relationship_types()
 
@@ -962,14 +852,12 @@ class LadybugDatabaseManager:
         f"Applying shared schema: {len(node_types)} node types, {len(relationship_types)} relationship types"
       )
 
-      # Create node tables
       for node_name in node_types:
         node_schema = schema_loader.get_node_schema(node_name)
         if not node_schema:
           logger.warning(f"No schema found for node type: {node_name}")
           continue
 
-        # Build column definitions from schema
         columns = []
         primary_key = None
 
@@ -999,25 +887,22 @@ class LadybugDatabaseManager:
           if "already exists" not in str(e).lower():
             logger.warning(f"Failed to create shared node table {node_name}: {e}")
 
-      # Create relationship tables
       for rel_name in relationship_types:
         rel_schema = schema_loader.get_relationship_schema(rel_name)
         if not rel_schema:
           logger.warning(f"No schema found for relationship type: {rel_name}")
           continue
 
-        # Build relationship definition
         from_node = rel_schema.from_node
         to_node = rel_schema.to_node
 
-        # Check if from/to nodes exist in our schema
+        # A relationship whose endpoints are not both present would fail DDL.
         if from_node not in node_types or to_node not in node_types:
           logger.debug(
             f"Skipping relationship {rel_name}: missing nodes {from_node} or {to_node}"
           )
           continue
 
-        # Build property definitions if any
         if rel_schema.properties:
           prop_definitions = []
           for prop in rel_schema.properties:
@@ -1054,14 +939,10 @@ class LadybugDatabaseManager:
       return False
 
   def _check_database_health(self, graph_id: str) -> bool:
-    """
-    Check if a database is healthy using connection pool.
+    """Check a database by running a trivial query through the pool.
 
-    Args:
-        graph_id: Graph database identifier to check
-
-    Returns:
-        True if database is healthy
+    The result is closed explicitly: an unclosed query result holds its Arrow
+    buffers, and health checks run often enough for that to accumulate.
     """
     try:
       db_path = self.base_path / f"{graph_id}.lbug"
@@ -1069,11 +950,9 @@ class LadybugDatabaseManager:
       if not db_path.exists():
         return False
 
-      # Try to get a connection from the pool and execute a simple query
       try:
         with self.connection_pool.get_connection(graph_id, read_only=True) as conn:
           result = conn.execute("RETURN 1 AS health_check")
-          # Consume the result to ensure query completed
           if isinstance(result, list):
             for r in result:
               if hasattr(r, "close"):
@@ -1094,31 +973,31 @@ class LadybugDatabaseManager:
       return False
 
   def close_all_connections(self):
-    """Close all open database connections using the connection pool."""
+    """Close every pooled connection on this node."""
     try:
-      # Close connections in the thread-safe pool
       self.connection_pool.close_all_connections()
       logger.info("Closed all connections in connection pool")
     except Exception as e:
       logger.error(f"Failed to close connection pool: {e}")
 
   def _update_instance_registry(self):
-    """Update the instance registry in DynamoDB with current database count."""
+    """Write this node's database count and free capacity to the registry.
+
+    Development path only — it points at the LocalStack endpoint. Failures are
+    swallowed so a registry problem cannot fail database creation.
+    """
     try:
       import boto3
 
-      # Get DynamoDB client
       dynamodb = boto3.client(
         "dynamodb",
         endpoint_url=env.AWS_ENDPOINT_URL or "http://localstack:4566",
         region_name="us-east-1",
       )
 
-      # Count databases (LadybugDB uses .lbug files)
       db_count = len([f for f in self.base_path.glob("*.lbug") if f.is_file()])
       capacity_pct = int((db_count / self.max_databases) * 100)
 
-      # Update the instance registry
       dynamodb.update_item(
         TableName=env.INSTANCE_REGISTRY_TABLE,
         Key={"instance_id": {"S": "local-lbug-writer"}},
@@ -1134,23 +1013,26 @@ class LadybugDatabaseManager:
       )
 
     except Exception as e:
-      # Don't fail database creation if registry update fails
       logger.warning(f"Failed to update instance registry: {e}")
 
   def _register_shared_repository(self, graph_id: str):
-    """Register a shared repository in DynamoDB instance registry."""
+    """Record this shared repository against the node in the instance registry.
+
+    Needs a real EC2 instance ID, taken from ``EC2_INSTANCE_ID`` or the
+    instance metadata service. Anywhere that lookup fails or yields a
+    non-instance-ID (a container, for instance), registration is skipped
+    rather than writing a bogus key.
+    """
     try:
       import re
       from datetime import datetime
 
       import boto3
 
-      # Get instance ID from EC2 metadata or hostname
       from robosystems.config import env as config_env
 
       instance_id = config_env.EC2_INSTANCE_ID
 
-      # Validate if we have a valid EC2 instance ID from environment
       if instance_id and not re.match(r"^i-[0-9a-f]{8,17}$", instance_id):
         logger.warning(
           f"EC2_INSTANCE_ID from environment '{instance_id}' is not a valid EC2 instance ID. "
@@ -1160,7 +1042,6 @@ class LadybugDatabaseManager:
 
       if not instance_id:
         try:
-          # Try to get from EC2 metadata service
           import urllib.request
 
           response = urllib.request.urlopen(
@@ -1168,7 +1049,6 @@ class LadybugDatabaseManager:
           )
           instance_id = response.read().decode("utf-8")
 
-          # Validate that this is actually an EC2 instance ID
           import re
 
           if not re.match(r"^i-[0-9a-f]{8,17}$", instance_id):
@@ -1178,20 +1058,16 @@ class LadybugDatabaseManager:
             )
             return
         except Exception as e:
-          # If we can't get EC2 metadata, we're likely in a container
           logger.info(
             f"Unable to retrieve EC2 instance ID (likely running in container): {e}. "
             f"Skipping instance registry update."
           )
           return
 
-      # Get table name from centralized config
       table_name = config_env.INSTANCE_REGISTRY_TABLE
 
-      # Get DynamoDB client
       dynamodb = boto3.client("dynamodb", region_name="us-east-1")
 
-      # Check if instance exists in registry
       response = dynamodb.get_item(
         TableName=table_name, Key={"instance_id": {"S": instance_id}}
       )
@@ -1229,5 +1105,4 @@ class LadybugDatabaseManager:
       )
 
     except Exception as e:
-      # Don't fail database creation if registry update fails
       logger.warning(f"Failed to register shared repository {graph_id}: {e}")

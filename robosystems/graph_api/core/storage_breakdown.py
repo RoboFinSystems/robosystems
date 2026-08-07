@@ -42,9 +42,9 @@ TRANSIENT_SUFFIXES = ("-wip", "-prev")
 def path_size_bytes(path: Path) -> int:
   """Size of a file or directory, recursing into directories.
 
-  A LadybugDB database may be either a single file or a directory depending on
-  the engine version, so both shapes have to be handled. Treating the directory
-  case as unmeasurable is what previously made this report zero.
+  Both shapes must be handled: a LadybugDB database is a single file in some
+  engine versions and a directory in others, and a caller that sizes only
+  files reports zero for the directory form.
   """
   total = 0
   try:
@@ -79,11 +79,11 @@ def _owns(name: str, graph_id: str) -> bool:
   database and subgraphs. Top-level ids are fixed-length ``kg`` + hex, so the
   prefix cannot collide with a different tenant's graph.
 
-  Matching on the base name is what brings the graph's *own* build artifacts
-  into scope. ``{graph_id}-wip`` uses a hyphen, so it failed both arms of this
-  test and went uncounted, while a subgraph's ``{graph_id}_{name}-wip`` passed
-  on the ``_`` prefix — the same artifact counted or not depending on which
-  database it was built for.
+  The comparison is against the *base* name, which is what brings the graph's
+  own build artifacts into scope: ``{graph_id}-wip`` is hyphen-separated and
+  matches neither arm on its raw name, while a subgraph's
+  ``{graph_id}_{name}-wip`` matches the ``_`` prefix regardless. Stripping the
+  suffix first is what makes both count the same way.
   """
   base = _base_name(name)
   return base == graph_id or base.startswith(f"{graph_id}_")
@@ -92,9 +92,9 @@ def _owns(name: str, graph_id: str) -> bool:
 def _classify_lbug(stem: str, graph_id: str) -> str:
   """Classify a `.lbug` database by its name.
 
-  Order matters: the transient check comes first because a subgraph's build
-  artifact matches the subgraph fallthrough below, and reporting it as a
-  subgraph is what made the storage breakdown disagree with the subgraph list.
+  Order matters: the transient check must come first, because a subgraph's
+  build artifact also matches the subgraph fallthrough, and classifying it as
+  a subgraph makes this report disagree with the subgraph list.
   """
   if stem.endswith(TRANSIENT_SUFFIXES):
     return TYPE_TRANSIENT
@@ -168,16 +168,11 @@ def _collect_staging(root: Path, graph_id: str) -> list[dict[str, Any]]:
 def compute_storage_breakdown(graph_id: str) -> dict[str, Any]:
   """Total and per-item disk usage for a graph and everything it owns.
 
-  Args:
-      graph_id: Parent graph identifier. Its memory database, subgraphs,
-          vector indexes and staging file are all attributed to it.
-
-  Returns:
-      ``{graph_id, total_bytes, items: [{type, id, bytes}]}`` where ``type``
-      is one of graph, memory, subgraph, vectors, staging, transient.
-
-  Raises:
-      HTTPException: If ``graph_id`` fails name validation.
+  A graph's memory database, subgraphs, vector indexes and staging file are
+  all attributed to it. Returns
+  ``{graph_id, total_bytes, items: [{type, id, bytes}]}`` where ``type`` is
+  one of graph, memory, subgraph, vectors, staging, transient. Raises
+  ``HTTPException`` if ``graph_id`` fails name validation.
   """
   validated = validate_database_name(graph_id)
 

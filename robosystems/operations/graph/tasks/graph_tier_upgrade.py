@@ -1,17 +1,20 @@
-"""Worker task for graph tier upgrade/downgrade.
+"""Worker task that moves a graph's EBS volume to a new tier's instance type.
 
-Handles the async EBS volume migration between instance types when a
-graph's tier changes (e.g., ladybug-standard -> ladybug-large).
+The graph is offline from the drain until reattachment completes, so the
+sequence is a correctness constraint, not just a description:
 
-Flow:
-1. Update DynamoDB registries (graph status=migrating, volume tier=new)
-2. Create EBS snapshot via Volume Manager Lambda (safety net)
-3. Drain connections on old instance
-4. Detach EBS volume (sits available with updated tier tag)
-5. Ensure target tier ASG has capacity
-6. Poll for volume reattachment by new instance
-7. Verify graph accessible on new instance
-8. Finalize: subscription -> active, graph registry -> active
+1. mark the graph ``migrating`` and retag the volume with the new tier
+2. snapshot the volume via the Volume Manager Lambda (the rollback point)
+3. drain connections on the old instance
+4. detach the volume — it then sits ``available`` carrying the new tier tag,
+   which is what makes the target tier's ASG claim it
+5. ensure the target ASG has capacity
+6. poll until a new instance has reattached the volume
+7. verify the graph answers on the new instance
+8. finalize: subscription and graph registry back to ``active``
+
+A failure after step 3 leaves the graph unreachable until rollback restores
+the registry entries, so the snapshot in step 2 is not optional.
 """
 
 import asyncio
@@ -39,7 +42,7 @@ GRAPH_API_PORT = 8001
 
 
 def _get_dynamodb_resource():
-  """Get DynamoDB resource with proper endpoint configuration."""
+  """DynamoDB resource, pointed at LocalStack in development."""
   region = env.AWS_REGION
   if env.is_development() and env.AWS_ENDPOINT_URL:
     return boto3.resource(
@@ -49,7 +52,7 @@ def _get_dynamodb_resource():
 
 
 def _get_lambda_client():
-  """Get Lambda client."""
+  """Lambda client, pointed at LocalStack in development."""
   region = env.AWS_REGION
   if env.is_development() and env.AWS_ENDPOINT_URL:
     return boto3.client("lambda", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region)
@@ -57,7 +60,7 @@ def _get_lambda_client():
 
 
 def _get_autoscaling_client():
-  """Get Auto Scaling client."""
+  """Auto Scaling client, pointed at LocalStack in development."""
   region = env.AWS_REGION
   if env.is_development() and env.AWS_ENDPOINT_URL:
     return boto3.client(
@@ -309,7 +312,11 @@ class GraphTierUpgradeTask(BaseTask):
       raise
 
   async def _drain_instance(self, private_ip: str) -> None:
-    """Drain connections on the old instance via Graph API admin endpoint."""
+    """Ask the old instance to close its connections before the detach.
+
+    Bounded by ``DRAIN_TIMEOUT_SECONDS``; the migration proceeds either way, so
+    a slow drain delays rather than blocks the move.
+    """
     if not private_ip:
       logger.warning("No private IP for drain, skipping")
       return
@@ -382,7 +389,11 @@ class GraphTierUpgradeTask(BaseTask):
   async def _wait_for_reattachment(
     self, volume_table: Any, volume_id: str, old_instance_id: str | None = None
   ) -> str:
-    """Poll DynamoDB volume registry until volume is reattached to a new instance."""
+    """Wait for a new instance to claim the volume, up to
+    ``REATTACH_TIMEOUT_SECONDS``.
+
+    The ASG does the attaching; this only observes the registry.
+    """
     elapsed = 0
     while elapsed < REATTACH_TIMEOUT_SECONDS:
       if await self.is_cancelled():

@@ -24,7 +24,6 @@ from .subscription_rate_limits import (
 
 def get_int_env(key: str, default: str) -> int:
   """Get integer environment variable, stripping any inline comments."""
-  # Use getattr to dynamically get env attribute
   value = str(getattr(env, key, default))
   # Strip inline comments (anything after #)
   value = value.split("#")[0].strip()
@@ -59,7 +58,6 @@ def _verify_jwt_for_rate_limiting(token: str) -> str | None:
 
 def get_user_identifier(request: Request) -> str:
   """Get user identifier for rate limiting based on authentication."""
-  # Check for API key authentication
   api_key = request.headers.get("X-API-Key")
   if api_key:
     # Hash the API key for privacy
@@ -68,7 +66,6 @@ def get_user_identifier(request: Request) -> str:
     api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
     return f"apikey:{api_key_hash}"
 
-  # Check for JWT authentication in Authorization header
   auth_header = request.headers.get("Authorization")
   if auth_header and auth_header.startswith("Bearer "):
     token = auth_header[7:]
@@ -97,14 +94,10 @@ def get_user_identifier(request: Request) -> str:
 
 
 def get_rate_limit_config(identifier: str) -> tuple[int, int]:
-  """
-  Get rate limiting configuration based on identifier type.
+  """Get rate limiting configuration based on identifier type.
 
   BURST-FOCUSED: Short windows for burst protection.
   Volume is controlled by credits, not rate limits.
-
-  Returns:
-      tuple[int, int]: (requests_per_window, window_seconds)
   """
   # Environment-based rate limits - BURST PROTECTION ONLY
   if identifier.startswith("apikey:"):
@@ -179,7 +172,6 @@ def rate_limit_dependency(request: Request):
       },
     )
 
-  # Add rate limit info to request state for response headers
   request.state.rate_limit_remaining = remaining
   request.state.rate_limit_limit = limit
 
@@ -259,14 +251,12 @@ def auth_rate_limit_dependency(request: Request):
       },
     )
 
-  # Add rate limit info to request state
   request.state.auth_rate_limit_remaining = remaining
   request.state.auth_rate_limit_limit = limit
 
 
 def get_user_from_request(request: Request) -> str | None:
   """Extract user ID from request for user-specific rate limiting."""
-  # Check for JWT authentication in Authorization header
   auth_header = request.headers.get("Authorization")
   if auth_header and auth_header.startswith("Bearer "):
     token = auth_header[7:]
@@ -306,14 +296,7 @@ def get_user_from_request(request: Request) -> str | None:
 def create_custom_rate_limit_dependency(
   limit_per_hour: int, window_seconds: int = 3600, limit_name: str = "custom"
 ):
-  """
-  Create a custom rate limiting dependency with specific limits.
-
-  Args:
-    limit_per_hour: Number of requests allowed per hour
-    window_seconds: Time window in seconds (default: 3600 = 1 hour)
-    limit_name: Name for the limit type (for logging/headers)
-  """
+  """Create a custom rate limiting dependency with specific limits."""
 
   def dependency(request: Request):
     identifier = get_user_identifier(request)
@@ -354,7 +337,6 @@ def create_custom_rate_limit_dependency(
         },
       )
 
-    # Add rate limit info to request state
     setattr(request.state, f"{limit_name}_rate_limit_remaining", remaining)
     setattr(request.state, f"{limit_name}_rate_limit_limit", limit)
 
@@ -433,8 +415,7 @@ def general_api_rate_limit_dependency(request: Request):
 
 
 def billing_rate_limit_dependency(request: Request):
-  """
-  Generous rate limiting for billing/checkout endpoints.
+  """Generous rate limiting for billing/checkout endpoints.
 
   Payment flows should never be rate-limited during normal use.
   All user types (JWT, API key, IP) get the same generous limit
@@ -487,15 +468,13 @@ def jwt_refresh_rate_limit_dependency(request: Request):
 
 
 def subscription_aware_rate_limit_dependency(request: Request):
-  """
-  Rate limiting that adapts based on user's subscription tier.
+  """Rate limiting that adapts based on user's subscription tier.
 
   This dependency:
   1. Identifies the user and their subscription tier
   2. Determines the endpoint category
   3. Applies appropriate rate limits based on subscription
   """
-  # Check if this endpoint should use subscription limits
   if not should_use_subscription_limits(request.url.path):
     # Fall back to general rate limiting for non-subscription endpoints
     return rate_limit_dependency(request)
@@ -509,7 +488,6 @@ def subscription_aware_rate_limit_dependency(request: Request):
     resolve_graph_tier,
   )
 
-  # Get user identification
   user_id = get_user_from_request(request)
   if not user_id:
     # Anonymous users get base tier limits
@@ -519,17 +497,13 @@ def subscription_aware_rate_limit_dependency(request: Request):
     subscription_tier = FALLBACK_TIER
     identifier = f"user_sub:{user_id}"
 
-  # Determine endpoint category
   category = get_endpoint_category(request.url.path, request.method)
   if not category:
-    # Fall back to general rate limiting if category not found
     return rate_limit_dependency(request)
 
-  # Resolve the graph's own tier for graph-scoped requests. Previously every
-  # authenticated user was pinned to ladybug-standard, which made the large and
-  # xlarge tables unreachable, and the bucket was keyed by user, so a customer
-  # with ten graphs shared one budget across all of them — per-graph pricing
-  # that delivered no per-graph throughput.
+  # Graph-scoped requests are bucketed by graph and limited by that graph's
+  # own tier, so per-graph pricing buys per-graph throughput instead of one
+  # budget shared across a customer's graphs.
   #
   # Three conditions, and each excludes a case where per-graph bucketing is
   # actively wrong:
@@ -559,7 +533,6 @@ def subscription_aware_rate_limit_dependency(request: Request):
     subscription_tier = resolve_graph_tier(parent_graph_id)
     identifier = f"graph_sub:{parent_graph_id}"
 
-  # Get subscription-based limits
   limit_config = get_subscription_rate_limit(subscription_tier, category)
   if not limit_config:
     # Fall back to general rate limiting if no specific limits
@@ -567,10 +540,8 @@ def subscription_aware_rate_limit_dependency(request: Request):
 
   limit, window = limit_config
 
-  # Create a unique identifier for this category
   category_identifier = f"{identifier}:{category.value}"
 
-  # Check rate limit
   allowed, remaining = rate_limit_cache.check_rate_limit(
     category_identifier, limit, window
   )
@@ -625,7 +596,6 @@ def subscription_aware_rate_limit_dependency(request: Request):
       },
     )
 
-  # Add rate limit info to request state
   request.state.rate_limit_remaining = remaining
   request.state.rate_limit_limit = limit
   request.state.rate_limit_tier = subscription_tier
@@ -633,23 +603,20 @@ def subscription_aware_rate_limit_dependency(request: Request):
 
 
 def graph_scoped_rate_limit_dependency(request: Request):
-  """
-  Rate limiting specifically for graph-scoped endpoints.
+  """Rate limiting specifically for graph-scoped endpoints.
   Always uses subscription-based limits.
   """
   return subscription_aware_rate_limit_dependency(request)
 
 
 def sse_connection_rate_limit_dependency(request: Request):
-  """
-  Rate limiting specifically for SSE connection endpoints.
+  """Rate limiting specifically for SSE connection endpoints.
   Limits the rate at which authenticated users can establish new SSE connections.
   Uses subscription-tier-based rate limits from centralized configuration.
   Note: SSE endpoints require authentication, so anonymous users cannot access them.
   """
   from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
 
-  # Get user ID from request (SSE requires authentication)
   user_id = get_user_from_request(request)
 
   # Determine subscription tier
@@ -657,7 +624,6 @@ def sse_connection_rate_limit_dependency(request: Request):
   # In the future, this could check actual subscription status
   subscription_tier = "ladybug-standard" if user_id else "base"
 
-  # Get rate limit for SSE based on subscription tier
   rate_limit = RateLimitConfig.get_rate_limit(subscription_tier, EndpointCategory.SSE)
 
   if rate_limit:
@@ -669,7 +635,6 @@ def sse_connection_rate_limit_dependency(request: Request):
 
   identifier = get_user_identifier(request)
 
-  # Check rate limit
   allowed, remaining = rate_limit_cache.check_rate_limit(
     f"{identifier}:sse_connections", limit, window
   )
@@ -716,6 +681,5 @@ def sse_connection_rate_limit_dependency(request: Request):
       },
     )
 
-  # Add rate limit info to request state
   request.state.sse_rate_limit_remaining = remaining
   request.state.sse_rate_limit_limit = limit

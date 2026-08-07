@@ -204,12 +204,8 @@ class OpenSearchClient:
 
     During bulk ingestion, frequent refreshes create new Lucene segments and
     trigger FAISS KNN graph rebuilds every second, degrading search latency.
-    This slows refresh to write_interval during the load, then restores
-    steady_interval for normal operations.
-
-    Args:
-      write_interval: Refresh interval during bulk writes (default "60s").
-      steady_interval: Refresh interval restored after writes (default "30s").
+    This slows refresh to ``write_interval`` during the load, then restores
+    ``steady_interval`` for normal operations.
     """
     try:
       self.client.indices.put_settings(
@@ -360,19 +356,10 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """BM25 text search with mandatory graph_id filtering.
 
-    Fast keyword search using OpenSearch's inverted index. This is the
-    default search mode — performant regardless of corpus size because
-    BM25 scoring only touches matching postings lists.
-
-    Args:
-        query: Search query string
-        graph_id: Required tenant filter
-        filters: Optional additional filters
-        size: Max results to return
-        offset: Pagination offset
-
-    Returns:
-        OpenSearch response with hits and highlights
+    Keyword search over OpenSearch's inverted index, and the default search
+    mode — it stays fast regardless of corpus size because BM25 scoring only
+    touches matching postings lists. Returns the raw OpenSearch response
+    (hits plus highlights).
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 
@@ -436,23 +423,15 @@ class OpenSearchClient:
     both sub-queries only score documents belonging to the target graph_id,
     preventing cross-tenant data leakage in KNN results.
 
-    Args:
-        query: Search query string
-        query_embedding: 384-dim embedding of the query from fastembed
-        graph_id: Required tenant filter
-        filters: Optional additional filters
-        size: Max results to return
-        offset: Pagination offset
-
-    Returns:
-        OpenSearch response with hits and highlights
+    ``query_embedding`` must be a 384-dim fastembed vector matching the
+    index mapping. Returns the raw OpenSearch response (hits plus
+    highlights).
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 
-    # Over-fetch for KNN to support offset pagination
-    knn_k = min(size + offset, 100)  # Cap at 100 to limit KNN cost
+    # Over-fetch for KNN to support offset pagination, capped to limit cost
+    knn_k = min(size + offset, 100)
 
-    # Build filter body for use inside sub-queries
     filter_body: dict[str, Any] = {"bool": {"filter": filter_clauses}}
 
     # The hybrid query's queries array is positional — index 0 maps to
@@ -604,8 +583,8 @@ class OpenSearchClient:
   ) -> dict[str, Any]:
     """Pure kNN vector search with mandatory graph_id filtering.
 
-    Unlike hybrid_search, this uses ONLY vector similarity (no BM25).
-    Used by recall-text for semantic memory retrieval.
+    Unlike `search_hybrid`, this scores on vector similarity alone (no
+    BM25). Used by recall-text for semantic memory retrieval.
     """
     filter_clauses = self._build_filter_clauses(graph_id, filters)
 

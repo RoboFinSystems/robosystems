@@ -1,10 +1,8 @@
-"""
-AI Client - AWS Bedrock interface for Claude models.
+"""Claude access via AWS Bedrock.
 
-Production-grade AI client using AWS Bedrock exclusively for:
-- Cost tracking in AWS Cost Explorer
-- CloudWatch metrics and monitoring
-- IAM-based access control
+Bedrock is the only path, deliberately: it puts model spend in AWS Cost
+Explorer alongside everything else, emits CloudWatch token metrics, and lets
+IAM rather than a shared API key control who can call a model.
 """
 
 import json
@@ -37,13 +35,10 @@ class AIResponse:
 
 
 class AIClient:
-  """
-  AWS Bedrock AI client for Claude models.
+  """Untracked Bedrock access.
 
-  Uses AWS Bedrock exclusively for all AI operations to ensure:
-  - All costs appear in AWS Cost Explorer
-  - CloudWatch metrics for token usage
-  - IAM-based access control
+  Callers on a billable path use `TrackedAIClient`, which wraps this and
+  consumes credits per call.
   """
 
   def __init__(self):
@@ -52,7 +47,6 @@ class AIClient:
     logger.info("Initialized AI client with AWS Bedrock")
 
   def _initialize_bedrock_client(self):
-    """Initialize AWS Bedrock client."""
     import boto3
 
     # Build real AWS endpoint URL (bypass LocalStack's AWS_ENDPOINT_URL env var)
@@ -77,7 +71,8 @@ class AIClient:
 
     try:
       client = boto3.client(**kwargs)
-      # Verify credentials work (skip in dev - LocalStack doesn't have STS)
+      # Fail at construction rather than on the first (billable) call. Skipped
+      # in dev, where LocalStack has no STS to call.
       if env.ENVIRONMENT != "dev":
         sts_kwargs = {"service_name": "sts", "region_name": env.AWS_BEDROCK_REGION}
         if env.AWS_BEDROCK_ACCESS_KEY_ID:
@@ -95,15 +90,10 @@ class AIClient:
   def _get_model_id(
     self, model: str | None = None, operator_type: str | None = None
   ) -> str:
-    """
-    Get the Bedrock model ID.
+    """Resolve a Bedrock model id from an optional override and operator type.
 
-    Args:
-        model: Optional model name override (e.g., 'claude-3-5-sonnet-20241022')
-        operator_type: Optional operator type to check for overrides
-
-    Returns:
-        Bedrock model ID string
+    An unrecognized `model` falls back to the configured default rather than
+    raising — see `OperatorConfig.get_bedrock_model_id`.
     """
     if model:
       try:
@@ -130,22 +120,11 @@ class AIClient:
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
-    """
-    Create a message using AWS Bedrock.
+    """Send one Bedrock request.
 
-    Args:
-        messages: List of conversation messages
-        system: Optional system prompt
-        max_tokens: Maximum tokens in response
-        temperature: Sampling temperature (0-1)
-        model: Optional model name override
-        operator_type: Optional operator type for model override lookup
-        tools: Optional Anthropic tool definitions (name/description/
-            input_schema). When provided the model may return tool_use
-            blocks and stop_reason "tool_use" — see AIResponse.content_blocks.
-
-    Returns:
-        AIResponse with content and token usage
+    `tools` takes Anthropic tool definitions (name/description/input_schema);
+    with them the model may stop with reason "tool_use" and return tool_use
+    blocks in `AIResponse.content_blocks`.
     """
     model_id = self._get_model_id(model, operator_type)
     return await self._bedrock_create_message(
@@ -161,7 +140,6 @@ class AIClient:
     model: str,
     tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
-    """Create message using AWS Bedrock."""
     message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
 
     request_body: dict[str, Any] = {

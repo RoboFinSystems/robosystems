@@ -5,10 +5,9 @@ The two public reads are the source of truth for the GraphQL fields
 agents, SDK callers, and the UI all see the same envelope that the
 create/update handlers emit.
 
-Legacy rows with ``taxonomy_type`` not registered (notably
-``'mapping'``) surface as ``None`` — mapping taxonomies don't have an
-envelope representation; they're addressed through the mapping
-association surface.
+Rows whose ``taxonomy_type`` isn't registered (notably ``'mapping'``)
+surface as ``None`` — mapping taxonomies have no envelope representation;
+they're addressed through the mapping association surface.
 """
 
 from __future__ import annotations

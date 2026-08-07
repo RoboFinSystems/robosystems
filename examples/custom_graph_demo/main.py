@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
 """
-Custom Graph Demo - Main Orchestration Script
+Custom Graph Demo — orchestrator.
 
-This script runs the complete custom graph demo workflow:
-1. Setup credentials (user account and API key)
-2. Create graph database
-3. Generate custom graph data (parquet files)
-4. Upload and ingest data
-5. Run verification queries
+Builds a domain-neutral graph (people, companies, projects) from the custom
+schema in `schema.json`, showing how to model an arbitrary domain and load it
+through the production bulk-ingest path. Each step is a standalone script this
+module runs in order:
+
+1. `setup_credentials.py` — user account and API key
+2. `create_graph.py` — graph with the custom schema
+3. `generate_data.py` — synthetic node/relationship Parquet files
+4. `upload_ingest.py` — upload to S3, stage, validate, materialize
+5. `query_graph.py` — verification queries (org charts, collaborations)
+6. `upload_documents.py` — index the markdown files in `documents/`
+7. `memory_subgraph.py` — a `knowledge` subgraph with structured + semantic memory
+
+Data is regenerated on every run so the Parquet identifiers line up with the
+current graph, which is why step 3 follows step 2.
+
+Prerequisites:
+    just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
 
 Usage:
-    uv run main.py                        # Reuse existing user & graph, regenerate data automatically
-    uv run main.py --new-user             # Create new user + graph, regenerate data
-    uv run main.py --new-graph            # Create new graph for existing user, regenerate data
-    uv run main.py --skip-queries         # Skip verification queries after ingestion
+    just demo-custom-graph                  # reuse the existing user and graph
+    just demo-custom-graph --new-graph      # new graph for the existing user
+    just demo-custom-graph --new-user       # new user (implies --new-graph)
+    just demo-custom-graph --skip-queries   # load only, no verification queries
+
+Edit `schema.json` to model your own node types and relationships.
 """
 
 import argparse

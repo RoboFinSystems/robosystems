@@ -285,7 +285,6 @@ async def register(
         detail="This invitation was issued for a different email address.",
       )
 
-  # Hash the password
   password_hash = hash_password(request.password)
 
   # Use transaction for atomic user creation
@@ -405,8 +404,8 @@ async def register(
   # Create JWT token with device binding
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-  # No longer setting auth cookies - using Bearer token authentication
-  # Token is returned in the response body for the frontend to store
+  # Bearer-token auth: the token is returned in the response body for the
+  # frontend to store. No auth cookie is set.
 
   # Record successful auth
   record_auth_metrics(

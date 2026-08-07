@@ -1,8 +1,7 @@
-"""
-MCP handler implementation and helper functions.
+"""MCP handler implementation and helper functions.
 
-This module provides the core MCPHandler class and related utilities
-for executing MCP tools with proper lifecycle management.
+Holds the `MCPHandler` class, which owns the Graph API MCP client lifecycle,
+plus the access check and result helpers the MCP routes share.
 """
 
 import asyncio
@@ -13,8 +12,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
-
-# Import Graph MCP components
 from robosystems.middleware.mcp import (
   GraphAPIError,
   GraphQueryComplexityError,
@@ -24,14 +21,11 @@ from robosystems.middleware.mcp import (
 from robosystems.middleware.mcp import (
   GraphMCPTools as AdapterGraphMCPTools,
 )
-
-# Import timeout utilities
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
-# MCP package is no longer used - always use adapter
+# Tool execution always runs through the Graph API adapter.
 MCP_AVAILABLE = False
 
-# Initialize timeout coordinator
 timeout_coordinator = TimeoutCoordinator()
 
 
@@ -66,17 +60,10 @@ def tool_error_kind(result: Any) -> str | None:
 async def validate_mcp_access(
   graph_id: str, current_user: Any, db: Session, operation_type: str = "read"
 ) -> None:
-  """
-  Validate user access for MCP operations based on graph type.
+  """Validate user access for MCP operations, raising 403 on denial.
 
-  Args:
-      graph_id: Graph database identifier
-      current_user: Authenticated user
-      db: Database session
-      operation_type: Type of operation (read, write, admin)
-
-  Raises:
-      HTTPException: If access denied
+  Shared repositories resolve through repository access (subgraphs resolve to
+  their parent); other graphs check per-graph membership.
   """
   # Check shared repositories (including subgraphs like "sec_historical")
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -115,8 +102,7 @@ class MCPHandler:
     self.user = user
     self._closed = False
 
-    # Always use Graph API adapter
-    # Get the correct API URL from the repository
+    # Resolve the Graph API URL from the repository.
     repository_url = None
     if hasattr(repository, "config") and hasattr(repository.config, "base_url"):
       repository_url = repository.config.base_url
@@ -148,7 +134,6 @@ class MCPHandler:
       if self.user is not None:
         self.graph_client.user_id = str(self.user.id)
 
-      # Resolve schema extensions for schema-driven tool gating
       from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
 
       schema_extensions = resolve_schema_extensions(self.graph_id)
@@ -192,13 +177,11 @@ class MCPHandler:
     assert self.mcp_tools is not None, "MCP tools not initialized"
     tools = self.mcp_tools.get_tool_definitions_as_dict()
 
-    # Determine if this is a shared repository (or subgraph of one)
     from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
     is_shared_repo = is_shared_repository_or_subgraph(self.graph_id)
     backend_name = "Graph Database"
 
-    # Add graph-specific context to descriptions
     for tool in tools:
       cypher_tool_names = ["read-graph-cypher"]
       schema_tool_names = ["get-graph-schema"]
@@ -222,7 +205,6 @@ class MCPHandler:
             f"List all node types, attributes and relationships in private graph {self.graph_id} (via {backend_name})"
           )
 
-    # Add custom graph info tool
     graph_type = "shared repository" if is_shared_repo else "private graph"
     tools.append(
       {
@@ -271,14 +253,13 @@ class MCPHandler:
     )
 
   async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Execute an MCP tool call using Graph API backend with comprehensive timeout protection."""
+    """Execute an MCP tool call against the Graph API backend, under a
+    coordinated timeout."""
     self._ensure_not_closed()
     await self._ensure_initialized()
 
-    # Use coordinated timeout from the calling context
     tool_timeout = timeout_coordinator.get_tool_timeout(name)
 
-    # Allow timeout override from arguments for read-graph-cypher
     if name == "read-graph-cypher" and "timeout" in arguments:
       user_timeout = min(arguments.get("timeout", tool_timeout), 300)  # Cap at 5 min
       tool_timeout = user_timeout
@@ -317,8 +298,7 @@ class MCPHandler:
       return tool_error_result(f"Query Error: {e!s}", "constraint")
 
     except GraphAPIError as e:
-      # Handle Graph API errors with their enhanced messages
-      # These already include helpful context from the MCP adapter
+      # Graph API errors already carry adapter-supplied context.
       logger.error(f"Graph API error in tool '{name}': {e}")
       return tool_error_result(str(e), "backend")
 
@@ -335,25 +315,22 @@ class MCPHandler:
     """Execute a query with streaming support."""
     self._ensure_not_closed()
 
-    # Check if repository supports streaming
     if hasattr(self.repository, "execute_query_streaming"):
       async for chunk in self.repository.execute_query_streaming(
         query, parameters or {}, chunk_size=chunk_size
       ):
         yield chunk
     else:
-      # Fallback to non-streaming execution using the MCP tools directly
-      # This avoids recursive call_tool and properly executes the query
+      # Non-streaming fallback: call the MCP tools directly rather than
+      # recursing through call_tool.
       try:
         logger.debug(f"Using streaming fallback for query: {query[:100]}")
 
-        # Ensure MCP tools are initialized before using them
         await self._ensure_initialized()
 
         if self.mcp_tools is None:
           raise RuntimeError("MCP tools not initialized")
 
-        # Use the MCP tools to execute the query directly
         results = await self.mcp_tools.call_tool(
           "read-graph-cypher",
           {"query": query, "parameters": parameters or {}},
@@ -369,7 +346,6 @@ class MCPHandler:
         if results and len(results) > 0 and isinstance(results[0], dict):
           columns = list(results[0].keys())
 
-        # Yield as a single chunk
         chunk_data = results if isinstance(results, list) else [results]
         logger.debug(
           f"Yielding chunk with {len(chunk_data)} rows and columns: {columns}"
@@ -391,13 +367,10 @@ class MCPHandler:
     """Get basic graph statistics."""
     try:
       if self.graph_client:
-        # Use Graph adapter for graph info
         info = await self.graph_client.get_graph_info()
       else:
-        # Ensure MCP tools are initialized
         await self._ensure_initialized()
         assert self.mcp_tools is not None, "MCP tools not initialized"
-        # Use direct MCP for graph info
         schema_result = await self.mcp_tools.call_tool(
           "get-graph-schema", {}, return_raw=True
         )
@@ -478,27 +451,14 @@ async def execute_mcp_query_with_timeout(
   timeout: float = 60.0,
   tool_timeout: float | None = None,
 ) -> Any:
+  """Execute an MCP tool under an overall `timeout`, in seconds.
+
+  `tool_timeout` is passed through to tools that accept their own budget.
+  Raises `asyncio.TimeoutError` when the overall timeout elapses.
   """
-  Execute MCP tool with comprehensive timeout protection.
-
-  Args:
-      mcp_tools: MCP tools instance
-      tool_name: Name of the tool to execute
-      arguments: Tool arguments
-      timeout: Overall timeout in seconds
-      tool_timeout: Tool-specific timeout to pass to the tool
-
-  Returns:
-      Tool execution result
-
-  Raises:
-      asyncio.TimeoutError: If execution exceeds timeout
-  """
-  # Add timeout to arguments if tool supports it
   if tool_timeout and tool_name == "read-graph-cypher":
     arguments = {**arguments, "timeout": int(tool_timeout)}
 
-  # Execute with timeout
   try:
     result = await asyncio.wait_for(
       mcp_tools.call_tool(tool_name, arguments, return_raw=True), timeout=timeout

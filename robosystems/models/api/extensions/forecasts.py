@@ -5,7 +5,7 @@ typed ``ForecastMechanics`` envelope lives in
 ``robosystems.models.api.information_block`` alongside the other block-
 type mechanics shapes.
 
-The forecast block is the **authored scenario container** (FP&A F-1):
+The forecast block is the **authored scenario container**:
 scenario identity (name + ``scenario_kind``), horizon, base period, and
 the lever assertions — values on ``rs-driver:*`` catalog elements. The
 lever *mechanics* (what each lever drives, and how) are library-seeded

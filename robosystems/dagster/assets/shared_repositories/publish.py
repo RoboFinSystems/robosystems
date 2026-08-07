@@ -41,22 +41,15 @@ def publish_to_s3(
   context: AssetExecutionContext,
   graph_id: str,
 ) -> MaterializeResult:
-  """Publish a shared repository database to S3 for replica consumption.
+  """Publish a shared repository database (e.g. "sec") to S3 for replicas.
 
-  Uses Graph Client Factory to call the backup endpoint on the shared master.
-  The backup runs entirely on-instance (CHECKPOINT + S3 multipart upload),
-  so this only orchestrates and monitors via SSE.
-
-  Args:
-      context: Dagster asset execution context
-      graph_id: Shared repository graph ID (e.g., "sec", "industry")
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
+  Calls the backup endpoint on the shared master via the Graph Client Factory,
+  which handles auth, routing, and circuit breakers. The backup runs entirely
+  on-instance (CHECKPOINT + S3 multipart upload), so this only orchestrates and
+  monitors via SSE. Returns the S3 URI and upload statistics as metadata.
   """
   context.log.info(f"Publishing {graph_id} database to S3 for replica cluster")
 
-  # Skip in dev environment
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping S3 publish in dev environment")
     return MaterializeResult(
@@ -71,7 +64,6 @@ def publish_to_s3(
 
   _validate_shared_graph_id(graph_id)
 
-  # Build S3 destination
   s3_info = _build_s3_destination(graph_id)
   bucket = s3_info["bucket"]
   s3_key = s3_info["s3_key"]
@@ -79,14 +71,13 @@ def publish_to_s3(
 
   context.log.info(f"Target: {s3_uri}")
 
-  # Use Graph Client Factory (handles auth, routing, circuit breakers)
   result = _run_backup(graph_id, bucket, s3_key)
 
   if result.get("status") != "completed":
     error = result.get("error", "Unknown error")
     raise RuntimeError(f"S3 publish failed for {graph_id}: {error}")
 
-  # Verify upload
+  # head_object confirms the upload landed before reporting success
   s3 = boto3.client("s3", region_name=env.AWS_REGION)
   head = s3.head_object(Bucket=bucket, Key=s3_key)
   file_size = head["ContentLength"]
@@ -115,22 +106,14 @@ def publish_duckdb_to_s3(
   context: AssetExecutionContext,
   graph_id: str,
 ) -> MaterializeResult:
-  """Publish a DuckDB staging database to S3.
+  """Publish a DuckDB staging database (e.g. "sec_historical") to S3.
 
-  Uses Graph Client Factory to call the backup endpoint on the shared master.
-  The backup runs entirely on-instance (DuckDB CHECKPOINT + S3 multipart upload),
-  so this only orchestrates and monitors via SSE.
-
-  Args:
-      context: Dagster asset execution context
-      graph_id: Shared repository graph ID (e.g., "sec", "sec_historical")
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
+  Same on-instance backup pattern as publish_to_s3(): the shared master runs
+  DuckDB CHECKPOINT + S3 multipart upload, and this only orchestrates and
+  monitors via SSE.
   """
   context.log.info(f"Publishing {graph_id} DuckDB staging to S3")
 
-  # Skip in dev environment
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping DuckDB S3 publish in dev environment")
     return MaterializeResult(
@@ -145,7 +128,7 @@ def publish_duckdb_to_s3(
 
   _validate_shared_graph_id(graph_id)
 
-  # Build S3 destination (uses .duckdb extension instead of .lbug)
+  # .duckdb extension instead of .lbug
   s3_info = _build_duckdb_s3_destination(graph_id)
   bucket = s3_info["bucket"]
   s3_key = s3_info["s3_key"]
@@ -153,14 +136,12 @@ def publish_duckdb_to_s3(
 
   context.log.info(f"Target: {s3_uri}")
 
-  # Use Graph Client Factory (handles auth, routing, circuit breakers)
   result = _run_duckdb_backup(graph_id, bucket, s3_key)
 
   if result.get("status") != "completed":
     error = result.get("error", "Unknown error")
     raise RuntimeError(f"DuckDB S3 publish failed for {graph_id}: {error}")
 
-  # Verify upload
   s3 = boto3.client("s3", region_name=env.AWS_REGION)
   head = s3.head_object(Bucket=bucket, Key=s3_key)
   file_size = head["ContentLength"]
@@ -266,16 +247,8 @@ def publish_to_r2(
 
   Same on-instance backup pattern as publish_to_s3(), but uploads to
   Cloudflare R2 instead of AWS S3. Creates/updates a GraphBackup record
-  so the file appears in the backup list and can be downloaded via
-  presigned URL with zero egress fees.
-
-  Args:
-      context: Dagster asset execution context
-      graph_id: Shared repository graph ID (e.g., "sec")
-      db_resource: DatabaseResource for GraphBackup record access
-
-  Returns:
-      MaterializeResult with R2 URI and upload statistics
+  (via ``db_resource``) so the file appears in the backup list and can be
+  downloaded via presigned URL with zero egress fees.
   """
   context.log.info(f"Publishing {graph_id} database to R2 for subscriber downloads")
 
@@ -306,14 +279,13 @@ def publish_to_r2(
     error = result.get("error", "Unknown error")
     raise RuntimeError(f"R2 publish failed for {graph_id}: {error}")
 
-  # Verify upload via R2 head_object
   r2_config = env.get_r2_config()
   r2_client = boto3.client("s3", **r2_config)
   head = r2_client.head_object(Bucket=bucket, Key=r2_key)
   compressed_size = head["ContentLength"]
   last_modified = head["LastModified"]
 
-  # Extract original (uncompressed) size from backup service result
+  # original_size_bytes is the uncompressed size reported by the backup service
   backup_result = result.get("result", {})
   original_size = backup_result.get("original_size_bytes", compressed_size)
   compression_ratio = backup_result.get("compression_ratio", 1.0)
@@ -325,7 +297,6 @@ def publish_to_r2(
     f"ratio: {compression_ratio:.1%}, modified: {last_modified})"
   )
 
-  # Create/update GraphBackup record
   _upsert_r2_backup_record(
     graph_id=graph_id,
     bucket=bucket,
@@ -409,7 +380,6 @@ def _upsert_r2_backup_record(
     existing = GraphBackup.get_latest_successful(graph_id, backup_type, session)
 
     if existing:
-      # Update existing record with new timestamp and size
       existing.completed_at = now
       existing.original_size_bytes = original_size
       existing.compressed_size_bytes = compressed_size
@@ -424,7 +394,6 @@ def _upsert_r2_backup_record(
       existing.updated_at = now
       session.commit()
     else:
-      # Create new record
       backup = GraphBackup.create(
         graph_id=graph_id,
         database_name=database_name,

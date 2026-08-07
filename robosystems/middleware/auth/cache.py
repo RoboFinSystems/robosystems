@@ -1,4 +1,11 @@
-"""API key caching service using Valkey/Redis."""
+"""API key and JWT caching in Valkey/Redis.
+
+Cached auth records are encrypted with a rotating Fernet key and carry an
+HMAC signature under a separate key. A read that fails decryption, signature
+verification, user-data validation, or the maximum-age check evicts the entry
+and returns a miss, so tampering degrades to a database lookup rather than a
+trusted answer.
+"""
 
 import base64
 import hashlib
@@ -23,11 +30,11 @@ from ...security import SecurityAuditLogger, SecurityEventType
 
 
 class APIKeyCache:
-  """Manages API key and JWT caching in Valkey/Redis with comprehensive security validation."""
+  """Encrypted, signature-verified cache for API key and JWT auth records."""
 
   @classmethod
   def get_default_ttl(cls) -> int:
-    """Get default TTL from TuningConfig (runtime tunable via SSM)."""
+    """Default TTL, runtime-tunable via SSM."""
     return TuningConfig.get_cache_api_key_ttl()
 
   CACHE_KEY_PREFIX = "apikey:"
@@ -63,21 +70,16 @@ class APIKeyCache:
   MAX_SIGNATURE_CACHE_SIZE = 1000  # Limit in-memory signature cache size
 
   def __init__(self):
-    """Initialize Redis connection with security features."""
     self._redis = None
-    # Cache TTLs are runtime tunable via SSM Parameter Store
+    # TTLs are runtime-tunable via SSM Parameter Store.
     self.ttl = TuningConfig.get_cache_api_key_ttl()
-    # JWT cache can have longer TTL since tokens are typically 30 days
-    self.jwt_ttl = TuningConfig.get_cache_jwt_ttl()  # 30 minutes
+    self.jwt_ttl = TuningConfig.get_cache_jwt_ttl()
 
-    # Initialize cache encryption for sensitive data (lazy-loaded)
     self._encryption_key = None
     self._cipher = None
 
-    # Validation failure tracking
     self._validation_failures = 0
 
-    # In-memory signature cache for performance optimization
     self._signature_cache: dict[str, str] = {}
     self._signature_cache_times: dict[str, float] = {}
 
@@ -86,9 +88,7 @@ class APIKeyCache:
     """Get Redis connection, creating if needed."""
     if self._redis is None:
       try:
-        # Use the new connection factory with proper ElastiCache support
         self._redis = create_redis_client(ValkeyDatabase.AUTH)
-        # Test connection
         self._redis.ping()
         logger.info("Connected to Valkey/Redis for API key caching")
       except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
@@ -142,14 +142,12 @@ class APIKeyCache:
     return hashlib.sha256(token.encode()).hexdigest()
 
   def _derive_encryption_key(self) -> bytes:
-    """Derive encryption key for cache data protection with rotation support."""
-    # Check if we need to rotate keys
+    """Derive the cache encryption key, rotating it when it is due."""
     rotation_key = f"{self.KEY_ROTATION_PREFIX}last_rotation"
     try:
       last_rotation = self.redis.get(rotation_key)
       current_time = time.time()
 
-      # Check if rotation is needed
       should_rotate = False
       if last_rotation is None:
         should_rotate = True
@@ -160,11 +158,11 @@ class APIKeyCache:
             current_time - last_rotation_time
           ) > self.KEY_ROTATION_INTERVAL
         except (ValueError, TypeError):
-          # Invalid stored value, force rotation
           should_rotate = True
 
       if should_rotate:
-        # Set rotation timestamp FIRST to prevent infinite recursion
+        # Stamp the rotation time BEFORE rotating: `_rotate_encryption_key`
+        # re-derives the key, and an unset timestamp would recurse forever.
         self.redis.setex(
           rotation_key, self.KEY_ROTATION_INTERVAL * 2, str(current_time)
         )
@@ -172,7 +170,6 @@ class APIKeyCache:
     except Exception as e:
       logger.warning(f"Key rotation check failed, using default key: {e}")
 
-    # Get current key generation component if available
     generation_key = f"{self.KEY_GENERATION_PREFIX}current"
     key_component = ""
     try:
@@ -180,10 +177,10 @@ class APIKeyCache:
       if stored_component and isinstance(stored_component, str):
         key_component = stored_component
     except Exception:
-      # Fallback to empty component if Redis unavailable
+      # Redis unavailable: derive from the static secret alone.
       pass
 
-    # Use a combination of environment-specific salt, system secret, and rotated component
+    # Salt binds the key to the environment and the current rotation.
     key_component_safe = key_component[:8] if key_component else ""
     salt = f"{env.ENVIRONMENT}_cache_salt_{env.JWT_SECRET_KEY[:16]}_{key_component_safe}".encode()
     key_material = f"{env.JWT_SECRET_KEY}_{key_component}".encode()
@@ -198,29 +195,29 @@ class APIKeyCache:
     return key
 
   def _rotate_encryption_key(self) -> None:
-    """Rotate encryption keys for enhanced security with rollback support."""
+    """Rotate the cache encryption key, rolling back if the new one fails.
+
+    Validates the new key with an encrypt/decrypt round trip before
+    committing, then evicts entries the new key cannot read.
+    """
     old_key_component = None
     old_encryption_key = self._encryption_key
     old_cipher = self._cipher
     generation_key = f"{self.KEY_GENERATION_PREFIX}current"
 
     try:
-      # Save current key component for potential rollback
       old_key_component = self.redis.get(generation_key)
 
-      # Generate new key component
       new_key_component = secrets.token_hex(32)
 
-      # Store new key component with expiration
       self.redis.setex(
         generation_key, self.KEY_ROTATION_INTERVAL * 2, new_key_component
       )
 
-      # Reset lazy-loaded cipher to force regeneration with new key
+      # Clear the lazy cipher so it regenerates from the new component.
       self._encryption_key = None
       self._cipher = None
 
-      # Test the new key by attempting encryption/decryption
       test_data = {"test": "rotation_validation", "timestamp": time.time()}
       encrypted = self._encrypt_cache_data(test_data)
       decrypted = self._decrypt_cache_data(encrypted)
@@ -232,13 +229,11 @@ class APIKeyCache:
 
       logger.info("Cache encryption key rotated successfully")
 
-      # Clean up old cache entries that can't be decrypted with new key
       self._cleanup_incompatible_cache_entries()
 
     except Exception as e:
       logger.error(f"Key rotation failed: {e}")
 
-      # Attempt rollback
       try:
         if old_key_component is not None:
           self.redis.setex(
@@ -268,16 +263,13 @@ class APIKeyCache:
           },
           risk_level="critical",
         )
-        # Consider circuit breaker or service degradation here
         raise
 
-      # Re-raise original error after rollback
       raise
 
   def _cleanup_incompatible_cache_entries(self) -> None:
-    """Clean up cache entries that can't be decrypted with rotated keys."""
+    """Evict cache entries the current encryption key cannot decrypt."""
     try:
-      # Get all cache keys
       cache_patterns = [
         f"{self.CACHE_KEY_PREFIX}*",
         f"{self.USER_DATA_PREFIX}*",
@@ -293,7 +285,6 @@ class APIKeyCache:
           try:
             encrypted_data = self.redis.get(key)
             if encrypted_data:
-              # Try to decrypt - if it fails, remove the entry
               self._decrypt_cache_data(encrypted_data)
           except (InvalidToken, Exception):
             self.redis.delete(key)
@@ -308,9 +299,8 @@ class APIKeyCache:
       logger.warning(f"Cache cleanup after key rotation failed: {e}")
 
   def _encrypt_cache_data(self, data: dict[str, Any]) -> str:
-    """Encrypt sensitive cache data."""
+    """Encrypt cache data, stamping it with the format version and a nonce."""
     try:
-      # Add validation metadata
       protected_data = {
         "data": data,
         "version": self.CACHE_VERSION,
@@ -321,7 +311,6 @@ class APIKeyCache:
       encrypted = self.cipher.encrypt(json_data.encode())
       return base64.urlsafe_b64encode(encrypted).decode()
     except Exception as e:
-      # Check for specific error types first
       if isinstance(e, TypeError):
         logger.error(f"Data serialization error during encryption: {e}")
         raise ValueError(f"Invalid data format for encryption: {e}")
@@ -343,20 +332,20 @@ class APIKeyCache:
         raise
 
   def _decrypt_cache_data(self, encrypted_data: str) -> dict[str, Any] | None:
-    """Decrypt and validate cache data."""
+    """Decrypt cache data, returning None if it is unreadable, the wrong
+    format version, or older than `MAX_CACHE_AGE_SECONDS`.
+    """
     try:
       encrypted_bytes = base64.urlsafe_b64decode(encrypted_data.encode())
       decrypted = self.cipher.decrypt(encrypted_bytes)
       protected_data = json.loads(decrypted.decode())
 
-      # Validate cache format version
       if protected_data.get("version") != self.CACHE_VERSION:
         logger.warning(
           f"Cache version mismatch: {protected_data.get('version')} != {self.CACHE_VERSION}"
         )
         return None
 
-      # Check cache age
       encrypted_at = datetime.fromisoformat(
         protected_data["encrypted_at"].replace("Z", "+00:00")
       )
@@ -404,16 +393,14 @@ class APIKeyCache:
       return None
 
   def _validate_user_data_integrity(self, user_data: dict[str, Any]) -> bool:
-    """Validate integrity of cached user data."""
+    """Reject cached user data that is malformed or marks the user inactive."""
     try:
-      # Required fields validation
       required_fields = ["id", "email", "is_active"]
       for field in required_fields:
         if field not in user_data:
           logger.warning(f"Missing required field in cached user data: {field}")
           return False
 
-      # Data type validation
       if not isinstance(user_data["id"], str) or not user_data["id"]:
         logger.warning("Invalid user ID in cached data")
         return False
@@ -426,7 +413,6 @@ class APIKeyCache:
         logger.warning("Invalid is_active field in cached data")
         return False
 
-      # Security checks
       if not user_data["is_active"]:
         logger.warning("Cached user data shows inactive user")
         SecurityAuditLogger.log_security_event(
@@ -447,13 +433,11 @@ class APIKeyCache:
       return False
 
   def _create_cache_signature(self, cache_key: str, data: dict[str, Any]) -> str:
-    """Create HMAC signature for cache data integrity with caching optimization."""
+    """HMAC-sign cache data, memoizing recent signatures in process."""
     try:
-      # Create signature payload
       payload = f"{cache_key}:{json.dumps(data, sort_keys=True)}"
       payload_hash = hashlib.sha256(payload.encode()).hexdigest()
 
-      # Check in-memory cache first for performance
       current_time = time.time()
       if (
         payload_hash in self._signature_cache
@@ -463,16 +447,13 @@ class APIKeyCache:
       ):
         return self._signature_cache[payload_hash]
 
-      # Clean up expired cache entries if cache is getting too large
       if len(self._signature_cache) > self.MAX_SIGNATURE_CACHE_SIZE:
         self._cleanup_signature_cache()
 
-      # Compute new signature
       signature = hmac.new(
         env.JWT_SECRET_KEY.encode(), payload.encode(), hashlib.sha256
       ).hexdigest()
 
-      # Cache the result
       self._signature_cache[payload_hash] = signature
       self._signature_cache_times[payload_hash] = current_time
 
@@ -482,11 +463,12 @@ class APIKeyCache:
       raise
 
   def _cleanup_signature_cache(self) -> None:
-    """Clean up expired signature cache entries using LRU eviction."""
+    """Drop expired signature-cache entries, then LRU-evict down to 80% of
+    `MAX_SIGNATURE_CACHE_SIZE` if still over the limit.
+    """
     try:
       current_time = time.time()
 
-      # First remove expired entries
       expired_keys = [
         key
         for key, cache_time in self._signature_cache_times.items()
@@ -497,16 +479,12 @@ class APIKeyCache:
         self._signature_cache.pop(key, None)
         self._signature_cache_times.pop(key, None)
 
-      # If still over limit, use LRU eviction
       if len(self._signature_cache) > self.MAX_SIGNATURE_CACHE_SIZE:
-        # Sort by access time and remove oldest entries
         sorted_entries = sorted(self._signature_cache_times.items(), key=lambda x: x[1])
 
-        # Calculate how many to remove (keep 80% of max size)
         target_size = int(self.MAX_SIGNATURE_CACHE_SIZE * 0.8)
         entries_to_remove = len(self._signature_cache) - target_size
 
-        # Remove oldest entries
         for key, _ in sorted_entries[:entries_to_remove]:
           self._signature_cache.pop(key, None)
           self._signature_cache_times.pop(key, None)
@@ -547,17 +525,12 @@ class APIKeyCache:
   def cache_api_key_validation(
     self, api_key_hash: str, user_data: dict[str, Any], is_active: bool = True
   ) -> None:
-    """
-    Cache API key validation result with encryption and integrity protection.
+    """Cache an API key validation result, encrypted and signed.
 
-    Args:
-        api_key_hash: SHA-256 hash of the API key
-        user_data: User data to cache (serializable dict)
-        is_active: Whether the API key is active
+    `is_active=False` writes a negative entry, which may carry empty
+    `user_data` and so skips the user-data integrity check.
     """
     try:
-      # Validate input data integrity for positive cache entries
-      # Negative cache entries (is_active=False) may have empty user_data
       if is_active and not self._validate_user_data_integrity(user_data):
         logger.error("Refusing to cache invalid user data")
         return
@@ -570,14 +543,12 @@ class APIKeyCache:
         "cache_version": self.CACHE_VERSION,
       }
 
-      # Create signature for integrity
       signature = self._create_cache_signature(cache_key, cache_data)
       signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
-      # Encrypt sensitive data
       encrypted_data = self._encrypt_cache_data(cache_data)
 
-      # Store encrypted data and signature separately
+      # Data and signature live under separate keys.
       pipe = self.redis.pipeline()
       pipe.setex(cache_key, self.ttl, encrypted_data)
       pipe.setex(signature_key, self.ttl, signature)
@@ -585,7 +556,6 @@ class APIKeyCache:
 
       logger.debug(f"Cached API key validation with encryption: {api_key_hash[:8]}...")
 
-      # Log security event for cache write
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTH_SUCCESS,
         details={
@@ -606,20 +576,18 @@ class APIKeyCache:
       )
 
   def get_cached_api_key_validation(self, api_key_hash: str) -> dict[str, Any] | None:
-    """
-    Get cached API key validation result with comprehensive security validation.
+    """Return a cached API key validation, or None on any miss.
 
-    Args:
-        api_key_hash: SHA-256 hash of the API key
-
-    Returns:
-        Cached validation data or None if not found/expired/invalid
+    Every failed check — decryption, signature, user-data integrity, age —
+    deletes the entry and reports a miss, so a tampered or stale record can
+    never authenticate a request. Entries past `CACHE_REFRESH_THRESHOLD` but
+    still within `MAX_CACHE_AGE_SECONDS` are re-stamped on read, giving
+    active sessions a sliding window.
     """
     try:
       cache_key = self._get_api_key_cache_key(api_key_hash)
       signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
-      # Get both encrypted data and signature
       pipe = self.redis.pipeline()
       pipe.get(cache_key)
       pipe.get(signature_key)
@@ -631,33 +599,27 @@ class APIKeyCache:
         logger.debug(f"Cache miss for API key: {api_key_hash[:8]}...")
         return None
 
-      # Decrypt the data
       cache_data = self._decrypt_cache_data(encrypted_data)
       if not cache_data:
         logger.warning(f"Failed to decrypt cached API key data: {api_key_hash[:8]}...")
-        # Clean up corrupted cache entry
         self.redis.delete(cache_key, signature_key)
         return None
 
-      # Verify signature integrity
       if not self._verify_cache_signature(cache_key, cache_data, stored_signature):
         logger.error(
           f"Cache signature verification failed for API key: {api_key_hash[:8]}..."
         )
-        # Clean up compromised cache entry
         self.redis.delete(cache_key, signature_key)
         return None
 
-      # Validate user data integrity (skip for negative cache entries which have empty user_data)
+      # Negative entries carry empty user_data, so skip the check for them.
       is_active = cache_data.get("is_active", True)
       user_data = cache_data.get("user_data", {})
       if is_active and not self._validate_user_data_integrity(user_data):
         logger.error(f"Cached user data failed integrity check: {api_key_hash[:8]}...")
-        # Clean up invalid cache entry
         self.redis.delete(cache_key, signature_key)
         return None
 
-      # Check cache freshness
       cached_at = datetime.fromisoformat(cache_data["cached_at"].replace("Z", "+00:00"))
       age_seconds = (datetime.now(UTC) - cached_at).total_seconds()
 
@@ -666,20 +628,16 @@ class APIKeyCache:
         self.redis.delete(cache_key, signature_key)
         return None
 
-      # Sliding window refresh: if cache is getting old but still valid, refresh it
       if age_seconds > self.CACHE_REFRESH_THRESHOLD:
         try:
           logger.debug(
             f"Refreshing aging API key cache entry: {api_key_hash[:8]}... (age: {age_seconds}s)"
           )
-          # Update the cached_at timestamp to extend the session
           cache_data["cached_at"] = datetime.now(UTC).isoformat()
 
-          # Re-encrypt and store the refreshed data
           encrypted_data = self._encrypt_cache_data(cache_data)
           signature = self._create_cache_signature(cache_key, cache_data)
 
-          # Update both cache entry and signature with fresh TTL
           pipe = self.redis.pipeline()
           pipe.setex(cache_key, self.get_default_ttl(), encrypted_data)
           pipe.setex(signature_key, self.get_default_ttl(), signature)
@@ -688,11 +646,10 @@ class APIKeyCache:
           logger.debug(f"Successfully refreshed API key cache: {api_key_hash[:8]}...")
         except Exception as e:
           logger.warning(f"Failed to refresh API key cache entry: {e}")
-          # Continue with existing cache data if refresh fails
+          # A failed refresh is harmless; the existing entry is still valid.
 
       logger.debug(f"Secure cache hit for API key: {api_key_hash[:8]}...")
 
-      # Log successful secure cache read (rate limited to reduce noise)
       user_id = user_data.get("id")
       if user_id and self._should_log_audit_event(user_id, "cache_hit"):
         SecurityAuditLogger.log_security_event(
@@ -710,7 +667,6 @@ class APIKeyCache:
 
     except Exception as e:
       logger.error(f"Failed to get cached API key validation: {e}")
-      # Clean up potentially corrupted cache
       try:
         cache_key = self._get_api_key_cache_key(api_key_hash)
         signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
@@ -722,14 +678,7 @@ class APIKeyCache:
   def cache_graph_access(
     self, api_key_hash: str, graph_id: str, has_access: bool
   ) -> None:
-    """
-    Cache API key + graph access result.
-
-    Args:
-        api_key_hash: SHA-256 hash of the API key
-        graph_id: Graph database ID
-        has_access: Whether user has access to the graph
-    """
+    """Cache whether an API key grants access to a graph."""
     try:
       cache_key = self._get_graph_cache_key(api_key_hash, graph_id)
       cache_data = {
@@ -744,16 +693,7 @@ class APIKeyCache:
       logger.error(f"Failed to cache graph access: {e}")
 
   def get_cached_graph_access(self, api_key_hash: str, graph_id: str) -> bool | None:
-    """
-    Get cached graph access result.
-
-    Args:
-        api_key_hash: SHA-256 hash of the API key
-        graph_id: Graph database ID
-
-    Returns:
-        Cached access result or None if not found/expired
-    """
+    """Return the cached access decision for an API key + graph, or None."""
     try:
       cache_key = self._get_graph_cache_key(api_key_hash, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
@@ -917,33 +857,25 @@ class APIKeyCache:
       return False
 
   def invalidate_api_key(self, api_key_hash: str) -> None:
-    """
-    Securely invalidate all cached data for an API key.
-
-    Args:
-        api_key_hash: SHA-256 hash of the API key
+    """Drop every cached record for an API key: validation, signature, and
+    per-graph access decisions.
     """
     try:
-      # Remove API key validation cache and signature
       api_key_cache_key = self._get_api_key_cache_key(api_key_hash)
       signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
-      # Remove all graph access caches for this API key
       pattern = f"{self.GRAPH_CACHE_KEY_PREFIX}{api_key_hash}:*"
       graph_keys = cast(list[str], self.redis.keys(pattern))
 
-      # Remove all signature keys for graph access
       signature_pattern = f"{self.CACHE_SIGNATURE_PREFIX}graph_{api_key_hash}:*"
       signature_keys = cast(list[str], self.redis.keys(signature_pattern))
 
-      # Batch delete all related keys
       keys_to_delete = [api_key_cache_key, signature_key, *graph_keys, *signature_keys]
       if keys_to_delete:
         self.redis.delete(*keys_to_delete)
 
       logger.info(f"Securely invalidated cache for API key: {api_key_hash[:8]}...")
 
-      # Log cache invalidation for security audit
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,
         details={
@@ -962,18 +894,13 @@ class APIKeyCache:
         risk_level="medium",
       )
 
-  # JWT Caching Methods
-
   def cache_jwt_graph_access(
     self, user_id: str, graph_id: str, has_access: bool
   ) -> None:
-    """
-    Cache JWT user + graph access result.
+    """Cache whether a JWT-authenticated user may access a graph.
 
-    Args:
-        user_id: User ID from JWT token
-        graph_id: Graph database ID
-        has_access: Whether user has access to the graph
+    Capped at 10 minutes regardless of `jwt_ttl` so a revoked grant stops
+    working promptly.
     """
     try:
       cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
@@ -982,7 +909,6 @@ class APIKeyCache:
         "cached_at": datetime.now(UTC).isoformat(),
       }
 
-      # Use shorter TTL for graph access (10 minutes)
       graph_ttl = min(self.jwt_ttl, 600)
       self.redis.setex(cache_key, graph_ttl, json.dumps(cache_data))
       logger.debug(f"Cached JWT graph access: {user_id} -> {graph_id}")
@@ -991,16 +917,7 @@ class APIKeyCache:
       logger.error(f"Failed to cache JWT graph access: {e}")
 
   def get_cached_jwt_graph_access(self, user_id: str, graph_id: str) -> bool | None:
-    """
-    Get cached JWT graph access result.
-
-    Args:
-        user_id: User ID from JWT token
-        graph_id: Graph database ID
-
-    Returns:
-        Cached access result or None if not found/expired
-    """
+    """Return the cached access decision for a JWT user + graph, or None."""
     try:
       cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
       cached_data = cast(str | None, self.redis.get(cache_key))
@@ -1018,18 +935,15 @@ class APIKeyCache:
       return None
 
   def blacklist_jwt_token(self, jwt_token: str, exp_timestamp: int) -> None:
-    """
-    Add JWT token to blacklist until its natural expiry.
+    """Blacklist a JWT until its own expiry.
 
-    Args:
-        jwt_token: The JWT token string
-        exp_timestamp: Token expiry timestamp
+    The TTL matches the remaining token lifetime, so the entry costs nothing
+    once the token would have expired anyway.
     """
     try:
       jwt_hash = self._hash_jwt_token(jwt_token)
       cache_key = self._get_jwt_blacklist_key(jwt_hash)
 
-      # Calculate TTL based on token expiry
       ttl = max(0, exp_timestamp - int(time.time()))
       if ttl > 0:
         self.redis.setex(cache_key, ttl, "blacklisted")
@@ -1039,15 +953,7 @@ class APIKeyCache:
       logger.error(f"Failed to blacklist JWT token: {e}")
 
   def is_jwt_blacklisted(self, jwt_token: str) -> bool:
-    """
-    Check if JWT token is blacklisted.
-
-    Args:
-        jwt_token: The JWT token string
-
-    Returns:
-        True if blacklisted, False otherwise
-    """
+    """Return True if this JWT has been blacklisted."""
     try:
       jwt_hash = self._hash_jwt_token(jwt_token)
       cache_key = self._get_jwt_blacklist_key(jwt_hash)
@@ -1060,23 +966,17 @@ class APIKeyCache:
   def invalidate_user_jwt_graph_access(
     self, user_id: str, graph_id: str | None = None
   ) -> bool:
-    """
-    Invalidate cached JWT graph access for a user.
+    """Invalidate a user's cached JWT graph access, or all of it when
+    `graph_id` is None.
 
     Returns True on success, False on Redis failure. The bool is the
     contract for callers driving retries — see ``invalidate_jwt_user_data``.
-
-    Args:
-        user_id: User ID
-        graph_id: Specific graph ID, or None to invalidate all graphs for user
     """
     try:
       if graph_id:
-        # Invalidate specific graph access for this user
         cache_key = self._get_jwt_graph_cache_key(user_id, graph_id)
         self.redis.delete(cache_key)
       else:
-        # Invalidate all graph access for user
         pattern = f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}{user_id}:*"
         keys = cast(list[str], self.redis.keys(pattern))
         if keys:
@@ -1094,21 +994,16 @@ class APIKeyCache:
   def invalidate_user_graph_access(
     self, user_id: str, graph_id: str | None = None
   ) -> None:
-    """
-    Invalidate cached graph access for a user.
+    """Invalidate cached API-key graph access, for one graph or all of them.
 
-    Args:
-        user_id: User ID
-        graph_id: Specific graph ID, or None to invalidate all graphs for user
+    The API-key cache is keyed by key hash, not user, so this matches by
+    pattern and clears every key's entry for the graph rather than only
+    this user's — over-invalidating instead of leaving a stale grant.
     """
     try:
       if graph_id:
-        # Invalidate specific graph access for all API keys of this user
-        # This requires finding all API keys for the user, which would need DB access
-        # For now, we'll use a pattern-based approach
         pattern = f"{self.GRAPH_CACHE_KEY_PREFIX}*:{graph_id}"
       else:
-        # Invalidate all graph access for user (pattern-based)
         pattern = f"{self.GRAPH_CACHE_KEY_PREFIX}*"
 
       keys = cast(list[str], self.redis.keys(pattern))
@@ -1122,26 +1017,20 @@ class APIKeyCache:
       logger.error(f"Failed to invalidate user graph access cache: {e}")
 
   def invalidate_user_data(self, user_id: str) -> None:
-    """
-    Invalidate all cached data for a user when their profile is updated.
+    """Drop every cache entry embedding this user's profile.
 
-    This includes API key validation caches and JWT validation caches that
-    contain outdated user profile information.
-
-    Args:
-        user_id: User ID as string
+    Covers the user-keyed JWT cache, any API key or JWT entry whose payload
+    names this user, and their JWT graph access. Call after a profile change
+    so no surface keeps serving the old record.
     """
     try:
       invalidated_count = 0
 
-      # Invalidate the user-id keyed JWT user data cache.
       user_cache_key = self._get_user_cache_key(user_id)
       user_signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
       self.redis.delete(user_cache_key, user_signature_key)
       invalidated_count += 1
 
-      # Invalidate all API key caches (contains user_data that might be stale)
-      # We need to scan all API key cache entries to find ones containing this user
       api_key_pattern = f"{self.CACHE_KEY_PREFIX}*"
       api_key_keys = cast(list[str], self.redis.keys(api_key_pattern))
 
@@ -1157,7 +1046,6 @@ class APIKeyCache:
         except Exception as e:
           logger.error(f"Failed to check/invalidate API key cache {key}: {e}")
 
-      # Invalidate all JWT caches (contains user_data that might be stale)
       jwt_pattern = f"{self.JWT_CACHE_KEY_PREFIX}*"
       jwt_keys = cast(list[str], self.redis.keys(jwt_pattern))
 
@@ -1173,7 +1061,6 @@ class APIKeyCache:
         except Exception as e:
           logger.error(f"Failed to check/invalidate JWT cache {key}: {e}")
 
-      # Also invalidate JWT graph access for this user
       self.invalidate_user_jwt_graph_access(user_id)
 
       logger.info(f"Invalidated {invalidated_count} cached entries for user {user_id}")
@@ -1197,7 +1084,6 @@ class APIKeyCache:
         cast(list[str], self.redis.keys(f"{self.JWT_BLACKLIST_PREFIX}*"))
       )
 
-      # Count signature keys for security validation
       signature_count = len(
         cast(list[str], self.redis.keys(f"{self.CACHE_SIGNATURE_PREFIX}*"))
       )
@@ -1240,28 +1126,18 @@ class APIKeyCache:
       return {"connected": False, "error": str(e)}
 
   def _should_log_audit_event(self, user_id: str, event_type: str) -> bool:
-    """
-    Check if we should log an audit event based on rate limiting.
+    """Return True unless this (user, event_type) was logged recently.
 
-    Prevents excessive logging of routine successful operations like cache hits.
-    Only logs once per user per period for low-risk events.
-
-    Args:
-        user_id: User ID to check rate limiting for
-        event_type: Type of event (e.g., 'cache_hit', 'auth_success')
-
-    Returns:
-        True if we should log the event, False if rate limited
+    Keeps routine low-risk events such as cache hits from flooding the
+    audit stream. Errors default to logging.
     """
     try:
       rate_limit_key = f"{self.AUDIT_LOG_RATE_LIMIT_PREFIX}{user_id}:{event_type}"
 
-      # Check if we've already logged this event type for this user recently
       existing = self.redis.get(rate_limit_key)
       if existing:
         return False  # Rate limited
 
-      # Set the rate limit key with TTL
       self.redis.setex(rate_limit_key, self.AUDIT_LOG_RATE_LIMIT_TTL, "1")
       return True  # Not rate limited, log the event
 
@@ -1270,11 +1146,8 @@ class APIKeyCache:
       return True  # Default to logging on error
 
   def perform_cache_integrity_audit(self) -> dict[str, Any]:
-    """
-    Perform comprehensive cache integrity audit.
-
-    Returns:
-        Audit results with any issues found
+    """Scan every cache entry and report decryption, signature, and
+    orphaned/missing-signature problems.
     """
     try:
       audit_results = {
@@ -1288,7 +1161,6 @@ class APIKeyCache:
         "issues_found": [],
       }
 
-      # Scan API key caches
       api_key_pattern = f"{self.CACHE_KEY_PREFIX}*"
       api_keys = cast(list[str], self.redis.keys(api_key_pattern))
 
@@ -1296,7 +1168,6 @@ class APIKeyCache:
         audit_results["total_keys_scanned"] += 1
 
         try:
-          # Extract hash from cache key
           api_key_hash = cache_key.replace(self.CACHE_KEY_PREFIX, "")
           signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
@@ -1304,7 +1175,6 @@ class APIKeyCache:
           stored_signature = cast(str | None, self.redis.get(signature_key))
 
           if encrypted_data and stored_signature:
-            # Try to decrypt and validate
             cache_data = self._decrypt_cache_data(encrypted_data)
             if cache_data and self._verify_cache_signature(
               cache_key, cache_data, stored_signature
@@ -1313,18 +1183,15 @@ class APIKeyCache:
             else:
               audit_results["invalid_entries"] += 1
               audit_results["issues_found"].append(f"Invalid cache entry: {cache_key}")
-              # Clean up invalid entry
               self.redis.delete(cache_key, signature_key)
               audit_results["corrupted_entries_cleaned"] += 1
           elif encrypted_data and not stored_signature:
             audit_results["missing_signatures"] += 1
             audit_results["issues_found"].append(f"Missing signature: {cache_key}")
-            # Clean up entry without signature
             self.redis.delete(cache_key)
             audit_results["corrupted_entries_cleaned"] += 1
           elif not encrypted_data and stored_signature:
             audit_results["orphaned_signatures"] += 1
-            # Clean up orphaned signature
             self.redis.delete(signature_key)
 
         except Exception as e:
@@ -1333,7 +1200,6 @@ class APIKeyCache:
             f"Cache audit error for {cache_key}: {e!s}"
           )
 
-      # Log audit results
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTH_SUCCESS,
         details={
@@ -1354,12 +1220,11 @@ class APIKeyCache:
       }
 
 
-# Global API key cache instance
+# Module-level singleton. Left as None when Redis is unreachable at import
+# time; callers must treat a None cache as an unconditional miss.
 try:
   api_key_cache = APIKeyCache()
-  # Log successful cache initialization
   logger.debug("Secure authentication cache system initialized successfully")
 except Exception as e:
   logger.error(f"Failed to initialize secure authentication cache system: {e}")
-  # Create fallback instance that will fail gracefully
   api_key_cache = None

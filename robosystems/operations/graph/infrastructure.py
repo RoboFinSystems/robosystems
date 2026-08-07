@@ -1,22 +1,20 @@
-"""Graph infrastructure operations.
+"""Reconcile the graph fleet's DynamoDB registries against live AWS state.
 
-This module provides infrastructure-level operations for Graph instances
-running on the current graph platform, migrated from Lambda functions:
-- Instance health checks and registry maintenance
-- CloudWatch metrics collection
-- Volume registry cleanup
+Three registries — instances, graphs, volumes — record what the platform
+believes exists. EC2 and EBS are the truth. These operations walk the
+registries, correct or drop entries whose backing resource is gone, and publish
+capacity metrics to CloudWatch (which the fleet's scaling policies read).
 
-These operations interact with:
-- DynamoDB registries (instances, graphs, volumes)
-- EC2 instances and EBS volumes
-- CloudWatch metrics
+Every method is a full table scan and is meant to run on a schedule, not per
+request. All failures are collected into the returned result rather than
+raised, so one bad row cannot abort a sweep.
 
-Usage:
+Usage::
+
     from robosystems.operations.graph.infrastructure import InstanceMonitor
 
-    # Check instance health
     monitor = InstanceMonitor()
-    results = await monitor.check_instance_health()
+    results = monitor.check_instance_health()
 """
 
 from __future__ import annotations
@@ -40,13 +38,12 @@ if TYPE_CHECKING:
   from mypy_boto3_ec2 import EC2Client  # type: ignore[import-not-found]
 
 
-# Configuration
-# Note: CLOUDWATCH_NAMESPACE is environment-specific: RoboSystems/Graph/{environment}
-# The namespace includes the environment (prod/staging) instead of using an Environment dimension
+# Metrics are namespaced RoboSystems/Graph/{environment} rather than carrying an
+# Environment dimension, so staging and prod never share a metric stream.
 STALE_GRAPH_DAYS = 7
 STALE_VOLUME_DAYS = 30
 
-# Tier capacity mapping (matches .github/configs/graph.yml)
+# Databases per instance, per tier. Must match `.github/configs/graph.yml`.
 TIER_CAPACITY_MAP = {
   "ladybug-standard": 1,
   "ladybug-large": 1,
@@ -95,7 +92,7 @@ class MetricsResult:
 
 
 def _get_tier_capacity(tier: str) -> int:
-  """Get capacity for a given tier with validation."""
+  """Databases per instance for a tier; falls back to standard if unknown."""
   if not tier:
     logger.warning("No tier specified, using 'ladybug-standard' as default")
     return TIER_CAPACITY_MAP["ladybug-standard"]
@@ -108,20 +105,17 @@ def _get_tier_capacity(tier: str) -> int:
 
 
 def _is_valid_ec2_instance_id(instance_id: str) -> bool:
-  """Validate if a string is a valid EC2 instance ID format."""
+  """True for a well-formed ``i-…`` EC2 instance ID."""
   if not instance_id or not isinstance(instance_id, str):
     return False
   return EC2_INSTANCE_ID_PATTERN.match(instance_id) is not None
 
 
 class InstanceMonitor:
-  """Monitor and maintain Graph instance infrastructure.
+  """Registry maintenance and metrics for the graph EC2 fleet.
 
-  This class provides operations for:
-  - Health checking EC2 instances
-  - Updating DynamoDB registry
-  - Collecting CloudWatch metrics
-  - Cleaning up stale registry entries
+  Table names default to ``robosystems-graph-{environment}-*-registry``; AWS
+  clients are built on first use.
   """
 
   def __init__(
@@ -131,17 +125,9 @@ class InstanceMonitor:
     volume_registry_table: str | None = None,
     environment: str | None = None,
   ):
-    """Initialize the instance monitor.
-
-    Args:
-        instance_registry_table: DynamoDB table for instance registry
-        graph_registry_table: DynamoDB table for graph registry
-        volume_registry_table: DynamoDB table for volume registry
-        environment: Environment name (prod, staging)
-    """
+    """Table names default to the per-environment naming convention."""
     self.environment = environment or env.ENVIRONMENT
 
-    # Table names from environment or explicit config
     self.instance_registry_table = (
       instance_registry_table
       or f"robosystems-graph-{self.environment}-instance-registry"
@@ -153,43 +139,37 @@ class InstanceMonitor:
       volume_registry_table or f"robosystems-graph-{self.environment}-volume-registry"
     )
 
-    # Lazy-loaded AWS clients
     self._ec2: EC2Client | None = None
     self._dynamodb: DynamoDBServiceResource | None = None
     self._cloudwatch: CloudWatchClient | None = None
 
   @property
   def ec2(self) -> EC2Client:
-    """Get EC2 client (lazy-loaded)."""
+    """EC2 client, built on first access."""
     if self._ec2 is None:
       self._ec2 = boto3.client("ec2")
     return self._ec2
 
   @property
   def dynamodb(self) -> DynamoDBServiceResource:
-    """Get DynamoDB resource (lazy-loaded)."""
+    """DynamoDB resource, built on first access."""
     if self._dynamodb is None:
       self._dynamodb = boto3.resource("dynamodb")
     return self._dynamodb
 
   @property
   def cloudwatch(self) -> CloudWatchClient:
-    """Get CloudWatch client (lazy-loaded)."""
+    """CloudWatch client, built on first access."""
     if self._cloudwatch is None:
       self._cloudwatch = boto3.client("cloudwatch")
     return self._cloudwatch
 
   def check_instance_health(self) -> HealthCheckResult:
-    """Check health of Graph instances and update registry.
+    """Reconcile the instance registry against live EC2 state.
 
-    This method:
-    1. Queries all instances from DynamoDB registry
-    2. Checks actual EC2 instance states
-    3. Updates instance health status in registry
-    4. Removes instances that have been terminated
-
-    Returns:
-        HealthCheckResult with counts of healthy, unhealthy, and removed instances
+    A terminated instance is dropped from the registry and its volumes are
+    released back to ``available``, so an ASG replacement does not inherit a
+    volume the registry still thinks is attached.
     """
     logger.info("Starting instance health check")
 
@@ -200,7 +180,6 @@ class InstanceMonitor:
     try:
       table = self.dynamodb.Table(self.instance_registry_table)
 
-      # Scan all instances with pagination
       items: list[dict[str, Any]] = []
       response = table.scan(Limit=100)
       items.extend(response.get("Items", []))
@@ -372,7 +351,11 @@ class InstanceMonitor:
   def _update_volumes_for_terminated_instance(
     self, instance_id: str, current_time: str
   ) -> None:
-    """Update volume registry when an instance is terminated."""
+    """Release an instance's volumes back to ``available``/``unattached``.
+
+    Database assignments on the volume are preserved, so the volume can be
+    re-attached to a replacement instance without losing what it holds.
+    """
     try:
       volume_table = self.dynamodb.Table(self.volume_registry_table)
       response = volume_table.scan(
@@ -408,14 +391,10 @@ class InstanceMonitor:
       logger.warning(f"Failed to update volumes for instance {instance_id}: {e}")
 
   def cleanup_stale_graphs(self) -> CleanupResult:
-    """Clean up stale entries from graph registry.
+    """Drop graph-registry rows that are deleted or point nowhere.
 
-    Removes:
-    - Entries marked as deleted older than 7 days
-    - Entries with missing instance_id references
-
-    Returns:
-        CleanupResult with count of removed entries
+    Removes entries deleted more than ``STALE_GRAPH_DAYS`` ago, and any entry
+    whose ``instance_id`` is absent from the instance registry.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -427,7 +406,6 @@ class InstanceMonitor:
       graph_table = self.dynamodb.Table(self.graph_registry_table)
       instance_table = self.dynamodb.Table(self.instance_registry_table)
 
-      # Get all graph entries
       response = graph_table.scan()
       items = response.get("Items", [])
 
@@ -435,7 +413,6 @@ class InstanceMonitor:
         response = graph_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
-      # Get valid instance IDs
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
       valid_instances = {
         item["instance_id"] for item in instance_response.get("Items", [])
@@ -449,7 +426,6 @@ class InstanceMonitor:
 
         should_remove = False
 
-        # Remove if deleted more than 7 days ago
         if status == "deleted" and deleted_at:
           try:
             deleted_time = datetime.fromisoformat(deleted_at.replace("Z", "+00:00"))
@@ -460,7 +436,6 @@ class InstanceMonitor:
           except Exception:
             pass
 
-        # Remove if instance doesn't exist
         if instance_id and instance_id not in valid_instances:
           should_remove = True
           logger.info(
@@ -486,15 +461,11 @@ class InstanceMonitor:
     return result
 
   def cleanup_stale_volumes(self) -> CleanupResult:
-    """Clean up stale entries from volume registry.
+    """Correct or drop volume-registry rows that no longer reflect reality.
 
-    Removes or updates:
-    - Volumes stuck in 'attaching' state to non-existent instances
-    - Volumes with missing instance references
-    - Old unattached volumes (older than 30 days)
-
-    Returns:
-        CleanupResult with counts of updated and removed entries
+    A volume stuck ``attaching`` to a dead instance is marked ``failed`` and
+    unattached; an unattached volume older than ``STALE_VOLUME_DAYS`` is
+    dropped from the registry. Neither path deletes the EBS volume itself.
     """
     logger.info("Starting volume registry cleanup")
 
@@ -506,7 +477,6 @@ class InstanceMonitor:
       volume_table = self.dynamodb.Table(self.volume_registry_table)
       instance_table = self.dynamodb.Table(self.instance_registry_table)
 
-      # Get all volume entries
       response = volume_table.scan()
       items = response.get("Items", [])
 
@@ -514,7 +484,6 @@ class InstanceMonitor:
         response = volume_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
-      # Get valid instance IDs
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
       valid_instances = {
         item["instance_id"] for item in instance_response.get("Items", [])
@@ -530,7 +499,6 @@ class InstanceMonitor:
         should_remove = False
         new_status = None
 
-        # Check volumes stuck attaching to non-existent instances
         if status == "attaching" and instance_id and instance_id != "unattached":
           if instance_id not in valid_instances:
             should_update = True
@@ -540,7 +508,6 @@ class InstanceMonitor:
               f"non-existent instance {instance_id}"
             )
 
-        # Check old unattached volumes
         if instance_id == "unattached" and status == "available" and created_at:
           try:
             created_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
@@ -598,15 +565,10 @@ class InstanceMonitor:
     return result
 
   def collect_metrics(self) -> MetricsResult:
-    """Collect and publish Graph cluster capacity metrics to CloudWatch.
+    """Publish fleet capacity and utilization metrics to CloudWatch.
 
-    This method:
-    1. Queries instance and graph registries
-    2. Calculates capacity, utilization, and health metrics
-    3. Publishes metrics to CloudWatch for monitoring and auto-scaling
-
-    Returns:
-        MetricsResult with count of published metrics
+    The fleet's auto-scaling policies consume these, so a failed collection run
+    leaves scaling decisions on stale data.
     """
     logger.info("Starting Graph metrics collection")
 

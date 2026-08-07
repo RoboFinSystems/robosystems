@@ -15,8 +15,7 @@ Two surfaces call this:
 
 Both paths share the same pure function: ``promote_pending_obligations``.
 The session is provided by the caller; this module never opens or commits
-its own transaction. ``extensions_session`` (production) and the test
-harness's stub session compose identically.
+its own transaction.
 
 Autopilot vs co-pilot
 ---------------------
@@ -180,10 +179,9 @@ def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Even
   """Matured `classified` obligations whose closing entry was never drafted.
 
   The population a co-pilot sweep creates: flipped past `pending` without
-  dispatch, so invisible to both the promote sweep's old pending-only
-  scope and the close gate's pending count — adjusting entries a close
-  would silently omit. The close gate counts these; the autopilot sweep
-  dispatches them.
+  dispatch, so invisible to the close gate's pending count — adjusting
+  entries a close would otherwise silently omit. The close gate counts
+  these; the autopilot sweep dispatches them.
   """
   classified = (
     session.query(Event)
@@ -212,23 +210,15 @@ def promote_pending_obligations(
   entry ("stranded" — see module docstring): autopilot dispatches them,
   co-pilot surfaces them on ``result.stranded_event_ids``.
 
-  Args:
-    session: Tenant-scoped extensions session (search_path already set
-      to the target graph's schema). The caller owns commit/rollback.
-    graph_id: The graph this session targets, used for logging only.
-      The actual data scope comes from the session's search_path.
-    as_of: Cutoff timestamp. Events with ``occurred_at <= as_of`` are
-      eligible. Pass ``datetime.now(UTC)`` for a wall-clock sweep.
-    dispatch_handlers: When True, fires the Python handler for each
-      promoted event so the draft entry materializes in the same
-      transaction. When False (the default), flips status only.
-    created_by: Actor recorded on any rows the handler creates.
+  ``session`` must be tenant-scoped (search_path set to the target graph's
+  schema) and the caller owns commit/rollback; ``graph_id`` is for logging
+  only, since the data scope comes from the search_path. Events with
+  ``occurred_at <= as_of`` are eligible — pass ``datetime.now(UTC)`` for a
+  wall-clock sweep.
 
-  Returns:
-    A ``PromotionResult`` with counts. Per-event handler errors are
-    collected (not raised) so a single bad row can't poison the sweep
-    — those events stay at ``classified`` (the flip already happened)
-    and surface in ``result.errors`` for the operator to investigate.
+  Per-event handler errors are collected rather than raised, so a single bad
+  row can't poison the sweep: those events stay at ``classified`` (the flip
+  already happened) and surface in ``result.errors``.
   """
   candidates = (
     session.query(Event)
@@ -246,15 +236,13 @@ def promote_pending_obligations(
 
   stranded = filter_stranded_obligations(session, classified) if classified else []
 
-  # Orphan guard (Layer 2): an obligation whose schedule structure no longer
-  # exists is orphaned — the schedule was deleted but its register wasn't
-  # voided (e.g. a pre-fix delete, or the void's silent no-op). Never draft an
-  # orphan into a closing entry: void it in place so it stops blocking close,
-  # and surface it. The catch-all that stops a deleted schedule from
-  # double-posting at promotion regardless of how the orphan arose. Covers
-  # stranded classified obligations too — a deleted schedule's classified
-  # leftovers void rather than error at dispatch. See
-  # specs/schedule-delete-obligation-integrity.md (Layer 2).
+  # Orphan guard: an obligation whose schedule structure no longer exists is
+  # orphaned — the schedule was deleted but its register wasn't voided. Never
+  # draft an orphan into a closing entry; void it in place so it stops
+  # blocking close, and surface it. This is the catch-all that stops a deleted
+  # schedule from double-posting at promotion regardless of how the orphan
+  # arose, and it covers stranded classified obligations too — a deleted
+  # schedule's classified leftovers void rather than error at dispatch.
   guard_pool = pending + stranded
   if guard_pool:
     candidate_schedule_ids = {

@@ -1,11 +1,8 @@
-"""TrackedAIClient — wraps AIClient with automatic credit tracking.
+"""TrackedAIClient — AIClient plus automatic credit tracking.
 
-Every create_message() call automatically:
-1. Invokes the underlying AIClient (Bedrock)
-2. Accumulates token counts
-3. Consumes credits via the injected CreditConsumer
-
-Agents never call consume_credits() themselves — it's built in.
+Each `create_message()` invokes Bedrock, accumulates the reported token counts,
+and consumes credits through the injected `CreditConsumer`. Operators never
+call consume themselves, so no operator can forget to bill.
 """
 
 from __future__ import annotations
@@ -33,7 +30,11 @@ class UnbilledAICallError(Exception):
 
 
 class TrackedAIClient:
-  """AI client wrapper that automatically tracks tokens and consumes credits."""
+  """AI client that tracks tokens and consumes credits per call.
+
+  One instance per operator run: the accumulated totals and the unbilled-call
+  latch are both per-run state.
+  """
 
   def __init__(
     self,
@@ -64,22 +65,13 @@ class TrackedAIClient:
     operation_description: str = "Operator AI call",
     tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
-    """Call AI and automatically consume credits.
+    """Call the model and consume credits for it.
 
-    Args:
-        messages: Conversation messages.
-        system: System prompt.
-        max_tokens: Maximum output tokens.
-        temperature: Sampling temperature.
-        model: Optional model override.
-        operator_type: Optional operator type for model override lookup.
-        operation_description: Description for credit audit trail.
-        tools: Optional Anthropic tool definitions. Each call in a tool-use
-            loop flows through here, so tokens and credits accumulate across
-            iterations automatically.
+    `operation_description` is what lands in the credit audit trail. Every call
+    in a tool-use loop flows through here, so tokens and credits accumulate
+    across iterations without the loop doing anything.
 
-    Returns:
-        AIResponse with content and token counts.
+    Raises `UnbilledAICallError` if an earlier call in this run went unbilled.
     """
     # A tool-use loop can make dozens of calls. If one of them could not be
     # billed, every later call in the same run would be unbilled too, so stop
@@ -99,12 +91,12 @@ class TrackedAIClient:
       tools=tools,
     )
 
-    # Track tokens
     self.total_tokens["input"] += response.input_tokens
     self.total_tokens["output"] += response.output_tokens
     self.call_count += 1
 
-    # Consume credits automatically (skip if no consumer — e.g. tests)
+    # No consumer means no billing at all — tests, and contexts with no
+    # platform DB session to bill against.
     if self._credit_consumer is not None:
       try:
         credits = await self._credit_consumer.consume(
@@ -122,11 +114,10 @@ class TrackedAIClient:
     return response
 
   def _mark_unbilled(self, response: AIResponse, reason: str) -> None:
-    """Record that a completed AI call could not be billed.
+    """Latch that a completed AI call could not be billed.
 
-    Logged at ERROR because this is real unrecovered spend, not a degraded
-    read — the previous WARNING made an unbounded billing failure look like
-    routine noise.
+    ERROR, not WARNING: this is real unrecovered spend, not a degraded read,
+    and it must not blend into routine log noise.
     """
     detail = (
       f"graph={self._graph_id} user={self._user_id} "

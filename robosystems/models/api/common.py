@@ -1,9 +1,4 @@
-"""
-Common API models shared across multiple routers.
-
-This module contains shared Pydantic models used throughout the API
-for consistent response structures and error handling.
-"""
+"""Response and error shapes shared across every router."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -13,12 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class ErrorResponse(BaseModel):
-  """
-  Standard error response format used across all API endpoints.
-
-  This model ensures consistent error responses for SDK generation
-  and client error handling.
-  """
+  """Error body returned by every endpoint."""
 
   detail: str = Field(
     ...,
@@ -117,13 +107,11 @@ class DeleteResult(BaseModel):
   """Shared response shape for delete / soft-delete operations.
 
   ``deleted=True`` means the operation succeeded (a row was deleted or
-  flipped). The handler returns 404 instead when the row didn't exist
-  to begin with — the response shape is never used to communicate "not
-  found".
+  flipped). A row that never existed gets a 404 — this shape never carries
+  "not found".
 
-  Defined once here to avoid OpenAPI components key collisions
-  between roboledger and roboinvestor (both surfaces produced
-  separate ``DeleteResult`` classes before consolidation).
+  Defined once here, and used by both roboledger and roboinvestor, so the
+  OpenAPI components key resolves to a single schema.
   """
 
   deleted: bool = Field(
@@ -153,53 +141,27 @@ class CreditCostInfo(BaseModel):
   )
 
 
-# Helper functions for consistent error handling
-
-
 def create_error_response(
   status_code: int,
   detail: str,
   code: str | None = None,
   request_id: str | None = None,
 ) -> HTTPException:
-  """
-  Create a consistent error response using ErrorResponse model.
-
-  Args:
-      status_code: HTTP status code
-      detail: Human-readable error message
-      code: Machine-readable error code
-      request_id: Request tracking ID
-
-  Returns:
-      HTTPException with ErrorResponse content
-  """
+  """Build an ``HTTPException`` whose detail is an ``ErrorResponse`` body."""
   error = ErrorResponse(
     detail=detail,
     code=code,
     request_id=request_id,
     timestamp=datetime.now(UTC),
   )
-  # Convert the error model to a dict with JSON-compatible values
   error_dict = error.model_dump(exclude_none=True)
-  # Ensure timestamp is converted to ISO format string
   if "timestamp" in error_dict and isinstance(error_dict["timestamp"], datetime):
     error_dict["timestamp"] = error_dict["timestamp"].isoformat()
   return HTTPException(status_code=status_code, detail=error_dict)
 
 
 def create_pagination_info(total: int, limit: int, offset: int) -> PaginationInfo:
-  """
-  Create pagination information for list responses.
-
-  Args:
-      total: Total number of items available
-      limit: Maximum items per page
-      offset: Number of items skipped
-
-  Returns:
-      PaginationInfo with calculated has_more flag
-  """
+  """Build a ``PaginationInfo``, deriving ``has_more`` from the window."""
   return PaginationInfo(
     total=total, limit=limit, offset=offset, has_more=(offset + limit) < total
   )
@@ -251,7 +213,6 @@ OPERATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-# Common error codes for consistency
 class ErrorCode:
   """Standard error codes for common scenarios."""
 

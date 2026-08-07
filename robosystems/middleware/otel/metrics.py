@@ -1,7 +1,8 @@
-"""
-Standardized OpenTelemetry metrics collection for RoboSystems API endpoints.
+"""OpenTelemetry metrics collection for API endpoints.
 
-This module provides consistent metrics patterns for observability across all API endpoints.
+`endpoint_metrics_decorator` is the usual entry point: it records duration,
+status, and business events for a route. Graph IDs are stripped from metric
+labels so cardinality stays bounded.
 """
 
 import functools
@@ -436,7 +437,6 @@ class EndpointMetrics:
       "user_authenticated": "true" if user_id else "false",
     }
 
-    # Record attempt
     if self._auth_attempts is not None:
       self._auth_attempts.add(1, base_attributes)
 
@@ -728,15 +728,6 @@ class EndpointMetrics:
 
     This provides indirect observability of the Graph API from the API side,
     since the Graph API runs on EC2 without an OTel sidecar.
-
-    Args:
-        method: HTTP method (GET, POST, DELETE)
-        operation: Normalized operation name (query, create_database, backup, etc.)
-        duration: Request duration in seconds
-        status_code: HTTP response status code
-        route_target: Routing target (user_graph, shared_master, shared_replica)
-        error: Whether the request failed
-        error_type: Error category (timeout, connection, client_4xx, server_5xx)
     """
     self._ensure_instruments()
 
@@ -901,19 +892,7 @@ def endpoint_metrics_decorator(
   business_event_type: str | None = None,
   method: str | None = None,
 ):
-  """
-  Enhanced decorator to automatically collect standard metrics for FastAPI endpoints.
-
-  Args:
-      endpoint_name: Override endpoint name (defaults to function name)
-      extract_user_id: Whether to attempt user_id extraction from request context
-      business_event_type: Optional business event to record on success
-      method: HTTP method label (e.g. "POST"). When supplied, skips the
-          runtime `fastapi.Request` scan and uses the explicit value.
-          Strongly preferred for routes that don't declare `request: Request`
-          in their signature — without it the decorator falls back to
-          `"UNKNOWN"` which silently degrades Prometheus dashboards that
-          filter by method.
+  """Enhanced decorator to automatically collect standard metrics for FastAPI endpoints.
 
   Idempotent replays:
       If the decorated function returns an object with a truthy
@@ -941,9 +920,9 @@ def endpoint_metrics_decorator(
     async def async_wrapper(*args, **kwargs):
       start_time = time.time()
       endpoint = endpoint_name or f"/{func.__name__}"
-      # If the caller supplied an explicit method we trust it; otherwise
-      # fall back to the legacy runtime scan (which only works for routes
-      # that declare `request: Request` in their signature).
+      # An explicit `method` is trusted; otherwise it is recovered below from
+      # the request object, which only works for routes that declare
+      # `request: Request` in their signature.
       resolved_method = method or "UNKNOWN"
       status_code = 200
       user_id = None
@@ -982,7 +961,6 @@ def endpoint_metrics_decorator(
             or getattr(request_obj.state, "user_id", None)
           )
 
-          # Extract graph_id from path
           graph_id = request_obj.path_params.get("graph_id")
 
         # Fallback: FastAPI injects path parameters as typed kwargs on the
@@ -1017,7 +995,6 @@ def endpoint_metrics_decorator(
         error_occurred = True
         status_code = getattr(e, "status_code", 500)
 
-        # Record error metrics
         record_error_metrics(
           endpoint=endpoint,
           method=resolved_method,
@@ -1063,7 +1040,6 @@ def endpoint_metrics_decorator(
         error_occurred = True
         status_code = getattr(e, "status_code", 500)
 
-        # Record error metrics
         record_error_metrics(
           endpoint=endpoint,
           method=resolved_method,
@@ -1103,8 +1079,7 @@ def endpoint_metrics_context(
   business_event_type: str | None = None,
   event_data: dict[str, Any] | None = None,
 ):
-  """
-  Context manager for manual metrics collection with automatic timing and error handling.
+  """Context manager for manual metrics collection with automatic timing and error handling.
 
   Usage:
       async def my_endpoint():
@@ -1140,7 +1115,6 @@ def endpoint_metrics_context(
     if business_event_type or ctx.business_events:
       metrics_instance = get_endpoint_metrics()
 
-      # Record the main business event if specified
       if business_event_type:
         metrics_instance.record_business_event(
           endpoint=endpoint,
@@ -1150,7 +1124,6 @@ def endpoint_metrics_context(
           user_id=user_id,
         )
 
-      # Record additional business events
       for event_type, data in ctx.business_events:
         metrics_instance.record_business_event(
           endpoint=endpoint,
@@ -1164,7 +1137,6 @@ def endpoint_metrics_context(
     error_occurred = True
     status_code = getattr(e, "status_code", 500)
 
-    # Record error metrics
     record_error_metrics(
       endpoint=endpoint,
       method=method,

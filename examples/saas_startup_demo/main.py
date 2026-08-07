@@ -1,20 +1,37 @@
 #!/usr/bin/env python3
-"""Cadence Labs — RoboLedger Showcase Demo (Season 1, Episode 2).
+"""Cadence Labs — RoboLedger showcase demo (Season 1, Episode 2).
 
-A thin wrapper over ``examples._scenario.runner`` — the company *is* the
-scenario. Cadence Labs is a seed-funded B2B SaaS startup: high-margin
-recurring revenue growing fast, but burning cash, with a large annual-prepay
-deferred-revenue float masking the burn. The arc is authored as flow
-parameters in ``data.py``; run
-``uv run python -m examples.saas_startup_demo.data`` for the offline preview.
+Loads a whole synthetic company into a RoboLedger graph and leaves it ready for
+a month-end close: chart of accounts, counterparty agents, 16 months of typed
+REA events, CoA→rs-gaap mappings, fiscal calendar, schedules, disclosure notes,
+policy documents, and a filed annual report.
+
+Cadence Labs is a seed-funded B2B SaaS startup burning cash. Recurring revenue
+is high-margin and growing fast, but engineering and go-to-market spend swamps
+gross profit every month. Customers sign annual contracts and pay up front, so
+a large deferred-revenue float sits on the balance sheet and flatters the bank
+balance — the runway looks longer than it is until you net the float out. The
+arc is authored as flow parameters in ``data.py``.
+
+This module is a thin wrapper over ``examples._scenario.runner``: the company
+*is* the scenario, so a new episode is a new set of data modules, not a fork of
+the runner. For the offline arc preview (no platform needed), run
+``uv run python -m examples.saas_startup_demo.data``.
+
+Prerequisites:
+    just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
+    just demo-user    # writes credentials to .local/config.json
 
 Usage:
-    uv run python -m examples.saas_startup_demo.main             # Create new graph + load
-    uv run python -m examples.saas_startup_demo.main <graph_id>  # Load into existing graph
-    uv run python -m examples.saas_startup_demo.main --dry-run   # Validate data only
-    uv run python -m examples.saas_startup_demo.main --ai        # Use MappingOperator (requires Bedrock)
+    just demo-saas-startup              # create a graph and load everything
+    just demo-saas-startup <graph_id>   # load into an existing graph
+    just demo-saas-startup --dry-run    # validate the synthetic data only
+    just demo-saas-startup --ai         # map the CoA with the MappingOperator
+                                        #   (requires AWS Bedrock)
 
-Requires: Docker stack running (just start)
+Expect several minutes of progress output ending in a summary with the graph
+id, the period queued for close, the filed report id, and the reveal prompts
+below to try against an MCP client.
 """
 
 from __future__ import annotations
@@ -31,7 +48,9 @@ from .memories import MEMORIES
 from .metrics import CUSTOM_METRICS
 from .policies import DOCUMENTS
 
-# Beat 4 — the unscripted reveal: the deferred-revenue runway illusion.
+# Beat 4 — the analysis questions printed at the end of the run, to ask an MCP
+# client against the loaded graph. Cadence's reveal: the bank balance implies a
+# runway that disappears once deferred revenue is netted out.
 REVEAL_PROMPTS = [
   "We raised a round and have cash in the bank — show me the income statement and cash position.",
   "Are we profitable? What is our monthly operating burn?",
@@ -39,14 +58,15 @@ REVEAL_PROMPTS = [
   "Net out deferred revenue — at this burn, what's our real runway?",
 ]
 
-# Operating-budget scenario (FP&A F-1) — Cadence's growth/burn arc as lever
-# assertions: SaaS growth continuing the historical ramp (~5%/month), the
-# ~22% hosting + support cost-of-revenue rate, a month of hosting bills in
-# payables. DSO is deliberately NOT asserted — an annual-prepay book has no
-# receivables story, so the DSO rule stays inactive and the working-capital
-# projection is the payables side only (the partial-lever path, on purpose:
-# each episode's scenario asserts the levers its business model actually
-# turns). Values follow the rs-driver catalog conventions.
+# Operating-budget scenario — Cadence's growth/burn arc as lever assertions:
+# SaaS growth continuing the historical ramp (~5%/month), the ~22% hosting +
+# support cost-of-revenue rate, a month of hosting bills in payables. DSO is
+# deliberately NOT asserted — an annual-prepay book has no receivables story,
+# so the DSO rule stays inactive and the working-capital projection is the
+# payables side only. That partial-lever path is the point: each episode
+# asserts only the levers its business model actually turns. Values follow the
+# rs-driver catalog conventions (percent levers as decimals per month, days
+# levers as day counts).
 FORECAST_LEVERS = {
   "rs-driver:RevenueGrowthRate": 0.05,
   "rs-driver:CostOfRevenueRate": 0.22,

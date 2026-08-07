@@ -1,18 +1,17 @@
 """Shared rs-gaap calculation-DAG loading + bottom-up subtotal resolution.
 
 The single source of truth for "resolve subtotal values over the
-``rs-gaap-calculations`` DAG". Extracted from ``fact_grid.py`` so the fact
-PRODUCER (``_emit_subtotal_facts``, ``_reconcile_operating_to_cash``) and the
-rollup VALIDATOR (``information_block.rules``) derive subtotals *identically* —
-the validator must mirror the producer or it re-derives the rollup wrong. The
-frozen-enumeration ``RollUp`` evaluator did exactly that: it summed a hardcoded
-child list bound one-fact-per-qname, so a subtotal footing over a sibling
-concept (``IntangibleAssetsNetExcludingGoodwill`` vs the enumerated
-``...IncludingGoodwill``) or over two facts in one period reported a false
-failure. Deriving children from the arcs — the way the producer already does —
-closes that class.
+``rs-gaap-calculations`` DAG". The fact PRODUCER (``fact_grid``'s
+``_emit_subtotal_facts`` / ``_reconcile_operating_to_cash``) and the rollup
+VALIDATOR (``information_block.rules``) both go through here so they derive
+subtotals *identically* — a validator that re-derives the rollup its own way
+reports false failures whenever the two disagree (a subtotal footing over a
+sibling concept, or over two facts in one period).
 
-Resolution semantics (unchanged from the original inline copies in fact_grid):
+Children always come from the arcs, never from a frozen child enumeration,
+for the same reason.
+
+Resolution semantics:
 
 - children come from ``association_type='calculation'`` arcs of the
   ``rs-gaap-calculations`` taxonomy standard (direct parent→child + weight);
@@ -77,10 +76,10 @@ def merge_calculations(
 
   A structure's own calculation arcs are its footing spec — a disclosure
   note that decomposes ``rs-gaap:Revenues`` into its own members must foot
-  against THOSE members, not the global DAG's statement-level children
-  (which are absent from the note's FactSet, so global-wins reported the
-  rollup as skipped or failed). The global DAG remains the fallback for
-  every parent the structure doesn't re-arc — statement subtotals resolve
+  against THOSE members. The global DAG's statement-level children are
+  absent from the note's FactSet, so letting global win would report the
+  rollup as skipped or failed. The global DAG stays the fallback for every
+  parent the structure doesn't re-arc, so statement subtotals resolve
   exactly as the fact producer resolved them. Pure: neither input is
   mutated.
   """

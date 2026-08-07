@@ -1,48 +1,36 @@
-"""LadybugDB configuration utilities.
+"""LadybugDB memory sizing — the single source of truth for buffer pool limits.
 
-This module provides configuration functions that need to be imported
-by multiple modules in the ladybug package without circular imports.
+Kept separate from the manager and pool so both can import it without a cycle.
 """
 
 from robosystems.config import env
 from robosystems.logger import logger
 
-# Per-database memory overrides for temporary boosts during heavy operations.
-# Using per-database tracking (like DuckDB) prevents a boost for one database
-# from leaking to other databases on the same instance, which can cause OOM.
+# Overrides are scoped per database. A process-wide boost would raise the
+# buffer pool for every database on the instance at once, which OOMs the node.
 _memory_overrides: dict[str, int] = {}
 
 
 def set_ladybug_memory_override(
   memory_mb: int | None, graph_id: str | None = None
 ) -> int | None:
-  """
-  Set a temporary memory override for a specific LadybugDB database.
+  """Set a temporary memory override for one database; returns the previous value.
 
-  This allows temporarily boosting LadybugDB memory during materialization,
-  then restoring the default lower limit afterward. The override is scoped
-  to a specific database to prevent boost leaking to subgraphs or other
-  databases on the same instance.
+  Recording the override is not enough on its own — buffer pool size is fixed
+  when the Database object opens, so call ``pool.recreate_database(graph_id)``
+  afterwards to make it take effect.
 
-  IMPORTANT: After setting this, you must call pool.recreate_database()
-  on the target database to apply the new memory setting.
-
-  Args:
-      memory_mb: Memory in MB or None to clear override
-      graph_id: Database name to scope the override to. If None, clears all.
-
-  Returns:
-      Previous override value (for restore purposes)
+  ``graph_id`` is required when setting; passing neither argument clears every
+  override.
 
   Example:
-      # Boost memory for materialization
       old_limit = set_ladybug_memory_override(50000, graph_id="sec")
       try:
-          pool.recreate_database("sec")  # Recreate with new limit
+          pool.recreate_database("sec")
           # ... perform materialization ...
       finally:
-          set_ladybug_memory_override(old_limit, graph_id="sec")  # Restore
-          pool.recreate_database("sec")  # Recreate with restored limit
+          set_ladybug_memory_override(old_limit, graph_id="sec")
+          pool.recreate_database("sec")
   """
   if graph_id:
     old_value = _memory_overrides.get(graph_id)
@@ -59,7 +47,6 @@ def set_ladybug_memory_override(
         "graph_id is required when setting a memory override — "
         "pass graph_id to scope the override to a specific database"
       )
-    # No graph_id + None memory_mb: clear all overrides
     old_value = next(iter(_memory_overrides.values()), None)
     _memory_overrides.clear()
     logger.info("LadybugDB memory overrides cleared (all)")
@@ -67,44 +54,31 @@ def set_ladybug_memory_override(
 
 
 def get_ladybug_memory_override(graph_id: str | None = None) -> int | None:
-  """Get current LadybugDB memory override in MB.
+  """Get a database's memory override in MB.
 
-  Args:
-      graph_id: Database name to check override for. If None, returns
-          any active override (for backward compatibility checks).
+  Without ``graph_id``, returns any active override — enough to answer
+  "is anything boosted?", but not which database.
   """
   if graph_id:
     return _memory_overrides.get(graph_id)
-  # Legacy: return any override if exists (for is-anything-boosted checks)
   return next(iter(_memory_overrides.values()), None) if _memory_overrides else None
 
 
 def get_database_memory_config(database_name: str | None = None) -> int:
+  """Get the buffer pool size in MB for a database, in priority order.
+
+  1. That database's memory override, if one is set
+  2. ``memory_per_subgraph_mb``, when the name is a subgraph
+  3. ``memory_per_db_mb``, for parent databases
+  4. ``lbug_max_memory_mb`` / ``max_memory_mb``, for single-database instances
+
+  Subgraphs are those whose name contains an underscore (``sec_historical``,
+  ``kg123_dev``). They get a smaller buffer pool than their parent and are
+  deliberately oversubscribed: they are rarely all active at once.
+
+  Always pass ``database_name`` — omitting it silently skips the override and
+  subgraph rules.
   """
-  Get memory configuration in MB for LadybugDB database creation.
-
-  This function provides a single source of truth for memory allocation,
-  used by both the connection pool and database manager.
-
-  Priority order:
-  1. Per-database override (only for the specific database being boosted)
-  2. Subgraph memory limit (memory_per_subgraph_mb) - if database is a subgraph
-  3. Per-database memory limit (memory_per_db_mb) - for parent databases
-  4. Total memory allocation (lbug_max_memory_mb or max_memory_mb) - for dedicated instances
-  5. Environment variable fallback (LBUG_MAX_MEMORY_MB)
-
-  Subgraphs are identified by containing an underscore (e.g., sec_historical,
-  kg123_dev). They receive a smaller buffer pool than parent databases, and
-  are intentionally oversubscribed since they are rarely all active simultaneously.
-
-  Args:
-      database_name: Database name to check for per-database override.
-          Pass this to ensure only the target database gets boosted memory.
-
-  Returns:
-      Memory allocation in megabytes
-  """
-  # Check for per-database override first (used during materialization)
   override = get_ladybug_memory_override(database_name)
   if override:
     logger.info(
@@ -115,7 +89,6 @@ def get_database_memory_config(database_name: str | None = None) -> int:
 
   tier_config = env.get_lbug_tier_config()
 
-  # Check if this is a subgraph (contains underscore: sec_historical, kg123_dev)
   is_subgraph = database_name is not None and "_" in database_name
   if is_subgraph:
     memory_per_subgraph_mb = tier_config.get("memory_per_subgraph_mb", 0)
@@ -131,8 +104,7 @@ def get_database_memory_config(database_name: str | None = None) -> int:
     logger.info(f"Using per-database memory limit: {memory_per_db_mb} MB")
     return memory_per_db_mb
 
-  # Fall back to total memory for single-database instances (shared/dedicated)
-  # Default of 2048 is sensible for local dev when tier config is not available
+  # The 2048 default covers local dev, where no tier config is present.
   max_memory_mb = tier_config.get(
     "lbug_max_memory_mb", tier_config.get("max_memory_mb", 2048)
   )

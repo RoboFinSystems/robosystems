@@ -1,8 +1,7 @@
-"""
-Generic task management endpoints for all background operations.
+"""Task endpoints for every background operation on this node.
 
-This module provides endpoints for monitoring and managing
-background tasks (ingestion, backup, restore, etc.).
+One SSE monitor and one status route serve all task types — ingestion, backup,
+restore, staging, migration — keyed by the task ID's prefix.
 """
 
 import json
@@ -33,7 +32,7 @@ class UnifiedTaskManager:
   def __init__(self):
     self._redis_client = None
     self._redis_url = None
-    # Map of task prefixes to their managers
+    # Task-ID prefix -> owning manager
     self.managers = {
       "backup": backup_task_manager,
       "restore": restore_task_manager,
@@ -42,9 +41,9 @@ class UnifiedTaskManager:
     }
 
   async def get_redis(self) -> redis_async.Redis:
-    """Get async Redis client for task status storage."""
+    """Async Redis client for task status storage."""
     if not self._redis_client:
-      # Use async factory method to handle SSL params correctly
+      # The async factory handles SSL params correctly.
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
@@ -53,23 +52,14 @@ class UnifiedTaskManager:
     return self._redis_client
 
   async def get_task(self, task_id: str) -> dict[str, Any] | None:
-    """
-    Get task by ID, checking all task types.
-
-    Args:
-        task_id: Task identifier
-
-    Returns:
-        Task data or None if not found
-    """
-    # Try direct Redis lookup first
+    """Look up a task by ID across all task types."""
     redis_client = await self.get_redis()
     task_json = await redis_client.get(f"lbug:task:{task_id}")
 
     if task_json:
       return json.loads(task_json)
 
-    # If not found, try each manager (for backwards compatibility)
+    # Fall back to the manager that owns the ID's prefix.
     for prefix, manager in self.managers.items():
       if task_id.startswith(prefix):
         task = await manager.get_task(task_id)
@@ -81,18 +71,9 @@ class UnifiedTaskManager:
   async def list_all_tasks(
     self, status_filter: str | None = None
   ) -> list[dict[str, Any]]:
-    """
-    List all tasks across all types.
-
-    Args:
-        status_filter: Optional status to filter by
-
-    Returns:
-        List of tasks
-    """
+    """List every task, newest first, optionally filtered by status."""
     redis_client = await self.get_redis()
 
-    # Get all task keys
     pattern = "lbug:task:*"
     keys = await redis_client.keys(pattern)
 
@@ -102,13 +83,11 @@ class UnifiedTaskManager:
       if task_json:
         task = json.loads(task_json)
 
-        # Apply status filter if specified
         if status_filter and task.get("status") != status_filter:
           continue
 
         tasks.append(task)
 
-    # Sort by created_at descending (newest first)
     tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
     return tasks
@@ -126,11 +105,10 @@ class UnifiedTaskManager:
     elif task_id.startswith("migration"):
       return TaskType.MIGRATION
     else:
-      # Default to ingestion for unknown types
+      # Unknown prefixes are treated as ingestion.
       return TaskType.INGESTION
 
 
-# Global unified task manager
 unified_task_manager = UnifiedTaskManager()
 
 
@@ -151,11 +129,9 @@ async def list_tasks(
   """
   tasks = await unified_task_manager.list_all_tasks(status_filter=status)
 
-  # Filter by task type if specified
   if task_type:
     tasks = [t for t in tasks if t.get("task_id", "").startswith(task_type)]
 
-  # Apply limit
   return tasks[:limit]
 
 
@@ -180,10 +156,8 @@ async def monitor_task(
   - failed: Operation failed with error
   - error: Stream error occurred
   """
-  # Determine task type from ID
   task_type = unified_task_manager.get_task_type(task_id)
 
-  # Get the appropriate manager
   manager = unified_task_manager
 
   return EventSourceResponse(
@@ -231,7 +205,6 @@ async def get_task_statistics() -> dict[str, Any]:
   """
   all_tasks = await unified_task_manager.list_all_tasks()
 
-  # Count by status
   status_counts = {}
   type_counts = {}
 

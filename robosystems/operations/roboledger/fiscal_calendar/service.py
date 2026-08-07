@@ -219,21 +219,13 @@ class FiscalCalendarService:
     `close_target_period` to the period immediately after `closed_through`
     (or None if closed_through is None — caller will set target explicitly).
 
-    Args:
-        session: extensions DB session
-        graph_id: target graph
-        closed_through: YYYY-MM string, or None. Must be ≤ last completed
-            calendar month if provided.
-        fiscal_year_start_month: 1-12, default 1 (calendar year)
-        actor_id: user / agent performing initialization
-        actor_type: one of 'user', 'agent', 'system'
-        note: optional free-form note for the audit event
+    `closed_through` must be ≤ the last completed calendar month;
+    `fiscal_year_start_month` is 1-12; `actor_type` is one of 'user',
+    'agent', 'system'.
 
-    Raises:
-        CalendarAlreadyInitializedError: if graph already has an initialized
-            fiscal calendar. Use reopen flow to undo prior closes.
-        InvalidCloseTargetError: if `closed_through` is malformed or in the
-            future.
+    Raises `CalendarAlreadyInitializedError` if the graph is already
+    initialized (use the reopen flow to undo prior closes), and
+    `InvalidCloseTargetError` if `closed_through` is malformed or future.
     """
     existing = self.get(session, graph_id)
     if existing is not None and existing.initialized_at is not None:
@@ -242,7 +234,6 @@ class FiscalCalendarService:
         f"(initialized_at={existing.initialized_at.isoformat()})."
       )
 
-    # Validate closed_through if provided
     if closed_through is not None:
       try:
         parse_period(closed_through)
@@ -308,9 +299,8 @@ class FiscalCalendarService:
     Emits a `target_changed` event. Safe to call with the current value
     (no-op with an audit event, useful for "touching" the target).
 
-    Raises:
-        InvalidCloseTargetError on any validation failure.
-        FiscalCalendarError if the calendar has not been initialized.
+    Raises ``InvalidCloseTargetError`` on any validation failure, and
+    ``FiscalCalendarError`` if the calendar has not been initialized.
     """
     try:
       parse_period(period)
@@ -432,8 +422,8 @@ class FiscalCalendarService:
     Emits a `period_closed` event. If auto-advance fires, also emits a
     `target_advanced_auto` event.
 
-    Raises:
-        AdvanceSequenceError if `period` is not the next sequential period.
+    Raises ``AdvanceSequenceError`` if `period` is not the next sequential
+    period.
     """
     calendar = self.require(session, graph_id)
 
@@ -805,8 +795,6 @@ class FiscalCalendarService:
       sid = meta.get("schedule_id")
       period_end_iso = meta.get("period_end") or ""
       # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
-      # Named `evt_period` to avoid shadowing closeable_gate's `period`
-      # parameter when this logic lived inline there; kept for clarity.
       evt_period = period_end_iso[:7] if period_end_iso else ""
       sample.append(
         PendingObligationDetail(
@@ -833,7 +821,7 @@ class FiscalCalendarService:
     - If both set → count of periods in (closed_through, target]
     - If closed_through is None AND session is provided → count from the
       earliest open FiscalPeriod up to and including target
-    - If closed_through is None and no session → fallback to 1 (legacy)
+    - If closed_through is None and no session → 1 (the target alone)
     """
     seq = self.catch_up_sequence(calendar, session=session, graph_id=graph_id)
     return len(seq)
@@ -853,8 +841,9 @@ class FiscalCalendarService:
     catch-up target of 2026-03 on a fresh tenant with data going back to
     2026-01 sees ``[2026-01, 2026-02, 2026-03]`` instead of just the target.
 
-    The session/graph_id parameters are optional for backward compatibility;
-    when omitted the fresh-business case returns just ``[close_target]``.
+    ``session``/``graph_id`` are optional; without them the fresh-business
+    case cannot look up the earliest open period and returns just
+    ``[close_target]``.
     """
     if calendar.close_target_period is None:
       return []
@@ -868,7 +857,7 @@ class FiscalCalendarService:
         earliest = self._earliest_open_period(session, graph_id)
         start = earliest or calendar.close_target_period
       else:
-        # Legacy fallback: single-element list.
+        # No session to consult — the target is the whole sequence.
         return [calendar.close_target_period]
 
     periods: list[str] = []
@@ -896,7 +885,6 @@ class FiscalCalendarService:
 
     Returns the number of rows actually inserted.
     """
-    # Pull existing period names so we don't re-insert
     existing_names = {
       name
       for (name,) in session.query(FiscalPeriod.name)
@@ -947,9 +935,8 @@ class FiscalCalendarService:
   ) -> FiscalCalendarEvent:
     """Append an audit event for a fiscal calendar mutation.
 
-    Called internally by every mutating method. Exposed publicly so that
-    higher-level flows (e.g., CloseAgent) can record their own meta-events
-    against the same calendar.
+    Called internally by every mutating method. Public so higher-level
+    close flows can record their own meta-events against the same calendar.
     """
     event = FiscalCalendarEvent(
       fiscal_calendar_id=calendar.id,

@@ -23,59 +23,52 @@ logger = get_logger(__name__)
 
 class ArelleClient:
   """
-  Arelle client for loading and validating XBRL documents.
+  Loads and validates XBRL documents through Arelle.
 
-  This client handles the HTTP/HTTPS redirect issues with xbrl.org
-  and properly configures EFM validation for SEC filings.
+  Works around the HTTP/HTTPS redirect behavior of xbrl.org and configures
+  EFM validation for SEC filings. Schemas are served from a pre-populated
+  local cache so a filing run does not hammer (and get throttled by) the
+  taxonomy hosts.
   """
 
   def __init__(self):
-    """Initialize the Arelle client with proper configuration."""
     self.cntlr = None
     self.cache_dir = None
     self._setup_cache_directory()
     self._initialize_controller()
 
   def _setup_cache_directory(self):
-    """Setup and populate Arelle's cache directory with pre-cached schemas."""
-    # Determine cache directory
+    """Pick a writable cache directory and seed it with the bundled schemas."""
     if env.ARELLE_CACHE_DIR:
-      # Use configured cache directory
       self.cache_dir = Path(env.ARELLE_CACHE_DIR)
     else:
-      # Try to use the mounted volume first (local development)
+      # The mounted volume is writable in local development; prod/staging run
+      # on a read-only filesystem and fall back to /tmp.
       mounted_cache = Path(__file__).parent.parent / "arelle" / "cache"
       if mounted_cache.exists() and os.access(mounted_cache, os.W_OK):
-        # We have write access to the mounted cache
         self.cache_dir = mounted_cache
       else:
-        # Use /tmp for production/staging where filesystem is read-only
         self.cache_dir = Path("/tmp/arelle/cache")
 
-    # Create cache directory if it doesn't exist
     try:
       self.cache_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-      # Fallback to /tmp if we can't create the directory
       logger.warning(f"Cannot create cache at {self.cache_dir}: {e}, using /tmp")
       self.cache_dir = Path("/tmp/arelle/cache")
       self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if we have pre-populated cache
     pre_cache_dir = Path(__file__).parent.parent / "arelle" / "cache"
     if pre_cache_dir.exists():
       logger.debug(f"Found pre-cached schemas at: {pre_cache_dir}")
-      # Copy pre-cached schemas to Arelle's cache directory
       self._populate_cache_from_bundle(pre_cache_dir, self.cache_dir)
     else:
       logger.warning(f"No pre-cached schemas found at: {pre_cache_dir}")
 
-    # Set environment variable for Arelle to use this cache
-    # Arelle expects XDG_CACHE_HOME/arelle/cache structure
+    # Arelle reads its cache from XDG_CACHE_HOME/arelle/cache, so point
+    # XDG_CACHE_HOME at whichever ancestor makes that resolve to cache_dir.
     if str(self.cache_dir).endswith("/arelle/cache"):
       os.environ["XDG_CACHE_HOME"] = str(self.cache_dir.parent.parent)
     else:
-      # If using a custom path, set it directly
       os.environ["XDG_CACHE_HOME"] = str(self.cache_dir.parent)
 
     logger.debug(f"Arelle cache directory: {self.cache_dir}")
@@ -89,19 +82,15 @@ class ArelleClient:
     for source_file in source_dir.glob("**/*"):
       if source_file.is_file() and source_file.suffix in [".xsd", ".dtd", ".xml"]:
         schemas_found += 1
-        # Compute relative path
         relative_path = source_file.relative_to(source_dir)
         target_file = target_dir / relative_path
 
-        # Skip if already exists and has content
         if target_file.exists() and target_file.stat().st_size > 0:
           logger.debug(f"Schema already cached: {relative_path}")
           continue
 
-        # Create parent directories
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy file
         try:
           shutil.copy2(source_file, target_file)
           schemas_copied += 1
@@ -134,18 +123,15 @@ class ArelleClient:
         logger.debug(f"Missing essential schema: {file_path}")
         return False
 
-    # Count total schemas
     schema_count = len(list(self.cache_dir.glob("**/*.xsd")))
     logger.debug(f"Cache health check: {schema_count} schemas found")
 
-    # Get minimum schema count from module constants (default 10 for basic operation)
     return schema_count >= ARELLE_MIN_SCHEMA_COUNT
 
   def _initialize_controller(self):
     """Initialize Arelle controller with proper settings."""
     logger.debug(f"Initializing Arelle controller (version {ARELLE_VERSION})")
 
-    # Initialize controller
     self.cntlr = Cntlr.Cntlr(
       hasGui=False,
       logFileName=ARELLE_LOG_FILE,
@@ -154,13 +140,10 @@ class ArelleClient:
       disable_persistent_config=True,
     )
 
-    # Load plugins after controller initialization
+    # Order matters: plugins must exist before the webcache is reconfigured,
+    # and the SEC transforms are registered by the EDGAR plugin.
     self._load_plugins()
-
-    # Configure webcache settings
     self._configure_webcache()
-
-    # Register SEC transformations
     self._register_sec_transformations()
 
   def _load_plugins(self):
@@ -170,28 +153,25 @@ class ArelleClient:
 
     logger.debug("Loading Arelle plugins")
 
-    # Import and use PluginManager directly
     import sys
 
     from arelle import PluginManager
 
-    # Add the local EDGAR plugin path to Python path
+    # The EDGAR plugin is vendored under adapters/sec/arelle/, so both it and
+    # its parent must be importable before PluginManager can resolve them.
     edgar_path = os.path.join(os.path.dirname(__file__), "..", "arelle", "EDGAR")
     edgar_path = os.path.abspath(edgar_path)
     if edgar_path not in sys.path:
       sys.path.insert(0, edgar_path)
       logger.debug(f"Added EDGAR plugin path: {edgar_path}")
 
-    # Also add the parent arelle directory to the path
     arelle_plugin_path = os.path.join(os.path.dirname(__file__), "..", "arelle")
     arelle_plugin_path = os.path.abspath(arelle_plugin_path)
     if arelle_plugin_path not in sys.path:
       sys.path.insert(0, arelle_plugin_path)
 
-    # Initialize the plugin manager with the controller
     PluginManager.init(self.cntlr, loadPluginConfig=False)
 
-    # Load plugins that exist
     plugins_to_load = [
       "inlineXbrlDocumentSet",  # For inline XBRL support
       "validate/EFM",  # EFM validation (from base Arelle)
@@ -204,23 +184,22 @@ class ArelleClient:
       except Exception as e:
         logger.warning(f"Could not load plugin {plugin}: {e}")
 
-    # Load only the EDGAR transform module (not the full EDGAR plugin)
-    # The main EDGAR module tries to load EDGAR/render which requires matplotlib
-    # We only need the SEC transforms, not the renderer
+    # Only EDGAR.transform, not the whole EDGAR plugin: the top-level module
+    # pulls in EDGAR/render, which requires matplotlib. The SEC inline-XBRL
+    # transforms are all this pipeline needs.
     try:
       PluginManager.addPluginModule("EDGAR.transform")
       logger.debug("Added EDGAR.transform module")
     except Exception as e:
       logger.warning(f"Could not load EDGAR.transform module: {e}")
 
-    # Reset the plugin config to activate loaded plugins
+    # reset() is what actually activates everything added above.
     try:
       PluginManager.reset()
       logger.debug("Plugin manager reset to activate plugins")
     except Exception as e:
       logger.warning(f"Could not reset plugin manager: {e}")
 
-    # After plugins are loaded, check if we need to register SEC transformations
     self._setup_sec_transforms()
 
   def _configure_webcache(self):
@@ -231,40 +210,32 @@ class ArelleClient:
 
     webcache = self.cntlr.webCache
 
-    # Set cache directory
     if self.cache_dir:
       webcache.cacheDir = str(self.cache_dir)
       logger.debug(f"WebCache using directory: {webcache.cacheDir}")
 
-    # Set timeout configuration from module constants
     max_timeout = ARELLE_DOWNLOAD_TIMEOUT
     timeout = min(ARELLE_TIMEOUT, max_timeout)
     webcache.timeout = timeout
     logger.debug(f"WebCache timeout set to {timeout}s (env: {env.ENVIRONMENT})")
 
-    # Disable retries at the WebCache level
-    # maxRetries attribute doesn't exist, retries are handled in _wrap_webcache_with_retry
+    # WebCache exposes no maxRetries knob; retry behavior is imposed in
+    # _wrap_webcache_with_retry instead.
 
-    # Configure HTTPS redirect behavior
     webcache.httpsRedirect = True
 
-    # Set offline mode if needed or if we detect rate limiting
     work_offline = ARELLE_WORK_OFFLINE
 
-    # Check cache health but don't force offline - we want to fetch missing schemas
+    # A healthy cache does NOT force offline mode — the cache is consulted
+    # first, and anything missing is still fetched from the web.
     if self.cache_dir and self._check_cache_health():
       logger.debug(
         "Pre-cached schemas detected, will use cache first but fetch missing ones"
       )
-      # Don't force offline - allow fetching schemas we don't have cached
-      # work_offline = True
 
     webcache.workOffline = work_offline
 
-    # Configure redirect overrides for problematic domains
     self._configure_redirects(webcache)
-
-    # Add retry logic wrapper for rate limiting
     self._wrap_webcache_with_retry(webcache)
 
     if work_offline:
@@ -287,14 +258,11 @@ class ArelleClient:
       "http://taxonomies.xbrl.org": "https://taxonomies.xbrl.org",
     }
 
-    # Apply redirects to webcache normalize URL function
     original_normalize = webcache.normalizeUrl
 
     def normalize_with_redirects(url: str | None, base: str | None = None) -> str:
-      # First apply original normalization
       normalized = original_normalize(url, base)
 
-      # Then apply our redirects
       for http_url, https_url in redirect_domains.items():
         if normalized.startswith(http_url):
           normalized = normalized.replace(http_url, https_url, 1)
@@ -310,7 +278,6 @@ class ArelleClient:
     from io import BytesIO
     from urllib.response import addinfourl
 
-    # Create a wrapper class for BytesIO that mimics urllib response
     class HTTPResponseWrapper:
       """Wrapper to make BytesIO behave like an HTTP response."""
 
@@ -367,13 +334,12 @@ class ArelleClient:
         "Content-Type": "application/xml",
         "Content-Length": str(len(content_bytes)),
       }
-      # Create addinfourl object that Arelle expects
+      # Arelle expects an addinfourl, not a bare file object.
       msg = EmailMessage()
       for key, value in headers.items():
         msg[key] = value
       return addinfourl(bytesio, msg, url)
 
-    # Override the _downloadFile method to prevent retries
     original_download = (
       webcache._downloadFile if hasattr(webcache, "_downloadFile") else None
     )
@@ -397,11 +363,11 @@ class ArelleClient:
 
     def open_with_fail_fast(fullurl, data=None, timeout=None):
       """Open URL but fail fast on rate limiting - no retries."""
-      # Log what we're trying to fetch for debugging
       if not fullurl.startswith("file://") and "://" in fullurl:
         logger.debug(f"WebCache request for: {fullurl}")
 
-        # Check if it's a W3C/XBRL schema that should be cached
+        # W3C / XBRL schema hosts throttle aggressively, so the local cache is
+        # searched before any network call for those domains.
         if any(
           domain in fullurl
           for domain in [
@@ -412,21 +378,20 @@ class ArelleClient:
             "xbrl.fasb.org",
           ]
         ):
-          # Try to find it in our pre-populated cache FIRST to avoid rate limiting
           if webcache.cacheDir:
             from urllib.parse import urlparse
 
             parsed = urlparse(fullurl)
 
-            # Check multiple possible cache locations
+            # Cached schemas land under either {host}/{path} or
+            # {scheme}/{host}/{path} depending on which writer put them there,
+            # so every layout is probed before giving up on the cache.
             cache_paths = []
 
-            # Try direct path
             cache_paths.append(
               Path(webcache.cacheDir) / parsed.netloc / parsed.path.lstrip("/")
             )
 
-            # Try with http/https subdirectory
             for protocol in ["http", "https"]:
               cache_paths.append(
                 Path(webcache.cacheDir)
@@ -435,7 +400,8 @@ class ArelleClient:
                 / parsed.path.lstrip("/")
               )
 
-            # If it's HTTP, also try HTTPS version
+            # Schemas are usually cached under their https:// form even when
+            # the taxonomy references them over http://.
             if fullurl.startswith("http://"):
               https_parsed = urlparse(fullurl.replace("http://", "https://", 1))
               cache_paths.append(
@@ -450,13 +416,11 @@ class ArelleClient:
                 / https_parsed.path.lstrip("/")
               )
 
-            # Check if any cache file exists
             for potential_cache_file in cache_paths:
               if potential_cache_file.exists():
                 logger.debug(
                   f"Using pre-cached file instead of fetching: {fullurl} -> {potential_cache_file}"
                 )
-                # Return the cached content with proper wrapper
                 try:
                   with open(potential_cache_file, "rb") as f:
                     content = f.read()
@@ -466,7 +430,6 @@ class ArelleClient:
                     f"Could not read cache file {potential_cache_file}: {e}"
                   )
 
-            # Log if not found in cache
             logger.debug(f"Not in pre-populated cache, will try to fetch: {fullurl}")
 
       try:
@@ -478,13 +441,12 @@ class ArelleClient:
             f"Rate limited ({e.code}) on {fullurl}, returning empty to continue processing"
           )
 
-          # Check if we have it in cache (try both HTTP and HTTPS versions)
+          # Fall back to the cache before giving up, probing the same layouts
+          # as the pre-fetch path above.
           if webcache.cacheDir:
             try:
-              # Try the original URL first
               cache_filepath = webcache.urlToCacheFilepath(fullurl)
 
-              # If not found and it's HTTP, try HTTPS version
               if (
                 not cache_filepath or not os.path.exists(cache_filepath)
               ) and fullurl.startswith("http://"):
@@ -494,12 +456,10 @@ class ArelleClient:
                   f"Trying HTTPS cache path for HTTP URL: {fullurl} -> {https_url}"
                 )
 
-              # Also check the direct cache structure (domain/path)
               if not cache_filepath or not os.path.exists(cache_filepath):
                 from urllib.parse import urlparse
 
                 parsed = urlparse(fullurl)
-                # Try both http and https subdirectories
                 for protocol in ["http", "https", ""]:
                   if protocol:
                     potential_path = (
@@ -533,44 +493,42 @@ class ArelleClient:
             except Exception as e:
               logger.error(f"Could not check cache for {fullurl}: {e}")
 
-          # Return empty response immediately - no retries
+          # An empty body lets the filing keep processing; retrying here would
+          # only deepen the throttle.
           logger.warning(f"No cached version for {fullurl}, returning empty")
           return create_response_wrapper(b"", fullurl)
         else:
-          # For other errors, just propagate them
           raise
       except Exception as e:
         logger.warning(f"Error fetching {fullurl}: {e}")
         raise
 
-    # Replace the opener's open method
     if hasattr(webcache, "opener"):
       webcache.opener.open = open_with_fail_fast
 
   def _register_sec_transformations(self):
-    """Register SEC inline XBRL transformations."""
-    # This will be called from _setup_sec_transforms after plugins are loaded
+    """No-op hook; the real work happens in `_setup_sec_transforms`."""
     pass
 
   def _setup_sec_transforms(self):
-    """Setup SEC inline XBRL transformations after plugins are loaded."""
+    """Register the SEC inline-XBRL transform functions with Arelle.
+
+    Loading `EDGAR.transform` does not always populate
+    `FunctionIxt.ixtNamespaceFunctions`, and without those entries every
+    `ix:` transform in an SEC filing fails to resolve, so they are wired in
+    by hand here. Idempotent — an already-registered namespace is left alone.
+    """
     if not self.cntlr:
       return
 
     try:
-      # The EDGAR transform plugin should have registered the SEC transformations
-      # Let's verify they're loaded
       from arelle import FunctionIxt
 
-      # SEC transformation namespace
       sec_namespace = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 
-      # Try to manually register SEC transforms if they're not loaded
       try:
-        # Import the EDGAR transform module
         import EDGAR.transform as edgar_transform  # type: ignore[import]
 
-        # The EDGAR transform module has functions like duryear, durmonth, etc.
         sec_transforms = {
           "duryear": edgar_transform.duryear,
           "durmonth": edgar_transform.durmonth,
@@ -592,7 +550,6 @@ class ArelleClient:
           "edgarprovcountryen": edgar_transform.edgarprovcountryen,
         }
 
-        # Register the transforms with FunctionIxt
         if not hasattr(FunctionIxt, "ixtNamespaceFunctions"):
           FunctionIxt.ixtNamespaceFunctions = {}
 
@@ -605,7 +562,6 @@ class ArelleClient:
       except ImportError as e:
         logger.warning(f"Could not import EDGAR transform module: {e}")
 
-      # Verify registration
       if hasattr(FunctionIxt, "ixtNamespaceFunctions"):
         if sec_namespace in FunctionIxt.ixtNamespaceFunctions:
           transform_count = len(FunctionIxt.ixtNamespaceFunctions[sec_namespace])
@@ -621,17 +577,10 @@ class ArelleClient:
       logger.warning(f"Error setting up SEC transforms: {e}")
 
   def controller(self, url: str) -> ModelXbrl.ModelXbrl:
-    """
-    Load an XBRL document and return the model.
+    """Load an XBRL document (URL or local path) into a ModelXbrl.
 
-    Args:
-        url: URL or file path to the XBRL document
-
-    Returns:
-        ModelXbrl instance with loaded document
-
-    Raises:
-        Exception: If document fails to load
+    EFM validation parameters are configured first when the URL looks like an
+    SEC filing. Raises if the document fails to load.
     """
     if not self.cntlr:
       self._initialize_controller()
@@ -640,18 +589,15 @@ class ArelleClient:
 
     logger.debug(f"Loading XBRL document from: {url}")
 
-    # Set up filing parameters for EFM validation if needed
     if self._is_sec_filing(url):
       self._configure_efm_validation()
 
     try:
-      # Load the model
       modelXbrl = self.cntlr.modelManager.load(url)
 
       if not modelXbrl or modelXbrl.modelDocument is None:
         raise Exception(f"Failed to load XBRL document from {url}")
 
-      # Log any errors
       if modelXbrl.errors:
         logger.error(f"Errors loading {url}: {modelXbrl.errors}")
 
@@ -662,27 +608,17 @@ class ArelleClient:
       raise
 
   def validate(self, modelXbrl: ModelXbrl.ModelXbrl) -> dict[str, Any]:
-    """
-    Validate an XBRL model with EFM validation if applicable.
+    """Validate a model, applying EFM rules when the filing is an SEC one.
 
-    Args:
-        modelXbrl: The model to validate
-
-    Returns:
-        Dictionary with validation results
+    Returns `{"valid", "errors", "warnings", "efm_validated"}`.
     """
     logger.debug("Starting XBRL validation")
 
-    # Import validation module
     from arelle import ValidateXbrl
 
-    # Create validator
     validate = ValidateXbrl.ValidateXbrl(modelXbrl)
-
-    # Set validation parameters
     validate.validate(modelXbrl)
 
-    # Collect results
     results = {
       "valid": len(modelXbrl.errors) == 0,
       "errors": [str(e) for e in modelXbrl.errors],
@@ -715,7 +651,8 @@ class ArelleClient:
 
     logger.info("Configuring EFM validation for SEC filing")
 
-    # Set disclosure system - try different EFM disclosure system names
+    # Arelle builds vary in which EFM disclosure system names they expose;
+    # take the first that the installed version accepts.
     disclosure_systems = ["efm-all-years", "efm-entire-us", "efm", "us-gaap"]
 
     for ds in disclosure_systems:
@@ -745,9 +682,8 @@ class ArelleClient:
       self.cntlr = None
 
 
-# For backward compatibility
 if __name__ == "__main__":
-  # Test the client
+  # Smoke test: load and validate one real filing.
   client = ArelleClient()
   test_url = "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000116/nvda-20250427.htm"
 

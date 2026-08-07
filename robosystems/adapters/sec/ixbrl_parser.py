@@ -197,15 +197,8 @@ class iXBRLParser:
     ix:continuation chains for split content. Each section includes
     the list of XBRL elements (numeric facts) it contains.
 
-    Uses string-find based tag matching instead of regex with (.*?) to
-    avoid catastrophic memory usage on large filings (the old regex
-    approach caused 7GB+ allocation on 5MB files).
-
-    Args:
-        html: Raw iXBRL HTML content
-
-    Returns:
-        List of disclosure sections with element metadata
+    Tag matching goes through `_find_tag_blocks` (string-find, not regex) —
+    see that function for why regex is unusable on filings this size.
     """
     # Build continuation lookup: id → content
     continuations = self._build_continuation_map(html)

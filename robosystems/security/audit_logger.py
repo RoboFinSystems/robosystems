@@ -188,18 +188,12 @@ class SecurityAuditLogger:
     risk_level: str = "medium",
   ):
     """
-    Log a security event with structured data.
+    Log a security event as structured JSON, and publish its CloudWatch metric.
 
-    Args:
-        event_type: Type of security event
-        user_id: User identifier (if available)
-        ip_address: Client IP address
-        user_agent: Client user agent
-        endpoint: API endpoint accessed
-        details: Additional event details
-        risk_level: Risk level (low, medium, high, critical)
+    ``risk_level`` is one of low, medium, high, critical. Setting
+    ``details["admin"]`` on an auth-failure event also emits the dedicated
+    admin-surface metric.
     """
-    # Skip audit logging in dev environment if disabled
     environment = env.ENVIRONMENT.lower()
     audit_enabled = env.SECURITY_AUDIT_ENABLED
 
@@ -461,7 +455,6 @@ class SecurityAuditLogger:
     )
 
 
-# Convenience function for backward compatibility
 def log_security_event(event_type: SecurityEventType, **kwargs):
-  """Convenience function for logging security events."""
+  """Module-level shorthand for :meth:`SecurityAuditLogger.log_security_event`."""
   return SecurityAuditLogger.log_security_event(event_type, **kwargs)

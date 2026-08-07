@@ -17,20 +17,16 @@ security = HTTPBearer()
 
 
 class AdminAuthMiddleware:
-  """Middleware for admin authentication using centralized Secrets Manager."""
+  """Bearer-token authentication for the admin API, against the admin key
+  held in AWS Secrets Manager.
+  """
 
   def __init__(self):
-    """Initialize the admin auth middleware."""
     self.secrets_manager = get_secrets_manager()
 
   def _get_admin_key(self) -> str | None:
-    """Get admin API key from AWS Secrets Manager.
-
-    Returns:
-        The admin key string, or None if not found
-    """
+    """Fetch the admin key from Secrets Manager, or None if unavailable."""
     try:
-      # Use centralized secrets manager with built-in caching
       admin_key = self.secrets_manager.get_admin_key()
 
       if admin_key:
@@ -45,22 +41,17 @@ class AdminAuthMiddleware:
       return None
 
   def verify_admin_key(self, api_key: str) -> dict[str, Any] | None:
-    """Verify an admin API key.
+    """Return key metadata when `api_key` matches the admin key, else None.
 
-    Args:
-        api_key: The API key to verify
-
-    Returns:
-        Key metadata if valid, None otherwise
+    The comparison is constant-time so a wrong key leaks no timing signal
+    about how much of it was right.
     """
     admin_key = self._get_admin_key()
 
     if not admin_key:
       return None
 
-    # Check if the provided key matches (constant-time comparison)
     if hmac.compare_digest(api_key, admin_key):
-      # Return metadata for the valid key
       return {
         "key_id": "admin",
         "name": "Admin API Key",
@@ -73,16 +64,9 @@ class AdminAuthMiddleware:
   async def __call__(
     self, request: Request, credentials: HTTPAuthorizationCredentials = None
   ):
-    """Authenticate admin requests.
-
-    Args:
-        request: FastAPI request object
-        credentials: Bearer token credentials
-
-    Raises:
-        HTTPException: If authentication fails
+    """Authenticate an admin request, raising 401 when the key is missing or
+    wrong, and publishing the key metadata on `request.state.admin`.
     """
-    # Get the authorization header
     auth_header = request.headers.get("Authorization")
 
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -92,10 +76,8 @@ class AdminAuthMiddleware:
         headers={"WWW-Authenticate": "Bearer"},
       )
 
-    # Extract the token
-    api_key = auth_header[7:]  # Remove "Bearer " prefix
+    api_key = auth_header[7:]
 
-    # Verify the admin key
     key_metadata = self.verify_admin_key(api_key)
 
     if not key_metadata:
@@ -113,7 +95,6 @@ class AdminAuthMiddleware:
         headers={"WWW-Authenticate": "Bearer"},
       )
 
-    # Store admin metadata in request state
     request.state.admin = key_metadata
     request.state.admin_key_id = key_metadata["key_id"]
 
@@ -127,35 +108,23 @@ class AdminAuthMiddleware:
     )
 
 
-# Create singleton instance
 admin_auth = AdminAuthMiddleware()
 
 
 def require_admin(permissions: list[str] | None = None):
-  """Decorator to require admin authentication and check permissions.
-
-  Args:
-      permissions: List of required permissions (default: any permission)
-
-  Returns:
-      Decorated function
-  """
+  """Require admin authentication, and any of `permissions` when given."""
 
   def decorator(func):
     @wraps(func)
     async def wrapper(request: Request, *args, **kwargs):
-      # Run authentication
       await admin_auth(request)
 
-      # Check permissions if specified
       if permissions:
         admin_permissions = request.state.admin.get("permissions", [])
 
-        # Check for wildcard permission
         if "*" in admin_permissions:
           pass  # Has all permissions
         else:
-          # Check if user has required permissions
           has_permission = any(perm in admin_permissions for perm in permissions)
           if not has_permission:
             raise HTTPException(
@@ -163,7 +132,6 @@ def require_admin(permissions: list[str] | None = None):
               detail=f"Insufficient permissions. Required: {permissions}",
             )
 
-      # Call the original function
       return await func(request, *args, **kwargs)
 
     return wrapper

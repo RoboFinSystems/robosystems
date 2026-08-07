@@ -88,16 +88,11 @@ class StructureListResponse(BaseModel):
 class CreateStructureRequest(BaseModel):
   name: str
   description: str | None = None
-  # NOTE: `cash_flow_statement` and `comprehensive_income` are intentionally
-  # omitted from this Literal even though the DB CHECK constraint allows them.
-  # The roboledger CF and CI renderers aren't implemented yet, so API
-  # requests to *create* those structures are rejected at the Pydantic
-  # layer. Any pre-existing rows with those block_types would only
-  # round-trip through this model if a write path validates it — the read
-  # path uses `str`-typed response models and is unaffected. Confirmed no
-  # rows in local/demo as of this commit; staging should be spot-checked
-  # before rollout. SEC XBRL cash-flow parsing is a separate pipeline and
-  # is unaffected. When the renderers land, add both back here.
+  # `cash_flow_statement` and `comprehensive_income` are deliberately omitted
+  # even though the DB CHECK constraint allows them: the roboledger CF and CI
+  # renderers do not exist, so creating those structures is refused here at the
+  # Pydantic layer. Reads are unaffected — response models type block_type as
+  # `str`. Add both back when the renderers land.
   block_type: Literal[
     "chart_of_accounts",
     "income_statement",

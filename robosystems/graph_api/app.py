@@ -1,15 +1,10 @@
-"""
-Graph API FastAPI application setup.
-
-This module creates the FastAPI application with all routers and middleware.
-"""
+"""Graph API application factory: builds the FastAPI app, routers, middleware."""
 
 import os
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# OpenTelemetry import - conditional based on OTEL_ENABLED
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -44,7 +39,6 @@ except Exception:
 def create_app() -> FastAPI:
   """Create FastAPI application with all endpoints."""
 
-  # Set appropriate service name based on node type (only if OTEL is enabled)
   node_type = env.LBUG_NODE_TYPE
   if env.OTEL_ENABLED:
     os.environ["OTEL_SERVICE_NAME"] = f"graph-api-{node_type}"
@@ -54,16 +48,15 @@ def create_app() -> FastAPI:
     """Manage application lifespan events."""
     import asyncio
 
-    # Startup
     logger.info("Graph API starting up")
 
     # Replica warmup: load data into OS page cache before serving traffic.
-    # LadybugDB is columnar — each property is a separate column file on disk.
-    # A simple count(n) only touches the node ID column. These queries force
-    # the OS to page in label indexes and property columns so that real MCP
-    # queries don't hit cold disk on first call. Edge/relationship columns are
-    # not warmed here (untyped edge scans are too expensive on large graphs)
-    # but will load quickly once node data is already cached.
+    # LadybugDB is columnar — each property is a separate column file on disk,
+    # and a plain count(n) only touches the node ID column. These queries force
+    # the OS to page in label indexes and property columns so real queries don't
+    # hit cold disk on first call. Edge columns are not warmed (untyped edge
+    # scans are too expensive on large graphs) but load quickly once node data
+    # is cached.
     if os.getenv("LBUG_ROLE") == "replica":
 
       async def warmup_local_databases():
@@ -86,8 +79,8 @@ def create_app() -> FastAPI:
             succeeded = 0
             failed = 0
 
-            # Step 1: Label scan — pages in node label index data and
-            # collects discovered labels for per-label property scans.
+            # Label scan: pages in node label index data and collects the
+            # labels for the per-label property scans below.
             node_labels: list[str] = []
             try:
               with service.db_manager.get_connection(db_name, read_only=True) as conn:
@@ -105,8 +98,8 @@ def create_app() -> FastAPI:
               failed += 1
               logger.warning(f"Warmup [{db_name}] label scan: {e}")
 
-            # Step 2: Per-label property scan — RETURN n LIMIT 500 forces
-            # LadybugDB to read all property column files for each label.
+            # Per-label property scan: RETURN n LIMIT 500 forces LadybugDB to
+            # read every property column file for the label.
             for label in node_labels:
               if not _valid_label.match(label):
                 logger.warning(f"Warmup [{db_name}] skipping invalid label: {label}")
@@ -140,11 +133,9 @@ def create_app() -> FastAPI:
 
       asyncio.create_task(warmup_local_databases())
 
-    # Clear stale extension cache from persistent volume
-    # LadybugDB caches extensions in {home_directory}/.lbug/extension/
-    # When container images are updated, stale cached extensions can cause
-    # ABI mismatch errors (undefined symbols). Clear the cache on startup
-    # to force LadybugDB to use fresh extensions from the container image.
+    # Extensions cached on the persistent volume survive container image
+    # updates and then fail with ABI mismatches (undefined symbols). Clearing
+    # the cache at startup forces LadybugDB to load the image's extensions.
     import shutil
 
     cache_paths_to_clear = [
@@ -163,10 +154,9 @@ def create_app() -> FastAPI:
         except Exception as e:
           logger.warning(f"Failed to clear extension cache at {cache_path}: {e}")
 
-    # Initialize DuckDB connection pool for staging tables
-    # Masters use staging for materialization; replicas use it for MCP vector search.
-    # Replicas download staging files in the background after startup, so the pool
-    # initializes with the path but connections are lazy (created on first query).
+    # DuckDB staging pool: masters use staging for materialization, replicas for
+    # MCP vector search. Replicas download staging files in the background after
+    # startup, so connections are lazy — created on first query, not here.
     from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 
     duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
@@ -182,14 +172,12 @@ def create_app() -> FastAPI:
 
     yield  # Application runs here
 
-    # Shutdown
     logger.info("Graph API shutting down")
     if duckdb_pool is not None:
       duckdb_pool.close_all_connections()
       logger.info("Closed all DuckDB connections")
 
-  # Load description from markdown file
-  base_dir = Path(__file__).parent.parent.parent  # Go up to project root
+  base_dir = Path(__file__).parent.parent.parent  # project root
   description_file = base_dir / "static" / "graph-api-description.md"
   api_description = (
     description_file.read_text()
@@ -197,7 +185,6 @@ def create_app() -> FastAPI:
     else "RoboSystems multi-database graph cluster management API"
   )
 
-  # Generate title based on node type
   api_title = "RoboSystems Graph API"
 
   app = FastAPI(
@@ -211,7 +198,7 @@ def create_app() -> FastAPI:
     openapi_tags=GRAPH_API_TAGS,
   )
 
-  # Add API key security scheme to OpenAPI documentation
+  # Document the API key security scheme in the published OpenAPI spec.
   if app.openapi_schema is None:
     from fastapi.openapi.utils import get_openapi
 
@@ -227,7 +214,6 @@ def create_app() -> FastAPI:
         tags=app.openapi_tags,
       )
 
-      # Add security scheme for API key
       openapi_schema["components"]["securitySchemes"] = {
         "ApiKeyHeader": {
           "type": "apiKey",
@@ -237,7 +223,6 @@ def create_app() -> FastAPI:
         }
       }
 
-      # Apply security to all endpoints except exempt ones
       exempt_paths = {
         "/health",
         "/status",
@@ -259,7 +244,7 @@ def create_app() -> FastAPI:
 
     app.openapi = custom_openapi
 
-  # Add CORS middleware - restrictive for VPC-internal API
+  # CORS is deliberately restrictive: this API is VPC-internal.
   lbug_cors_origins = env.get_lbug_cors_origins()
   app.add_middleware(
     CORSMiddleware,
@@ -269,7 +254,6 @@ def create_app() -> FastAPI:
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Graph-API-Key"],
   )
 
-  # Add request size limit middleware
   try:
     from .middleware import RequestSizeLimitMiddleware
 
@@ -278,7 +262,7 @@ def create_app() -> FastAPI:
   except Exception as e:
     logger.warning(f"Request size limit middleware not loaded: {e}")
 
-  # Add authentication middleware (only for prod/staging)
+  # Authentication is enforced in prod/staging only.
   try:
     from .middleware import LadybugAuthMiddleware
 
@@ -287,7 +271,6 @@ def create_app() -> FastAPI:
   except Exception as e:
     logger.warning(f"LadybugDB authentication middleware not loaded: {e}")
 
-  # Setup OpenTelemetry instrumentation (only if enabled)
   if env.OTEL_ENABLED and setup_telemetry is not None:
     logger.info("OpenTelemetry is ENABLED for Graph API")
     # Suppress noisy OTEL logs
@@ -301,12 +284,10 @@ def create_app() -> FastAPI:
   else:
     logger.info("OpenTelemetry is DISABLED for Graph API - no metrics collection")
 
-  # Mount static files from main static directory
   static_dir = base_dir / "static"
   if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-  # Custom docs route with dark theme at root
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
   async def custom_docs():
     """Custom Swagger docs with dark theme."""
@@ -315,12 +296,10 @@ def create_app() -> FastAPI:
 
       return HTMLResponse(content=generate_lbug_docs())
     except ImportError:
-      # Fallback to default FastAPI docs
       from fastapi.openapi.docs import get_swagger_ui_html
 
       return get_swagger_ui_html(openapi_url="/openapi.json", title=api_title)
 
-  # Custom ReDoc route with dark theme
   @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
   async def custom_redoc():
     """Custom ReDoc with dark theme."""
@@ -329,14 +308,12 @@ def create_app() -> FastAPI:
 
       return HTMLResponse(content=generate_redoc_docs(title="RoboSystems Graph API"))
     except ImportError:
-      # Fallback to default ReDoc
       from fastapi.openapi.docs import get_redoc_html
 
       return get_redoc_html(openapi_url="/openapi.json", title=api_title)
 
-  # Include all routers
   app.include_router(health.router)  # /health for load balancer health checks
-  app.include_router(info.router)  # /info for comprehensive cluster info
+  app.include_router(info.router)  # /info for cluster info
   app.include_router(metrics.router)  # /metrics for monitoring systems
 
   # Database routers
@@ -361,9 +338,7 @@ def create_app() -> FastAPI:
   app.include_router(tasks.router)
   app.include_router(migration.router)
 
-  # Table routers (DuckDB staging) - now database-scoped under /databases/{graph_id}/tables
+  # Table routers (DuckDB staging), scoped under /databases/{graph_id}/tables
   app.include_router(databases.tables.router)
-
-  # Volume management (only on EC2)
 
   return app

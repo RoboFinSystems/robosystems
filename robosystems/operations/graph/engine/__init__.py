@@ -1,11 +1,6 @@
-"""
-graph database engine operations and management.
+"""Low-level LadybugDB plumbing: backup, ingestion, paths, schema setup.
 
-This module contains low-level graph database operations including:
-- Backup and restore operations
-- Data ingestion processes
-- Path and filesystem utilities
-- Schema initialization and management
+The business-logic layer above it is :mod:`robosystems.operations.graph`.
 """
 
 from .backup import LadybugGraphBackupService, create_graph_backup_service

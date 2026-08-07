@@ -14,10 +14,11 @@ it cleanly even if the count fails.
 Cursor
 ------
 
-We carry an `in_progress` cursor that maps `graph_id → submitted_at_iso`
-for runs that have been queued but haven't been confirmed
-materialized yet. Entries expire after ``_CURSOR_EXPIRY_SECONDS`` so a
-sensor failure doesn't permanently block a graph.
+An `in_progress` cursor maps `graph_id → submitted_at_iso` for runs that have
+been queued and not yet observed as finished, so a graph is not resubmitted on
+the next tick. Entries expire after ``_CURSOR_EXPIRY_SECONDS``, and entries for
+graphs not seen on a tick are dropped, so a failed run or a sensor failure
+never blocks a graph permanently.
 
 Cadence
 -------

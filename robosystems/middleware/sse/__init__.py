@@ -1,27 +1,20 @@
-"""
-Server-Sent Events (SSE) middleware for unified operation monitoring.
+"""Server-Sent Events middleware for operation monitoring.
 
-This package provides infrastructure for real-time operation monitoring
-using Server-Sent Events with Redis-based event persistence.
+- `event_storage` — Redis event persistence with TTL and replay
+- `streaming` — SSE stream generator and connection management
+- `operation_manager` — operation lifecycle helpers
+- `redis_subscriber` — relays worker-emitted events into the API process
 
-Key Components:
-- EventStorage: Redis-based event persistence with TTL
-- Streaming: SSE endpoint and connection management
-- OperationManager: High-level operation lifecycle management
+Endpoints queue work and hand back the operation's stream link:
 
-Usage Example:
-    # In an endpoint
-    from robosystems.middleware.sse import create_operation_response, get_operation_manager
-
-    # Start an operation
     response = await create_operation_response("graph_creation", user.id, graph_id)
 
-    # In a worker/task
+The worker then reports progress; the context manager completes or fails
+the operation on exit:
+
     manager = get_operation_manager()
     async with manager.operation_context("graph_creation", user.id) as op_id:
         await manager.emit_progress(op_id, "Creating nodes...")
-        # ... do work
-        # Operation is automatically completed/failed
 """
 
 from robosystems.dagster.jobs.notifications import build_email_job_config

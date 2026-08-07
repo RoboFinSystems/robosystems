@@ -5,10 +5,11 @@ Each module exposes a `@strawberry.type` class (e.g., `LedgerQuery`,
 `graphql/schema.py` composes the top-level `Query` root from all of
 them via inheritance.
 
-Resolvers stay thin — every field body should be ~3 lines:
-1. Authenticate + graph-access check (`require_user` + `check_graph_access`)
-2. Open an `extensions_session(graph_id)`
-3. Call into `operations/{domain}/reads/*.py`
+Resolvers stay thin — a field body is typically three lines:
+1. `open_extensions_session(info, ...)` (or `open_library_session`), which
+   runs the auth and extension gates
+2. Call into `operations/{domain}/reads/*.py`
+3. Wrap the Pydantic result in its Strawberry type
 
 No business logic lives here. Error translation: `None` returns become
 `null` in the response; `ValueError`/`ProgrammingError` from a missing

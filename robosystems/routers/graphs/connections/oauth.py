@@ -82,7 +82,6 @@ async def init_oauth(
       redirect_uri=request.redirect_uri,
     )
 
-    # Return OAuth init response
     return OAuthInitResponse(
       auth_url=auth_url,
       state=state,
@@ -150,7 +149,6 @@ async def oauth_callback(
     connection_id = state_data["connection_id"]
     redirect_uri = state_data["redirect_uri"]
 
-    # Get connection
     connection = await ConnectionService.get_connection(
       connection_id, current_user.id, graph_id=graph_id
     )
@@ -177,12 +175,10 @@ async def oauth_callback(
         quickbooks_oauth_provider,
       )
 
-      # Exchange code for tokens
       tokens = await quickbooks_oauth_handler.exchange_code_for_tokens(
         request.code, redirect_uri
       )
 
-      # Extract provider data
       provider_data = quickbooks_oauth_provider.extract_provider_data(
         {"realmId": request.realm_id}
       )
@@ -236,7 +232,6 @@ async def oauth_callback(
       # else at the freshly-created pending id.
       target_connection_id = revived_id or connection_id
 
-      # Store tokens
       quickbooks_oauth_handler.store_tokens(
         target_connection_id, tokens, provider_data, db, user_id=str(current_user.id)
       )
@@ -261,7 +256,6 @@ async def oauth_callback(
         db_session=db,
       )
 
-      # Validate connection
       is_valid = await quickbooks_oauth_provider.validate_connection(
         tokens["access_token"], provider_data.get("realm_id")
       )

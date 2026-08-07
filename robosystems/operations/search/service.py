@@ -97,13 +97,12 @@ class SearchService:
       source = hit.get("_source", {})
       highlight = hit.get("highlight", {})
 
-      # Build snippet from highlights or fallback
       content_fragments = highlight.get("content", [])
       if content_fragments:
         snippet = " ... ".join(content_fragments)
       else:
-        # No highlight — we excluded content from _source in search,
-        # so use section_label as minimal context
+        # The search excludes content from _source, so with no highlight
+        # section_label is the only context available.
         snippet = source.get("section_label", "")
 
       # Extract PG document ID for user docs: "udoc_{pg_doc_id}_{idx}" → pg_doc_id
@@ -184,43 +183,35 @@ class SearchService:
   ) -> DocumentUploadResponse:
     """Upload a markdown document: parse, section, embed, and index.
 
-    Args:
-        graph_id: Target graph for tenant isolation.
-        request: Document upload request with title, content, etc.
-
-    Returns:
-        DocumentUploadResponse with section IDs and counts.
+    Re-uploading the same ``external_id`` (or the same content, when no
+    external_id is given) replaces the previous sections rather than
+    duplicating them.
     """
     from .embeddings import EMBEDDING_MODEL_ID
     from .markdown_parser import content_hash, parse_document
 
-    # Parse markdown
     metadata, sections = parse_document(request.content, request.title)
     if not sections:
       raise ValueError("Document produced no indexable sections")
 
-    # Generate base document ID
-    # User docs use "udoc_" prefix so the PG document ID is trivially extractable
-    # from search results: "udoc_{pg_doc_id}_{section_idx}" → rsplit("_", 1)[0][5:]
-    # SEC/pipeline docs use "doc_" prefix (no PG document table).
+    # User docs take a "udoc_" prefix so the PG document ID is trivially
+    # extractable from search results: "udoc_{pg_doc_id}_{section_idx}" →
+    # rsplit("_", 1)[0][5:]. SEC/pipeline docs use "doc_" (no PG document row).
     if request.external_id:
       base_id = f"udoc_{request.external_id}"
     else:
       base_id = f"udoc_{content_hash(request.content)}"
 
-    # Remove old sections if re-uploading
     self.client.delete_by_document_prefix(graph_id, base_id)
 
-    # Use frontmatter values, falling back to request fields
+    # Frontmatter wins over the request fields.
     doc_title = metadata.get("title", request.title)
     doc_tags = metadata.get("tags", request.tags)
     doc_folder = metadata.get("folder", request.folder)
 
-    # Embed all section contents
     section_texts = [s["content"] for s in sections]
     embeddings = self.embedding_service.embed_batch(section_texts)
 
-    # Build OpenSearch documents
     os_docs: list[dict[str, Any]] = []
     section_ids: list[str] = []
     total_length = 0
@@ -258,11 +249,13 @@ class SearchService:
     )
 
   def delete_document(self, graph_id: str, document_id: str) -> bool:
-    """Delete a document and all its sections."""
-    # Try exact match first
+    """Delete a document and all its sections.
+
+    Tries an exact id match first, then falls back to a prefix match that
+    sweeps every section of a multi-section document.
+    """
     if self.client.delete_document(document_id, graph_id):
       return True
-    # Try prefix match (delete all sections of a multi-section doc)
     deleted = self.client.delete_by_document_prefix(graph_id, document_id)
     return deleted > 0
 
@@ -276,7 +269,6 @@ class SearchService:
 
     documents: list[DocumentListItem] = []
     for bucket in doc_buckets:
-      # Extract nested aggregation values
       source_types = bucket.get("source_type", {}).get("buckets", [])
       st = source_types[0]["key"] if source_types else "uploaded_doc"
       folders = bucket.get("folder", {}).get("buckets", [])

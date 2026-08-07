@@ -1,5 +1,4 @@
-"""
-Common types and enums for the graph middleware.
+"""Common types and enums for the graph middleware.
 
 This module defines the type system for distinguishing between different categories
 and types of graphs in the system, providing clear separation between user-created
@@ -174,15 +173,11 @@ class GraphTypeRegistry:
 
   @classmethod
   def get_graph_id_pattern(cls) -> str:
-    """
-    Build graph ID validation pattern for API endpoints.
+    """Build graph ID validation pattern for API endpoints.
 
     Format: kg + 20 hex characters (lowercase hex from ULID generation)
     Special cases: Shared repository names from registry
     Regex accepts 16+ chars to remain compatible with older graph IDs.
-
-    Returns:
-        Regex pattern string for validating graph IDs
     """
     repo_names = "|".join(cls._get_shared_repo_ids())
     return f"^(kg[a-f0-9]{{16,}}|{repo_names})$"
@@ -202,17 +197,7 @@ class GraphTypeRegistry:
     session: Any | None = None,
     graph_tier: GraphTier | None = None,
   ) -> GraphIdentity:
-    """
-    Identify a graph from its ID using database lookup.
-
-    Args:
-        graph_id: The graph identifier
-        session: Optional database session for lookup
-        graph_tier: Optional graph tier override
-
-    Returns:
-        GraphIdentity with category and type information
-    """
+    """Identify a graph from its ID using database lookup."""
     # The registry is authoritative for what is shared. Shared-repo subgraph
     # rows are created with is_repository=False (subgraph_service), so trusting
     # the row alone classified sec_historical as a READ_WRITE user graph.
@@ -284,7 +269,6 @@ class GraphTypeRegistry:
         access_pattern=AccessPattern.READ_ONLY,
       )
 
-    # Check if it's a system graph
     if graph_id in ["system", "metadata", "config"]:
       return GraphIdentity(
         graph_id=graph_id,
@@ -370,17 +354,10 @@ SUBGRAPH_NAME_PATTERN = r"^[a-zA-Z0-9]{1,20}$"
 
 
 def is_subgraph_id(graph_id: str) -> bool:
-  """
-  Check if graph_id is a subgraph ID.
+  """Check if graph_id is a subgraph ID.
 
   Subgraph IDs have a parent_subgraph format where the parent is either
   a user graph (kg[hex]{16,}) or a shared repository ID.
-
-  Args:
-      graph_id: The graph identifier to check
-
-  Returns:
-      True if graph_id is a subgraph ID, False otherwise
 
   Examples:
       >>> is_subgraph_id("kg0123456789abcdef_dev")
@@ -415,7 +392,6 @@ def is_subgraph_id(graph_id: str) -> bool:
     if all(c in "0123456789abcdef" for c in hex_part):
       return True
 
-  # Check if parent is a shared repository
   if parent_part in GraphTypeRegistry._get_shared_repo_ids():
     return True
 
@@ -423,17 +399,7 @@ def is_subgraph_id(graph_id: str) -> bool:
 
 
 def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
-  """
-  Parse graph_id into parent graph ID and optional subgraph name.
-
-  Args:
-      graph_id: The graph identifier to parse
-
-  Returns:
-      Tuple of (parent_graph_id, subgraph_name)
-      - For parent graphs: (graph_id, None)
-      - For subgraphs: (parent_id, subgraph_name)
-      - For shared repos: (graph_id, None)
+  """Parse graph_id into parent graph ID and optional subgraph name.
 
   Examples:
       >>> parse_graph_id("kg0123456789abcdef_dev")
@@ -452,22 +418,11 @@ def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
 
 
 def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:
-  """
-  Construct a full subgraph ID from parent graph ID and subgraph name.
-
-  Args:
-      parent_graph_id: The parent graph identifier
-      subgraph_name: The subgraph name
-
-  Returns:
-      Full subgraph ID in format: parent_id_subgraph_name
+  """Construct a full subgraph ID from parent graph ID and subgraph name.
 
   Examples:
       >>> construct_subgraph_id("kg0123456789abcdef", "dev")
       "kg0123456789abcdef_dev"
-
-  Raises:
-      ValueError: If parent_graph_id or subgraph_name are invalid
   """
   if not parent_graph_id:
     raise ValueError("parent_graph_id cannot be empty")

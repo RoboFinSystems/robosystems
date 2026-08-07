@@ -33,9 +33,6 @@ def sec_entity_extract(
 
   The shared SEC pipeline is the sole source — if a filing isn't in
   the raw bucket, it's skipped.
-
-  Returns:
-      MaterializeResult with filing discovery metadata
   """
   import boto3
 

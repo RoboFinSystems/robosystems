@@ -40,9 +40,6 @@ def sec_duckdb_s3_published(
   - Graph Client Factory (auth, routing, circuit breakers)
   - DuckDB VACUUM + CHECKPOINT + S3 multipart upload on-instance
   - Upload verification
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
   """
   return publish_duckdb_to_s3(context, graph_id="sec")
 
@@ -63,8 +60,5 @@ def sec_historical_duckdb_s3_published(
   """Publish SEC historical DuckDB staging database to S3.
 
   Runs VACUUM + CHECKPOINT on-instance before S3 multipart upload.
-
-  Returns:
-      MaterializeResult with S3 URI and upload statistics
   """
   return publish_duckdb_to_s3(context, graph_id="sec_historical")

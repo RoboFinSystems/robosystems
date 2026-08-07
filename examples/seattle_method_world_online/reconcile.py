@@ -1,35 +1,39 @@
 #!/usr/bin/env python3
-"""Reconcile the World Online graph against Charlie's published pivot.
+"""Reconcile the World Online graph against the published transaction pivot.
 
-Charlie ships ``SummaryOfTransactions.csv`` — a
-``(StandardLineItem x StandardBusinessEvent) -> (Amount, Count)`` pivot
-over all 22,288 GL lines. That pivot IS the "summary of business event
-information" his README asks the report to produce, and it's the natural
-reconciliation reference (far simpler than Test Case 1's ``instance.xml``
-parsing).
+The dataset ships ``SummaryOfTransactions.csv``: a
+``(StandardLineItem x StandardBusinessEvent) -> (Amount, Count)`` pivot over
+all 22,288 GL lines. That pivot is the summary of business-event information
+the reporting framework asks for, which makes it the natural reference for
+checking the ingestion.
 
-This script reproduces the same pivot from the ingested graph — group
-LineItems by ``(line-item element qname, flow element qname)`` and sum
-``debit_amount - credit_amount`` (debit-positive cents) plus a row count
-— then compares cell-by-cell against the CSV and classifies every delta
-per the methodology's four categories:
+This rebuilds the same pivot from the ingested graph — group line items by
+(line-item concept, flow concept), sum ``debit_amount - credit_amount`` in
+debit-positive cents, count the rows — then compares it cell by cell and
+classifies every difference into one of four categories:
 
   Matching | Methodology gap | Our bug | Their data quality
 
-The amount column in both the GL and the summary is already
-debit-positive signed, so the comparison is direct (no sign flipping).
-The GL itself balances to exactly $0.00; Charlie's published summary
-carries a small accumulated rounding ($0.50 grand total), so sub-cent
-per-line amount deltas with matching counts are classified **Their data
-quality (rounding in the published summary)**, not our bug.
+Both sides are already debit-positive signed, so the comparison is direct.
+The ingested ledger balances to exactly $0.00 while the published summary
+rounds each cell and so nets to a small non-zero figure; a cell whose count
+matches and whose amount differs by less than the per-line rounding budget is
+therefore classified as rounding in the published summary rather than as a
+defect here.
 
-The flow grouping matches what the rollforward filter engine sees
-(``LineItem.flow_element_id``), so a clean reconciliation here is also
-evidence the rollforward attribution will foot.
+The grouping is the same one the rollforward filter engine sees, so a clean
+reconciliation here is also evidence that the rollforward attribution will
+foot.
 
-Usage:
-    uv run python -m examples.seattle_method_world_online.reconcile <graph_id>
-    uv run python -m examples.seattle_method_world_online.reconcile <graph_id> --no-diff
+Prerequisites: ``just demo-world-online`` has ingested the GL, and
+``EXTENSIONS_DATABASE_URL`` is set — the ``just`` recipe loads it from
+``.env.local``; export it yourself when invoking the module directly.
+
+Run it (the orchestrator runs this as step 7):
+    just demo-world-online-reconcile <graph_id>
+    just demo-world-online-reconcile <graph_id> --no-diff   # print the pivot only
+
+Writes ``output/world-online-reconciliation.md``.
 """
 
 from __future__ import annotations
@@ -56,10 +60,9 @@ OUTPUT_FILE = OUTPUT_DIR / "world-online-reconciliation.md"
 EXTENSIONS_DB_URL = os.environ.get("EXTENSIONS_DATABASE_URL")
 SAFE_GRAPH_ID = re.compile(r"^kg[a-zA-Z0-9_]+$")
 
-# Per-line rounding budget — Charlie's published summary rounds each cell,
-# so a cell with matching count may differ by a sub-cent-per-line amount.
-# Observed worst case ≈ $0.013/line; $0.02/line + a $0.50 floor is a safe
-# tolerance for "matches within his summary's rounding".
+# Per-line rounding budget. The published summary rounds each cell, so a cell
+# whose count matches can still differ by a fraction of a cent per line.
+# $0.02/line with a $0.50 floor comfortably covers the observed spread.
 ROUNDING_PER_LINE_DOLLARS = 0.02
 ROUNDING_FLOOR_DOLLARS = 0.50
 
@@ -148,8 +151,8 @@ def load_expected(summary_path: Path = SUMMARY_PATH) -> tuple[list[Cell], Cell |
   """Parse SummaryOfTransactions.csv → ([per-cell], grand_total).
 
   The final "All LineItems / All Business Events" row is split out as the
-  grand total (a balance check: it should be ≈ $0.00 since the GL
-  balances).
+  grand total, which doubles as a balance check: a double-entry ledger sums
+  to ≈ $0.00 across every account.
   """
   cells: list[Cell] = []
   grand_total: Cell | None = None
@@ -172,9 +175,10 @@ def load_expected(summary_path: Path = SUMMARY_PATH) -> tuple[list[Cell], Cell |
 def load_actual_pivot(session: Session) -> dict[tuple[str, str], Cell]:
   """Group posted LineItems by (line-item qname, flow qname) → Cell.
 
-  Reproduces Charlie's pivot: ``SUM(debit_amount - credit_amount)``
-  (debit-positive cents → dollars) and ``COUNT(*)``. ``flow_element_id``
-  is the business-event FK; an untagged line surfaces as ``(untagged)``.
+  Rebuilds the published pivot: ``SUM(debit_amount - credit_amount)`` in
+  debit-positive cents, converted to dollars, plus ``COUNT(*)``.
+  ``flow_element_id`` is the business-event reference, so a line that failed
+  to resolve one surfaces as ``(untagged)`` rather than disappearing.
   """
   rows = session.execute(
     text(
@@ -254,10 +258,10 @@ def build_diff(
         f"sign/scale in ingest."
       )
     elif not count_ok and within_round:
-      # Amounts agree but the line count is lower — Charlie's pivot
-      # counts $0 memo lines that our double-entry handler can't post
-      # (see ingest_gl's zero-line skip; mirrors Test Case 1's JE-225).
-      # No economic substance, so the amount still ties.
+      # Amounts agree but the line count is lower: the published pivot counts
+      # the $0 memo lines that a double-entry handler cannot post (see the
+      # zero-line skip in ingest_gl). They carry no economic substance, so
+      # the amount still ties.
       category = "Their data quality"
       note = (
         f"Amounts tie (Δ ${amt_delta:,.2f}) but Charlie counts "
@@ -265,7 +269,7 @@ def build_diff(
         f"as non-postable in double-entry. No economic impact."
       )
     else:
-      # Count mismatch AND amount beyond tolerance — real missing lines.
+      # Count mismatch and amount beyond tolerance — genuinely missing lines.
       category = "Our bug"
       note = (
         f"Line count differs: graph={act.count}, expected={cell.count} "
@@ -275,7 +279,7 @@ def build_diff(
       DiffRow(cell.line_item, cell.business_event, cell, act, category, note)
     )
 
-  # Graph cells with no expected counterpart.
+  # Cells present on the graph with no counterpart in the published pivot.
   for key, act in actual.items():
     if key in matched_keys:
       continue

@@ -16,18 +16,15 @@ Statements aren't created via ``create-information-block``; the
 entry are the not-implemented stubs built by
 ``make_not_implemented_handler``.
 
-**Rendering projection.** As of Plan B (2026-04-25) the envelope
-populates ``view.rendering`` with the server-computed statement grid
-(rows + periods + validation). This replaces the legacy
-``getStatement(reportId, blockType)`` REST path: frontend
-``BlockView`` consumes ``envelope.view.rendering`` directly, no
-client-side rollup or hierarchy walk needed. The pure in-memory rollup
-helpers (``_build_rows``, ``_facts_to_balance_dict``, ``_natural_sign``)
-are imported from
-:mod:`robosystems.operations.roboledger.reports.fact_grid`; the
-hierarchy + classifications are derived from the already-loaded
-envelope atoms, and calculations compose cross-structure for
-``arithmetic`` blocks (see ``_build_statement_rendering``).
+**Rendering projection.** The envelope populates ``view.rendering`` with the
+server-computed statement grid (rows + periods + validation), so a frontend
+consumes ``envelope.view.rendering`` directly with no client-side rollup or
+hierarchy walk. The pure in-memory rollup helpers (``_build_rows``,
+``_facts_to_balance_dict``, ``_natural_sign``) are imported from
+:mod:`robosystems.operations.roboledger.reports.fact_grid`; the hierarchy +
+classifications are derived from the already-loaded envelope atoms, and
+calculations compose cross-structure for ``arithmetic`` blocks (see
+``_build_statement_rendering``).
 """
 
 from __future__ import annotations
@@ -110,17 +107,13 @@ def _build_statement_envelope(
   expected block_type — lets :func:`get_information_block` cleanly
   return nothing to the caller.
 
-  **Read path (Plan B, Apr 2026).** Facts are loaded by `fact_set_id` —
-  the canonical Block-instance pin per Charlie's PDF synonymy ("Block
-  and Fact Set are synonyms"). ``load_base_envelope_atoms`` already
-  loads the latest FactSet for this Structure (ordered by
-  ``period_end`` desc, ``created_at`` desc); we filter facts by that
-  FactSet's id. On the library sentinel and on tenant graphs with no
-  generated reports the FactSet is null and ``facts`` comes back empty
-  — the correct behaviour for both. This replaces the prior
-  "latest Report touching these elements" heuristic; writes have
-  stamped both ``report_id`` and ``fact_set_id`` since Phase gamma.1 so
-  the switch is a strict simplification (one less query per envelope).
+  **Read path.** Facts are loaded by ``fact_set_id`` — the canonical
+  Block-instance pin (a Block and a Fact Set are the same thing).
+  ``load_base_envelope_atoms`` already loads the latest FactSet for this
+  Structure (ordered by ``period_end`` desc, ``created_at`` desc); facts
+  are filtered to that FactSet's id. On the library sentinel and on
+  tenant graphs with no generated reports the FactSet is null and
+  ``facts`` comes back empty — the correct behaviour for both.
 
   **Scenario slice.** ``scenario_id=None`` binds actuals (the
   scenario-pinned latest-set read); a non-None value binds the
@@ -128,7 +121,7 @@ def _build_statement_envelope(
   column carries a ``"... (forecast)"`` label so the surface is honest
   about what it shows.
 
-  **Series mode (F-4).** ``series=True`` binds the structure's WHOLE
+  **Series mode.** ``series=True`` binds the structure's WHOLE
   report-set series instead of one set — one rendered column per
   period, actuals-preferred at the seam when a scenario is selected
   (:func:`envelope.load_statement_fact_set_series`). This is the
@@ -141,8 +134,7 @@ def _build_statement_envelope(
   **Series window.** ``series_history`` / ``series_forecast`` trim the
   series to its seam-adjacent columns BEFORE facts load — the last N
   actual columns and the first N forecast columns
-  (:func:`envelope.window_series_sets`). ``None`` = unbounded (the
-  pre-window behavior), so existing callers are untouched; the Plan
+  (:func:`envelope.window_series_sets`). ``None`` = unbounded. The Plan
   page passes its visible window so a deep-history tenant's envelope
   stays proportional to what's on screen rather than to the ledger's
   age.
@@ -515,9 +507,9 @@ def _build_hierarchy_from_atoms(
 ) -> list[_HierarchyNode]:
   """Build the presentation hierarchy from already-loaded atoms.
 
-  Replaces the SQL-heavy ``fact_grid._load_reporting_structure``: works
-  off the associations + elements that ``load_base_envelope_atoms``
-  already loaded, no extra queries.
+  Works off the associations + elements that ``load_base_envelope_atoms``
+  already loaded, so no extra queries — unlike the SQL-heavy
+  ``fact_grid._load_reporting_structure``.
 
   Two root-anchor conventions are supported:
 
@@ -582,8 +574,7 @@ def _build_hierarchy_from_atoms(
   # would expand a shared subtree under each parent, producing
   # exponential row counts and double-counting facts at render time.
   # The first parent that reaches a node owns it; subsequent parents
-  # treat the node as already-rendered. Mirrors the same fix in
-  # ``fact_grid._build_tree``.
+  # treat the node as already-rendered. Mirrors ``fact_grid._build_tree``.
   emitted: set[str] = set()
 
   def _make_node(element_id: str, depth: int) -> _HierarchyNode | None:
@@ -651,7 +642,7 @@ def _load_element_classifications(
   on this axis are absent from the dict — callers default to the empty
   string for the resulting :class:`RenderingRowLite.classification`.
 
-  Single batched query; mirrors the LEFT JOIN that the legacy
+  Single batched query; mirrors the LEFT JOIN that
   :func:`fact_grid._load_reporting_structure` does inline, but separates
   the trait lookup from the hierarchy walk.
   """

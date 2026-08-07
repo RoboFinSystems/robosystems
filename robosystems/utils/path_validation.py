@@ -1,3 +1,16 @@
+"""
+Build on-disk paths from user-supplied identifiers without letting them escape.
+
+`graph_id` and `table_name` reach the filesystem from request input, so every
+path here is constructed in two steps: reject identifiers that are not plain
+names, then resolve the result and confirm it still sits under its base
+directory. Some of these paths are passed to `shutil.rmtree`, so a traversal is
+a delete primitive, not just a read.
+
+All validators raise `HTTPException` (400) rather than returning a flag, so
+callers cannot proceed on an unvalidated value by forgetting to check.
+"""
+
 import re
 from pathlib import Path
 
@@ -7,18 +20,7 @@ from robosystems.logger import logger
 
 
 def validate_graph_id(graph_id: str) -> str:
-  """
-  Validate graph_id to prevent path traversal attacks.
-
-  Args:
-      graph_id: Graph database identifier to validate
-
-  Returns:
-      The validated graph_id
-
-  Raises:
-      HTTPException: If graph_id contains illegal characters or patterns
-  """
+  """Return `graph_id` if it is alphanumeric plus underscore and hyphen."""
   if not graph_id:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST, detail="graph_id cannot be empty"
@@ -42,21 +44,9 @@ def validate_graph_id(graph_id: str) -> str:
 
 
 def get_lbug_database_path(graph_id: str, base_path: str | None = None) -> Path:
-  """
-  Get validated LadybugDB database path for a graph_id.
+  """Path to a graph's LadybugDB database file.
 
-  This function provides centralized path construction with security validation
-  to prevent path traversal attacks.
-
-  Args:
-      graph_id: Graph database identifier
-      base_path: Optional override for base directory (defaults to env config)
-
-  Returns:
-      Validated Path object for the LadybugDB database
-
-  Raises:
-      HTTPException: If graph_id is invalid or path is outside base directory
+  `base_path` defaults to `env.LBUG_DATABASE_PATH`.
   """
   from robosystems.config import env
 
@@ -83,20 +73,9 @@ def get_lbug_database_path(graph_id: str, base_path: str | None = None) -> Path:
 
 
 def validate_table_name(table_name: str) -> str:
-  """
-  Validate a table/index name used as a filesystem path component.
+  """Return `table_name` if it is a bare SQL-style identifier.
 
-  Prevents path traversal via the user-influenced table/index name that gets
-  joined into on-disk lance/staging paths (and passed to shutil.rmtree).
-
-  Args:
-      table_name: Table or index name to validate
-
-  Returns:
-      The validated table_name
-
-  Raises:
-      HTTPException: If table_name contains illegal characters or patterns
+  Stricter than `validate_graph_id`: must start with a letter or underscore.
   """
   if not table_name:
     raise HTTPException(
@@ -131,23 +110,9 @@ def get_lance_index_path(
   table_name: str | None = None,
   base_path: str | None = None,
 ) -> Path:
-  """
-  Get a validated LanceDB index path for a graph_id (and optional table).
+  """Path to a graph's LanceDB index directory, or one table's within it.
 
-  Centralized, security-validated path construction to prevent traversal via
-  either graph_id or table_name before they are joined into the on-disk lance
-  directory (and passed to shutil.rmtree).
-
-  Args:
-      graph_id: Graph database identifier
-      table_name: Optional table/index name (validated when provided)
-      base_path: Optional override for base directory (defaults to env config)
-
-  Returns:
-      Validated Path object for the lance index directory
-
-  Raises:
-      HTTPException: If graph_id/table_name are invalid or the path escapes base
+  Both components are validated. `base_path` defaults to `env.LANCE_INDEX_PATH`.
   """
   from robosystems.config import env
 
@@ -176,18 +141,9 @@ def get_lance_index_path(
 
 
 def get_duckdb_staging_path(graph_id: str, base_path: str | None = None) -> Path:
-  """
-  Get validated DuckDB staging database path for a graph_id.
+  """Path to a graph's DuckDB staging database file.
 
-  Args:
-      graph_id: Graph database identifier
-      base_path: Optional override for base directory (defaults to env config)
-
-  Returns:
-      Validated Path object for the DuckDB staging database
-
-  Raises:
-      HTTPException: If graph_id is invalid or path is outside base directory
+  `base_path` defaults to `env.DUCKDB_STAGING_PATH`.
   """
   from robosystems.config import env
 

@@ -34,16 +34,9 @@ class Node:
     """
     Convert node to Cypher CREATE NODE TABLE statement.
 
-    Args:
-        safe_mode: If True, uses IF NOT EXISTS to prevent data loss.
-                  If False, creates without existence check (dangerous).
-
-    Returns:
-        Cypher DDL statement for creating the node table
-
-    NOTE: We use CREATE TABLE IF NOT EXISTS to prevent data loss.
-    This means schema changes require manual migration, but protects existing data.
-    For schema evolution, use dedicated migration scripts rather than DROP/CREATE.
+    ``safe_mode`` emits IF NOT EXISTS so an existing table is never clobbered;
+    turning it off risks data loss. Schema evolution therefore goes through
+    dedicated migration scripts, not DROP/CREATE.
     """
     properties_str = ",\n        ".join(prop.to_cypher() for prop in self.properties)
 
@@ -77,15 +70,8 @@ class Relationship:
     """
     Convert relationship to Cypher CREATE REL TABLE statement.
 
-    Args:
-        safe_mode: If True, uses IF NOT EXISTS to prevent data loss.
-                  If False, creates without existence check (dangerous).
-
-    Returns:
-        Cypher DDL statement for creating the relationship table
-
-    NOTE: We use CREATE REL TABLE IF NOT EXISTS to prevent data loss.
-    This means schema changes require manual migration, but protects existing data.
+    ``safe_mode`` emits IF NOT EXISTS so an existing table is never clobbered;
+    turning it off risks data loss.
     """
     if self.properties:
       properties_str = ",\n        " + ",\n        ".join(

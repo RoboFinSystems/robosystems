@@ -63,21 +63,15 @@ def apply_handler(
 ) -> list[Transaction]:
   """Evaluate handler.transaction_template against event and persist GL rows.
 
-  All rows are flushed (not committed). The calling create_event_block
-  commits after this returns so the event row + all GL rows land atomically.
+  ``session`` must be tenant-scoped (search_path already set) and ``event``
+  already flushed, so its id is available for the ``triggered_by_event_id``
+  links. Rows are flushed but not committed — ``create_event_block`` commits
+  after this returns so the event row and its GL rows land atomically.
+  Returns one Transaction per template entry.
 
-  Args:
-      session: Tenant-scoped extensions session (search_path already set).
-      event: The newly-created Event row (must have been flushed to get its id).
-      handler: The resolved EventHandler row.
-      created_by: User/system identifier for audit columns.
-
-  Returns:
-      List of Transaction rows created (typically one per template entry).
-
-  Raises:
-      EngineValidationError: Unbalanced entry, missing element, negative amount.
-      TemplateInterpolationError: Bad template expression.
+  Raises ``EngineValidationError`` on an unbalanced entry, a missing element,
+  or a negative amount, and ``TemplateInterpolationError`` on a bad template
+  expression.
   """
   template = handler.transaction_template
   if not template or "transactions" not in template:
@@ -123,7 +117,7 @@ def apply_handler(
         f"Template entry {i} debit/credit must each have an 'element_id'"
       )
 
-    # Resolve element_ids (may themselves be template expressions)
+    # element_ids may themselves be template expressions
     if "{{" in debit_element_id:
       debit_element_id = str(interpolate(debit_element_id, context))
     if "{{" in credit_element_id:
@@ -171,7 +165,6 @@ def apply_handler(
     session.add(entry)
     session.flush()
 
-    # Create debit LineItem
     debit_li = LineItem(
       entry_id=entry.id,
       element_id=debit_element_id,
@@ -181,7 +174,6 @@ def apply_handler(
       created_at=now,
       updated_at=now,
     )
-    # Create credit LineItem
     credit_li = LineItem(
       entry_id=entry.id,
       element_id=credit_element_id,

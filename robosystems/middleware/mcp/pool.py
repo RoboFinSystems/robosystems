@@ -1,9 +1,4 @@
-"""
-Connection pooling for MCP clients.
-
-This module provides connection pooling to reuse MCP client instances
-and improve performance by reducing initialization overhead.
-"""
+"""Connection pooling for MCP clients, so a client's setup cost is paid once."""
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -14,11 +9,11 @@ from robosystems.logger import logger
 
 
 class MCPConnectionPool:
-  """
-  Connection pool for MCP clients.
+  """Pool of reusable MCP clients, one bucket per graph_id.
 
-  Maintains a pool of reusable client connections per graph_id
-  to reduce initialization overhead and improve performance.
+  A background sweep closes clients that have sat idle too long or outlived
+  `max_lifetime`, so a pooled client never outlives the endpoint it was
+  built against.
   """
 
   def __init__(
@@ -205,12 +200,7 @@ class MCPConnectionPool:
               logger.error(f"Error closing client: {e}")
 
   async def get_stats(self) -> dict[str, dict]:
-    """
-    Get statistics about the connection pool.
-
-    Returns:
-        Dictionary with pool statistics per graph_id
-    """
+    """Return per-graph pool statistics."""
     stats = {}
     now = datetime.now()
 
@@ -245,18 +235,15 @@ _global_pool: MCPConnectionPool | None = None
 
 
 def get_connection_pool() -> MCPConnectionPool:
-  """
-  Get the global connection pool instance.
+  """Return the process-wide pool, creating it on first use.
 
-  Returns:
-      Global MCPConnectionPool instance
+  The pool is created stopped; the application starts it during startup via
+  `initialize_pool`.
   """
   global _global_pool
 
   if _global_pool is None:
     _global_pool = MCPConnectionPool()
-    # Note: The pool should be started by the application during startup
-    # asyncio.create_task(_global_pool.start())
 
   return _global_pool
 

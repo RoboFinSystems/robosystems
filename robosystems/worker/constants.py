@@ -3,14 +3,13 @@
 Used by both the consumer loop and the Dagster reaper sensor.
 """
 
-# Per-task-type timeouts in seconds. Operator tasks can take 2+ minutes
-# for complex mapping operations — the MappingOperator makes one AI
-# call per CoA element during rs-gaap refinement, so a 100-element
-# CoA at ~3-4s/call lands around 6-7 minutes. Match the operator's own
-# ``ExecutionProfile.max_time=600`` so the worker doesn't kill jobs
-# the operator thinks are still in budget. (The key was ``"agent"``
-# pre-rename; the bridge task enqueues ``task_type="operator"``, so a
-# stale key silently dropped the operator to ``DEFAULT_TASK_TIMEOUT``.)
+# Per-task-type timeouts in seconds. Keys must match the ``task_type`` the
+# enqueuer sends; an unrecognized key silently falls back to
+# ``DEFAULT_TASK_TIMEOUT``. The "operator" budget matches the operator's own
+# ``ExecutionProfile.max_time=600`` so the worker doesn't kill jobs the
+# operator thinks are still in budget — the MappingOperator makes one AI call
+# per CoA element during rs-gaap refinement, so a 100-element CoA at ~3-4s per
+# call lands around 6-7 minutes.
 TASK_TIMEOUTS: dict[str, int] = {
   "operator": 600,  # 10 minutes
   "extensions_materialize": 1800,  # 30 minutes

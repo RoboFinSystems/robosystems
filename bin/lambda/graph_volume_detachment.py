@@ -1,9 +1,11 @@
 """
-Graph Volume Detachment Lambda Function
+Detach LadybugDB EBS data volumes when an EC2 instance terminates.
 
-Handles the safe detachment of EBS volumes when EC2 instances are terminated.
-This function is triggered by Auto Scaling lifecycle hooks to ensure volumes
-are properly unmounted and detached before instance termination.
+Triggered by an Auto Scaling terminate lifecycle hook (via SNS). Unmounts the
+data volume over SSM, asks the volume manager to detach it, and waits for the
+volume to reach `available` before releasing the hook. Signals CONTINUE only
+when every volume detached cleanly; otherwise ABANDON, so the ASG does not
+launch a replacement that races a half-detached volume.
 """
 
 import json
@@ -29,16 +31,7 @@ def format_missing_field_error(field_name: str, available_keys: list) -> dict:
 
 
 def handler(event, context):
-  """
-  Main Lambda handler for processing instance termination events
-
-  Args:
-      event: SNS event containing lifecycle hook details
-      context: Lambda execution context
-
-  Returns:
-      dict: Response with status code and completion message
-  """
+  """Process an instance-termination lifecycle event delivered over SNS."""
   try:
     message = json.loads(event["Records"][0]["Sns"]["Message"])
     print(f"Received message: {json.dumps(message, indent=2)}")
@@ -116,8 +109,9 @@ def handler(event, context):
 
     # Call Volume Manager to detach volumes and update registry.
     # Track per-volume success: if any detach fails or the volume doesn't reach
-    # `available` state, we'll signal ABANDON so the next launch doesn't race a
-    # half-detached volume (the 2026-05-08 outage cause).
+    # `available` state, signal ABANDON. A half-detached volume is the worst
+    # outcome — the replacement instance cannot claim it, yet the registry still
+    # advertises the graph as served by an instance that is going away.
     all_detached = True
     for volume in volumes:
       volume_id = volume["VolumeId"]
@@ -163,10 +157,9 @@ def handler(event, context):
         print(f"Failed to detach volume {volume_id}: {e}")
         all_detached = False
 
-    # Clean stale instance-registry entry for the terminating instance.
-    # Without this, registry accumulates dead instance IDs and the graph-registry
-    # routing layer can keep pointing at IPs that no longer exist (the cleanup
-    # we did manually during the 2026-05-08 recovery).
+    # Clean the stale instance-registry entry for the terminating instance.
+    # Without this the registry accumulates dead instance IDs and the routing
+    # layer keeps resolving graphs to IPs that no longer exist.
     try:
       registry_table = (
         f"robosystems-graph-{os.environ['ENVIRONMENT']}-instance-registry"
@@ -192,18 +185,7 @@ def handler(event, context):
 
 
 def complete_lifecycle(asg_name, hook_name, instance_id, result):
-  """
-  Complete the Auto Scaling lifecycle action
-
-  Args:
-      asg_name: Auto Scaling Group name
-      hook_name: Lifecycle hook name
-      instance_id: EC2 instance ID
-      result: Action result (CONTINUE or ABANDON)
-
-  Returns:
-      dict: Response with status code and completion message
-  """
+  """Release the Auto Scaling lifecycle hook with CONTINUE or ABANDON."""
   asg.complete_lifecycle_action(
     LifecycleHookName=hook_name,
     AutoScalingGroupName=asg_name,

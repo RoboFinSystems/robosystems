@@ -1,7 +1,6 @@
-"""Delete-file command — remove a file from S3, DuckDB (cascade), and PostgreSQL.
+"""Remove a file from S3, from the DuckDB staging table, and from PostgreSQL.
 
-Extracted verbatim from the old ``DELETE /files/{id}`` router body; called by the
-``delete-file`` content-op handler. Returns a ``DeleteFileResponse``.
+Backs the ``delete-file`` content operation.
 """
 
 from __future__ import annotations

@@ -1,14 +1,15 @@
 """
-Graph Client Factory - Intelligent routing for graph database backends.
+Graph client factory — routes a graph ID to the instance that holds it.
 
-This module provides a factory for creating GraphClient instances that properly
-route to the correct graph database instance based on the graph ID,
-operation type, and tier.
+Builds :class:`~robosystems.graph_api.client.GraphClient` instances aimed at
+one of three targets, chosen from the graph ID, the operation type and the
+tier:
 
-Routing targets:
-1. User Graph Writers - LadybugDB instances (Standard/Large/XLarge tiers)
-2. Shared Repository Master - Primary source of truth for shared data (writes + fallback reads)
-3. Shared Repository Replica ALB - Read-only replicas for high-volume reads
+1. User graph writers — per-graph LadybugDB instances (Standard/Large/XLarge),
+   located through the allocation manager and cached in Valkey.
+2. Shared repository master — source of truth for shared data (all writes, and
+   reads when no replica ALB is configured), discovered from DynamoDB.
+3. Shared repository replica ALB — read-only replicas for high-volume reads.
 """
 
 import asyncio
@@ -73,13 +74,7 @@ class CircuitBreaker:
   """Async-safe circuit breaker for managing service availability."""
 
   def __init__(self, failure_threshold: int = 5, timeout: int = 60):
-    """
-    Initialize circuit breaker.
-
-    Args:
-        failure_threshold: Number of failures before opening circuit
-        timeout: Seconds to wait before attempting to close circuit
-    """
+    """Open after ``failure_threshold`` failures; retry after ``timeout`` seconds."""
     self._lock = asyncio.Lock()
     self.failure_threshold = failure_threshold
     self.timeout = timeout
@@ -105,12 +100,11 @@ class CircuitBreaker:
         logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
 
   async def should_attempt(self) -> bool:
-    """Check if we should attempt the operation."""
+    """Check whether the operation should be attempted, half-opening on timeout."""
     async with self._lock:
       if not self.is_open:
         return True
 
-      # Check if timeout has passed
       if (
         self.last_failure_time and (time.time() - self.last_failure_time) > self.timeout
       ):
@@ -129,20 +123,17 @@ def with_retry(
   exponential_base: float = 2.0,
   jitter: bool = True,
 ):
-  """
-  Decorator for retry logic with exponential backoff.
+  """Retry an async function with exponential backoff.
 
-  Args:
-      max_attempts: Maximum number of retry attempts
-      base_delay: Initial delay between retries in seconds
-      max_delay: Maximum delay between retries
-      exponential_base: Base for exponential backoff
-      jitter: Add random jitter to delays
+  Only retries connection-level failures (``httpx.TimeoutException``,
+  ``httpx.ConnectError``, ``ServiceUnavailableError``); everything else
+  propagates on the first raise. ``jitter`` spreads the delay over 0.5x-1.5x to
+  avoid a synchronized retry storm across callers. Disabled wholesale by
+  ``GRAPH_RETRY_LOGIC_ENABLED=false``.
   """
 
   def decorator(func):
     async def wrapper(*args, **kwargs):
-      # Check if retry logic is enabled via feature flag
       if not env.GRAPH_RETRY_LOGIC_ENABLED:
         return await func(*args, **kwargs)
 
@@ -164,10 +155,8 @@ def with_retry(
             )
             break
 
-          # Calculate delay with exponential backoff
           delay = min(base_delay * (exponential_base**attempt), max_delay)
 
-          # Add jitter if enabled
           if jitter:
             delay = delay * (0.5 + random.random())
 
@@ -185,31 +174,25 @@ def with_retry(
 
 
 class GraphClientFactory:
-  """
-  Factory for creating properly routed graph database clients.
+  """Creates graph clients routed to the backend that holds the graph.
 
-  Handles intelligent routing to different backends:
-  - User graph writers (LadybugDB instances for Standard/Large/XLarge tiers)
-  - Shared repository master (writes + fallback reads)
-  - Shared repository replica ALB (primary reads)
+  All state is class-level and shared process-wide: the connection pools, the
+  Valkey client used for route caching, and the shared-master circuit breaker.
   """
 
-  # Cache TTLs from constants
   _instance_cache_ttl = GRAPH_INSTANCE_CACHE_TTL
 
-  # Timeout configurations from constants
   _connect_timeout = GRAPH_CONNECT_TIMEOUT
   _read_timeout = GRAPH_READ_TIMEOUT
 
-  # Connection pools for reuse (HTTP/2 enabled for efficiency)
   _connection_pools: dict[str, httpx.AsyncClient] = {}
-  _pool_stats: dict[str, dict[str, Any]] = {}  # Track pool statistics
+  _pool_stats: dict[str, dict[str, Any]] = {}
 
-  # Redis connection pool for caching (thread-local to avoid event loop issues)
+  # Guarded by a threading lock rather than an asyncio one: the pool is shared
+  # across event loops, and each loop builds its own client from it.
   _redis_pool: redis.ConnectionPool | None = None
   _redis_client_lock = threading.Lock()
 
-  # Circuit breakers for different services
   _master_circuit_breaker = CircuitBreaker(
     failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
     timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
@@ -217,16 +200,7 @@ class GraphClientFactory:
 
   @classmethod
   def _get_cache_key(cls, key_type: str, identifier: str = "") -> str:
-    """
-    Generate environment-prefixed cache key to prevent collisions.
-
-    Args:
-        key_type: Type of cache key (e.g., "master", "alb", "location")
-        identifier: Optional identifier (e.g., graph_id)
-
-    Returns:
-        Environment-prefixed cache key
-    """
+    """Build a cache key, prefixed by environment so envs never share entries."""
     env_prefix = env.ENVIRONMENT or "dev"
     if identifier:
       return f"graph:{env_prefix}:{key_type}:{identifier}"
@@ -234,21 +208,23 @@ class GraphClientFactory:
 
   @classmethod
   async def _get_redis(cls) -> redis.Redis | None:
-    """Get or create Redis connection for caching with event loop safety."""
-    # Check if Redis caching is enabled via feature flag
+    """Get a Redis client for route caching, or None when caching is unavailable.
+
+    A fresh client is built per call rather than reused: background tasks run
+    on their own event loops, and a client bound to a closed loop raises. Every
+    failure path returns None so routing degrades to uncached lookups instead
+    of failing.
+    """
     if not env.GRAPH_REDIS_CACHE_ENABLED:
       return None
 
     try:
-      # Create a new Redis client for each event loop to avoid "Event loop is closed" errors
-      # This is necessary because background tasks may create new event loops
-      # Use async factory method to handle SSL params correctly
       import socket
 
       from robosystems.config.valkey_registry import create_async_redis_client
 
-      # Build keepalive options using socket module constants for cross-platform compatibility
-      # Linux: TCP_KEEPIDLE=4, TCP_KEEPINTVL=5, TCP_KEEPCNT=6
+      # Constants are looked up on `socket` rather than hardcoded; they are
+      # Linux-only and absent on macOS.
       keepalive_options = {}
       if env.ENVIRONMENT in ["prod", "staging"]:
         if hasattr(socket, "TCP_KEEPIDLE"):
@@ -266,18 +242,16 @@ class GraphClientFactory:
         socket_keepalive_options=keepalive_options if keepalive_options else None,
       )
 
-      # Test the connection - handle connection state issues gracefully
       try:
         await client.ping()
         return client
       except AttributeError as ae:
-        # Handle '_AsyncRESP2Parser' object has no attribute '_connected' error
-        # This happens when the event loop context changes (e.g., in background tasks)
+        # A changed event-loop context surfaces as an AttributeError on the
+        # parser rather than a connection error.
         logger.debug(f"Redis connection state issue, skipping cache: {ae}")
         return None
 
     except Exception as e:
-      # Don't cache failures - might be transient
       logger.warning(f"Redis not available for caching: {e}")
       return None
 
@@ -289,55 +263,38 @@ class GraphClientFactory:
     environment: str | None = None,
     tier: GraphTier | None = None,
   ) -> GraphClient:
-    """
-    Create a graph database client with intelligent routing.
+    """Create a graph client routed to whichever backend holds ``graph_id``.
 
-    Routes to the appropriate LadybugDB instance based on tier.
+    Shared repositories — and subgraphs of them, such as ``sec_historical`` —
+    go to the shared master or a replica depending on ``operation_type``;
+    everything else routes to the user graph's allocated instance.
 
-    Args:
-        graph_id: Graph database identifier
-        operation_type: "read" or "write"
-        environment: Environment (defaults to env.ENVIRONMENT)
-        tier: Instance tier for user graphs (Standard/Large/XLarge)
-
-    Returns:
-        Configured GraphClient instance for the routed Graph API endpoint
-
-    Raises:
-        ValueError: If graph not found or invalid configuration
-        ServiceUnavailableError: If required services are unavailable
+    Raises ``ServiceUnavailableError`` when no endpoint can be resolved, and
+    ``RouteError`` when the graph is not allocated to any instance.
     """
     if environment is None:
       environment = env.ENVIRONMENT or "dev"
 
-    # Log routing decision with context
     logger.info(
       f"Creating graph client for graph={graph_id}, "
       f"operation={operation_type}, tier={tier}, env={environment}"
     )
 
     try:
-      # Determine routing based on graph_id
       if is_shared_repository(graph_id.lower()):
-        # Route to shared repository infrastructure
         return await cls._create_shared_repository_client(graph_id, operation_type)
 
-      # Check for shared repo subgraphs (e.g., sec_historical)
       subgraph_info = parse_subgraph_id(graph_id)
       if subgraph_info and is_shared_repository(subgraph_info.parent_graph_id.lower()):
-        # Route shared repo subgraphs to shared infrastructure
         return await cls._create_shared_repository_client(graph_id, operation_type)
 
-      # Route to user graph writers
       return await cls._create_user_graph_client(graph_id, environment, tier)
     except ServiceUnavailableError as e:
-      # Enhance error with routing context
       raise ServiceUnavailableError(
         f"Failed to create client for {graph_id} ({operation_type} operation): {e}. "
         f"Environment={environment}, Tier={tier}"
       )
     except Exception as e:
-      # Add context to unexpected errors
       logger.error(
         f"Unexpected error creating client for {graph_id}: {e}",
         extra={
@@ -353,58 +310,42 @@ class GraphClientFactory:
   async def _create_shared_repository_client(
     cls, graph_id: str, operation_type: str
   ) -> GraphClient:
-    """
-    Create client for shared repository with intelligent routing.
+    """Create a client for a shared repository.
 
-    Routing logic:
-    - Dev: Everything goes to single local graph instance
-    - Prod/Staging:
-      - Writes: Always go to shared master
-      - Reads: Try replica ALB first, fallback to master if allowed
+    Dev collapses to the single local instance. In prod/staging writes always
+    go to the shared master — replicas are read-only copies synced from it —
+    and reads prefer the replica ALB, falling back to the master.
     """
 
-    # In dev environment, route to appropriate local instance based on configuration
     if env.is_development():
-      # Priority hierarchy for backend selection in dev:
-      # 1. GRAPH_SHARED_REPOSITORY_BACKEND env var (explicit override)
-      # 2. graph.yml tier config (fallback for consistency with AWS)
-      # 3. Default to ladybug
-
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       logger.info(
         f"Dev environment: Routing {graph_id} {operation_type} to LadybugDB at {api_url}"
       )
 
       api_key = env.GRAPH_API_KEY
-      target = RouteTarget.SHARED_MASTER  # Treat as master in dev
+      target = RouteTarget.SHARED_MASTER
 
-    # Production/staging routing
     elif operation_type == "write":
-      # All writes MUST go to shared master
       target = RouteTarget.SHARED_MASTER
       api_url = await cls._get_shared_master_url()
       api_key = env.GRAPH_API_KEY
 
       logger.info(f"Routing {graph_id} WRITE to shared master at {api_url}")
 
-    else:  # read operation in prod/staging
-      # Determine read target with fallback logic
+    else:
       target, api_url, api_key = await cls._determine_read_target(graph_id)
 
-    # Validate we have necessary configuration
     if not api_url:
       raise ConfigurationError(f"No endpoint configured for {target.value}")
 
     if not api_key:
-      # Only warn in production/staging environments
       if not env.is_development() and not env.is_test():
         logger.warning(f"No API key configured for {target.value}, using default")
       api_key = env.GRAPH_API_KEY
 
-    # Create client with appropriate configuration
     client = GraphClient(base_url=api_url, api_key=api_key)
 
-    # Add metadata for debugging
     client._route_target = target.value
     client._graph_id = graph_id
 
@@ -412,18 +353,12 @@ class GraphClientFactory:
 
   @classmethod
   async def _determine_read_target(cls, graph_id: str) -> tuple[RouteTarget, str, str]:
-    """
-    Determine the best target for read operations.
+    """Pick the read endpoint: replica ALB if configured, else the master.
 
-    Priority:
-    1. Shared Replica ALB (if configured) - for horizontal read scaling
-    2. Shared Master (if SHARED_MASTER_READS_ENABLED) - fallback
-    3. Error if no read endpoint available
-
-    Returns:
-        Tuple of (target, api_url, api_key)
+    Falling through to the master requires ``SHARED_MASTER_READS_ENABLED``, so
+    a deployment can keep read load off the writer entirely. Returns
+    ``(target, api_url, api_key)``.
     """
-    # Try replica ALB first (if configured)
     if env.SHARED_REPLICA_ALB_URL:
       logger.info(f"Routing {graph_id} READ to shared replica ALB")
       return (
@@ -432,7 +367,6 @@ class GraphClientFactory:
         env.GRAPH_API_KEY,
       )
 
-    # Fallback to shared master
     if env.SHARED_MASTER_READS_ENABLED:
       logger.info(
         f"Routing {graph_id} READ to shared master (no replica ALB configured)"
@@ -451,18 +385,15 @@ class GraphClientFactory:
   @classmethod
   @with_retry(max_attempts=3, base_delay=1.0)
   async def _get_shared_master_url(cls) -> str:
-    """
-    Get the shared master URL by discovering from DynamoDB.
+    """Discover the shared master's URL.
 
-    The shared master is deployed using the same graph-ladybug stack with tier="shared".
-    It registers in DynamoDB with node_type="shared_master" and is auto-discoverable.
-
-    Priority:
-    1. Check Redis cache for recently discovered master
-    2. Discover from DynamoDB by looking for node_type = shared_master (with pagination)
-    3. Fallback to standard API URL if discovery fails
+    The shared master runs the same graph-ladybug stack with ``tier="shared"``
+    and registers itself in the DynamoDB instance registry under
+    ``node_type="shared_master"``, so there is no static endpoint to
+    configure. Resolution order: Valkey cache, then a paginated registry scan
+    for a healthy master (cached for 5 minutes), then ``GRAPH_API_URL`` — but
+    that last fallback applies in development only, never prod/staging.
     """
-    # Check circuit breaker if enabled
     if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
       if not await cls._master_circuit_breaker.should_attempt():
         logger.warning("Shared master circuit breaker is open, using fallback")
@@ -473,7 +404,6 @@ class GraphClientFactory:
         )
 
     try:
-      # Check Redis cache first
       redis_client = await cls._get_redis()
       cache_key = cls._get_cache_key("shared_master", "url")
 
@@ -488,15 +418,12 @@ class GraphClientFactory:
         except Exception as e:
           logger.warning(f"Redis cache read failed: {e}")
 
-      # Query DynamoDB for shared master instance with pagination support
       import boto3
 
       dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION or "us-east-1")
 
-      # Scan instance registry for healthy shared master with pagination
       paginator = dynamodb.get_paginator("scan")
 
-      # Configure pagination
       page_iterator = paginator.paginate(
         TableName=env.INSTANCE_REGISTRY_TABLE,
         FilterExpression="#status = :status AND node_type = :node_type",
@@ -513,10 +440,8 @@ class GraphClientFactory:
         },
       )
 
-      # Process pages
       for page in page_iterator:
         if page.get("Items"):
-          # Use the first healthy shared master found
           item = page["Items"][0]
           private_ip = item.get("private_ip", {}).get("S")
           instance_id = item.get("instance_id", {}).get("S", "unknown")
@@ -525,10 +450,9 @@ class GraphClientFactory:
             url = f"http://{private_ip}:8001"
             logger.info(f"Discovered shared master at {url} (instance: {instance_id})")
 
-            # Cache the discovery
             if redis_client:
               try:
-                await redis_client.setex(cache_key, 300, url)  # Cache for 5 minutes
+                await redis_client.setex(cache_key, 300, url)
               except Exception as e:
                 logger.warning(f"Redis cache write failed: {e}")
 
@@ -536,14 +460,10 @@ class GraphClientFactory:
               await cls._master_circuit_breaker.record_success()
             return url
 
-      # No healthy shared master found. An earlier implementation had a
-      # fallback that scanned Valkey for `lbug:ingestion:active:*` flags
-      # to discover masters marked unhealthy during ingestion, but the
-      # flag was never set by any writer and the fallback never fired.
-      # In-flight destructive operations are now tracked via the DynamoDB
-      # busy counter on instance-registry (see instance_busy.py) and GHA
-      # pre-refresh workflows read it directly — no Valkey coordination
-      # path exists or is needed here.
+      # The registry is the only source of master liveness here. In-flight
+      # destructive operations are tracked by the DynamoDB busy counter on
+      # instance-registry (see instance_busy.py), which the GHA pre-refresh
+      # workflows read directly — routing does not consult it.
       logger.warning(
         f"No healthy shared master found in DynamoDB after scanning "
         f"{env.ENVIRONMENT} environment"
@@ -564,8 +484,8 @@ class GraphClientFactory:
         },
       )
 
-    # Don't use localhost as fallback in production/staging
-    # This should only be used in development
+    # Gated on development: a localhost fallback in prod/staging would send
+    # shared-repository writes to whatever happens to answer on port 8001.
     if env.is_development() and env.GRAPH_API_URL:
       logger.warning(
         f"Dev environment: Using API URL fallback for shared master: {env.GRAPH_API_URL}"
@@ -581,15 +501,14 @@ class GraphClientFactory:
   async def _create_user_graph_client(
     cls, graph_id: str, environment: str | None, tier: GraphTier | None
   ) -> GraphClient:
-    """
-    Create client for user graph with tier-based routing.
+    """Create a client for a user graph, resolving its allocated instance.
 
-    - Dev: Routes to single local graph instance
-    - Prod/Staging: Uses allocation manager to find the appropriate LadybugDB instance
-    - Subgraphs: Routes to parent's instance but uses subgraph database
+    Dev routes to the single local instance. Prod/staging asks the allocation
+    manager which instance holds the graph. A subgraph routes to its *parent's*
+    instance but targets the subgraph's own database, which is why
+    ``_database_name`` is set separately from ``_graph_id``.
     """
 
-    # Check if this is a subgraph
     subgraph_info = parse_subgraph_id(graph_id)
     actual_graph_id = subgraph_info.parent_graph_id if subgraph_info else graph_id
     database_name = subgraph_info.database_name if subgraph_info else graph_id
@@ -600,7 +519,6 @@ class GraphClientFactory:
         f"database: {database_name}"
       )
 
-    # In dev environment, route everything to the single graph instance
     if env.is_development():
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       api_key = env.GRAPH_API_KEY
@@ -612,20 +530,18 @@ class GraphClientFactory:
       client = GraphClient(base_url=api_url, api_key=api_key)
       client._route_target = RouteTarget.USER_GRAPH.value
       client._graph_id = graph_id
-      client._database_name = database_name  # Actual database to use
+      client._database_name = database_name
 
       return client
 
-    # Production/staging: Use allocation manager to find the right instance
-    # Check cache first - use actual_graph_id for routing
+    # Keyed on actual_graph_id, so a parent and its subgraphs share one entry.
     cache_key = cls._get_cache_key("location", actual_graph_id)
     redis_client = await cls._get_redis()
 
-    # Routing only needs the instance's private IP and ID. We cache those two
-    # values as plain scalars rather than reconstructing a DatabaseLocation —
-    # the dataclass has required fields (graph_id, availability_zone, status,
-    # created_at) the cache never carried, so reconstruction always raised and
-    # silently disabled the cache.
+    # Routing needs only the instance's private IP and ID, cached as plain
+    # scalars. Do not round-trip a DatabaseLocation through this cache: its
+    # required fields (graph_id, availability_zone, status, created_at) are not
+    # stored, so reconstruction raises and silently disables caching.
     private_ip: str | None = None
     instance_id: str | None = None
     if redis_client:
@@ -633,7 +549,6 @@ class GraphClientFactory:
         cached = await redis_client.get(cache_key)
         if cached:
           location_data = json.loads(cached)
-          # Verify cache is still fresh (1 minute TTL)
           if time.time() - location_data.get("timestamp", 0) < cls._instance_cache_ttl:
             location = location_data["location"]
             private_ip = location["private_ip"]
@@ -642,7 +557,6 @@ class GraphClientFactory:
       except Exception as e:
         logger.warning(f"Redis cache read failed for location: {e}")
 
-    # If not cached, look it up - use actual_graph_id for routing
     if private_ip is None:
       allocation_manager = LadybugAllocationManager(
         environment=environment or env.ENVIRONMENT
@@ -650,7 +564,6 @@ class GraphClientFactory:
       db_location = await allocation_manager.find_database_location(actual_graph_id)
 
       if not db_location:
-        # Database doesn't exist
         error_msg = (
           f"Database {actual_graph_id} not found in any instance. "
           f"It may need to be created first."
@@ -665,7 +578,6 @@ class GraphClientFactory:
       private_ip = db_location.private_ip
       instance_id = db_location.instance_id
 
-      # Cache the location
       if redis_client:
         try:
           location_data = {
@@ -681,7 +593,6 @@ class GraphClientFactory:
         except Exception as e:
           logger.warning(f"Redis cache write failed for location: {e}")
 
-    # Create client with the allocated instance's endpoint
     api_url = f"http://{private_ip}:8001"
     api_key = env.GRAPH_API_KEY
 
@@ -692,12 +603,10 @@ class GraphClientFactory:
 
     client = GraphClient(base_url=api_url, api_key=api_key)
 
-    # Add metadata
     client._route_target = RouteTarget.USER_GRAPH.value
     client._graph_id = graph_id
-    client._database_name = (
-      database_name  # Actual database to use (important for subgraphs)
-    )
+    # Differs from _graph_id for subgraphs — the client targets this database.
+    client._database_name = database_name
     client._instance_id = instance_id
 
     return client
@@ -710,23 +619,13 @@ class GraphClientFactory:
     environment: str | None = None,
     tier: GraphTier | None = None,
   ) -> GraphClient:
-    """
-    Synchronous wrapper for create_client.
+    """Synchronous wrapper for :meth:`create_client`.
 
-    Args:
-        graph_id: Graph database identifier
-        operation_type: "read" or "write"
-        environment: Environment (defaults to env.ENVIRONMENT)
-        tier: Instance tier for user graphs
-
-    Returns:
-        Configured GraphClient instance
+    Only valid outside a running event loop; called from async code it raises
+    rather than deadlocking on a nested ``asyncio.run``.
     """
-    # Check if we're already in an async context
     try:
       asyncio.get_running_loop()
-      # We're in an async context, can't use asyncio.run()
-      # This is a design flaw - sync methods shouldn't be called from async context
       raise RuntimeError(
         "create_client_sync() cannot be called from an async context. "
         "Use 'await get_graph_client(graph_id)' or "
@@ -735,23 +634,15 @@ class GraphClientFactory:
       )
     except RuntimeError as e:
       if "no running event loop" in str(e).lower():
-        # No running loop, we can use asyncio.run()
         return asyncio.run(
           cls.create_client(graph_id, operation_type, environment, tier)
         )
       else:
-        # Re-raise the error about being in async context
         raise
 
   @classmethod
   def get_pool_statistics(cls) -> dict[str, Any]:
-    """
-    Get connection pool statistics for monitoring.
-
-    Returns:
-        Dictionary with pool statistics including request counts,
-        failure rates, and circuit breaker status.
-    """
+    """Get per-pool request counts and failure rates plus circuit-breaker state."""
     stats = {
       "pools": {},
       "circuit_breakers": {
@@ -764,7 +655,6 @@ class GraphClientFactory:
       "total_pools": len(cls._connection_pools),
     }
 
-    # Add pool-specific statistics
     for url, pool_stat in cls._pool_stats.items():
       failure_rate = 0
       if pool_stat.get("requests", 0) > 0:
@@ -782,8 +672,10 @@ class GraphClientFactory:
 
   @classmethod
   async def cleanup(cls):
-    """Clean up connection pools and Redis connection with proper error handling."""
-    # Log final statistics before cleanup
+    """Close all pools and reset the circuit breakers.
+
+    Every step swallows its own errors so one bad pool cannot abort shutdown.
+    """
     try:
       stats = cls.get_pool_statistics()
       logger.info(
@@ -793,7 +685,6 @@ class GraphClientFactory:
     except Exception as e:
       logger.warning(f"Error getting pool statistics during cleanup: {e}")
 
-    # Close HTTP connection pools with error handling
     for url, client in cls._connection_pools.items():
       try:
         await client.aclose()
@@ -804,7 +695,6 @@ class GraphClientFactory:
     cls._connection_pools.clear()
     cls._pool_stats.clear()
 
-    # Close Redis connection pool with error handling
     with cls._redis_client_lock:
       if cls._redis_pool:
         try:
@@ -815,7 +705,6 @@ class GraphClientFactory:
         finally:
           cls._redis_pool = None
 
-    # Reset circuit breakers
     cls._master_circuit_breaker = CircuitBreaker(
       failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
       timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
@@ -833,20 +722,7 @@ async def get_graph_client(
   environment: str | None = None,
   tier: GraphTier | None = None,
 ) -> GraphClient:
-  """
-  Convenience function to get a properly routed graph database client.
-
-  This is the preferred method for getting a graph client in async contexts.
-  Routes to appropriate LadybugDB instance based on tier.
-
-  Args:
-      graph_id: Graph database identifier
-      operation_type: "read" or "write"
-      environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs (Standard/Large/XLarge)
-
-  Returns:
-      Configured GraphClient instance for the routed Graph API endpoint
+  """Get a routed graph client. Preferred entry point in async contexts.
 
   Example:
       async with await get_graph_client("sec", "read") as client:
@@ -863,20 +739,7 @@ def get_graph_client_sync(
   environment: str | None = None,
   tier: GraphTier | None = None,
 ) -> GraphClient:
-  """
-  Convenience function to get a properly routed graph database client (sync version).
-
-  This is the preferred method for getting a graph client in sync contexts.
-  Routes to appropriate LadybugDB instance based on tier.
-
-  Args:
-      graph_id: Graph database identifier
-      operation_type: "read" or "write"
-      environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs (Standard/Large/XLarge)
-
-  Returns:
-      Configured GraphClient instance for the routed Graph API endpoint
+  """Get a routed graph client from sync code (no event loop running).
 
   Example:
       with get_graph_client_sync("kg1a2b3c") as client:
@@ -890,18 +753,10 @@ def get_graph_client_sync(
 async def get_graph_client_for_instance(
   instance_ip: str, api_key: str | None = None
 ) -> GraphClient:
-  """
-  Get a graph database client for direct instance access.
+  """Get a client pinned to one instance IP, bypassing routing entirely.
 
-  This bypasses all routing and connects directly to a specific instance.
-  Used for allocation operations where we need to target a specific instance.
-
-  Args:
-      instance_ip: Private IP address of the graph database instance
-      api_key: API key (defaults to env.GRAPH_API_KEY)
-
-  Returns:
-      Configured GraphClient instance for direct instance access
+  Used by allocation, where the target instance is chosen before any database
+  exists on it for the router to find.
 
   Example:
       client = await get_graph_client_for_instance("10.0.1.123")
@@ -916,31 +771,23 @@ async def get_graph_client_for_instance(
   return GraphClient(base_url=api_url, api_key=api_key)
 
 
-# Special factory method for SEC ingestion
 async def get_graph_client_for_sec_ingestion() -> GraphClient:
-  """
-  Get a graph database client specifically for SEC data ingestion.
+  """Get a client pinned to the shared master, for SEC ingestion.
 
-  CRITICAL: SEC ingestion MUST always go to the shared master instance.
-  This bypasses normal routing logic to ensure data is loaded to the
-  correct instance that will be synced to S3 for replicas.
-
-  Returns:
-      GraphClient configured for shared master
+  SEC ingestion must land on the shared master: that instance is the one
+  snapshotted to S3 and synced out to the read replicas, so a write anywhere
+  else would be invisible to readers and lost on the next sync.
   """
   logger.info("Creating graph client for SEC ingestion (direct to shared master)")
 
-  # In dev, use the single local graph instance
   if env.is_development():
     api_url = env.GRAPH_API_URL or "http://localhost:8001"
     logger.info(f"Dev environment: SEC ingestion to local graph at {api_url}")
   else:
-    # In prod/staging, discover shared master from DynamoDB
     try:
       api_url = await GraphClientFactory._get_shared_master_url()
       logger.info(f"Discovered shared master for SEC ingestion: {api_url}")
     except Exception as e:
-      # Fallback during migration or if discovery fails
       logger.warning(f"Failed to discover shared master: {e}")
       if env.GRAPH_API_URL:
         api_url = env.GRAPH_API_URL
@@ -960,29 +807,16 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
 
 
 async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, Any]:
-  """
-  Boost memory for staging (DuckDB) or materialization (LadybugDB) operations.
+  """Raise memory limits for staging (``duckdb``) or materialization (``ladybug``).
 
-  Call this before starting a batch of staging or materialization operations.
-  The boost will remain active until restore_graph_memory is called.
-
-  Args:
-      graph_id: Graph database identifier
-      target: Which system to boost - "duckdb", "ladybug", or "both"
-
-  Returns:
-      Dictionary with boost status
+  The boost stays active until :func:`restore_graph_memory`. Never raises — a
+  failed boost degrades to default limits rather than blocking the operation.
 
   Example:
-      # Before staging
       await boost_graph_memory("sec", target="duckdb")
       # ... run staging ...
-
-      # Before materialization
       await boost_graph_memory("sec", target="ladybug")
       # ... run materialization ...
-
-      # After completion
       await restore_graph_memory("sec")
   """
   client = await get_graph_client(graph_id, operation_type="write")
@@ -993,7 +827,6 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
     return result
   except Exception as e:
     logger.warning(f"Failed to boost memory for {graph_id}: {e}")
-    # Don't raise - boost failure shouldn't block the operation
     return {
       "graph_id": graph_id,
       "target": target,
@@ -1004,22 +837,11 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
 
 
 async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
-  """
-  Restore memory limits to defaults after staging/materialization operations.
+  """Restore memory limits to their defaults.
 
-  This only reconfigures memory limits - connections stay open and buffers
-  remain allocated. Use release_graph_memory() to actually free memory.
-
-  Args:
-      graph_id: Graph database identifier
-
-  Returns:
-      Dictionary with restore status (duckdb_restored, ladybug_restored, message)
-
-  Example:
-      # After materialization completes
-      result = await restore_graph_memory("sec")
-      logger.info(f"Memory restored: {result['message']}")
+  Reconfigures limits only — connections stay open and buffers stay allocated.
+  Use :func:`release_graph_memory` to actually hand memory back. Never raises;
+  this is cleanup and must not fail the operation it follows.
   """
   client = await get_graph_client(graph_id, operation_type="write")
 
@@ -1029,7 +851,6 @@ async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
     return result
   except Exception as e:
     logger.warning(f"Failed to restore memory for {graph_id}: {e}")
-    # Don't raise - this is cleanup, shouldn't fail the main operation
     return {
       "graph_id": graph_id,
       "duckdb_restored": False,
@@ -1041,28 +862,15 @@ async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
 async def release_graph_memory(
   graph_id: str, target: str = "both", aggressive: bool = True
 ) -> dict[str, Any]:
-  """
-  Release memory by closing connections and freeing buffers.
+  """Close connections and return buffer memory to the OS.
 
-  Unlike restore_graph_memory (which only reconfigures limits), this function
-  actually closes connections to force the database engines to release their
-  buffer memory back to the OS.
-
-  Call this after staging or materialization operations complete.
-
-  Args:
-      graph_id: Graph database identifier
-      target: Which system to release - "duckdb", "ladybug", or "both"
-      aggressive: For LadybugDB - run GC and malloc_trim for maximum release
-
-  Returns:
-      Dictionary with release status and statistics
+  Closing connections is what forces the engines to give buffers back;
+  :func:`restore_graph_memory` only lowers the configured ceiling.
+  ``aggressive`` additionally runs GC and ``malloc_trim`` on the LadybugDB
+  side. Never raises; this is cleanup.
 
   Example:
-      # After staging completes
       await release_graph_memory("sec", target="duckdb")
-
-      # After materialization completes
       await release_graph_memory("sec", target="both", aggressive=True)
   """
   client = await get_graph_client(graph_id, operation_type="write")
@@ -1073,7 +881,6 @@ async def release_graph_memory(
     return result
   except Exception as e:
     logger.warning(f"Failed to release memory for {graph_id}: {e}")
-    # Don't raise - this is cleanup, shouldn't fail the main operation
     return {
       "graph_id": graph_id,
       "target": target,

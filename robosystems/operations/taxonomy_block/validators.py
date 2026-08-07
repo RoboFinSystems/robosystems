@@ -2,9 +2,8 @@
 
 Runs before any handler writes. Collects every issue across all
 checks and surfaces them as a single
-:class:`TaxonomyBlockValidationError` — tenants see every problem in
-one response, not the first-fail shape the inline handler checks
-produced.
+:class:`TaxonomyBlockValidationError`, so tenants see every problem in
+one response rather than only the first failure.
 
 Checks:
 
@@ -477,8 +476,8 @@ def _phase_rule_expression_parse(
 
     if rule.rule_pattern == "RollUp":
       # The arc-derived evaluator resolves the parent subtotal from the
-      # expression LHS with variables[0] as the legacy fallback — keep
-      # both producers' parent-first invariant enforced at the gate.
+      # expression LHS, falling back to variables[0] — keep both
+      # producers' parent-first invariant enforced at the gate.
       try:
         lhs = lhs_variable_names(parsed)
       except InvalidRuleExpression:

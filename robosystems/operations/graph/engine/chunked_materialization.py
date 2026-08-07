@@ -34,26 +34,19 @@ async def materialize_table_chunked(
   materialize_embeddings: bool = False,
   file_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-  """Materialize a staging table, chunking large tables into hash-based batches.
+  """Materialize a staging table, chunking large ones into hash-based batches.
 
   For tables smaller than the tier's chunk_size_rows, delegates directly to
   client.materialize_table (single pass). For larger tables, iterates through
   hash-based batches using batch_num/num_batches parameters.
 
-  Args:
-      client: Graph API client instance.
-      graph_id: Graph database identifier.
-      table_name: DuckDB staging table to materialize.
-      tier: Graph tier name (e.g. "ladybug-standard").
-      materialize_embeddings: Include embedding columns and build HNSW vector indexes.
-      file_ids: Optional file ID filter (passed through; chunking still applies).
+  ``materialize_embeddings`` additionally builds the HNSW vector indexes.
+  ``file_ids`` narrows the source rows and does not disable chunking.
 
-  Returns:
-      Dict with rows_ingested, chunked (bool), and batches (int) keys.
+  Returns ``{rows_ingested, chunked, batches}``.
   """
   chunk_size = _get_chunk_size(tier)
 
-  # Query row count to decide whether to chunk
   row_count = await _get_row_count(client, graph_id, table_name)
 
   if row_count is not None and row_count > chunk_size:

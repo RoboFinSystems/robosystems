@@ -1,20 +1,15 @@
 """
-RoboSystems Unified Logging System
+Application-wide loggers and the shortest path to emitting a structured event.
 
-This module provides a unified logging interface that integrates:
-1. Structured CloudWatch-optimized logging for production
-2. OTEL noise suppression for clean development logs
-3. Backward compatibility with existing logger usage
+Importing this module configures logging as a side effect: it calls
+`setup_logging()` from `config.logging` (structured JSON in production,
+CloudWatch log-group routing) and quiets OpenTelemetry, boto, and HTTP client
+loggers in development, where their output otherwise drowns the app's own.
 
-Key features preserved:
-- OTEL noise suppression (essential for development)
-- Environment-based configuration
-- Simple logger interface
-
-Enhanced features:
-- Structured JSON logging for production
-- CloudWatch log group routing
-- Cost-optimized tiered logging
+Import `logger` for ordinary messages, or one of the component loggers
+(`api_logger`, `worker_logger`, `lbug_logger`, `security_logger`) to route an
+event to its own log group. The `log_*` helpers below wrap the field-typed
+emitters in `config.logging` with this module's loggers already bound.
 """
 
 import logging
@@ -32,38 +27,32 @@ from .config.logging import (
   setup_logging,
 )
 
-# Initialize the advanced structured logging system
 setup_logging()
 
-# Create our main application logger with structured capabilities
 logger = get_logger("robosystems")
 
-# Preserve OTEL noise suppression - critical for development usability
 if env.is_development():
-  # Suppress verbose OpenTelemetry logging
   logging.getLogger("opentelemetry").setLevel(logging.WARNING)
   logging.getLogger("opentelemetry.sdk").setLevel(logging.WARNING)
   logging.getLogger("opentelemetry.exporter").setLevel(logging.WARNING)
   logging.getLogger("opentelemetry.instrumentation").setLevel(logging.WARNING)
 
-  # Also suppress httpx/httpcore noise from OTEL exporters
+  # httpx/httpcore are noisy because the OTEL exporters run over them
   logging.getLogger("httpx").setLevel(logging.WARNING)
   logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-  # Suppress additional noisy AWS/boto loggers in development
   logging.getLogger("boto3").setLevel(logging.WARNING)
   logging.getLogger("botocore").setLevel(logging.WARNING)
   logging.getLogger("urllib3").setLevel(logging.WARNING)
   logging.getLogger("requests").setLevel(logging.WARNING)
 
-# Specialized loggers for different components (structured logging enabled)
+# Per-component loggers, each routed to its own CloudWatch log group
 api_logger = get_logger("robosystems.api")
 worker_logger = get_logger("robosystems.workers")
 lbug_logger = get_logger("robosystems.lbug")
 security_logger = get_logger("robosystems.security")
 
 
-# Convenience functions that preserve existing usage patterns while adding structure
 def log_api(
   method: str,
   path: str,
@@ -132,14 +121,11 @@ def log_metric(
   log_performance_metric(logger, metric_name, value, unit, component, metadata)
 
 
-# Export all logging capabilities
 __all__ = [
-  "api_logger",  # API-specific structured logger
+  "api_logger",
   "get_logger",
-  "lbug_logger",  # Database-specific structured logger
-  # Convenience functions
+  "lbug_logger",
   "log_api",
-  # Advanced functions from config.logging
   "log_api_request",
   "log_app_error",
   "log_auth_event",
@@ -149,8 +135,8 @@ __all__ = [
   "log_metric",
   "log_performance_metric",
   "log_security_event",
-  "logger",  # Main backward-compatible logger
+  "logger",
   "performance_timer",
-  "security_logger",  # Security-specific structured logger
-  "worker_logger",  # Worker-specific structured logger
+  "security_logger",
+  "worker_logger",
 ]

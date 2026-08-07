@@ -38,13 +38,7 @@ class AsyncRateLimiter:
   """
 
   def __init__(self, rate: float = 5.0, interval: float = 1.0):
-    """
-    Initialize rate limiter.
-
-    Args:
-        rate: Maximum requests per interval (default: 5.0)
-        interval: Time window in seconds (default: 1.0)
-    """
+    """Allow at most `rate` requests per `interval` seconds."""
     self.rate = rate
     self.interval = interval
     self.last_request = 0.0

@@ -1,6 +1,9 @@
-"""Operations layer for business workflows and orchestration."""
+"""Business logic kernel: the operations every API surface delegates to.
 
-# Core business services
+Routers, GraphQL resolvers, MCP tools, and AI Operators all call through here,
+so business rules live in this package rather than in any one surface.
+"""
+
 from ..middleware.graph.allocation_manager import (
   DatabaseLocation,
   DatabaseStatus,
@@ -13,8 +16,6 @@ from .connection_service import (
   ConnectionService,
 )
 from .graph.credit_service import CreditService
-
-# LadybugDB engine (low-level backend plumbing, lives under `graph/engine/`)
 from .graph.engine.backup import LadybugGraphBackupError, LadybugGraphBackupService
 from .graph.engine.backup_manager import (
   BackupFormat,
@@ -28,14 +29,10 @@ from .graph.graph_creation_service import (
   GraphCreationResult,
   GraphCreationService,
 )
-
-# Graph operations (high-level business logic)
 from .graph.metrics_service import GraphMetricsService
 from .graph.pricing_service import GraphPricingService
 from .graph.repository_subscription_service import RepositorySubscriptionService
 from .graph.subscription_service import GraphSubscriptionService
-
-# Provider registry
 from .providers.registry import ConnectionProvider, ProviderRegistry
 
 __all__ = [

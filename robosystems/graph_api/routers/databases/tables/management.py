@@ -1,15 +1,9 @@
-"""
-DuckDB table management endpoints with SSE support for long-running operations.
+"""DuckDB staging table management, with SSE for long-running operations.
 
-This module provides:
-- Background table creation from S3 with SSE monitoring
-- Table listing, deletion, and file data management
-- Heartbeat events to prevent connection timeouts
-
-The table creation follows the same pattern as copy/backup/restore endpoints:
-1. Client POSTs to create table
-2. Server returns task_id + sse_url immediately
-3. Client monitors via SSE until complete
+Creates and appends to staging tables from S3, and lists/deletes tables and
+per-file row sets. Writes follow the same shape as backup/restore: the client
+POSTs, the server returns a task_id plus sse_url immediately, and the client
+monitors ``GET /tasks/{task_id}/monitor`` until the task completes.
 """
 
 import asyncio
@@ -52,7 +46,7 @@ class StagingTaskManager:
     self._redis_client = None
 
   async def get_redis(self) -> redis_async.Redis:
-    """Get async Redis client for task storage."""
+    """Async Redis client for task storage."""
     if not self._redis_client:
       from robosystems.config.valkey_registry import create_async_redis_client
 
@@ -109,18 +103,15 @@ class StagingTaskManager:
     """Update task status."""
     redis_client = await self.get_redis()
 
-    # Get existing task
     task_json = await redis_client.get(f"lbug:task:{task_id}")
     if not task_json:
       raise ValueError(f"Task {task_id} not found")
 
     task_data = json.loads(task_json)
 
-    # Update fields
     task_data.update(updates)
     task_data["last_heartbeat"] = time.time()
 
-    # Store back in Redis
     await redis_client.setex(
       f"lbug:task:{task_id}",
       86400,  # 24 hours
@@ -152,30 +143,22 @@ async def _run_table_background_op(
   """Shared background-task driver for create/insert table operations.
 
   Runs ``table_manager_fn(request)`` in a worker thread with a hard timeout,
-  interrupts any in-flight DuckDB connections on timeout, publishes task
-  state transitions to Redis for SSE monitoring, and wraps the whole thing
-  in an ``instance_busy`` counter so GHA pre-refresh workflows know the
-  instance is doing destructive work.
+  interrupts any in-flight DuckDB connections on timeout, publishes task state
+  transitions to Redis for SSE monitoring, and wraps the whole thing in an
+  ``instance_busy`` counter so GHA pre-refresh workflows know the instance is
+  doing destructive work.
 
-  Args:
-    task_id: SSE task tracking id.
-    request: Table operation request (graph_id, table_name, s3_pattern, ...).
-    op_kind: Busy counter op_kind label (OP_KIND_BULK_TABLE_* constant).
-    op_label: Human-readable label for log and error messages — "creation"
-      or "insert".
-    table_manager_fn: Sync callable — typically ``table_manager.create_table``
-      or ``table_manager.insert_into_table``. Must accept a single
-      ``TableCreateRequest`` argument and return an object with
-      ``status``, ``table_name``, ``execution_time_ms``, and ``row_count``
-      attributes.
-    timeout_seconds: Hard timeout before the DuckDB connection is interrupted.
+  ``table_manager_fn`` is a sync callable — ``table_manager.create_table`` or
+  ``table_manager.insert_into_table`` — taking one ``TableCreateRequest`` and
+  returning an object with ``status``, ``table_name``, ``execution_time_ms``,
+  and ``row_count``. ``op_label`` ("creation" or "insert") appears in logs and
+  error messages.
   """
-  # Import inside function to avoid circular dependency with pool initialization
+  # Imported here to avoid a circular dependency with pool initialization.
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
   async with instance_busy(env.INSTANCE_ID, op_kind):
     try:
-      # Update task status to running
       await staging_task_manager.update_task(
         task_id,
         status=TaskStatus.RUNNING,
@@ -187,7 +170,6 @@ async def _run_table_background_op(
         f"for graph {request.graph_id}"
       )
 
-      # Run the sync function in a thread pool with a hard timeout
       start_time = time.time()
       try:
         result = await asyncio.wait_for(
@@ -195,9 +177,9 @@ async def _run_table_background_op(
           timeout=timeout_seconds,
         )
       except TimeoutError:
-        # CRITICAL: Interrupt the DuckDB query to prevent zombie threads.
-        # asyncio.wait_for() raises TimeoutError but the thread keeps running;
-        # we must interrupt the connection to cancel the in-progress query.
+        # asyncio.wait_for() raises but the worker thread keeps running, so the
+        # DuckDB connection must be interrupted to cancel the in-flight query —
+        # otherwise the thread is a zombie holding the query open.
         try:
           pool = get_duckdb_pool()
           interrupted = pool.interrupt_connections(request.graph_id)
@@ -215,7 +197,6 @@ async def _run_table_background_op(
         )
       duration = time.time() - start_time
 
-      # Update task as completed
       await staging_task_manager.update_task(
         task_id,
         status=TaskStatus.COMPLETED,
@@ -238,7 +219,6 @@ async def _run_table_background_op(
     except Exception as e:
       logger.error(f"[Task {task_id}] Failed: {e}")
 
-      # Update task as failed
       await staging_task_manager.update_task(
         task_id,
         status=TaskStatus.FAILED,
@@ -252,11 +232,10 @@ async def perform_table_creation(
   request: TableCreateRequest,
   timeout_seconds: int = 1800,  # 30 minutes default
 ) -> None:
-  """Perform table creation in the background.
+  """Create a staging table in the background.
 
-  Thin wrapper around :func:`_run_table_background_op` — see that helper
-  for the shared lifecycle (busy counter, SSE state transitions, timeout
-  + DuckDB interrupt handling).
+  Thin wrapper around :func:`_run_table_background_op`, which owns the shared
+  lifecycle (busy counter, SSE state transitions, timeout + DuckDB interrupt).
   """
   await _run_table_background_op(
     task_id=task_id,
@@ -273,11 +252,10 @@ async def perform_table_insert(
   request: TableCreateRequest,
   timeout_seconds: int = 1800,  # 30 minutes default
 ) -> None:
-  """Perform incremental table insert in the background.
+  """Append to an existing staging table in the background.
 
-  Thin wrapper around :func:`_run_table_background_op` — see that helper
-  for the shared lifecycle (busy counter, SSE state transitions, timeout
-  + DuckDB interrupt handling).
+  Thin wrapper around :func:`_run_table_background_op`, which owns the shared
+  lifecycle (busy counter, SSE state transitions, timeout + DuckDB interrupt).
   """
   await _run_table_background_op(
     task_id=task_id,
@@ -311,7 +289,6 @@ async def create_table(
   """
   request.graph_id = graph_id
 
-  # Calculate file count for logging
   file_count = len(request.s3_pattern) if isinstance(request.s3_pattern, list) else 1
 
   logger.info(
@@ -319,7 +296,6 @@ async def create_table(
     f"({file_count} {'files' if file_count > 1 else 'pattern'})"
   )
 
-  # Create task
   task_id = await staging_task_manager.create_task(
     graph_id=graph_id,
     table_name=request.table_name,
@@ -327,7 +303,6 @@ async def create_table(
     file_count=file_count,
   )
 
-  # Add background task with client-specified timeout
   background_tasks.add_task(
     perform_table_creation,
     task_id=task_id,
@@ -372,7 +347,6 @@ async def insert_into_table(
   request.graph_id = graph_id
   request.table_name = table_name
 
-  # Calculate file count for logging
   file_count = len(request.s3_pattern) if isinstance(request.s3_pattern, list) else 1
 
   logger.info(
@@ -380,7 +354,6 @@ async def insert_into_table(
     f"({file_count} {'files' if file_count > 1 else 'pattern'})"
   )
 
-  # Create task
   task_id = await staging_task_manager.create_task(
     graph_id=graph_id,
     table_name=table_name,
@@ -388,7 +361,6 @@ async def insert_into_table(
     file_count=file_count,
   )
 
-  # Add background task with client-specified timeout
   background_tasks.add_task(
     perform_table_insert,
     task_id=task_id,

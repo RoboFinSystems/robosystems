@@ -7,11 +7,10 @@ Information Block envelope = Structure + FactSet for a given period.
 
 The table provides one period-scoped grouping concept that statements
 and schedules share. ``create_report`` creates a FactSet row first and
-stamps all facts with ``fact_set_id`` (the FK on
-``facts.fact_set_id`` is NOT NULL ON DELETE CASCADE, so deleting the
-FactSet cascades to its facts). FactSet carries its own ``report_id``
-back-pointer to the parent Report — the ``facts.report_id`` column
-was retired in migration 0010.
+stamps all facts with ``fact_set_id`` (the FK on ``facts.fact_set_id``
+is NOT NULL ON DELETE CASCADE, so deleting the FactSet cascades to its
+facts). The link to a parent Report lives here, on ``report_id`` — facts
+themselves carry no report reference.
 """
 
 from datetime import UTC, datetime
@@ -67,13 +66,12 @@ class FactSet(ExtensionsBase):
     ),
   )
 
-  # Identity — ``fs_``-prefixed ULID matches the id shape
-  # ``schedules/service.py`` already stamps on ``facts.fact_set_id`` today.
+  # Identity — ``fs_``-prefixed ULID, matching the id shape
+  # ``schedules/service.py`` stamps on ``facts.fact_set_id``.
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fs"))
 
-  # Structure the fact set instantiates. Nullable because the expand-pass
-  # backfill may encounter historic rows whose structure linkage was
-  # implicit; new writes always populate it.
+  # Structure the fact set instantiates. Nullable at the DB level for rows
+  # whose structure linkage is implicit; every write path populates it.
   structure_id = Column(String, ForeignKey("structures.id"), nullable=True)
 
   # Period coverage — same semantics as ``facts.period_start/period_end``.
@@ -99,11 +97,10 @@ class FactSet(ExtensionsBase):
   report_id = Column(String, nullable=True)
 
   # Scenario axis (the forecast engine's parallel universes). NULL =
-  # actuals — every pre-forecast writer leaves it unset, so the entire
-  # historical corpus is the null scenario by construction. Non-NULL
-  # points at the owning ``forecast`` Structure (the block IS the
-  # scenario), and ON DELETE CASCADE removes the whole scenario slice
-  # with its block. Never SET NULL here: an orphaned scenario set
+  # actuals, so any writer that leaves it unset lands in the actuals
+  # slice. Non-NULL points at the owning ``forecast`` Structure (the block
+  # IS the scenario), and ON DELETE CASCADE removes the whole scenario
+  # slice with its block. Never SET NULL here: an orphaned scenario set
   # demoted to NULL would masquerade as actuals.
   scenario_id = Column(
     String,
@@ -112,15 +109,15 @@ class FactSet(ExtensionsBase):
   )
 
   # Free-form metadata (render config pins, template id at creation time,
-  # agent prompt, etc.). NOTE: typed fact provenance lives on its own
-  # first-class ``provenance`` column below, not in this bag.
+  # agent prompt, etc.). Typed fact provenance does NOT go in this bag — it
+  # has its own ``provenance`` column below.
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
 
-  # Typed ``FactProvenance`` descriptor (discriminated on ``origin``) —
-  # how this FactSet's facts were constructed. Nullable in the DB so
-  # pre-feature historical rows stay valid; mandatoriness for *new*
-  # inserts is enforced at the application boundary (the ``before_insert``
-  # backstop below + the ``create_fact_set`` helper), not by a DB NOT NULL.
+  # Typed ``FactProvenance`` descriptor (discriminated on ``origin``) — how
+  # this FactSet's facts were constructed. Nullable at the DB level so rows
+  # predating the descriptor stay readable; new inserts are required to carry
+  # one, enforced at the application boundary (the ``before_insert`` backstop
+  # below plus the ``create_fact_set`` helper).
   provenance = Column(JSONB, nullable=True)
 
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
@@ -143,10 +140,9 @@ class FactSet(ExtensionsBase):
 def _require_provenance(_mapper, _connection, target: FactSet) -> None:
   """Mandatory-at-emission backstop: a new FactSet must carry provenance.
 
-  Fires only on INSERT, so historical rows (``provenance IS NULL``) are
-  never re-validated — an UPDATE of a legacy row does not trip this. A
-  cheap presence guard (not a full re-parse): the typed union is already
-  validated in ``create_fact_set`` before the value lands here.
+  INSERT only, so a row with ``provenance IS NULL`` can still be updated. A
+  presence guard rather than a re-parse — the typed union is already validated
+  in ``create_fact_set`` before the value lands here.
   """
   prov = target.provenance
   if not prov or not isinstance(prov, dict) or "origin" not in prov:

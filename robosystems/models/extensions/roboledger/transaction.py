@@ -72,8 +72,9 @@ class Transaction(ExtensionsBase):
   source_id = Column(String, nullable=True)
   connection_id = Column(String, nullable=True)
 
-  # Event audit chain — links this transaction to the business event that caused it.
-  # Null for legacy transactions and explicit journal entries (no upstream event).
+  # Event audit chain — links this transaction to the business event that
+  # caused it. NULL when there is no upstream event, as for an explicit
+  # journal entry.
   triggered_by_event_id = Column(String, nullable=True)
 
   # State

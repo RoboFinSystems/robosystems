@@ -51,7 +51,6 @@ class User(Model):
   )
 
   def __repr__(self) -> str:
-    """String representation of the user."""
     return f"<User {self.id} {self.email}>"
 
   @classmethod
@@ -61,10 +60,10 @@ class User(Model):
 
   @classmethod
   def get_by_email(cls, email: str, session: Session) -> Optional["User"]:
-    """Get a user by email (case-insensitive).
+    """Get a user by email, case-insensitively.
 
-    Emails are stored in lowercase, so we normalize the input email
-    and can use a direct indexed lookup.
+    Emails are stored lowercased, so lowering the input keeps this an indexed
+    equality lookup rather than a functional scan.
     """
     return session.query(cls).filter(cls.email == email.lower()).first()
 
@@ -89,13 +88,7 @@ class User(Model):
     return session.query(cls).all()
 
   def update(self, session: Session, auto_commit: bool = True, **kwargs) -> None:
-    """Update user fields.
-
-    Args:
-        session: Database session
-        auto_commit: Whether to automatically commit the transaction (default: True)
-        **kwargs: Fields to update
-    """
+    """Update the named fields, normalizing ``email`` to lowercase."""
     for key, value in kwargs.items():
       if hasattr(self, key):
         if key == "email" and isinstance(value, str):

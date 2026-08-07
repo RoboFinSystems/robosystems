@@ -1,5 +1,9 @@
 """
-Swagger and ReDoc documentation template utility for generating custom API docs.
+Render the Swagger UI and ReDoc pages that serve this API's documentation.
+
+Pages are built from templates under `/static`, with inline fallbacks so docs
+still render if a template file is missing. All interpolated values are HTML-
+escaped, since titles and spec URLs can come from configuration.
 """
 
 import html
@@ -94,29 +98,12 @@ REDOC_DARK_THEME = {
 
 
 def _sanitize_input(value: str) -> str:
-  """
-  Sanitize input to prevent XSS and injection attacks.
-
-  Args:
-      value: Input string to sanitize
-
-  Returns:
-      Sanitized string safe for HTML inclusion
-  """
+  """Escape a value for interpolation into the docs HTML."""
   return html.escape(value, quote=True)
 
 
 def _load_template_safely(template_path: Path, fallback_func) -> str:
-  """
-  Load template with proper error handling.
-
-  Args:
-      template_path: Path to template file
-      fallback_func: Function to generate fallback template
-
-  Returns:
-      Template content or fallback
-  """
+  """Read a template file, falling back to `fallback_func()` if unreadable."""
   try:
     if template_path.exists() and template_path.is_file():
       return template_path.read_text(encoding="utf-8")
@@ -133,19 +120,15 @@ def generate_swagger_docs(
   models_expand_depth: int = 0,
   model_expand_depth: int = 1,
 ) -> str:
-  """
-  Generate a Swagger UI HTML page with configurable parameters.
+  """Render the Swagger UI page as an HTML string.
 
   Args:
-      title: Page title (e.g., "RoboSystems API", "RoboSystems Graph API")
-      openapi_url: URL to OpenAPI JSON spec (default: "/openapi.json")
-      doc_expansion: How to expand docs ("list", "full", "none")
-      persist_auth: Whether to persist authorization between refreshes
-      models_expand_depth: Default depth for expanding models section
-      model_expand_depth: Default depth for expanding individual models
-
-  Returns:
-      HTML string for the Swagger UI page
+      title: Page title.
+      openapi_url: URL the page fetches the OpenAPI spec from.
+      doc_expansion: Initial operation expansion: "list", "full", or "none".
+      persist_auth: Keep entered credentials across page reloads.
+      models_expand_depth: Expansion depth of the models section; -1 hides it.
+      model_expand_depth: Expansion depth within an individual model.
   """
   # Sanitize inputs
   title = _sanitize_input(title)
@@ -225,16 +208,7 @@ def generate_redoc_docs(
   title: str = "API Documentation",
   openapi_url: str = "/openapi.json",
 ) -> str:
-  """
-  Generate a ReDoc HTML page with dark theme styling.
-
-  Args:
-      title: Page title (e.g., "RoboSystems API", "RoboSystems Graph API")
-      openapi_url: URL to OpenAPI JSON spec (default: "/openapi.json")
-
-  Returns:
-      HTML string for the ReDoc page with dark theme
-  """
+  """Render the dark-themed ReDoc page as an HTML string."""
   # Sanitize inputs to prevent injection
   title = _sanitize_input(title)
   openapi_url = _sanitize_input(openapi_url)
@@ -257,15 +231,10 @@ def generate_redoc_docs(
 
 
 def _get_redoc_fallback_template(title: str, openapi_url: str) -> str:
-  """
-  Fallback ReDoc template with dark theme if the file doesn't exist.
+  """Inline ReDoc page used when the template file is unavailable.
 
-  Args:
-      title: The page title
-      openapi_url: The OpenAPI spec URL
-
-  Returns:
-      Complete HTML string with dark theme
+  Placeholders are substituted rather than `str.format`-ed, because the
+  embedded theme JSON is full of braces.
   """
   import json
 

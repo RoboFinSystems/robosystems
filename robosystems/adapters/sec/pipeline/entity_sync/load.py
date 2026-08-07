@@ -3,7 +3,8 @@
 Registers parquet files as GraphFiles, uploads to the user's S3 bucket,
 stages to DuckDB on the graph instance, and materializes to LadybugDB.
 
-Follows the same pattern as the QuickBooks load asset.
+Mirrors the QuickBooks load asset
+(`robosystems/adapters/quickbooks/pipeline/load.py`).
 """
 
 import asyncio
@@ -38,9 +39,6 @@ def sec_entity_load(
   3. Upload parquet to USER_DATA_BUCKET
   4. Stage to DuckDB on graph instance via Graph API
   5. Materialize from DuckDB to LadybugDB
-
-  Returns:
-      MaterializeResult with load statistics
   """
   work_dir = get_pipeline_work_dir(config.graph_id)
   output_dir = work_dir / "output"

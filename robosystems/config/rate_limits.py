@@ -400,18 +400,16 @@ class RateLimitConfig:
 
       # Query layer — POST /v1/graphs/{graph_id}/query/{cypher,sql}, so the
       # segment after graph_id (endpoint_type) is "query" and the language is
-      # the next segment. Cypher → GRAPH_QUERY; SQL keeps the DuckDB/columnar
-      # bucket (TABLE_QUERY) it had as the former /tables/query route.
+      # the next segment. Cypher → GRAPH_QUERY; SQL → the DuckDB/columnar
+      # bucket (TABLE_QUERY).
       elif endpoint_type == "query":
         if len(path_parts) >= 4 and path_parts[3] == "sql":
           return EndpointCategory.TABLE_QUERY
         return EndpointCategory.GRAPH_QUERY
 
       # Content metrics + consumption usage — aggregation-heavy reads get a
-      # dedicated bucket. Match the endpoint segment, which is what actually
-      # appears in the path: this checked `endpoint_type == "graph"` once and
-      # never matched, then "analytics" until those routes were renamed to
-      # /metrics and /usage. Keep this in step with routers/graphs/usage.py.
+      # dedicated bucket. Match on the endpoint segment as it actually appears
+      # in the path. Keep this in step with routers/graphs/usage.py.
       elif endpoint_type in ("metrics", "usage"):
         return EndpointCategory.GRAPH_ANALYTICS
 

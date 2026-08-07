@@ -22,7 +22,6 @@ from ..models.api.common import (
 logger = logging.getLogger(__name__)
 
 
-# Public offering router - comprehensive service menu
 offering_router = APIRouter(
   prefix="/offering",
   tags=["Service Offerings"],
@@ -68,16 +67,13 @@ async def get_service_offerings(
       if not plan_data or tier_name not in customer_tiers:
         continue
 
-      # Find the corresponding tier config for technical specs
       tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
       # Skip a tier this environment cannot describe. Billing defines what is
-      # purchasable; graph.yml defines the specs. When the two disagree — as in
-      # local dev, which only defines ladybug-standard because it runs a single
-      # graph_api — the tier used to be advertised anyway, with max_subgraphs
-      # fabricated as 0 and the limits falling through to Standard-shaped
-      # defaults. "Zero subgraphs, 20 GB" is a confident wrong answer where the
-      # truth is "not offered here"; omitting the tier says that instead.
+      # purchasable and graph.yml defines the specs; where the two disagree —
+      # local dev defines only ladybug-standard, since it runs a single
+      # graph_api — omitting the tier says "not offered here" instead of
+      # advertising fabricated limits.
       if not tier_config:
         logger.info(
           f"Skipping tier {tier_name} in offerings: no tier config for this environment"
@@ -146,7 +142,6 @@ async def get_service_offerings(
       }
       graph_tiers.append(tier_info)
 
-    # Sort graph tiers by price
     graph_tiers.sort(key=lambda x: x["monthly_price_per_graph"])
 
     # Get repository subscription information directly from manifests
@@ -176,7 +171,6 @@ async def get_service_offerings(
 
           plans.append(plan_info)
 
-      # Sort plans by price
       plans.sort(key=lambda x: x["monthly_price"])
 
       repo_info = {

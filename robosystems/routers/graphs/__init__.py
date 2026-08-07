@@ -1,9 +1,8 @@
-"""
-Graph management routers.
+"""Graph routers, mounted under `/v1/graphs`.
 
-This module contains routers for graph database management operations
-including creation, listing, selection, backup, usage analytics, and other
-graph-level administrative functions.
+Covers graph creation and listing, per-graph backups, connections, credits,
+files, health, limits, members, query, schema, subgraphs, subscriptions,
+tables, and usage.
 """
 
 from robosystems.config import env

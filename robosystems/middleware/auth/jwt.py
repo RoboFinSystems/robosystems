@@ -1,7 +1,11 @@
-"""JWT token utilities.
+"""JWT minting, verification, and revocation.
 
-This module provides JWT-related functionality that is shared between
-routers and middleware to avoid circular dependencies.
+Lives here rather than in the routers so middleware can import it without a
+circular dependency.
+
+Two token kinds share this secret: session bearers (``type: "access"``, with a
+``jti`` so they can be revoked) and single-use SSO handoff tokens
+(``sso: true``, no ``jti``). `verify_jwt_claims` accepts only the former.
 """
 
 import uuid
@@ -30,7 +34,7 @@ class JWTConfig:
 
   @staticmethod
   def get_jwt_secret() -> str:
-    """Get JWT secret key."""
+    """Return the signing secret, raising 500 when it is unset."""
     secret = env.JWT_SECRET_KEY
     if not secret:
       raise HTTPException(
@@ -41,31 +45,30 @@ class JWTConfig:
 
 
 def get_redis_client():
-  """Get synchronous Redis client for token tracking with proper ElastiCache support."""
+  """Synchronous Redis client for token revocation tracking."""
   return create_redis_client(ValkeyDatabase.AUTH)
 
 
 async def get_async_redis_client():
-  """Get async Redis client for token tracking with proper ElastiCache support."""
+  """Async Redis client for token revocation tracking."""
   return create_async_redis_client(ValkeyDatabase.AUTH)
 
 
 def is_jwt_token_revoked(token: str) -> bool:
-  """Check if a JWT token has been revoked.
+  """Whether a token's `jti` is in the revocation list.
 
-  Args:
-    token: The JWT token to check
+  Fails closed: an unreadable token or an unreachable Redis both count as
+  revoked, so a revocation list outage cannot be used to keep using a
+  revoked token.
 
-  Returns:
-    True if token is revoked, False otherwise
+  Tokens revoked with reason ``session_refresh`` stay usable for a short
+  grace period, so requests already in flight when a session refreshes
+  don't fail.
   """
-  # Grace period for tokens revoked during session refresh
-  # This handles race conditions where /me and /refresh are called simultaneously
   REFRESH_GRACE_PERIOD = timedelta(seconds=JWT_REVOCATION_GRACE_SECONDS)
 
   try:
     secret_key = JWTConfig.get_jwt_secret()
-    # Decode without verification to get JTI
     payload = jwt.decode(
       token,
       secret_key,
@@ -79,22 +82,19 @@ def is_jwt_token_revoked(token: str) -> bool:
 
     jti = payload.get("jti")
     if not jti:
-      # Old tokens without JTI can't be revoked
+      # A token with no jti has nothing to look up in the revocation list.
       return False
 
     try:
       redis_client = get_redis_client()
       revocation_key = f"revoked_jwt:{jti}"
 
-      # Get revocation data to check reason and timing
       revocation_data = redis_client.hgetall(revocation_key)
 
       if not revocation_data:
         return False  # Not revoked
 
-      # Check for grace period on session_refresh revocations
-      # This allows in-flight requests to complete during token refresh
-      # Note: decode_responses=True is used, so keys are strings not bytes
+      # `decode_responses=True`, so these keys are str, not bytes.
       reason = revocation_data.get("reason", "")
       if reason == "session_refresh":
         revoked_at_str = revocation_data.get("revoked_at", "")
@@ -109,17 +109,13 @@ def is_jwt_token_revoked(token: str) -> bool:
       return True  # Revoked (or grace period expired)
 
     except redis.ConnectionError as conn_err:
-      # Log connection errors explicitly
       logger.error(f"Redis connection error during token revocation check: {conn_err}")
-      # Fail closed during Redis connection issues
       return True
 
   except jwt.InvalidTokenError as jwt_err:
-    # Fail closed for invalid JWT tokens
     logger.warning(f"Invalid JWT token during revocation check: {jwt_err}")
     return True
   except Exception as e:
-    # Unexpected errors: log and fail closed
     logger.error(f"Unexpected error checking token revocation: {e}")
     return True
 
@@ -160,21 +156,13 @@ def verify_jwt_claims(
   Validates: signature, expiry, issuer, audience, jti revocation, and
   optional device fingerprint binding.
 
-  Does NOT compare session_version against the User row — that requires DB
-  access and is the caller's responsibility. Caller must compare the returned
-  session_version against ``User.session_version`` before treating the token
-  as authenticated. The auth dependency layer handles this via
-  ``_get_user_for_verified_jwt``; direct callers must do it explicitly.
-
-  Args:
-    token: The JWT token to verify
-    device_fingerprint: Optional device fingerprint to validate against token
-
-  Returns:
-    (user_id, session_version) if signature-level validation passed, else None
+  Does NOT compare session_version against the User row — that needs DB
+  access and is the caller's job. Compare the returned session_version
+  against ``User.session_version`` before treating the token as
+  authenticated; the auth dependency layer does this via
+  ``_get_user_for_verified_jwt``.
   """
   try:
-    # First check if token is revoked
     if is_jwt_token_revoked(token):
       logger.info("JWT token verification failed: token is revoked")
       return None
@@ -188,13 +176,12 @@ def verify_jwt_claims(
       audience=env.JWT_AUDIENCE,
     )
 
-    # F3: single-use SSO handoff tokens (`create_sso_token`: {"sso": true},
-    # no jti, unrevocable) must never authenticate as a full session bearer.
-    # They are consumed only at /sso-exchange, which decodes them directly —
-    # not through this function. Reject `sso` here, and reject any non-`access`
-    # token type so a future purpose-scoped token (e.g. an SSE stream token)
-    # can't be replayed as a session bearer. Legacy session tokens minted
-    # before the `type` claim existed have no `type` and are grandfathered.
+    # Single-use SSO handoff tokens (`create_sso_token`: {"sso": true}, no
+    # jti, unrevocable) must never authenticate as a session bearer. They are
+    # consumed only at /sso-exchange, which decodes them directly rather than
+    # through this function. Rejecting every non-`access` type also stops a
+    # future purpose-scoped token (an SSE stream token, say) from being
+    # replayed as a bearer. Tokens with no `type` claim at all are accepted.
     token_type = payload.get("type")
     if payload.get("sso") or (token_type is not None and token_type != "access"):
       logger.info("JWT token verification failed: non-access token presented as bearer")
@@ -214,7 +201,6 @@ def verify_jwt_claims(
       )
       return None
 
-    # Verify device fingerprint if both token and request fingerprint are available
     if device_fingerprint and payload.get("device_hash"):
       from ...security.device_fingerprinting import create_device_hash
 
@@ -255,21 +241,15 @@ def create_jwt_token(
   device_fingerprint: dict[str, Any] | None = None,
   session: Any = None,
 ) -> str:
-  """Create a JWT token for authentication with optional device binding.
+  """Mint a session bearer token, optionally bound to a device fingerprint.
 
-  Args:
-    user_id: The user ID to encode in the token
-    device_fingerprint: Optional device fingerprint for token binding
-    session: Optional DB session to read session_version from. If provided,
-      the caller owns the lifecycle (no close). Otherwise a short-lived
-      session is opened.
-
-  Returns:
-    The encoded JWT token
+  The token carries the user's current ``session_version``; bumping that
+  column invalidates every token issued before it. When ``session`` is
+  passed the caller owns its lifecycle, otherwise a short-lived one is
+  opened to read the version.
   """
   secret_key = JWTConfig.get_jwt_secret()
 
-  # Generate unique JTI (JWT ID) for revocation tracking
   jti = str(uuid.uuid4())
 
   payload = {
@@ -283,24 +263,20 @@ def create_jwt_token(
     "aud": env.JWT_AUDIENCE,
   }
 
-  # Add device fingerprint hash for token binding if provided
   if device_fingerprint:
     payload["device_hash"] = create_device_hash(device_fingerprint)
   return jwt.encode(payload, secret_key, algorithm="HS256")
 
 
 def create_sso_token(user_id: str, session: Any = None) -> tuple[str, str]:
-  """Create a temporary SSO token for cross-app authentication.
+  """Mint a short-lived SSO handoff token for cross-app authentication.
 
-  Args:
-    user_id: The user ID to encode in the token
-
-  Returns:
-    Tuple of (token, token_id) where token_id is used for single-use tracking
+  Returns `(token, token_id)`; `token_id` is what /sso-exchange tracks to
+  enforce single use. These tokens have no `jti` and cannot be revoked,
+  which is why `verify_jwt_claims` refuses them as session bearers.
   """
   secret_key = JWTConfig.get_jwt_secret()
 
-  # Generate unique token ID for single-use tracking
   token_id = str(uuid.uuid4())
 
   payload = {
@@ -318,17 +294,12 @@ def create_sso_token(user_id: str, session: Any = None) -> tuple[str, str]:
 
 
 def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
-  """Add a JWT token to the revocation list.
+  """Add a token's `jti` to the revocation list until its natural expiry.
 
-  Args:
-    token: The JWT token to revoke
-    reason: Reason for revocation (for logging/auditing)
-
-  Returns:
-    True if token was successfully revoked, False otherwise
+  `reason` is stored alongside; ``session_refresh`` triggers the grace
+  period in `is_jwt_token_revoked`.
   """
   try:
-    # First decode to get expiration for TTL
     secret_key = JWTConfig.get_jwt_secret()
     payload = jwt.decode(
       token,
@@ -349,7 +320,6 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       logger.warning("Cannot revoke token: missing jti or exp claim")
       return False
 
-    # Calculate TTL (time until natural expiration)
     exp_datetime = datetime.fromtimestamp(exp, tz=UTC)
     ttl_seconds = int((exp_datetime - datetime.now(UTC)).total_seconds())
 
@@ -357,7 +327,6 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       logger.info("Token already expired, no need to revoke")
       return True
 
-    # Store in revocation list with TTL
     redis_client = get_redis_client()
     revocation_key = f"revoked_jwt:{jti}"
     revocation_data = {
@@ -366,7 +335,6 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       "user_id": user_id,
     }
 
-    # Use pipeline for atomic operation
     pipe = redis_client.pipeline()
     pipe.hset(revocation_key, mapping=revocation_data)
     pipe.expire(revocation_key, ttl_seconds)

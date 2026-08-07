@@ -1,8 +1,9 @@
 """
 Custom Schema Support for LadybugDB
 
-This module provides support for custom schema definitions via JSON/YAML,
-allowing users to define their own graph schemas without modifying code.
+Parses user-supplied JSON/YAML schema definitions into `Schema` objects, so a
+graph can carry its own node and relationship types without code changes.
+Reserved system names and unknown data types are rejected at parse time.
 """
 
 import json
@@ -27,11 +28,7 @@ class SchemaFormat(Enum):
 
 @dataclass
 class CustomSchemaDefinition:
-  """
-  Custom schema definition structure.
-
-  This represents the JSON/YAML structure that users provide to define custom schemas.
-  """
+  """The JSON/YAML structure users provide to define a custom schema."""
 
   name: str
   version: str = "1.0.0"
@@ -43,11 +40,7 @@ class CustomSchemaDefinition:
 
 
 class CustomSchemaParser:
-  """
-  Parser for custom schemas.
-
-  Converts JSON/YAML schema definitions into Schema objects.
-  """
+  """Converts JSON/YAML schema definitions into Schema objects."""
 
   # Supported LadybugDB data types
   VALID_TYPES = {
@@ -109,17 +102,11 @@ class CustomSchemaParser:
     format: SchemaFormat = SchemaFormat.JSON,
   ) -> Schema:
     """
-    Parse custom schema from various formats.
-
-    Args:
-        schema_input: Schema definition as string or dict
-        format: Input format (JSON, YAML, or DICT)
-
-    Returns:
-        Compiled Schema object
+    Parse a custom schema from a JSON/YAML string or an already-parsed dict.
 
     Raises:
-        ValueError: If schema is invalid
+        ValueError: If the input does not match ``format``, or the schema is
+            structurally invalid.
     """
     # Parse input based on format
     if format == SchemaFormat.DICT:
@@ -328,11 +315,7 @@ class CustomSchemaParser:
 
 
 class CustomSchemaManager:
-  """
-  Manager for custom schemas.
-
-  Handles parsing, validation, storage, and integration with the main schema system.
-  """
+  """Parses, validates, and merges custom schemas with the base schema."""
 
   def __init__(self):
     self.parser = CustomSchemaParser()
@@ -351,9 +334,10 @@ class CustomSchemaManager:
 
   def merge_with_base(self, user_schema: Schema) -> Schema:
     """
-    Merge custom schema with base schema.
+    Merge a custom schema onto the base schema.
 
-    This allows users to extend the base schema with custom nodes and relationships.
+    User definitions that collide with a base name or a reserved system name
+    are skipped with a warning — base declarations always win.
     """
     from ..base import BASE_NODES, BASE_RELATIONSHIPS
     from ..models import Schema
@@ -402,11 +386,7 @@ class CustomSchemaManager:
     return merged
 
   def validate_json_schema(self, json_str: str) -> dict[str, Any]:
-    """
-    Validate a JSON schema definition without creating Schema object.
-
-    Returns validation result with any errors found.
-    """
+    """Validate a JSON schema definition, reporting errors instead of raising."""
     try:
       schema = self.create_from_json(json_str)
       return {

@@ -1,36 +1,25 @@
-"""
-LanceDB Vector Index Manager for Graph API.
+"""Batch LanceDB IVF-PQ vector index builder for graph instances.
 
-DORMANT — NOT DEAD CODE. This is the batch IVF-PQ index builder (build from a
-DuckDB staging query → export as tar.gz). Its only consumer (SEC element-vector
-search) was retired in the 2026-07 embedding cut, so nothing calls build/search/
-export today. It is kept deliberately as the queued IVF-PQ foundation for the
-future `lance` vector-store subgraph (multimodal-knowledge-graph spec §58/§118);
-that subgraph pairs this batch-index side with the incremental-CRUD side of
-`LanceMemoryStore`. The LIVE vector path is instead LadybugDB-native in-graph
-HNSW (`CALL QUERY_VECTOR_INDEX`). Do not remove without retiring the lance
-subgraph plan. (`delete` is the one method still live — called on database drop
-to tear down the whole graph lance dir, including memory.)
+DORMANT — NOT DEAD CODE. Only ``delete`` is on a live path (called when a
+database is dropped, to tear down the graph's whole lance directory including
+memory). ``build``/``search``/``export`` have no caller: the live vector path
+is LadybugDB-native in-graph HNSW (``CALL QUERY_VECTOR_INDEX``). This is kept
+as the IVF-PQ foundation for the planned ``lance`` vector-store subgraph,
+which pairs this batch side with the incremental-CRUD side of
+``LanceMemoryStore``. Do not remove without retiring that plan.
 
-Manages per-graph, per-table LanceDB IVF-PQ vector indexes on graph instances.
-Follows the same lifecycle pattern as DuckDB staging:
+Per-graph, per-table indexes with a lifecycle mirroring DuckDB staging:
 
-  build:  Read embedding column from DuckDB staging → build IVF-PQ lance index
-  search: Query the lance index by embedding similarity
-  export: Package the lance index as tar.gz for S3 publish / replica download
-  delete: Clean up lance index when graph is deleted or rebuilt
+  build:  DuckDB staging query → IVF-PQ lance index (atomic directory swap)
+  search: query the index by embedding similarity
+  export: package as tar.gz for S3 publish / replica download
+  delete: remove the index when a graph is deleted or rebuilt
 
-Directory structure on disk:
-  {LANCE_INDEX_PATH}/
-    {graph_id}/
-      {table_name}/          ← LanceDB db directory (one per indexed table)
-        {table_name}.lance/  ← LanceDB internal format
+On disk:
+  {LANCE_INDEX_PATH}/{graph_id}/{table_name}/{table_name}.lance/
 
-The embedding column convention:
-  - Column must be named "embedding"
-  - Type must be FLOAT[] (dimension auto-detected from data)
-  - One embedding column per table (first detected is used)
-  - Rows with NULL embeddings are excluded from the index
+Embedding column convention: one column named "embedding", type FLOAT[] with
+the dimension auto-detected; rows with NULL embeddings are excluded.
 """
 
 from __future__ import annotations
@@ -54,10 +43,10 @@ _MIN_ROWS_FOR_INDEX = 1000
 
 
 class LanceManager:
-  """Manages LanceDB vector indexes for graph databases.
+  """Build, search, export and delete LanceDB vector indexes.
 
-  Each graph + table combination gets its own lance directory on disk.
-  Indexes are built from DuckDB staging tables that contain embedding columns.
+  Each graph + table pair gets its own lance directory, built from a DuckDB
+  staging table carrying an embedding column.
   """
 
   def __init__(self, base_path: str | None = None) -> None:
@@ -129,36 +118,21 @@ class LanceManager:
     duckdb_path: str | Path | None = None,
     memory_limit: str = "8GB",
   ) -> dict:
-    """Build a LanceDB IVF-PQ index from a DuckDB query.
+    """Build a LanceDB IVF-PQ index from a DuckDB staging query.
 
-    Runs the provided query against the DuckDB staging database and builds
-    an IVF-PQ vector index from the results. The query must return a column
-    named "vector" of type FLOAT[N] — all other columns are stored as
-    metadata alongside the vectors.
+    ``query`` must return a "vector" column of type FLOAT[N] (e.g.
+    ``embedding::FLOAT[384] AS vector``); the remaining columns are stored as
+    metadata beside the vectors. Domain-specific filtering, dedup and column
+    selection live in the query, which keeps this endpoint generic.
 
-    This keeps the Graph API generic — domain-specific filtering, dedup,
-    and column selection are the caller's responsibility via the query.
+    Builds into a temp directory and renames on success, so an existing index
+    stays queryable throughout and a failed build leaves it untouched.
 
-    Uses atomic swap: builds to a temp directory, then renames on success.
-    If an existing index is present, it remains queryable during the build.
-
-    Args:
-        graph_id: Graph database identifier.
-        table_name: Name for the lance index (e.g., "Element"). Used as the
-            LanceDB table name and directory name on disk.
-        query: DuckDB SQL query that selects the rows to index. Must include
-            a "vector" column (e.g., ``embedding::FLOAT[384] AS vector``).
-        duckdb_path: Path to the DuckDB staging database. If None, uses
-            the default staging path for this graph_id.
-        memory_limit: DuckDB memory limit for the query.
-
-    Returns:
-        Dict with build results: row_count, index_size_bytes, duration_ms,
-        num_partitions.
-
-    Raises:
-        ValueError: If the query returns no rows or no "vector" column.
-        RuntimeError: If the build fails.
+    ``table_name`` names both the LanceDB table and its directory;
+    ``duckdb_path`` defaults to the graph's staging database. Returns
+    row_count, num_partitions, index_size_bytes and duration_ms. Raises
+    ValueError on an empty result or missing "vector" column, RuntimeError if
+    the index build itself fails.
     """
     import duckdb
     import lancedb
@@ -183,17 +157,15 @@ class LanceManager:
     build_dir = self._build_dir(graph_id, table_name)
     final_dir = self._table_dir(graph_id, table_name)
 
-    # Clean up any prior failed build
     if build_dir.exists():
       shutil.rmtree(build_dir)
 
     logger.info(f"Building lance index for {graph_id}/{table_name} from {duckdb_path}")
 
-    # Step 1: Execute the caller's query against DuckDB staging.
-    # Use the DuckDB connection pool if available — DuckDB does not allow
-    # opening a second connection with different config (read_only vs read_write,
-    # different memory_limit) on the same file. The pool already manages the
-    # connection used by staging, so we borrow it.
+    # Borrow the pool's connection rather than opening our own: DuckDB refuses
+    # a second connection with a different config (read_only vs read_write, a
+    # different memory_limit) on the same file, and the pool already holds the
+    # one staging used.
     try:
       from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
@@ -202,8 +174,7 @@ class LanceManager:
         logger.info("Executing vector extraction query against DuckDB (via pool)...")
         arrow_table = con.execute(query).fetch_arrow_table()
     except Exception:
-      # Fallback: open a standalone connection (works when no pool exists,
-      # e.g., in tests or when the pool hasn't opened this database yet)
+      # No pool (tests, or the pool has not opened this database yet).
       logger.info("Pool unavailable, opening standalone DuckDB connection...")
       con = duckdb.connect(str(duckdb_path), read_only=True)
       try:
@@ -214,7 +185,6 @@ class LanceManager:
 
     row_count = arrow_table.num_rows
 
-    # Validate the query returned a "vector" column
     col_names = [field.name for field in arrow_table.schema]
     if "vector" not in col_names:
       raise ValueError(
@@ -226,17 +196,16 @@ class LanceManager:
     if row_count == 0:
       raise ValueError("Query returned no rows — cannot build vector index.")
 
-    # Step 2: Build LanceDB table + IVF-PQ index
     build_dir.mkdir(parents=True, exist_ok=True)
     try:
       db = lancedb.connect(str(build_dir))
       table = db.create_table(table_name, data=arrow_table, mode="overwrite")
 
-      # Free arrow table before building index
+      # Drop the Arrow buffers before the index build, which is the memory
+      # peak — LanceDB has copied the data into the table by now.
       del arrow_table
       gc.collect()
 
-      # Build IVF-PQ index for large datasets
       num_partitions = 0
       if row_count > _MIN_ROWS_FOR_INDEX:
         num_partitions = min(256, row_count // 10)
@@ -257,11 +226,10 @@ class LanceManager:
         logger.info(f"Skipping IVF-PQ index ({row_count} rows, brute-force is fine)")
 
     except Exception as e:
-      # Clean up failed build
       shutil.rmtree(build_dir, ignore_errors=True)
       raise RuntimeError(f"Lance index build failed: {e}") from e
 
-    # Step 3: Atomic swap — replace old index with new one
+    # Atomic swap: the old index stays in place until the new one is complete.
     if final_dir.exists():
       backup_dir = graph_dir / f"{table_name}.old"
       if backup_dir.exists():
@@ -271,14 +239,13 @@ class LanceManager:
         build_dir.rename(final_dir)
         shutil.rmtree(backup_dir, ignore_errors=True)
       except Exception:
-        # Restore old index on rename failure
+        # Put the old index back if the rename fails.
         backup_dir.rename(final_dir)
         shutil.rmtree(build_dir, ignore_errors=True)
         raise
     else:
       build_dir.rename(final_dir)
 
-    # Calculate index size
     index_size = sum(f.stat().st_size for f in final_dir.rglob("*") if f.is_file())
     duration_ms = (time.time() - start_time) * 1000
 
@@ -313,19 +280,8 @@ class LanceManager:
   ) -> dict:
     """Search a lance index by embedding similarity.
 
-    Args:
-        graph_id: Graph database identifier.
-        table_name: Table name whose index to search.
-        embedding: Query embedding vector.
-        limit: Maximum results to return.
-        select_columns: Columns to include in results. If None, returns all
-            non-vector columns.
-
-    Returns:
-        Dict with results list, total count, and execution_time_ms.
-
-    Raises:
-        ValueError: If no index exists for this graph + table.
+    ``select_columns`` defaults to every non-vector column. Returns results,
+    total and execution_time_ms; raises ValueError when the index is absent.
     """
     import lancedb
 
@@ -344,7 +300,7 @@ class LanceManager:
     query = table.search(embedding).limit(limit)
 
     if select_columns:
-      # Always include _distance for scoring
+      # _distance is the score, so it is always fetched.
       cols = list(select_columns)
       if "_distance" not in cols:
         cols.append("_distance")
@@ -354,7 +310,6 @@ class LanceManager:
 
     elapsed_ms = (time.perf_counter() - start) * 1000
 
-    # Normalize _distance to "distance" in output
     normalized = []
     for r in results:
       row = {k: v for k, v in r.items() if k != "_distance" and k != "vector"}
@@ -379,25 +334,15 @@ class LanceManager:
     s3_key: str | None = None,
     output_path: str | Path | None = None,
   ) -> dict:
-    """Package a lance index as tar.gz and optionally upload to S3.
+    """Package a lance index as tar.gz and optionally upload it to S3.
 
-    When s3_bucket and s3_key are provided, the tar.gz is uploaded directly
-    from this instance to S3 (required because the Dagster worker that calls
-    this endpoint cannot access this instance's filesystem).
+    Given ``s3_bucket`` and ``s3_key``, the upload runs on this instance and
+    the local tar.gz is deleted afterwards — the Dagster worker calling this
+    endpoint cannot reach this instance's filesystem. ``output_path`` defaults
+    to a temp path under {LANCE_INDEX_PATH}/{graph_id}/.
 
-    Args:
-        graph_id: Graph database identifier.
-        table_name: Table name whose index to export.
-        s3_bucket: If provided, upload the tar.gz to this S3 bucket.
-        s3_key: S3 object key for the upload.
-        output_path: Path for the local tar.gz. If None, uses a temp path
-            under {LANCE_INDEX_PATH}/{graph_id}/.
-
-    Returns:
-        Dict with size_bytes, size_mb, duration_ms, and s3_uri if uploaded.
-
-    Raises:
-        ValueError: If no index exists for this graph + table.
+    Returns size_bytes, size_mb, duration_ms, plus s3_uri when uploaded.
+    Raises ValueError when the index is absent.
     """
     table_dir = self._table_dir(graph_id, table_name)
     if not table_dir.is_dir():
@@ -413,7 +358,7 @@ class LanceManager:
     logger.info(f"Exporting lance index {graph_id}/{table_name} to {output_path}")
 
     with tarfile.open(str(output_path), "w:gz") as tar:
-      # Archive with arcname so extraction gives {graph_id}/{table_name}/
+      # arcname so extraction lands at {graph_id}/{table_name}/
       tar.add(str(table_dir), arcname=f"{graph_id}/{table_name}")
 
     tar_size = output_path.stat().st_size
@@ -432,7 +377,6 @@ class LanceManager:
       "duration_ms": round(duration_ms, 2),
     }
 
-    # Upload to S3 if bucket/key provided (runs on this instance, not the caller)
     if s3_bucket and s3_key:
       import boto3
 
@@ -442,7 +386,6 @@ class LanceManager:
       logger.info(f"Uploading lance tar.gz to s3://{s3_bucket}/{s3_key}")
       s3.upload_file(str(output_path), s3_bucket, s3_key)
 
-      # Verify upload
       head = s3.head_object(Bucket=s3_bucket, Key=s3_key)
       result["s3_uri"] = f"s3://{s3_bucket}/{s3_key}"
       result["s3_size_bytes"] = head["ContentLength"]
@@ -451,7 +394,6 @@ class LanceManager:
         f"({head['ContentLength'] / (1024**2):.1f} MB)"
       )
 
-      # Clean up local tar.gz after successful upload
       output_path.unlink(missing_ok=True)
 
     return result
@@ -461,15 +403,12 @@ class LanceManager:
   # ---------------------------------------------------------------------------
 
   def delete(self, graph_id: str, table_name: str | None = None) -> dict:
-    """Delete lance index for a graph (or a specific table).
+    """Delete one table's lance index, or the graph's whole lance directory
+    when ``table_name`` is omitted.
 
-    Args:
-        graph_id: Graph database identifier.
-        table_name: If provided, delete only this table's index.
-            If None, delete all indexes for the graph.
-
-    Returns:
-        Dict with deleted paths.
+    The directory-wide form is what database drop calls, so it also removes
+    the semantic-memory table (see ``memory_store.py``). Returns the paths
+    deleted.
     """
     deleted = []
 

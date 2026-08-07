@@ -70,8 +70,8 @@ RS_GAAP_SUBTOTAL_DENYLIST: frozenset[str] = frozenset(
 # ``audit_only`` (no extra BS rows), but mapping fixed-asset accounts to
 # Gross + the accumulated-depreciation contra is what lets CF Investing
 # read the change in Gross as capex (the change in Net conflates
-# purchases with depreciation). The candidate
-# suggester admits these regardless of presentation-set membership.
+# purchases with depreciation). The candidate suggester admits these
+# regardless of presentation-set membership.
 RS_GAAP_SYNTHESIZED_DETAIL_ALLOW: frozenset[str] = frozenset(
   {
     "rs-gaap:PropertyPlantAndEquipmentGross",
@@ -100,11 +100,10 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
   # paid-in catch-all that isn't a rollup.
   "fac:Equity": "rs-gaap:AdditionalPaidInCapital",
   "fac:EquityAttributableToParent": "rs-gaap:AdditionalPaidInCapital",
-  # Revenues — RevenueFromContractWithCustomerExcludingAssessedTax is the
-  # sole operating-revenue leaf wired under rs-gaap:Revenues (the ASC 606
-  # primary; the us-gaap-deprecated SalesRevenueNet/OtherSalesRevenueNet
-  # leaves were retired). NOT OtherIncome, which is non-operating and isn't
-  # a child of the Revenues rollup → would drop.
+  # Revenues — RevenueFromContractWithCustomerExcludingAssessedTax (the ASC 606
+  # primary) is the sole operating-revenue leaf wired under rs-gaap:Revenues.
+  # NOT OtherIncome, which is non-operating and isn't a child of the Revenues
+  # rollup → would drop.
   "fac:Revenues": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
   "fac:OtherOperatingIncomeExpenses": "rs-gaap:OtherCostAndExpenseOperating",
   "fac:NonoperatingIncomeLoss": "rs-gaap:OtherNonoperatingIncomeExpense",

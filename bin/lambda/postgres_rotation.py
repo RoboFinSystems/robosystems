@@ -36,15 +36,10 @@ rds_client = boto3.client("rds")
 
 
 def get_database_connection_info(secret_arn: str, environment: str) -> dict[str, Any]:
-  """
-  Get database connection information based on the secret ARN and environment.
+  """Resolve host, port, and database name for the RDS instance this secret guards.
 
-  Args:
-      secret_arn: The ARN of the secret being rotated
-      environment: The environment (prod, staging, dev)
-
-  Returns:
-      Dictionary with host, port, and database name
+  The environment is read out of the secret name rather than taken from the
+  caller, and matched against RDS instance identifiers.
   """
   # Parse the secret name from ARN to determine the database
   # Format: arn:aws:secretsmanager:region:account:secret:robosystems/env/postgres-xxxxx
@@ -92,12 +87,10 @@ def create_new_password() -> str:
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> None:
-  """
-  AWS Lambda handler for Secrets Manager rotation.
+  """Route one Secrets Manager rotation step to its handler.
 
-  Args:
-      event: The Lambda event containing SecretId, ClientRequestToken, and Step
-      context: The Lambda context
+  Secrets Manager invokes this once per step with the same ClientRequestToken;
+  the token must be staged AWSPENDING or the step is refused.
   """
   arn = event["SecretId"]
   token = event["ClientRequestToken"]
@@ -144,14 +137,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
 
 
 def create_secret(arn: str, token: str) -> None:
-  """
-  Generate a new secret password.
+  """Step 1: generate a new password and store it as the AWSPENDING version.
 
-  This step generates a new password and stores it as the AWSPENDING version.
-  The pending secret is written with both legacy keys (POSTGRES_USER /
-  POSTGRES_PASSWORD) and RDS Proxy-compatible keys (username / password),
-  both holding the same value. This allows EnableRDSProxy to be flipped on
-  at any time after at least one rotation has occurred.
+  Writes both key conventions (POSTGRES_USER/POSTGRES_PASSWORD and
+  username/password) with the same value, so EnableRDSProxy can be turned on at
+  any time after one rotation.
   """
   # Get the current secret
   current_secret = secrets_client.get_secret_value(
@@ -190,10 +180,10 @@ def create_secret(arn: str, token: str) -> None:
 
 
 def set_secret(arn: str, token: str, environment: str) -> None:
-  """
-  Set the pending secret in the database.
+  """Step 2: apply the pending password in PostgreSQL via ALTER USER.
 
-  This step changes the password in PostgreSQL using the ALTER USER command.
+  Connects with the still-current credentials, since the pending ones are not
+  live in the database yet.
   """
   # Get the pending secret
   pending_secret = secrets_client.get_secret_value(
@@ -251,11 +241,7 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
 
 def test_secret(arn: str, token: str, environment: str) -> None:
-  """
-  Test the pending secret.
-
-  This step verifies that the new password works by attempting to connect.
-  """
+  """Step 3: verify the pending password by connecting with it."""
   # Get the pending secret
   pending_secret = secrets_client.get_secret_value(
     SecretId=arn, VersionStage="AWSPENDING", VersionId=token
@@ -299,12 +285,10 @@ def test_secret(arn: str, token: str, environment: str) -> None:
 
 
 def finish_secret(arn: str, token: str) -> None:
-  """
-  Finish the rotation by updating version stages.
+  """Step 4: promote AWSPENDING to AWSCURRENT and clear the AWSPENDING label.
 
-  This step promotes the pending secret to current and explicitly cleans up
-  the AWSPENDING label. Secrets Manager should remove AWSPENDING automatically
-  when AWSCURRENT is moved, but this does not always happen (known AWS quirk).
+  Secrets Manager is meant to drop AWSPENDING when AWSCURRENT moves, but does
+  not always do so, hence the explicit cleanup.
   """
   metadata = secrets_client.describe_secret(SecretId=arn)
   current_version = None

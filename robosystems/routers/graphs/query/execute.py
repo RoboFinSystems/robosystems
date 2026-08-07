@@ -1,4 +1,11 @@
-"""Cypher query execution with intelligent strategy selection and streaming."""
+"""Cypher execution: `POST /v1/graphs/{graph_id}/query/cypher`.
+
+Authorization runs through the shared StatementKernel, which classifies each
+statement as a read or a write. The endpoint then selects an execution
+strategy and answers as JSON, NDJSON, or SSE, or hands back a queue handle
+under load; monitor a queued run over the unified SSE stream at
+`/v1/operations/{id}/stream`.
+"""
 
 import hashlib
 from datetime import UTC, datetime
@@ -131,7 +138,6 @@ async def execute_cypher_query(
 
   graph = require_graph_access(graph_id, session, require_write=False)
 
-  # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 
   # Determine chunk size based on tier (if not explicitly provided)
@@ -267,7 +273,6 @@ async def execute_cypher_query(
       is_write_operation=is_write,
     )
 
-    # Calculate timeouts
     timeouts = QueryTimeoutCoordinator.calculate_timeouts(
       requested_timeout=request.timeout or DEFAULT_QUERY_TIMEOUT,
       strategy=strategy,
@@ -383,7 +388,6 @@ async def execute_cypher_query(
               f"Testing mode with large query ({query_analysis['estimated_rows']} rows)"
             )
 
-        # Execute query
         result = await execute_query_with_timeout(
           repository, request.query, request.parameters, timeout
         )
@@ -435,7 +439,6 @@ async def execute_cypher_query(
             }
           )
 
-        # Record success
         circuit_breaker.record_success(graph_id, "cypher_query")
 
         # Record business event for successful execution

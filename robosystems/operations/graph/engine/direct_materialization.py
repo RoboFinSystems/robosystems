@@ -1,19 +1,13 @@
-"""Direct graph materialization without Dagster orchestration.
+"""In-process materialization of DuckDB staging tables into the graph.
 
-This module provides a fast path for materializing DuckDB staging tables
-to the graph database, bypassing Dagster job overhead while still reporting
-AssetMaterializations for observability in the Dagster UI.
+Runs in the API worker rather than as a Dagster job, trading the job's
+isolation and retries for the removal of 5-15s of cold-start latency, and
+emitting SSE progress as it goes. An AssetMaterialization is still reported so
+the run shows up in the Dagster UI.
 
-For user-triggered materializations, this approach:
-- Executes materialization immediately in the API worker process
-- Emits SSE events for real-time progress tracking
-- Reports an AssetMaterialization to Dagster for observability
-- Eliminates Dagster cold start latency (5-15s+)
-
-For large or long-running materializations, the regular Dagster job can be
-used as a fallback by disabling DIRECT_GRAPH_MATERIALIZATION_ENABLED.
-
-Pattern follows: robosystems/middleware/sse/direct_monitor.py
+Clearing ``DIRECT_GRAPH_MATERIALIZATION_ENABLED`` routes materialization back
+through the Dagster job, which is the right choice for very large graphs where
+the worker's request lifetime is the binding constraint.
 """
 
 import time
@@ -37,21 +31,14 @@ async def materialize_graph_directly(
   materialize_embeddings: bool = False,
   operation_id: str | None = None,
 ) -> dict[str, Any]:
-  """
-  Materialize all DuckDB staging tables to the graph database directly.
+  """Materialize every staging table into the graph, in this process.
 
-  This is the fast path equivalent of the Dagster materialize_graph_tables op.
+  Skipped unless the graph is stale, ``force`` is set, or ``rebuild`` is set;
+  ``rebuild`` drops and recreates the graph database first.
+  ``materialize_embeddings`` additionally builds the HNSW vector indexes, which
+  is much slower. Progress streams over SSE when ``operation_id`` is given.
 
-  Args:
-      db: SQLAlchemy database session
-      graph_id: Graph database identifier
-      force: Force materialization even if graph is not stale
-      rebuild: Delete and recreate graph database before materialization
-      materialize_embeddings: Include embedding columns and build HNSW vector indexes
-      operation_id: Optional SSE operation ID for progress tracking
-
-  Returns:
-      Dict with materialization result including status, tables, rows, etc.
+  Errors come back as ``{"status": "error", ...}`` rather than raising.
   """
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.middleware.sse.operation_manager import get_operation_manager
@@ -70,7 +57,6 @@ async def materialize_graph_directly(
     await manager.emit_progress(operation_id, "Starting materialization...", 0)
 
   try:
-    # Verify graph exists
     graph_record = Graph.get_by_id(graph_id, db)
     if not graph_record:
       error_result = {
@@ -82,21 +68,21 @@ async def materialize_graph_directly(
         await manager.fail_operation(operation_id, error=error_result["message"])
       return error_result
 
-    # Recover stale files before proceeding
+    # Files left mid-stage by an interrupted run must be re-staged first, or
+    # this materialization would silently omit their rows.
     recovered_ids = GraphFile.recover_stale_files(graph_id, db)
     if recovered_ids:
       logger.info(
         f"Recovered {len(recovered_ids)} stale files for graph {graph_id}: {recovered_ids}"
       )
-      # Re-stage recovered files
       await _restage_stale_files(db, graph_id, recovered_ids)
 
-    # Check staleness
     was_stale = graph_record.graph_stale or False
     stale_reason = graph_record.graph_stale_reason
 
     if not was_stale and not force and not rebuild:
-      # Check if there are any tables with staged data in DuckDB
+      # Staged-but-unmaterialized data counts as stale even when the flag was
+      # never set, so a dropped staleness signal cannot strand rows in DuckDB.
       staged_tables_count = (
         db.query(GraphTable)
         .join(GraphFile, GraphTable.id == GraphFile.table_id)
@@ -381,13 +367,10 @@ async def _restage_stale_files(
   graph_id: str,
   file_ids: list[str],
 ) -> None:
-  """
-  Re-stage stale files by running direct staging for each.
+  """Re-run direct staging for each recovered file.
 
-  Args:
-      db: SQLAlchemy session
-      graph_id: Graph database identifier
-      file_ids: List of file IDs to re-stage
+  A file that has gone missing is logged and skipped rather than failing the
+  recovery pass.
   """
   from robosystems.models.core import GraphFile
 

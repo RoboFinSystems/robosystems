@@ -1,10 +1,4 @@
-"""
-Metrics endpoints for Graph API monitoring.
-
-This module provides endpoints for retrieving comprehensive metrics
-about the cluster node, including system resources, database statistics,
-query performance, and ingestion queue status.
-"""
+"""Node metrics: system resources, database stats, query and ingestion counters."""
 
 import asyncio
 import logging
@@ -30,9 +24,9 @@ async def get_metrics(
   ladybug_service=Depends(get_ladybug_service),
 ) -> dict[str, Any]:
   """
-  Get comprehensive metrics for the cluster node.
+  Get metrics for the cluster node.
 
-  Returns a complete snapshot of the node's operational metrics including:
+  Returns a snapshot of the node's operational metrics including:
 
   - **System Metrics**: CPU usage, memory consumption, disk space
   - **Database Metrics**: Size, table counts, connection pools for each database
@@ -40,9 +34,7 @@ async def get_metrics(
   - **Ingestion Metrics**: Queue depth, processing rates, active tasks
   - **Cluster Info**: Node identification, type, and uptime
 
-  This endpoint is designed for monitoring systems like Prometheus
-  or custom dashboards to track the health and performance of the
-  LadybugDB cluster.
+  Intended for Prometheus and dashboards tracking the LadybugDB cluster.
   """
   metrics_collector = ladybug_service.metrics_collector
 
@@ -61,13 +53,12 @@ async def get_metrics(
       "Database metrics collection timed out (%.1fs), returning cached data",
       _DATABASE_METRICS_TIMEOUT,
     )
-    # Return cached sizes (stale but available) rather than blocking
+    # Stale-but-available sizes beat blocking the endpoint.
     database_metrics = metrics_collector.collect_database_metrics_cached()
 
   query_metrics = metrics_collector.get_query_metrics()
   ingestion_metrics = await metrics_collector.collect_ingestion_metrics()
 
-  # Get admission control metrics
   admission_controller = get_admission_controller()
   admission_metrics = admission_controller.get_metrics()
 

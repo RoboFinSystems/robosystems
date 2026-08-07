@@ -7,9 +7,8 @@ non-numeric (string / text-block) value such as a bound disclosure narrative.
 
 A fact is numeric XOR non-numeric: ``fact_type`` discriminates, and the
 ``ck_facts_value_shape`` CHECK enforces exactly one of ``value`` /
-``string_value`` populated. This mirrors the graph ``Fact`` node
-(``schemas/extensions/roboledger.py``), which has carried the non-numeric
-shape since inception — the OLTP side caught up in migration 0021.
+``string_value`` populated. This mirrors the graph ``Fact`` node in
+``schemas/extensions/roboledger.py``.
 
 Every Fact belongs to exactly one FactSet (the parent envelope that pins the
 period bounds and back-references the Report or Schedule that created it).
@@ -82,7 +81,7 @@ class Fact(ExtensionsBase):
   value_type = Column(String, nullable=False, default="inline")
   content_type = Column(String, nullable=True)  # MIME, e.g. 'text/markdown'
   # XBRL @decimals for numeric facts. NULL means unspecified; materialize
-  # falls back to the legacy '-2' for numeric rows so graph output is stable.
+  # substitutes '-2' for numeric rows so graph output stays stable.
   decimals = Column(String, nullable=True)
   period_start = Column(Date, nullable=True)
   period_end = Column(Date, nullable=False)
@@ -92,17 +91,15 @@ class Fact(ExtensionsBase):
   unit = Column(String, nullable=False, default="USD")
   entity_id = Column(String, nullable=False)
   structure_id = Column(String, nullable=True)  # structure this fact belongs to
-  # FK → fact_sets.id with ON DELETE CASCADE. The FactSet is created
-  # before the fact is stamped. The column is NOT NULL as of
-  # migration 0010 — every fact has exactly one parent FactSet; deleting
-  # the FactSet cascades to its facts.
+  # Every fact has exactly one parent FactSet, created before the fact is
+  # stamped; deleting the FactSet cascades to its facts.
   fact_set_id = Column(
     String, ForeignKey("fact_sets.id", ondelete="CASCADE"), nullable=False
   )
-  # fact_scope distinguishes "historical" (already reflected in opening balances,
-  # ignored by close workflow) from "in_scope" (close workflow drafts entries from
-  # these). Defaults to 'in_scope' so existing facts and non-schedule facts are
-  # always visible to existing queries.
+  # fact_scope distinguishes "historical" (already reflected in opening
+  # balances, ignored by the close workflow) from "in_scope" (the close
+  # workflow drafts entries from these). Defaults to 'in_scope' so
+  # non-schedule facts stay visible to scope-unaware queries.
   fact_scope = Column(String, nullable=False, default="in_scope")
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 

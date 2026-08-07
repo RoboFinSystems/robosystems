@@ -1,9 +1,11 @@
-"""
-LadybugDB Database Schema Setup
+"""One-time schema creation for a LadybugDB database.
 
-This module handles one-time schema initialization for graph databases.
-Schema is created only once when the database is first initialized,
-eliminating redundant schema compilation during data ingestion.
+Schema compilation is expensive, so it happens once at database creation
+rather than on every ingest. Table creation is additive and idempotent: an
+existing table is left alone unless ``force`` is set.
+
+Platform metadata (graphs, users, connections) lives in PostgreSQL, not in the
+graph — nothing here creates metadata nodes.
 """
 
 from pathlib import Path
@@ -22,40 +24,25 @@ class LadybugSchemaManager:
   """Manages schema initialization and verification for graph databases."""
 
   def __init__(self, engine: Engine):
-    """
-    Initialize schema manager with a LadybugDB engine.
-
-    Args:
-        engine: Connected graph database engine
-    """
     self.engine = engine
 
   def schema_exists(self) -> bool:
-    """
-    Check if schema has already been created in the database.
+    """True when the database has any table at all.
 
-    Returns:
-        True if schema exists, False otherwise
+    An unreadable database counts as "no schema", so the caller retries
+    creation rather than skipping it.
     """
     try:
-      # Query to check if any node tables exist
       result = self.engine.execute_query("CALL show_tables() RETURN *")
 
-      # If we have tables, schema exists
       return len(result) > 0
 
     except Exception as e:
       logger.warning(f"Could not check schema existence: {e}")
-      # Assume schema doesn't exist if we can't check
       return False
 
   def get_existing_tables(self) -> dict[str, set[str]]:
-    """
-    Get existing node and relationship tables in the database.
-
-    Returns:
-        Dict with 'nodes' and 'relationships' sets
-    """
+    """Table names already present, as ``{"nodes": set, "relationships": set}``."""
     existing = {"nodes": set(), "relationships": set()}
 
     try:
@@ -83,37 +70,28 @@ class LadybugSchemaManager:
   def initialize_schema(
     self, schema_config: dict[str, Any] | None = None, force: bool = False
   ) -> bool:
-    """
-    Initialize database schema if it doesn't exist.
+    """Create any missing tables. False when the schema was already there.
 
-    Args:
-        schema_config: Schema configuration (defaults to RoboLedger)
-        force: Force schema recreation even if it exists
-
-    Returns:
-        True if schema was created/updated, False if already existed
+    ``schema_config`` defaults to the RoboLedger configuration. ``force``
+    re-issues every CREATE, ignoring what already exists.
     """
-    # Check if schema already exists
     if not force and self.schema_exists():
       logger.info("Schema already exists in database, skipping initialization")
       return False
 
     logger.info("Initializing graph database schema")
 
-    # Create schema processor
     if schema_config:
       schema_processor = XBRLSchemaConfigGenerator(schema_config)
     else:
       schema_processor = create_roboledger_ingestion_processor()
       logger.info("Using default RoboLedger schema configuration")
 
-    # Log what we're about to create
     logger.info(
       f"Creating schema with {len(schema_processor.ingest_config.node_tables)} nodes "
       f"and {len(schema_processor.ingest_config.relationship_tables)} relationships"
     )
 
-    # Get existing tables to avoid recreation
     existing = (
       self.get_existing_tables()
       if not force
@@ -123,7 +101,6 @@ class LadybugSchemaManager:
     created_nodes = 0
     created_relationships = 0
 
-    # Create node tables
     for node_name, table_info in schema_processor.ingest_config.node_tables.items():
       if node_name in existing["nodes"] and not force:
         logger.debug(f"Node table {node_name} already exists, skipping")
@@ -132,7 +109,6 @@ class LadybugSchemaManager:
       if self._create_node_table(node_name, table_info):
         created_nodes += 1
 
-    # Create relationship tables
     for (
       rel_name,
       table_info,
@@ -149,30 +125,18 @@ class LadybugSchemaManager:
       f"and {created_relationships} relationship tables"
     )
 
-    # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
-    # stored exclusively in PostgreSQL, not in the LadybugDB graph database.
-    # Shared repositories (SEC, industry, economic) no longer create GraphMetadata nodes.
-
     return True
 
   def _create_node_table(self, table_name: str, table_info: Any) -> bool:
-    """
-    Create a node table in LadybugDB.
+    """Create one node table. Column types are inferred from column *names*.
 
-    Args:
-        table_name: Name of the node table
-        table_info: Table information including columns and primary keys
-
-    Returns:
-        True if created successfully
+    Anything not matched by the name lists below lands as STRING.
     """
     try:
-      # Build column definitions
       column_defs = []
 
       for col in table_info.columns:
-        # Determine data type (simplified - you may need more mappings)
-        data_type = "STRING"  # Default
+        data_type = "STRING"
 
         if col in ["created_at", "updated_at", "filing_date"]:
           data_type = "TIMESTAMP"
@@ -183,13 +147,11 @@ class LadybugSchemaManager:
         elif col in ["processed", "failed", "is_extension"]:
           data_type = "BOOLEAN"
 
-        # Check if it's a primary key
         if col in table_info.primary_keys:
           column_defs.append(f"{col} {data_type} PRIMARY KEY")
         else:
           column_defs.append(f"{col} {data_type}")
 
-      # Create the CREATE NODE statement
       create_stmt = f"CREATE NODE TABLE {table_name}({', '.join(column_defs)})"
 
       logger.debug(f"Creating node table: {create_stmt}")
@@ -202,23 +164,12 @@ class LadybugSchemaManager:
       return False
 
   def _create_relationship_table(self, table_name: str, table_info: Any) -> bool:
-    """
-    Create a relationship table in LadybugDB.
-
-    Args:
-        table_name: Name of the relationship table
-        table_info: Table information including from/to nodes and properties
-
-    Returns:
-        True if created successfully
-    """
+    """Create one relationship table, inferring property types from names."""
     try:
-      # Build property definitions
       property_defs = []
 
       if table_info.properties:
         for prop in table_info.properties:
-          # Simple type mapping
           data_type = "STRING"
           if prop in ["created_at", "updated_at"]:
             data_type = "TIMESTAMP"
@@ -227,7 +178,6 @@ class LadybugSchemaManager:
 
           property_defs.append(f"{prop} {data_type}")
 
-      # Create the CREATE REL statement
       properties_str = f", {', '.join(property_defs)}" if property_defs else ""
       create_stmt = (
         f"CREATE REL TABLE {table_name}"
@@ -249,40 +199,24 @@ def ensure_schema(
   schema_config: dict[str, Any] | None = None,
   force: bool = False,
 ) -> bool:
-  """
-  Ensure schema exists for a graph database.
+  """Open ``db_path``, creating the directory and schema if needed.
 
-  This is a convenience function that handles the full flow:
-  1. Connect to database
-  2. Check if schema exists
-  3. Create schema if needed
-  4. Return status
-
-  Args:
-      db_path: Path to graph database
-      schema_config: Optional schema configuration
-      force: Force schema recreation
-
-  Returns:
-      True if schema was created, False if already existed
+  True when tables were created, False when the schema was already there.
+  Unlike the methods it wraps, this raises on failure.
   """
   try:
     from .path_utils import (
       ensure_lbug_directory,
     )
 
-    # Ensure we have the proper path
     db_path = Path(db_path)
     ensure_lbug_directory(db_path)
 
-    # Connect to database
     logger.info(f"Connecting to database for schema setup: {db_path}")
     engine = Engine(str(db_path))
 
-    # Initialize schema manager
     schema_manager = LadybugSchemaManager(engine)
 
-    # Initialize schema
     return schema_manager.initialize_schema(schema_config, force)
 
   except Exception as e:

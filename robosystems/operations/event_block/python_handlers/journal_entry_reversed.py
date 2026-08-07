@@ -6,10 +6,10 @@ journal entry, flipping debits and credits and marking the original as
 reversed. Both Entry rows (the original and the new reversing entry) carry
 a `triggered_by_event_id` link to this event.
 
-Replaces the standalone `reverse-journal-entry` operation. The underlying
-logic (entry-status validation + line-item flip + closed-period gate) lives
-in `reverse_journal_entry` (commands/journal_entries.py) and is reused
-verbatim.
+Entry-status validation, the line-item flip, and the closed-period gate all
+come from `reverse_journal_entry`
+(`operations/roboledger/commands/journal_entries.py`); this handler sequences
+that call inside the event-block unit of work.
 
 Event status after success: 'fulfilled' (the reversal is terminal — the
 original is now closed by an offsetting posted entry).

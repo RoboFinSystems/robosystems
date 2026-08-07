@@ -1,14 +1,12 @@
-"""Graph operation worker tasks.
+"""Worker tasks for graph creation, materialization, and subgraph creation.
 
-Business logic tasks for graph creation, materialization, and subgraph
-creation. Each task extends BaseTask from the worker infrastructure and
-registers via @register_task for the consumer loop to dispatch.
-
-This mirrors the agent adapter pattern (operations/agents/adapters/worker_task.py)
-where business logic lives in operations/ and the worker provides infrastructure.
+Each task extends ``BaseTask`` and registers itself with ``@register_task`` so
+the worker consumer loop can dispatch it. The business logic lives here in
+``operations/``; the worker supplies only the infrastructure — the same split
+as :mod:`robosystems.operations.operators.adapters.worker_task`.
 """
 
-# Side-effect imports: trigger @register_task decorators
+# Imported for side effects: importing each module runs its @register_task.
 from robosystems.operations.graph.tasks import (
   extensions_materialize as extensions_materialize,
 )

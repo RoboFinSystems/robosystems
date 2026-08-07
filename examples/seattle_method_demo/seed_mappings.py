@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Seed mini → rs-gaap mapping associations on a graph.
 
-Walks the curated mapping table in ``mappings.py`` and posts one
-``create_mapping_association`` per pair. Mirrors the shape of
-``examples.roboledger_demo.main.create_mappings`` — the difference is
-only the source vocabulary (mini concepts vs. native CoA codes).
+Walks the curated table in ``mappings.py`` and posts one
+``create_mapping_association`` per pair, wiring each mini concept to its
+rs-gaap counterpart. This is what makes the cross-taxonomy projection
+possible: once the associations exist, the same postings can be rendered
+through either vocabulary.
 
-Pre-condition: ``load_taxonomy.py`` has already run against this graph
-(creates the mini CoA + the empty ``mini to rs-gaap Mapping``
-structure). rs-gaap is assumed available as a library taxonomy on the
-graph.
+Prerequisites: ``load_taxonomy.py`` has run against this graph — it creates
+the mini CoA and the empty "mini to rs-gaap Mapping" structure these
+associations attach to — and rs-gaap is available as a library taxonomy.
 
-Usage:
+Pairs whose concepts do not resolve on the graph are reported as warnings and
+skipped, so a partially-loaded taxonomy is visible rather than silent.
+
+Run it (the orchestrator runs this as step 4):
     uv run python -m examples.seattle_method_demo.seed_mappings <graph_id>
     uv run python -m examples.seattle_method_demo.seed_mappings <graph_id> --dry-run
 """
@@ -27,7 +30,7 @@ from .mappings import ALL_MAPPINGS, BS_IS_MAPPINGS, FLOW_MAPPINGS
 
 
 def _get_ledger_client():
-  """Mirrors the helper in load_taxonomy.py / roboledger_demo.main."""
+  """Construct a LedgerClient from the credentials ``just demo-user`` saved."""
   from robosystems_client.clients.ledger_client import LedgerClient
 
   config_path = Path(".local/config.json")
@@ -48,11 +51,9 @@ def _get_ledger_client():
 def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   """Find the mini CoA taxonomy_id on the graph by name.
 
-  Mini Elements are loaded with ``source='native'`` (the Element
-  source CHECK constraint only admits a fixed enum that doesn't
-  include 'mini'), so we can't filter on ``source='mini'`` to find
-  them. Filter by ``taxonomy_id`` instead — which we look up by
-  name once at the start of the script.
+  Mini Elements load with ``source='native'`` — the Element source CHECK
+  constraint admits a fixed enum with no 'mini' member — so element lookups
+  scope by ``taxonomy_id``, resolved once here.
   """
   taxonomies = client.list_taxonomies(graph_id) or []
   for tax in taxonomies:
@@ -89,7 +90,7 @@ def _build_qname_lookup(
 ) -> dict[str, str]:
   """Page through ``list_elements(source=…)`` → {qname: element_id}.
 
-  Used for rs-gaap (which uses the canonical source filter).
+  Used for rs-gaap, which is filterable by its canonical source.
   """
   out: dict[str, str] = {}
   offset = 0
@@ -113,8 +114,8 @@ def _build_qname_lookup(
 def _find_mapping_structure(client, graph_id: str) -> str:
   """Return the structure_id of the mini→rs-gaap mapping structure.
 
-  ``load_taxonomy.py`` creates this as ``block_type='coa_mapping'``
-  alongside the CoA elements. We look it up by block_type.
+  ``load_taxonomy.py`` creates it as ``block_type='coa_mapping'`` alongside
+  the CoA elements.
   """
   structures = client.list_structures(graph_id, block_type="coa_mapping")
   if not structures:
@@ -122,7 +123,7 @@ def _find_mapping_structure(client, graph_id: str) -> str:
       "No coa_mapping structure found on this graph. Did you run "
       "load_taxonomy.py first?"
     )
-  # Prefer the one named "mini to rs-gaap Mapping" if multiple exist.
+  # Prefer the mini mapping structure when the graph carries several.
   for s in structures:
     if "mini" in (s.get("name") or "").lower():
       return s["id"]
@@ -133,10 +134,9 @@ def seed_mappings(graph_id: str, dry_run: bool = False) -> tuple[int, list[str]]
   """Seed every (mini, rs-gaap) pair in ``ALL_MAPPINGS`` as a derivation
   association on the graph.
 
-  Returns ``(created_count, warnings)``. Warnings collect cases where
-  a mini or rs-gaap qname didn't resolve to an Element — usually means
-  the taxonomy wasn't fully loaded or the qname has a typo in
-  ``mappings.py``.
+  Returns ``(created_count, warnings)``. A warning means one side of a pair
+  did not resolve to an Element — usually a taxonomy that loaded only
+  partially, or a qname typo in ``mappings.py``.
   """
   client = _get_ledger_client()
 

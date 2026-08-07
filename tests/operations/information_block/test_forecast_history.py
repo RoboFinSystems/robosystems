@@ -181,7 +181,7 @@ class TestBackSolve:
 
   def test_a_zero_base_leaves_the_cell_blank_rather_than_dividing(self) -> None:
     # Revenues[t-1] = 0 ⇒ the growth rule's slope is 0: no rate explains
-    # a jump off a zero base (the §11 #9 restart case).
+    # a jump off a zero base (the restart-from-zero case).
     history = _run(
       _mechanics([GROWTH_LEVER]),
       [GROWTH_RULE],

@@ -1,8 +1,7 @@
-"""
-Redis pub/sub subscriber for SSE event distribution.
+"""Redis pub/sub subscriber for SSE event distribution.
 
-This module bridges the gap between worker processes that emit events
-and the API process that streams them to clients via SSE.
+Bridges worker processes that emit events and the API process that
+streams them to clients over SSE.
 """
 
 import asyncio
@@ -19,13 +18,14 @@ from .streaming import get_connection_manager
 
 
 class RedisEventSubscriber:
-  """
-  Subscribes to Redis pub/sub channels for SSE events and distributes
-  them to connected clients through the connection manager.
+  """Relays `sse:events:{operation_id}` messages to the connection manager.
+
+  One background task services every subscription; `subscribe_to_operation`
+  and `unsubscribe_from_operation` adjust the channel set as SSE streams
+  open and close.
   """
 
   def __init__(self):
-    """Initialize the Redis subscriber."""
     self.redis_client: redis.Redis | None = None
     self.pubsub: Any | None = None
     self.subscriptions: dict[str, bool] = {}
@@ -40,7 +40,6 @@ class RedisEventSubscriber:
 
     logger.info("Starting Redis SSE event subscriber")
 
-    # Create Redis client for pub/sub with proper ElastiCache support
     self.redis_client = create_async_redis_client(ValkeyDatabase.SSE)
     self.pubsub = self.redis_client.pubsub()
 
@@ -70,12 +69,7 @@ class RedisEventSubscriber:
         pass
 
   async def subscribe_to_operation(self, operation_id: str):
-    """
-    Subscribe to events for a specific operation.
-
-    Args:
-        operation_id: Operation to subscribe to
-    """
+    """Subscribe to one operation's event channel."""
     if not self.pubsub:
       logger.error("Redis subscriber not started")
       return
@@ -87,12 +81,7 @@ class RedisEventSubscriber:
       logger.info(f"Subscribed to Redis channel: {channel}")
 
   async def unsubscribe_from_operation(self, operation_id: str):
-    """
-    Unsubscribe from events for a specific operation.
-
-    Args:
-        operation_id: Operation to unsubscribe from
-    """
+    """Unsubscribe from one operation's event channel."""
     if not self.pubsub:
       return
 
@@ -103,9 +92,7 @@ class RedisEventSubscriber:
       logger.info(f"Unsubscribed from Redis channel: {channel}")
 
   async def _listen_for_events(self):
-    """
-    Main loop that listens for Redis pub/sub messages and distributes them.
-    """
+    """Listen for pub/sub messages and broadcast them to local clients."""
     connection_manager = get_connection_manager()
     logger.info(
       f"Redis event listener started with {len(self.subscriptions)} initial subscriptions"
@@ -113,12 +100,10 @@ class RedisEventSubscriber:
 
     while self._running:
       try:
-        # Don't try to get messages if we have no subscriptions
         if not self.subscriptions:
           await asyncio.sleep(1.0)
           continue
 
-        # Get message with timeout
         if self.pubsub is None:
           await asyncio.sleep(1.0)
           continue
@@ -134,7 +119,6 @@ class RedisEventSubscriber:
           f"Received Redis message: type={message.get('type')}, channel={message.get('channel')}, data_len={len(str(message.get('data', '')))}"
         )
 
-        # Parse the channel to get operation_id
         channel = message["channel"]
         if not channel.startswith("sse:events:"):
           logger.debug(f"Ignoring message from non-SSE channel: {channel}")
@@ -142,7 +126,6 @@ class RedisEventSubscriber:
 
         operation_id = channel.replace("sse:events:", "")
 
-        # Parse the event data
         try:
           event_data = json.loads(message["data"])
           event = SSEEvent.from_dict(event_data)
@@ -151,7 +134,6 @@ class RedisEventSubscriber:
             f"Parsed SSE event: type={event.event_type}, operation={operation_id}, seq={event.sequence_number}"
           )
 
-          # Distribute to connected clients
           await connection_manager.broadcast_event(operation_id, event)
 
           logger.info(
@@ -165,10 +147,8 @@ class RedisEventSubscriber:
           logger.error(f"Error processing event: {e}")
 
       except TimeoutError:
-        # Normal timeout, continue listening
         continue
       except asyncio.CancelledError:
-        # Task cancelled, exit cleanly
         break
       except Exception as e:
         logger.error(f"Error in Redis event listener: {e}")

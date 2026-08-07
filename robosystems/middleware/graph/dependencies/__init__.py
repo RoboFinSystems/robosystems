@@ -1,6 +1,4 @@
-"""
-FastAPI dependency functions for multi-tenant graph database resolution.
-"""
+"""FastAPI dependency functions for multi-tenant graph database resolution."""
 
 from .auth import (
   get_graph_database,

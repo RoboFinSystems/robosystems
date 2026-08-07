@@ -1,8 +1,8 @@
-"""
-Admission control and load shedding for query queue.
+"""Admission control and load shedding for the query queue.
 
-Provides intelligent request filtering based on system resources
-and load to prevent overload and maintain system stability.
+Rejects incoming queries when memory, CPU, queue depth, or load average
+cross their thresholds, so an overloaded process degrades by refusing new
+work rather than by failing work already in flight.
 """
 
 import random
@@ -45,8 +45,7 @@ class SystemResources:
 
 
 class AdmissionController:
-  """
-  Controls admission of new queries based on system resources.
+  """Controls admission of new queries based on system resources.
 
   Features:
   - CPU and memory threshold checks
@@ -65,18 +64,7 @@ class AdmissionController:
     shed_start_pressure: float = 80.0,
     shed_stop_pressure: float = 60.0,
   ):
-    """
-    Initialize admission controller.
-
-    Args:
-        memory_threshold: Max memory usage percent (0-100)
-        cpu_threshold: Max CPU usage percent (0-100)
-        queue_threshold: Queue depth threshold percent (0-100)
-        check_interval: Seconds between resource checks
-        load_shedding_enabled: Enable admission control and load shedding
-        shed_start_pressure: Pressure threshold to start load shedding percent (0-100)
-        shed_stop_pressure: Pressure threshold to stop load shedding percent (0-100)
-    """
+    """Initialize admission controller."""
     self.memory_threshold = memory_threshold
     self.cpu_threshold = cpu_threshold
     # Normalize percentage inputs to decimals for internal comparisons
@@ -101,23 +89,11 @@ class AdmissionController:
     active_queries: int,
     priority: int = 5,
   ) -> tuple[AdmissionDecision, str | None]:
-    """
-    Check if a new query should be admitted.
-
-    Args:
-        queue_depth: Current queue size
-        max_queue_size: Maximum queue size
-        active_queries: Currently executing queries
-        priority: Query priority (1-10)
-
-    Returns:
-        (decision, rejection_reason)
-    """
+    """Check if a new query should be admitted."""
     # If load shedding is disabled, always accept
     if not self.load_shedding_enabled:
       return AdmissionDecision.ACCEPT, None
 
-    # Get current resources
     resources = self._get_system_resources(queue_depth, active_queries)
 
     # Check hard limits first
@@ -141,7 +117,6 @@ class AdmissionController:
         f"System CPU usage too high: {resources.cpu_percent:.1f}%",
       )
 
-    # Check queue depth
     queue_ratio = queue_depth / max_queue_size if max_queue_size > 0 else 0
     if queue_ratio > self.queue_threshold:
       # Apply probabilistic rejection based on how full the queue is
@@ -258,8 +233,7 @@ class AdmissionController:
   def _calculate_pressure_score(
     self, resources: SystemResources, queue_ratio: float
   ) -> float:
-    """
-    Calculate overall system pressure score (0-1).
+    """Calculate overall system pressure score (0-1).
 
     Combines multiple factors into a single pressure metric.
     """

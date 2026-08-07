@@ -14,31 +14,27 @@ logger = logging.getLogger(__name__)
 
 
 class GraphMetricsService:
-  """Service for collecting and aggregating graph database metrics."""
+  """Collect node/relationship counts, storage, and health per graph.
 
-  # Configuration constants
+  Every method degrades to an ``error`` key rather than raising, so a metrics
+  failure never breaks the caller. Counts are gathered with one query per
+  label, so cost scales with the number of distinct labels.
+  """
+
   DEFAULT_GRAPH_LIMIT = 5
 
   def __init__(self):
     self.metrics_instance = get_endpoint_metrics()
 
   async def collect_metrics_for_graph(self, graph_id: str) -> dict[str, Any]:
-    """
-    Collect comprehensive metrics for a specific graph database.
+    """Counts, storage, and health for one graph, also emitted to OpenTelemetry.
 
-    Args:
-        graph_id: The graph database identifier
-
-    Returns:
-        Dict containing node counts, relationship counts, and database size estimates
+    Returns a dict with an ``error`` key instead of raising on failure.
     """
     try:
-      # Get database name from graph_id
       database_name = MultiTenantUtils.get_database_name(graph_id)
-      # Get repository asynchronously
       repository = await get_universal_repository(database_name, operation_type="write")
 
-      # Collect basic metrics
       metrics = {
         "graph_id": graph_id,
         "timestamp": datetime.now(UTC).isoformat(),
@@ -50,7 +46,6 @@ class GraphMetricsService:
         "health_status": await self._check_graph_health(repository),
       }
 
-      # Calculate totals (filter out non-numeric values)
       metrics["total_nodes"] = sum(
         v for v in metrics["node_counts"].values() if isinstance(v, (int, float))
       )
@@ -60,7 +55,6 @@ class GraphMetricsService:
         if isinstance(v, (int, float))
       )
 
-      # Record OpenTelemetry metrics
       self._record_otel_metrics(graph_id, metrics)
 
       return metrics
@@ -76,17 +70,12 @@ class GraphMetricsService:
   async def collect_metrics_for_user_graphs(
     self, user_id: str
   ) -> dict[str, dict[str, Any]]:
-    """
-    Collect metrics for all graphs accessible to a user.
+    """Metrics for every graph the user can reach, keyed by graph id.
 
-    Args:
-        user_id: The user identifier
-
-    Returns:
-        Dict mapping graph_id to metrics
+    Carries an extra ``_summary`` entry with the cross-graph totals; on failure
+    the whole result is a single ``_error`` entry.
     """
     try:
-      # Get user's accessible graphs
       user_graphs = GraphUser.get_by_user_id(user_id, session)
       logger.info(
         f"collect_metrics_for_user: Found {len(user_graphs)} graphs for user {user_id}"
@@ -100,14 +89,12 @@ class GraphMetricsService:
         graph_metrics = await self.collect_metrics_for_graph(user_graph.graph_id)
         metrics_by_graph[user_graph.graph_id] = graph_metrics
 
-        # Add graph name and role info
         if "error" not in graph_metrics:
           graph_metrics["graph_name"] = user_graph.graph.graph_name
           graph_metrics["user_role"] = user_graph.role
           total_nodes += graph_metrics.get("total_nodes", 0)
           total_relationships += graph_metrics.get("total_relationships", 0)
 
-      # Add summary statistics
       metrics_by_graph["_summary"] = {
         "user_id": user_id,
         "total_graphs": len(user_graphs),
@@ -129,31 +116,23 @@ class GraphMetricsService:
       }
 
   async def get_usage_summary(self, user_id: str | None = None) -> dict[str, Any]:
-    """
-    Get usage summary for monitoring dashboards.
+    """Dashboard-shaped totals for one user, or a system-wide graph count.
 
-    Args:
-        user_id: Optional user ID to filter metrics
-
-    Returns:
-        Summary statistics suitable for dashboard display
+    The per-user totals cover only the first ``DEFAULT_GRAPH_LIMIT`` graphs, so
+    a user with more graphs sees an undercount rather than a slow response.
     """
     try:
       if user_id:
-        # User-specific summary
         user_graphs = GraphUser.get_by_user_id(user_id, session)
         graph_count = len(user_graphs)
         logger.info(
           f"Found {graph_count} graphs for user {user_id}: {[g.graph_id for g in user_graphs]}"
         )
 
-        # Calculate total nodes/relationships across user's graphs
         total_nodes = 0
         total_relationships = 0
 
-        for user_graph in user_graphs[
-          : self.DEFAULT_GRAPH_LIMIT
-        ]:  # Configurable limit to avoid timeout
+        for user_graph in user_graphs[: self.DEFAULT_GRAPH_LIMIT]:
           try:
             metrics = await self.collect_metrics_for_graph(user_graph.graph_id)
             if "error" not in metrics:
@@ -173,7 +152,6 @@ class GraphMetricsService:
           "timestamp": datetime.now(UTC).isoformat(),
         }
       else:
-        # System-wide summary (admin only)
         total_graphs = session.query(GraphUser).count()
         return {
           "system_wide": True,
@@ -189,61 +167,35 @@ class GraphMetricsService:
       }
 
   async def collect_metrics_for_graph_async(self, graph_id: str) -> dict[str, Any]:
-    """
-    Async version of collect_metrics_for_graph for use in async contexts.
-    This is now just an alias since the main method is async.
-
-    Args:
-        graph_id: The graph database identifier
-
-    Returns:
-        Dict containing node counts, relationship counts, and database size estimates
-    """
+    """Alias for :meth:`collect_metrics_for_graph`."""
     return await self.collect_metrics_for_graph(graph_id)
 
   async def get_usage_summary_async(self, user_id: str | None = None) -> dict[str, Any]:
-    """
-    Async version of get_usage_summary for use in async contexts.
-    This is now just an alias since the main method is async.
-
-    Args:
-        user_id: Optional user ID to filter metrics
-
-    Returns:
-        Summary statistics suitable for dashboard display
-    """
+    """Alias for :meth:`get_usage_summary`."""
     return await self.get_usage_summary(user_id)
 
   async def collect_metrics_for_user_graphs_async(
     self, user_id: str
   ) -> dict[str, dict[str, Any]]:
-    """
-    Async version of collect_metrics_for_user_graphs for use in async contexts.
-    This is now just an alias since the main method is async.
-
-    Args:
-        user_id: The user identifier
-
-    Returns:
-        Dict mapping graph_id to metrics
-    """
+    """Alias for :meth:`collect_metrics_for_user_graphs`."""
     return await self.collect_metrics_for_user_graphs(user_id)
 
   async def _get_node_counts_by_label(self, repository) -> dict[str, int]:
-    """Get node counts grouped by label."""
+    """Node count per label; falls back to a single ``_total`` on failure.
+
+    One COUNT per label rather than a grouped aggregate — LadybugDB has no
+    label-keyed grouping, and the labels come from the graph itself, so each is
+    backtick-quoted before interpolation.
+    """
     try:
-      # Get all unique node labels using LadybugDB-compatible query
       labels_query = "MATCH (n) RETURN DISTINCT LABEL(n) AS label"
-      # Use async method for repository
       labels_result = await repository.execute_query(labels_query)
 
       node_counts = {}
 
-      # Count nodes for each label individually to avoid dynamic query construction
       for record in labels_result:
         label = record["label"]
         try:
-          # Use parameterized query construction - escape label name properly
           count_query = f"MATCH (n:`{label}`) RETURN count(n) as count"
           count_result = await repository.execute_query(count_query)
           count = count_result[0]["count"] if count_result else 0
@@ -256,30 +208,29 @@ class GraphMetricsService:
 
     except Exception as e:
       logger.warning(f"Failed to get node counts by label: {e}")
-      # Fallback to simple total count
       try:
         result = await repository.execute_query("MATCH (n) RETURN count(n) as total")
         total = result[0]["total"] if result else 0
         return {"_total": total}
       except Exception as fallback_e:
         logger.warning(f"Fallback node count also failed: {fallback_e}")
-        return {"_total": 0}  # Return 0 instead of string to avoid type issues
+        return {"_total": 0}
 
   async def _get_relationship_counts_by_type(self, repository) -> dict[str, int]:
-    """Get relationship counts grouped by type."""
+    """Relationship count per type; falls back to a single ``_total``.
+
+    One COUNT per type, for the same reason as
+    :meth:`_get_node_counts_by_label`.
+    """
     try:
-      # First get all relationship types
-      # Get all unique relationship types using LadybugDB-compatible query
       types_query = "MATCH ()-[r]->() RETURN DISTINCT LABEL(r) AS relationshipType"
       types_result = await repository.execute_query(types_query)
 
       rel_counts = {}
 
-      # Count relationships for each type individually to avoid dynamic query construction
       for record in types_result:
         rel_type = record["relationshipType"]
         try:
-          # Use parameterized query construction - escape relationship type name properly
           count_query = f"MATCH ()-[r:`{rel_type}`]->() RETURN count(r) as count"
           count_result = await repository.execute_query(count_query)
           count = count_result[0]["count"] if count_result else 0
@@ -292,7 +243,6 @@ class GraphMetricsService:
 
     except Exception as e:
       logger.warning(f"Failed to get relationship counts by type: {e}")
-      # Fallback to simple query
       try:
         query = "MATCH ()-[r]->() RETURN count(r) as total"
         result = await repository.execute_query(query)
@@ -300,15 +250,13 @@ class GraphMetricsService:
         return {"_total": total}
       except Exception as fallback_e:
         logger.warning(f"Fallback relationship count also failed: {fallback_e}")
-        return {"_total": 0}  # Return 0 instead of string to avoid type issues
+        return {"_total": 0}
 
   async def _get_storage(self, graph_id: str) -> dict[str, Any]:
     """Measured on-disk storage for a graph and everything it owns.
 
-    Replaces a ``node_count * 100 bytes`` heuristic that reported roughly
-    7 KB for a real 1 MB graph. The measure spans the LadybugDB databases,
-    vector indexes and staging file, so it reflects actual occupied disk
-    rather than a guess derived from node count.
+    Spans the LadybugDB databases, vector indexes, and staging file, so it is
+    occupied disk rather than anything derived from node count.
     """
     from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -331,13 +279,13 @@ class GraphMetricsService:
       }
 
     except Exception as e:
-      # Degrade to an absent measure rather than a fabricated one — a missing
-      # number is honest, a made-up number is what this replaced.
+      # No estimate on failure: an absent measure is honest, an invented one
+      # silently understates real usage on every dashboard that reads it.
       logger.warning(f"Failed to measure storage for {graph_id}: {e}")
       return {"error": "Unable to measure storage"}
 
   async def _check_graph_health(self, repository) -> dict[str, Any]:
-    """Check graph database health status."""
+    """Probe the graph; any failure reports ``unhealthy`` rather than raising."""
     try:
       health_info = await repository.health_check()
       return {
@@ -348,11 +296,9 @@ class GraphMetricsService:
       return {"status": "unhealthy", "error": str(e)}
 
   def _record_otel_metrics(self, graph_id: str, metrics: dict[str, Any]):
-    """Record metrics to OpenTelemetry."""
+    """Emit the collected metrics to OpenTelemetry. Best-effort."""
     try:
-      # Record node and relationship counts as gauges
       if "error" not in metrics:
-        # Record graph metrics
         storage_bytes = metrics.get("storage", {}).get("total_bytes", 0)
         if not isinstance(storage_bytes, int):
           storage_bytes = 0
@@ -369,7 +315,6 @@ class GraphMetricsService:
           },
         )
 
-        # Also record as business event for additional tracking
         self.metrics_instance.record_business_event(
           endpoint="graph_metrics_collection",
           method="INTERNAL",

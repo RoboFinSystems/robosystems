@@ -1,5 +1,4 @@
-"""
-Database operation utilities.
+"""Database operation utilities.
 
 Functions for database name resolution, creation, and management.
 """
@@ -19,29 +18,18 @@ from .validation import is_shared_repository, validate_graph_id
 
 
 def is_multitenant_mode() -> bool:
-  """
-  Check if the system is running in multi-tenant mode.
+  """Check if the system is running in multi-tenant mode.
 
   For graph databases, multi-tenant is always enabled via clusters.
-
-  Returns:
-      bool: True if multi-tenant mode is enabled, False otherwise
   """
   return True
 
 
 def get_database_name(graph_id: str | None = None) -> str:
-  """
-  Get the appropriate database name based on multi-tenant mode and graph_id.
+  """Get the appropriate database name based on multi-tenant mode and graph_id.
 
   Special handling for shared repositories - always routes to their specific
   database names regardless of multi-tenant mode.
-
-  Args:
-      graph_id: Optional graph identifier for multi-tenant mode
-
-  Returns:
-      str: Database name to use
   """
   if graph_id and is_shared_repository(graph_id):
     repository_name = get_repository_database_name(graph_id)
@@ -66,18 +54,7 @@ def get_database_name(graph_id: str | None = None) -> str:
 
 
 def get_repository_database_name(repository_id: str) -> str:
-  """
-  Get the database name for a shared repository.
-
-  Args:
-      repository_id: Repository identifier (e.g., 'sec', 'industry')
-
-  Returns:
-      str: Database name for the repository
-
-  Raises:
-      ValueError: If repository_id is not a known shared repository
-  """
+  """Get the database name for a shared repository."""
   from robosystems.config.shared_repositories import is_shared_repository
 
   if not is_shared_repository(repository_id):
@@ -88,12 +65,7 @@ def get_repository_database_name(repository_id: str) -> str:
 
 
 def list_shared_repositories() -> list[str]:
-  """
-  Get a list of all known shared repository identifiers.
-
-  Returns:
-      List[str]: List of repository IDs
-  """
+  """Get a list of all known shared repository identifiers."""
   from ..types import GraphTypeRegistry
 
   return GraphTypeRegistry.list_shared_repositories()
@@ -102,14 +74,7 @@ def list_shared_repositories() -> list[str]:
 def log_database_operation(
   operation: str, database_name: str, graph_id: str | None = None
 ) -> None:
-  """
-  Log database operations for observability.
-
-  Args:
-      operation: Description of the operation being performed
-      database_name: Name of the database being accessed
-      graph_id: Optional graph identifier
-  """
+  """Log database operations for observability."""
   if graph_id:
     logger.info(f"{operation} - Database: {database_name}, Graph ID: {graph_id}")
   else:
@@ -117,15 +82,7 @@ def log_database_operation(
 
 
 def get_database_path_for_graph(graph_id: str) -> str:
-  """
-  Get the database file path for a graph (LadybugDB single-file format).
-
-  Args:
-      graph_id: Graph identifier
-
-  Returns:
-      str: Database file path (.lbug extension)
-  """
+  """Get the database file path for a graph (LadybugDB single-file format)."""
   from robosystems.operations.graph.engine.path_utils import get_lbug_database_path
 
   db_path = get_lbug_database_path(graph_id)
@@ -133,13 +90,9 @@ def get_database_path_for_graph(graph_id: str) -> str:
 
 
 def get_max_databases_per_node() -> int:
-  """
-  Get the maximum number of databases per graph node.
+  """Get the maximum number of databases per graph node.
 
   Uses tier-specific configuration from graph.yml via GraphTierConfig.
-
-  Returns:
-      int: Maximum databases per node (from graph.yml, defaults to 10 if not configured)
   """
   try:
     from robosystems.config.graph_tier import GraphTierConfig
@@ -160,22 +113,7 @@ async def ensure_database_with_schema(
   api_key: str | None = None,
   lock_timeout: int = 300,
 ) -> dict[str, Any]:
-  """
-  Ensure database exists with proper schema.
-
-  Args:
-      graph_url: Graph API endpoint URL
-      db_name: Database name to create
-      schema_name: Schema name to apply (e.g., "sec", "entity")
-      api_key: Optional API key for authentication
-      lock_timeout: Unused parameter (kept for backwards compatibility)
-
-  Returns:
-      Dict with creation status and database info
-
-  Raises:
-      RuntimeError: If creation fails
-  """
+  """Ensure database exists with proper schema."""
   headers = {}
   if api_key:
     headers["Authorization"] = f"Bearer {api_key}"
@@ -268,19 +206,7 @@ def ensure_database_with_schema_sync(
   api_key: str | None = None,
   redis_client: redis.Redis | None = None,
 ) -> dict[str, Any]:
-  """
-  Synchronous wrapper for ensure_database_with_schema.
-
-  Args:
-      graph_url: Graph API endpoint URL
-      db_name: Database name to create
-      schema_name: Schema name to apply
-      api_key: Optional API key for authentication
-      redis_client: Optional Redis client for locking (unused, for compatibility)
-
-  Returns:
-      Dict with creation status and database info
-  """
+  """Synchronous wrapper for ensure_database_with_schema."""
   loop = asyncio.new_event_loop()
   asyncio.set_event_loop(loop)
   try:

@@ -706,8 +706,7 @@ class TestTaxonomyLabelElementUri:
   On the SEC shared repo the taxonomy is the filer's per-report extension
   taxonomy, so the edge is report-scoped; element_uri re-attaches the element a
   label belongs to, which is what makes "this report's label for element X" an
-  exact lookup against the content-addressed shared Label pool. See
-  sec-label-scoping spec (Option A).
+  exact lookup against the content-addressed shared Label pool.
   """
 
   @staticmethod

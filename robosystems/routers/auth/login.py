@@ -145,7 +145,6 @@ async def login(
       status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
     )
 
-  # Verify password
   if not verify_password(request.password, user.password_hash):
     # Record failed attempt for protection system
     if client_ip:
@@ -175,8 +174,8 @@ async def login(
   # Create JWT token with device binding
   jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)
 
-  # No longer setting auth cookies - using Bearer token authentication instead
-  # This enables proper cross-domain authentication for all three domains
+  # Bearer-token auth rather than a cookie, so the same token works across all
+  # three app domains.
 
   # Record successful auth
   record_auth_metrics(

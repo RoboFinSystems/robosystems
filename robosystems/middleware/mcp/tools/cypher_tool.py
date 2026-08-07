@@ -190,9 +190,7 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     # Route every category through the central security analyzer — the same
     # predicates the StatementKernel (REST /query/cypher) composes — so this
     # tool-layer guard can't diverge. It also protects the Operator path, which
-    # invokes this tool directly (bypassing the HTTP handler + kernel). The
-    # write check was previously a hand-rolled keyword regex duplicating
-    # is_write_operation; the dangerous-category checks already delegated here.
+    # invokes this tool directly, bypassing the HTTP handler and kernel.
     from robosystems.security.cypher_analyzer import (
       is_admin_operation,
       is_bulk_operation,

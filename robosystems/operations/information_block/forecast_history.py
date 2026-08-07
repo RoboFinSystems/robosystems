@@ -7,13 +7,12 @@ against the closed months' canonical statement sets so the Assumptions
 block reads as ONE continuous series across the seam — realized rates on
 the left, asserted rates on the right.
 
-It also closes a smaller correctness gap. A scenario whose horizon
-opened before today still holds asserted lever values for months that
-have since closed; rendering them as-is presents an assumption as though
-it described history. Those months are facts now, so the realized value
-supersedes the assertion — the same actual-beats-forecast rule
-:func:`envelope.load_statement_fact_set_series` applies to statement
-columns (the moving seam).
+It also handles a scenario whose horizon opened before today: it still holds
+asserted lever values for months that have since closed, and rendering those
+as-is presents an assumption as though it described history. Those months are
+facts now, so the realized value supersedes the assertion — the same
+actual-beats-forecast rule :func:`envelope.load_statement_fact_set_series`
+applies to statement columns (the moving seam).
 
 **Inversion is generic, not per-rule.** Every seeded driver rule is
 affine in its lever operand::
@@ -180,8 +179,8 @@ def back_solve_lever_history(
   """Realized lever values for every closed month, by rule inversion.
 
   Returns an empty history when the tenant has no actual statement sets,
-  no rs-driver rules, or nothing to solve — callers render the asserted
-  horizon alone in that case, exactly as before.
+  no rs-driver rules, or nothing to solve; callers then render the
+  asserted horizon alone.
   """
   lever_qnames = {lever.qname for lever in mechanics.levers}
   # Line assertions AND line-growth targets: both grid families render

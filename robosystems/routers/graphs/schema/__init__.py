@@ -1,11 +1,7 @@
-"""
-Schema management routers.
+"""Schema routers: runtime inspection, validation, and export.
 
-This module contains routers for schema operations including runtime inspection,
-validation, and export.
-
-Note: Extension listing is available at the global level via GET /v1/graphs/extensions
-and is not duplicated at the per-graph level.
+Extension listing lives at the global `GET /v1/graphs/extensions` rather than
+per graph.
 """
 
 from fastapi import APIRouter

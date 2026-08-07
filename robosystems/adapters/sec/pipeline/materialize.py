@@ -43,9 +43,6 @@ def sec_graph_materialized(
 
   Run with:
     uv run dagster asset materialize -m robosystems.dagster --select sec_graph_materialized
-
-  Returns:
-      MaterializeResult with materialization statistics
   """
   import asyncio
 
@@ -191,9 +188,6 @@ def sec_historical_materialized(
 
   Run with:
     uv run dagster asset materialize -m robosystems.dagster --select sec_historical_materialized
-
-  Returns:
-      MaterializeResult with materialization statistics
   """
   import asyncio
 

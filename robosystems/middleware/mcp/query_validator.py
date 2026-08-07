@@ -155,7 +155,7 @@ class GraphQueryValidator:
           self._properties[label] = prop_names
 
   def validate(self, query: str, params: dict | None = None) -> ValidationResult:
-    """Validate a graph database query comprehensively."""
+    """Validate a graph database query."""
     result = ValidationResult(is_valid=True)
 
     # Skip validation for metadata queries

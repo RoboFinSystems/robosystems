@@ -5,8 +5,6 @@ This is an orchestration task — the worker doesn't do the actual work,
 it monitors a remote operation (Graph API backup/restore, Dagster
 materialization) and keeps the SSE stream alive even if API containers
 scale in.
-
-Replaces BackgroundTasks + run_and_monitor_dagster_job pattern.
 """
 
 from __future__ import annotations
@@ -24,10 +22,9 @@ logger = get_logger(__name__)
 class DagsterJobMonitorTask(BaseTask):
   """Submit a Dagster job and monitor its progress, relaying to SSE.
 
-  This is an orchestration task — the actual work runs in Dagster
-  (backup/restore on Graph API, materialization ops). The worker
-  just polls status and keeps the SSE stream alive so the frontend
-  doesn't lose progress when API containers scale in.
+  Params: ``job_name`` (required), plus optional ``run_config``, ``tags``,
+  and ``lock_key`` — the lock is released when the monitor exits, however it
+  exits.
   """
 
   async def execute(self) -> dict[str, Any]:

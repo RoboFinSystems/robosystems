@@ -1,8 +1,8 @@
 """
 LadybugDB Schema Builder
 
-Dynamically generates and manages LadybugDB schemas based on configuration.
-Uses the enhanced SchemaManager for better inheritance and compatibility.
+Turns a schema configuration dict into a compiled `Schema`, its Cypher DDL,
+and — via `apply_to_connection` — the tables themselves.
 """
 
 import importlib
@@ -18,30 +18,23 @@ class LadybugSchemaBuilder:
   """
   Builds LadybugDB schemas by combining base schemas and extensions.
 
-  This builder loads schema definitions from configuration and generates
-  the complete Cypher DDL script for creating the database schema.
-
-  Now uses the enhanced SchemaManager for better inheritance support.
+  Loads schema definitions from configuration and generates the complete
+  Cypher DDL script for creating the database schema.
   """
 
   def __init__(self, config: dict[str, Any]):
     """
     Initialize the schema builder.
 
-    Args:
-        config: Configuration dictionary with base_schema and extensions
+    ``config`` carries ``base_schema`` and ``extensions``, plus optional
+    ``name``, ``description``, and ``version``.
     """
     self.config = config
     self.schema_manager = SchemaManager()
     self.schema = None
 
   def load_schemas(self) -> "LadybugSchemaBuilder":
-    """
-    Load base schema and all configured extensions using SchemaManager.
-
-    Returns:
-        Self for method chaining
-    """
+    """Load base schema and all configured extensions; returns self for chaining."""
     logger.info(f"Loading LadybugDB schemas from configuration: {self.config}")
 
     # Create schema configuration
@@ -130,23 +123,13 @@ class LadybugSchemaBuilder:
       raise ValueError(f"Extension schema '{extension_name}' not found")
 
   def generate_cypher(self) -> str:
-    """
-    Generate the complete Cypher DDL script.
-
-    Returns:
-        Complete Cypher script as string
-    """
+    """Generate the complete Cypher DDL script for the loaded schema."""
     if self.schema is None:
       raise ValueError("Schema not loaded. Call load_schemas() first.")
     return self.schema.to_cypher()
 
   def apply_to_connection(self, connection):
-    """
-    Apply the schema to a LadybugDB database connection.
-
-    Args:
-        connection: LadybugDB database connection
-    """
+    """Execute the schema DDL statement by statement on a LadybugDB connection."""
     cypher_script = self.generate_cypher()
     logger.info("Applying LadybugDB schema to database")
     logger.debug(f"Schema DDL:\n{cypher_script}")
@@ -194,11 +177,8 @@ class LadybugSchemaBuilder:
     """
     Get the built schema object.
 
-    Returns:
-        Complete schema object
-
     Raises:
-        ValueError: If schema has not been loaded
+        ValueError: If `load_schemas` has not run.
     """
     if self.schema is None:
       raise ValueError("Schema not loaded. Call load_schemas() first.")
@@ -206,28 +186,14 @@ class LadybugSchemaBuilder:
 
 
 def create_schema_from_config(config: dict[str, Any]) -> Schema:
-  """
-  Convenience function to create a schema from configuration.
-
-  Args:
-      config: Schema configuration dictionary
-
-  Returns:
-      Complete schema object
-  """
+  """Create a compiled schema from a configuration dictionary."""
   builder = LadybugSchemaBuilder(config)
   builder.load_schemas()
   return builder.get_schema()
 
 
 def apply_schema_to_database(database_path: str, config: dict[str, Any]):
-  """
-  Convenience function to apply schema to a LadybugDB database.
-
-  Args:
-      database_path: Path to LadybugDB database
-      config: Schema configuration dictionary
-  """
+  """Open the LadybugDB database at ``database_path`` and apply the schema."""
   import ladybug as lbug
 
   db = lbug.Database(database_path)

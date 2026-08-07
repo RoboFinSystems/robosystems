@@ -1,13 +1,21 @@
-"""Information Block validation — Step 7 of the roboledger demo.
+"""Information Block validation for the roboledger demo.
 
-Runs after schedules are created to verify:
+`main.py` calls this right after the schedules are created, to prove the
+Information Block machinery behind them actually holds together:
+
   - FactSet rows exist for every schedule
-  - SumEquals rules auto-generated and evaluate clean
-  - GraphQL envelope resolves fact_set + verification_results
-  - dispose-schedule computes correct NBV, deletes the SumEquals rule
-  - Ad-hoc 3-month prepaid rollforward: creation → evaluation → cleanup
+  - SumEquals rules are auto-generated and evaluate clean
+  - the GraphQL envelope resolves fact_set + verification_results
+  - disposing an asset computes the right NBV and deletes the SumEquals rule
+  - an ad-hoc 3-month prepaid rollforward survives creation → evaluation →
+    cleanup
 
-Can also be run standalone against any graph:
+Everything it creates is throwaway and removed before it returns, including the
+draft entry the disposal handler posts into the period the demo then tells you
+to close.
+
+Can also be run standalone against any graph (defaults to the cached demo
+graph in .local/config.json):
 
     uv run python -m examples.roboledger_demo.validate <graph_id>
 """

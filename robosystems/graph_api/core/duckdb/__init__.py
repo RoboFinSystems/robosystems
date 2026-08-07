@@ -1,8 +1,5 @@
-"""DuckDB core services.
-
-This module provides DuckDB-specific functionality for staging data
-before ingestion into graph databases.
-"""
+"""DuckDB staging layer: transform parquet on S3 into tables that LadybugDB
+ingestion can COPY from."""
 
 from .manager import (
   DuckDBTableManager,

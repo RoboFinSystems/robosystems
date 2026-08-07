@@ -1,8 +1,7 @@
-"""
-Unified operation manager for SSE-based operation tracking.
+"""Operation lifecycle management on top of SSE event storage.
 
-This module provides high-level utilities for managing operations through
-their entire lifecycle, from creation to completion or failure.
+Wraps `SSEEventStorage` so callers emit start/progress/complete/fail
+events without hand-rolling the status transitions.
 """
 
 import asyncio
@@ -20,12 +19,7 @@ from robosystems.middleware.sse.event_storage import (
 
 
 class OperationManager:
-  """
-  High-level manager for SSE operations.
-
-  Provides context managers and utilities for operation lifecycle management,
-  making it easy for endpoints to create and track operations.
-  """
+  """Context managers and helpers for creating and tracking SSE operations."""
 
   def __init__(self, event_storage: SSEEventStorage | None = None):
     self.event_storage = event_storage or get_event_storage()
@@ -38,20 +32,7 @@ class OperationManager:
     operation_id: str | None = None,
     initial_data: dict[str, Any] | None = None,
   ) -> str:
-    """
-    Start a new operation and emit the started event.
-
-    Args:
-        operation_type: Type of operation (e.g., "graph_creation")
-        user_id: User who initiated the operation
-        graph_id: Graph database ID (if applicable)
-        operation_id: Custom operation ID (generates one if None)
-        initial_data: Additional data to include in start event
-
-    Returns:
-        str: The operation ID
-    """
-    # Create operation in storage
+    """Register an operation and emit its started event; returns the ID."""
     op_id = await self.event_storage.create_operation(
       operation_type=operation_type,
       user_id=user_id,
@@ -59,7 +40,7 @@ class OperationManager:
       operation_id=operation_id,
     )
 
-    # Store started event (updates status to RUNNING) and broadcast via Redis pub/sub
+    # Moves status to RUNNING and broadcasts over pub/sub.
     start_data = {
       "operation_type": operation_type,
       "graph_id": graph_id,
@@ -80,22 +61,13 @@ class OperationManager:
     progress_percent: float | None = None,
     details: dict[str, Any] | None = None,
   ):
-    """
-    Emit a progress update for an operation.
-
-    Args:
-        operation_id: Operation identifier
-        message: Human-readable progress message
-        progress_percent: Completion percentage (0-100)
-        details: Additional progress details
-    """
+    """Emit a progress update. `progress_percent` is 0-100."""
     progress_data = {
       "message": message,
       "progress_percent": progress_percent,
       **(details or {}),
     }
 
-    # Store event and broadcast via Redis pub/sub
     await self.event_storage.store_event(
       operation_id, EventType.OPERATION_PROGRESS, progress_data
     )
@@ -106,17 +78,9 @@ class OperationManager:
     result: dict[str, Any] | None = None,
     message: str = "Operation completed successfully",
   ):
-    """
-    Mark an operation as completed.
-
-    Args:
-        operation_id: Operation identifier
-        result: Result data to store
-        message: Completion message
-    """
+    """Mark an operation completed, storing `result` in its metadata."""
     completion_data = {"message": message, "result": result}
 
-    # Store event (updates status to COMPLETED) and broadcast via Redis pub/sub
     await self.event_storage.store_event(
       operation_id, EventType.OPERATION_COMPLETED, completion_data
     )
@@ -126,17 +90,9 @@ class OperationManager:
   async def fail_operation(
     self, operation_id: str, error: str, error_details: dict[str, Any] | None = None
   ):
-    """
-    Mark an operation as failed.
-
-    Args:
-        operation_id: Operation identifier
-        error: Error message
-        error_details: Additional error details
-    """
+    """Mark an operation failed with `error` as the recorded message."""
     error_data = {"error": error, "error_details": error_details}
 
-    # Store event (updates status to FAILED) and broadcast via Redis pub/sub
     await self.event_storage.store_event(
       operation_id, EventType.OPERATION_ERROR, error_data
     )
@@ -146,13 +102,7 @@ class OperationManager:
   async def cancel_operation(
     self, operation_id: str, reason: str = "Cancelled by user"
   ):
-    """
-    Cancel an operation.
-
-    Args:
-        operation_id: Operation identifier
-        reason: Cancellation reason
-    """
+    """Cancel an operation."""
     await self.event_storage.cancel_operation(operation_id, reason)
     logger.info(f"Cancelled operation {operation_id}: {reason}")
 
@@ -170,31 +120,16 @@ class OperationManager:
     operation_id: str | None = None,
     initial_data: dict[str, Any] | None = None,
   ):
-    """
-    Context manager for operation lifecycle management.
+    """Run a block as a tracked operation, yielding the operation ID.
 
-    Automatically handles operation creation, error catching, and cleanup.
+    Completes the operation on normal exit, fails it on exception, and
+    cancels it on `asyncio.CancelledError` — always re-raising.
 
-    Usage:
         async with manager.operation_context("graph_creation", user_id) as op_id:
-            # Do work, emit progress events
             await manager.emit_progress(op_id, "Creating nodes...")
-            # Operation is automatically completed on success
-            # or failed on exception
-
-    Args:
-        operation_type: Type of operation
-        user_id: User who initiated the operation
-        graph_id: Graph database ID (if applicable)
-        operation_id: Custom operation ID (generates one if None)
-        initial_data: Additional data for start event
-
-    Yields:
-        str: The operation ID
     """
     op_id = None
     try:
-      # Start operation
       op_id = await self.start_operation(
         operation_type=operation_type,
         user_id=user_id,
@@ -203,20 +138,16 @@ class OperationManager:
         initial_data=initial_data,
       )
 
-      # Yield operation ID to calling code
       yield op_id
 
-      # If we get here, operation succeeded
       await self.complete_operation(op_id)
 
     except asyncio.CancelledError:
-      # Operation was cancelled
       if op_id:
         await self.cancel_operation(op_id, "Operation cancelled")
       raise
 
     except Exception as e:
-      # Operation failed
       if op_id:
         await self.fail_operation(
           op_id, error=str(e), error_details={"error_type": type(e).__name__}
@@ -232,34 +163,15 @@ class OperationManager:
     operation_id: str | None = None,
     initial_data: dict[str, Any] | None = None,
   ) -> str:
-    """
-    Run an operation function with automatic lifecycle management.
+    """Run `operation_func` inside `operation_context`, returning its ID.
 
-    This is a convenience method that wraps an operation function
-    with full lifecycle management.
+    async def create_graph(operation_id: str):
+        manager = get_operation_manager()
+        await manager.emit_progress(operation_id, "Creating nodes...")
 
-    Args:
-        operation_type: Type of operation
-        user_id: User who initiated the operation
-        operation_func: Async function that performs the operation
-        graph_id: Graph database ID (if applicable)
-        operation_id: Custom operation ID (generates one if None)
-        initial_data: Additional data for start event
-
-    Returns:
-        str: The operation ID
-
-    Example:
-        async def create_graph(operation_id: str):
-            manager = get_operation_manager()
-            await manager.emit_progress(operation_id, "Creating nodes...")
-            # ... do work
-
-        operation_id = await manager.run_operation(
-            "graph_creation",
-            user_id,
-            create_graph
-        )
+    operation_id = await manager.run_operation(
+        "graph_creation", user_id, create_graph
+    )
     """
     async with self.operation_context(
       operation_type=operation_type,
@@ -268,7 +180,6 @@ class OperationManager:
       operation_id=operation_id,
       initial_data=initial_data,
     ) as op_id:
-      # Run the operation function
       await operation_func(op_id)
 
     return op_id
@@ -281,18 +192,8 @@ class OperationManager:
     graph_id: str | None = None,
     operation_id: str | None = None,
   ) -> str:
-    """
-    Run a batch of operations with combined progress tracking.
-
-    Args:
-        operation_type: Type of batch operation
-        user_id: User who initiated the operation
-        operations: List of operation functions
-        graph_id: Graph database ID (if applicable)
-        operation_id: Custom operation ID (generates one if None)
-
-    Returns:
-        str: The operation ID
+    """Run `operations` in sequence under one operation ID, emitting a
+    progress event before each.
     """
     async with self.operation_context(
       operation_type=operation_type,
@@ -302,7 +203,6 @@ class OperationManager:
       initial_data={"total_operations": len(operations)},
     ) as op_id:
       for i, operation_func in enumerate(operations):
-        # Update progress
         progress_percent = (i / len(operations)) * 100
         await self.emit_progress(
           op_id,
@@ -310,10 +210,8 @@ class OperationManager:
           progress_percent=progress_percent,
         )
 
-        # Run operation
         await operation_func(op_id, i)
 
-      # Final progress update
       await self.emit_progress(op_id, "All operations completed", progress_percent=100)
 
     return op_id
@@ -338,23 +236,13 @@ def emit_sse_event(
   message: str | None = None,
   progress_percentage: float | None = None,
 ):
-  """
-  Compatibility wrapper for emitting SSE events.
+  """Emit an SSE event from an `OperationStatus` rather than an `EventType`.
 
-  This function provides backward compatibility for code that uses the old
-  emit_sse_event interface. It maps OperationStatus to EventType and
-  calls emit_event_to_operation.
-
-  Args:
-      operation_id: Operation identifier
-      status: Operation status (mapped to event type)
-      data: Event data dictionary
-      message: Optional message
-      progress_percentage: Optional progress percentage
+  Usable from sync code: it dispatches onto a running loop when there is
+  one and otherwise spins up a short-lived loop.
   """
   from robosystems.middleware.sse.streaming import emit_event_to_operation
 
-  # Map OperationStatus to EventType
   status_to_event_type = {
     OperationStatus.PENDING: EventType.OPERATION_STARTED,
     OperationStatus.RUNNING: EventType.OPERATION_PROGRESS,
@@ -365,27 +253,21 @@ def emit_sse_event(
 
   event_type = status_to_event_type.get(status, EventType.OPERATION_PROGRESS)
 
-  # Merge message and progress_percentage into data
   event_data = data.copy() if data else {}
   if message:
     event_data["message"] = message
   if progress_percentage is not None:
     event_data["progress_percentage"] = progress_percentage
 
-  # Call emit_event_to_operation - handle both async and sync contexts
   try:
-    # Try to get existing event loop
     loop = asyncio.get_event_loop()
     if loop.is_running():
-      # We're in an async context, schedule as task
       asyncio.create_task(emit_event_to_operation(operation_id, event_type, event_data))
     else:
-      # Run in the existing loop
       loop.run_until_complete(
         emit_event_to_operation(operation_id, event_type, event_data)
       )
   except RuntimeError:
-    # No event loop, create a new one (sync context)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -403,23 +285,15 @@ async def create_operation_response(
   graph_id: str | None = None,
   operation_id: str | None = None,
 ) -> dict[str, Any]:
-  """
-  Create a new operation and return the standardized response.
+  """Register an operation and return the response body endpoints should
+  hand back when queueing work.
 
-  This is what endpoints should return when starting a new operation.
-
-  Args:
-      operation_type: Type of operation
-      user_id: User identifier
-      graph_id: Graph database ID (if applicable)
-      operation_id: Custom operation ID (generates one if None)
-
-  Returns:
-      Dict containing operation details and SSE endpoint
+  The operation is created but not started; the worker that picks it up
+  emits the started event. The returned `_links` point at the stream,
+  status, and cancel endpoints in `routers/operations.py`.
   """
   manager = get_operation_manager()
 
-  # Create operation (but don't start it yet - that's for the actual worker)
   op_id = await manager.event_storage.create_operation(
     operation_type=operation_type,
     user_id=user_id,
@@ -427,7 +301,6 @@ async def create_operation_response(
     operation_id=operation_id,
   )
 
-  # Get metadata for response
   metadata = await manager.event_storage.get_operation_metadata(op_id)
 
   return {

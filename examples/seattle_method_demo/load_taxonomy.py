@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
-"""Load the Seattle Method ``mini`` reporting framework as a CoA.
+"""Load the Seattle Method ``mini`` reporting framework as a chart of accounts.
 
-Parses Charlie Hoffman's mini XBRL taxonomy (already pulled into
-``local/taxonomies/mini/`` by ``pull_mini.sh``) and ingests it as a
-``chart_of_accounts`` Taxonomy Block — identical shape to how a
-QuickBooks CoA import or a hand-authored CoA (see
-``examples.roboledger_demo.create_chart_of_accounts``) lands in the
-system. Mini concepts become Element rows; mini's presentation
-linkbases supply the parent_ref hierarchy.
+Parses Charlie Hoffman's mini XBRL taxonomy and ingests it as a
+``chart_of_accounts`` Taxonomy Block — the same shape a QuickBooks CoA import
+or a hand-authored CoA lands in. Mini concepts become Element rows; mini's
+presentation linkbases supply the parent_ref hierarchy.
 
-**Sources parsed** (all under ``local/taxonomies/mini/``):
+**Why a CoA and not a reporting taxonomy**: mini deliberately collapses the
+chart of accounts and the reporting framework into one structure — every GL
+account *is* its own reporting concept. Loading it as a tenant CoA is
+therefore faithful to the source, and it puts mini on the same footing as any
+other customer chart of accounts, so the mini→rs-gaap projection the demo
+exercises is an ordinary mapping rather than a special case. Another source
+framework (us-gaap, IFRS) would be loaded the same way into its own graph.
+
+**Sources parsed** (all under ``local/taxonomies/mini/``, populated by the
+pull step):
 
 - ``mini.xsd`` — concept declarations: name, type, ``xbrli:balance``,
   ``xbrli:periodType``, ``substitutionGroup`` (for abstract/hypercube
   detection).
 - ``mini-lab.xml`` — human-readable labels (the Element ``name`` field).
-- ``mini-pre-*.xml`` — presentation linkbases. Each file is one
-  XBRL Network covering one statement or disclosure. A concept can
-  appear in multiple networks; we use a canonical-parent priority
-  (BalanceSheet > IncomeStatement > CashFlowStatement > ChangesInEquity
-  > roll-forwards > everything else) so each Element ends up with a
-  single deterministic parent_ref.
+- ``mini-pre-*.xml`` — presentation linkbases, one XBRL Network per statement
+  or disclosure. A concept can appear in several networks, so a
+  canonical-parent priority (BalanceSheet > IncomeStatement >
+  CashFlowStatement > ChangesInEquity > roll-forwards > everything else)
+  gives each Element a single deterministic parent_ref.
 
-**Why this is a CoA shape, not a "load the full taxonomy" shape**:
-Charlie's mini collapses the chart-of-accounts and the reporting
-framework into one structure (his "fix the process" thesis — every GL
-account IS its own reporting concept). We treat it the same way our
-QB sync treats QB accounts — as a tenant CoA. Future cross-taxonomy
-test cases (us-gaap, IFRS) would each be loaded the same way into
-their own tenant graphs.
+Prerequisites: ``just demo-user``, and the taxonomy pulled by
+``just demo-seattle-method --step pull``.
 
-Usage:
+Run it (the orchestrator runs this as step 3):
     uv run python -m examples.seattle_method_demo.load_taxonomy <graph_id>
     uv run python -m examples.seattle_method_demo.load_taxonomy <graph_id> --taxonomy-dir <path>
+    uv run python -m examples.seattle_method_demo.load_taxonomy <graph_id> --dry-run
 """
 
 from __future__ import annotations
@@ -284,26 +285,23 @@ def build_element_payloads(
 ) -> list[dict]:
   """Build the elements list for ``create_taxonomy_block``.
 
-  **Filter rule**: only **monetary concepts** (the ~92 leaves with
-  ``xbrli:balance``) become CoA elements. The other ~98 mini concepts
-  (hypercubes, line-items containers, abstract roll-ups, text-block
-  policies) are XBRL structural plumbing — they're load-bearing for
-  rendering presentation networks but they aren't GL-postable
-  accounts. The CoA validator requires every element to declare a
-  ``trait`` from a fixed enum (asset/liability/equity/contraAsset/
-  temporaryEquity/revenue/expense/income/gain/loss); only monetary
-  leaves cleanly satisfy that — matches how QB CoAs land (flat list
-  of balance-bearing accounts).
+  **Filter rule**: only **monetary concepts** (the leaves carrying
+  ``xbrli:balance``) become CoA elements. The rest — hypercubes, line-items
+  containers, abstract roll-ups, text-block policies — are XBRL structural
+  plumbing: load-bearing when rendering presentation networks, but not
+  GL-postable accounts. The CoA validator also requires every element to
+  declare a ``trait`` from a fixed enum (asset/liability/equity/contraAsset/
+  temporaryEquity/revenue/expense/income/gain/loss), which only balance-
+  bearing leaves cleanly satisfy.
 
-  **Hierarchy**: ``parent_ref=None`` for every leaf — the mini
-  hierarchy lives in the presentation linkbases, not in CoA
-  parent-child relationships among the monetary leaves themselves.
-  This mirrors how QB sync produces a flat CoA when the source
-  doesn't carry sub-account nesting between balance-bearing accounts.
+  **Hierarchy**: ``parent_ref=None`` for every leaf. The mini hierarchy lives
+  in the presentation linkbases, not in parent-child relationships among the
+  monetary leaves themselves — the same flat shape a QuickBooks sync produces
+  when the source carries no sub-account nesting.
 
-  Excluded structural concepts can be loaded as a separate
-  ``custom_ontology`` Taxonomy Block later if their presentation
-  hierarchy is needed for rendering.
+  The excluded structural concepts can be loaded separately as a
+  ``custom_ontology`` Taxonomy Block if their presentation hierarchy is ever
+  needed for rendering.
   """
   payloads: list[dict] = []
 
@@ -345,21 +343,20 @@ def build_element_payloads(
 def _derive_trait(concept: Concept) -> str | None:
   """Best-effort FASB trait classification for a monetary concept.
 
-  Mini doesn't carry an explicit trait per concept, so we infer from
+  Mini carries no explicit trait per concept, so the trait is inferred from
   ``balance_type`` + ``period_type``:
 
   - instant + debit → ``asset``
-  - instant + credit → ``liability`` (the most common case; equity
-    concepts like ``PaidInCapital`` get re-classified by name below)
+  - instant + credit → ``liability`` (the common case; equity concepts like
+    ``PaidInCapital`` are re-classified by name below)
   - duration + debit → ``expense``
   - duration + credit → ``revenue``
 
-  Equity-side concepts (PaidInCapital, RetainedEarnings, etc.) are
-  detected by name suffix and re-classified to ``equity``. Mapping
-  refinement against rs-gaap happens separately via the
-  MappingOperator path; the validator just needs *a* valid trait
-  from {asset, liability, equity, contraAsset, contraLiability,
-  contraEquity, temporaryEquity, revenue, expense, income, gain, loss}.
+  Equity-side concepts (PaidInCapital, RetainedEarnings, and friends) are
+  credit-balance like liabilities, so they are detected by name and
+  re-classified to ``equity``. Precision beyond this comes from the
+  mini→rs-gaap mapping, not from the trait — the CoA validator only needs
+  *a* valid trait.
   """
   if concept.is_hypercube or not concept.is_monetary:
     return None
@@ -392,9 +389,7 @@ def _derive_trait(concept: Concept) -> str | None:
 
 
 def _get_ledger_client():
-  """Construct a LedgerClient from saved credentials.
-
-  Mirrors the helper in ``examples.roboledger_demo.main``."""
+  """Construct a LedgerClient from the credentials ``just demo-user`` saved."""
   import json
 
   from robosystems_client.clients.ledger_client import LedgerClient
@@ -415,17 +410,14 @@ def _get_ledger_client():
 
 
 def upload_taxonomy(graph_id: str, elements: list[dict]) -> str:
-  """Create the mini CoA via ``create_taxonomy_block``.
+  """Create the mini CoA via ``create_taxonomy_block``; return its taxonomy_id.
 
-  Returns the new taxonomy_id. Idempotent: if a taxonomy with
-  ``name="Seattle Method mini CoA"`` already exists on the graph,
-  returns its existing id instead of recreating (which would fail
-  on the unique-qname constraint).
+  Idempotent: when a "Seattle Method mini CoA" taxonomy already exists on the
+  graph its id is returned unchanged, since recreating it would collide on
+  the unique-qname constraint.
   """
   client = _get_ledger_client()
 
-  # Idempotency check — re-runs against the same graph reuse the
-  # existing taxonomy rather than colliding on unique-qname.
   existing_taxonomies = client.list_taxonomies(graph_id) or []
   for tax in existing_taxonomies:
     if (tax.get("name") or "").lower().startswith("seattle method"):

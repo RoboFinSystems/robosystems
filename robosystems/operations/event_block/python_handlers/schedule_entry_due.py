@@ -4,10 +4,9 @@ Fires when create-event-block runs with event_type='schedule_entry_due' and
 apply_handlers=True. Drafts (or refreshes) a closing entry derived from a
 schedule's facts for the given period, then links the entry to the event.
 
-Replaces the standalone `create-closing-entry` operation. The underlying
-logic (idempotent 5-outcome reconcile) lives in
-`ScheduleService.create_closing_entry` and is reused verbatim — this
-handler just sequences it inside the event-block unit of work.
+The idempotent five-outcome reconcile lives in
+`ScheduleService.create_closing_entry`; this handler sequences that call
+inside the event-block unit of work.
 
 Event status after success: 'classified' (the draft still has to go
 through close-period to become posted).
@@ -97,10 +96,9 @@ def dispatch_preview(
 ) -> HandlerPreview:
   """Read-only: inspect the schedule + target period fact and describe the plan.
 
-  Does not call `create_closing_entry` — that writes rows. We mirror the
-  subset of logic needed to describe what *would* happen: load the
-  schedule, find the in-scope fact for the period, report what the draft
-  would look like.
+  Does not call `create_closing_entry` — that writes rows. Mirrors only the
+  subset of its logic needed to describe the draft: load the schedule, find
+  the in-scope fact for the period, report the resulting entry.
   """
   from sqlalchemy import text
 

@@ -1,8 +1,4 @@
-"""Service offering API response models.
-
-This module contains Pydantic models for service offering responses including
-graph subscriptions, repository subscriptions, and operation costs.
-"""
+"""Service offering responses: graph tiers, repository plans, operation costs."""
 
 from pydantic import BaseModel, ConfigDict, Field
 

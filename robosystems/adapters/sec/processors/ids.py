@@ -40,22 +40,12 @@ def create_reference_id(value: str, ref_type: str) -> str:
 
 
 def create_report_id(uri: str) -> str:
-  """
-  Create a Report identifier from URI.
-
-  Reports must have deterministic IDs based on URI for consistency
-  across pipeline runs.
-  """
+  """Create a Report identifier from its URI."""
   return generate_deterministic_uuid(uri, namespace="report")
 
 
 def create_fact_id(fact_uri: str) -> str:
-  """
-  Create a Fact identifier.
-
-  Facts must have deterministic IDs based on URI for consistency
-  across pipeline runs.
-  """
+  """Create a Fact identifier from its URI."""
   return generate_deterministic_uuid(fact_uri, namespace="fact")
 
 
@@ -103,7 +93,6 @@ def camel_to_snake(name: str) -> str:
     LineItem -> line_item
     HTTPSConnection -> https_connection
   """
-  # Insert underscore before uppercase letters (except first)
   s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
   return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
@@ -127,35 +116,19 @@ def make_plural(word: str) -> str:
 
 
 def convert_schema_name_to_filename(schema_name: str) -> str:
-  """
-  Convert schema name to appropriate filename using exact table names.
+  """Name a table's parquet file after its exact schema name.
 
-  Uses exact schema names for file naming - no conversion to snake_case.
-  This ensures directories and files match exact table names like Entity,
-  Dimension, etc.
-
-  Args:
-    schema_name: Schema name like "Entity", "FACT_HAS_DIMENSION"
-
-  Returns:
-    Filename like "Entity.parquet", "FACT_HAS_DIMENSION.parquet"
+  No snake_case conversion — directories and files match the table names the
+  graph uses ("Entity.parquet", "FACT_HAS_DIMENSION.parquet").
   """
   return f"{schema_name}.parquet"
 
 
 def safe_concat(existing_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
-  """
-  Safely concatenate DataFrames, handling empty DataFrames and dtype mismatches.
+  """Concatenate two DataFrames, tolerating empties and dtype mismatches.
 
-  Fixes pandas FutureWarning about dtype inconsistencies by explicitly
-  handling dtypes when concatenating.
-
-  Args:
-    existing_df: Existing DataFrame
-    new_df: New DataFrame to append
-
-  Returns:
-    Concatenated DataFrame
+  Columns whose dtypes differ are widened to a common dtype first, which avoids
+  the pandas FutureWarning about concatenating inconsistent dtypes.
   """
   if new_df.empty:
     return existing_df

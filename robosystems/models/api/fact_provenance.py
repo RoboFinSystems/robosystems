@@ -16,8 +16,7 @@ discipline as ``ArtifactMechanics``, which discriminates on ``kind``):
                  (straight-line depreciation, amortization); projected,
                  no posted event yet.
 * ``derived``  — computed from other facts via a formula/computation
-                 (subtotals, retained-earnings close, metrics). Defined
-                 now; wired when Metrics un-parks.
+                 (subtotals, retained-earnings close, metrics).
 * ``asserted`` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
 * ``document`` — text-block fact bound from a platform Document; the
@@ -95,11 +94,10 @@ class ScheduleProvenance(BaseModel):
 class DerivedProvenance(BaseModel):
   """Facts computed from other facts via a formula/computation.
 
-  Subtotals, the retained-earnings close, and (future) metrics. Defined
-  now so the union is complete; wired when Metrics un-parks. At least one
-  of ``formula`` / ``computation`` / ``source_fact_ids`` must be present —
-  computation-only covers auto-derived facts with no single source row
-  (retained earnings, persisted subtotals).
+  Subtotals and the retained-earnings close; metrics will use it too. At
+  least one of ``formula`` / ``computation`` / ``source_fact_ids`` must be
+  present — computation-only covers auto-derived facts with no single source
+  row (retained earnings, persisted subtotals).
   """
 
   origin: Literal["derived"] = "derived"

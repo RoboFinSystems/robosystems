@@ -1,8 +1,8 @@
 """
 LadybugDB Schema Validator
 
-Validates node and relationship operations against predefined LadybugDB schema
-using the robosystems.schemas definitions as the source of truth.
+Validates node and relationship operations against the declarations in
+`robosystems.schemas`, which are the source of truth.
 """
 
 import logging
@@ -14,11 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class LadybugSchemaValidator:
-  """
-  Validates LadybugDB operations against the robosystems schema.
-
-  Uses robosystems.schemas as the source of truth for all validation.
-  """
+  """Validates LadybugDB operations against the loaded schema."""
 
   def __init__(self):
     self.schema_loader = get_schema_loader()
@@ -33,14 +29,10 @@ class LadybugSchemaValidator:
 
   def validate_node(self, node_type: str, properties: dict[str, Any]) -> bool:
     """
-    Validate node properties against schema.
+    Validate node properties against the schema.
 
-    Args:
-        node_type: The node type (e.g., "Entity", "Element")
-        properties: Dict of property names and values
-
-    Returns:
-        True if valid, raises ValueError if invalid
+    Raises:
+        ValueError: If the node type or any property is invalid.
     """
     return self.schema_loader.validate_node_properties(node_type, properties)
 
@@ -52,16 +44,11 @@ class LadybugSchemaValidator:
     properties: dict[str, Any] | None = None,
   ) -> bool:
     """
-    Validate relationship against schema.
+    Validate a relationship and its endpoints against the schema.
 
-    Args:
-        source_type: Source node type
-        target_type: Target node type
-        relationship_type: Relationship type
-        properties: Optional relationship properties
-
-    Returns:
-        True if valid, raises ValueError if invalid
+    Raises:
+        ValueError: If the relationship type, endpoints, or properties are
+            invalid.
     """
     return self.schema_loader.validate_relationship(
       source_type, target_type, relationship_type, properties

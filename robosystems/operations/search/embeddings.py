@@ -39,14 +39,7 @@ class EmbeddingService:
     return self._model
 
   def embed_batch(self, texts: list[str]) -> list[list[float]]:
-    """Generate embeddings for a batch of texts.
-
-    Args:
-        texts: List of text strings to embed.
-
-    Returns:
-        List of embedding vectors (each 384 floats).
-    """
+    """Embed a batch of texts, one 384-float vector per input."""
     if not texts:
       return []
     embeddings = list(self.model.embed(texts))

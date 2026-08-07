@@ -1,9 +1,4 @@
-"""
-Cypher query execution endpoints for LadybugDB databases.
-
-This module provides endpoints for executing Cypher queries against
-specific LadybugDB graph databases with admission control.
-"""
+"""Cypher query execution against a LadybugDB database, under admission control."""
 
 import json
 import os
@@ -120,10 +115,7 @@ async def execute_query(
       },
     )
 
-  # Get admission controller
   admission_controller = get_admission_controller()
-
-  # Check admission control before executing query
   decision, reason = admission_controller.check_admission(graph_id, "query")
 
   if decision != AdmissionDecision.ACCEPT:
@@ -138,9 +130,8 @@ async def execute_query(
       },
     )
 
-  # Track the connection for this query
   with track_connection(admission_controller, graph_id):
-    # Create a new request with the graph_id from the path
+    # The path's graph_id is authoritative — ignore any database in the body.
     query_request = QueryRequest(
       database=graph_id, cypher=request.cypher, parameters=request.parameters
     )
@@ -148,7 +139,6 @@ async def execute_query(
     if not streaming:
       return service.execute_query(query_request)
 
-    # Streaming response for large result sets
     def _json_default(obj: object) -> str:
       if isinstance(obj, (date, datetime)):
         return obj.isoformat()

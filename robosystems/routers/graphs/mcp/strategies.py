@@ -1,8 +1,7 @@
-"""
-MCP-specific strategy selection and execution coordination.
+"""MCP strategy selection and execution coordination.
 
-This module provides intelligent strategy selection for MCP tool execution,
-optimized for AI agent consumption and shared repository scalability.
+Picks an execution strategy (immediate JSON, streaming, queued, cached) for a
+given MCP tool call from the tool type, request headers, and system load.
 """
 
 import re
@@ -44,32 +43,14 @@ class MCPToolAnalyzer(BaseAnalyzer):
   INFO_TOOLS = ["get-graph-info"]
 
   def analyze(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """
-    Implementation of abstract analyze method.
-
-    Args:
-        tool_name: Name of the MCP tool
-        arguments: Tool arguments
-
-    Returns:
-        Dictionary with analysis results
-    """
+    """Implementation of the abstract `analyze` method."""
     return self.analyze_tool_call(tool_name, arguments)
 
   @classmethod
   def analyze_tool_call(
     cls, tool_name: str, arguments: dict[str, Any]
   ) -> dict[str, Any]:
-    """
-    Analyze an MCP tool call to estimate its characteristics.
-
-    Args:
-        tool_name: Name of the MCP tool
-        arguments: Tool arguments
-
-    Returns:
-        Dictionary with analysis results
-    """
+    """Estimate the cost and shape of an MCP tool call."""
     analysis = {
       "tool_category": cls._get_tool_category(tool_name),
       "is_cacheable": cls._is_cacheable(tool_name),
@@ -137,7 +118,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
     """Estimate result size category: small, medium, large."""
     if tool_name in cls.QUERY_TOOLS:
       query = arguments.get("query", "")
-      # Check for LIMIT clause
       limit_match = re.search(r"LIMIT\s+(\d+)", query, re.IGNORECASE)
       if limit_match:
         limit = int(limit_match.group(1))
@@ -166,7 +146,6 @@ class MCPToolAnalyzer(BaseAnalyzer):
     )
     has_order_by = "ORDER BY" in query_upper
 
-    # Determine if streaming would help
     requires_streaming = (
       has_match and "LIMIT" not in query_upper and not has_aggregation
     )
@@ -192,34 +171,15 @@ class MCPStrategySelector(BaseStrategySelector):
     graph_id: str,
     user_tier: str | None = None,
   ) -> MCPExecutionStrategy:
+    """Select the execution strategy for an MCP tool call.
+
+    Weighs tool type and estimated complexity, client capabilities, current
+    system load and queue depth, whether the graph is a shared repository,
+    and the caller's subscription tier.
     """
-    Select the optimal execution strategy for an MCP tool call.
-
-    This method considers:
-    - Tool type and estimated complexity
-    - Client capabilities (though AI agents get transparent handling)
-    - System load and queue status
-    - Graph type (shared repository vs user graph)
-    - User subscription tier
-
-    Args:
-        tool_name: Name of the MCP tool
-        arguments: Tool arguments
-        client_info: Client capabilities (from headers)
-        system_state: Current system load
-        graph_id: Target graph identifier
-        user_tier: User subscription tier
-
-    Returns:
-        Selected execution strategy
-    """
-    # Analyze the tool call
     analysis = MCPToolAnalyzer.analyze_tool_call(tool_name, arguments)
 
-    # Special handling for AI agents (MCP clients)
     is_mcp_client = client_info.get("is_mcp_client", False)
-
-    # Try strategies in priority order
 
     # 1. Check for cached strategy
     cached_strategy = cls._select_cached_strategy(analysis, system_state)
@@ -241,7 +201,6 @@ class MCPStrategySelector(BaseStrategySelector):
     elif analysis["tool_category"] == "info":
       return MCPExecutionStrategy.JSON_IMMEDIATE
 
-    # Default fallback
     return MCPExecutionStrategy.JSON_COMPLETE
 
   @classmethod
@@ -332,7 +291,6 @@ class MCPStrategySelector(BaseStrategySelector):
       MCPExecutionStrategy.INFO_CACHED: 30,
     }
 
-    # Default to 60 seconds if not specified
     return mcp_timeouts.get(strategy, 60)
 
 
@@ -341,27 +299,16 @@ class MCPClientDetector(BaseClientDetector):
 
   @classmethod
   def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
+    """Detect MCP client capabilities from request headers.
+
+    The stdio bridge identifies itself with a `robosystems-mcp` User-Agent or
+    an `X-MCP-Client` header; otherwise capabilities come from `Accept`.
     """
-    Detect MCP client capabilities from request headers.
-
-    MCP clients (Node.js package) are detected by:
-    - User-Agent containing 'robosystems-mcp'
-    - X-MCP-Client header
-    - Accept header preferences
-
-    Args:
-        headers: Request headers
-
-    Returns:
-        Client capability information
-    """
-    # Get base client capabilities
     base_info = cls.detect_client_capabilities(headers)
 
     user_agent = headers.get("user-agent", "").lower()
     mcp_client = headers.get("x-mcp-client", "")
 
-    # Detect MCP client
     is_mcp_client = (
       "robosystems-mcp" in user_agent or mcp_client != "" or "mcp" in user_agent
     )
@@ -374,7 +321,6 @@ class MCPClientDetector(BaseClientDetector):
         "supports_ndjson": True,  # And NDJSON
         "prefers_streaming": False,  # But aggregate for AI agent
         "client_version": mcp_client or "unknown",
-        # Include base info
         "is_testing_tool": base_info["is_testing_tool"],
         "is_browser": base_info["is_browser"],
         "is_interactive": base_info["is_interactive"],
@@ -387,7 +333,6 @@ class MCPClientDetector(BaseClientDetector):
       "supports_ndjson": base_info["supports_ndjson"],
       "prefers_streaming": base_info["supports_streaming"],
       "client_version": None,
-      # Include base info
       "is_testing_tool": base_info["is_testing_tool"],
       "is_browser": base_info["is_browser"],
       "is_interactive": base_info["is_interactive"],

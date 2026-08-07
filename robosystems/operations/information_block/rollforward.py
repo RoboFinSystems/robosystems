@@ -1,26 +1,26 @@
 """Handlers for ``block_type='rollforward'`` — declarative-mode
 attribution block.
 
-Implements **Tier 2 of the rollforward attribution design**. The user
-authors a Structure declaring a BS source element and a list of
-attribution filters; at render time the filter engine
+The author declares a Structure with a balance-sheet source element and a
+list of attribution filters; at render time the filter engine
 (:mod:`robosystems.operations.roboledger.reports.rollforward_filters`)
-evaluates the filters against ledger LineItems and produces attributed
-facts per period.
+evaluates the filters against ledger LineItems and produces attributed facts
+per period.
 
-This module owns the authoring surface — ``create`` / ``update`` /
-``delete`` persist the typed :class:`RollforwardMechanics` to
-``structures.artifact_mechanics``; ``build_envelope`` round-trips the
-typed mechanics and an empty facts list. The filter engine is callable
-directly from caller code, but filter evaluation is not yet wired into
-the live ``fact_grid`` rendering pipeline — it has no in-tree consumer.
+This module owns the authoring surface — ``create`` / ``update`` / ``delete``
+persist the typed :class:`RollforwardMechanics` to
+``structures.artifact_mechanics``; ``build_envelope`` round-trips the typed
+mechanics and an empty facts list. The filter engine is callable directly,
+but filter evaluation is not wired into the live ``fact_grid`` rendering
+pipeline — it has no in-tree consumer.
 
-Pattern mirrors :mod:`robosystems.operations.information_block.schedule`
-(the canonical declarative-mode reference). Differences are:
- - No pre-generated facts at create time (rollforward is lazy)
- - No domain-service object (the structure persistence is straight SQL)
- - No closed_through / fiscal_calendar coupling (period scoping is
-   per-render, not per-block)
+Mirrors :mod:`robosystems.operations.information_block.schedule` (the
+canonical declarative-mode reference), differing in three ways:
+
+- No pre-generated facts at create time (rollforward is lazy).
+- No domain-service object (structure persistence is straight SQL).
+- No closed_through / fiscal_calendar coupling (period scoping is
+  per-render, not per-block).
 """
 
 from __future__ import annotations
@@ -164,9 +164,8 @@ def update(
   """Update a rollforward block in place.
 
   Mutable: name, default_change_tag_qname, attribution_filters,
-  validation_mode. BS source is immutable (changing it would invalidate
-  every previously rendered period). To change BS source: delete and
-  re-create.
+  validation_mode. BS source is immutable — changing it would invalidate
+  every period already rendered. To change BS source, delete and re-create.
   """
   structure = _load_rollforward_or_404(session, payload.structure_id)
   current = RollforwardMechanics.model_validate(structure.artifact_mechanics or {})

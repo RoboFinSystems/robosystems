@@ -1,8 +1,9 @@
-"""
-Cache validation service for comprehensive authentication cache security.
+"""Validation and cleanup for the encrypted authentication cache.
 
-This module provides validation, monitoring, and cleanup services for the
-encrypted authentication cache system.
+Sweeps the cache written by `auth/cache.py`, deleting any entry that fails
+decryption, signature verification, user-data validation, or the freshness
+bound, and flags counts high enough to look like cache flooding. Every
+deletion is a repair: the affected request falls back to a database lookup.
 """
 
 import logging
@@ -20,7 +21,7 @@ from .cache import APIKeyCache
 
 @dataclass
 class CacheValidationResult:
-  """Result of cache validation operation."""
+  """Outcome of one validation sweep."""
 
   is_valid: bool
   issues_found: list[str]
@@ -30,21 +31,19 @@ class CacheValidationResult:
 
   @property
   def has_security_issues(self) -> bool:
-    """Check if validation found security issues."""
+    """True when the sweep found at least one issue."""
     return len(self.issues_found) > 0
 
 
 class CacheValidator:
-  """Comprehensive cache validation and security monitoring service."""
+  """Validates and repairs the authentication cache."""
 
   def __init__(self, api_key_cache: APIKeyCache):
     self.api_key_cache = api_key_cache
     self.logger = logging.getLogger(__name__)
 
-    # Initialize async Redis client for async operations
     self._async_redis = None
 
-    # Validation thresholds
     self.max_validation_failures = 10
     self.max_cache_age_hours = 24
     self.validation_interval_minutes = 30
@@ -52,19 +51,12 @@ class CacheValidator:
   async def _get_async_redis(self) -> redis_async.Redis:
     """Get async Redis connection, creating if needed."""
     if self._async_redis is None:
-      # Use the new connection factory with proper ElastiCache support
       self._async_redis = create_async_redis_client(ValkeyDatabase.AUTH)
-      # Test connection
       await self._async_redis.ping()
     return self._async_redis
 
   async def validate_cache_integrity(self) -> CacheValidationResult:
-    """
-    Perform comprehensive cache integrity validation.
-
-    Returns:
-        CacheValidationResult with detailed validation results
-    """
+    """Run every validation pass and return the combined result."""
     validation_start = datetime.now(UTC)
     issues_found = []
     corrective_actions = []
@@ -73,31 +65,26 @@ class CacheValidator:
     try:
       self.logger.info("Starting comprehensive cache integrity validation")
 
-      # 1. Validate API key cache encryption and signatures
       api_key_issues = await self._validate_api_key_cache()
       issues_found.extend(api_key_issues["issues"])
       corrective_actions.extend(api_key_issues["actions"])
       security_events += api_key_issues["events"]
 
-      # 2. Validate JWT cache encryption and signatures
       jwt_issues = await self._validate_jwt_cache()
       issues_found.extend(jwt_issues["issues"])
       corrective_actions.extend(jwt_issues["actions"])
       security_events += jwt_issues["events"]
 
-      # 3. Check for cache consistency issues
       consistency_issues = await self._check_cache_consistency()
       issues_found.extend(consistency_issues["issues"])
       corrective_actions.extend(consistency_issues["actions"])
       security_events += consistency_issues["events"]
 
-      # 4. Validate cache freshness and cleanup stale entries
       freshness_issues = await self._validate_cache_freshness()
       issues_found.extend(freshness_issues["issues"])
       corrective_actions.extend(freshness_issues["actions"])
       security_events += freshness_issues["events"]
 
-      # 5. Check for suspicious cache patterns
       pattern_issues = await self._detect_suspicious_patterns()
       issues_found.extend(pattern_issues["issues"])
       corrective_actions.extend(pattern_issues["actions"])
@@ -111,7 +98,6 @@ class CacheValidator:
         validation_timestamp=validation_start,
       )
 
-      # Log overall validation result
       if validation_result.has_security_issues:
         SecurityAuditLogger.log_security_event(
           event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
@@ -165,24 +151,23 @@ class CacheValidator:
       )
 
   async def _validate_api_key_cache(self) -> dict[str, Any]:
-    """Validate API key cache entries for encryption and signature integrity."""
+    """Delete API key cache entries that fail decryption, signature, or
+    user-data validation, or that have lost their paired signature.
+    """
     issues = []
     actions = []
     events = 0
 
     try:
-      # Get all API key cache entries using async Redis
       redis = await self._get_async_redis()
       api_key_pattern = f"{self.api_key_cache.CACHE_KEY_PREFIX}*"
       api_key_keys = await redis.keys(api_key_pattern)
 
       for cache_key in api_key_keys:
         try:
-          # Extract API key hash from cache key
           api_key_hash = cache_key.replace(self.api_key_cache.CACHE_KEY_PREFIX, "")
           signature_key = f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
 
-          # Check if both data and signature exist
           encrypted_data = await redis.get(cache_key)
           stored_signature = await redis.get(signature_key)
 
@@ -190,19 +175,16 @@ class CacheValidator:
             issues.append(
               f"API key cache entry missing signature: {api_key_hash[:8]}..."
             )
-            # Clean up entry without signature
             await redis.delete(cache_key)
             actions.append(f"Removed unsigned cache entry: {api_key_hash[:8]}...")
             events += 1
 
           elif not encrypted_data and stored_signature:
             issues.append(f"Orphaned signature found: {api_key_hash[:8]}...")
-            # Clean up orphaned signature
             await redis.delete(signature_key)
             actions.append(f"Removed orphaned signature: {api_key_hash[:8]}...")
 
           elif encrypted_data and stored_signature:
-            # Validate decryption and signature
             try:
               cache_data = self.api_key_cache._decrypt_cache_data(encrypted_data)
               if not cache_data:
@@ -221,7 +203,6 @@ class CacheValidator:
                 events += 1
                 continue
 
-              # Validate user data integrity
               user_data = cache_data.get("user_data", {})
               if not self.api_key_cache._validate_user_data_integrity(user_data):
                 issues.append(f"Invalid user data in cache: {api_key_hash[:8]}...")
@@ -247,24 +228,21 @@ class CacheValidator:
     return {"issues": issues, "actions": actions, "events": events}
 
   async def _validate_jwt_cache(self) -> dict[str, Any]:
-    """Validate JWT cache entries for encryption and signature integrity."""
+    """Same sweep as `_validate_api_key_cache`, over JWT cache entries."""
     issues = []
     actions = []
     events = 0
 
     try:
-      # Get all JWT cache entries using async Redis
       redis = await self._get_async_redis()
       jwt_pattern = f"{self.api_key_cache.JWT_CACHE_KEY_PREFIX}*"
       jwt_keys = await redis.keys(jwt_pattern)
 
       for cache_key in jwt_keys:
         try:
-          # Extract JWT hash from cache key
           jwt_hash = cache_key.replace(self.api_key_cache.JWT_CACHE_KEY_PREFIX, "")
           signature_key = f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}jwt_{jwt_hash}"
 
-          # Check if both data and signature exist
           encrypted_data = await redis.get(cache_key)
           stored_signature = await redis.get(signature_key)
 
@@ -280,7 +258,6 @@ class CacheValidator:
             actions.append(f"Removed orphaned JWT signature: {jwt_hash[:8]}...")
 
           elif encrypted_data and stored_signature:
-            # Validate decryption and signature
             try:
               cache_data = self.api_key_cache._decrypt_cache_data(encrypted_data)
               if not cache_data:
@@ -299,7 +276,6 @@ class CacheValidator:
                 events += 1
                 continue
 
-              # Validate user data integrity
               user_data = cache_data.get("user_data", {})
               if not self.api_key_cache._validate_user_data_integrity(user_data):
                 issues.append(f"Invalid JWT user data: {jwt_hash[:8]}...")
@@ -323,7 +299,11 @@ class CacheValidator:
     return {"issues": issues, "actions": actions, "events": events}
 
   async def _check_cache_consistency(self) -> dict[str, Any]:
-    """Check for cache consistency issues and data integrity problems."""
+    """Delete cache entries and signatures that have lost their counterpart.
+
+    An unsigned entry could not be verified on read, and an orphaned
+    signature is dead weight.
+    """
     issues = []
     actions = []
     events = 0
@@ -331,17 +311,14 @@ class CacheValidator:
     try:
       redis = await self._get_async_redis()
 
-      # Check for cache entries without corresponding signatures
       cache_keys = await redis.keys(f"{self.api_key_cache.CACHE_KEY_PREFIX}*")
       signature_keys = await redis.keys(f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}*")
 
-      # Extract identifiers from cache keys
       cache_ids = set()
       for key in cache_keys:
         cache_id = key.replace(self.api_key_cache.CACHE_KEY_PREFIX, "")
         cache_ids.add(cache_id)
 
-      # Extract identifiers from signature keys
       signature_ids = set()
       for key in signature_keys:
         if key.startswith(f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}jwt_"):
@@ -350,7 +327,6 @@ class CacheValidator:
           sig_id = key.replace(self.api_key_cache.CACHE_SIGNATURE_PREFIX, "")
         signature_ids.add(sig_id)
 
-      # Find orphaned entries
       orphaned_cache = cache_ids - signature_ids
       orphaned_signatures = signature_ids - cache_ids
 
@@ -365,7 +341,7 @@ class CacheValidator:
       if orphaned_signatures:
         for sig_id in orphaned_signatures:
           issues.append(f"signature without cache entry: {sig_id[:8]}...")
-          # Try both signature key formats
+          # Signature keys use two formats; delete both candidates.
           sig_key1 = f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}{sig_id}"
           sig_key2 = f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}jwt_{sig_id}"
           await redis.delete(sig_key1, sig_key2)
@@ -378,7 +354,7 @@ class CacheValidator:
     return {"issues": issues, "actions": actions, "events": events}
 
   async def _validate_cache_freshness(self) -> dict[str, Any]:
-    """Validate cache freshness and clean up stale entries."""
+    """Delete API key cache entries older than `max_cache_age_hours`."""
     issues = []
     actions = []
     events = 0
@@ -388,7 +364,6 @@ class CacheValidator:
       max_age = timedelta(hours=self.max_cache_age_hours)
       now = datetime.now(UTC)
 
-      # Check API key cache freshness
       api_key_keys = await redis.keys(f"{self.api_key_cache.CACHE_KEY_PREFIX}*")
 
       for cache_key in api_key_keys:
@@ -408,7 +383,6 @@ class CacheValidator:
                 )
                 issues.append(f"stale cache entry: {api_key_hash[:8]}... (age: {age})")
 
-                # Clean up stale entry and signature
                 signature_key = (
                   f"{self.api_key_cache.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
                 )
@@ -425,7 +399,7 @@ class CacheValidator:
     return {"issues": issues, "actions": actions, "events": events}
 
   async def _detect_suspicious_patterns(self) -> dict[str, Any]:
-    """Detect suspicious patterns in cache usage."""
+    """Flag cache populations large enough to suggest a flooding attack."""
     issues = []
     actions = []
     events = 0
@@ -433,7 +407,6 @@ class CacheValidator:
     try:
       redis = await self._get_async_redis()
 
-      # Check for excessive cache entries (potential cache flooding attack)
       total_cache_keys = len(
         await redis.keys(f"{self.api_key_cache.CACHE_KEY_PREFIX}*")
       )
@@ -441,7 +414,6 @@ class CacheValidator:
         await redis.keys(f"{self.api_key_cache.JWT_CACHE_KEY_PREFIX}*")
       )
 
-      # Define thresholds
       MAX_API_KEY_CACHE_ENTRIES = 10000
       MAX_JWT_CACHE_ENTRIES = 50000
 
@@ -480,19 +452,14 @@ class CacheValidator:
     return {"issues": issues, "actions": actions, "events": events}
 
   async def emergency_cache_purge(self, reason: str) -> bool:
-    """
-    Emergency purge of all cache data in case of security breach.
+    """Delete every auth cache key. Use on suspected compromise.
 
-    Args:
-        reason: Reason for emergency purge
-
-    Returns:
-        True if successful
+    Costs a database lookup per request until the cache refills; `reason`
+    is recorded in the audit log at critical risk level.
     """
     try:
       redis = await self._get_async_redis()
 
-      # Get all cache-related keys
       patterns = [
         f"{self.api_key_cache.CACHE_KEY_PREFIX}*",
         f"{self.api_key_cache.GRAPH_CACHE_KEY_PREFIX}*",
@@ -509,7 +476,6 @@ class CacheValidator:
           await redis.delete(*keys)
           total_deleted += len(keys)
 
-      # Log emergency purge
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
         details={
@@ -540,12 +506,11 @@ class CacheValidator:
       return False
 
 
-# Global cache validator instance
 cache_validator: CacheValidator | None = None
 
 
 def get_cache_validator() -> CacheValidator | None:
-  """Get the global cache validator instance."""
+  """Return the shared validator, or None when the cache is unavailable."""
   global cache_validator
   if cache_validator is None:
     try:

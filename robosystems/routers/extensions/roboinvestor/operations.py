@@ -8,10 +8,10 @@ emits the `OperationEnvelope` + audit trail. MCP tools for every spec
 are auto-generated via `MCPRegistrar` — no MCP-specific code lives
 here.
 
-Portfolio + position writes flow through the **Portfolio Block**
-envelope ops (`create-portfolio-block`, `update-portfolio-block`,
-`delete-portfolio-block`); atom-level CRUD on portfolios/positions
-has been retired. Securities remain Master Data CRUD.
+Portfolio and position writes flow through the Portfolio Block envelope ops
+(`create-portfolio-block`, `update-portfolio-block`,
+`delete-portfolio-block`) — there is no atom-level CRUD on portfolios or
+positions. Securities are Master Data CRUD.
 """
 
 from __future__ import annotations

@@ -6,23 +6,19 @@ multiple Information Blocks:
 1. get-period-close-status: Overview of what's done vs pending for a period
 2. list-period-drafts: Review all draft entries for a period before close
 
-Schedule-specific reads (``list-schedule-structures``,
-``get-schedule-facts``) were retired in favour of the generic
-Information Block reads — see ``information_block_tools.py``.
-Schedule envelopes now surface through ``list-information-blocks``
-with ``blockType="schedule"`` and ``get-information-block``. This
-module stays scoped to tools that operate across blocks rather than
-within one.
+This module stays scoped to tools that operate across blocks rather than
+within one. Where the per-schedule operations live:
 
-Schedule writes have no dedicated ops: schedules are created, updated,
-and deleted through the unified ``create-information-block`` /
-``update-information-block`` / ``delete-information-block`` operations
-(``block_type='schedule'``), which dispatch to the schedule commands via
-the block-type registry. Closing-entry drafting goes through
-``create-event-block`` — ``event_type='schedule_entry_due'`` for
-schedule-derived drafts, ``event_type='journal_entry_recorded'`` for
-free-form manual entries. Schedule termination (truncate forward facts)
-is handled internally by the ``asset_disposed`` event handler.
+- Reads → ``list-information-blocks`` with ``blockType="schedule"`` and
+  ``get-information-block`` (see ``information_block_tools.py``).
+- Writes → the unified ``create-`` / ``update-`` / ``delete-information-block``
+  operations with ``block_type='schedule'``, which dispatch to the schedule
+  commands through the block-type registry.
+- Closing-entry drafting → ``create-event-block``, with
+  ``event_type='schedule_entry_due'`` for schedule-derived drafts and
+  ``event_type='journal_entry_recorded'`` for free-form manual entries.
+- Schedule termination (truncate forward facts) → internal to the
+  ``asset_disposed`` event handler; there is no public op.
 """
 
 from datetime import date

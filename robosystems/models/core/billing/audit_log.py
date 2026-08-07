@@ -53,10 +53,11 @@ class BillingEventType(str, Enum):
 
 
 class BillingAuditLog(Base):
-  """Consolidated audit log for all billing events.
+  """Audit trail for customer, subscription, invoice, and payment events.
 
-  Tracks customer, subscription, invoice, and payment events
-  for security, compliance, and debugging purposes.
+  Also serves as the webhook idempotency store: a partial unique index over
+  ``event_data->>'event_id'`` and ``->>'provider'`` makes a re-delivered
+  webhook a constraint violation rather than a second effect.
   """
 
   __tablename__ = "billing_audit_logs"
@@ -118,11 +119,8 @@ class BillingAuditLog(Base):
   ) -> "BillingAuditLog":
     """Create an audit log entry.
 
-    At least one entity reference (org_id, subscription_id, invoice_id, or actor_user_id)
-    must be provided to ensure the audit log is traceable.
-
-    Raises:
-        ValueError: If no entity reference is provided
+    Requires at least one of ``org_id`` / ``subscription_id`` / ``invoice_id``
+    / ``actor_user_id``; an entry referencing nothing is not traceable.
     """
     if not any([org_id, subscription_id, invoice_id, actor_user_id]):
       raise ValueError(
@@ -227,18 +225,7 @@ class BillingAuditLog(Base):
 
   @classmethod
   def is_webhook_processed(cls, event_id: str, provider: str, session: Session) -> bool:
-    """Check if a webhook event has already been processed.
-
-    Uses the audit log to track webhook events for idempotency.
-
-    Args:
-        event_id: The webhook event ID from the payment provider
-        provider: Payment provider name (e.g., 'stripe')
-        session: Database session
-
-    Returns:
-        True if event already processed, False otherwise
-    """
+    """Whether this provider event has already been recorded (idempotency)."""
     from sqlalchemy import and_
 
     return (
@@ -263,20 +250,13 @@ class BillingAuditLog(Base):
     event_data: dict,
     session: Session,
   ) -> "BillingAuditLog":
-    """Mark a webhook event as processed in the audit log.
+    """Record a webhook event, making a redelivery detectable.
 
-    Args:
-        event_id: The webhook event ID from the payment provider
-        provider: Payment provider name (e.g., 'stripe')
-        event_type: The webhook event type (e.g., 'checkout.session.completed')
-        event_data: Full event data from the webhook
-        session: Database session
-
-    Returns:
-        The created audit log entry
+    ``event_type`` is the provider's own type string (e.g.
+    ``checkout.session.completed``), stored under ``webhook_type``; the row's
+    ``event_type`` column is always ``webhook_received``.
     """
-    # Extract entity references from event data for audit traceability.
-    # Different Stripe events put references in different places.
+    # Different provider events carry entity references in different places.
     metadata = event_data.get("metadata", {})
     subscription_id = metadata.get("subscription_id")
     actor_user_id = metadata.get("user_id")
@@ -288,9 +268,9 @@ class BillingAuditLog(Base):
       "data": event_data,
     }
 
-    # Many webhook events (invoice.created, invoice.paid) have no metadata
-    # with entity references. log_event() requires at least one FK reference,
-    # but actor_user_id is a FK to users — we can't fake it. Create directly.
+    # Many webhook events (invoice.created, invoice.paid) carry no entity
+    # references at all. log_event() insists on one, and actor_user_id is a FK
+    # to users so it cannot be synthesized — insert the row directly instead.
     if not any([subscription_id, actor_user_id]):
       audit_log = cls(
         event_type=BillingEventType.WEBHOOK_RECEIVED.value,

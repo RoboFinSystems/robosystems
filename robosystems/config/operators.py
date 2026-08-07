@@ -1,11 +1,6 @@
 """
-Centralized AI Operator system configuration.
-
-This module defines all configuration for the multi-operator system including:
-- AI model selection and endpoints
-- Execution profiles and mode limits
-- Orchestrator routing configuration
-- Token cost configurations
+AI Operator configuration: model selection and endpoints, execution profiles
+and mode limits, orchestrator routing, and token costs.
 
 "Operator" is the AI-executor concept (Claude/MCP), distinct from REA ``Agent``
 (counterparty) in ``models/extensions/roboledger/agent.py``.

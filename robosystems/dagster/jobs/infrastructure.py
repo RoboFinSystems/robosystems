@@ -36,7 +36,6 @@ INSTANCE_SCHEDULE_STATUS = (
 
 # ============================================================================
 # Auth Cleanup Job
-# Replaces: robosystems.tasks.infrastructure.auth_cleanup.cleanup_expired_api_keys_task
 # ============================================================================
 
 
@@ -46,7 +45,6 @@ def cleanup_expired_api_keys(context: OpExecutionContext, db: DatabaseResource) 
   with db.get_session() as session:
     now = datetime.now(UTC)
 
-    # Find and delete expired API keys
     expired_keys = (
       session.query(UserAPIKey)
       .filter(
@@ -77,8 +75,6 @@ def hourly_auth_cleanup_job():
 
 # ============================================================================
 # Health Check Jobs
-# Replaces: robosystems.tasks.billing.shared_credit_allocation.check_credit_allocation_health
-# Replaces: robosystems.tasks.billing.credit_allocation.check_graph_credit_health
 # ============================================================================
 
 
@@ -215,7 +211,6 @@ weekly_health_check_schedule = ScheduleDefinition(
 
 # ============================================================================
 # Instance Monitoring Jobs
-# Replaces: bin/lambda/graph_instance_monitor.py
 # ============================================================================
 
 
@@ -417,7 +412,6 @@ def full_instance_maintenance_job():
 # Instance Infrastructure Schedules
 # ============================================================================
 
-# Instance health check - every hour (matches Lambda: rate(1 hour))
 # Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2)
 instance_health_check_schedule = ScheduleDefinition(
   job=instance_health_check_job,
@@ -425,16 +419,14 @@ instance_health_check_schedule = ScheduleDefinition(
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Metrics collection - every 5 minutes (matches Lambda: rate(5 minutes))
-# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch)
-# Critical for autoscaling
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch).
+# Drives graph-tier autoscaling, so the 5-minute cadence is load-bearing.
 instance_metrics_collection_schedule = ScheduleDefinition(
   job=instance_metrics_collection_job,
   cron_schedule="*/5 * * * *",  # Every 5 minutes
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Instance registry cleanup - daily at 3 AM UTC (matches Lambda: cron(0 3 * * ? *))
 # Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 instance_registry_cleanup_schedule = ScheduleDefinition(
   job=instance_registry_cleanup_job,
@@ -442,7 +434,6 @@ instance_registry_cleanup_schedule = ScheduleDefinition(
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Volume registry cleanup - daily at 4 AM UTC (matches Lambda: cron(0 4 * * ? *))
 # Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 volume_registry_cleanup_schedule = ScheduleDefinition(
   job=volume_registry_cleanup_job,
@@ -450,7 +441,6 @@ volume_registry_cleanup_schedule = ScheduleDefinition(
   default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
-# Full maintenance - weekly on Sundays at 2 AM UTC
 # Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch)
 full_instance_maintenance_schedule = ScheduleDefinition(
   job=full_instance_maintenance_job,

@@ -45,30 +45,19 @@ from .models import (
 
 class DuckDBStager:
   """
-  DuckDB staging operations for XBRL graph data.
+  Stage 1: loads processed Parquet files from S3 into DuckDB tables.
 
-  This class handles Stage 1 of the ingestion pipeline - staging processed
-  Parquet files from S3 into DuckDB tables.
-
-  Architecture:
-  - Uses Graph API client to communicate with Graph API container
-  - DuckDB pool lives on Graph API side, not on worker
-  - Supports both full rebuild and incremental staging modes
-
+  Work is driven through the Graph API rather than done locally — the DuckDB
+  pool lives on the Graph API container, not on the worker. Supports full
+  rebuild and incremental staging modes.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
-    """
-    Initialize DuckDB stager.
-
-    Args:
-        graph_id: Graph database identifier (default: "sec")
-        source_prefix: S3 prefix for source files (default: "sec/processed")
-    """
+    """`source_prefix` is the S3 prefix for source files ("sec/processed")."""
     self.graph_id = graph_id
     self.s3_client = S3Client()
     self.bucket = env.SHARED_PROCESSED_BUCKET
-    # New structure: sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+    # Layout: {source_prefix}/filed=YYYY-QN/nodes/TABLE/*.parquet
     self.source_prefix = source_prefix or "sec/processed"
 
   async def stage_to_duckdb(
@@ -100,15 +89,9 @@ class DuckDBStager:
     - Large tables (LARGE_STAGING_TABLES) use per-quarter chunked staging to
       avoid OOM when S3 data exceeds DuckDB's memory limit
 
-    Args:
-        year: Optional single year filter. If provided, only files from that year.
-        start_year: Optional start of year range (inclusive). Used with end_year.
-        end_year: Optional end of year range (inclusive). Used with start_year.
-        reset_staging: If True, delete entire DuckDB staging database first.
-        progress_callback: Optional callback for progress logging.
-
-    Returns:
-        StagingResult with table counts and file counts
+    Pass either `year` for a single year or `start_year`/`end_year`
+    (both inclusive) for a range. `reset_staging=True` deletes the whole
+    DuckDB staging database first.
     """
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
@@ -246,13 +229,8 @@ class DuckDBStager:
 
     Precondition: DuckDB tables must already exist from initial full staging.
 
-    Args:
-        year: Year to stage (default: current year)
-        quarter: Quarter to stage 1-4 (default: current quarter)
-        progress_callback: Optional callback for Dagster logging
-
-    Returns:
-        StagingResult with tables staged and row counts (net new rows)
+    `year` / `quarter` default to the current Eastern-time quarter. Reported
+    row counts are net new rows.
     """
     from robosystems.adapters.sec import get_current_quarter
 
@@ -603,17 +581,11 @@ class DuckDBStager:
 
   def _get_chunking_threshold_bytes(self, duckdb_memory_mb: int | None) -> int:
     """
-    Calculate the S3 data size threshold for chunked staging.
+    Byte threshold above which a table is staged in per-quarter chunks.
 
-    If DuckDB memory is known (from boost response), threshold is
-    CHUNKING_MEMORY_FRACTION of that. Otherwise falls back to a conservative
-    15 GiB default.
-
-    Args:
-        duckdb_memory_mb: DuckDB memory limit in MB (from boost response), or None
-
-    Returns:
-        Threshold in bytes — tables with more S3 data than this get chunked
+    When the DuckDB memory limit is known (from the boost response), the
+    threshold is CHUNKING_MEMORY_FRACTION of it; otherwise it falls back to a
+    conservative 15 GiB.
     """
     if duckdb_memory_mb and duckdb_memory_mb > 0:
       threshold = int(duckdb_memory_mb * 1024 * 1024 * self.CHUNKING_MEMORY_FRACTION)
@@ -637,17 +609,8 @@ class DuckDBStager:
     """
     Get total S3 parquet size for a table across quarterly partitions.
 
-    Uses S3 ListObjectsV2 to sum file sizes. Queries per-year prefixes
-    to avoid listing the entire bucket.
-
-    Args:
-        entity_type: "nodes" or "relationships"
-        table_name: Table name (e.g., "Label", "Element")
-        start_year: First year to check
-        end_year: Last year to check (inclusive)
-
-    Returns:
-        Total size in bytes
+    Sums ListObjectsV2 sizes per year/quarter prefix rather than listing the
+    whole bucket. `end_year` is inclusive.
     """
     total_bytes = 0
     boto_client = self.s3_client.s3_client
@@ -679,21 +642,12 @@ class DuckDBStager:
     """
     Retry wrapper for table staging with exponential backoff.
 
-    On failure, drops the partial table and retries from scratch.
+    On failure, drops the partial table and retries from scratch. `stage_fn`
+    is an async callable returning `(success, TableInfo | None, error | None)`,
+    which is also this function's return shape.
 
-    Args:
-        table_name: Name of the table being staged
-        stage_fn: Async callable that returns (success, info, error)
-        graph_client: Graph API client for dropping tables on retry
-        log_progress: Progress logging callback
-        table_index: Current table index for progress display
-        total_tables: Total tables for progress display
-        drop_on_retry: Whether to drop the table before retrying (default True).
-            Set to False for tables like Entity where the stage_fn manages its
-            own temp tables and dropping the main table would be destructive.
-
-    Returns:
-        Tuple of (success, TableInfo or None, error message or None)
+    Pass `drop_on_retry=False` for tables like Entity whose `stage_fn` manages
+    its own temp tables — dropping the main table there would be destructive.
     """
     last_error: str | None = None
 
@@ -988,17 +942,8 @@ class DuckDBStager:
     the DuckDB memory threshold. Tables exceeding the threshold are staged
     in per-quarter chunks to avoid OOM.
 
-    Args:
-        tables: Dictionary mapping table names to entity type
-        graph_client: Graph API client instance
-        year: Optional single year filter
-        start_year: Optional start of year range (inclusive)
-        end_year: Optional end of year range (inclusive)
-        duckdb_memory_mb: DuckDB memory limit in MB (for chunking threshold)
-        progress_callback: Optional progress callback
-
-    Returns:
-        Tuple of (successful_table_names, table_info_dict)
+    `tables` maps table name → entity type. Returns
+    `(successful_table_names, {table_name: TableInfo})`.
     """
     successful_tables: list[str] = []
     table_infos: dict[str, TableInfo] = {}

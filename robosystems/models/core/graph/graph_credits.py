@@ -1,11 +1,8 @@
-"""
-Graph credit system models for tracking AI operation credits.
+"""Per-graph credit pools for AI operations.
 
-This module implements the simplified credit system where:
-- Each graph has its own credit pool for AI operations
-- Only AI operations (Anthropic Claude via Bedrock) consume credits
-- All database operations are included
-- Credits are consumed post-operation based on actual token usage
+Only AI operations (Anthropic Claude via Bedrock) consume credits; database
+operations are free. Consumption happens *after* the operation, priced off
+actual token usage, so a call is never pre-authorized against the pool.
 """
 
 import logging
@@ -52,12 +49,7 @@ class CreditTransactionType(str, Enum):
 
 
 class GraphCredits(Base):
-  """
-  Credit balance tracking for each graph database.
-
-  Each graph has its own credit pool that gets allocated monthly
-  based on the subscription tier.
-  """
+  """A graph's credit pool, refilled monthly from its subscription tier."""
 
   __tablename__ = "graph_credits"
 
@@ -120,10 +112,9 @@ class GraphCredits(Base):
 
   @property
   def graph_tier(self) -> str:
-    """Get graph tier from the related Graph model."""
+    """Tier of the related Graph, defaulting to standard if it is missing."""
     if self.graph:
       return self.graph.graph_tier
-    # Fallback for backwards compatibility during migration
     return GraphTier.LADYBUG_STANDARD.value
 
   @classmethod
@@ -143,17 +134,14 @@ class GraphCredits(Base):
     """Create credit record for a new graph."""
     from .graph import Graph
 
-    # Get the graph to determine tier
     graph = Graph.get_by_id(graph_id, session)
     if not graph:
       raise ValueError(f"Graph {graph_id} not found")
 
     graph_tier = GraphTier(graph.graph_tier)
 
-    # In simplified model, no multipliers are used
-    # All tiers have 1.0 multiplier
-
-    # Get storage safety cap from backup limits (storage included in tier, not billed)
+    # Storage is included in the tier rather than billed, so the backup cap
+    # doubles as the storage safety cap.
     backup_limits = GraphTierConfig.get_backup_limits(graph_tier.value)
     storage_limit_gb = backup_limits.get("max_backup_size_gb", 10)
 
@@ -201,24 +189,15 @@ class GraphCredits(Base):
     user_id: str | None = None,
     metadata: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
-    """
-    Atomically consume credits for AI operations.
+    """Atomically deduct credits for a completed AI operation.
 
-    In the simplified model, credits are only consumed for AI operations
-    and are consumed post-operation based on actual token usage.
+    The deduction and its balance check happen in one conditional UPDATE, so
+    concurrent callers cannot drive the pool negative. Returns
+    ``{"success": False, "error": "Insufficient credits", ...}`` rather than
+    raising when the pool cannot cover ``amount``.
 
-    Args:
-        amount: Credit amount to consume (based on actual token usage)
-        operation_type: Type of operation (should be AI-related)
-        operation_description: Human-readable description
-        session: Database session
-        request_id: HTTP request ID for tracing
-        user_id: User performing the operation
-        metadata: Caller metadata (e.g. token counts) merged into the
-            transaction record; built-in keys win on collision
-
-    Returns:
-        Dict with consumption results
+    ``metadata`` (token counts and the like) is merged into the transaction
+    record; the built-in keys win on collision.
     """
     from sqlalchemy import text
 
@@ -227,10 +206,8 @@ class GraphCredits(Base):
     transaction_id = generate_prefixed_ulid("tx")
 
     try:
-      # In simplified model, no multipliers are applied
       actual_cost = amount
 
-      # Atomically deduct credits
       result = session.execute(
         text("""
           UPDATE graph_credits
@@ -250,7 +227,6 @@ class GraphCredits(Base):
       consumption_result = result.fetchone()
 
       if not consumption_result:
-        # Insufficient credits
         current_result = session.execute(
           text("SELECT current_balance FROM graph_credits WHERE id = :credits_id"),
           {"credits_id": self.id},
@@ -265,7 +241,6 @@ class GraphCredits(Base):
           "available_credits": available_balance,
         }
 
-      # Create consumption transaction record
       GraphCreditTransaction.create_transaction(
         graph_credits_id=self.id,
         transaction_type=CreditTransactionType.CONSUMPTION,
@@ -285,7 +260,6 @@ class GraphCredits(Base):
         user_id=user_id or self.user_id,
       )
 
-      # Update the local object
       self.current_balance = consumption_result.new_balance
       self.updated_at = datetime.now(UTC)
 
@@ -342,15 +316,12 @@ class GraphCredits(Base):
   def allocate_monthly_credits(self, session: Session) -> bool:
     """Allocate monthly credits if due. Credits do not roll over.
 
-    The balance is *replaced* by the monthly allocation rather than added to
-    it. Adding was the outlier: the public offering page states "Credits do not
-    roll over between billing periods" (`routers/offering.py`),
-    `UserRepositoryCredits.allocate_monthly_credits` resets and documents
-    itself as "no rollover, same as user graphs", and `GraphCredits` carries no
-    `rollover_credits` column while `UserRepositoryCredits` does. Accumulating
-    here also made `current_balance` drift permanently away from the
-    `monthly_allocation - consumed_this_month` figure the read paths reported,
-    so the same pool answered differently depending on which one you asked.
+    The balance is *replaced* by ``monthly_allocation``, never added to — the
+    offering page promises no rollover (``routers/offering.py``) and this table
+    has no ``rollover_credits`` column. Accumulating instead would let
+    ``current_balance`` drift away from the ``monthly_allocation -
+    consumed_this_month`` figure the read paths report, so the same pool would
+    answer differently depending on which side you asked.
 
     The discarded remainder — unspent allocation and unspent bonus credits
     alike — is recorded as an EXPIRATION transaction so the ledger keeps
@@ -360,7 +331,7 @@ class GraphCredits(Base):
 
     # One allocation per calendar month, matching both the monthly cron that
     # drives bulk allocation and the transaction idempotency key below. A
-    # day-count gate here refuses the 1-Mar run for anything allocated on
+    # day-count gate here would refuse the 1-Mar run for anything allocated on
     # 1-Feb (28 days elapsed), silently skipping March fleet-wide.
     if self.last_allocation_date is not None:
       last = self.last_allocation_date
@@ -467,14 +438,13 @@ class GraphCredits(Base):
       else Decimal("0")
     )
 
-    # `current_balance` is the column the atomic consume path decrements and
-    # gates on, so it is the only balance a caller can actually spend. This
-    # previously recomputed `monthly_allocation - consumed_this_month` and
-    # returned it under the same name, which disagreed with the real column
-    # for any graph whose allocation had ever rolled over.
+    # Report `current_balance` verbatim: it is the column the atomic consume
+    # path decrements and gates on, so it is the only balance a caller can
+    # actually spend. Recomputing it from allocation minus consumption would
+    # disagree with the real column.
     return {
       "graph_id": self.graph_id,
-      "graph_tier": self.graph_tier,  # This now uses the property that gets it from graph
+      "graph_tier": self.graph_tier,
       "current_balance": safe_float(self.current_balance),
       "monthly_allocation": safe_float(self.monthly_allocation),
       "consumed_this_month": safe_float(consumed_this_month),
@@ -534,11 +504,12 @@ class GraphCredits(Base):
     self.storage_override_gb = new_limit_gb
     self.updated_at = datetime.now(UTC)
 
-    # Record transaction for audit trail
+    # Zero-amount BONUS row: carries the admin action into the audit trail
+    # without moving the balance.
     GraphCreditTransaction.create_transaction(
       graph_credits_id=self.id,
-      transaction_type=CreditTransactionType.BONUS,  # Using bonus type for admin actions
-      amount=Decimal("0"),  # No credit change
+      transaction_type=CreditTransactionType.BONUS,
+      amount=Decimal("0"),
       description=f"Storage limit override: {old_limit}GB → {new_limit_gb}GB",
       metadata={
         "admin_user_id": admin_user_id,
@@ -557,11 +528,10 @@ class GraphCredits(Base):
 
 
 class GraphCreditTransaction(Base):
-  """
-  Individual credit transactions for tracking usage.
+  """Append-only ledger of credit movements for a graph's pool.
 
-  Records all credit movements including allocations, consumption, and refunds.
-  Includes idempotency support to prevent duplicate transactions.
+  ``idempotency_key`` is uniquely indexed, so a retried allocation or
+  consumption resolves to the existing row instead of double-posting.
   """
 
   __tablename__ = "graph_credit_transactions"
@@ -637,30 +607,16 @@ class GraphCreditTransaction(Base):
     graph_id: str | None = None,
     user_id: str | None = None,
   ) -> "GraphCreditTransaction":
-    """
-    Create a new credit transaction with idempotency support.
+    """Post a credit transaction; ``amount`` is negative for consumption.
 
-    Args:
-        graph_credits_id: The graph credits record ID
-        transaction_type: Type of transaction (allocation, consumption, etc.)
-        amount: Transaction amount (negative for consumption)
-        description: Human-readable description
-        metadata: Optional metadata dictionary
-        session: Database session
-        idempotency_key: Unique key to prevent duplicate transactions
-        request_id: HTTP request ID for tracing
-        operation_id: ID to link related operations
-        graph_id: Direct graph ID reference
-        user_id: Direct user ID reference
-
-    Returns:
-        Created transaction or existing transaction if idempotency key exists
+    When ``idempotency_key`` is supplied, an existing row with that key is
+    returned untouched — both on the up-front lookup and on the unique-index
+    violation that a concurrent writer can raise.
     """
     import json
 
     from sqlalchemy.exc import IntegrityError
 
-    # If idempotency key provided, check for existing transaction
     if idempotency_key and session:
       existing = (
         session.query(cls).filter(cls.idempotency_key == idempotency_key).first()
@@ -671,7 +627,6 @@ class GraphCreditTransaction(Base):
         )
         return existing
 
-    # Get graph_id from credits if not provided
     if not graph_id and session:
       credits_record = (
         session.query(GraphCredits).filter(GraphCredits.id == graph_credits_id).first()
@@ -699,7 +654,6 @@ class GraphCreditTransaction(Base):
         session.commit()
       except IntegrityError as e:
         session.rollback()
-        # Handle race condition - another request created the transaction
         if idempotency_key and "idx_credit_transactions_idempotency" in str(e):
           existing = (
             session.query(cls).filter(cls.idempotency_key == idempotency_key).first()

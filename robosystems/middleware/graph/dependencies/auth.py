@@ -1,7 +1,9 @@
-"""
-Graph access authorization dependencies.
+"""Graph access authorization dependencies.
 
-FastAPI dependency functions for validating user access to graphs.
+Every dependency here fails closed with a 403 and an audit-log entry, and
+routes user graphs through `GraphUser` while shared repositories go through
+`UserRepository` access levels — the two graph categories have separate
+permission models.
 """
 
 from fastapi import Depends, HTTPException, status
@@ -30,19 +32,10 @@ async def get_graph_database(
   required_access: AccessPattern | None = None,
   db: Session = Depends(get_db_session),
 ) -> str:
-  """
-  Resolve the database name for any graph type.
+  """Resolve a graph's physical database name after checking access.
 
-  Args:
-      graph_id: Graph identifier
-      current_user: Authenticated user
-      required_access: Optional required access pattern
-
-  Returns:
-      Database name for the graph
-
-  Raises:
-      HTTPException: If graph not found or user doesn't have access
+  Raises 403 when the caller lacks access or `required_access` exceeds
+  their level, and 404 when the graph cannot be resolved.
   """
   try:
     routing_info = MultiTenantUtils.get_graph_routing(graph_id, session=db)
@@ -139,19 +132,10 @@ async def get_graph_repository_with_auth(
   operation_type: str = "write",
   db: Session = Depends(get_db_session),
 ) -> Repository:
-  """
-  Get a graph repository with user authorization.
+  """Open a repository for a graph after checking the caller's access.
 
-  Args:
-      graph_id: Graph/database identifier
-      current_user: Authenticated user
-      operation_type: "read" or "write"
-
-  Returns:
-      Configured Repository instance
-
-  Raises:
-      HTTPException: If graph not found or user doesn't have access
+  `operation_type="write"` additionally requires a write role; a viewer
+  gets 403.
   """
   try:
     identity = MultiTenantUtils.get_graph_identity(graph_id)
@@ -233,20 +217,7 @@ async def get_universal_repository_with_auth(
   operation_type: str = "write",
   db: Session = Depends(get_db_session),
 ):
-  """
-  Get a universal repository wrapper with user authorization.
-
-  Args:
-      graph_id: Graph/database identifier
-      current_user: Authenticated user
-      operation_type: "read" or "write"
-
-  Returns:
-      UniversalRepository instance
-
-  Raises:
-      HTTPException: If graph not found or user doesn't have access
-  """
+  """`get_graph_repository_with_auth`, wrapped in a `UniversalRepository`."""
   try:
     from ..repository import UniversalRepository
 

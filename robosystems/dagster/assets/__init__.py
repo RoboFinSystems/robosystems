@@ -4,12 +4,9 @@ Assets represent data artifacts that are produced and consumed:
 - User graph assets (creation, staging, materialization)
 - Shared repository assets (replica refresh)
 
-Per-repository publish assets live inside their adapter packages
-(e.g., adapters/sec/pipeline/s3_publish.py) and are collected via
-get_dagster_components() in definitions.py.
-
-SEC pipeline assets have moved to robosystems.adapters.sec.pipeline
-and are collected via get_dagster_components() in definitions.py.
+Adapter assets — including per-repository publish assets — live inside their
+adapter packages (e.g., adapters/sec/pipeline/s3_publish.py) and are collected
+via get_dagster_components() in definitions.py.
 """
 
 from robosystems.dagster.assets.graphs import (

@@ -1,32 +1,21 @@
 """RoboLedger graph-backed analytical views (fact-grid operation).
 
-Hosts `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`
-— the one read-shaped operation in the dispatcher. Lives in its own
-router file (separate from `operations.py`) so it can be mounted
-independently of `ROBOLEDGER_ENABLED`.
+Hosts `POST /extensions/roboledger/{graph_id}/operations/build-fact-grid`,
+the one read-shaped operation in the dispatcher.
 
-**Why a separate router?**
-Fact-grid queries the LadybugDB graph schema (XBRL hypercube) — the
-same schema the SEC shared repository uses. A deployment that hosts
-SEC research without enabling RoboLedger tenants still wants this
-endpoint. Bundling it into `operations.py` (which is gated by
-`ROBOLEDGER_ENABLED`) would lose the feature for SEC-only deployments,
-which is a regression vs. the legacy `/v1/graphs/{g}/views` endpoint
-that gated only on `FACT_GRID_ENABLED`.
+It sits in its own router, separate from `operations.py`, so the mount
+gates on `FACT_GRID_ENABLED` rather than `ROBOLEDGER_ENABLED`: the fact
+grid queries the LadybugDB graph schema (the XBRL hypercube the SEC shared
+repository also uses), so a deployment hosting SEC research without
+RoboLedger tenants still gets the endpoint.
 
-**Why still under `/extensions/roboledger/`?**
-Because the fact-grid is roboledger-schema-specific. It doesn't fit on
-the platform graph surface (which is schema-agnostic) and it doesn't
-fit on GraphQL (whose typed field selection can't express an arbitrary
-slice across element, period, and entity). The operations dispatcher is
-the right home — we just gate the mount on `FACT_GRID_ENABLED`
-independently.
-
-**Idempotency + audit:**
-Because this is a real operation in the dispatcher, it gets the
-`OperationEnvelope`, idempotency-key cache (genuinely useful as a
-deterministic cache for expensive analytical queries), and audit
-logging for free.
+It stays under `/extensions/roboledger/` because the grid is
+roboledger-schema-specific — it does not fit the schema-agnostic platform
+graph surface, and GraphQL's typed field selection cannot express an
+arbitrary slice across element, period, and entity. Being a dispatcher
+operation, it carries the `OperationEnvelope`, the idempotency-key cache
+(a useful deterministic cache for expensive analytical queries), and audit
+logging.
 """
 
 from __future__ import annotations
@@ -264,11 +253,10 @@ async def financial_statement_analysis_op(
       report_id = resolved.get("identifier") if resolved else None
 
       # A requested fiscal_year that resolves to nothing is a 404, not a
-      # licence to answer with a different year. Without this the ticker
-      # path below sweeps the filer's entire history ordered by end_date
-      # DESC — fiscal_year is never passed down — so a request scoped to
-      # FY2005 came back with the newest filing and no indication that the
-      # scope had been dropped.
+      # licence to answer with a different year: the ticker path below
+      # sweeps the filer's whole history ordered by end_date DESC and never
+      # receives fiscal_year, so without this guard a scoped request would
+      # silently return the newest filing.
       if body.fiscal_year is not None and not report_id:
         raise HTTPException(
           status_code=404,

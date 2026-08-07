@@ -1,4 +1,4 @@
-"""Graph query API models."""
+"""Graph backup, restore, and export API models."""
 
 from datetime import datetime
 
@@ -55,7 +55,8 @@ class BackupResponse(BaseModel):
   backup_format: str
   backup_type: str
   status: str
-  # s3_bucket and s3_key removed for security - infrastructure details not needed by users
+  # Storage location (bucket/key) is deliberately not exposed — callers
+  # address backups by backup_id, never by infrastructure path.
   original_size_bytes: int
   compressed_size_bytes: int
   compression_ratio: float

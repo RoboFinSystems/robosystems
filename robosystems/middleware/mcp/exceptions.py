@@ -1,7 +1,8 @@
-"""
-MCP exceptions for Graph client operations.
+"""Exception hierarchy for the graph MCP client.
 
-Custom exceptions for graph databases MCP client error handling with enhanced hierarchy.
+Every error derives from `GraphAPIError` and carries a stable `error_code`
+plus a `details` dict, so callers can branch on the code rather than parse
+the message.
 """
 
 

@@ -132,7 +132,7 @@ async def boost_memory(
     result = ensure_duckdb_memory_boosted(graph_id)
     if result:
       duckdb_boosted = True
-      # Parse the boost value (e.g., "55GB" -> 56320)
+      # Boost values arrive as strings like "55GB"; the response reports MB.
       try:
         if result.endswith("GB"):
           duckdb_boost_mb = int(result[:-2]) * 1024
@@ -176,7 +176,6 @@ async def boost_memory(
         if current:
           ladybug_boost_mb = current
 
-  # Build message
   parts = []
   if duckdb_boosted:
     parts.append(f"DuckDB ({duckdb_boost_mb}MB)" if duckdb_boost_mb else "DuckDB")
@@ -287,7 +286,6 @@ async def release_memory(
     if ladybug_released:
       logger.info(f"LadybugDB memory released (aggressive={request.aggressive})")
 
-  # Build message
   parts = []
   if duckdb_released:
     parts.append(f"DuckDB ({duckdb_connections_closed} connections)")

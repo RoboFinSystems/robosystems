@@ -1,45 +1,40 @@
 """compute-metrics / assert-metrics — write a standing metric FactSet.
 
-The metric block's two write paths. ``compute-metrics`` (Metrics M-1 +
-the M-2 grammar) evaluates ``Derive`` rules: the same ``$Var``
-expression grammar as verification rules, but evaluated for a VALUE —
-the LHS names the metric element being computed, the RHS operands bind
-to the entity's persisted facts at the requested ``period_end``, and
-the result is written as a Numeric fact in a standing
-``factset_type='metric'`` FactSet — one per (structure, entity,
-period_end), so successive runs accumulate the time series and
-re-running a period replaces its values. ``assert-metrics`` is the
-observation sibling: externally-observed values arrive in the request
-and land on the same standing-set shape with ``AssertedProvenance``;
-structures carrying Derive rules are compute-owned and rejected, so
-asserted and derived series keep disjoint structures.
+The metric block's two write paths. ``compute-metrics`` evaluates ``Derive``
+rules: the same ``$Var`` expression grammar as verification rules, but
+evaluated for a VALUE — the LHS names the metric element being computed, the
+RHS operands bind to the entity's persisted facts at the requested
+``period_end``, and the result is written as a Numeric fact in a standing
+``factset_type='metric'`` FactSet — one per (structure, entity, period_end),
+so successive runs accumulate the time series and re-running a period
+replaces its values. ``assert-metrics`` is the observation sibling:
+externally-observed values arrive in the request and land on the same
+standing-set shape with ``AssertedProvenance``; structures carrying Derive
+rules are compute-owned and rejected, so asserted and derived series keep
+disjoint structures.
 
-M-2 grammar:
+Two grammar extensions beyond plain arithmetic:
 
 - ``avg($X)`` — the period average of an instant operand,
   (begin + end) / 2. Desugared pre-parse to a synthesized ``$__avg_X``
-  operand (``expressions.desugar_aggregates``); the begin fact binds at
-  a resolved prior period end — ``body.period_start - 1 day`` when the
-  request carries a window, else a bound duration operand's start - 1
-  day, else the entity's newest report ``period_end`` strictly before
-  the requested one (run-cached; never the fiscal calendar, which
+  operand (:func:`.rules.expressions.desugar_aggregates`); the begin fact
+  binds at a resolved prior period end — ``body.period_start - 1 day`` when
+  the request carries a window, else a bound duration operand's start - 1
+  day, else the entity's newest report ``period_end`` strictly before the
+  requested one (run-cached; never the fiscal calendar, which
   annual-comparative tenants don't populate at month ends).
-- **Composition** (DuPont) — an operand naming another rule's target is
-  an in-run metric dependency: rules evaluate in Kahn topological order
-  (``calc_dag.topo_sort_calculations``), in-run values resolve first,
-  and persisted-fact binding is widened to ``('report', 'metric')`` so
-  cross-structure metrics resolve when already computed for the period.
-  A cyclic or skipped dependency leaves the operand unbound → the
-  dependent metric soft-skips.
-
-The future ``$X[t-1]`` prior-period operand (the forecast grammar's
-general form) rides the same two seams: a pre-parse rewrite to a
-synthesized operand, bound through the same prior-period resolver.
+- **Composition** (DuPont) — an operand naming another rule's target is an
+  in-run metric dependency: rules evaluate in Kahn topological order
+  (``calc_dag.topo_sort_calculations``), in-run values resolve first, and
+  persisted-fact binding is widened to ``('report', 'metric')`` so
+  cross-structure metrics resolve when already computed for the period. A
+  cyclic or skipped dependency leaves the operand unbound → the dependent
+  metric soft-skips.
 
 Soft-fail per metric: a missing operand fact (InterestExpense for a
 debt-free entity), an unresolvable qname, a missing prior period for
-``avg()``, or an undefined ratio (division by zero) skips that metric
-with a reason — one broken metric never aborts the run.
+``avg()``, or an undefined ratio (division by zero) skips that metric with a
+reason — one broken metric never aborts the run.
 """
 
 from __future__ import annotations
@@ -201,8 +196,8 @@ def _latest_report_period_end_before(
 
 
 def _metric_unit(target: Element) -> str:
-  """Fact unit for a computed metric — from ``item_type``, else the
-  ``is_monetary`` binary (NULL ``item_type`` keeps the M-1 behavior)."""
+  """Fact unit for a computed metric — from ``item_type``, falling back to
+  the ``is_monetary`` binary when ``item_type`` is NULL."""
   if target.item_type is not None:
     return {"monetary": "USD", "days": "days"}.get(target.item_type, "pure")
   return "USD" if target.is_monetary else "pure"
@@ -277,8 +272,8 @@ def cmd_compute_metrics(
     key=lambda r: order_by_element.get(r.target_element_id or "", float("inf"))
   )
 
-  # Dependency-ordered evaluation (M-2 composition): an operand qname
-  # naming another rule's target is an in-run metric dependency, so the
+  # Dependency-ordered evaluation: an operand qname naming another
+  # rule's target is an in-run metric dependency, so the
   # run evaluates dependencies first. Rules sort by dependency DEPTH
   # (longest in-run chain below the target), arc order as the tiebreak —
   # depth is deterministic where Kahn's emission order among independents

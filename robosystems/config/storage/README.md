@@ -1,121 +1,96 @@
 # Storage Configuration
 
-This module provides centralized S3 path helpers for different data domains, ensuring consistent bucket usage and key structure across the platform.
+S3 key and prefix helpers. Build every S3 path through these functions rather than formatting strings at the call site — the prefixes are the contract between the writers (Dagster assets, backup services, upload routers) and the readers.
 
-## Architecture
+## Buckets
 
-```
-storage/
-├── __init__.py      # Re-exports from shared and graph
-├── shared.py        # Shared/public data sources (SEC, FRED, etc.)
-└── graph.py         # Customer graph database storage
-```
+Bucket names come from `env.py` and are set from CloudFormation outputs at deploy time.
 
-## Bucket Structure
+| Environment variable | Default name pattern | Purpose |
+| -------------------- | -------------------- | ------- |
+| `SHARED_RAW_BUCKET` | `robosystems-shared-raw-{env}` | Raw downloads from external sources |
+| `SHARED_PROCESSED_BUCKET` | `robosystems-shared-processed-{env}` | Processed parquet ready for ingestion |
+| `USER_DATA_BUCKET` | `robosystems-user-{env}` | User uploads, graph backups, report bundles |
+| `PUBLIC_DATA_BUCKET` | `robosystems-public-data-{env}` | CDN-served public content |
 
-All storage uses four canonical buckets (defined in `env.py`):
+S3 bucket names are globally unique across all AWS accounts, so forks get an account-id namespace injected by the deployment workflows (`robosystems-{account-id}-shared-raw-{env}`). Nothing in application code hardcodes a bucket name.
 
-| Bucket | Environment Variable | Purpose |
-|--------|---------------------|---------|
-| `robosystems-shared-raw-{env}` | `SHARED_RAW_BUCKET` | Raw downloads from external sources |
-| `robosystems-shared-processed-{env}` | `SHARED_PROCESSED_BUCKET` | Processed parquet files for ingestion |
-| `robosystems-user-{env}` | `USER_DATA_BUCKET` | User uploads, graph backups, staging |
-| `robosystems-public-data-{env}` | `PUBLIC_DATA_BUCKET` | CDN-served public content |
-
-**Fork Support:** S3 bucket names are globally unique across all AWS accounts. For forks, GitHub Actions workflows automatically pass your AWS account ID as a namespace to CloudFormation, creating unique bucket names like `robosystems-{account-id}-shared-raw-{env}`. Bucket names are passed to the application via environment variables from CloudFormation outputs.
-
-## Modules
-
-### shared.py - Shared Data Sources
-
-Manages S3 paths for shared/public data repositories (SEC, FRED, etc.).
+## `shared.py` — external data sources
 
 ```python
+from robosystems.config import env
 from robosystems.config.storage import shared
 from robosystems.config.storage.shared import DataSourceType
 
-# Check if a data source is enabled
 if shared.is_source_enabled(DataSourceType.SEC):
-    # Build S3 keys for raw and processed data
     raw_key = shared.get_raw_key(DataSourceType.SEC, "year=2024", "320193", "filing.zip")
-    # → 'sec/year=2024/320193/filing.zip'
+    # 'sec/year=2024/320193/filing.zip'
 
     processed_key = shared.get_processed_key(DataSourceType.SEC, "year=2024", "nodes", "Entity.parquet")
-    # → 'sec/year=2024/nodes/Entity.parquet'
+    # 'sec/year=2024/nodes/Entity.parquet'
 
-# Get full S3 URIs
-from robosystems.config import env
 uri = shared.get_raw_uri(env.SHARED_RAW_BUCKET, DataSourceType.SEC, "year=2024", "file.zip")
-# → 's3://robosystems-shared-raw-prod/sec/year=2024/file.zip'
+# 's3://robosystems-shared-raw-prod/sec/year=2024/file.zip'
 ```
 
-#### Data Source Registry
+`DataSourceType` enumerates `SEC`, `FRED`, `BLS`, `CENSUS`, and `INDUSTRY`. The `DATA_SOURCES` registry carries each source's prefixes, rate limit, user agent, and enabled flag; only enabled sources are wired into pipelines.
 
-```python
-class DataSourceType(Enum):
-    SEC = "sec"           # SEC EDGAR filings (enabled)
-    FRED = "fred"         # Federal Reserve Economic Data (future)
-    BLS = "bls"           # Bureau of Labor Statistics (future)
-    CENSUS = "census"     # Census Bureau data (future)
-    INDUSTRY = "industry" # Industry benchmarks (future)
-```
+## `graph.py` — graph database storage
 
-Each data source has configuration for rate limits, user agents, and enabled status.
+Each storage type owns a top-level prefix, declared once in `GRAPH_STORAGE`:
 
-### graph.py - Graph Database Storage
-
-Manages S3 paths for customer graph databases with three storage types:
-
-| Storage Type | Prefix | Purpose |
-|--------------|--------|---------|
+| `GraphStorageType` | Prefix | Purpose |
+| ------------------ | ------ | ------- |
 | `USER_STAGING` | `user-staging/` | Pre-ingestion file uploads |
-| `BACKUPS` | `graph-backups/` | Application-level backups via API |
+| `BACKUPS` | `graph-backups/` | Application-level backups via the API |
 | `DATABASES` | `graph-databases/` | Instance-level backups from writer nodes |
+| `REPORT_BUNDLES` | `report-bundles/` | Per-Report serialization bundles |
+| `SHARED_REPO_DATABASES` | `shared-repositories/databases/` | Published shared-repository snapshots |
+| `SHARED_REPO_BACKUPS` | `shared-repositories/backups/` | Compressed subscriber downloads |
+| `R2_DOWNLOADS` | `downloads/` | Uncompressed files on R2 for zero-egress downloads |
 
 ```python
+from datetime import UTC, datetime
 from robosystems.config.storage import graph
 
-# User file staging (pre-ingestion uploads)
-key = graph.get_staging_key("user123", "kg456", "Entity", "file789", "data.parquet")
-# → 'user-staging/user123/kg456/Entity/file789/data.parquet'
-
-# List staged files for a graph
-prefix = graph.get_staging_prefix("user123", "kg456")
-# → 'user-staging/user123/kg456/'
-
-# Application-level backups
-from datetime import datetime, UTC
 ts = datetime.now(UTC)
-backup_key = graph.get_backup_key("kg456", "full", ts)
-# → 'graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz'
 
-metadata_key = graph.get_backup_metadata_key("kg456", ts)
-# → 'graph-backups/metadata/kg456/backup-20240115_123045.json'
+graph.get_staging_key("user123", "kg456", "Entity", "file789", "data.parquet")
+# 'user-staging/user123/kg456/Entity/file789/data.parquet'
+graph.get_staging_prefix("user123", "kg456")
+# 'user-staging/user123/kg456/'
 
-# Instance-level backups (from writer nodes)
-instance_key = graph.get_instance_backup_key("prod", "kg456", ts)
-# → 'graph-databases/prod/kg456/kg456_20240115_123045.tar.gz'
+graph.get_backup_key("kg456", "full", ts)
+# 'graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz'
+graph.get_backup_metadata_key("kg456", ts)
+# 'graph-backups/metadata/kg456/backup-20240115_123045.json'
 
-# List instance backups
-prefix = graph.get_instance_backup_prefix("prod", "kg456")
-# → 'graph-databases/prod/kg456/'
+graph.get_instance_backup_key("prod", "kg456", ts)
+# 'graph-databases/prod/kg456/kg456_20240115_123045.tar.gz'
+
+graph.get_report_bundle_key("kg456", "rpt_01K8", 1)
+# 'report-bundles/kg456/rpt_01K8/g1.jsonld'
 ```
 
-## S3 Key Structure
+Report bundles are versioned by `Report.generation_count` (the `g` prefix reads as "generation"), so regenerating a report leaves prior generations addressable for restatement audit trails.
 
-### Shared Raw Bucket
+## Key structure
+
+### Shared raw bucket
+
 ```
 s3://robosystems-shared-raw-{env}/
   sec/                           # SEC EDGAR filings
     year=2024/
       320193/                    # CIK
         0000320193-24-000081.zip
-  fred/                          # Federal Reserve (future)
+  fred/
     series=GDP/
       2024-Q4.json
 ```
 
-### Shared Processed Bucket
+### Shared processed bucket
+
 ```
 s3://robosystems-shared-processed-{env}/
   sec/
@@ -129,83 +104,28 @@ s3://robosystems-shared-processed-{env}/
         ...
 ```
 
-### User Data Bucket
+### User data bucket
+
 ```
 s3://robosystems-user-{env}/
   user-staging/                  # Pre-ingestion uploads
-    {user_id}/
-      {graph_id}/
-        {table_name}/
-          {file_id}/
-            *.parquet
+    {user_id}/{graph_id}/{table_name}/{file_id}/*.parquet
 
   graph-backups/                 # Application-level backups
-    databases/
-      {graph_id}/
-        full/
-          backup-{timestamp}.lbug.gz
-        incremental/
-          backup-{timestamp}.lbug.gz
-    metadata/
-      {graph_id}/
-        backup-{timestamp}.json
+    databases/{graph_id}/{full|incremental}/backup-{timestamp}.lbug.gz
+    metadata/{graph_id}/backup-{timestamp}.json
 
   graph-databases/               # Instance-level backups
-    {environment}/
-      {graph_id}/
-        {graph_id}_{timestamp}.tar.gz
+    {environment}/{graph_id}/{graph_id}_{timestamp}.tar.gz
+
+  report-bundles/                # Per-Report serialization bundles
+    {graph_id}/{report_id}/g{generation}.jsonld
 ```
 
-## Usage in Code
+## Adding a data source
 
-### Dagster Assets/Sensors
-```python
-from robosystems.config.storage.shared import DataSourceType, get_raw_key, get_processed_key
+1. Add the member to `DataSourceType` in `shared.py`.
+2. Add a `DataSourceConfig` entry to the `DATA_SOURCES` registry (prefixes, rate limit, `enabled`).
+3. Use `get_raw_key()` / `get_processed_key()` with the new member.
 
-# In SEC pipeline
-raw_key = get_raw_key(DataSourceType.SEC, f"year={year}", cik, f"{accession}.zip")
-processed_key = get_processed_key(DataSourceType.SEC, f"year={year}", "nodes", f"{filename}.parquet")
-```
-
-### Backup Services
-```python
-from robosystems.config.storage import graph
-
-# In LadybugGraphBackupService
-s3_prefix = graph.get_instance_backup_prefix(environment)
-s3_key = graph.get_instance_backup_key(environment, graph_id, timestamp)
-```
-
-### File Upload Routers
-```python
-from robosystems.config.storage import graph
-
-# Build staging key for uploaded file
-s3_key = graph.get_staging_key(user_id, graph_id, table_name, file_id, filename)
-```
-
-## Adding New Data Sources
-
-1. Add the source type to `DataSourceType` enum in `shared.py`
-2. Add configuration to `DATA_SOURCES` registry
-3. Use `get_raw_key()` and `get_processed_key()` with the new type
-4. No new buckets needed - data is organized by prefix
-
-```python
-# In shared.py
-class DataSourceType(Enum):
-    SEC = "sec"
-    FRED = "fred"
-    MY_NEW_SOURCE = "my_source"  # Add new source
-
-DATA_SOURCES = {
-    # ... existing sources ...
-    DataSourceType.MY_NEW_SOURCE: DataSourceConfig(
-        source_type=DataSourceType.MY_NEW_SOURCE,
-        raw_prefix="my_source/",
-        processed_prefix="my_source/",
-        enabled=True,
-        rate_limit=10,
-    ),
-}
-```
+No new bucket is needed — sources are separated by prefix inside the two shared buckets.

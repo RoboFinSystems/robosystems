@@ -1,8 +1,4 @@
-"""
-Base tool class for MCP tools.
-
-Provides common functionality and interface for all MCP tools.
-"""
+"""Base class for hand-written MCP tools."""
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
@@ -15,11 +11,7 @@ from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 
 
 class BaseTool(ABC):
-  """
-  Base class for all MCP tools.
-
-  Provides common functionality like client access, validation, and logging.
-  """
+  """Shared client access, query validation, and logging for MCP tools."""
 
   def __init__(self, client: "GraphMCPClient"):
     self.client = client
@@ -27,25 +19,12 @@ class BaseTool(ABC):
 
   @abstractmethod
   def get_tool_definition(self) -> dict[str, Any]:
-    """
-    Get the tool definition for this tool.
-
-    Returns:
-        Tool definition dictionary for MCP protocol
-    """
+    """Return this tool's MCP definition: name, description, inputSchema."""
     pass
 
   @abstractmethod
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    """
-    Execute the tool with the given arguments.
-
-    Args:
-        arguments: Tool-specific arguments
-
-    Returns:
-        Tool execution result
-    """
+    """Run the tool against the arguments an MCP client supplied."""
     pass
 
   def _log_tool_execution(self, tool_name: str, arguments: dict[str, Any]) -> None:

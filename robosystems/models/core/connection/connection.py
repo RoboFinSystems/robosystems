@@ -138,12 +138,11 @@ class Connection(Model):
   last_sync = Column(DateTime, nullable=True)
   # Outcome summary of the most recent sync ATTEMPT (success or failure):
   # status, window, per-category counts (captured / updated / drift /
-  # dispatch_failed / …), truncated errors. The loader used to emit this
-  # only as a worker log line, leaving the surface that triggered the
-  # sync — MCP operator, frontend — unable to answer "did it finish, and
-  # what did it do?" without CloudWatch. Written on success alongside
-  # `last_sync`; on failure alone (`last_sync` only ever advances on
-  # success — the close gate's sync-current check reads it).
+  # dispatch_failed / …), truncated errors. This is what lets the surface
+  # that triggered the sync — MCP operator, frontend — answer "did it
+  # finish, and what did it do?" without CloudWatch. Written on success
+  # alongside `last_sync`; on failure alone (`last_sync` only ever advances
+  # on success — the close gate's sync-current check reads it).
   last_sync_result = Column(JSONB, nullable=True)
 
   # Source-of-truth policy. Default `'native'` means no outbound writes
@@ -448,12 +447,11 @@ class Connection(Model):
       raise
 
   def delete(self, session: Session) -> None:
-    """Hard-delete the connection row.
+    """Hard-delete the connection row (admin purge only).
 
     Almost always the wrong choice — prefer ``soft_delete`` so the
     tenant-side events/agents/elements scoped to this connection_id
-    don't orphan. Kept for admin tooling that intentionally needs to
-    purge.
+    don't orphan.
     """
     try:
       session.delete(self)
@@ -490,12 +488,16 @@ class Connection(Model):
       raise
 
   def to_dict(self) -> dict:
-    """Convert to dictionary matching the legacy return format."""
+    """Serialize for the connections API surface.
+
+    ``entity_id`` duplicates ``graph_id``: consumers still read the older
+    key, so both ship on every response.
+    """
     return {
       "connection_id": self.id,
       "provider": self.provider,
       "status": self.status,
-      "entity_id": self.graph_id,  # backward compat
+      "entity_id": self.graph_id,
       "graph_id": self.graph_id,
       "user_id": self.user_id,
       "write_policy": self.write_policy,

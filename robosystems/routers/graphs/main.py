@@ -713,7 +713,6 @@ async def select_graph(
         code=ErrorCode.FORBIDDEN,
       )
 
-    # Set this graph as selected
     success = GraphUser.set_selected_graph(current_user.id, graph_id, session)
 
     if not success:

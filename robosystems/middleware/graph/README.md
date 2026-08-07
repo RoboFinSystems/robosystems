@@ -1,438 +1,132 @@
 # Graph Middleware
 
-This middleware layer provides the core graph database abstraction and routing logic for the RoboSystems platform.
+The routing and multi-tenancy layer above the graph engine. Application code
+asks this package for a repository bound to a `graph_id`; the package resolves
+which LadybugDB instance holds that database, applies authorization and
+admission control, and hands back a uniform interface. It does not itself talk
+to the database — that is the core services layer under
+[`../../graph_api/core/`](../../graph_api/core/README.md).
 
-## Overview
+Two layers, cleanly split:
 
-The graph middleware:
+- **Middleware (this package)** — routing, multi-tenancy, allocation, admission
+  control, authorization, FastAPI dependencies.
+- **Core services** (`graph_api/core/ladybug/`, `graph_api/core/duckdb/`) —
+  connection pooling, database lifecycle, query execution, staging.
 
-- Routes graph operations to appropriate LadybugDB clusters
-- Manages database connections and pooling
-- Handles query execution with caching and queuing
-- Provides admission control and backpressure management
-- Integrates with the credit system for usage tracking
+## Multi-tenancy: `graph_id` is the tenancy boundary
 
-**Backend:**
+Every operation is scoped to a `graph_id`, and nothing in this package will
+give you a repository without one. Graph IDs fall into three categories
+(`GraphCategory` in `types.py`):
 
-- **LadybugDB**: Embedded graph database (all subscription tiers)
-  - Multi-tenant shared instances (ladybug-standard)
-  - Dedicated instances (ladybug-large, ladybug-xlarge)
-  - Subgraph support on dedicated tiers
-  - Core services: `/robosystems/graph_api/core/ladybug/`
+- **User graphs** — `kg` + at least 16 hex characters, e.g. `kg1a2b3c…`. One
+  customer database per instance.
+- **Shared repositories** — platform-managed, named (`sec`, …), registered in
+  `config/shared_repositories.py`. Read-only to customers.
+- **System graphs** — platform internals.
 
-- **DuckDB Staging**: Data transformation layer
-  - Parquet file reading from S3
-  - Data validation and transformation
-  - Core services: `/robosystems/graph_api/core/duckdb/`
+**All tiers are dedicated.** `.github/configs/graph.yml` sets
+`databases_per_instance: 1` for `ladybug-standard`, `ladybug-large`, and
+`ladybug-xlarge` alike; the tiers differ in instance size, not in whether the
+instance is shared. Read that file when the exact instance spec matters — it is
+authoritative over any number written here.
 
-## Architecture
+### Subgraphs
 
-The middleware layer sits above the core services, providing routing, orchestration, and multi-tenant management:
-
-```
-middleware/graph/                         # Middleware layer (this module)
-├── __init__.py                          # Module exports
-├── router.py                            # GraphRouter — main routing logic
-├── repository.py                        # UniversalRepository wrapper (sync/async unification)
-├── base.py                              # Base abstractions (GraphEngineInterface, GraphOperation)
-├── types.py                             # Type definitions, enums, graph-id helpers
-├── query_queue.py                       # QueryQueueManager — admission control + long polling
-├── admission_control.py                 # System resource monitoring
-├── execution_strategies.py             # Strategy selection (query vs MCP, load-aware)
-├── ingestion_limits.py                 # Tier storage caps / materialization write-path limits
-├── instance_busy.py                    # DynamoDB busy counter for destructive ops
-├── streaming_wrapper.py                # Streaming query support for Graph API clients
-├── allocation_manager.py                # DynamoDB-based database allocation
-├── dependencies/                        # FastAPI dependency injection
-│   ├── auth.py                         # Auth-checked repository/database dependencies
-│   ├── repositories.py                 # Repository dependencies
-│   └── helpers.py                      # require_entity / require_user_graph / etc.
-└── utils/                               # Utility modules (MultiTenantUtils lives here)
-    ├── __init__.py                     # MultiTenantUtils class
-    ├── validation.py                    # Input validation
-    ├── database.py                      # Database resolution
-    ├── identity.py                      # Graph identity management
-    └── subgraph.py                      # Subgraph utilities
-
-graph_api/core/                          # Core services layer (database access)
-├── ladybug/                             # LadybugDB embedded database
-│   ├── engine.py                       # Low-level driver
-│   ├── pool.py                         # Connection pooling
-│   ├── manager.py                      # Database lifecycle
-│   └── service.py                      # Service orchestration
-└── duckdb/                              # DuckDB staging layer
-    ├── pool.py                          # Connection pooling
-    └── manager.py                       # Table management
-```
-
-**Layer Separation**:
-- **Middleware** (this module): Routing, multi-tenancy, orchestration
-- **Core Services**: Database access, connection management, query execution
-
-## Key Components
-
-### 1. Graph Router (`router.py`)
-
-The central routing component that determines where graph operations should be executed.
-
-**Key Features:**
-
-- **Intelligent Routing**: Routes based on graph type, operation, and tier
-- **Cluster Selection**: Chooses optimal cluster for each operation
-- **API Endpoint Resolution**: Determines correct endpoints
-- **Fallback Handling**: Graceful degradation when clusters unavailable
-
-**Routing Logic:**
+A subgraph is an isolated database living on the *parent's* instance, addressed
+as `{parent_graph_id}_{subgraph_name}`:
 
 ```python
-# Shared repositories (SEC, etc.) → Shared master/replica clusters
-# Entity graphs → Entity writer clusters based on tier
-# Read operations → Can use replica endpoints if available
-# Write operations → Always use master/writer endpoints
-```
-
-**Usage:**
-
-```python
-router = GraphRouter()
-repo = await router.get_repository(   # get_repository is async
-    graph_id="kg1a2b3c",
-    operation_type="write",
-    tier=GraphTier.LADYBUG_STANDARD,
+from robosystems.middleware.graph.types import (
+    is_subgraph_id, parse_graph_id, construct_subgraph_id,
 )
-result = await repo.execute_query("MATCH (n) RETURN n LIMIT 10")
+
+is_subgraph_id("kg1234567890abcdef_dev")            # True
+parse_graph_id("kg1234567890abcdef_dev")            # ("kg1234567890abcdef", "dev")
+construct_subgraph_id("kg1234567890abcdef", "dev")  # "kg1234567890abcdef_dev"
 ```
 
-`GraphRouter.get_repository()` delegates routing to
-`graph_api.client.factory.GraphClientFactory` (or returns a direct-file
-`Repository` when `LBUG_ACCESS_PATTERN=direct_file`).
+Validation (`utils/subgraph.py`):
 
-### 2. Graph Type Definitions (`types.py`)
+- Parent ID must match `^kg[a-f0-9]{16,}$`.
+- Subgraph name must match `[a-zA-Z0-9]{1,20}` — alphanumeric only, no hyphens
+  or underscores. The underscore is the separator, so a name containing one
+  would make the ID ambiguous.
+- Full ID must match `^(kg[a-f0-9]{16,})_([a-zA-Z0-9]{1,20})$`.
 
-`types.py` is the canonical source for graph-routing enums and graph-id
-helpers (there is no separate `clusters.py`).
+Constraints that bite:
 
-**Enums:**
+- Subgraphs have **no DynamoDB registry entries of their own**.
+  `LadybugAllocationManager.find_database_location()` resolves a subgraph to its
+  parent's instance location and returns the subgraph ID with the parent's
+  instance details.
+- Single level only — a subgraph cannot have subgraphs.
+- Subgraphs inherit the parent's tier, instance, credit pool, and permissions.
+  Only the data is isolated.
+- Shared repositories cannot have subgraphs.
 
-- `NodeType`: node roles (e.g. writer / shared master / shared replica)
-- `RepositoryType`: entity vs shared repository
-- `GraphCategory`: `USER`, `SHARED`, `SYSTEM`
-- `AccessPattern`: `READ_ONLY`, `READ_WRITE`, `RESTRICTED`
-- `ConnectionPattern`: connection routing strategy
-
-Graph tiers (`LADYBUG_STANDARD`, `LADYBUG_LARGE`, `LADYBUG_XLARGE`) come
-from `config/graph_tier.py:GraphTier`, re-exported by this package.
-
-### 3. Core Services Integration
-
-The middleware integrates with the core services layer for database access.
-
-**LadybugDB Service** (`graph_api/core/ladybug/`):
-- Connection pooling via `LadybugConnectionPool`
-- Database lifecycle via `LadybugDatabaseManager`
-- Query execution via `LadybugService`
-- Direct engine access via `Engine` (for low-level operations)
-
-**DuckDB Staging** (`graph_api/core/duckdb/`):
-- Staging table management via `DuckDBTableManager`
-- Connection pooling via `DuckDBConnectionPool`
-
-**Usage:**
+## Getting a repository
 
 ```python
-# Via middleware routing (recommended)
+from robosystems.middleware.graph import GraphRouter
+
 router = GraphRouter()
-repo = await router.get_repository("kg1a2b3c")
+repo = await router.get_repository("kg1a2b3c", operation_type="write")
 result = await repo.execute_query("MATCH (c:Entity) RETURN c")
-
-# Direct core service access (when needed)
-from robosystems.graph_api.core.ladybug import get_ladybug_service
-
-service = get_ladybug_service()
-response = await service.execute_query(QueryRequest(
-    database="kg1a2b3c",
-    cypher="MATCH (c:Entity) RETURN c"
-))
 ```
 
-See the [Core Services README](/robosystems/graph_api/core/README.md) for detailed documentation.
+`GraphRouter.get_repository()` is async. It delegates to
+`graph_api.client.factory.GraphClientFactory`, or returns a direct-file
+`Repository` when `LBUG_ACCESS_PATTERN=direct_file`. Writes always route to a
+writer/master endpoint; reads may route to a replica when one exists for that
+repository.
 
-### 4. Repository Wrapper (`repository.py`)
+What comes back is a `UniversalRepository` (`repository.py`) — a wrapper over
+either a direct `Repository` or an async Graph API `GraphClient`, so callers
+never branch on which one they got. It offers `execute_query`,
+`execute_query_streaming`, `execute_transaction`, `get_schema`, `health_check`,
+`close`, sync variants (`execute_query_sync`, …), and both `async with` and
+`with`. Build one through `create_universal_repository()` /
+`get_universal_repository()` rather than instantiating the class.
 
-`UniversalRepository` wraps either a direct `Repository` or a Graph API
-`GraphClient` and exposes a unified async (and sync) interface so callers
-don't branch on the underlying type.
-
-**Features:**
-
-- **Unification**: Same interface for sync direct repos and async API clients
-- **Async + sync methods**: `execute_query` / `execute_query_sync`, etc.
-- **Streaming**: `execute_query_streaming`
-- **Context managers**: both `async with` and `with`
-
-**Selected methods:**
-
-```python
-class UniversalRepository:
-    async def execute_query(self, cypher, parameters=None, ...) -> Any
-    async def execute_query_streaming(self, cypher, ...) -> Any
-    async def execute_transaction(self, queries) -> Any
-    async def get_schema(self) -> list[dict[str, Any]]
-    async def health_check(self) -> dict[str, Any]
-    async def close(self) -> None
-```
-
-Construct via `create_universal_repository(...)` /
-`get_universal_repository(...)` rather than instantiating directly.
-
-### 5. Query Queue with Admission Control (`query_queue.py`)
-
-`QueryQueueManager` provides admission control and long polling.
-
-**Features:**
-
-- **Admission Control**: CPU/memory-based rejection
-- **Load Shedding**: Probabilistic rejection under load
-- **Priority Queue**: Higher priority queries execute first
-- **Long Polling**: Efficient result waiting
-- **Transparent Queuing**: Executes immediately when capacity available
-
-**Usage:**
-
-```python
-from robosystems.middleware.graph.query_queue import get_query_queue
-
-queue = get_query_queue()
-query_id = await queue.submit_query(
-    cypher="MATCH (n) RETURN n",
-    parameters=None,
-    graph_id="kg1a2b3c",
-    user_id="user_123",
-    priority=5,
-)
-# Poll status, then fetch the result:
-status = await queue.get_query_status(query_id)
-result = await queue.get_query_result(query_id)
-```
-
-### 6. Admission Control (`admission_control.py`)
-
-Monitors system resources and controls admission.
-
-**Features:**
-
-- **Resource Monitoring**: Tracks CPU, memory, disk usage
-- **Admission Decisions**: Accepts/rejects based on thresholds
-- **Load Shedding**: Probabilistic rejection under high load
-- **Metrics Export**: Exports system metrics
-
-**Decision Logic:**
-
-1. Check if system is under memory pressure (>85%)
-2. Check if system is under CPU pressure (>90%)
-3. Apply probabilistic rejection based on load
-4. Track rejection metrics
-
-### 7. FastAPI Dependencies (`dependencies/`)
-
-Dependency injection for FastAPI routes lives in the `dependencies/`
-package (`auth.py`, `repositories.py`, `helpers.py`), exported from
-`dependencies/__init__.py`.
-
-**Provided Dependencies (selected):**
-
-- `get_graph_database`: Resolves + auth-checks the graph for the request
-- `get_graph_repository_with_auth` / `get_universal_repository_with_auth`: Auth-checked repository
-- `get_user_graph_repository` / `get_shared_repository` / `get_main_repository`: Repository by graph kind
-- `get_graph_repository_dependency`: Generic repository dependency
-- `require_entity` / `require_user_graph` / `require_graph_category` (+ `optional_*` variants): Path-param helpers
+In FastAPI routes, prefer the dependencies in `dependencies/` — they resolve the
+graph and check access in one step:
 
 ```python
 from robosystems.middleware.graph.dependencies import get_graph_repository_with_auth
 
 @router.post("/v1/graphs/{graph_id}/query")
-async def execute_query(
-    repo = Depends(get_graph_repository_with_auth),
-):
-    return await repo.execute_query(query)
+async def execute_query(repo=Depends(get_graph_repository_with_auth)):
+    return await repo.execute_query(cypher)
 ```
 
-### 8. Type Definitions (`types.py`)
+Available dependencies include `get_graph_database`,
+`get_graph_repository_with_auth`, `get_universal_repository_with_auth`,
+`get_user_graph_repository`, `get_shared_repository`, `get_main_repository`,
+`get_graph_repository_dependency`, and the path-param helpers `require_entity`,
+`require_user_graph`, `require_graph_category` (each with an `optional_*`
+variant).
 
-Core type definitions and enums (see §2 for the enum list). `types.py`
-also exposes graph-id helpers (`is_subgraph_id`, `parse_graph_id`,
-`construct_subgraph_id`) and the `GraphIdentity` / `GraphTypeRegistry`
-models. `GraphTier` is imported from `config/graph_tier.py`.
+## Authorization: one gauntlet, all transports
 
-### 9. Database Allocation (`allocation_manager.py`)
+`statement_kernel.py` is the single policy path for graph statements. REST
+(`/query/cypher`, `/query/sql`), MCP, and Operators all run through it rather
+than re-implementing checks inline. It owns write detection (via
+`security/cypher_analyzer.py`), the three-tier write policy — main graph
+read-only, subgraph read+write, shared repository read-only — per-engine
+validation, and the role-based write check.
 
-`LadybugAllocationManager` — DynamoDB-based allocation of graph databases
-across instances.
+It deliberately does **not** own circuit breaking, rate limiting, repository
+acquisition, execution-strategy selection, or streaming: those are
+transport-specific and position-sensitive in the hot path, and stay in the
+callers. Adding a new query surface means calling the kernel, not copying it.
 
-**Features:**
+## Queueing and admission control
 
-- **DynamoDB Registry**: Persistent state storage for allocations
-- **Instance Management**: Tracks capacity and health of LadybugDB instances
-- **Atomic Allocation**: Race-condition-free database assignment
-- **Auto-scaling Integration**: Triggers capacity increases when needed
-- **Multi-tier Support**: ladybug-standard, ladybug-large, ladybug-xlarge instance tiers
-- **Instance Protection**: Automatically enables scale-in protection for instances with allocated databases
-
-**Usage:**
-
-```python
-from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
-from robosystems.config.graph_tier import GraphTier
-
-manager = LadybugAllocationManager(environment="prod")
-location = await manager.allocate_database(
-    entity_id="kg1a2b3c",
-    instance_tier=GraphTier.LADYBUG_STANDARD,
-)
-print(f"Database allocated to {location.instance_id}")
-```
-
-### 10. Multi-tenant Utilities (`utils/`)
-
-`MultiTenantUtils` (in `middleware/graph/utils/__init__.py`) aggregates
-static methods from the `utils/` submodules (`validation.py`,
-`database.py`, `identity.py`, `subgraph.py`) for multi-tenant database
-operations and validation.
-
-**Capabilities:**
-
-- **Database Name Resolution**: Maps graph IDs to database names
-- **Access Pattern Management**: Determines routing strategies
-- **Shared Repository Support**: Routes to shared repository infrastructure
-- **Validation**: Input validation and security checks
-- **Graph Type Detection**: Identifies user vs shared vs system graphs
-
-**Usage:**
-
-```python
-from robosystems.middleware.graph.utils import MultiTenantUtils
-
-# Validate and get database name
-graph_id = MultiTenantUtils.validate_graph_id("kg1a2b3c")
-db_name = MultiTenantUtils.get_database_name(graph_id)
-
-# Check if shared repository
-is_shared = MultiTenantUtils.is_shared_repository("sec")
-
-# Get routing information
-routing = MultiTenantUtils.get_graph_routing("kg1a2b3c")
-```
-
-### 11. Subgraph Support (`types.py`, `allocation_manager.py`)
-
-Subgraph functionality allows users on dedicated tiers to create isolated databases on their parent instance.
-
-**Key Functions:**
-
-```python
-from robosystems.middleware.graph.types import (
-    is_subgraph_id,
-    parse_graph_id,
-    construct_subgraph_id,
-)
-
-# Check if ID is a subgraph
-if is_subgraph_id("kg1234567890abcdef_dev"):
-    print("This is a subgraph")
-
-# Parse subgraph ID to get parent
-parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_dev")
-# Returns: ("kg1234567890abcdef", "dev")
-
-# Construct subgraph ID
-subgraph_id = construct_subgraph_id("kg1234567890abcdef", "staging")
-# Returns: "kg1234567890abcdef_staging"
-```
-
-**Allocation Manager Integration:**
-
-The `LadybugAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
-
-```python
-manager = LadybugAllocationManager(environment="prod")
-
-# Requesting location for subgraph returns parent's instance location
-location = await manager.find_database_location("kg1234567890abcdef_dev")
-# Returns location with subgraph_id but parent's instance details
-```
-
-**Validation:**
-
-- Parent graph ID: Must match `kg[a-f0-9]{16,}` (16+ hex chars)
-- Subgraph name: Must match `[a-zA-Z0-9]{1,20}` (alphanumeric only)
-- Format: `{parent_id}_{subgraph_name}`
-
-**Limitations:**
-
-- Subgraphs inherit parent's tier and instance
-- No DynamoDB registry entries for subgraphs (resolved via parent)
-- Cannot create subgraphs of subgraphs (single-level only)
-- Shared repositories cannot have subgraphs
-
-## Configuration
-
-Key environment variables:
-
-```bash
-# LadybugDB Configuration (core/ladybug/)
-LBUG_DATABASE_PATH=/data/lbug-dbs        # Database directory
-LBUG_DATABASES_PER_INSTANCE=10           # Instance capacity
-LBUG_CONNECTION_POOL_SIZE=10             # Connection pool size
-LBUG_ACCESS_PATTERN=api_writer           # Access pattern for routing
-GRAPH_API_URL=                         # Graph API endpoint (dynamic in prod)
-
-# DuckDB Staging Configuration (core/duckdb/)
-DUCKDB_STAGING_DIR=/data/duckdb-staging  # Staging database directory
-DUCKDB_MAX_CONNECTIONS_PER_DB=3          # DuckDB connection pool size
-DUCKDB_MAX_THREADS=4                     # DuckDB processing threads
-DUCKDB_MEMORY_LIMIT=2GB                  # DuckDB memory limit
-
-# Queue Configuration
-QUERY_QUEUE_MAX_SIZE=1000           # Maximum queries in queue
-QUERY_QUEUE_MAX_CONCURRENT=50       # Max concurrent executions
-LONG_POLL_TIMEOUT=30                # Long polling timeout (seconds)
-
-# Admission Control
-ADMISSION_MEMORY_THRESHOLD=85       # Memory threshold (%)
-ADMISSION_CPU_THRESHOLD=90          # CPU threshold (%)
-LOAD_SHEDDING_ENABLED=true         # Enable load shedding
-
-# Performance
-QUERY_TIMEOUT=300                   # Query timeout (seconds)
-
-# Multi-tenant Configuration
-MULTITENANT_MODE=true              # Enable multi-tenant database support
-```
-
-## Usage Patterns
-
-### Basic Query Execution
-
-```python
-# Via middleware router (recommended for multi-tenant routing)
-from robosystems.middleware.graph import GraphRouter
-
-router = GraphRouter()
-repo = await router.get_repository("kg1a2b3c")
-result = await repo.execute_query("MATCH (c:Entity) RETURN c")
-
-# Via core service (direct access when routing not needed)
-from robosystems.graph_api.core.ladybug import get_ladybug_service
-from robosystems.graph_api.models.database import QueryRequest
-
-service = get_ladybug_service()
-response = await service.execute_query(QueryRequest(
-    database="kg1a2b3c",
-    cypher="MATCH (c:Entity) RETURN c"
-))
-```
-
-### With Query Queue
+`query_queue.py` (`QueryQueueManager`, via `get_query_queue()`) accepts a query,
+executes it immediately if there is capacity, and otherwise queues it by
+priority with long polling for the result:
 
 ```python
 from robosystems.middleware.graph.query_queue import get_query_queue
@@ -445,114 +139,154 @@ query_id = await queue.submit_query(
     user_id="user_123",
     priority=8,
 )
+status = await queue.get_query_status(query_id)
 result = await queue.get_query_result(query_id)
 ```
 
-### Transaction Execution
+`admission_control.py` decides whether to accept at all. **Memory rejection is
+not gated on percent used.** `ADMISSION_MEMORY_THRESHOLD` (85%) only *reports*
+memory pressure; rejection uses `MIN_AVAILABLE_MB` (1 GB of absolute headroom).
+The reason is in `config/defaults.py`: a LadybugDB buffer pool is a fixed
+pre-commitment that is *supposed* to fill, so percent-of-total conflates that
+constant with the query working set that actually predicts exhaustion, and an
+absolute figure does not move when the pool or the instance size changes. CPU
+(90%) and queue capacity (80%) are percentage-gated.
+
+`execution_strategies.py` picks the execution path (direct query vs MCP,
+load-aware). `streaming_wrapper.py` adapts streaming results for Graph API
+clients. `instance_busy.py` maintains a DynamoDB busy counter so destructive
+operations don't run against an instance mid-work.
+
+## Allocation
+
+`allocation_manager.py` (`LadybugAllocationManager`) assigns databases to
+instances through a DynamoDB registry, atomically, and enables ASG scale-in
+protection on instances that hold allocated databases.
 
 ```python
-repo = await router.get_repository("kg1a2b3c", operation_type="write")
-success = await repo.execute_transaction([
-    "CREATE (e:Entity {identifier: 'entity-123', name: 'New Corp'})",
-    "CREATE (el:Element {uri: 'http://example.com/element/Cash', qname: 'Cash'})",
-    "CREATE (e)-[:ENTITY_HAS_ELEMENT]->(el)"
-])
+from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
+from robosystems.config.graph_tier import GraphTier
+
+manager = LadybugAllocationManager(environment="prod")
+location = await manager.allocate_database(
+    entity_id="kg1a2b3c",
+    instance_tier=GraphTier.LADYBUG_STANDARD,
+)
 ```
 
-## Integration Points
+The registry is authoritative for *where* a database lives, and it can drift
+from reality when instances cycle — a healing pass exists for exactly that
+reason. Treat a "database not found" that contradicts a healthy instance as a
+registry question first.
 
-### 1. Credit System
+## Write-path limits
 
-Credit consumption is intentionally narrow:
+`ingestion_limits.py` blocks materialization on two independent categories:
 
-- **AI Operations**: Anthropic Claude calls via AWS Bedrock consume credits (token-based billing) — the only credit-consuming path
-- **Database Operations**: All graph queries, imports, backups are free (included in the subscription tier)
-- **Storage**: Currently limit-enforced, not metered into credits (see
-  `middleware/billing/README.md`); if usage-based storage billing is added it
-  would be a separate credit line, independent of the AI compute path.
+1. **Aggregate storage GB** — the tier-scoped product cap, bounding instance
+   disk cost. Enforced at the write path so a customer cannot accumulate data
+   they are then unable to promote.
+2. **Per-operation row caps** (`max_rows_per_copy`, `max_single_table_rows`) —
+   OOM guardrails set per instance class, not marketing limits.
 
-### 2. Authentication
+Row counts come from `GraphFile.duckdb_row_count` (recorded at upload), storage
+from the Graph API's `get_database_info()` `size_bytes`, and the caps from
+`GraphTierConfig.get_graph_limits(tier)`.
 
-All operations require authentication:
+## Telemetry
 
-- API key validation
-- User context injection
-- Graph access validation
+`query_telemetry.py` classifies bad outcomes on the **shared** query surface
+only — timeouts, capacity rejections, rate limits, policy denials, engine
+disruptions — and records them through the security audit log, which publishes
+the CloudWatch metrics the detective-control alarms watch. It also emits
+structured start/end cost lines so operators can rank users by execution time
+and reconstruct in-flight work during an incident. Every entry point gates on
+the shared-repository check and no-ops on user graphs, which run on dedicated
+instances. All of it is best-effort and never raises into the request path.
 
-### 3. Monitoring
+## Credits
 
-Comprehensive monitoring integration:
+Only AI operations (Anthropic Claude via AWS Bedrock, token-based) consume
+credits. **Every graph query, import, ingestion, and backup is free**, included
+in the subscription tier. Storage is limit-enforced, not metered into credits.
+See [`../billing/README.md`](../billing/README.md).
 
-- Query performance metrics
-- Queue depth and wait times
-- System resource utilization
-- Error rates and types
+## Types
 
-## Best Practices
+`types.py` is the canonical source for routing enums and graph-ID helpers;
+there is no separate `clusters.py`.
 
-1. **Use the Router**: Always use GraphRouter for database access
-2. **Handle Errors**: Implement proper error handling for queries
-3. **Set Priorities**: Use appropriate priorities for queries
-4. **Monitor Queues**: Watch queue depth and adjust capacity
-5. **Close Connections**: Always close repository connections
+| Name                | Meaning                                              |
+| ------------------- | ---------------------------------------------------- |
+| `NodeType`          | Node role — writer, shared master, shared replica     |
+| `RepositoryType`    | Entity graph vs shared repository                     |
+| `GraphCategory`     | `USER`, `SHARED`, `SYSTEM`                            |
+| `AccessPattern`     | `READ_ONLY`, `READ_WRITE`, `RESTRICTED`               |
+| `ConnectionPattern` | Connection routing strategy                           |
 
-## Performance Considerations
+It also exposes `is_subgraph_id`, `parse_graph_id`, `construct_subgraph_id`,
+`GraphIdentity`, and `GraphTypeRegistry`. `GraphTier` (`LADYBUG_STANDARD`,
+`LADYBUG_LARGE`, `LADYBUG_XLARGE`) comes from `config/graph_tier.py` and is
+re-exported here.
 
-1. **Connection Pooling**: Reuse connections via the pool
-2. **Query Optimization**: Use indexes and limit result sets
-3. **Batch Operations**: Batch multiple operations when possible
-4. **Caching**: Leverage result caching for read-heavy workloads
-5. **Load Distribution**: Use read replicas for read operations
+`utils/` holds `MultiTenantUtils`, which aggregates static helpers from
+`validation.py`, `database.py`, `identity.py`, and `subgraph.py`:
 
-## Troubleshooting
+```python
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
-Common issues and solutions:
+graph_id = MultiTenantUtils.validate_graph_id("kg1a2b3c")
+db_name = MultiTenantUtils.get_database_name(graph_id)
+is_shared = MultiTenantUtils.is_shared_repository("sec")
+```
 
-1. **High Queue Depth**
+## Configuration
 
-   - Increase concurrent execution limit
-   - Add more worker instances
-   - Optimize slow queries
+Read every one of these through `robosystems.config.env`, never `os.getenv()`.
 
-2. **Admission Rejections**
+```bash
+LBUG_DATABASE_PATH=./data/lbug-dbs      # database directory
+LBUG_ACCESS_PATTERN=api_auto            # api_auto | api_writer | direct_file
+LBUG_NODE_TYPE=writer
+LBUG_CONNECTION_POOL_SIZE=10
+LBUG_DATABASES_PER_INSTANCE=10
+GRAPH_API_URL=                          # resolved dynamically in prod
+```
 
-   - Check system resources
-   - Scale infrastructure
-   - Implement backoff in clients
+Queue and admission settings are **SSM-tunable at runtime** (no redeploy) —
+they resolve through `TuningConfig` with an env-var override:
 
-3. **Connection Errors**
+| Setting                      | SSM key                     | Default |
+| ---------------------------- | --------------------------- | ------- |
+| `QUERY_QUEUE_MAX_SIZE`       | `queues/MAX_SIZE`           | 1000    |
+| `QUERY_QUEUE_MAX_CONCURRENT` | `queues/MAX_CONCURRENT`     | 50      |
+| `QUERY_QUEUE_MAX_PER_USER`   | `queues/MAX_PER_USER`       | 10      |
+| `QUERY_QUEUE_TIMEOUT`        | `queues/TIMEOUT`            | 300 s   |
+| `ADMISSION_MEMORY_THRESHOLD` | `admission/MEMORY_THRESHOLD`| 85.0 %  |
+| `ADMISSION_CPU_THRESHOLD`    | `admission/CPU_THRESHOLD`   | 90.0 %  |
+| `ADMISSION_QUEUE_THRESHOLD`  | `admission/QUEUE_THRESHOLD` | 80.0 %  |
+| `LOAD_SHEDDING_ENABLED`      | `LOAD_SHEDDING_ENABLED`     | true    |
 
-   - Verify network connectivity
-   - Check instance health
-   - Review security groups
+```bash
+just ssm-get prod tuning/queues/MAX_CONCURRENT
+just ssm-set prod tuning/queues/MAX_CONCURRENT 64
+```
 
-4. **Slow Queries**
-   - Add appropriate indexes
-   - Limit result sets
-   - Use query profiling
+## Local debugging
 
-## Related Documentation
+```bash
+just graph-health                          # Graph API health
+just graph-info GRAPH_ID                   # database info
+just graph-query GRAPH_ID "MATCH (n) RETURN count(n)"
+just lbug-query GRAPH_ID "MATCH (n) RETURN count(n)"   # bypass the API
+```
 
-### Core Services Layer
+## Related
 
-- **[Core Services Overview](/robosystems/graph_api/core/README.md)** - Complete overview of the core services architecture
-- **[LadybugDB Service](/robosystems/graph_api/core/ladybug/README.md)** - Embedded database services (Engine, Pool, Manager, Service)
-- **[DuckDB Staging](/robosystems/graph_api/core/duckdb/README.md)** - Data staging and transformation layer
-
-### Middleware Components
-
-- **[Subgraph Utilities](/robosystems/middleware/graph/utils/subgraph.py)** - Subgraph ID parsing and validation
-- **[Multi-tenant Utilities](/robosystems/middleware/graph/utils/)** - Database resolution and access patterns
-- **[Allocation Manager](/robosystems/middleware/graph/allocation_manager.py)** - DynamoDB-based database allocation
-
-### Configuration
-
-- **[Billing Plans](/robosystems/config/billing/core.py)** - Subscription tiers and features (the `config/billing/` package)
-- **[Rate Limiting](/robosystems/config/rate_limits.py)** - Burst-focused rate limiting
-- **[Graph Tier Configuration](/.github/configs/graph.yml)** - Infrastructure tier specifications
-
-### API Documentation
-
-- **[Graph API README](/robosystems/graph_api/README.md)** - Complete Graph API overview
-- **[API Routers](/robosystems/graph_api/routers/)** - FastAPI endpoint implementations
-- **[API Models](/robosystems/graph_api/models/)** - Request/response schemas
+- [`../../graph_api/core/README.md`](../../graph_api/core/README.md) — core services
+- [`../../graph_api/core/ladybug/README.md`](../../graph_api/core/ladybug/README.md) — engine, pool, manager, service
+- [`../../graph_api/core/duckdb/README.md`](../../graph_api/core/duckdb/README.md) — staging layer
+- [`../../graph_api/README.md`](../../graph_api/README.md) — Graph API service
+- [`../auth/README.md`](../auth/README.md) — authentication and graph access
+- [`../billing/README.md`](../billing/README.md) — credits and enforcement
+- `.github/configs/graph.yml` — authoritative tier and instance specifications

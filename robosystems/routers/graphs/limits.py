@@ -133,10 +133,8 @@ async def get_graph_limits(
       else FALLBACK_TIER
     )
 
-    # Get storage information (instance storage limit from graph.yml).
-    # Reads the itemized breakdown so this agrees with `instance_usage` below
-    # and with cap enforcement — all three previously disagreed, and this one
-    # read a field name the Graph API never emitted, so it was always 0.
+    # Instance storage limit from graph.yml. Reads the itemized breakdown so
+    # this figure agrees with `instance_usage` below and with cap enforcement.
     max_storage_gb = GraphTierConfig.get_instance_storage_limit_gb(graph_tier)
     storage_limits = {
       "current_usage_gb": None,
@@ -208,10 +206,8 @@ async def get_graph_limits(
     backup_limits = get_tier_backup_limits(graph_tier)
 
     # Report what the limiter actually enforces, read from the same table the
-    # limiter reads. This previously computed 60 x api_rate_multiplier, which
-    # told Large 90/min and XLarge 150/min while enforcement gave every tier
-    # 60 — the multiplier is read in several places and applied in none.
-    # Reporting a limit we do not honour is worse than reporting a lower one.
+    # limiter reads. Deriving this from api_rate_multiplier would advertise a
+    # ceiling no tier is granted.
     query_limit = RateLimitConfig.get_rate_limit(
       enforced_tier, EndpointCategory.GRAPH_QUERY
     )
@@ -349,7 +345,6 @@ async def get_graph_limits(
       except Exception as e:
         logger.warning(f"Could not get instance usage for {graph_id}: {e}")
 
-    # Build comprehensive response using typed models
     response = GraphLimitsResponse(
       graph_id=graph_id,
       # Graph subscriptions are per graph, not per user (User has no tier
@@ -377,7 +372,6 @@ async def get_graph_limits(
       instance=instance_usage,
     )
 
-    # Record success
     circuit_breaker.record_success(graph_id, "graph_limits")
 
     return response

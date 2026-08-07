@@ -1,4 +1,4 @@
-High-performance REST API for LadybugDB graph database operations. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure with dedicated instances and subgraph support, plus shared repositories for public datasets (SEC filings). Built-in health monitoring, streaming query results, and vector search.
+REST API for LadybugDB graph database operations. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and backup/restore. Features tiered infrastructure with dedicated instances and subgraph support, plus shared repositories for public datasets (SEC filings). Built-in health monitoring, streaming query results, and vector search.
 
 ## Core Features
 
@@ -71,8 +71,8 @@ Shared data repositories (currently SEC filings) are available as read-only data
 
 The API supports multiple infrastructure tiers optimized for different workload requirements:
 
-- **ladybug-standard**: Dedicated m7g.large instances (8 GB, 3 subgraphs)
-- **ladybug-large**: Dedicated r7g.large instances (16 GB, 10 subgraphs)
+- **ladybug-standard**: Dedicated m7g.medium instances (4 GB, 3 subgraphs)
+- **ladybug-large**: Dedicated m7g.large instances (8 GB, 10 subgraphs)
 - **ladybug-xlarge**: Dedicated r7g.xlarge instances (32 GB, 25 subgraphs)
 - **ladybug-shared**: Platform infrastructure for shared repositories
 

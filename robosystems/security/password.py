@@ -37,7 +37,7 @@ class PasswordValidationResult:
 
 
 class PasswordSecurity:
-  """Secure password utilities with enterprise-grade requirements."""
+  """Password validation, strength scoring, hashing, and generation."""
 
   # Password requirements
   MIN_LENGTH = 12
@@ -94,14 +94,11 @@ class PasswordSecurity:
     cls, password: str, email: str | None = None
   ) -> PasswordValidationResult:
     """
-    Validate password against security requirements.
+    Validate a password against the policy and score it 0-100.
 
-    Args:
-        password: Password to validate
-        email: User email for personalization checks
-
-    Returns:
-        PasswordValidationResult with validation details
+    Passing ``email`` additionally penalizes passwords containing parts of the
+    user's own address. A password is valid only with zero errors AND a score
+    of at least MIN_STRENGTH_SCORE.
     """
     errors = []
     suggestions = []
@@ -223,30 +220,13 @@ class PasswordSecurity:
 
   @classmethod
   def hash_password(cls, password: str) -> str:
-    """
-    Hash a password using bcrypt with high security settings.
-
-    Args:
-        password: Plain text password
-
-    Returns:
-        Bcrypt hash string
-    """
+    """Hash a password with bcrypt at BCRYPT_ROUNDS cost."""
     salt = bcrypt.gensalt(rounds=cls.BCRYPT_ROUNDS)
     return bcrypt.hashpw(cls._bcrypt_bytes(password), salt).decode("utf-8")
 
   @classmethod
   def verify_password(cls, password: str, hashed: str) -> bool:
-    """
-    Verify a password against its bcrypt hash.
-
-    Args:
-        password: Plain text password
-        hashed: Stored bcrypt hash
-
-    Returns:
-        True if password matches hash
-    """
+    """Verify a password against its bcrypt hash; malformed hashes return False."""
     try:
       return bcrypt.checkpw(cls._bcrypt_bytes(password), hashed.encode("utf-8"))
     except (ValueError, TypeError):
@@ -265,13 +245,9 @@ class PasswordSecurity:
   @classmethod
   def generate_secure_password(cls, length: int = 16) -> str:
     """
-    Generate a cryptographically secure password.
+    Generate a cryptographically secure password meeting the policy.
 
-    Args:
-        length: Password length (minimum 12)
-
-    Returns:
-        Secure password meeting all requirements
+    ``length`` is raised to MIN_LENGTH if smaller.
     """
     if length < cls.MIN_LENGTH:
       length = cls.MIN_LENGTH
@@ -330,12 +306,7 @@ class PasswordSecurity:
 
   @classmethod
   def get_password_policy(cls) -> dict[str, Any]:
-    """
-    Get the current password policy for frontend display.
-
-    Returns:
-        Dictionary describing password requirements
-    """
+    """Get the current password policy, for frontend display of requirements."""
     return {
       "min_length": cls.MIN_LENGTH,
       "max_length": cls.MAX_LENGTH,

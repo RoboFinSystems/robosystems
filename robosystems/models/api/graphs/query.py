@@ -1,19 +1,15 @@
-"""Graph management API models."""
+"""Cypher query request/response models and Neo4j-dialect translation."""
 
 import re
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-# Import secure write operation detection
-
-# Neo4j to LadybugDB query translation patterns
 NEO4J_DB_COMMANDS = re.compile(
   r"CALL\s+db\.(schema|labels|relationships|relationshipTypes|propertyKeys|indexes|constraints)\s*\(\s*\)",
   re.IGNORECASE | re.MULTILINE,
 )
 
-# Mapping of Neo4j commands to LadybugDB equivalents
 NEO4J_TO_LADYBUG_MAPPING = {
   "db.schema": "SHOW_TABLES()",
   "db.labels": "SHOW_TABLES()",
@@ -24,40 +20,28 @@ NEO4J_TO_LADYBUG_MAPPING = {
   "db.constraints": "SHOW_TABLES()",  # LadybugDB doesn't have constraints like Neo4j
 }
 
-# Constants
 MAX_QUERY_LENGTH = 50000
 DEFAULT_QUERY_TIMEOUT = 60
 
 
 def translate_neo4j_to_lbug(query: str) -> str:
-  """
-  Translate Neo4j-style db.* commands to LadybugDB equivalents.
+  """Rewrite Neo4j ``CALL db.*()`` introspection into LadybugDB equivalents.
 
-  Args:
-      query: The original Cypher query
-
-  Returns:
-      Translated query compatible with LadybugDB
+  Queries with no such call are returned unchanged. LadybugDB requires an
+  explicit RETURN after the call, so one is appended when the query lacks it.
   """
-  # Check if query contains Neo4j db.* commands
   match = NEO4J_DB_COMMANDS.search(query)
   if not match:
     return query
 
-  # Extract the command type
   command = match.group(1).lower()
 
-  # Handle different command types
   if command in ["schema", "labels", "relationships", "relationshiptypes"]:
-    # Replace with LadybugDB SHOW_TABLES
     translated = NEO4J_DB_COMMANDS.sub("CALL SHOW_TABLES()", query)
 
-    # If there's no RETURN statement after the CALL, add it
     if not re.search(r"RETURN\s+", translated, re.IGNORECASE):
-      # Handle case where CALL is at the end of the query
       if translated.strip().endswith("SHOW_TABLES()"):
         translated = translated.strip() + " RETURN *"
-      # Handle case where there might be other clauses after CALL
       else:
         translated = re.sub(
           r"(CALL\s+SHOW_TABLES\(\s*\))",
@@ -68,15 +52,12 @@ def translate_neo4j_to_lbug(query: str) -> str:
 
     return translated
   elif command == "propertykeys":
-    # For property keys, we need to return table info
-    # Since we can't query all tables at once, we'll just show node tables
-    # Users can then use TABLE_INFO on specific tables
+    # LadybugDB has no all-tables property listing; return the table list so
+    # the caller can follow up with TABLE_INFO on the ones it cares about.
     return "CALL SHOW_TABLES() RETURN *"
   else:
-    # For other commands, default to SHOW_TABLES
     translated = NEO4J_DB_COMMANDS.sub("CALL SHOW_TABLES()", query)
 
-    # If there's no RETURN statement after the CALL, add it
     if not re.search(r"RETURN\s+", translated, re.IGNORECASE):
       if translated.strip().endswith("SHOW_TABLES()"):
         translated = translated.strip() + " RETURN *"

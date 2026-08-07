@@ -137,8 +137,8 @@ class ClassificationLite(BaseModel):
 class ConnectionLite(BaseModel):
   """Connection (= Association) projection.
 
-  Renamed at the API boundary to match Charlie's ontology vocabulary.
-  The underlying storage table is still ``associations``.
+  "Connection" is the ontology term used on the wire; the storage table is
+  ``associations`` (``models/extensions/association.py``).
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -174,10 +174,9 @@ class FactLite(BaseModel):
 
   id: str
   element_id: str
-  # Denormalized from the related Element row so consumers can render
-  # fact rows without an additional join through `elements[]`. Populated
-  # by `fact_to_lite` when an element lookup is supplied; null on
-  # legacy paths that haven't been migrated yet.
+  # Denormalized from the related Element row so consumers can render fact
+  # rows without an additional join through `elements[]`. Populated by
+  # `fact_to_lite` when an element lookup is supplied, null when it is not.
   element_name: str | None = None
   element_qname: str | None = None
   value: float | None = Field(
@@ -201,10 +200,8 @@ class FactLite(BaseModel):
 class FactSetLite(BaseModel):
   """FactSet projection — period-specific instantiation of the Structure.
 
-  The envelope carries one ``FactSetLite`` per block when a FactSet row
-  exists for the requested period; legacy writes that pre-date FactSet
-  stamping leave ``fact_set`` null until the expand pass starts
-  populating those rows.
+  The envelope carries one ``FactSetLite`` per block when a FactSet row exists
+  for the requested period, and leaves ``fact_set`` null when none does.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -224,8 +221,8 @@ class FactSetLite(BaseModel):
   report_id: str | None = Field(
     None,
     description=(
-      "Back-pointer to the ``reports`` table while ``report_id`` still "
-      "lives on facts. Drops out once the retirement migration lands."
+      "Back-pointer to the parent row in ``reports``. Null when the FactSet "
+      "does not belong to a report package."
     ),
   )
   scenario_id: str | None = Field(
@@ -242,7 +239,7 @@ class FactSetLite(BaseModel):
       "Typed ``FactProvenance`` descriptor (discriminated on ``origin``: "
       "pivot | schedule | derived | asserted) recording how this FactSet's "
       "facts were constructed. Surfaced as JSON, mirroring how mechanics "
-      "is exposed. Null for pre-feature historical FactSets."
+      "is exposed. Null when the FactSet carries no descriptor."
     ),
   )
 
@@ -435,12 +432,10 @@ class RuleLite(BaseModel):
 class ScheduleMechanics(BaseModel):
   """Closing-entry generator mechanics for ``block_type='schedule'``.
 
-  Reads directly from the typed ``structures.artifact_mechanics`` JSONB
-  column. ``entry_template`` and ``schedule_metadata`` are typed
-  sub-models (reusing the wire-level request shapes so OpenAPI emits one
-  canonical type per concept); the envelope builder falls back to
-  ``structures.metadata_`` for legacy Schedule rows that the tenant
-  backfill hasn't yet migrated to the typed column.
+  Reads the typed ``structures.artifact_mechanics`` JSONB column, falling back
+  to ``structures.metadata_`` for Schedule rows that lack it.
+  ``entry_template`` and ``schedule_metadata`` reuse the wire-level request
+  shapes so OpenAPI emits one canonical type per concept.
   """
 
   kind: Literal["closing_entry_generator"] = "closing_entry_generator"
@@ -687,7 +682,7 @@ class LineGrowthLite(BaseModel):
 
 
 class ForecastMechanics(BaseModel):
-  """Authored scenario container for ``block_type='forecast'`` (FP&A F-1).
+  """Authored scenario container for ``block_type='forecast'``.
 
   The block IS the scenario: its structure id is the ``scenario_id``
   every derived forward FactSet carries (NULL = actuals). The authored
@@ -854,11 +849,10 @@ class ArtifactResponse(BaseModel):
 class RenderingRowLite(BaseModel):
   """One row of a server-side rendered statement.
 
-  Mirrors :class:`FactRow` from the legacy
-  :mod:`robosystems.operations.roboledger.reports.fact_grid` but lives at
-  the API boundary so envelope consumers don't depend on the
-  fact-grid module. ``values`` is one entry per period column in
-  :class:`RenderingLite.periods`.
+  Mirrors :class:`FactRow` in
+  :mod:`robosystems.operations.roboledger.reports.fact_grid`, restated at the
+  API boundary so envelope consumers don't depend on that module. ``values``
+  holds one entry per period column in :class:`RenderingLite.periods`.
   """
 
   model_config = ConfigDict(from_attributes=True)

@@ -1,8 +1,7 @@
-"""Materialize command — business logic extracted from the old materialize router.
+"""Business logic behind the ``materialize`` graph operation.
 
-Called by the graph operations router's ``materialize_op`` handler.
-Returns a dict with ``operation_id`` and ``status`` fields so the
-caller can wrap the result in an ``OperationEnvelope``.
+Returns ``operation_id`` and ``status`` for the router to wrap in an
+``OperationEnvelope``.
 """
 
 from __future__ import annotations

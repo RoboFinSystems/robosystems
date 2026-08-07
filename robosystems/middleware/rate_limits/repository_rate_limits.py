@@ -1,14 +1,11 @@
-"""
-Repository-specific rate limiting for shared repositories like SEC.
+"""Volume limits for shared repositories such as SEC.
 
-This module implements the subscription-plan *volume* limits for shared
-repositories. Per-request *burst* protection is handled upstream by the
-per-tier FastAPI dependency (``subscription_aware_rate_limit_dependency``),
-so this layer only enforces the manifest's per-plan volume caps.
+Enforces the subscription plan's per-plan volume caps from the adapter
+manifest. Per-request *burst* protection is a separate, upstream layer
+(``subscription_aware_rate_limit_dependency``).
 
-IMPORTANT: Both direct API queries and MCP queries are included.
-Rate limits are applied to prevent abuse and ensure fair usage across tiers.
-No credits are consumed for any query operations.
+Both direct API queries and MCP queries count against these caps. Queries
+consume no credits — this is the only thing bounding their use.
 """
 
 from datetime import UTC, datetime
@@ -53,8 +50,7 @@ BLOCKED_SHARED_ENDPOINTS = [
 
 
 class SharedRepositoryRateLimits:
-  """
-  Rate limits specific to shared repositories by subscription tier.
+  """Rate limits specific to shared repositories by subscription tier.
 
   Uses the shared repository registry as the accessor for rate limits from manifests.
   NO FREE TIER - all access requires a paid subscription.
@@ -77,8 +73,7 @@ class SharedRepositoryRateLimits:
 
 
 class DualLayerRateLimiter:
-  """
-  Enforce shared-repository subscription-plan *volume* limits.
+  """Enforce shared-repository subscription-plan *volume* limits.
 
   Per-request burst protection is applied upstream by the per-tier FastAPI
   dependency (``subscription_aware_rate_limit_dependency``); this class only
@@ -97,19 +92,7 @@ class DualLayerRateLimiter:
     endpoint: str,
     repository_plan: str | None = None,
   ) -> dict:
-    """
-    Check shared-repository per-plan volume limits.
-
-    Args:
-        user_id: User making the request
-        graph_id: Graph ID (could be "sec"/"sec_historical" for a shared repo)
-        operation: Operation type (query, mcp, search)
-        endpoint: The actual endpoint being called
-        repository_plan: Repository subscription plan (for volume limits)
-
-    Returns:
-        Dict with allowed status and details
-    """
+    """Check shared-repository per-plan volume limits."""
     from robosystems.config import env
 
     # Only shared repositories (including subgraphs like sec_historical) are

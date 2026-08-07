@@ -127,19 +127,17 @@ class XBRLGraphProcessor:
         self.schema_adapter, self.ingest_adapter, self.enable_column_standardization
       )
 
-      # Initialize all DataFrames through the manager
       dataframes = self.df_manager.initialize_all_dataframes()
 
-      # Set DataFrames as instance attributes for backward compatibility
+      # The rest of this class reads its tables as plain attributes
+      # (self.entities_df, self.facts_df, …), so bind each one here.
       for df_attr_name, df in dataframes.items():
         setattr(self, df_attr_name, df)
 
-      # Create dynamic DataFrame mapping
       self.schema_to_dataframe_mapping = (
         self.df_manager.create_dynamic_dataframe_mapping()
       )
 
-      # Initialize Parquet writer
       self.parquet_writer = ParquetWriter(
         self.output_dir,
         self.schema_adapter,
@@ -164,7 +162,7 @@ class XBRLGraphProcessor:
   def safe_concat(
     self, existing_df: pd.DataFrame, new_df: pd.DataFrame
   ) -> pd.DataFrame:
-    """Safely concatenate DataFrames (delegates to xbrl.naming_utils)."""
+    """Safely concatenate DataFrames (delegates to `processors.ids`)."""
     return safe_concat(existing_df, new_df)
 
   def process(self):
@@ -276,7 +274,7 @@ class XBRLGraphProcessor:
     """Async version of process method for use in async contexts."""
     logger.info(f"Starting async XBRL processing for report: {self.report_uri}")
 
-    # Async version just calls the sync version since we're working with DataFrames
+    # Nothing here awaits — the whole pipeline is synchronous DataFrame work.
     self.process()
 
   def output_parquet_files(self):
@@ -378,10 +376,9 @@ class XBRLGraphProcessor:
   def enrich_dataframes(self):
     """Batch canonical enrichment of Element and Structure DataFrames.
 
-    Query embeddings are computed transiently to assign canonical concepts /
-    types, but no embedding vector is persisted (the LanceDB semantic-element
-    search was retired). Labels are no longer enriched at all — their
-    embeddings were computed and then dropped at staging."""
+    Embeddings are computed transiently to assign canonical concepts / types;
+    no embedding vector is persisted. Labels are not enriched — they carry no
+    canonical concept, so there is nothing for enrichment to assign."""
     from robosystems.adapters.sec.enrichment import (
       SemanticEnricher,
       camel_case_to_words,
@@ -446,10 +443,8 @@ class XBRLGraphProcessor:
         f"Element enrichment complete: {matched}/{len(self.elements_df)} matched to canonical concepts"
       )
 
-    # Labels are intentionally not enriched — they carry no canonical concept,
-    # and their embeddings (the only thing enrichment ever produced for them)
-    # were dropped at staging. Retiring the vector index removes the last
-    # reason to embed them.
+    # Labels are deliberately skipped: they carry no canonical concept, and
+    # nothing downstream consumes a label embedding.
 
     # ----- Structures ------------------------------------------------------
     if hasattr(self, "structures_df") and not self.structures_df.empty:
@@ -470,7 +465,7 @@ class XBRLGraphProcessor:
         text = compose_structure_text(parsed_name, row.get("definition", ""))
         texts.append(text)
 
-      # Fix names that were empty from the old parser
+      # Fill in names the stored row left empty
       for idx, name in enumerate(parsed_names):
         if name and not self.structures_df.iloc[idx].get("name"):
           self.structures_df.iloc[idx, self.structures_df.columns.get_loc("name")] = (
@@ -638,7 +633,7 @@ class XBRLGraphProcessor:
       )
 
   def make_entity(self):
-    """Create the main entity (formerly entity) for this graph."""
+    """Create the top-level (filer) entity for this graph."""
     logger.debug(f"Creating entity data for ID: {self.entityId}")
     if not self.entityId:
       logger.warning("No entity ID provided")
@@ -1072,13 +1067,13 @@ class XBRLGraphProcessor:
       "identifier": identifier,
       "uri": fact_uri,
       "value": fact_value,
-      "numeric_value": numeric_value,  # NEW: Computed numeric value for calculations
+      "numeric_value": numeric_value,  # Parsed value, for calculations
       "fact_type": "Numeric" if xfact.unit is not None else "Nonnumeric",
       "decimals": xfact.decimals if xfact.unit is not None else None,
-      "value_type": value_type,  # NEW: Indicates inline vs external storage
-      "content_type": content_type,  # NEW: MIME type for externalized content
+      "value_type": value_type,  # inline vs external storage
+      "content_type": content_type,  # MIME type for externalized content
       "has_dimensions": has_dimensions,  # True if fact has dimensional breakdowns
-      "dimension_count": dimension_count,  # Number of dimensions (0=consolidated, 1=single, 2+=complex)
+      "dimension_count": dimension_count,  # 0=consolidated, 1=single, 2+=complex
     }
 
     logger.debug(f"Created new fact: {fact_uri}")
@@ -1993,14 +1988,14 @@ class XBRLGraphProcessor:
 
     # Extract element information for deduplication via COPY with IGNORE_ERRORS
     qname_str = str(xconcept.qname)
-    # Extract simple name from qname for easier querying (Claude Opus recommendation)
+    # Local name (qname minus prefix) so queries can match without the namespace
     element_name = qname_str.split(":")[-1] if ":" in qname_str else qname_str
 
     element_data = {
       "identifier": element_identifier,
       "uri": concept_uri,
       "qname": qname_str,
-      "name": element_name,  # NEW: Simple name for easier querying
+      "name": element_name,
       "period_type": xconcept.periodType,
       "type": xconcept.niceType,
       "balance": xconcept.balance,
@@ -2139,7 +2134,7 @@ class XBRLGraphProcessor:
       # report-scoped. Carry element_uri so "this report's label for element X"
       # is an exact lookup — the shared, content-addressed Label pool alone can't
       # distinguish which element a label belongs to. URI (not qname) keeps the
-      # join exact for filer-extension elements. See sec-label-scoping spec.
+      # join exact for filer-extension elements.
       if hasattr(self, "taxonomy_data"):
         taxonomy_label_rel = {
           "from": self.taxonomy_data["identifier"],

@@ -198,16 +198,9 @@ class SECDownloader:
     year: int,
     bucket: str | None = None,
   ) -> DownloadStats:
-    """
-    Download a list of filings to S3.
+    """Download EFTS hits to S3 in parallel, under the shared rate limiter.
 
-    Args:
-        hits: List of EFTS hits to download
-        year: Year for S3 path partitioning
-        bucket: S3 bucket (default: SHARED_RAW_BUCKET)
-
-    Returns:
-        DownloadStats with counts of downloaded, skipped, failed.
+    `year` partitions the S3 path; `bucket` defaults to SHARED_RAW_BUCKET.
     """
     bucket = bucket or env.SHARED_RAW_BUCKET
     self._stats.filings_found = len(hits)
@@ -246,14 +239,8 @@ class SECDownloader:
     """
     Download all filings for a year using EFTS discovery.
 
-    Args:
-        year: Year to download
-        form_types: Form types to download (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
-        ciks: Optional list of CIKs to filter
-        bucket: S3 bucket (default: SHARED_RAW_BUCKET)
-
-    Returns:
-        DownloadStats with counts.
+    `form_types` defaults to 10-K, 10-Q, 20-F, 40-F, DEF 14A, S-1; `ciks`
+    narrows to specific filers.
 
     Example:
         async with SECDownloader() as downloader:

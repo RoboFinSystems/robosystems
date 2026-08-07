@@ -21,17 +21,7 @@ def get_backup_manager():
 
 
 def verify_graph_access(current_user: User, graph_id: str, db: Session) -> None:
-  """
-  Verify user has access to the specified graph.
-
-  Args:
-      current_user: Authenticated user
-      graph_id: Graph identifier to check access for
-      db: Database session
-
-  Raises:
-      HTTPException: If user doesn't have access to the graph
-  """
+  """Verify the user has access to the graph, raising 403 otherwise."""
   if not GraphUser.user_has_access(current_user.id, graph_id, db):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this graph"
@@ -39,17 +29,7 @@ def verify_graph_access(current_user: User, graph_id: str, db: Session) -> None:
 
 
 def verify_admin_access(current_user: User, graph_id: str, db: Session) -> None:
-  """
-  Verify user has admin access to the specified graph.
-
-  Args:
-      current_user: Authenticated user
-      graph_id: Graph identifier to check admin access for
-      db: Database session
-
-  Raises:
-      HTTPException: If user doesn't have admin access to the graph
-  """
+  """Verify the user has admin access to the graph, raising 403 otherwise."""
   if not GraphUser.user_has_admin_access(current_user.id, graph_id, db):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,

@@ -118,6 +118,8 @@ See RoboSystems in action with runnable demos that create graphs, load data, and
 just demo-sec               # Loads NVIDIA's SEC XBRL data via Dagster pipeline
 just demo-roboledger        # End-to-end RoboLedger demo: bulk OLTP, schedules, FY 2025 filed report, AI close
 just demo-custom-graph      # Builds custom graph schema with relationship networks
+just demo-coffee-roaster    # Synthetic manufacturing scenario
+just demo-saas-startup      # Synthetic SaaS scenario
 ```
 
 Each demo has a corresponding [Wiki article](https://github.com/RoboFinSystems/robosystems/wiki) with detailed guides.
@@ -318,6 +320,8 @@ pip install robosystems-client
 
 ### Developer Documentation (Codebase)
 
+Each package documents itself — read the README for a directory before working in it.
+
 **Core Services:**
 
 - **[Adapters](/robosystems/adapters/README.md)** - External service integrations
@@ -358,7 +362,7 @@ pip install robosystems-client
 
 - **[Examples](/examples/README.md)** - Runnable demos and integration examples
 - **[Tests](/tests/README.md)** - Testing strategy and organization
-- **[Admin Tools](/robosystems/admin/README.md)** - Administrative utilities and cli
+- **[Admin Tools](/robosystems/admin/README.md)** - Administrative utilities and CLI
 
 **Security & Compliance:**
 
@@ -378,6 +382,7 @@ pip install robosystems-client
 - [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)
+- [CONTRIBUTING.md](/.github/CONTRIBUTING.md) — branch conventions, coding standards, and the pull request process
 
 ## License
 

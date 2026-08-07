@@ -61,16 +61,12 @@ class DeprovisionResult:
 
 
 class GraphDeprovisionService:
-  """Service for deprovisioning graph infrastructure.
+  """Tear down a graph's infrastructure, in dependency order.
 
-  Handles the full teardown lifecycle:
-  1. Create final backup (optional)
-  2. Delete subgraph databases
-  3. Delete parent database
-  4. Deallocate DynamoDB routing registry
-  5. Clean PostgreSQL records
-  6. Update subscription metadata
-  7. Soft-delete the graph record
+  Backup first (optional), then subgraph databases, the parent database, the
+  DynamoDB routing entry, the PostgreSQL records, the subscription metadata,
+  and finally the soft-delete of the graph row. Later steps assume earlier ones
+  ran, so the order is not arbitrary.
   """
 
   def __init__(self, environment: str):
@@ -83,16 +79,14 @@ class GraphDeprovisionService:
     create_backup: bool = True,
     skip_backup_check: bool = False,
   ) -> DeprovisionResult:
-    """Deprovision a graph, tearing down all infrastructure.
+    """Tear down a graph. Destructive and not reversible from here.
 
-    Args:
-        graph_id: The graph to deprovision.
-        session: Active SQLAlchemy session (caller manages lifecycle).
-        create_backup: Whether to create a final backup before teardown.
-        skip_backup_check: If True, skip backup even when config requires it.
+    The caller owns ``session``. ``skip_backup_check`` bypasses the
+    configuration's backup requirement, so a graph can be torn down with no
+    recoverable copy — use it only when the data is known to be disposable.
 
-    Returns:
-        DeprovisionResult with status and details of each step.
+    Individual steps are best-effort: a failure is recorded in the result's
+    ``errors`` and downgrades the status to ``partial`` rather than aborting.
     """
     from ...models.core.graph import Graph, GraphStatus
 

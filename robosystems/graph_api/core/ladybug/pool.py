@@ -1,16 +1,11 @@
 """
-Thread-Safe LadybugDB Connection Pool
+Thread-safe LadybugDB connection pool.
 
-This module provides a production-ready connection pool for LadybugDB databases
-with proper thread safety, connection limits, TTL, and health checking.
+Hands out connections per database under a per-database lock, with a cap on
+concurrent connections, a TTL, periodic health checks and cleanup on shutdown.
 
-Key features:
-- Thread-safe connection management using locks
-- Configurable connection limits per database
-- Connection TTL and automatic cleanup
-- Connection health checking and recovery
-- Metrics and monitoring integration
-- Graceful connection cleanup on shutdown
+All connections to one database share a single ``lbug.Database`` object: two
+Database objects over the same file do not see each other's committed writes.
 """
 
 import os
@@ -37,19 +32,17 @@ class ConnectionInfo:
   last_used: datetime
   use_count: int
   is_healthy: bool
-  read_only: bool = False  # Track if connection was opened read-only
+  # Read-only and read-write connections are pooled separately, never swapped.
+  read_only: bool = False
 
 
 class LadybugConnectionPool:
-  """
-  Thread-safe connection pool for LadybugDB databases.
+  """Thread-safe connection pool for the node's LadybugDB databases.
 
-  This pool manages connections with proper lifecycle management,
-  health checking, and resource limits to prevent memory leaks
-  and ensure optimal performance.
-
-  IMPORTANT: All connections for a given database share the same Database
-  object to ensure proper transaction visibility across connections.
+  Bounds connections per database, expires them on a TTL, and drops
+  connections that fail a health check. All connections for one database share
+  a single ``lbug.Database`` object so writes committed on one are visible on
+  the others.
   """
 
   def __init__(
@@ -60,15 +53,12 @@ class LadybugConnectionPool:
     health_check_interval_minutes: int = 5,
     cleanup_interval_minutes: int = 10,
   ):
-    """
-    Initialize connection pool.
+    """Initialize the pool.
 
-    Args:
-        base_path: Base directory for LadybugDB databases
-        max_connections_per_db: Maximum connections per database
-        connection_ttl_minutes: Connection time-to-live in minutes
-        health_check_interval_minutes: How often to check connection health
-        cleanup_interval_minutes: How often to cleanup expired connections
+    A database at ``max_connections_per_db`` does not block: the oldest
+    connection is closed to make room. Maintenance (expiry cleanup and health
+    checks) is not a background thread — it runs opportunistically on acquire,
+    at most once per its interval.
     """
     self.base_path = Path(base_path)
     self.max_connections_per_db = max_connections_per_db
@@ -76,16 +66,13 @@ class LadybugConnectionPool:
     self.health_check_interval = timedelta(minutes=health_check_interval_minutes)
     self.cleanup_interval = timedelta(minutes=cleanup_interval_minutes)
 
-    # Thread-safe storage
     self._pools: dict[str, dict[str, ConnectionInfo]] = {}
     self._locks: dict[str, threading.RLock] = {}
     self._global_lock = threading.RLock()
 
-    # Store Database objects to ensure all connections use the same one
-    # This is critical for transaction visibility in LadybugDB
+    # One Database object per database name, shared by all its connections.
     self._databases: dict[str, lbug.Database] = {}
 
-    # Monitoring
     self._stats = {
       "connections_created": 0,
       "connections_reused": 0,
@@ -94,11 +81,9 @@ class LadybugConnectionPool:
       "health_failures": 0,
     }
 
-    # Cleanup tracking
     self._last_cleanup = datetime.now(UTC)
     self._last_health_check = datetime.now(UTC)
 
-    # Register cleanup on process exit
     weakref.finalize(self, self._cleanup_all_connections)
 
     logger.info(
@@ -107,15 +92,10 @@ class LadybugConnectionPool:
 
   @contextmanager
   def get_connection(self, database_name: str, read_only: bool = False):
-    """
-    Get a connection from the pool (context manager).
+    """Check out a pooled connection for the duration of the ``with`` block.
 
-    Args:
-        database_name: Name of the database
-        read_only: Whether to open in read-only mode
-
-    Yields:
-        lbug.Connection: Database connection
+    Fully consume (and close) any result inside the block — a QueryResult
+    holds Arrow buffers that outlive the block otherwise.
 
     Example:
         with pool.get_connection("my_db") as conn:
@@ -130,16 +110,13 @@ class LadybugConnectionPool:
         self._release_connection(database_name, connection_info)
 
   def _acquire_connection(self, database_name: str, read_only: bool) -> ConnectionInfo:
-    """Acquire a connection from the pool."""
-    # Perform periodic maintenance
+    """Reuse a valid pooled connection, or create one."""
     self._maybe_run_maintenance()
 
     with self._get_database_lock(database_name):
-      # Try to get existing connection
       connection_info = self._get_existing_connection(database_name, read_only)
 
       if connection_info and self._is_connection_valid(connection_info):
-        # Reuse existing connection
         connection_info.last_used = datetime.now(UTC)
         connection_info.use_count += 1
         self._stats["connections_reused"] += 1
@@ -148,28 +125,21 @@ class LadybugConnectionPool:
         )
         return connection_info
 
-      # Create new connection
       return self._create_new_connection(database_name, read_only)
 
   def _release_connection(self, database_name: str, connection_info: ConnectionInfo):
-    """Release a connection back to the pool."""
-    # Connection is automatically returned to pool
-    # No explicit action needed as we're using a simple strategy
+    """Mark a connection as done with. Connections stay in the pool for reuse."""
     logger.debug(f"Released connection for {database_name}")
 
   def invalidate_connection(self, database_name: str):
-    """
-    Invalidate all connections for a database.
+    """Close a database's connections and drop its shared Database object.
 
-    This forces new connections to be created on next access,
-    which can help with transaction visibility issues after bulk operations.
-
-    Args:
-        database_name: Name of the database
+    Discarding the Database object is the point: a bulk load performed outside
+    this process is not visible to the existing object, so the next caller
+    must open a fresh one.
     """
     with self._get_database_lock(database_name):
       if database_name in self._pools:
-        # Close all connections for this database
         for conn_id, conn_info in self._pools[database_name].items():
           try:
             conn_info.connection.close()
@@ -177,11 +147,8 @@ class LadybugConnectionPool:
           except Exception as e:
             logger.warning(f"Error closing connection during invalidation: {e}")
 
-        # Clear the pool for this database
         del self._pools[database_name]
 
-        # Remove the shared Database object to force recreation
-        # This ensures the next connection sees all committed data
         if database_name in self._databases:
           try:
             self._databases[database_name].close()
@@ -202,20 +169,19 @@ class LadybugConnectionPool:
   def _get_existing_connection(
     self, database_name: str, read_only: bool
   ) -> ConnectionInfo | None:
-    """Get an existing connection for a database if available."""
+    """Find the least recently used healthy connection matching ``read_only``."""
     if database_name not in self._pools:
       return None
 
     pool = self._pools[database_name]
 
-    # Find the least recently used healthy connection with matching read_only status
     best_connection = None
     oldest_time = datetime.now(UTC)
 
     for conn_id, conn_info in pool.items():
       if (
         conn_info.is_healthy
-        and conn_info.read_only == read_only  # Match read_only status
+        and conn_info.read_only == read_only
         and conn_info.last_used < oldest_time
         and self._is_connection_valid(conn_info)
       ):
@@ -227,34 +193,29 @@ class LadybugConnectionPool:
   def _create_new_connection(
     self, database_name: str, read_only: bool
   ) -> ConnectionInfo:
-    """Create a new connection for a database."""
-    # Check connection limits
+    """Open a new connection, creating the shared Database object if needed.
+
+    A database already at its connection cap has its oldest connection closed
+    to make room rather than blocking the caller.
+    """
     if database_name in self._pools:
       current_count = len(self._pools[database_name])
       if current_count >= self.max_connections_per_db:
-        # Remove oldest connection to make room
         self._remove_oldest_connection(database_name)
 
     try:
-      # Construct database path safely (LadybugDB uses .lbug files)
       db_path = self.base_path / f"{database_name}.lbug"
 
-      # Get or create shared Database object
-      # CRITICAL: All connections must use the same Database object for transaction visibility
       if database_name not in self._databases:
         logger.info(f"Creating new Database object for {database_name}")
 
-        # Get memory configuration from shared helper (single source of truth)
         from .config import get_database_memory_config
 
         buffer_pool_mb = get_database_memory_config(database_name)
-
-        # Create database with buffer pool size configuration
-        # Note: LadybugDB Python API uses buffer_pool_size in bytes
         buffer_pool_size = buffer_pool_mb * 1024 * 1024
 
-        # Check if this is a replica instance - replicas MUST open read-only
-        # to avoid WAL recovery and lock contention from snapshot-based volumes
+        # Replicas run off snapshot-restored volumes; opening read-write there
+        # triggers WAL recovery and lock contention against the snapshot.
         lbug_role = os.getenv("LBUG_ROLE", "master")
         is_replica = lbug_role == "replica"
 
@@ -264,37 +225,37 @@ class LadybugConnectionPool:
           )
           db_read_only = True
         else:
-          # Masters open read_write to allow both read and write operations.
-          # This prevents the bug where the first read-only request permanently
-          # locks the database in read-only mode.
+          # Masters always open read-write, regardless of the caller's
+          # read_only flag: the Database object is shared, so opening it
+          # read-only for the first request would lock out every later write.
           db_read_only = False
 
-        # For SEC database, use explicit checkpoint threshold for large tables
-        # SEC has huge tables (Fact, Association) that can exhaust memory
+        # SEC's Fact and Association tables are large enough that the default
+        # threshold lets the WAL grow until it exhausts memory.
         if database_name == "sec":
-          checkpoint_threshold = 134217728  # 128MB for SEC (more frequent checkpoints)
+          checkpoint_threshold = 134217728
           logger.info("Using reduced checkpoint threshold (128MB) for SEC database")
         else:
-          checkpoint_threshold = 536870912  # 512MB for regular databases
+          checkpoint_threshold = 536870912
 
-        # Create database with all optimizations
         self._databases[database_name] = lbug.Database(
           str(db_path),
           read_only=db_read_only,
           buffer_pool_size=buffer_pool_size,
-          compression=True,  # Safe: enabled by default in LadybugDB
-          max_num_threads=0,  # Use all available threads (LadybugDB decides)
-          auto_checkpoint=True,  # Enable automatic checkpointing
-          checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
+          compression=True,
+          max_num_threads=0,  # 0 lets LadybugDB use every available thread
+          auto_checkpoint=True,
+          checkpoint_threshold=checkpoint_threshold,
         )
         logger.info(
           f"Database '{database_name}' created - read_only: {db_read_only}, buffer pool: {buffer_pool_mb} MB, "
           f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
         )
 
-        # Load vector extension for FLOAT[N] column support and vector indexes
-        # Must happen once per Database object (persists across connections)
-        # Pre-installed in Docker image; INSTALL is fallback for local dev
+        # FLOAT[N] columns and vector indexes need the vector extension.
+        # Loading it once per Database object is enough — it persists across
+        # that object's connections. Baked into the Docker image; the INSTALL
+        # path covers local dev only.
         try:
           init_conn = lbug.Connection(self._databases[database_name])
           try:
@@ -309,13 +270,12 @@ class LadybugConnectionPool:
 
       db = self._databases[database_name]
 
-      # Create connection from shared Database object
       conn = lbug.Connection(db)
 
-      # Test connection
       try:
         result = conn.execute("RETURN 1 as test")
-        # Handle both single QueryResult and list[QueryResult] return types
+        # execute() returns a QueryResult or a list of them; both must be
+        # closed or their Arrow buffers stay allocated.
         if isinstance(result, list):
           for r in result:
             r.close()
@@ -323,52 +283,41 @@ class LadybugConnectionPool:
           result.close()
         is_healthy = True
 
-        # Apply connection-level configuration AFTER verifying connection is healthy
-        # These are non-critical settings that enhance performance but aren't required
+        # Per-connection tuning, applied only once the connection answers.
+        # None of it is required — a failure here leaves a usable connection.
         try:
-          # Set home directory to the base path (LadybugDB creates .lbug subdirectory)
-          # This keeps temporary files on the same fast EBS volume
-          # Note: Don't add ".lbug" suffix - LadybugDB creates that internally
+          # Keeps LadybugDB's temporary files on the same fast EBS volume as
+          # the databases. It appends ".lbug" itself, so pass the bare path.
           home_dir = str(self.base_path)
 
           conn.execute(f"CALL home_directory='{home_dir}';")
 
-          # Disable progress bar for server applications (not needed in non-interactive mode)
           conn.execute("CALL progress_bar=false;")
 
-          # Set query timeout to 2 minutes (120000ms) to prevent long-running queries
-          # This is a per-query timeout that applies to each individual query
-          # Note: Ingestion operations specifically set this to 30 minutes when needed
+          # Per-query ceiling. Ingestion raises this to 30 minutes for the
+          # duration of a load.
           conn.execute("CALL timeout=120000;")
 
-          # Enable semi-mask optimization for better query performance
-          # This is enabled by default but explicit is better
           conn.execute("CALL enable_semi_mask=true;")
 
-          # Set warning limit to prevent excessive memory usage from warnings
-          # 1024 warnings should be plenty for debugging without consuming too much memory
+          # Caps the memory a pathological query's warnings can consume.
           conn.execute("CALL warning_limit=1024;")
 
-          # Enable spill to disk for large operations to prevent out-of-memory errors
-          # This allows LadybugDB to use disk for temporary storage during large queries
+          # Lets large queries spill temporaries to disk instead of OOMing.
           conn.execute("CALL spill_to_disk=true;")
 
           logger.info(
             f"Applied connection configuration for {database_name} (home_dir={home_dir}, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
           )
         except Exception as config_error:
-          # These settings are nice-to-have but not critical
-          # Log at debug level to avoid noise
           logger.debug(
             f"Could not apply connection settings (non-critical): {config_error}"
           )
-          # Connection is still healthy even if these settings fail
 
       except Exception as e:
         logger.warning(f"New connection health check failed for {database_name}: {e}")
         is_healthy = False
 
-      # Create connection info
       now = datetime.now(UTC)
       connection_info = ConnectionInfo(
         connection=conn,
@@ -380,7 +329,6 @@ class LadybugConnectionPool:
         read_only=read_only,
       )
 
-      # Store in pool
       if database_name not in self._pools:
         self._pools[database_name] = {}
 
@@ -399,7 +347,7 @@ class LadybugConnectionPool:
       raise
 
   def _is_connection_valid(self, connection_info: ConnectionInfo) -> bool:
-    """Check if a connection is still valid."""
+    """Check a connection against the TTL and its last recorded health."""
     if datetime.now(UTC) - connection_info.created_at > self.connection_ttl:
       return False
 
@@ -412,7 +360,6 @@ class LadybugConnectionPool:
 
     pool = self._pools[database_name]
 
-    # Find oldest connection
     oldest_conn_id = None
     oldest_time = datetime.now(UTC)
 
@@ -436,8 +383,8 @@ class LadybugConnectionPool:
 
     try:
       connection_info.connection.close()
-      # Don't close the database here - it's shared and will be closed in _cleanup_all_connections
-      # or when the pool is destroyed. This prevents double-closing.
+      # The Database object is shared by the other connections and is closed
+      # only in _cleanup_all_connections; closing it here double-closes it.
     except Exception as e:
       logger.warning(f"Error closing connection {connection_id}: {e}")
 
@@ -447,15 +394,16 @@ class LadybugConnectionPool:
     logger.debug(f"Closed connection {connection_id} for {database_name}")
 
   def _maybe_run_maintenance(self):
-    """Run maintenance tasks if needed."""
+    """Run expiry cleanup and health checks if their intervals have elapsed.
+
+    Driven by connection acquisition, not a timer: an idle pool does no work.
+    """
     now = datetime.now(UTC)
 
-    # Run cleanup
     if now - self._last_cleanup > self.cleanup_interval:
       self._cleanup_expired_connections()
       self._last_cleanup = now
 
-    # Run health checks
     if now - self._last_health_check > self.health_check_interval:
       self._check_connection_health()
       self._last_health_check = now
@@ -500,7 +448,6 @@ class LadybugConnectionPool:
     try:
       self._stats["health_checks"] += 1
       result = connection_info.connection.execute("RETURN 1 as health_check")
-      # Handle both single QueryResult and list[QueryResult] return types
       if isinstance(result, list):
         for r in result:
           r.close()
@@ -513,7 +460,7 @@ class LadybugConnectionPool:
       return False
 
   def _cleanup_all_connections(self):
-    """Clean up all connections (called on shutdown)."""
+    """Close every connection and Database object. Runs on shutdown."""
     with self._global_lock:
       total_closed = 0
 
@@ -522,7 +469,6 @@ class LadybugConnectionPool:
           self._close_connection(db_name, conn_id)
           total_closed += 1
 
-      # Close all Database objects
       for db_name in list(self._databases.keys()):
         try:
           db = self._databases[db_name]
@@ -537,40 +483,32 @@ class LadybugConnectionPool:
       self._databases.clear()
 
   def force_database_cleanup(self, database_name: str, aggressive: bool = True) -> None:
-    """
-    Force cleanup of all connections and optionally the database object for a specific database.
+    """Drop a database's connections and its Database object to free memory.
 
-    This is useful after large ingestion operations to release memory held by LadybugDB's buffer pool.
-    All existing connections will be closed and new ones will be created on next access.
-
-    Args:
-        database_name: Name of the database to clean up
-        aggressive: If True, use more aggressive memory cleanup techniques
+    Dropping the Database object is what releases LadybugDB's buffer pool —
+    closing connections alone does not — so this is the call to make after a
+    large ingestion. The next access recreates it. ``aggressive`` additionally
+    forces full GC and ``malloc_trim`` to hand the pages back to the OS.
     """
     with self._global_lock:
       logger.debug(
         f"Forcing cleanup for database: {database_name} (aggressive={aggressive})"
       )
 
-      # Close all connections for this database
       if database_name in self._pools:
         pool = self._pools[database_name]
         for conn_id in list(pool.keys()):
           self._close_connection(database_name, conn_id)
 
-        # Clear the pool for this database
         del self._pools[database_name]
         logger.debug(f"Closed all connections for database: {database_name}")
 
-      # Remove the Database object to force buffer pool release
-      # This will cause it to be recreated with fresh memory on next access
       if database_name in self._databases:
         try:
-          # Try to close the database if it has a close method
           db = self._databases[database_name]
 
-          # For SEC database, try to execute CHECKPOINT before closing
-          # This ensures all WAL data is flushed to disk
+          # SEC's WAL is large enough that closing without a checkpoint
+          # leaves a long recovery for the next open.
           if database_name == "sec" and hasattr(db, "execute"):
             try:
               temp_conn = lbug.Connection(db)
@@ -585,35 +523,33 @@ class LadybugConnectionPool:
         except Exception as e:
           logger.debug(f"Could not close database object: {e}")
 
-        # Remove the database object from cache
         del self._databases[database_name]
         logger.debug(f"Removed cached Database object for: {database_name}")
 
         if aggressive:
-          # Aggressive memory cleanup for large operations
           import ctypes
           import gc
 
-          # Clear any references to the database object
+          # The local reference would otherwise keep the buffer pool alive
+          # through the collection below.
           db = None
 
-          # Force multiple rounds of garbage collection
-          # Generation 2 contains long-lived objects
+          # All three generations: the Database object is long-lived enough
+          # to have been promoted to generation 2.
           for generation in range(3):
             collected = gc.collect(generation)
             logger.debug(f"GC generation {generation}: collected {collected} objects")
 
-          # Try to trim memory back to OS (Linux/Unix specific)
+          # glibc holds freed pages in its arenas; malloc_trim returns them to
+          # the OS. Linux only — absent elsewhere, and harmless to skip.
           if hasattr(ctypes, "CDLL"):
             try:
               libc = ctypes.CDLL("libc.so.6")
-              # malloc_trim returns 1 on success, 0 on failure
               if libc.malloc_trim(0) == 1:
                 logger.debug("Successfully trimmed memory back to OS")
             except Exception as e:
               logger.debug(f"Could not trim memory (not Linux?): {e}")
 
-          # Log memory usage for monitoring
           try:
             import psutil
 
@@ -626,7 +562,6 @@ class LadybugConnectionPool:
           except ImportError:
             pass
         else:
-          # Standard garbage collection
           import gc
 
           gc.collect()
@@ -662,14 +597,18 @@ class LadybugConnectionPool:
       }
 
   def close_database_connections(self, database_name: str):
-    """Close all connections for a specific database."""
+    """Close a database's connections and its Database object.
+
+    Required before renaming or deleting the file on disk — the rename in
+    :meth:`~..manager.LadybugDatabaseManager.swap_database` is unsafe while a
+    handle is open.
+    """
     with self._get_database_lock(database_name):
       if database_name in self._pools:
         pool = self._pools[database_name]
         for conn_id in list(pool.keys()):
           self._close_connection(database_name, conn_id)
 
-        # Close and remove the Database object
         if database_name in self._databases:
           try:
             self._databases[database_name].close()
@@ -687,38 +626,26 @@ class LadybugConnectionPool:
       return False
 
   def list_databases(self) -> list[str]:
-    """
-    List all databases known to the pool.
-
-    Returns:
-        List of database names managed by this pool
-    """
+    """List the databases the pool currently holds open."""
     with self._global_lock:
       return list(self._databases.keys())
 
   def recreate_database(self, database_name: str) -> None:
-    """
-    Close and remove a database so it will be recreated with current settings.
+    """Drop a database's handles so the next access reopens it.
 
-    This is used to apply new memory configuration (via set_ladybug_memory_override)
-    to an existing database. The database will be recreated on next connection
-    with the current memory settings from get_database_memory_config().
-
-    Args:
-        database_name: Name of the database to recreate
+    Buffer pool size is fixed when the Database object is created, so this is
+    how a memory override takes effect on an already-open database.
 
     Example:
         from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
 
-        # Boost memory for materialization (scoped to specific database)
         old_limit = set_ladybug_memory_override(50000, graph_id="sec")
-        pool.recreate_database("sec")  # Close existing, will recreate with 50GB
+        pool.recreate_database("sec")  # reopens with a 50GB buffer pool
 
         # ... perform materialization ...
 
-        # Restore default memory
         set_ladybug_memory_override(old_limit, graph_id="sec")
-        pool.recreate_database("sec")  # Recreate with restored limit
+        pool.recreate_database("sec")
     """
     logger.info(f"Recreating database {database_name} to apply new memory settings")
     self.close_database_connections(database_name)
@@ -728,14 +655,13 @@ class LadybugConnectionPool:
     self._cleanup_all_connections()
 
 
-# Global connection pool instance (initialized by the application)
 _connection_pool: LadybugConnectionPool | None = None
 
 
 def initialize_connection_pool(
   base_path: str, max_connections_per_db: int = 3, connection_ttl_minutes: int = 30
 ) -> LadybugConnectionPool:
-  """Initialize the global connection pool."""
+  """Create the process-wide connection pool, replacing any existing one."""
   global _connection_pool
   _connection_pool = LadybugConnectionPool(
     base_path=base_path,

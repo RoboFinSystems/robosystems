@@ -44,12 +44,11 @@ def list_taxonomies(
 ) -> list[LibraryTaxonomyResponse]:
   """List library taxonomies visible to the current session.
 
-  Args:
-      session: SQLAlchemy session (public schema for sentinel; tenant schema for graph queries).
-      standard: Optional filter by standard (fac, us-gaap, …).
-      include_element_count: If True, add a COUNT(*) per taxonomy.
-      shared_only: If True (default), return only shared/canonical taxonomies.
-          Pass False when the session is tenant-scoped to include tenant CoA taxonomies.
+  ``standard`` filters on the taxonomy standard (fac, us-gaap, …) and
+  ``include_element_count`` adds a per-taxonomy count of *active* elements.
+  ``shared_only`` (the default) restricts the result to shared/canonical
+  taxonomies — pass False on a tenant-scoped session to also see that
+  tenant's CoA taxonomies.
   """
   query = select(Taxonomy)
   if shared_only:

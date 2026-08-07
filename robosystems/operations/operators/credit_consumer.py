@@ -1,11 +1,11 @@
-"""Credit consumer implementations for different execution contexts.
+"""Credit consumers — one per execution context.
 
-CreditConsumer is a protocol — each execution context provides an
-implementation that knows how to obtain a database session and call
-CreditService.consume_ai_tokens().
+`CreditConsumer` is a protocol; each implementation differs only in how it
+obtains a database session before calling `CreditService.consume_ai_tokens`.
 
-- SessionCreditConsumer: API context (reuses the request's db session)
-- FactoryCreditConsumer: Worker context (creates sessions per call)
+- `SessionCreditConsumer`: API context (reuses the request's db session)
+- `FactoryCreditConsumer`: worker context (creates a session per call)
+- `NoOpCreditConsumer`: tests and any context that must not bill
 """
 
 from __future__ import annotations
@@ -16,10 +16,9 @@ from typing import Protocol, runtime_checkable
 class CreditConsumptionError(Exception):
   """Raised when credits for a completed AI call could not be recorded.
 
-  Distinguishes "billing failed" from "billed, and the cost rounded to zero" —
-  the implementations previously returned 0.0 for both, which made an unbounded
-  billing failure indistinguishable from a cheap call and impossible for the
-  caller to act on.
+  The failure has to be raised rather than reported as 0.0 credits: a cheap
+  call legitimately rounds to zero, so a shared return value would leave the
+  caller unable to tell unbounded unbilled spend from an inexpensive request.
   """
 
 
@@ -44,10 +43,10 @@ class CreditConsumer(Protocol):
 
 
 class SessionCreditConsumer:
-  """For API context: uses the injected SQLAlchemy session.
+  """API context: bills on the request's own session.
 
-  The session is the same one used by the request lifecycle, ensuring
-  credit consumption is part of the same transaction scope.
+  Sharing the request's transaction scope means consumption commits or rolls
+  back with the rest of the request.
   """
 
   def __init__(self, db_session) -> None:
@@ -81,10 +80,11 @@ class SessionCreditConsumer:
 
 
 class FactoryCreditConsumer:
-  """For worker context: creates its own sessions per call.
+  """Worker context: one short-lived session, and one transaction, per call.
 
-  Each consumption is an independent transaction, matching the worker's
-  per-batch processing model where partial progress is committed.
+  Independent transactions match the worker's per-batch model, where partial
+  progress is committed — a long run that dies partway is still billed for the
+  calls it actually made.
   """
 
   async def consume(
@@ -124,7 +124,7 @@ class FactoryCreditConsumer:
 
 
 class NoOpCreditConsumer:
-  """For tests or contexts where credits should not be consumed."""
+  """Bills nothing. Tests only — anything user-facing must record spend."""
 
   async def consume(
     self,

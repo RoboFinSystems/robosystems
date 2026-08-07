@@ -188,16 +188,12 @@ def grant_repository_access(
   credentials_path: Optional[Path] = None,
 ) -> bool:
   """
-  Grant shared repository access to the authenticated user.
+  Subscribe the authenticated user to a shared repository, recording it as a
+  graph entry in the credentials file. Returns True on success.
 
-  Args:
-      auth_client: Authenticated client with JWT token
-      repository_type: Type of repository (sec, industry, economic, etc.)
-      repository_plan: Plan tier (starter, advanced, etc.)
-      credentials_path: Path to credentials file to save graph entry
-
-  Returns:
-      True if successful, False otherwise
+  ``repository_type`` names the repository (``sec``, ``industry``,
+  ``economic``, …); ``repository_plan`` is its tier (``starter``,
+  ``advanced``, …).
   """
   print(
     f"\n🔄 Granting {repository_type.upper()} repository access ({repository_plan} tier)..."

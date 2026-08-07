@@ -34,10 +34,9 @@ class LineItemMetadataPredicate(BaseModel):
   FK; matched lines aggregate signed into the attributed fact for the
   period.
 
-  ``field`` is **legacy and ignored** — the flow tag used to live in
-  ``line_items.metadata[field]`` but has been promoted to the typed
-  ``flow_element_id`` FK. Retained for wire-compatibility; the engine no
-  longer reads it.
+  ``field`` is accepted but ignored: the flow tag lives in the typed
+  ``flow_element_id`` FK, not in JSONB metadata. It stays on the wire so
+  existing request bodies keep validating.
   """
 
   kind: Literal["line_item_metadata_field"] = Field(
@@ -47,9 +46,9 @@ class LineItemMetadataPredicate(BaseModel):
   field: str = Field(
     "transaction_description_code",
     description=(
-      "Legacy/ignored. The flow tag now lives in the typed "
-      "``flow_element_id`` FK, not JSONB metadata; the engine no longer "
-      "reads this. Retained for wire-compatibility."
+      "Accepted but ignored. The flow tag lives in the typed "
+      "``flow_element_id`` FK, not JSONB metadata. Retained for "
+      "wire-compatibility."
     ),
   )
   values: list[str] = Field(
@@ -192,18 +191,16 @@ class UpdateRollforwardRequest(BaseModel):
   """Update mutable fields on a rollforward block.
 
   Editable: name, default_change_tag_qname, attribution_filters,
-  validation_mode. The BS source is fixed once the block is created
-  (changing it would invalidate every previously rendered period); to
-  change BS source, delete and re-create.
+  validation_mode. The BS source is fixed at creation — changing it would
+  invalidate every period already rendered — so switching BS source means
+  delete and re-create.
 
-  **Partial-update semantics**: omitted (``None``) fields mean "leave
-  unchanged" — there is no wire-level way to *clear* a previously set
-  default change tag or empty the attribution_filters list via this
-  endpoint. To remove the default tag entirely, delete and re-create
-  the rollforward block. The asymmetry is deliberate: an explicit
-  clear-sentinel adds wire-shape complexity for a use case that rarely
-  arises in practice (default tags are typically set during initial
-  authoring and only swapped, not removed).
+  **Partial-update semantics**: an omitted (``None``) field means "leave
+  unchanged". There is no wire-level way to *clear* the default change tag or
+  empty the attribution_filters list; delete and re-create the block instead.
+  The asymmetry is deliberate — a clear-sentinel costs wire-shape complexity
+  for a case that rarely arises, since default tags get swapped rather than
+  removed.
   """
 
   structure_id: str = Field(..., description="Structure ID of the rollforward block.")
@@ -213,8 +210,7 @@ class UpdateRollforwardRequest(BaseModel):
     description=(
       "New default change tag qname. Pass a value to *change* the "
       "default; omit (``None``) to leave unchanged. There is no "
-      "wire-level way to clear a previously set default — see the "
-      "class docstring."
+      "wire-level way to clear the default — see the class docstring."
     ),
   )
   attribution_filters: list[AttributionFilter] | None = None

@@ -1,8 +1,9 @@
-"""
-Distributed locking service for SSO tokens and authentication operations.
+"""Redis-based distributed locking for SSO token and auth operations.
 
-This module provides Redis-based distributed locking to prevent race conditions
-in SSO token operations, ensuring atomic operations across multiple instances.
+Serializes token operations across API instances. Locks always carry a TTL,
+so a process that dies holding one cannot deadlock the others, and release is
+an atomic compare-and-delete against the holder's lock_id so a lock that
+already expired and was re-acquired is never released by its previous owner.
 """
 
 import time
@@ -30,26 +31,14 @@ class LockAcquisitionResult:
 
 
 class DistributedLock:
-  """
-  Redis-based distributed lock with automatic expiry and deadlock prevention.
+  """A single distributed lock: SET NX EX to acquire, compare-and-delete to
+  release, exponential backoff between blocking retries.
 
-  Features:
-  - Atomic lock acquisition and release
-  - Automatic expiry to prevent deadlocks
-  - Lock ownership verification
-  - Retry mechanisms with exponential backoff
-  - Comprehensive security logging
+  Instance-bound — the acquiring object must be the releasing object. Use
+  `release_lock_by_id` when the lock spans processes.
   """
 
   def __init__(self, redis_client: redis.Redis, lock_key: str, ttl_seconds: int = 30):
-    """
-    Initialize distributed lock.
-
-    Args:
-        redis_client: Redis client instance
-        lock_key: Unique key for the lock
-        ttl_seconds: Lock expiry time in seconds
-    """
     self.redis = redis_client
     self.lock_key = f"lock:{lock_key}"
     self.ttl_seconds = ttl_seconds
@@ -60,15 +49,9 @@ class DistributedLock:
   def acquire(
     self, blocking: bool = True, timeout: float | None = None
   ) -> LockAcquisitionResult:
-    """
-    Acquire the distributed lock.
+    """Acquire the lock, retrying with backoff while `blocking`.
 
-    Args:
-        blocking: Whether to block until lock is available
-        timeout: Maximum time to wait for lock (seconds)
-
-    Returns:
-        LockAcquisitionResult with acquisition status
+    Non-blocking failures report the current holder and remaining TTL.
     """
     start_time = time.time()
     max_retries = 50 if blocking else 1
@@ -76,20 +59,19 @@ class DistributedLock:
 
     while retry_count < max_retries:
       try:
-        # Use SET with NX (only if not exists) and EX (expiry) for atomic operation
+        # NX + EX in one call: acquisition and expiry are set atomically, so a
+        # crash between the two can never leave an immortal lock.
         result = self.redis.set(
           self.lock_key,
           self.lock_id,
-          nx=True,  # Only set if key doesn't exist
-          ex=self.ttl_seconds,  # Set expiry
+          nx=True,
+          ex=self.ttl_seconds,
         )
 
         if result:
-          # Lock acquired successfully
           self.acquired = True
           self.acquisition_time = time.time()
 
-          # Log successful lock acquisition
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.AUTH_SUCCESS,
             details={
@@ -109,12 +91,9 @@ class DistributedLock:
             ttl_remaining=self.ttl_seconds,
           )
 
-        # Lock is held by another process
         if not blocking:
-          # `redis.get()` returns `bytes` when the client is constructed
-          # with `decode_responses=False` (legacy default) and `str` when
-          # `decode_responses=True` (the registry's modern default).
-          # Handle both — calling `.decode()` on a str raises AttributeError.
+          # `redis.get()` returns bytes or str depending on the client's
+          # `decode_responses` setting; `.decode()` on a str would raise.
           raw_holder = self.redis.get(self.lock_key)
           if isinstance(raw_holder, bytes):
             holder = raw_holder.decode("utf-8")
@@ -132,7 +111,6 @@ class DistributedLock:
             error_message="Lock is currently held by another process",
           )
 
-        # Check timeout
         if timeout and (time.time() - start_time) >= timeout:
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
@@ -152,7 +130,6 @@ class DistributedLock:
             error_message=f"Lock acquisition timed out after {timeout} seconds",
           )
 
-        # Wait before retry with exponential backoff
         retry_count += 1
         wait_time = min(0.01 * (2**retry_count), 0.5)  # Max 500ms
         time.sleep(wait_time)
@@ -176,7 +153,6 @@ class DistributedLock:
           error_message=f"Redis error: {e!s}",
         )
 
-    # Max retries exceeded
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
       details={
@@ -197,19 +173,15 @@ class DistributedLock:
     )
 
   def release(self) -> bool:
-    """
-    Release the distributed lock safely.
+    """Release the lock, but only if this instance is still the holder.
 
-    Only releases the lock if we are the current holder.
-
-    Returns:
-        True if lock was released, False otherwise
+    The Lua compare-and-delete is what makes that safe: without it, a lock
+    that expired and was re-acquired by someone else would be deleted here.
     """
     if not self.acquired:
       return False
 
     try:
-      # Use Lua script for atomic compare-and-delete operation
       lua_script = """
             if redis.call("get", KEYS[1]) == ARGV[1] then
                 return redis.call("del", KEYS[1])
@@ -226,7 +198,6 @@ class DistributedLock:
           time.time() - self.acquisition_time if self.acquisition_time else 0
         )
 
-        # Log successful lock release
         SecurityAuditLogger.log_security_event(
           event_type=SecurityEventType.AUTH_SUCCESS,
           details={
@@ -240,7 +211,6 @@ class DistributedLock:
 
         return True
       else:
-        # We don't own the lock (expired or taken by another process)
         logger.warning(
           f"Failed to release lock {self.lock_key} - not the current holder"
         )
@@ -270,20 +240,11 @@ class DistributedLock:
       return False
 
   def extend(self, additional_seconds: int) -> bool:
-    """
-    Extend the lock expiry time.
-
-    Args:
-        additional_seconds: Additional time to extend the lock
-
-    Returns:
-        True if lock was extended, False otherwise
-    """
+    """Extend the lock's TTL, only while this instance still holds it."""
     if not self.acquired:
       return False
 
     try:
-      # Use Lua script for atomic extend operation
       lua_script = """
             if redis.call("get", KEYS[1]) == ARGV[1] then
                 return redis.call("expire", KEYS[1], ARGV[2])
@@ -312,14 +273,12 @@ class DistributedLock:
       return False
 
   def __enter__(self):
-    """Context manager entry."""
     result = self.acquire()
     if not result.acquired:
       raise RuntimeError(f"Failed to acquire lock: {result.error_message}")
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    """Context manager exit."""
     self.release()
 
 
@@ -328,25 +287,20 @@ def release_lock_by_id(
   lock_key: str,
   lock_id: str,
 ) -> bool:
-  """Release a distributed lock from a different process than the one
-  that acquired it.
+  """Release a lock acquired in a different process.
 
-  `DistributedLock.release()` is instance-bound — it requires the same
-  Python object that acquired the lock (the `self.acquired` flag
-  doesn't survive process boundaries). For locks that span processes
-  (e.g., API endpoint acquires, Dagster job releases), pass the
-  `lock_id` from the acquirer's `LockAcquisitionResult` and call this
-  module-level helper.
+  `DistributedLock.release()` needs the acquiring object — its `acquired`
+  flag doesn't cross process boundaries. When one process acquires and
+  another releases (an API endpoint and the Dagster job it launched), pass
+  the `lock_id` from the acquirer's `LockAcquisitionResult` here.
 
-  Returns True if the lock was released, False if it was already gone
-  or held by a different lock_id (someone else's lock; safe to ignore).
-
-  Atomic compare-and-delete via Lua — same primitive as
+  Returns True if released, False if the lock was already gone or is held
+  by a different lock_id — the same compare-and-delete guarantee as
   `DistributedLock.release()`.
+
+  `lock_key` is the unprefixed key; the `lock:` prefix is applied here to
+  match `DistributedLock.__init__`.
   """
-  # The lock_key the API endpoint constructed lives at `f"lock:{key}"`
-  # per DistributedLock.__init__; the caller passes the unprefixed key
-  # and we apply the same prefix here.
   full_key = f"lock:{lock_key}"
   lua_script = """
         if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -369,23 +323,13 @@ def release_lock_by_id(
 
 
 class SSOTokenLockManager:
-  """
-  Specialized lock manager for SSO token operations.
-
-  Provides high-level locking primitives for common SSO token operations
-  with appropriate timeouts and security logging.
+  """Lock helpers for SSO token and session operations, each with a TTL and
+  acquisition timeout tuned to how long that operation should take.
   """
 
   def __init__(self, redis_client: redis.Redis):
-    """
-    Initialize SSO token lock manager.
-
-    Args:
-        redis_client: Redis client instance
-    """
     self.redis = redis_client
 
-    # Lock configuration for different operations
     self.lock_configs = {
       "token_verification": {"ttl": 10, "timeout": 5},  # Quick verification
       "token_exchange": {"ttl": 30, "timeout": 10},  # Exchange operations
@@ -395,18 +339,10 @@ class SSOTokenLockManager:
 
   @asynccontextmanager
   async def lock_sso_token(self, token_id: str, operation: str = "verification"):
-    """
-    Async context manager for SSO token locking.
+    """Hold a lock on an SSO token for the duration of the block.
 
-    Args:
-        token_id: SSO token ID to lock
-        operation: Type of operation (verification, exchange, session_creation, cleanup)
-
-    Yields:
-        DistributedLock instance
-
-    Raises:
-        RuntimeError: If lock cannot be acquired
+    `operation` selects the TTL/timeout pair from `lock_configs`. Raises
+    `RuntimeError` if the lock can't be acquired within that timeout.
     """
     config = self.lock_configs.get(operation, self.lock_configs["token_verification"])
     lock_key = f"sso_token:{token_id}:{operation}"
@@ -416,7 +352,6 @@ class SSOTokenLockManager:
     )
 
     try:
-      # Acquire lock with timeout
       result = lock.acquire(blocking=True, timeout=config["timeout"])
 
       if not result.acquired:
@@ -436,7 +371,6 @@ class SSOTokenLockManager:
       yield lock
 
     finally:
-      # Always attempt to release the lock
       if lock.acquired:
         lock.release()
         logger.debug(f"Released SSO token lock for {operation}: {token_id[:8]}...")
@@ -445,16 +379,7 @@ class SSOTokenLockManager:
   async def lock_sso_session(
     self, session_id: str, operation: str = "session_creation"
   ):
-    """
-    Async context manager for SSO session locking.
-
-    Args:
-        session_id: SSO session ID to lock
-        operation: Type of operation
-
-    Yields:
-        DistributedLock instance
-    """
+    """Hold a lock on an SSO session for the duration of the block."""
     config = self.lock_configs.get(operation, self.lock_configs["session_creation"])
     lock_key = f"sso_session:{session_id}:{operation}"
 
@@ -489,11 +414,9 @@ class SSOTokenLockManager:
         logger.debug(f"Released SSO session lock for {operation}: {session_id[:8]}...")
 
   def cleanup_expired_locks(self) -> dict[str, Any]:
-    """
-    Clean up expired SSO locks (maintenance operation).
+    """Delete SSO locks that somehow have no TTL, and report the counts.
 
-    Returns:
-        Dictionary with cleanup statistics
+    Locks with a live TTL are left alone — Redis expires those itself.
     """
     try:
       stats = {
@@ -502,7 +425,6 @@ class SSOTokenLockManager:
         "total_locks_cleaned": 0,
       }
 
-      # Find all SSO-related locks
       sso_token_pattern = "lock:sso_token:*"
       sso_session_pattern = "lock:sso_session:*"
 
@@ -514,14 +436,12 @@ class SSOTokenLockManager:
 
         for lock_key in lock_keys:
           try:
-            # Check if lock is expired
             ttl = cast(int, self.redis.ttl(lock_key))
-            if ttl == -1:  # Key exists but has no expiry
+            if ttl == -1:  # Exists with no expiry
               self.redis.delete(lock_key)
               stats[stat_key] += 1
-            elif ttl == -2:  # Key doesn't exist
+            elif ttl == -2:  # Already gone
               continue
-            # If ttl > 0, lock is still valid
           except RedisError:
             continue
 
@@ -560,21 +480,12 @@ class SSOTokenLockManager:
 
 
 def get_sso_lock_manager() -> SSOTokenLockManager | None:
-  """
-  Get the global SSO lock manager instance.
-
-  Returns:
-      SSOTokenLockManager instance or None if Redis is unavailable
-  """
+  """Build an `SSOTokenLockManager`, or None when Redis is unreachable."""
   try:
-    # Use DB 2 for auth cache (same as SSO tokens)
-    # Use distributed locks database from registry
     from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
-    # Use factory method to handle SSL params correctly
     redis_client = create_redis_client(ValkeyDatabase.LOCKS, decode_responses=True)
 
-    # Test connection
     redis_client.ping()
 
     return SSOTokenLockManager(redis_client)

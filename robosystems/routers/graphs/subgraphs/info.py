@@ -53,7 +53,6 @@ async def get_subgraph_info(
 ) -> SubgraphResponse:
   start_time = record_operation_start()
 
-  # Check circuit breaker
   handle_circuit_breaker_check(graph_id, "subgraph_info")
 
   try:
@@ -86,7 +85,6 @@ async def get_subgraph_info(
       f"Retrieved subgraph info for {subgraph.graph_id} by user {current_user.id}"
     )
 
-    # Record metrics
     record_operation_metrics(start_time, "info", graph_id)
     log_metric("subgraph_info_retrieved", 1, {"subgraph": subgraph.graph_id})
 

@@ -1200,13 +1200,12 @@ class TestCreateScheduleMaterializesObligations:
     session.get.assert_not_called()
 
   def test_void_pending_obligations_recovers_link_when_stamp_missing(self):
-    """Layer 1 fix: the structure lacks the schedule_created_event_id stamp, but
-    the obligations carry the link (obligated_by_event_id) — recover it and void
+    """The structure lacks the schedule_created_event_id stamp, but the
+    obligations carry the link (obligated_by_event_id) — recover it and void
     anyway, instead of silently returning 0.
 
-    This is the 2026-06-19 Harbinger orphan defect: without this fallback the
-    void no-op'd and the delete orphaned 280 pending obligations that then
-    double-posted at close. See specs/schedule-delete-obligation-integrity.md.
+    Without this fallback the void is a no-op, so deleting a schedule leaves
+    its pending obligations orphaned and they double-post at close.
     """
     structure = MagicMock()
     structure.metadata_ = {}  # the bug condition: stamp missing

@@ -110,10 +110,9 @@ router.include_router(
   tables_router
 )  # No prefix - handles all /tables and /files paths internally
 
-# NOTE: views router used to live under /v1/graphs/{g}/views. It has been
-# relocated to /extensions/roboledger/{graph_id}/views — see main.py. The
-# fact grid is roboledger-schema-specific (XBRL hypercube), so it never
-# really belonged on the platform graph surface.
+# The fact-grid views router mounts at /extensions/roboledger/{graph_id}/views
+# in main.py, not here: the grid is roboledger-schema-specific (XBRL
+# hypercube), not part of the schema-agnostic platform graph surface.
 
 # Conditionally include search / documents / memory routers based on flags.
 # search_router hosts document search AND memory recall → mount under either flag.

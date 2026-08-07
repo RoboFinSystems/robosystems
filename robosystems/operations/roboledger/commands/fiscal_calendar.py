@@ -1,14 +1,8 @@
 """Write operations for the fiscal calendar and period close workflow.
 
-Thin wrappers over the existing `FiscalCalendarService` and
-`PeriodCloseService`. They take both an extensions session (for the
-calendar/period tables) and a platform DB session (for QB sync state
-lookup), plus a service instance so tests can swap it out.
-
-The existing old REST router (`routers/ledger/fiscal_calendar.py`,
-`routers/ledger/periods.py`) owns the module-level `_svc = FiscalCalendarService()`
-singleton; after cutover, the command routes will construct their
-own singletons at the route-layer.
+Thin wrappers over `FiscalCalendarService` and `PeriodCloseService`. They
+take an extensions session (calendar / period tables), a platform DB session
+(QB sync state), and a service instance so tests can swap it out.
 """
 
 from __future__ import annotations
@@ -56,10 +50,9 @@ class ReopenPeriodResult:
   """Return value for `reopen_period` — wraps the refreshed calendar.
 
   ``statement_sets_retracted`` counts the reopened month's canonical
-  statement FactSets deleted by the reopen (0 when the month was closed
-  before close-time stamping existed, or was soft-skipped). The REST
-  router keeps returning only ``fiscal_calendar`` (wire shape
-  unchanged); the MCP tool surfaces the count.
+  statement FactSets deleted by the reopen — 0 when the close soft-skipped
+  stamping. The REST router returns only ``fiscal_calendar``; the MCP tool
+  surfaces the count.
   """
 
   fiscal_calendar: FiscalCalendarResponse

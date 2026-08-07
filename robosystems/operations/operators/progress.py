@@ -1,11 +1,10 @@
-"""Progress reporter implementations for different execution contexts.
+"""Progress reporters — one per execution context.
 
-ProgressReporter is a protocol (defined in operator_context.py). Each execution
-context provides an implementation:
+`ProgressReporter` is a protocol defined in `operator_context.py`.
 
-- CallbackProgress: API context (wraps the callback function pattern)
-- OperationManagerProgress: Worker context (wraps the SSE OperationManager)
-- NoOpProgress: Tests and contexts where progress isn't needed
+- `CallbackProgress`: API context (wraps a callback function)
+- `OperationManagerProgress`: worker context (wraps the SSE OperationManager)
+- `NoOpProgress`: tests and contexts with nowhere to report
 """
 
 from __future__ import annotations
@@ -19,10 +18,10 @@ if TYPE_CHECKING:
 
 
 class CallbackProgress:
-  """For API context. Wraps the existing callback function pattern.
+  """API context. Invokes the caller's `callback(stage, percent, message)`.
 
-  The callback signature matches what the existing orchestrator/handlers
-  expect: callback(stage, percent, message).
+  Cannot report cancellation — a sync request has no channel for it, so
+  `is_cancelled` is always False.
   """
 
   def __init__(self, callback: Callable | None = None) -> None:
@@ -42,10 +41,10 @@ class CallbackProgress:
 
 
 class OperationManagerProgress:
-  """For worker context. Wraps the existing SSE OperationManager.
+  """Worker context. Emits SSE progress events via the OperationManager.
 
-  Emits progress events that the frontend can stream via SSE.
-  Supports cancellation checking between processing steps.
+  `is_cancelled` reads the operation's live status, so a long-running operator
+  that polls between steps can stop when the client cancels.
   """
 
   def __init__(self, task_id: str, manager: OperationManager) -> None:
@@ -73,7 +72,7 @@ class OperationManagerProgress:
 
 
 class NoOpProgress:
-  """For tests or contexts where progress reporting isn't needed."""
+  """Discards progress and never reports cancellation."""
 
   async def report(
     self,

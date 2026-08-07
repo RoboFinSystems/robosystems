@@ -1,10 +1,9 @@
-"""Legacy schema-extension name aliases.
+"""Schema-extension name aliases.
 
-The ``memory`` extension was renamed to ``knowledge`` when semantic memory
-moved to LanceDB (the "memory" label now belongs to the LanceDB vector store,
-not the structural subgraph schema). Any subgraph persisted with
-``schema_extensions=["memory"]`` must still resolve, so every extension loader
-routes names through :func:`resolve_extension_alias` before importing the module.
+``memory`` is an accepted alias for the ``knowledge`` extension: subgraphs
+persisted with ``schema_extensions=["memory"]`` must still resolve. Every
+extension loader routes names through :func:`resolve_extension_alias` before
+importing the module.
 """
 
 from __future__ import annotations

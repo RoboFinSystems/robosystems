@@ -1,7 +1,4 @@
-"""Graph tier API response models.
-
-This module contains Pydantic models for graph tier configuration responses.
-"""
+"""Graph tier configuration response models."""
 
 from pydantic import BaseModel, ConfigDict, Field
 

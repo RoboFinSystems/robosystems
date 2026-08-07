@@ -39,20 +39,17 @@ class ConnectionService:
     expires_at: Any = None,
     db_session: Session | None = None,
   ) -> dict[str, Any]:
-    """Create a new connection.
+    """Create a connection row and, if given, its encrypted credentials.
 
-    Args:
-        entity_id: Entity identifier (used as graph_id for backward compat)
-        provider: Provider name (quickbooks, sec)
-        user_id: User who owns the connection
-        credentials: OAuth tokens or API keys to encrypt and store
-        metadata: Provider-specific metadata (realm_id, item_id, cik, etc.)
-        graph_id: Graph database ID (defaults to entity_id)
-        expires_at: When credentials expire
-        db_session: Optional existing database session
+    `graph_id` defaults to `entity_id`. `metadata` carries the
+    provider-specific fields (realm_id, item_id, cik, ...).
 
-    Returns:
-        Dict with connection details
+    `write_policy` governs the OUTBOUND (write-back) direction only and is
+    defaulted per provider by `Connection.create`: QuickBooks connections are
+    `qb_authoritative` (QB is the GL, so RoboLedger-originated entries write
+    back), everything else is `native`. Inbound sync-down is decoupled — QB
+    rows auto-commit to the GL via the loader's source-keyed rule whatever the
+    policy says. Use `set_write_policy` to pause write-back.
     """
     metadata = metadata or {}
     target_graph_id = graph_id or entity_id
@@ -61,7 +58,6 @@ class ConnectionService:
     session_created = db_session is None
 
     try:
-      # Create connection record
       conn = Connection.create(
         graph_id=target_graph_id,
         user_id=user_id,
@@ -77,16 +73,6 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
-      # `write_policy` governs the OUTBOUND (write-back) direction only and
-      # defaults per provider (`Connection.create` →
-      # `default_write_policy_for_provider`): a QuickBooks connection is
-      # `qb_authoritative` (QB is the GL, so RL-originated entries write
-      # back), everything else is `native`. Inbound sync-down is decoupled —
-      # QB rows auto-commit to GL via the loader's source-keyed rule
-      # regardless of this policy. Flip to `native` via `set_write_policy`
-      # to pause write-back (e.g. a setup/review window).
-
-      # Store credentials if provided
       if credentials:
         ConnectionCredentials.create(
           connection_id=conn.id,
@@ -120,18 +106,12 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> dict[str, Any] | None:
-    """Get connection details.
+    """Fetch a connection with decrypted credentials, or None.
 
-    Args:
-        connection_id: Connection identifier
-        user_id: Optional user filter (SYSTEM_USER_ID bypasses)
-        graph_id: When set, the connection must belong to this graph — pass
-            the URL scope the caller already authorized so a guessed
-            connection_id can't reach another graph's connection.
-        db_session: Optional existing database session
-
-    Returns:
-        Dict with connection details including credentials, or None
+    Pass `graph_id` (the URL scope the caller already authorized) whenever it
+    is known: `connection_id` is caller-supplied, so without the scope check a
+    guessed id reaches another graph's connection. `SYSTEM_USER_ID` bypasses
+    the ownership check.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -142,19 +122,16 @@ class ConnectionService:
         logger.warning("Connection not found: %s", connection_id)
         return None
 
-      # Enforce graph scope when provided (connection_id is caller-supplied)
       if graph_id and conn.graph_id != graph_id:
         logger.warning("Connection %s not in requested graph scope", connection_id)
         return None
 
-      # Check user access (system user can access any connection)
       if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
         logger.warning("User not authorized for connection %s", connection_id)
         return None
 
       result = conn.to_dict()
 
-      # Include decrypted credentials
       cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
       if cred:
         result["credentials"] = cred.get_credentials()
@@ -185,17 +162,10 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> list[dict[str, Any]]:
-    """List connections with optional filters.
+    """List connections, without decrypting credentials.
 
-    Args:
-        entity_id: Filter by graph_id (backward compat name)
-        provider: Filter by provider type
-        user_id: Filter by user (SYSTEM_USER_ID sees all)
-        graph_id: Filter by graph_id (takes precedence over entity_id)
-        db_session: Optional existing database session
-
-    Returns:
-        List of connection dicts
+    `graph_id` takes precedence over `entity_id`; `SYSTEM_USER_ID` sees every
+    user's connections. Each dict carries `has_credentials` and `is_expired`.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -215,7 +185,6 @@ class ConnectionService:
       for conn in connections:
         conn_dict = conn.to_dict()
 
-        # Check if credentials exist (without decrypting)
         cred = ConnectionCredentials.get_by_connection_id(conn.id, session)
         conn_dict["has_credentials"] = cred is not None
         try:
@@ -241,17 +210,7 @@ class ConnectionService:
     credentials: dict[str, Any],
     db_session: Session | None = None,
   ) -> bool:
-    """Update credentials for a connection.
-
-    Args:
-        connection_id: Connection identifier
-        user_id: User performing the update
-        credentials: New credentials to encrypt and store
-        db_session: Optional existing database session
-
-    Returns:
-        True if updated successfully
-    """
+    """Replace a connection's credentials, creating the row if absent."""
     session = db_session or SessionFactory()
     session_created = db_session is None
 
@@ -281,16 +240,7 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Update last sync timestamp.
-
-    Args:
-        connection_id: Connection identifier
-        graph_id: Unused (kept for backward compat)
-        db_session: Optional existing database session
-
-    Returns:
-        True if updated successfully
-    """
+    """Stamp `last_sync` on the connection. `graph_id` is accepted but unused."""
     session = db_session or SessionFactory()
     session_created = db_session is None
 
@@ -324,16 +274,8 @@ class ConnectionService:
     row in place via the OAuth callback's reuse path
     (`routers/graphs/connections/oauth.py`).
 
-    Args:
-        connection_id: Connection identifier
-        user_id: User performing the deletion
-        graph_id: When set, the connection must belong to this graph — pass
-            the URL scope the caller already authorized so a guessed
-            connection_id can't delete another graph's connection.
-        db_session: Optional existing database session
-
-    Returns:
-        True if deleted successfully
+    Pass `graph_id` (the authorized URL scope) so a guessed `connection_id`
+    can't delete another graph's connection.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -344,18 +286,14 @@ class ConnectionService:
         logger.warning(f"Connection {connection_id} not found for deletion")
         return False
 
-      # Enforce graph scope when provided (connection_id is caller-supplied)
       if graph_id and conn.graph_id != graph_id:
         logger.warning("Connection %s not in requested graph scope", connection_id)
         return False
 
-      # Deactivate credentials (already soft-deletion via is_active=False)
       cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
       if cred:
         cred.deactivate(session)
 
-      # Soft-delete connection record. Hard-delete would orphan
-      # connection_id-scoped tenant rows.
       conn.soft_delete(session)
       logger.info(f"Soft-deleted connection {connection_id}")
       return True
@@ -467,19 +405,10 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Update connection metadata and/or credentials.
+    """Update metadata fields, status, and/or credentials.
 
-    Args:
-        connection_id: Connection identifier
-        user_id: User performing the update
-        metadata: Metadata fields to update
-        credentials: New credentials to encrypt
-        status: New status value
-        graph_id: Unused (kept for backward compat)
-        db_session: Optional existing database session
-
-    Returns:
-        True if updated successfully
+    Only a fixed set of `metadata` keys is applied; anything else is ignored.
+    `graph_id` is accepted but unused — this path does no scope check.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -490,7 +419,6 @@ class ConnectionService:
         logger.warning(f"Connection {connection_id} not found for update")
         return False
 
-      # Update metadata fields
       update_kwargs = {}
       if status:
         update_kwargs["status"] = status
@@ -511,7 +439,6 @@ class ConnectionService:
       if update_kwargs:
         conn.update_metadata(session, **update_kwargs)
 
-      # Update credentials if provided
       if credentials:
         cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
         if cred:
@@ -550,14 +477,8 @@ class ConnectionService:
     another graph's connection into write-back via a guessed connection_id.
     Returns the updated connection dict, or None when the connection is
     missing, belongs to a different graph, or isn't owned by the user.
-    Raises ValueError for an unsupported policy value (the model validates).
-
-    Args:
-        connection_id: Connection identifier
-        write_policy: New policy ('native' | 'qb_authoritative')
-        user_id: User performing the change (SYSTEM_USER_ID bypasses)
-        graph_id: Graph the connection must belong to
-        db_session: Optional existing database session
+    Raises ValueError for an unsupported policy value (the model validates);
+    valid values are 'native' and 'qb_authoritative'.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -749,10 +670,8 @@ async def dispatch_connection_sync(
       raise SyncInProgressError(
         connection_id, lock_result.holder_id, lock_result.ttl_remaining
       )
-    # Capture the lock id so the Dagster job can release the lock on
-    # completion. `lock_result.lock_id` is the same value the holder
-    # stored under the lock key; `release_lock_by_id` does an atomic
-    # compare-and-delete against it.
+    # The Dagster job releases the lock on completion via this id;
+    # `release_lock_by_id` compare-and-deletes against it.
     sync_lock_id = lock_result.lock_id or ""
   except SyncInProgressError:
     raise
@@ -777,8 +696,7 @@ async def dispatch_connection_sync(
     effective_options["full_rebuild"] = True
   if since_date is not None:
     effective_options["since_date"] = since_date.isoformat()
-  # Lock release: pass the acquired lock_id through to QBSyncConfig
-  # so `qb_load` can release it on completion.
+  # Plumbed into QBSyncConfig so `qb_load` can release the lock when done.
   if sync_lock_id:
     effective_options["sync_lock_id"] = sync_lock_id
 

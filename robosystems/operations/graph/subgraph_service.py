@@ -1,16 +1,14 @@
-"""
-Subgraph Service for managing subgraph operations.
+"""Lifecycle operations for subgraphs.
 
-This service handles the creation, deletion, and management of subgraphs
-for Enterprise and Premium tier graphs. Subgraphs share the parent's
-infrastructure and credit pool while maintaining separate databases.
+A subgraph is a separate LadybugDB database living on the *parent's* instance,
+so it shares the parent's hardware, memory pool, and credit pool while keeping
+its data isolated. Its id is ``{parent_graph_id}_{subgraph_name}``, and how
+many a parent may have is a function of its tier
+(``GraphTierConfig.get_max_subgraphs``).
 
-Key features:
-- Subgraph creation on parent's instance
-- Shared memory pool management
-- Schema inheritance from parent
-- Database lifecycle management
-- Access control validation
+Creation writes in two places — the database on the instance, then the
+PostgreSQL ``Graph`` metadata — so :meth:`SubgraphService.create_subgraph`
+rolls the database back if the metadata write fails.
 """
 
 from datetime import UTC, datetime
@@ -35,16 +33,9 @@ from ...middleware.graph.utils import (
 
 
 class SubgraphService:
-  """
-  Service class for subgraph-related operations.
-
-  This service manages subgraph lifecycle operations including creation,
-  deletion, and configuration. It ensures subgraphs are properly isolated
-  while sharing the parent's infrastructure resources.
-  """
+  """Create, delete, and inspect subgraphs on their parent's instance."""
 
   def __init__(self):
-    """Initialize the subgraph service."""
     self.allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
 
   async def create_subgraph_database(
@@ -55,36 +46,21 @@ class SubgraphService:
     include_base: bool = True,
     platform_managed: bool = False,
   ) -> dict[str, Any]:
+    """Create the subgraph's database on the parent's instance.
+
+    Creates only the database — no PostgreSQL metadata. Use
+    :meth:`create_subgraph` for the full operation.
+
+    ``subgraph_name`` must be alphanumeric, 1-20 characters. Creation is capped
+    by the parent tier's subgraph limit. ``platform_managed`` is what allows a
+    subgraph on a *shared repository*; the user-facing API never sets it, so
+    shared-repo subgraphs stay platform-only.
+
+    Returns ``{status: "created"|"exists", graph_id, database_name,
+    parent_graph_id, instance_id, instance_ip}``. Raises
+    ``GraphAllocationError`` when the parent is missing or the tier limit is
+    hit, ValueError on malformed input.
     """
-    Create a new subgraph database on the parent's instance.
-
-    This method creates a new database on the same instance as the parent graph,
-    letting customers maximize their dedicated instance (subgraph count varies by tier).
-
-    For shared repositories, subgraphs can only be created with platform_managed=True
-    (used by Dagster jobs and platform scripts). The user-facing API does not pass
-    this flag, keeping shared repo subgraphs platform-only.
-
-    Args:
-        parent_graph_id: Parent graph identifier
-        subgraph_name: Alphanumeric name for the subgraph (1-20 chars)
-        schema_extensions: Optional schema extensions to apply
-        platform_managed: If True, allow creation on shared repositories
-
-    Returns:
-        Dictionary with creation status and details including:
-        - status: "created" or "exists"
-        - graph_id: Full subgraph identifier
-        - database_name: Actual database name on disk
-        - parent_graph_id: Parent graph ID
-        - instance_id: EC2 instance ID
-        - instance_ip: Private IP of the instance
-
-    Raises:
-        GraphAllocationError: If parent not found or creation fails
-        ValueError: If inputs are invalid
-    """
-    # Validate inputs
     if not validate_parent_graph_id(parent_graph_id):
       raise ValueError(f"Invalid parent graph ID: {parent_graph_id}")
 
@@ -100,7 +76,6 @@ class SubgraphService:
         "Must be alphanumeric and 1-20 characters."
       )
 
-    # Check subgraph limit for parent's tier
     from ...config.graph_tier import GraphTierConfig
     from ...database import get_db_session
     from ...models.core.graph import Graph
@@ -133,17 +108,14 @@ class SubgraphService:
     finally:
       db.close()
 
-    # Construct the full subgraph ID
     subgraph_id = construct_subgraph_id(parent_graph_id, subgraph_name)
-    database_name = subgraph_id  # Using underscore notation
+    database_name = subgraph_id
 
     logger.info(
       f"Creating subgraph database {subgraph_id} on parent {parent_graph_id}'s instance"
     )
 
     try:
-      # Get the parent's instance location
-      # For local dev graphs, use PostgreSQL instance_id directly
       from robosystems.config import env
       from robosystems.database import get_db_session
       from robosystems.models.core.graph import Graph
@@ -161,12 +133,12 @@ class SubgraphService:
           "The parent graph must exist before creating subgraphs."
         )
 
-      # Check if this is a local dev graph
+      # Local dev graphs are not registered in DynamoDB, so their location is
+      # synthesised rather than looked up.
       if (
         parent_graph_record.graph_instance_id
         and parent_graph_record.graph_instance_id.startswith("local-")
       ):
-        # For local graphs, create a mock location without DynamoDB lookup
         from dataclasses import dataclass
 
         @dataclass
@@ -174,7 +146,6 @@ class SubgraphService:
           instance_id: str
           private_ip: str
 
-        # For local dev, use the graph-api service name
         parent_location = LocalGraphLocation(
           instance_id=parent_graph_record.graph_instance_id,
           private_ip="graph-api" if env.ENVIRONMENT == "dev" else "localhost",
@@ -183,11 +154,10 @@ class SubgraphService:
           f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
         )
       elif is_shared_repository(parent_graph_id.lower()):
-        # For shared repos in production, use shared master discovery
         from ...graph_api.client.factory import GraphClientFactory
 
         master_url = await GraphClientFactory._get_shared_master_url()
-        # Extract IP from URL (http://10.0.1.123:8001 -> 10.0.1.123)
+        # http://10.0.1.123:8001 -> 10.0.1.123
         master_ip = master_url.replace("http://", "").split(":")[0]
 
         from dataclasses import dataclass
@@ -205,7 +175,6 @@ class SubgraphService:
           f"Using shared master for subgraph creation: {parent_location.private_ip}"
         )
       else:
-        # For production user graphs, use the allocation manager to find in DynamoDB
         parent_location = await self.allocation_manager.find_database_location(
           parent_graph_id
         )
@@ -216,10 +185,8 @@ class SubgraphService:
             "The parent graph must exist before creating subgraphs."
           )
 
-      # Get a direct client to the parent's instance
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
-      # Check if database already exists
       existing_databases_response = await client.list_databases()
       existing_database_ids = [
         db["graph_id"] for db in existing_databases_response.get("databases", [])
@@ -236,7 +203,6 @@ class SubgraphService:
           "message": "Subgraph database already exists",
         }
 
-      # Create the new database
       logger.info(
         f"Creating database {database_name} on instance {parent_location.instance_id} "
         f"({parent_location.private_ip})"
@@ -249,9 +215,8 @@ class SubgraphService:
         is_subgraph=True,  # Bypass max_databases check for Enterprise/Premium
       )
 
-      # Install schema with extensions using the same pattern as entity graph creation.
       # An empty subgraph (no base, no extensions) generates no DDL — skip the
-      # install entirely and leave a bare database for the caller to define.
+      # install and leave a bare database for the caller to define.
       if not include_base and not schema_extensions:
         logger.info("Empty subgraph — no schema installed (bare database)")
       else:
@@ -298,29 +263,16 @@ class SubgraphService:
     fork_options: dict[str, Any] | None = None,
     platform_managed: bool = False,
   ) -> dict[str, Any]:
-    """
-    Create a subgraph including both the database and PostgreSQL metadata.
+    """Create a subgraph end to end: database, schema, metadata, and access.
 
-    This method:
-    1. Creates the actual LadybugDB database on the parent's instance
-    2. Installs schema (base + extensions from parent)
-    3. Creates PostgreSQL metadata records
-    4. Creates user-graph relationship
-    5. Optionally forks parent data via ingestion
+    ``subgraph_type`` selects the schema: "knowledge" installs the knowledge
+    extension without the base schema, "empty" installs nothing at all, and
+    anything else inherits the parent's extensions on top of the base schema.
 
-    Args:
-        parent_graph: Parent graph model
-        user: User creating the subgraph
-        name: Alphanumeric subgraph name
-        description: Optional description
-        subgraph_type: Type of subgraph (default: "static")
-        metadata: Optional metadata dict
-        fork_parent: If True, copy data from parent graph (creates a "fork")
-        fork_options: Options for forking (tables, filters, etc.)
-        platform_managed: If True, allow creation on shared repositories
-
-    Returns:
-        Dictionary with created subgraph details
+    If the PostgreSQL metadata write fails, the database created on the
+    instance is deleted before re-raising — otherwise the instance accumulates
+    databases no registry knows about. A failed ``fork_parent`` does *not*
+    unwind the subgraph; it is reported in the returned ``fork_status``.
     """
     from ...database import get_db_session
     from ...models.core.graph import Graph
@@ -328,31 +280,25 @@ class SubgraphService:
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
-    # Step 1: Create the actual LadybugDB database on the parent's instance
     logger.info(
       f"Creating LadybugDB database for subgraph {subgraph_id} on parent {parent_graph.graph_id}'s instance"
     )
 
     try:
-      # Build schema extensions list
       include_base = True
       if subgraph_type == "knowledge":
-        # Knowledge subgraphs get only the knowledge extension (no base Entity/Period/etc.)
         extensions = ["knowledge"]
         include_base = False
         logger.info(
           "Using knowledge-only schema (no base schema) for knowledge subgraph"
         )
       elif subgraph_type == "empty":
-        # Empty subgraphs get a bare database — no base schema, no extensions.
-        # The caller defines their own schema afterward via DDL.
         extensions = []
         include_base = False
         logger.info("Creating empty subgraph (bare database, no schema)")
       else:
         extensions = list(parent_graph.schema_extensions or [])
 
-      # Directly await the async database creation method
       db_creation_result = await self.create_subgraph_database(
         parent_graph_id=parent_graph.graph_id,
         subgraph_name=name,
@@ -365,7 +311,6 @@ class SubgraphService:
       logger.error(f"Failed to create LadybugDB database for subgraph: {e}")
       raise
 
-    # Step 2: Create PostgreSQL metadata records
     db = next(get_db_session())
     try:
       existing_subgraphs = (
@@ -380,7 +325,6 @@ class SubgraphService:
 
       now = datetime.now(UTC)
 
-      # Ensure subgraph_type is stored in metadata
       subgraph_metadata = (metadata or {}).copy()
       if "subgraph_type" not in subgraph_metadata:
         subgraph_metadata["subgraph_type"] = subgraph_type
@@ -424,7 +368,6 @@ class SubgraphService:
         f"Created subgraph {subgraph_id} (index {next_index}) for parent {parent_graph.graph_id}"
       )
 
-      # Step 3: Fork parent data if requested
       fork_status = None
       if fork_parent:
         logger.info(
@@ -439,7 +382,6 @@ class SubgraphService:
           logger.info(f"Fork completed: {fork_status}")
         except Exception as fork_error:
           logger.error(f"Fork failed but subgraph created: {fork_error}")
-          # Don't fail the whole operation if fork fails
           fork_status = {"status": "failed", "error": str(fork_error)}
 
       return {
@@ -484,24 +426,14 @@ class SubgraphService:
     force: bool = False,
     create_backup: bool = False,
   ) -> dict[str, Any]:
+    """Delete a subgraph's database. Destructive and not recoverable here.
+
+    Refuses a database that holds any nodes unless ``force`` is set.
+    ``create_backup`` is accepted but not yet implemented — take a backup
+    through the backup operations before forcing.
+
+    Returns ``{status: "deleted"|"not_found", ...}``.
     """
-    Delete a subgraph database from the parent's instance.
-
-    Args:
-        subgraph_id: Full subgraph identifier to delete
-        force: Force deletion even if database contains data
-        create_backup: Create a backup before deletion (not yet implemented)
-
-    Returns:
-        Dictionary with deletion status including:
-        - status: "deleted" or "not_found"
-        - graph_id: Deleted subgraph ID
-
-    Raises:
-        GraphAllocationError: If deletion fails
-        ValueError: If subgraph_id is invalid
-    """
-    # Parse the subgraph ID
     subgraph_info = parse_subgraph_id(subgraph_id)
     if not subgraph_info:
       raise ValueError(f"Invalid subgraph ID: {subgraph_id}")
@@ -512,14 +444,12 @@ class SubgraphService:
     logger.info(f"Deleting subgraph database {subgraph_id}")
 
     try:
-      # Get the Graph API client
-      # In local mode, use direct URL; in production, resolve parent's instance
       from ...config import env
       from ...graph_api.client import GraphClient
       from ...graph_api.client.factory import get_graph_client_for_instance
 
-      # Local development mode: use GRAPH_API_URL directly
-      # Check for localhost or docker container hostnames (graph-api, etc.)
+      # Locally there is one Graph API; in production the parent's instance
+      # has to be resolved from DynamoDB first.
       is_local = env.GRAPH_API_URL and any(
         host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
       )
@@ -529,7 +459,6 @@ class SubgraphService:
         logger.info(f"Using local Graph API URL for deletion: {env.GRAPH_API_URL}")
         client = GraphClient(base_url=env.GRAPH_API_URL)
       else:
-        # Production mode: resolve parent graph's location from DynamoDB
         parent_location = await self.allocation_manager.find_database_location(
           parent_graph_id
         )
@@ -541,7 +470,6 @@ class SubgraphService:
 
         client = await get_graph_client_for_instance(parent_location.private_ip)
 
-      # Check if database exists
       existing_databases_response = await client.list_databases()
       existing_database_ids = [
         db["graph_id"] for db in existing_databases_response.get("databases", [])
@@ -554,13 +482,11 @@ class SubgraphService:
           "message": "Subgraph database does not exist",
         }
 
-      # Get instance_id for logging and response
       if is_local:
         instance_id = "local-lbug-writer"
       else:
         instance_id = parent_location.instance_id if parent_location else "unknown"
 
-      # Check if database contains data (unless forced)
       if not force:
         has_data = await self._check_database_has_data(client, database_name)
         if has_data:
@@ -569,7 +495,6 @@ class SubgraphService:
             "Use force=True to delete anyway, or create a backup first."
           )
 
-      # Delete the database
       logger.info(f"Deleting database {database_name} from instance {instance_id}")
       await client.delete_database(database_name)
 
@@ -592,19 +517,14 @@ class SubgraphService:
     self,
     parent_graph_id: str,
   ) -> list[dict[str, Any]]:
-    """
-    List all subgraph databases for a parent graph.
+    """List the parent's subgraph databases as seen on its instance.
 
-    Args:
-        parent_graph_id: Parent graph identifier
-
-    Returns:
-        List of subgraph information dictionaries
+    Reads the instance rather than PostgreSQL, so it also surfaces databases
+    the registry has lost track of. Returns an empty list on any failure.
     """
     logger.info(f"Listing subgraph databases for parent {parent_graph_id}")
 
     try:
-      # Get the parent's instance location
       parent_location = await self.allocation_manager.find_database_location(
         parent_graph_id
       )
@@ -613,22 +533,18 @@ class SubgraphService:
         logger.warning(f"Parent graph {parent_graph_id} not found")
         return []
 
-      # Get a direct client to the parent's instance
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
-      # List all databases on the instance
       all_databases_response = await client.list_databases()
       all_database_ids = [
         db["graph_id"] for db in all_databases_response.get("databases", [])
       ]
 
-      # Filter for subgraphs of this parent
       subgraphs = []
       parent_prefix = f"{parent_graph_id}_"
 
       for db_name in all_database_ids:
         if db_name.startswith(parent_prefix):
-          # This is a subgraph of our parent
           subgraph_info = parse_subgraph_id(db_name)
           if subgraph_info:
             subgraphs.append(
@@ -652,16 +568,7 @@ class SubgraphService:
     self,
     subgraph_id: str,
   ) -> dict[str, Any] | None:
-    """
-    Get detailed information about a specific subgraph.
-
-    Args:
-        subgraph_id: Full subgraph identifier
-
-    Returns:
-        Dictionary with subgraph information or None if not found
-    """
-    # Parse the subgraph ID
+    """Location and statistics for one subgraph, or None if it isn't there."""
     subgraph_info = parse_subgraph_id(subgraph_id)
     if not subgraph_info:
       logger.warning(f"Invalid subgraph ID: {subgraph_id}")
@@ -671,7 +578,6 @@ class SubgraphService:
     database_name = subgraph_info.database_name
 
     try:
-      # Get the parent's instance location
       parent_location = await self.allocation_manager.find_database_location(
         parent_graph_id
       )
@@ -680,10 +586,8 @@ class SubgraphService:
         logger.warning(f"Parent graph {parent_graph_id} not found")
         return None
 
-      # Get a direct client to the parent's instance
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
-      # Check if database exists
       existing_databases_response = await client.list_databases()
       existing_database_ids = [
         db["graph_id"] for db in existing_databases_response.get("databases", [])
@@ -692,7 +596,6 @@ class SubgraphService:
         logger.warning(f"Subgraph database {database_name} not found")
         return None
 
-      # Get database statistics (if available)
       stats = await self._get_database_stats(client, database_name)
 
       return {
@@ -709,24 +612,13 @@ class SubgraphService:
       logger.error(f"Failed to get info for subgraph {subgraph_id}: {e}")
       return None
 
-  # Private helper methods
-
   async def _generate_schema_ddl(
     self, extensions: list[str], include_base: bool = True
   ) -> str:
-    """
-    Generate DDL from schema extensions using SchemaManager.
+    """Compile DDL for the base schema plus ``extensions``.
 
-    This uses the same pattern as entity graph creation to generate
-    DDL from base schema + extensions.
-
-    Args:
-        extensions: List of extension names (e.g., ['roboledger'])
-        include_base: If True, include the base schema (Entity, Period, etc.).
-                      Set to False for extension-only subgraphs like memory.
-
-    Returns:
-        str: Generated DDL statements
+    Set ``include_base=False`` for extension-only subgraphs, which then carry
+    no Entity/Period tables.
     """
     from ...schemas.runtime.manager import SchemaManager
 
@@ -754,9 +646,8 @@ class SubgraphService:
     database_name: str,
     extensions: list[str],
   ) -> None:
-    """Install schema with specified extensions."""
+    """Install the entity base schema plus ``extensions`` in one call."""
     try:
-      # Install base schema + all extensions in a single call
       logger.info(
         f"Installing entity schema with extensions {extensions} for {database_name}"
       )
@@ -776,9 +667,8 @@ class SubgraphService:
     client: "GraphClient",
     database_name: str,
   ) -> None:
-    """Install base schema only."""
+    """Install the entity base schema — the only base a subgraph uses."""
     try:
-      # Install the base entity schema (subgraphs always use entity schema)
       await client.install_schema(
         graph_id=database_name, base_schema="entity", extensions=[]
       )
@@ -792,9 +682,12 @@ class SubgraphService:
     client: "GraphClient",
     database_name: str,
   ) -> bool:
-    """Check if a database contains any data."""
+    """True when the database holds at least one node.
+
+    Returns False when the check itself fails, so a caller relying on this as a
+    delete guard should pair it with ``force`` semantics.
+    """
     try:
-      # Query for any nodes to check if database has data
       result = await client.execute(
         graph_id=database_name, query="MATCH (n) RETURN count(n) as node_count LIMIT 1"
       )
@@ -808,7 +701,6 @@ class SubgraphService:
       return False
     except Exception as e:
       logger.warning(f"Could not check data for {database_name}: {e}")
-      # If we can't check, assume no data for safety
       return False
 
   async def _get_database_stats(
@@ -816,9 +708,8 @@ class SubgraphService:
     client: "GraphClient",
     database_name: str,
   ) -> dict[str, Any]:
-    """Get statistics for a database."""
+    """Node/edge counts and size. Fields are None when unavailable."""
     try:
-      # Get node and edge counts
       node_result = await client.execute(
         graph_id=database_name, query="MATCH (n) RETURN count(n) as count"
       )
@@ -829,7 +720,6 @@ class SubgraphService:
       )
       edge_count = edge_result[0]["count"] if edge_result else 0
 
-      # Try to get database info for size
       try:
         db_info = await client.get_database(database_name)
         size_mb = db_info.get("size_mb", None)
@@ -860,29 +750,16 @@ class SubgraphService:
     options: dict[str, Any] | None = None,
     progress_callback: Any | None = None,
   ) -> dict[str, Any]:
+    """Copy the parent's data into the subgraph via the Graph API fork endpoint.
+
+    The copy runs entirely on the instance where both databases live: the
+    endpoint attaches the parent's DuckDB staging database and writes straight
+    into the subgraph. Nothing streams through this process.
+
+    ``options`` accepts ``tables`` (default: all). Returns
+    ``{status, tables_copied, row_count, errors, ...}`` — failures come back as
+    ``status: "failed"`` rather than raising.
     """
-    Fork data from parent graph to subgraph by calling Graph API fork endpoint.
-
-    This method calls the Graph API's fork endpoint which attaches the parent graph's
-    DuckDB staging database and copies tables directly to the subgraph's LadybugDB database.
-    All operations happen on the EC2 instance where both databases live.
-
-    Args:
-        parent_graph_id: Parent graph to copy data from
-        subgraph_id: Subgraph to copy data to
-        options: Fork options including:
-          - tables: List of table names (default: all tables)
-          - exclude_patterns: List of table patterns to exclude (e.g., ["Report*"])
-        progress_callback: Optional async callback function(msg, pct) for progress updates
-
-    Returns:
-        Dictionary with fork status including:
-        - status: "success" or "failed"
-        - tables_copied: List of tables successfully copied
-        - row_count: Total rows copied
-        - errors: List of any errors encountered
-    """
-    # Default options
     options = options or {}
     tables_to_copy = options.get("tables", [])
 
@@ -891,12 +768,9 @@ class SubgraphService:
     )
 
     try:
-      # Report initial progress
       if progress_callback:
         progress_callback("Initiating fork from parent DuckDB", 10)
 
-      # Get the Graph API client
-      # In local mode, use direct URL; in production, resolve parent's instance
       from ...config import env
       from ...graph_api.client import GraphClient
       from ...graph_api.client.factory import get_graph_client_for_instance
@@ -904,8 +778,8 @@ class SubgraphService:
       if progress_callback:
         progress_callback("Connecting to Graph API", 20)
 
-      # Local development mode: use GRAPH_API_URL directly
-      # Check for localhost or docker container hostnames (graph-api, etc.)
+      # Locally there is one Graph API; in production the parent's instance
+      # has to be resolved from DynamoDB first.
       is_local = env.GRAPH_API_URL and any(
         host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
       )
@@ -914,7 +788,6 @@ class SubgraphService:
         logger.info(f"Using local Graph API URL: {env.GRAPH_API_URL}")
         client = GraphClient(base_url=env.GRAPH_API_URL)
       else:
-        # Production mode: resolve parent graph's location from DynamoDB
         parent_location = await self.allocation_manager.find_database_location(
           parent_graph_id
         )

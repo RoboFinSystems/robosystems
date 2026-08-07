@@ -1,10 +1,13 @@
 """Demo-only reset logic for roboledger_demo.
 
-This is NOT a production operation. It selectively wipes demo-generated
-state while preserving graph infrastructure (entity, library-seeded
-taxonomies + elements + structures + associations).
+This is NOT a production operation, and it is the single place in the demo that
+touches PostgreSQL directly instead of going through the HTTP API. Wiping a
+tenant back to a clean slate is a demo convenience, not something a customer
+should ever be able to do, so it deliberately has no API surface. It
+selectively removes demo-generated state while preserving graph infrastructure
+(entity, library-seeded taxonomies + elements + structures + associations).
 
-For production use cases:
+Real corrections never take this path:
 - Entries are corrected via
   `create-event-block(event_type='journal_entry_reversed')`, not deleted
 - Schedules are terminated via

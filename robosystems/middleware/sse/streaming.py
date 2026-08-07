@@ -1,8 +1,8 @@
-"""
-Server-Sent Events streaming for unified operation monitoring.
+"""Server-Sent Events streaming for operation monitoring.
 
-This module provides the SSE endpoint and streaming utilities for
-real-time operation monitoring with event replay capability.
+Backs `GET /v1/operations/{operation_id}/stream`: replays stored events
+from a requested sequence number, then streams live ones until the
+operation reaches a terminal state.
 """
 
 import asyncio
@@ -26,14 +26,13 @@ from robosystems.middleware.sse.event_storage import (
 
 
 class SSEConnectionManager:
-  """
-  Manages Server-Sent Event connections for operations.
+  """Tracks open SSE connections per operation and per user.
 
-  Handles connection lifecycle, event distribution, and cleanup for SSE streams.
+  Each connection gets a bounded queue; a queue that fills is dropped
+  rather than allowed to block the broadcaster.
   """
 
   def __init__(self):
-    """Initialize the connection manager."""
     self.connections: dict[str, set[str]] = {}  # operation_id -> set of connection_ids
     self.connection_queues: dict[
       str, asyncio.Queue
@@ -41,7 +40,7 @@ class SSEConnectionManager:
     self.user_connections: dict[str, set[str]] = {}  # user_id -> set of connection_keys
     self._lock = asyncio.Lock()
 
-    # Configuration - runtime tunable via SSM
+    # Runtime-tunable via SSM.
     self.max_connections_per_user = TuningConfig.get_sse_max_connections_per_user()
     self.queue_size = TuningConfig.get_sse_queue_size()
     self.sse_enabled = env.SSE_ENABLED  # Feature flag, not tunable
@@ -49,29 +48,18 @@ class SSEConnectionManager:
   async def add_connection(
     self, operation_id: str, connection_id: str, user_id: str
   ) -> asyncio.Queue:
-    """
-    Add a new SSE connection for an operation.
+    """Register a connection and return its event queue.
 
-    Args:
-        operation_id: Operation being monitored
-        connection_id: Unique connection identifier
-        user_id: User identifier for connection limits
-
-    Returns:
-        asyncio.Queue: Queue for sending events to this connection
-
-    Raises:
-        HTTPException: If user has exceeded connection limit
+    Raises `HTTPException` 429 once the user is at
+    `max_connections_per_user`.
     """
     async with self._lock:
-      # Check per-user connection limit
       if user_id in self.user_connections:
         user_connection_count = len(self.user_connections[user_id])
         if user_connection_count >= self.max_connections_per_user:
           logger.warning(
             f"User {user_id} exceeded SSE connection limit ({user_connection_count}/{self.max_connections_per_user})"
           )
-          # Emit OpenTelemetry metric for connection limit exceeded
           try:
             from robosystems.middleware.otel.metrics import get_endpoint_metrics
 
@@ -85,18 +73,15 @@ class SSEConnectionManager:
             detail=f"Too many concurrent SSE connections (limit: {self.max_connections_per_user})",
           )
 
-      # Add to connections set
       if operation_id not in self.connections:
         self.connections[operation_id] = set()
       self.connections[operation_id].add(connection_id)
 
-      # Track user connections
       if user_id not in self.user_connections:
         self.user_connections[user_id] = set()
       queue_key = f"{operation_id}:{connection_id}"
       self.user_connections[user_id].add(queue_key)
 
-      # Create event queue for this connection with configurable size
       queue = asyncio.Queue(maxsize=self.queue_size)
       self.connection_queues[queue_key] = queue
 
@@ -104,7 +89,6 @@ class SSEConnectionManager:
         f"Added SSE connection {connection_id} for operation {operation_id} (user: {user_id})"
       )
 
-      # Emit OpenTelemetry metric for connection added
       try:
         from robosystems.middleware.otel.metrics import get_endpoint_metrics
 
@@ -118,32 +102,20 @@ class SSEConnectionManager:
   async def remove_connection(
     self, operation_id: str, connection_id: str, user_id: str | None = None
   ):
-    """
-    Remove an SSE connection.
-
-    Args:
-        operation_id: Operation being monitored
-        connection_id: Connection identifier
-        user_id: Optional user identifier for cleanup
-    """
+    """Remove an SSE connection and its queue."""
     async with self._lock:
-      # Remove from connections set
       if operation_id in self.connections:
         self.connections[operation_id].discard(connection_id)
 
-        # Clean up empty operation
         if not self.connections[operation_id]:
           del self.connections[operation_id]
 
-      # Remove event queue
       queue_key = f"{operation_id}:{connection_id}"
       if queue_key in self.connection_queues:
         del self.connection_queues[queue_key]
 
-      # Remove from user connections tracking
       if user_id and user_id in self.user_connections:
         self.user_connections[user_id].discard(queue_key)
-        # Clean up empty user entry
         if not self.user_connections[user_id]:
           del self.user_connections[user_id]
 
@@ -151,7 +123,6 @@ class SSEConnectionManager:
         f"Removed SSE connection {connection_id} for operation {operation_id}"
       )
 
-      # Emit OpenTelemetry metric for connection closed
       try:
         from robosystems.middleware.otel.metrics import get_endpoint_metrics
 
@@ -161,12 +132,10 @@ class SSEConnectionManager:
         pass  # Don't fail if metrics aren't available
 
   async def broadcast_event(self, operation_id: str, event: SSEEvent):
-    """
-    Broadcast an event to all active connections for an operation.
+    """Fan an event out to every open connection for an operation.
 
-    Args:
-        operation_id: Operation identifier
-        event: Event to broadcast
+    Connections whose queue is full are dropped: the broadcaster never
+    blocks on a client that has stopped consuming.
     """
     failed_connections: list[str] = []
 
@@ -182,14 +151,12 @@ class SSEConnectionManager:
         f"Broadcasting event {event.event_type} to {connection_count} connections for operation {operation_id}"
       )
 
-      # Send to all active connections
       emitted_count = 0
       failed_count = 0
       for connection_id in self.connections[operation_id].copy():
         queue_key = f"{operation_id}:{connection_id}"
         if queue_key in self.connection_queues:
           try:
-            # Non-blocking put (connection should be consuming)
             self.connection_queues[queue_key].put_nowait(event)
             logger.debug(f"Event queued for connection {connection_id}")
             emitted_count += 1
@@ -197,7 +164,6 @@ class SSEConnectionManager:
             logger.warning(f"Queue full for connection {connection_id}, removing")
             failed_count += 1
             failed_connections.append(connection_id)
-            # Record queue overflow metric
             try:
               from robosystems.middleware.otel.metrics import get_endpoint_metrics
 
@@ -206,7 +172,6 @@ class SSEConnectionManager:
             except Exception:
               pass  # Metrics are best-effort, never break SSE delivery
 
-      # Record event emission metrics
       try:
         from robosystems.middleware.otel.metrics import get_endpoint_metrics
 
@@ -236,11 +201,10 @@ class SSEConnectionManager:
   async def _handle_connection_error(
     self, operation_id: str, connection_id: str, error_message: str
   ):
-    """Handle connection error by trying to notify the client."""
+    """Best-effort attempt to tell the client why its stream is closing."""
     queue_key = f"{operation_id}:{connection_id}"
     if queue_key in self.connection_queues:
       try:
-        # Try to send error event to client
         error_event = SSEEvent(
           event_type=EventType.OPERATION_ERROR,
           operation_id=operation_id,
@@ -248,7 +212,6 @@ class SSEConnectionManager:
           data={"error": error_message, "connection_closed": True},
           sequence_number=0,
         )
-        # Use put_nowait to avoid blocking
         self.connection_queues[queue_key].put_nowait(error_event)
       except Exception:
         pass  # Queue might be full or closed, best effort only
@@ -272,17 +235,14 @@ async def create_sse_stream_starlette(
   from_sequence: int = 0,
   request: Request | None = None,
 ) -> AsyncGenerator[dict[str, Any]]:
-  """
-  Create an SSE stream for an operation using sse-starlette format.
+  """Yield sse-starlette event dicts for one operation stream.
 
-  Args:
-      operation_id: Operation to monitor
-      user_id: User identifier (for access control)
-      from_sequence: Start from this sequence number
-      request: FastAPI request (for disconnect detection)
+  Emits `connected`, replays stored events from `from_sequence`, then
+  streams live events until a terminal event or client disconnect, at
+  which point it emits `stream_end`. Idle periods emit `keepalive`.
 
-  Yields:
-      Dict[str, Any]: Dictionaries with 'event' and 'data' keys for sse-starlette
+  A stream for an operation belonging to another user yields an `error`
+  event and stops — the caller's identity is the access check.
   """
   import uuid
 
@@ -291,7 +251,6 @@ async def create_sse_stream_starlette(
   connection_manager = get_connection_manager()
 
   try:
-    # Verify operation exists and user has access
     metadata = await event_storage.get_operation_metadata(operation_id)
     if not metadata:
       yield {"event": "error", "data": json.dumps({"error": "Operation not found"})}
@@ -301,7 +260,6 @@ async def create_sse_stream_starlette(
       yield {"event": "error", "data": json.dumps({"error": "Access denied"})}
       return
 
-    # Send initial connection event
     yield {
       "event": "connected",
       "data": json.dumps(
@@ -313,13 +271,11 @@ async def create_sse_stream_starlette(
       ),
     }
 
-    # Replay missed events if requested
     if from_sequence > 0:
       historical_events = await event_storage.get_events(operation_id, from_sequence)
       for event in historical_events:
         if request and await request.is_disconnected():
           return
-        # Convert to sse-starlette format
         yield {
           "event": str(event.event_type),
           "data": json.dumps(
@@ -332,17 +288,15 @@ async def create_sse_stream_starlette(
           ),
         }
 
-    # Add connection for real-time events with user tracking
     try:
       event_queue = await connection_manager.add_connection(
         operation_id, connection_id, user_id
       )
     except HTTPException as e:
-      # Connection limit exceeded
       yield {"event": "error", "data": json.dumps({"error": e.detail})}
       return
 
-    # Subscribe to Redis pub/sub for this operation
+    # Pub/sub relays events emitted by worker processes into this one.
     try:
       from .redis_subscriber import get_redis_subscriber
 
@@ -353,13 +307,12 @@ async def create_sse_stream_starlette(
         f"Failed to subscribe to Redis channel for operation {operation_id}: {e}"
       )
 
-    # Check if operation is already complete
     if metadata.status in [
       OperationStatus.COMPLETED,
       OperationStatus.FAILED,
       OperationStatus.CANCELLED,
     ]:
-      # Operation already complete - replay all events
+      # Already terminal: replay the whole history and close.
       all_events = await event_storage.get_events(operation_id, from_sequence=0)
       for event in all_events:
         if request and await request.is_disconnected():
@@ -375,13 +328,11 @@ async def create_sse_stream_starlette(
             }
           ),
         }
-        # Small delay between events for client processing
         await asyncio.sleep(0.01)
 
-      # Keep connection open briefly to ensure client processes events
+      # Hold the connection open briefly so the client drains the replay.
       await asyncio.sleep(1.0)
 
-      # Send explicit stream_end event
       yield {
         "event": "stream_end",
         "data": json.dumps(
@@ -394,16 +345,13 @@ async def create_sse_stream_starlette(
       }
       return
 
-    # Stream real-time events
     while True:
       if request and await request.is_disconnected():
         break
 
       try:
-        # Wait for next event with timeout
         event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
 
-        # Yield in sse-starlette format
         yield {
           "event": str(event.event_type),
           "data": json.dumps(
@@ -416,13 +364,11 @@ async def create_sse_stream_starlette(
           ),
         }
 
-        # Check if operation is complete
         if event.event_type in [
           EventType.OPERATION_COMPLETED,
           EventType.OPERATION_ERROR,
           EventType.OPERATION_CANCELLED,
         ]:
-          # Send stream_end event
           yield {
             "event": "stream_end",
             "data": json.dumps(
@@ -436,7 +382,6 @@ async def create_sse_stream_starlette(
           break
 
       except TimeoutError:
-        # Send keepalive
         yield {
           "event": "keepalive",
           "data": json.dumps({"timestamp": str(asyncio.get_event_loop().time())}),
@@ -447,10 +392,8 @@ async def create_sse_stream_starlette(
     yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
   finally:
-    # Cleanup with user tracking
     await connection_manager.remove_connection(operation_id, connection_id, user_id)
 
-    # Unsubscribe from Redis
     try:
       from .redis_subscriber import get_redis_subscriber
 
@@ -466,25 +409,15 @@ async def emit_event_to_operation(
   data: dict[str, Any],
   sequence_number: int | None = None,
 ) -> bool:
-  """
-  Emit an event to all active SSE connections for an operation.
+  """Broadcast an event to this process's open connections for an operation.
 
-  This is used by internal services to send events to connected clients.
-
-  Args:
-      operation_id: Operation identifier
-      event_type: Type of event
-      data: Event data
-      sequence_number: Optional sequence number
-
-  Returns:
-      bool: True if event was sent to at least one connection
+  Returns True when at least one connection was still attached. This does
+  not persist the event — use `SSEEventStorage.store_event` for that.
   """
   from datetime import datetime
 
   connection_manager = get_connection_manager()
 
-  # Create SSE event
   event = SSEEvent(
     event_type=event_type,
     operation_id=operation_id,
@@ -493,15 +426,12 @@ async def emit_event_to_operation(
     sequence_number=sequence_number or 0,
   )
 
-  # Broadcast to all connections
   await connection_manager.broadcast_event(operation_id, event)
 
-  # Check if any connections received it
   active_connections = await connection_manager.get_active_connections(operation_id)
   return active_connections > 0
 
 
-# Initialize default SSE operation response
 DEFAULT_SSE_OPERATION_RESPONSE = {
   "operation_id": "string",
   "status": "pending",
@@ -517,18 +447,7 @@ def create_sse_response_starlette(
   from_sequence: int = 0,
   request: Request | None = None,
 ) -> EventSourceResponse:
-  """
-  Create a FastAPI EventSourceResponse using sse-starlette.
-
-  Args:
-      operation_id: Operation to stream
-      user_id: User identifier
-      from_sequence: Start sequence number
-      request: FastAPI request
-
-  Returns:
-      EventSourceResponse configured for SSE with automatic formatting
-  """
+  """Wrap `create_sse_stream_starlette` in an `EventSourceResponse`."""
   return EventSourceResponse(
     create_sse_stream_starlette(operation_id, user_id, from_sequence, request),
     headers={

@@ -1,8 +1,8 @@
 """
-Enhanced Schema Manager for LadybugDB
+Schema Manager for LadybugDB
 
-Manages configurable schema definitions with inheritance and compilation.
-Supports base schema + extensions architecture.
+Compiles a base schema plus a set of extensions into one `Schema`, caching the
+result per combination and checking extensions for name collisions.
 """
 
 import importlib
@@ -46,11 +46,7 @@ class SchemaCompatibility:
 
 
 class SchemaManager:
-  """
-  Enhanced schema manager with base + extension support.
-
-  Provides schema loading, inheritance, compilation, and compatibility checking.
-  """
+  """Schema loading, compilation, and compatibility checking."""
 
   def __init__(self):
     self._schema_cache: dict[str, Schema] = {}
@@ -78,11 +74,8 @@ class SchemaManager:
     """
     Load and compile a complete schema from configuration.
 
-    Args:
-        config: Schema configuration with base + extensions
-
-    Returns:
-        Complete compiled schema
+    An empty ``config.base_schema`` compiles extensions alone, which is how
+    knowledge-only subgraphs are built.
     """
     cache_key = f"{config.base_schema}+{'+'.join(sorted(config.extensions))}"
 
@@ -194,15 +187,7 @@ class SchemaManager:
     logger.debug("Schema consistency validation passed")
 
   def check_schema_compatibility(self, extensions: list[str]) -> SchemaCompatibility:
-    """
-    Check compatibility between multiple schema extensions.
-
-    Args:
-        extensions: List of extension names to check
-
-    Returns:
-        Compatibility information
-    """
+    """Check whether extensions can be combined without name collisions."""
     cache_key = tuple(sorted(extensions))
 
     if cache_key in self._compatibility_cache:
@@ -243,12 +228,10 @@ class SchemaManager:
         logger.error(f"Error checking compatibility for {extension_name}: {e}")
         conflicts.append(f"Failed to load extension {extension_name}: {e}")
 
-    # Find shared nodes (nodes used by multiple extensions)
+    # Shared nodes and relationships are not computed — that needs dependency
+    # analysis across extensions. Compatibility is judged on name conflicts.
     shared_nodes = []
     shared_relationships = []
-
-    # This would require more sophisticated analysis of relationship dependencies
-    # For now, we'll mark as compatible if no naming conflicts
 
     compatibility = SchemaCompatibility(
       compatible=len(conflicts) == 0,
@@ -261,27 +244,11 @@ class SchemaManager:
     return compatibility
 
   def generate_cypher_ddl(self, schema: Schema) -> str:
-    """
-    Generate complete Cypher DDL for schema.
-
-    Args:
-        schema: Compiled schema object
-
-    Returns:
-        Complete DDL script
-    """
+    """Generate the complete Cypher DDL script for a compiled schema."""
     return schema.to_cypher()
 
   def get_schema_statistics(self, schema: Schema) -> dict[str, Any]:
-    """
-    Get statistics about a compiled schema.
-
-    Args:
-        schema: Compiled schema object
-
-    Returns:
-        Schema statistics
-    """
+    """Get counts, names, and DDL size for a compiled schema."""
     return {
       "name": schema.name,
       "version": schema.version,
@@ -296,8 +263,8 @@ class SchemaManager:
     """
     List all available schema extensions.
 
-    Returns:
-        List of extension information
+    Each description is the FIRST LINE of the extension module's docstring and
+    is surfaced to users — treat those lines as part of the public API.
     """
     extensions = []
 

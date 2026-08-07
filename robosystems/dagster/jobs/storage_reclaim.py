@@ -2,8 +2,8 @@
 
 Daily sweep deleting the instance storage the breakdown labels reclaimable:
 `transient` blue-green build artifacts stranded by crashed materializations,
-and `orphan` estates left behind by deleted subgraphs. The itemization made
-these visible on ``/usage``; this job is what actually collects them.
+and `orphan` estates left behind by deleted subgraphs. The same items are
+itemized on ``/usage``; this job is what collects them.
 
 Safety properties, in order of importance:
 

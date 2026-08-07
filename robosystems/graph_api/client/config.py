@@ -1,7 +1,8 @@
 """
-Graph API Client Configuration.
+Graph API client configuration.
 
-Centralized configuration for Graph API clients.
+Defaults, ``GRAPH_CLIENT_*`` environment overrides, and per-call overrides for
+:class:`~robosystems.graph_api.client.base.BaseGraphClient`.
 """
 
 import os
@@ -35,18 +36,13 @@ class GraphClientConfig:
 
   @classmethod
   def from_env(cls, prefix: str = "GRAPH_CLIENT_") -> "GraphClientConfig":
-    """
-    Create configuration from environment variables.
+    """Build a config from ``{prefix}{FIELD}`` environment variables.
 
-    Args:
-        prefix: Environment variable prefix
-
-    Returns:
-        GraphClientConfig instance
+    Each value is coerced to the type of the field's default; unset variables
+    leave the default in place. ``headers`` has no environment form.
     """
     config = cls()
 
-    # Map of config attribute to env var suffix
     env_mappings = {
       "base_url": "BASE_URL",
       "timeout": "TIMEOUT",
@@ -66,7 +62,6 @@ class GraphClientConfig:
       value = os.environ.get(env_var)
 
       if value is not None:
-        # Convert to appropriate type
         attr_type = type(getattr(config, attr))
         if attr_type is bool:
           setattr(config, attr, value.lower() in ("true", "1", "yes"))
@@ -78,15 +73,7 @@ class GraphClientConfig:
     return config
 
   def with_overrides(self, **kwargs: Any) -> "GraphClientConfig":
-    """
-    Create a new config with overridden values.
-
-    Args:
-        **kwargs: Values to override
-
-    Returns:
-        New GraphClientConfig instance
-    """
+    """Return a copy with ``kwargs`` applied; ``headers`` is copied, not shared."""
     config_dict: dict[str, Any] = {
       "base_url": self.base_url,
       "timeout": self.timeout,

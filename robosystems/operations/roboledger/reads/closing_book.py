@@ -16,9 +16,9 @@ from robosystems.models.api.extensions.closing_book import (
 )
 from robosystems.models.extensions.roboledger import Report, Structure
 
-# Structure types that represent financial statements
-# NOTE: `cash_flow_statement` is not listed — the renderer is not yet
-# implemented for roboledger. SEC XBRL cash-flow parsing is unaffected.
+# Structure types that represent financial statements. `cash_flow_statement`
+# is absent because roboledger has no renderer for it; SEC XBRL cash-flow
+# parsing is a separate path and is unaffected.
 _STATEMENT_TYPES = {
   "income_statement",
   "balance_sheet",

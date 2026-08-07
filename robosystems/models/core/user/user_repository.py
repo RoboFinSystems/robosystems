@@ -1,8 +1,8 @@
-"""
-User Repository Access Model
+"""A user's subscription to a shared repository: plan, permissions, billing.
 
-This model manages user access to repositories (formerly "shared repositories")
-including subscriptions, permissions, and billing information.
+One row per (user, repository) pair, carrying the access level, the plan and
+its price, and the monthly credit allocation that seeds the paired
+``UserRepositoryCredits`` pool.
 """
 
 import logging
@@ -50,7 +50,6 @@ class RepositoryType(str, Enum):
   ECONOMIC = "economic"
 
 
-# Type-safe helpers for SQLAlchemy model attributes
 def safe_str(value: Any) -> str:
   """Safely convert SQLAlchemy model attributes to string."""
   return str(value) if value is not None else ""
@@ -71,10 +70,7 @@ class RepositoryAccessLevel(str, Enum):
 
 
 class UserRepository(Model):
-  """
-  Model for user repository access combining subscription management
-  with permission-based access control.
-  """
+  """A user's access to one shared repository: subscription plus permission."""
 
   __tablename__ = "user_repository"
 
@@ -85,13 +81,12 @@ class UserRepository(Model):
 
   # Repository identification (plain String — new repos added via manifests, no migration needed)
   repository_type = Column(String, nullable=False)
-  # NOTE: repository_name contains the graph_id (e.g., "sec") not the display name.
-  # This is the unique identifier/slug for the repository, stored in graphs.graph_id.
+  # Holds the graph_id slug (e.g. "sec"), not a display name — it is the FK
+  # target in graphs.graph_id.
   repository_name = Column(
     String, ForeignKey("graphs.graph_id", ondelete="RESTRICT"), nullable=False
   )
 
-  # Access control (from UserRepositoryAccess)
   access_level = Column(
     SQLEnum(RepositoryAccessLevel), nullable=False, default=RepositoryAccessLevel.NONE
   )
@@ -188,17 +183,19 @@ class UserRepository(Model):
     expires_at: datetime | None = None,
     metadata: dict[str, Any] | None = None,
   ) -> "UserRepository":
-    """Create or update repository access for a user."""
+    """Create or update repository access for a user.
+
+    Upserts on the (user, repository) pair, then creates or resizes the paired
+    credit pool when ``monthly_credits`` is non-zero.
+    """
     import json
     from datetime import timedelta
 
-    # Check if access already exists
     existing = cls.get_by_user_and_repository(user_id, repository_name, session)
 
     now = datetime.now(UTC)
 
     if existing:
-      # Update existing access
       existing.repository_type = repository_type
       existing.access_level = access_level
       existing.repository_plan = repository_plan
@@ -215,7 +212,6 @@ class UserRepository(Model):
 
       access = existing
     else:
-      # Create new access
       access = cls(
         user_id=user_id,
         repository_type=repository_type,
@@ -234,7 +230,6 @@ class UserRepository(Model):
       if expires_at:
         access.expires_at = expires_at
 
-      # Set billing cycle
       if monthly_price_cents > 0:
         access.billing_cycle_day = now.day
         access.next_billing_at = now + timedelta(days=30)
@@ -245,17 +240,14 @@ class UserRepository(Model):
       session.commit()
       session.refresh(access)
 
-      # Create or update associated credit pool
       if monthly_credits > 0:
         from .user_repository_credits import UserRepositoryCredits
 
         if access.user_credits:
-          # Update existing credit pool
           access.user_credits.update_monthly_allocation(
             new_allocation=Decimal(str(monthly_credits)), session=session
           )
         else:
-          # Create new credit pool
           UserRepositoryCredits.create_for_access(
             access_id=cast(str, access.id),
             repository_type=repository_type,
@@ -290,7 +282,6 @@ class UserRepository(Model):
     if not access or not safe_bool(access.is_active):
       return False
 
-    # Check if expired
     if access.expires_at and access.expires_at < datetime.now(UTC):
       return False
 
@@ -305,7 +296,6 @@ class UserRepository(Model):
     if not access or not safe_bool(access.is_active):
       return RepositoryAccessLevel.NONE
 
-    # Check if expired
     if access.expires_at and access.expires_at < datetime.now(UTC):
       return RepositoryAccessLevel.NONE
 
@@ -359,12 +349,11 @@ class UserRepository(Model):
     )
 
   def revoke_access(self, session: Session) -> None:
-    """Revoke repository access for a user."""
+    """Revoke repository access and deactivate the paired credit pool."""
     self.is_active = False
     self.expires_at = datetime.now(UTC)
     self.updated_at = datetime.now(UTC)
 
-    # Also deactivate the credit pool
     if self.user_credits:
       self.user_credits.is_active = False
 
@@ -381,27 +370,11 @@ class UserRepository(Model):
     new_price_cents: int | None = None,
     new_credits: int | None = None,
   ) -> None:
-    """
-    Upgrade or downgrade repository subscription plan.
+    """Move the subscription to another plan, in either direction.
 
-    This updates the repository plan (STARTER, ADVANCED, UNLIMITED) and optionally
-    adjusts pricing and credit allocations. When credits are updated, the method also
-    synchronizes the UserRepositoryCredits record to reflect the new allocation.
-
-    Use cases:
-    - User upgrades from STARTER to ADVANCED for more features
-    - User downgrades from UNLIMITED to ADVANCED to reduce costs
-    - Price adjustments due to promotional pricing
-    - Credit allocation changes without plan changes
-
-    Args:
-        new_plan: Target repository plan (STARTER, ADVANCED, or UNLIMITED)
-        session: Database session for the transaction
-        new_price_cents: Optional new monthly price in cents (overrides plan default)
-        new_credits: Optional new monthly credit allocation (overrides plan default)
-
-    Raises:
-        SQLAlchemyError: If the database update fails
+    ``new_price_cents`` and ``new_credits`` override the plan's own defaults —
+    which is also how a price or allocation is adjusted without changing plan.
+    A credit change propagates to the paired ``UserRepositoryCredits`` pool.
     """
     old_plan = self.repository_plan
     self.repository_plan = new_plan
@@ -413,7 +386,6 @@ class UserRepository(Model):
     if new_credits is not None:
       self.monthly_credit_allocation = new_credits
 
-      # Update credit allocation
       if self.user_credits:
         self.user_credits.update_monthly_allocation(
           new_allocation=Decimal(str(new_credits)), session=session
@@ -461,10 +433,9 @@ class UserRepository(Model):
     return self.access_level == RepositoryAccessLevel.ADMIN  # type: ignore[return-value]
 
   def get_graph_connection_info(self) -> dict[str, Any]:
-    """
-    Get graph database connection information for this repository.
+    """Graph-database connection info, read from the related ``Graph`` row.
 
-    Pulls infrastructure metadata from the Graph table via relationship.
+    Falls back to the shared-tier defaults when the ``Graph`` row is absent.
     """
     if self.graph:
       graph_tier = self.graph.graph_tier
@@ -487,21 +458,10 @@ class UserRepository(Model):
     }
 
   def get_repository_plan_config(self) -> dict[str, Any]:
-    """
-    Get repository plan configuration for this repository type and plan.
+    """Plan configuration from ``config/shared_repositories.py``.
 
-    Pulls from the shared repository registry in config/shared_repositories.py
-    which is the single source of truth for pricing, credits, and access levels.
-
-    Returns:
-        Dict containing plan configuration:
-        - name: Human-readable plan name
-        - monthly_credits: Credit allocation per month
-        - price_monthly: Monthly subscription price in dollars
-        - price_cents: Monthly price in cents
-        - access_level: RepositoryAccessLevel string (READ, WRITE, or ADMIN)
-
-        Empty dict if plan is not configured.
+    That registry is the source of truth for pricing, credits, and access
+    level. Returns an empty dict when the plan is not registered.
     """
     plan_details = _get_plan_details(self.repository_plan)
     if not plan_details:

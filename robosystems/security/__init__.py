@@ -1,12 +1,12 @@
 """
 Security utilities for RoboSystems.
 
-This package contains security-related utilities including:
-- Secure Cypher query analysis (cypher_analyzer.py)
-- Secure error handling and information disclosure prevention (error_handling.py)
-- Data encryption for backups (encryption.py)
-- Authentication and authorization helpers
-- Input validation and sanitization
+- `cypher_analyzer.py` — Cypher read/write classification (the query write barrier)
+- `error_handling.py` — generic client errors, full detail to logs only
+- `encryption.py` — Fernet encryption for backups
+- `audit_logger.py` — structured security events + CloudWatch alerting metrics
+- `auth_protection.py`, `captcha.py`, `password.py`, `device_fingerprinting.py`,
+  `input_validation.py` — authentication and input hardening
 """
 
 from .audit_logger import SecurityAuditLogger, SecurityEventType

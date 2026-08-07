@@ -32,15 +32,8 @@ timeout_coordinator = TimeoutCoordinator()
 
 
 async def get_schema_info(repository: Any) -> dict[str, Any]:
-  """
-  Retrieve schema information from the graph database.
-
-  Args:
-      repository: The graph repository instance
-
-  Returns:
-      Dictionary containing schema information
-  """
+  """Retrieve node labels, relationship types, and node properties from the
+  graph database."""
   schema_info = {"node_labels": [], "relationship_types": [], "node_properties": {}}
 
   try:

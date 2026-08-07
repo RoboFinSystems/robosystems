@@ -1,51 +1,54 @@
 #!/usr/bin/env python3
 """Ingest Charlie Hoffman's "The World Online" general ledger.
 
-Reads ``GeneralLedger.csv`` (22,288 lines) + ``ChartOfAccounts.csv``
-(239 GL accounts) pulled into
-``local/datasets/seattle_method_world_online/`` by
-``pull_world_online.sh``, groups lines by ``journalId`` (~3,389 balanced
-entries), and posts one event per journal id via ``create-event-block``
-with ``apply_handlers=True``.
+Reads ``GeneralLedger.csv`` (22,288 lines) and ``ChartOfAccounts.csv``
+(239 GL accounts), groups the lines by ``journalId`` into roughly 3,389
+balanced entries, and posts one event per entry via ``create-event-block``
+with ``apply_handlers=True``. Each line item carries its business-event
+concept, which the ingest handler resolves to ``LineItem.flow_element_id`` —
+the foreign key the rollforward filter engine matches on when attributing a
+balance-sheet movement to the events that caused it.
 
-This is the scaled-up sibling of
-``examples.seattle_method_demo.ingest_transactions`` (Charlie's 14-JE
-lemonade stand). The methodology is identical — each LineItem carries
-its business-event concept on ``metadata['transaction_description_code']``,
-which the ingest handler resolves to ``LineItem.flow_element_id`` (the
-first-class FK the rollforward filter engine matches). The differences:
+The methodology matches ``examples.seattle_method_demo.ingest_transactions``;
+the dataset differs in four ways:
 
-- **GL flat format** (not pre-journalized JE CSV). Columns:
-  ``glAccountNumber`` (GL account), ``userDefined2`` (the mini line-item
-  concept — used as the LineItem element), ``tags`` (the mini business
-  event — stamped as the flow tag), ``amount`` + ``amountCreditDebitIndicator``.
-- **CoA layer** — ``ChartOfAccounts.csv`` maps the 239 real GL accounts
-  to mini concepts. We collapse to the mini concept at ingest (matching
-  Test Case 1, and Charlie's note #3: use the lowest-level line item as
-  the code and let software roll up; subclassifications deferred). The
-  GL account number + name are preserved on ``LineItem.metadata`` for
-  audit/traceability.
-- **Opening balances** — 98 ``BBF`` (beginning-balance-forward) lines
-  dated 12/31/2023, tagged ``mini:OpeningBalance``. They ingest as real
-  transactions exactly like every other line; for them to attribute in
-  the rollforward (and reconcile against Charlie's OpeningBalance pivot
-  row), ``mini:OpeningBalance`` must be a loaded Element — see the load
-  step, which adds it as an extension concept (it is NOT in MINI 2026).
-- **Provenance** — ``transactionId``, ``enteredBy``, ``enteredDateTime``
-  preserved on metadata (Charlie's note #5).
+- **Flat GL format** rather than a pre-journalized entry CSV. The columns
+  that matter: ``glAccountNumber`` (the source GL account), ``userDefined2``
+  (the mini line-item concept, used as the LineItem element), ``tags`` (the
+  mini business event, stamped as the flow concept), and ``amount``.
+- **A real chart of accounts** — ``ChartOfAccounts.csv`` maps 239 GL accounts
+  onto mini concepts, and ingest collapses each line to its mini concept.
+  That follows the framework's own guidance: code at the lowest-level line
+  item and let the software roll up. The source account number and name stay
+  on ``LineItem.metadata`` so every posting remains traceable to its origin.
+- **Opening balances** — the beginning-balance-forward lines dated 12/31/2023
+  are tagged ``mini:OpeningBalance`` and ingest as ordinary transactions,
+  exactly like every other line. Modelling the opening position as real
+  tagged postings rather than a separately-injected number is what lets the
+  rollforward start from a genuine $0 genesis and still foot, and what lets
+  the opening reconcile against the published pivot. ``mini:OpeningBalance``
+  is not in MINI 2026, so the load step adds it as an extension concept.
+- **Provenance** — ``transactionId``, ``enteredBy`` and ``enteredDateTime``
+  are preserved on metadata.
 
-**Sign convention**: the ``amount`` column is already signed in
-**debit-positive** form (verified against ``SummaryOfTransactions.csv``:
-asset openings positive, liability/equity openings negative; the D/C
-indicator agrees with the sign on every row). So
-``debit_amount - credit_amount == round(amount * 100)`` and no indicator
-gymnastics are needed.
+**Sign convention**: the ``amount`` column is already signed debit-positive —
+asset openings positive, liability and equity openings negative, with the
+debit/credit indicator agreeing with the sign on every row. So
+``debit_amount - credit_amount == round(amount * 100)`` directly, with no
+reinterpretation of the indicator.
 
-Usage:
+Prerequisites: the pull and load steps have run, so the dataset is in
+``local/datasets/seattle_method_world_online/`` and the mini CoA (including
+the ``mini:OpeningBalance`` extension) exists on the graph.
+
+Run it (the orchestrator runs this as step 5):
     uv run python -m examples.seattle_method_world_online.ingest_gl <graph_id>
     uv run python -m examples.seattle_method_world_online.ingest_gl <graph_id> --dry-run
     uv run python -m examples.seattle_method_world_online.ingest_gl <graph_id> --limit 50
     uv run python -m examples.seattle_method_world_online.ingest_gl <graph_id> --start 1000
+
+Entries post one at a time, so a full ingest takes several minutes; progress
+prints every 250 entries. ``--start`` resumes after a partial run.
 """
 
 from __future__ import annotations
@@ -65,8 +68,8 @@ COA_PATH = DATA_DIR / "ChartOfAccounts.csv"
 
 OPENING_BALANCE_QNAME = "mini:OpeningBalance"
 
-# journalEntryType → best-effort REA event_category. The GL impact is
-# what drives the reconciliation; the REA classification is advisory.
+# journalEntryType → best-effort REA event_category. Advisory only — the
+# reconciliation turns on the GL impact, not on this classification.
 _JE_TYPE_CATEGORY: dict[str, str] = {
   "BBF": "adjustment",  # beginning balance forward (opening)
   "SJ": "sales",  # sales journal
@@ -108,9 +111,9 @@ def _get_ledger_client():
 def _parse_date(raw: str) -> date:
   """Parse a GL ``period`` value → date.
 
-  The World Online GL uses ``M/D/YYYY`` (e.g. ``1/1/2024``). ISO
-  ``YYYY-MM-DD`` is also accepted defensively. Raises ``ValueError`` on
-  any other shape so the demo fails loudly rather than mis-dating events.
+  This GL uses ``M/D/YYYY`` (e.g. ``1/1/2024``); ISO ``YYYY-MM-DD`` is also
+  accepted. Raises ``ValueError`` on anything else, so the demo fails loudly
+  rather than mis-dating events.
   """
   raw = raw.strip()
   if "-" in raw:
@@ -125,10 +128,10 @@ def _parse_date(raw: str) -> date:
 def load_coa_map(coa_path: Path = COA_PATH) -> dict[str, tuple[str, str]]:
   """Read ChartOfAccounts.csv → {glAccountNumber: (mini_qname, name)}.
 
-  ``userDefined2`` carries the mini concept the GL account rolls up to;
-  ``userDefined1`` is the human-readable account name. Used to enrich
-  LineItem metadata (the GL rows also carry these inline, but the CoA
-  file is the canonical mapping and lets us flag inline/CoA drift).
+  ``userDefined2`` carries the mini concept the GL account rolls up to and
+  ``userDefined1`` its human-readable name. The GL rows repeat both inline,
+  but this file is the canonical mapping, so comparing the two catches drift
+  between an account's declared concept and the one its postings use.
   """
   out: dict[str, tuple[str, str]] = {}
   if not coa_path.exists():
@@ -147,9 +150,8 @@ def load_coa_map(coa_path: Path = COA_PATH) -> dict[str, tuple[str, str]]:
 def read_gl_grouped(gl_path: Path = GL_PATH) -> OrderedDict[str, list[dict]]:
   """Read GeneralLedger.csv → ordered {journalId: [row, ...]}.
 
-  Insertion order (by first appearance of each journalId) is preserved,
-  and the journalId=1 opening entry sorts first because it appears
-  first in the file.
+  Entries keep their first-appearance order, so the opening entry ingests
+  first, as it does in the file.
   """
   by_journal: OrderedDict[str, list[dict]] = OrderedDict()
   with gl_path.open(encoding="utf-8-sig") as f:
@@ -181,20 +183,17 @@ def _build_event_payload(
         f"no matching Element on this graph. Check the load step output."
       )
 
-    # amount is already debit-positive signed (verified against
-    # SummaryOfTransactions.csv). Split into the non-negative
-    # debit/credit columns the LineItem model expects.
+    # amount is already debit-positive signed; split it into the
+    # non-negative debit/credit columns the LineItem model expects.
     cents = round(float(row["amount"]) * 100)
 
-    # Skip zero-amount lines. Charlie's GL carries the occasional $0
-    # memo line (e.g. a placeholder InterestExpense line on a card
-    # transaction); our double-entry handler rejects any line with no
-    # debit or credit, and rejecting the whole entry would drop its
-    # non-zero siblings too. A $0 line doesn't affect the balance, so
-    # dropping just it keeps the entry valid. This mirrors Test Case 1's
-    # JE-225 nil-entry finding — the $0 lines have no economic substance,
-    # so the only consequence is a count-only delta on cells where
-    # Charlie's pivot counts the $0 line (classified Their data quality).
+    # Skip zero-amount lines. The GL carries the occasional $0 memo line —
+    # a placeholder interest line on a card transaction, say — and the
+    # double-entry handler rejects any line with neither a debit nor a
+    # credit. Rejecting the whole entry would drop its non-zero siblings too,
+    # and a $0 line changes no balance, so dropping just the line keeps the
+    # entry valid. The only visible consequence is a line-count difference
+    # against the published pivot, which counts those lines.
     if cents == 0:
       warnings.append(
         f"journalId {journal_id}: skipped $0 line on {mini_qname} "
@@ -208,8 +207,8 @@ def _build_event_payload(
     gl_account = (row.get("glAccountNumber") or "").strip()
     account_name = (row.get("userDefined1") or "").strip()
 
-    # CoA drift check — the GL row's inline mini concept should agree
-    # with the canonical ChartOfAccounts.csv mapping for that account.
+    # Drift check — the row's inline mini concept should agree with the
+    # canonical ChartOfAccounts.csv mapping for that account.
     coa_entry = coa_map.get(gl_account)
     if coa_entry and coa_entry[0] and coa_entry[0] != mini_qname:
       warnings.append(
@@ -238,9 +237,9 @@ def _build_event_payload(
 
   occurred_at = datetime.combine(posting, datetime.min.time()).isoformat() + "Z"
   event_category = _JE_TYPE_CATEGORY.get(je_type, "adjustment")
-  # JournalEntryRecordedMetadata.type enum is {standard, adjusting, closing,
-  # reversing}; opening balances are ordinary posted entries (type=standard).
-  # The BBF distinction is preserved on metadata.journal_entry_type.
+  # The entry-type enum is {standard, adjusting, closing, reversing}, and
+  # opening balances are ordinary posted entries. The source journal type,
+  # including the beginning-balance-forward marker, stays on metadata.
   entry_type = "standard"
 
   return {
@@ -306,9 +305,8 @@ def ingest(
 ) -> tuple[int, list[str]]:
   """Walk the GL's journal ids and post each as one event.
 
-  Returns ``(events_created, warnings)``. ``limit`` caps the number of
-  entries (handy for smoke tests); ``start`` skips the first N entries
-  (resume after a partial run).
+  Returns ``(events_created, warnings)``. ``limit`` caps how many entries are
+  posted, and ``start`` skips the first N so a partial run can be resumed.
   """
   if not gl_path.exists():
     raise SystemExit(f"GeneralLedger.csv not found at {gl_path} — run the pull step.")
@@ -369,7 +367,7 @@ def ingest(
     try:
       response = client.create_event_block(graph_id, payload)
       created += 1
-      _ = response  # response.id available; suppressed in the bulk loop
+      _ = response  # response.id is available but too noisy to print per entry
     except Exception as exc:
       warnings.append(f"journalId {jid}: {exc}")
       print(f"  ✗ journalId {jid}: {exc}")

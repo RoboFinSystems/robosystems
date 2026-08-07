@@ -17,11 +17,11 @@ synthesized ``$__avg_X`` operand *before* parsing
 (:func:`desugar_aggregates`), so the whitelist keeps rejecting every
 ``ast.Call`` and the evaluator stays pure arithmetic — averaging happens
 at bind time in the caller, where the begin + end facts live. The
-``$X[t-1]`` prior-period reference (the forecast grammar's compounding
-form) rides the same mechanism: :func:`desugar_priors` rewrites it to a
-synthesized ``$__prior_X`` operand pre-parse, and the caller binds it at
-the resolved prior period — ``compute-forecast`` binds the previous
-forward month's value in its walk. ``ast.Subscript`` stays outside the
+``$X[t-1]`` prior-period reference rides the same mechanism:
+:func:`desugar_priors` rewrites it to a synthesized ``$__prior_X``
+operand pre-parse, and the caller binds it at the resolved prior period
+— ``compute-forecast`` binds the previous forward month's value in its
+walk. ``ast.Subscript`` stays outside the
 whitelist, so any other bracket form (``$X[t-2]``, ``$X[0]``) is
 structurally rejected — the grammar ceiling is ``[t-1]`` + ``avg()``.
 """
@@ -93,12 +93,12 @@ _PRIOR_REF_RE = re.compile(r"\$([A-Za-z_]\w*)\[t-1\]")
 def desugar_priors(expr: str) -> tuple[str, dict[str, str]]:
   """Rewrite ``$X[t-1]`` references to synthesized ``$__prior_X`` operands.
 
-  The prior-period half of the forecast grammar (``avg()``'s documented
-  sibling seam). Returns the rewritten expression plus a map of
-  synthesized variable name → base variable name; callers append the
-  synthesized names to the parse variable list and bind each one at the
-  resolved prior period — the forecast walk binds the previous forward
-  month's value (seeded from actuals at the base period).
+  The prior-period half of the forecast grammar, sibling to ``avg()``.
+  Returns the rewritten expression plus a map of synthesized variable
+  name → base variable name; callers append the synthesized names to
+  the parse variable list and bind each one at the resolved prior
+  period — the forecast walk binds the previous forward month's value
+  (seeded from actuals at the base period).
 
   Only the exact ``[t-1]`` form matches. Any other bracket construct —
   ``$X[t-2]``, ``$X[0]``, ``$X[t]`` — survives as a genuine
@@ -276,8 +276,8 @@ def lhs_variable_names(parsed: ParsedExpression) -> list[str]:
 def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> float:
   """Evaluate a single arithmetic expression (no equality) to a float.
 
-  Used by future derivation evaluators (metric blocks, etc.) that need
-  a numeric result rather than a pass/fail outcome.
+  The numeric-result counterpart to :func:`evaluate_equality`, for
+  callers that need a value rather than a pass/fail outcome.
   """
   mapped: dict[str, Any] = {
     f"_var_{name}": values[name] for name in parsed.variable_names

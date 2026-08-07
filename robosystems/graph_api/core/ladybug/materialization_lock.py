@@ -73,13 +73,10 @@ class MaterializationLock:
   async def acquire(
     self, timeout_seconds: float = DEFAULT_ACQUIRE_TIMEOUT_SECONDS
   ) -> bool:
-    """Try to acquire the lock.
+    """Try to acquire the lock, returning False if ``timeout_seconds`` elapses.
 
-    Args:
-        timeout_seconds: Maximum time to wait. Default 5s (fail fast).
-
-    Returns:
-        True if lock was acquired, False if timed out.
+    Polls with a halving backoff. Redis errors are retried within the window
+    rather than raised — a blip should not fail a materialization outright.
     """
     import asyncio
     import time
@@ -111,11 +108,11 @@ class MaterializationLock:
     return False
 
   async def release(self) -> bool:
-    """Release the lock using compare-and-delete.
+    """Release the lock, returning False if this process no longer holds it.
 
-    Returns:
-        True if this process held and released the lock,
-        False if the lock was already released or held by another process.
+    The compare-and-delete is what makes that safe: after a TTL expiry the key
+    may belong to another process, and deleting it unconditionally would strip
+    a lock someone else is relying on.
     """
     if not self._acquired:
       return False

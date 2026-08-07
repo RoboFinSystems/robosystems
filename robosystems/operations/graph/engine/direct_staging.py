@@ -1,18 +1,11 @@
-"""Direct file staging for small files.
+"""In-request staging of small files into DuckDB.
 
-This module provides a fast path for staging small files directly to DuckDB,
-bypassing Dagster job overhead while still reporting AssetMaterializations
-for observability in the Dagster UI.
+Files under ``SMALL_FILE_STAGING_THRESHOLD_MB`` are staged inside the HTTP
+request — milliseconds instead of seconds — while still reporting an
+AssetMaterialization so the run appears in the Dagster UI.
 
-For small files (< SMALL_FILE_STAGING_THRESHOLD_MB), this approach:
-- Stages files immediately during the HTTP request
-- Reports an AssetMaterialization to Dagster for observability
-- Returns control to the caller in milliseconds instead of seconds
-
-For large files, the regular Dagster job should be used for:
-- Async processing that won't timeout
-- Progress streaming for long operations
-- Retry logic for unreliable operations
+Larger files belong on the Dagster job, which gets async execution beyond the
+request timeout, streamed progress, and retries.
 """
 
 import time
@@ -33,28 +26,12 @@ async def stage_file_directly(
   file_size_bytes: int,
   row_count: int | None = None,
 ) -> dict[str, Any]:
+  """Stage one uploaded file into its DuckDB table, in this process.
+
+  The staging call covers *every* uploaded file for the table, not just this
+  one — the DuckDB table is rebuilt from the full set each time. Errors are
+  returned as ``{"status": "error", ...}`` rather than raised.
   """
-  Stage a file directly to DuckDB without Dagster orchestration.
-
-  This is the fast path for small files. It:
-  1. Gets all uploaded files for the table
-  2. Calls the Graph API to create/update the DuckDB staging table
-  3. Marks the file as staged in the database
-  4. Reports an AssetMaterialization to Dagster for observability
-
-  Args:
-      db: SQLAlchemy database session (from FastAPI dependency injection)
-      file_id: The file ID to stage
-      graph_id: The graph database ID
-      table_id: The table ID
-      s3_key: The S3 key of the file
-      file_size_bytes: Size of the file in bytes
-      row_count: Optional row count for the file
-
-  Returns:
-      Dict with staging result including status, duration, etc.
-  """
-  # Lazy imports to avoid circular dependencies
   from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.models.core import GraphFile, GraphTable
 
@@ -65,7 +42,6 @@ async def stage_file_directly(
   )
 
   try:
-    # Get the file and table
     graph_file = GraphFile.get_by_id(file_id, db)
     if not graph_file:
       return {
@@ -82,7 +58,6 @@ async def stage_file_directly(
         "file_id": file_id,
       }
 
-    # Get all uploaded files for this table (for proper staging)
     all_files = GraphFile.get_all_for_table(table_id, db)
     uploaded_files = [f for f in all_files if f.upload_status == "uploaded"]
 

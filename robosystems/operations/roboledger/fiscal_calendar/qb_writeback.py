@@ -56,8 +56,8 @@ def resolve_writeback_connection(
   Mirrors the connection selection in
   ``PeriodCloseService._publish_drafts_to_qb``: the most-recently-created
   non-deleted QuickBooks connection on the graph whose ``write_policy`` is
-  qb_authoritative / hybrid. Most graphs have at most one; v1 picks the
-  first by ``created_at`` desc when several exist.
+  qb_authoritative / hybrid. Most graphs have at most one; when several
+  exist the newest by ``created_at`` wins.
   """
   from robosystems.models.core.connection.connection import Connection
 

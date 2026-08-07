@@ -70,7 +70,6 @@ async def get_org_limits(
         detail="You are not a member of this organization",
       )
 
-    # Get org limits
     limits = OrgLimits.get_by_org_id(org_id, db)
     if not limits:
       raise HTTPException(
@@ -78,7 +77,6 @@ async def get_org_limits(
         detail="Organization limits not found",
       )
 
-    # Get current usage
     usage = limits.get_current_usage(db)
 
     # Calculate if any limits are approaching or exceeded
@@ -162,7 +160,6 @@ async def get_org_usage(
     graph_usage_details = []
 
     for graph in graphs:
-      # Get graph credits
       credits = GraphCredits.get_by_graph_id(graph.graph_id, db)
       if not credits:
         continue
@@ -188,11 +185,10 @@ async def get_org_usage(
         for r in usage_records
         if r.event_type == UsageEventType.CREDIT_CONSUMPTION.value
       )
-      # Count API-shaped events, not every row in the table. `graph_usage` also
-      # holds the 6-hourly storage snapshots the usage sensor writes and the
-      # credit-consumption rows counted just above, so `len(usage_records)`
-      # reported background bookkeeping as customer API traffic — an untouched
-      # graph still showed a steadily climbing "API calls" figure.
+      # Count API-shaped events, not every row in the table: `graph_usage`
+      # also holds the 6-hourly storage snapshots the usage sensor writes and
+      # the credit-consumption rows counted just above, neither of which is
+      # customer API traffic.
       graph_api_calls = sum(
         1 for r in usage_records if r.event_type in _API_EVENT_TYPES
       )
@@ -208,11 +204,8 @@ async def get_org_usage(
         .first()
       )
 
-      # GraphUsage.storage_gb is a Float column while the running total was a
-      # Decimal, so the first graph with a storage snapshot raised
-      # "unsupported operand type(s) for +=: 'decimal.Decimal' and 'float'"
-      # and 500'd the whole endpoint. Any org with real graph activity has
-      # snapshots, so this failed for exactly the orgs it mattered for.
+      # GraphUsage.storage_gb is a Float column and the running total is a
+      # Decimal, so the snapshot value must be converted before it is added.
       graph_storage = float(latest_storage.storage_gb or 0) if latest_storage else 0.0
 
       graph_usage_details.append(
@@ -261,11 +254,10 @@ async def get_org_usage(
       day_start = start_date + timedelta(days=i)
       day_end = day_start + timedelta(days=1)
 
-      # Same definitions as the summary above: `api_calls` counts only
-      # API-shaped events (a bare count also swept in the 6-hourly storage
-      # snapshots and the credit-consumption rows, so the trend disagreed
-      # with the summary in the same payload), while credits sum across
-      # whatever rows carry them.
+      # Same definitions as the summary above, so the two agree within one
+      # payload: `api_calls` counts only API-shaped events, excluding the
+      # 6-hourly storage snapshots and the credit-consumption rows, while
+      # credits sum across whatever rows carry them.
       day_records = (
         db.query(
           func.sum(GraphUsage.credits_consumed).label("credits"),

@@ -1,9 +1,6 @@
-"""Shared data source configuration.
+"""Registry of external data sources, and helpers to build their S3 paths.
 
-This module defines the data sources available in the shared data buckets
-and provides helpers for building consistent S3 paths.
-
-The shared bucket structure uses key prefixes to organize data by source:
+Each source owns a key prefix in both shared buckets:
   s3://robosystems-shared-raw-{env}/
     sec/          # SEC EDGAR filings
     fred/         # Federal Reserve Economic Data (future)
@@ -91,29 +88,12 @@ DATA_SOURCES: dict[DataSourceType, DataSourceConfig] = {
 
 
 def get_data_source(source: DataSourceType) -> DataSourceConfig:
-  """Get configuration for a data source.
-
-  Args:
-      source: The data source type
-
-  Returns:
-      DataSourceConfig for the source
-
-  Raises:
-      KeyError: If the source is not registered
-  """
+  """Get configuration for a data source; raises KeyError if unregistered."""
   return DATA_SOURCES[source]
 
 
 def get_raw_key(source: DataSourceType, *parts: str) -> str:
-  """Build an S3 key for raw data.
-
-  Args:
-      source: The data source type
-      *parts: Path components after the source prefix
-
-  Returns:
-      S3 key string (without bucket name)
+  """Build an S3 key for raw data; ``parts`` follow the source prefix.
 
   Example:
       >>> get_raw_key(DataSourceType.SEC, "year=2024", "320193", "filing.zip")
@@ -126,14 +106,7 @@ def get_raw_key(source: DataSourceType, *parts: str) -> str:
 
 
 def get_processed_key(source: DataSourceType, *parts: str) -> str:
-  """Build an S3 key for processed data.
-
-  Args:
-      source: The data source type
-      *parts: Path components after the source prefix
-
-  Returns:
-      S3 key string (without bucket name)
+  """Build an S3 key for processed data; ``parts`` follow the source prefix.
 
   Example:
       >>> get_processed_key(DataSourceType.SEC, "processed", "filed=2024-01-15", "nodes", "Entity", "file.parquet")
@@ -151,14 +124,6 @@ def get_cache_key(source: DataSourceType, partition: str, source_file_id: str) -
   Used for spot instance resilience — caches individual filing results
   so they can be restored after an interruption without reprocessing.
 
-  Args:
-      source: The data source type
-      partition: Partition identifier (e.g., "2024-Q1")
-      source_file_id: SourceFile ID
-
-  Returns:
-      S3 key string (without bucket name)
-
   Example:
       >>> get_cache_key(DataSourceType.SEC, "2024-Q1", "sf_01ABC")
       'sec/cache/2024-Q1/sf_01ABC.zip'
@@ -168,15 +133,7 @@ def get_cache_key(source: DataSourceType, partition: str, source_file_id: str) -
 
 
 def get_raw_uri(bucket: str, source: DataSourceType, *parts: str) -> str:
-  """Build a full S3 URI for raw data.
-
-  Args:
-      bucket: The S3 bucket name
-      source: The data source type
-      *parts: Path components after the source prefix
-
-  Returns:
-      Full S3 URI string
+  """Build a full ``s3://`` URI for raw data.
 
   Example:
       >>> get_raw_uri("robosystems-shared-raw-staging", DataSourceType.SEC, "year=2024")
@@ -187,15 +144,7 @@ def get_raw_uri(bucket: str, source: DataSourceType, *parts: str) -> str:
 
 
 def get_processed_uri(bucket: str, source: DataSourceType, *parts: str) -> str:
-  """Build a full S3 URI for processed data.
-
-  Args:
-      bucket: The S3 bucket name
-      source: The data source type
-      *parts: Path components after the source prefix
-
-  Returns:
-      Full S3 URI string
+  """Build a full ``s3://`` URI for processed data.
 
   Example:
       >>> get_processed_uri("robosystems-shared-processed-staging", DataSourceType.SEC, "year=2024", "nodes", "Entity")
@@ -206,23 +155,12 @@ def get_processed_uri(bucket: str, source: DataSourceType, *parts: str) -> str:
 
 
 def list_enabled_sources() -> list[DataSourceConfig]:
-  """Get all enabled data sources.
-
-  Returns:
-      List of enabled DataSourceConfig objects
-  """
+  """Get all enabled data sources."""
   return [config for config in DATA_SOURCES.values() if config.enabled]
 
 
 def is_source_enabled(source: DataSourceType) -> bool:
-  """Check if a data source is enabled.
-
-  Args:
-      source: The data source type
-
-  Returns:
-      True if the source is enabled
-  """
+  """Check if a data source is enabled."""
   return DATA_SOURCES[source].enabled
 
 
@@ -232,13 +170,7 @@ def is_source_enabled(source: DataSourceType) -> bool:
 
 
 def get_artifact_path(name: str) -> str:
-  """Get path to a precomputed artifact Parquet file.
-
-  Args:
-      name: Artifact name (e.g., "element_knowledge", "structure_profiles")
-
-  Returns:
-      Full path to the artifact Parquet file.
+  """Get local path to a precomputed artifact Parquet file.
 
   Example:
       >>> get_artifact_path("element_knowledge")
@@ -251,12 +183,6 @@ def get_artifact_path(name: str) -> str:
 
 def get_artifact_r2_key(name: str) -> str:
   """Get R2 key for a precomputed artifact Parquet file.
-
-  Args:
-      name: Artifact name (e.g., "element_knowledge", "structure_profiles")
-
-  Returns:
-      R2 key string (without bucket name).
 
   Example:
       >>> get_artifact_r2_key("element_knowledge")
@@ -287,14 +213,8 @@ def get_public_data_url(bucket: str, key: str, cdn_url: str | None = None) -> st
        from the host browser, so the stored URL must use the localhost one.
     3. Real AWS without a CDN: the virtual-hosted-style public S3 URL.
 
-  Args:
-      bucket: The public-data bucket name the object was uploaded to.
-      key: The object key within the bucket (leading slash optional).
-      cdn_url: Optional CDN base URL; when truthy it takes precedence over
-          both the LocalStack and raw-S3 forms.
-
-  Returns:
-      An absolute URL to the object.
+  A truthy ``cdn_url`` takes precedence over both the LocalStack and raw-S3
+  forms. A leading slash on ``key`` is optional.
 
   Example:
       >>> get_public_data_url("robosystems-public-data", "2025/320193/f.html")
@@ -323,15 +243,8 @@ def get_public_data_url(bucket: str, key: str, cdn_url: str | None = None) -> st
 def get_staging_duckdb_path(graph_id: str = "sec") -> str:
   """Get persistent DuckDB staging database path on EBS.
 
-  This path is used for DuckDB staging tables that persist between
-  job runs, enabling independent retry of LadybugDB materialization
-  without re-running the DuckDB staging step.
-
-  Args:
-      graph_id: Graph database identifier (default: "sec")
-
-  Returns:
-      Full path to the DuckDB database file
+  Staging tables persist between job runs so LadybugDB materialization can be
+  retried without re-running the DuckDB staging step.
 
   Example:
       >>> get_staging_duckdb_path("sec")

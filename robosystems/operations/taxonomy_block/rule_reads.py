@@ -6,11 +6,9 @@ reporting_standard / schedule_container handlers'
 
 One SELECT per taxonomy projection — pulls every rule that targets
 the taxonomy itself OR any of its in-taxonomy structures OR any of
-its in-taxonomy elements. `target_kind='association'` rules would
-also belong here once that pattern lands; for now we don't surface
-association-level rules on Taxonomy Blocks (the envelope model
-doesn't carry association objects keyed by id, just by from/to
-qnames).
+its in-taxonomy elements. ``target_kind='association'`` rules are not
+surfaced: the envelope model carries associations by from/to qname,
+not keyed by id, so there is nothing to attach them to.
 """
 
 from __future__ import annotations

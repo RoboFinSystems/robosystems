@@ -1,5 +1,4 @@
-"""
-Graph identity utilities.
+"""Graph identity utilities.
 
 Functions for resolving graph identity, routing, and access patterns.
 """
@@ -23,30 +22,12 @@ from .validation import is_shared_repository
 
 
 def get_graph_identity(graph_id: str, session: Any | None = None) -> GraphIdentity:
-  """
-  Get complete graph identity including category and type.
-
-  Args:
-      graph_id: Graph identifier
-      session: Optional database session for lookup
-
-  Returns:
-      GraphIdentity with full type information
-  """
+  """Get complete graph identity including category and type."""
   return GraphTypeRegistry.identify_graph(graph_id, session=session)
 
 
 def get_graph_routing(graph_id: str, session: Any | None = None) -> dict[str, Any]:
-  """
-  Get routing information for a graph based on its type.
-
-  Args:
-      graph_id: Graph identifier
-      session: Optional database session for lookup
-
-  Returns:
-      Dict with routing configuration including cluster type, access mode, etc.
-  """
+  """Get routing information for a graph based on its type."""
   identity = get_graph_identity(graph_id, session=session)
   routing_info = identity.get_routing_info()
 
@@ -61,17 +42,7 @@ def validate_graph_access(
   required_access: GraphAccessPattern,
   user_permissions: dict[str, Any] | None = None,
 ) -> bool:
-  """
-  Validate if the requested access pattern is allowed for this graph.
-
-  Args:
-      graph_id: Graph identifier
-      required_access: Required access pattern
-      user_permissions: Optional user permissions to check
-
-  Returns:
-      bool: True if access is allowed
-  """
+  """Validate if the requested access pattern is allowed for this graph."""
   identity = get_graph_identity(graph_id)
   _allowed_access = identity.get_access_pattern()
 
@@ -89,15 +60,7 @@ def validate_graph_access(
 
 
 def get_graph_cluster_type(graph_id: str) -> str:
-  """
-  Determine which cluster type should handle this graph.
-
-  Args:
-      graph_id: Graph identifier
-
-  Returns:
-      str: Cluster type ("user_writer", "shared_writer", etc.)
-  """
+  """Determine which cluster type should handle this graph."""
   identity = get_graph_identity(graph_id)
 
   if identity.is_shared_repository:
@@ -109,32 +72,13 @@ def get_graph_cluster_type(graph_id: str) -> str:
 
 
 def is_user_graph(graph_id: str) -> bool:
-  """
-  Check if this is a user-created graph.
-
-  Args:
-      graph_id: Graph identifier
-
-  Returns:
-      bool: True if this is a user graph
-  """
+  """Check if this is a user-created graph."""
   identity = get_graph_identity(graph_id)
   return identity.is_user_graph
 
 
 def get_repository_type_from_graph_id(graph_id: str) -> str:
-  """
-  Validate that graph_id is a known shared repository and return it.
-
-  Args:
-      graph_id: Graph identifier
-
-  Returns:
-      str: The repository ID (same as graph_id for shared repos)
-
-  Raises:
-      ValueError: If graph_id is not a known repository
-  """
+  """Validate that graph_id is a known shared repository and return it."""
   if not is_shared_repository(graph_id):
     raise ValueError(f"Unknown repository graph_id: {graph_id}")
 
@@ -144,19 +88,10 @@ def get_repository_type_from_graph_id(graph_id: str) -> str:
 def validate_repository_access(
   graph_id: str, user_id: str, operation_type: str = "read"
 ) -> bool:
-  """
-  Validate that a user has access to a shared repository.
+  """Validate that a user has access to a shared repository.
 
   For subgraphs (e.g., "sec_historical"), access is checked against the
   parent repository ("sec") since subgraphs inherit parent permissions.
-
-  Args:
-      graph_id: Repository identifier or subgraph thereof
-      user_id: User ID to check
-      operation_type: Type of operation (read, write, admin)
-
-  Returns:
-      bool: True if user has appropriate access
   """
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph,
@@ -230,12 +165,7 @@ def validate_repository_access(
 
 
 def get_access_pattern() -> ConnectionPattern:
-  """
-  Get the preferred graph database access pattern.
-
-  Returns:
-      ConnectionPattern: The access pattern to use
-  """
+  """Get the preferred graph database access pattern."""
   pattern = env.LBUG_ACCESS_PATTERN.lower()
   try:
     return ConnectionPattern(pattern)
@@ -247,15 +177,7 @@ def get_access_pattern() -> ConnectionPattern:
 def log_cluster_operation(
   operation: str, cluster_id: str, graph_id: str, **kwargs
 ) -> None:
-  """
-  Log cluster operation for monitoring and debugging.
-
-  Args:
-      operation: Operation description
-      cluster_id: Cluster identifier
-      graph_id: Graph identifier
-      **kwargs: Additional context
-  """
+  """Log cluster operation for monitoring and debugging."""
   context = ", ".join([f"{k}={v}" for k, v in kwargs.items()])
   logger.info(
     f"Graph Cluster Operation: {operation} | "
@@ -265,12 +187,7 @@ def log_cluster_operation(
 
 
 def get_migration_status() -> dict[str, Any]:
-  """
-  Get the current graph database migration status.
-
-  Returns:
-      Dict: Migration status information
-  """
+  """Get the current graph database migration status."""
   from robosystems.config.shared_repositories import get_all_repository_ids
 
   from .database import get_max_databases_per_node

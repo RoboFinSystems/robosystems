@@ -1,9 +1,8 @@
 """File resource reads (list + get).
 
-Files are first-class, file_id-keyed resources with their own namespace (not
-nested under tables). After the content-ops cutover this router is **read-only**
-— every file *write* is a content operation under
-``POST /v1/graphs/{graph_id}/operations/*``:
+Files are first-class, file_id-keyed resources with their own namespace, not
+nested under tables. This router is read-only; every file write is a content
+operation under ``POST /v1/graphs/{graph_id}/operations/*``:
 
 - GET  /files, GET /files/{file_id}       — list + inspect (here)
 - POST /operations/create-file-upload     — presign an S3 upload + register file

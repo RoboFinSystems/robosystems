@@ -1,8 +1,4 @@
-"""
-OpenTelemetry centralized metrics and tracing utilities for RoboSystems.
-
-This module provides consistent observability patterns for all API endpoints.
-"""
+"""OpenTelemetry metrics and tracing helpers shared by all API endpoints."""
 
 from .metrics import (
   endpoint_metrics_context,

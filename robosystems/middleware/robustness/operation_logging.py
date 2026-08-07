@@ -1,11 +1,7 @@
-"""
-Generic Operation Logging for API Endpoints
+"""Structured operation logging for API endpoints.
 
-Provides structured, detailed logging for all API operations to support:
-- Operation debugging and troubleshooting
-- Performance analysis and optimization
-- Security auditing and compliance
-- Operational visibility and monitoring
+Emits machine-parseable lines for each operation so debugging, performance
+analysis, and security auditing all read the same record.
 """
 
 import threading
@@ -79,8 +75,7 @@ class OperationLogEntry:
 
 
 class OperationLogger:
-  """
-  Enhanced logger for API operations with structured logging and context tracking.
+  """Enhanced logger for API operations with structured logging and context tracking.
 
   Provides operation-scoped logging with automatic correlation IDs,
   performance tracking, and security audit trails.
@@ -93,15 +88,7 @@ class OperationLogger:
     slow_operation_threshold_ms: float = 5000.0,
     max_log_entries: int = 10000,
   ):
-    """
-    Initialize operation logger.
-
-    Args:
-        enable_performance_logging: Enable performance-related logging
-        enable_debug_logging: Enable verbose debug logging
-        slow_operation_threshold_ms: Threshold for logging slow operations
-        max_log_entries: Maximum log entries to retain in memory
-    """
+    """Initialize operation logger."""
     self.enable_performance_logging = enable_performance_logging
     self.enable_debug_logging = enable_debug_logging
     self.slow_operation_threshold_ms = slow_operation_threshold_ms
@@ -129,21 +116,7 @@ class OperationLogger:
     trace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
   ) -> str:
-    """
-    Log the start of an API operation.
-
-    Args:
-        operation: Operation type (e.g., 'cypher_query', 'entity_create')
-        endpoint: API endpoint path
-        graph_id: Graph identifier
-        user_id: User identifier
-        operation_name: Specific operation name
-        trace_id: Optional trace ID for correlation
-        metadata: Additional operation metadata
-
-    Returns:
-        Operation ID for correlation with completion logging
-    """
+    """Log the start of an API operation."""
     operation_id = trace_id or f"{operation}_{int(time.time() * 1000000)}"
     start_time = time.time()
 
@@ -159,7 +132,6 @@ class OperationLogger:
         "metadata": metadata or {},
       }
 
-    # Log operation start
     log_entry = OperationLogEntry(
       timestamp=start_time,
       event_type=OperationLogEventType.OPERATION_START,
@@ -188,13 +160,7 @@ class OperationLogger:
     operation_id: str,
     result_metadata: dict[str, Any] | None = None,
   ) -> None:
-    """
-    Log successful completion of an API operation.
-
-    Args:
-        operation_id: Operation ID from log_operation_start
-        result_metadata: Additional result metadata
-    """
+    """Log successful completion of an API operation."""
     end_time = time.time()
 
     with self._lock:
@@ -205,7 +171,6 @@ class OperationLogger:
 
       duration_ms = (end_time - context["start_time"]) * 1000
 
-      # Create log entry
       log_entry = OperationLogEntry(
         timestamp=end_time,
         event_type=OperationLogEventType.OPERATION_SUCCESS,
@@ -226,7 +191,6 @@ class OperationLogger:
 
       self._add_log_entry(log_entry)
 
-      # Log performance if enabled
       if self.enable_performance_logging:
         if duration_ms > self.slow_operation_threshold_ms:
           self._log_slow_operation(context, duration_ms, operation_id)
@@ -237,7 +201,6 @@ class OperationLogger:
             f"Duration: {duration_ms:.1f}ms"
           )
 
-      # Clean up context
       del self._operation_contexts[operation_id]
 
   def log_operation_failure(
@@ -246,14 +209,7 @@ class OperationLogger:
     error: Exception,
     error_metadata: dict[str, Any] | None = None,
   ) -> None:
-    """
-    Log failed completion of an API operation.
-
-    Args:
-        operation_id: Operation ID from log_operation_start
-        error: Exception that caused the failure
-        error_metadata: Additional error metadata
-    """
+    """Log failed completion of an API operation."""
     end_time = time.time()
 
     with self._lock:
@@ -265,7 +221,6 @@ class OperationLogger:
       duration_ms = (end_time - context["start_time"]) * 1000
       error_message = str(error)
 
-      # Create log entry
       log_entry = OperationLogEntry(
         timestamp=end_time,
         event_type=OperationLogEventType.OPERATION_FAILURE,
@@ -288,14 +243,12 @@ class OperationLogger:
 
       self._add_log_entry(log_entry)
 
-      # Log error
       logger.error(
         f"Operation failed - ID: {operation_id}, "
         f"Operation: {context['operation']}, Endpoint: {context['endpoint']}, "
         f"Duration: {duration_ms:.1f}ms, Error: {error_message}"
       )
 
-      # Clean up context
       del self._operation_contexts[operation_id]
 
   def log_circuit_breaker_event(
@@ -476,19 +429,7 @@ class OperationLogger:
     time_range_minutes: int = 60,
     limit: int = 100,
   ) -> list[dict[str, Any]]:
-    """
-    Get recent log entries matching criteria.
-
-    Args:
-        endpoint: Filter by endpoint
-        graph_id: Filter by graph ID
-        event_type: Filter by event type
-        time_range_minutes: Time range to search
-        limit: Maximum entries to return
-
-    Returns:
-        List of log entry dictionaries
-    """
+    """Get recent log entries matching criteria."""
     cutoff_time = time.time() - (time_range_minutes * 60)
 
     with self._lock:
@@ -524,8 +465,7 @@ class OperationLogger:
     operation_name: str | None = None,
     metadata: dict[str, Any] | None = None,
   ):
-    """
-    Context manager for automatic operation logging.
+    """Context manager for automatic operation logging.
 
     Usage:
         async with operation_logger.operation_context("entity_create", endpoint, graph_id, user_id) as op_id:

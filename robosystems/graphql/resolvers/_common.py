@@ -1,22 +1,11 @@
-"""Shared helpers for GraphQL resolvers.
+"""Shared helpers for GraphQL resolvers, kept in one place so bounds and
+behavior can't drift between domains.
 
-Lifted out of `ledger.py` and `investor.py` where they were duplicated
-verbatim. Put them in one place so the bounds and behavior can't drift
-between domains as more resolvers get added.
-
-What lives here:
-
-- **Pagination guards** (`_MIN_LIMIT`, `_MAX_LIMIT`, `_MIN_OFFSET`,
-  `validate_pagination`) — Strawberry doesn't have a `Field(ge=…, le=…)`
-  equivalent, so the bounds the retired REST endpoints enforced via
-  FastAPI's `Query(..., ge=N, le=M)` get reasserted at the resolver
-  boundary.
-
-- **`open_extensions_session`** — the shared auth-then-open-session
-  prelude every data resolver runs. Calls `require_user` to enforce
-  the introspection bypass contract, reads `graph_id` from the URL via
-  `require_graph_id`, then returns an `extensions_session(graph_id)`
-  context manager.
+- Pagination guards (`resolve_pagination`, `validate_pagination`).
+  Strawberry has no `Field(ge=…, le=…)` equivalent, so the bounds are
+  asserted at the resolver boundary.
+- `open_extensions_session` / `open_library_session` — the auth, extension
+  gate, and session-open prelude every data resolver runs.
 """
 
 from __future__ import annotations
@@ -30,7 +19,6 @@ from robosystems.graphql.context import (
   require_user,
 )
 
-# Pagination bounds — mirror the retired REST `Query(..., ge=N, le=M)`.
 _MIN_LIMIT = 1
 _MAX_LIMIT = 1000
 _MIN_OFFSET = 0
@@ -56,11 +44,9 @@ def resolve_pagination(
 def validate_pagination(limit: int, offset: int) -> None:
   """Reject out-of-range pagination args at the resolver boundary.
 
-  Strawberry doesn't have a `Field(ge=…, le=…)` equivalent, so the
-  bounds the retired REST endpoints enforced via FastAPI's
-  `Query(..., ge=N, le=M)` are reasserted here. Raising a
-  `StrawberryGraphQLError` surfaces a clean GraphQL error rather than
-  a 500 — same shape as authentication failures.
+  Raises `StrawberryGraphQLError` so callers get an `INVALID_PAGINATION`
+  entry in `errors[]` rather than a 500 — the same shape as an
+  authentication failure.
   """
   if not _MIN_LIMIT <= limit <= _MAX_LIMIT:
     raise strawberry.exceptions.StrawberryGraphQLError(
@@ -75,31 +61,24 @@ def validate_pagination(limit: int, offset: int) -> None:
 
 
 def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
-  """Raise a GraphQL error if the graph hasn't been provisioned for this extension.
+  """Raise `EXTENSION_NOT_PROVISIONED` if the graph lacks this extension.
 
-  Complements `require_user`: `get_context` has already validated auth
-  and graph access, but it does NOT 403 graphs that lack a given
-  extension (doing so would break the `hello` probe and schema
-  introspection on under-provisioned graphs). Domain resolvers call
-  this at the top of their shared session opener so the first data
-  field surfaces a clean `EXTENSION_NOT_PROVISIONED` error instead of
-  a confusing schema-missing fallthrough.
+  `get_context` validates auth and graph access but deliberately does not
+  403 graphs that lack an extension — that would break the `hello` probe
+  and introspection. Domain resolvers call this from their session opener
+  so the first data field fails cleanly instead of falling through to a
+  missing schema.
 
-  The context's `schema_extensions` is an empty tuple for
-  unauthenticated introspection traffic; combined with `require_user`
-  running first, this branch only fires for authenticated calls on
-  graphs where the extension genuinely isn't enabled.
+  `schema_extensions` is empty for anonymous introspection traffic, and
+  `require_user` runs first, so this only fires for authenticated calls.
 
-  **Deliberate asymmetry with the REST gate** (`require_graph_extension`
-  in `middleware/extensions.py`): the REST gate rejects
-  `graph_type == "repository"` outright because command writes must
-  never land in a shared tenant schema. This GraphQL gate does NOT
-  apply that check — repository graphs (e.g. SEC) declare
-  `schema_extensions=["roboledger"]` in their manifest precisely so
-  ledger-shaped reads work against the shared data. Removing that
-  asymmetry here would break SEC GraphQL queries for every
-  subscriber. If a future "fix" adds a `graph_type` check, SEC read
-  access dies with it.
+  This gate is intentionally weaker than the REST gate
+  (`require_graph_extension` in `middleware/extensions.py`), which also
+  rejects `graph_type == "repository"` so command writes can never land in
+  a shared tenant schema. Repository graphs such as SEC declare
+  `schema_extensions=["roboledger"]` so ledger-shaped *reads* work against
+  shared data; adding a `graph_type` check here would break SEC GraphQL
+  reads for every subscriber.
   """
   if extension not in info.context["schema_extensions"]:
     raise strawberry.exceptions.StrawberryGraphQLError(
@@ -109,14 +88,12 @@ def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
 
 
 def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
-  """Shared auth + extension-gate + extensions-session prelude.
+  """Shared auth, extension-gate, and extensions-session prelude.
 
-  Auth + graph access were enforced by `get_context` before this is
-  ever reached — `require_user` here only catches the introspection
-  bypass case (no API key supplied at all). `require_extension`
-  enforces the per-domain feature gate so resolvers never open a
-  session on a graph that lacks the extension. `graph_id` is read
-  from the request URL via `require_graph_id`.
+  `get_context` already enforced auth and graph access, so `require_user`
+  here only catches the anonymous-introspection case. `require_extension`
+  keeps resolvers from opening a session on a graph that lacks the
+  extension.
   """
   require_user(info)
   require_extension(info, extension)
@@ -130,19 +107,16 @@ def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
 def open_library_session(info: Info[GraphQLContext, None]):
   """Open an extensions session for library reads on any graph_id.
 
-  Unlike `open_extensions_session`, this does NOT gate on a per-graph
-  extension flag. Library reads are safe on any authenticated graph
-  because the returned rows are driven by the session's `search_path`:
+  Unlike `open_extensions_session`, this does not gate on a per-graph
+  extension flag: library reads are safe on any authenticated graph because
+  the rows returned are driven by the session's `search_path`.
 
   - `graph_id == "library"` → `search_path = public` → canonical library.
-  - `graph_id == "kg…"`     → `search_path = {schema}, public` →
-    tenant's library copy + any tenant extensions of library tables
-    (e.g. the tenant's own CoA elements and anchor associations).
+  - `graph_id == "kg…"` → `search_path = {schema}, public` → the tenant's
+    library copy plus any tenant extensions of library tables (its own CoA
+    elements and anchor associations).
 
-  Access control is already enforced by `check_graph_access` in
-  `get_context`. The extension gate was defensive but blocked the
-  roboledger-app `/library` page (entity-graph scope) from resolving
-  library fields without adding security.
+  Access control is enforced by `check_graph_access` in `get_context`.
   """
   require_user(info)
   graph_id = require_graph_id(info)

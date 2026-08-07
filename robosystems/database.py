@@ -1,7 +1,6 @@
-"""Backwards-compatible re-export from robosystems.db.platform.
+"""Compatibility re-export of the platform database session API.
 
-All 130+ files that import from robosystems.database continue to work unchanged.
-New code should import from robosystems.db.platform directly.
+New code should import from `robosystems.db.platform` directly.
 """
 
 from robosystems.db.platform import (  # noqa: F401

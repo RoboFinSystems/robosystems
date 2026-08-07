@@ -63,15 +63,15 @@ class EmailResult:
   tags={"kind": "email", "category": "notification"},
 )
 def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
-  """
-  Send an email via SES with retry logic and tracking.
+  """Send an email via SES.
 
-  This op handles all email types:
-  - email_verification: Requires token
-  - password_reset: Requires token
-  - welcome: No token needed
+  Token requirements by email_type:
+  - email_verification, password_reset, org_invitation: token required
+  - org_invitation: org_name also required
+  - welcome: no token
 
-  Results are logged and can be tracked via SSE if operation_id is provided.
+  A send failure raises, so the op's RetryPolicy retries it. When
+  operation_id is set, the result is written to the SSE operation metadata.
   """
   import asyncio
 
@@ -81,7 +81,6 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     f"Sending {config.email_type} email to {config.to_email} for app {config.app}"
   )
 
-  # Run the async email send
   loop = asyncio.new_event_loop()
   try:
     if config.email_type == "email_verification":
@@ -141,7 +140,6 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     error=None if success else "Email send failed",
   )
 
-  # Log result for observability
   if success:
     context.log.info(
       f"Successfully sent {config.email_type} email to {config.to_email}"
@@ -151,7 +149,6 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     # Raise to trigger retry
     raise RuntimeError(f"Failed to send {config.email_type} email to {config.to_email}")
 
-  # Update SSE if operation_id provided
   if config.operation_id:
     _emit_email_result_to_sse(context, config.operation_id, result.to_dict())
 
@@ -182,14 +179,7 @@ def _emit_email_result_to_sse(
   },
 )
 def send_email_job():
-  """
-  Job for sending emails via SES.
-
-  This job provides:
-  - Retry logic with exponential backoff (3 retries)
-  - Full observability in Dagster UI
-  - Optional SSE progress tracking
-  - Audit trail of all email sends
+  """Send an email via SES, with 3 retries at exponential backoff.
 
   Usage:
     from robosystems.middleware.sse import run_and_monitor_dagster_job, build_notification_job_config
@@ -224,21 +214,14 @@ def build_email_job_config(
   org_name: str | None = None,
   inviter_name: str | None = None,
 ) -> dict:
-  """
-  Build run_config for send_email_job.
+  """Build the Dagster run_config for send_email_job.
 
   Args:
-    email_type: Type of email (email_verification, password_reset, welcome, org_invitation)
-    to_email: Recipient email address
-    user_name: User's display name
+    email_type: email_verification, password_reset, welcome, or org_invitation
     token: Verification/reset/invitation token (required for all but welcome)
     app: App identifier (roboledger, roboinvestor, robosystems)
-    operation_id: Optional SSE operation ID for progress tracking
+    operation_id: SSE operation ID for progress tracking
     org_name: Organization name (required for org_invitation)
-    inviter_name: Inviting user's display name (org_invitation)
-
-  Returns:
-    run_config dictionary for Dagster
   """
   from robosystems.config import env
 

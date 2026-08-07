@@ -167,7 +167,6 @@ class ScheduleService:
     if not taxonomy_id:
       taxonomy_id = self._ensure_schedule_taxonomy(session, created_by)
 
-    # Create structure with entry template metadata
     metadata, artifact_mechanics = self._build_schedule_definition_blobs(
       name=name,
       monthly_amount=monthly_amount,
@@ -190,7 +189,6 @@ class ScheduleService:
     session.add(structure)
     session.flush()
 
-    # Create associations to elements
     # For schedules, from_element_id is the first element (debit) to anchor
     # the presentation chain. to_element_id is the element being associated.
     anchor_element_id = element_ids[0] if element_ids else None
@@ -210,10 +208,8 @@ class ScheduleService:
     # `connections`) rather than only as opaque entry_template mechanics:
     #   cm:Debit  ─has-part→ debit account
     #   cm:Credit ─has-part→ credit account
-    # Mirrors Charlie's classic-transactions posting model. Best-effort — if
-    # the cm library concepts aren't seeded in this tenant (provisioned before
-    # the cm framework landed), skip silently; entry_template remains the
-    # generation source of truth.
+    # Best-effort: a tenant whose library lacks the cm concepts skips this
+    # silently, and entry_template remains the generation source of truth.
     cm_role_ids = {
       e.qname: e.id
       for e in session.execute(
@@ -286,14 +282,13 @@ class ScheduleService:
         "periodic_amounts": schedule_metadata.periodic_amounts,
       }
 
-    # Stamp the typed artifact_mechanics column alongside the legacy
-    # metadata_ blob so the envelope builder's typed-column read path
-    # works from creation. metadata_ stays populated during the
-    # transition window for backward compatibility with rows written
-    # before artifact_mechanics landed.
+    # Both blobs are stamped: artifact_mechanics is the typed column the
+    # envelope builder reads, and metadata_ stays populated so rows without
+    # artifact_mechanics still resolve.
+    #
     # periods_with_entries is a transient read-time value (queried from facts),
-    # not a stored property — intentionally excluded here rather than using
-    # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
+    # not a stored property — deliberately excluded here rather than using
+    # ScheduleMechanics.model_dump(); the envelope builder injects it.
     artifact_mechanics: dict[str, object] = {
       "kind": "closing_entry_generator",
       "entry_template": metadata["entry_template"],
@@ -328,37 +323,23 @@ class ScheduleService:
     elements, and facts for each monthly period between period_start and
     period_end.
 
-    Args:
-        session: Extensions DB session.
-        name: Schedule name (e.g., "Office Furniture Depreciation").
-        taxonomy_id: Taxonomy to attach to. If None, uses or creates
-            a default "Schedules" taxonomy.
-        element_ids: Element IDs to include in the schedule (e.g.,
-            [depreciation_expense_id, accumulated_depreciation_id]).
-        period_start: First period start date.
-        period_end: Last period end date.
-        monthly_amount: Monthly amount in cents (e.g., depreciation per month).
-        entry_template: Template for generating closing entries.
-        schedule_metadata: Informational metadata about the schedule.
-        created_by: User ID.
-        closed_through: If provided, facts with period_end ≤ this date are
-            tagged `fact_scope='historical'` (already reflected in opening
-            balances, ignored by the close workflow). Facts with period_end
-            > closed_through are tagged `in_scope`. None means all facts
-            are in_scope — backward compatible with callers that haven't
-            adopted the fiscal calendar yet.
-        existing_structure: When provided, regenerate facts + the
-            obligation chain **in place** on this existing Structure row
-            instead of creating a new one. The structure, its element
-            associations, and its cm has-part arcs are preserved; only
-            the freshly-stamped definition blobs + facts + obligation
-            events are written. The caller (``rebuild_schedule``) is
-            responsible for voiding the old obligation chain and deleting
-            the old facts/rules before invoking this path. ``element_ids``
-            is ignored in this mode (associations are preserved).
+    ``monthly_amount`` is in cents. ``taxonomy_id=None`` uses or creates a
+    default "Schedules" taxonomy. ``element_ids`` are the elements the
+    schedule spans (e.g. depreciation expense + accumulated depreciation).
 
-    Returns:
-        The created (or rebuilt) Structure.
+    ``closed_through`` splits the generated facts: those with
+    ``period_end <= closed_through`` are tagged ``fact_scope='historical'``
+    (already reflected in opening balances, ignored by the close workflow),
+    the rest ``in_scope``. ``None`` makes every fact in_scope.
+
+    ``existing_structure`` regenerates facts + the obligation chain **in
+    place** on that Structure instead of creating a new one: the structure,
+    its element associations, and its cm has-part arcs survive; only the
+    definition blobs, facts, and obligation events are rewritten, and
+    ``element_ids`` is ignored. The caller (``rebuild_schedule``) must void
+    the old obligation chain and delete the old facts/rules first.
+
+    Returns the created (or rebuilt) Structure.
     """
     if existing_structure is not None:
       structure = existing_structure
@@ -861,14 +842,13 @@ class ScheduleService:
     metadata = structure.metadata_ or {}
     schedule_created_event_id = metadata.get("schedule_created_event_id")
     if not schedule_created_event_id:
-      # Robust fallback: recover the originator from the obligations' own
-      # link — every schedule_entry_due carries metadata.schedule_id == this
+      # Fallback: recover the originator from the obligations' own link —
+      # every schedule_entry_due carries metadata.schedule_id == this
       # structure's id and obligated_by_event_id == the schedule_created
-      # originator. Structures missing the `schedule_created_event_id` stamp
-      # would otherwise no-op silently here and orphan their pending
-      # obligations on delete (the 2026-06-19 Harbinger defect: 280 phantom
-      # obligations that double-posted at close). See
-      # specs/schedule-delete-obligation-integrity.md.
+      # originator. Without it, a structure missing the
+      # `schedule_created_event_id` stamp no-ops silently here and orphans its
+      # pending obligations on delete, leaving phantom obligations that
+      # double-post at close.
       schedule_created_event_id = session.execute(
         select(Event.obligated_by_event_id)
         .where(
@@ -967,8 +947,8 @@ class ScheduleService:
       period_start_iso = old_meta.get("period_start")
       period_end_iso = old_meta.get("period_end")
       if not period_start_iso or not period_end_iso:
-        # Legacy / malformed row — skip rather than crash. The void below
-        # is also skipped so we don't strand a row in an inconsistent state.
+        # Malformed row — skip rather than crash. The void below is also
+        # skipped so we don't strand a row in an inconsistent state.
         logger.warning(
           "supersede_pending_obligations: skipping malformed event %s "
           "on schedule %s (missing period_start/period_end metadata)",
@@ -1072,7 +1052,6 @@ class ScheduleService:
       {"period_start": period_start, "period_end": period_end},
     )
 
-    # Check fiscal period status
     fp_result = session.execute(
       text("""
         SELECT status FROM fiscal_periods
@@ -1146,16 +1125,11 @@ class ScheduleService:
       in-scope fact for this period → old deleted, nothing created
     - **skipped** — no prior draft, no in-scope fact → nothing to do
 
-    The `ValueError` path is reserved for invalid inputs (structure not
-    found, no entry template). Stale or non-existent drafts produce
-    structured outcomes, not errors.
-
-    Raises:
-        ValueError: If the structure is not found or has no entry template.
-            Also raised if the existing entry for this period has already
-            been posted (cannot regenerate a posted entry — use reopen flow).
+    ``ValueError`` is reserved for invalid inputs: structure not found, no
+    entry template, or an entry for this period that is already posted (use
+    the reopen flow to change a posted entry). Stale or non-existent drafts
+    produce structured outcomes, not errors.
     """
-    # Load structure with entry template
     structure = session.get(Structure, structure_id)
     if not structure or structure.block_type != "schedule":
       raise ValueError(f"Schedule structure '{structure_id}' not found")
@@ -1238,7 +1212,6 @@ class ScheduleService:
 
     # ── Cases where an existing draft exists ──
     if existing_entry_id:
-      # Load current line items + memo for staleness comparison
       current = session.execute(
         text("""
           SELECT
@@ -1411,25 +1384,15 @@ class ScheduleService:
     long as total_debit == total_credit. This supports 4-sided disposal
     entries (DR Cash, DR Accum Depr, CR Asset, CR Gain).
 
-    Args:
-        posting_date: Date the entry is posted on.
-        line_items: List of dicts with keys:
-            - element_id (required)
-            - debit_amount (cents, default 0)
-            - credit_amount (cents, default 0)
-            - description (optional)
-            Exactly one of debit_amount/credit_amount must be > 0 per line.
-        memo: Required free-form memo. Usually cites the business event.
-        created_by: User ID.
-        entry_type: Defaults to 'closing'. Other valid values: 'adjusting',
-            'standard'.
+    Each ``line_items`` dict carries ``element_id`` (required),
+    ``debit_amount`` / ``credit_amount`` in cents (default 0, exactly one > 0
+    per line) and an optional ``description``. ``memo`` is required and
+    usually cites the business event. ``entry_type`` accepts 'closing'
+    (default), 'adjusting' or 'standard'.
 
-    Returns:
-        ClosingEntryResult with outcome='created'.
-
-    Raises:
-        ValueError: If line_items is empty, doesn't balance, has invalid
-            debit/credit combinations, or memo is empty.
+    Returns a ``ClosingEntryResult`` with ``outcome='created'``. Raises
+    ``ValueError`` when ``line_items`` is empty, doesn't balance, has an
+    invalid debit/credit combination, or ``memo`` is empty.
     """
     if not memo or not memo.strip():
       raise ValueError("Manual entry requires a non-empty memo")
@@ -1545,22 +1508,15 @@ class ScheduleService:
     Historical facts (periods ≤ closed_through) are unaffected — they
     remain as the record of what was recognized before the truncation.
 
-    Args:
-        structure_id: The schedule to truncate.
-        new_end_date: Last date covered by the schedule. Facts with
-            period_start > this date are deleted. Cannot be earlier than
-            the schedule's earliest existing fact (that would be a delete,
-            not a truncate).
-        reason: Required — captured in metadata for audit.
-        updated_by: User ID.
+    ``new_end_date`` is the last date the schedule covers; facts with
+    ``period_start`` beyond it are deleted. It cannot precede the schedule's
+    earliest existing fact — that would be a delete, not a truncate.
+    ``reason`` is required and captured in metadata for audit.
 
-    Returns:
-        Dict with `facts_deleted`, `new_end_date`, `reason`.
-
-    Raises:
-        ValueError: If structure not found or not a schedule, or if
-            new_end_date is earlier than the schedule's first fact, or if
-            any matching fact is linked to a posted entry.
+    Returns a dict with ``facts_deleted``, ``new_end_date`` and ``reason``.
+    Raises ``ValueError`` when the structure isn't a schedule, when
+    ``new_end_date`` precedes the schedule's first fact, or when any matching
+    fact is linked to a posted entry.
     """
     if not reason or not reason.strip():
       raise ValueError("truncate_schedule requires a non-empty reason")

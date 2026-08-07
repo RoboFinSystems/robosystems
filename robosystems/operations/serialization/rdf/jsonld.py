@@ -1,10 +1,5 @@
 """RDF-graph encoder for ``StatementBundle`` — v1.0 graph-native shape.
 
-The graph-native shape is the first *published* bundle ontology (v1.0): the
-earlier XBRL-aligned draft never shipped beyond a one-day demo, so there is no
-released predecessor to supersede. The design history (XBRL-aligned →
-graph-native) is recorded in the specs; the artifact itself is v1.
-
 Builds an :class:`rdflib.Graph` from the bundle and serializes it as JSON-LD
 using the canonical ``CANONICAL_CONTEXT`` (``robosystems/arelle/context.py``),
 so the export bundle speaks the *same* vocabulary as the framework seeds.
@@ -45,8 +40,7 @@ from robosystems.arelle.context import CANONICAL_CONTEXT
 from robosystems.logger import logger
 from robosystems.operations.serialization.bundle import StatementBundle
 
-# Bundle ontology version emitted on the root node. This is the first published
-# bundle ontology — the XBRL-aligned draft never shipped, so it's v1, not v2.
+# Bundle ontology version emitted on the root node.
 SERIALIZATION_VERSION = "1.0"
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -329,7 +323,7 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     g.add((s_uri, RS.internalId, Literal(link.structure_id)))
     g.add((s_uri, RS.structureName, Literal(link.structure_name)))
     # Promote the legible name to the predicate consumers render; the UUID
-    # stays on rs:internalId. (§ logical-naming pass.)
+    # stays on rs:internalId.
     g.add((s_uri, SKOS.prefLabel, Literal(link.structure_name)))
     # Published section order (disclosure notes) — the holon viewer sorts
     # sections by rs:structureOrder when present, so the bundle's note
@@ -455,7 +449,7 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     # boundary translation like item_type's snake->camel.
     g.add((uri, RS.factType, Literal(fact.fact_type.lower())))
     if fact.value is not None:
-      # Numeric arm — value + unit + decimals, unchanged shape.
+      # Numeric arm — value + unit + decimals.
       if fact.unit_ref is not None:
         g.add((uri, RS.unit, _scoped(root, "unit", fact.unit_ref)))
       g.add(
@@ -596,8 +590,9 @@ def shacl_report(g: Graph) -> ShaclResult:
   Non-raising — produces an outcome the caller can log (e.g. onto
   ``Report.metadata``) or escalate. Checks the positive instance shapes
   (a Fact has element/period; an Association has from/to/associationType)
-  and the negative shapes that ban the retired dialects (``xbrli:contextRef``,
-  ``arcFrom``, direct ``summationOf``) — the same shapes that gate the seeds.
+  and the negative shapes that ban the dialects this vocabulary excludes
+  (``xbrli:contextRef``, ``arcFrom``, direct ``summationOf``) — the same
+  shapes that gate the seeds.
   """
   shapes = _shapes_graph()
   if shapes is None:

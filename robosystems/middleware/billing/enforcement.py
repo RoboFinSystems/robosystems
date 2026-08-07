@@ -52,16 +52,7 @@ def check_can_provision_graph(
   requested_tier: GraphTier,
   session: Session,
 ) -> tuple[bool, str | None]:
-  """Check if a user can provision a new graph.
-
-  Args:
-      user_id: The user ID
-      requested_tier: The requested graph tier
-      session: Database session
-
-  Returns:
-      Tuple of (can_provision, error_message)
-  """
+  """Check if a user can provision a new graph."""
   # Get user's organization - billing is org-level, not user-level
   org_user = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
 
@@ -72,7 +63,6 @@ def check_can_provision_graph(
     )
     return (False, "User is not a member of any organization")
 
-  # Get or create billing customer for the user's organization
   billing_customer = BillingCustomer.get_or_create(org_user.org_id, session)
 
   can_provision, error_message = billing_customer.can_provision_resources(
@@ -105,15 +95,7 @@ def check_graph_subscription_active(
   graph_id: str,
   session: Session,
 ) -> tuple[bool, str | None]:
-  """Check if a graph has an active subscription.
-
-  Args:
-      graph_id: The graph ID
-      session: Database session
-
-  Returns:
-      Tuple of (is_active, error_message)
-  """
+  """Check if a graph has an active subscription."""
   subscription = BillingSubscription.get_by_resource(
     resource_type="graph", resource_id=graph_id, session=session
   )
@@ -148,17 +130,6 @@ def require_graph_access(
   Checks two layers:
   1. Graph status (suspended -> 403, deprovisioned -> 404)
   2. Subscription status (grace period: reads OK, writes blocked)
-
-  Args:
-      graph_id: The graph ID to check
-      session: Database session
-      require_write: Whether a write operation is being attempted
-
-  Returns:
-      The Graph if access is allowed.
-
-  Raises:
-      HTTPException: If access is denied.
   """
   graph = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
 
@@ -191,7 +162,6 @@ def require_graph_access(
   if graph.is_repository:
     return graph
 
-  # Check in-memory subscription cache first
   cached = _get_cached_subscription(graph_id)
   if cached == "active":
     return graph

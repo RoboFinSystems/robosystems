@@ -352,7 +352,6 @@ async def cancel_operation(
         detail=f"Operation cannot be cancelled - current status is {metadata.status}",
       )
 
-    # Cancel the operation
     await event_storage.cancel_operation(
       operation_id, reason="Cancelled by user request"
     )

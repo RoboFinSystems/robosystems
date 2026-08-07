@@ -9,43 +9,17 @@ SUBSCRIPTION_RATE_LIMITS = RateLimitConfig.SUBSCRIPTION_RATE_LIMITS
 def get_subscription_rate_limit(
   tier: str, category: EndpointCategory
 ) -> tuple[int, int] | None:
-  """
-  Get rate limit for a subscription tier and endpoint category.
-
-  Args:
-      tier: Subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge)
-      category: Endpoint category
-
-  Returns:
-      Tuple of (limit, window_seconds) or None if not configured
-  """
+  """Get rate limit for a subscription tier and endpoint category."""
   return RateLimitConfig.get_rate_limit(tier, category)
 
 
 def get_endpoint_category(path: str, method: str = "GET") -> EndpointCategory | None:
-  """
-  Determine the category of an endpoint based on its path and method.
-
-  Args:
-      path: The API endpoint path
-      method: HTTP method
-
-  Returns:
-      The endpoint category or None if not categorized
-  """
+  """Determine the category of an endpoint based on its path and method."""
   return RateLimitConfig.get_endpoint_category(path, method)
 
 
 def should_use_subscription_limits(path: str) -> bool:
-  """
-  Determine if an endpoint should use subscription-based rate limits.
-
-  Args:
-      path: The API endpoint path
-
-  Returns:
-      True if subscription limits should be applied
-  """
+  """Determine if an endpoint should use subscription-based rate limits."""
   # Extensions surface — both graph-scoped reads (GraphQL) and writes
   # (REST operation endpoints) are tenant-scoped and must use the
   # per-tier buckets. Without this branch the new primary read surface

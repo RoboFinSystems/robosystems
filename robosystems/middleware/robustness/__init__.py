@@ -1,9 +1,4 @@
-"""
-Robustness middleware components.
-
-This module provides reusable components for error handling, circuit breaking,
-and observability across all endpoints.
-"""
+"""Circuit breaking, timeout coordination, and operation logging."""
 
 from .circuit_breaker import CircuitBreakerManager
 from .operation_logging import get_operation_logger

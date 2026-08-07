@@ -40,7 +40,6 @@ class OrgLimits(Model):
   org = relationship("Org")
 
   def __repr__(self) -> str:
-    """String representation of the org limits."""
     return f"<OrgLimits org={self.org_id} max_graphs={self.max_graphs}>"
 
   @classmethod
@@ -93,11 +92,9 @@ class OrgLimits(Model):
     )
 
   def can_create_graph(self, session: Session) -> tuple[bool, str]:
-    """
-    Check if org can create another graph (safety check only).
+    """Whether another graph may be created, with a human-readable reason.
 
-    Returns:
-        tuple: (can_create: bool, reason: str)
+    ``max_graphs == -1`` means unlimited.
     """
     if self.max_graphs == -1:
       return True, "Can create graph (unlimited)"
@@ -126,13 +123,7 @@ class OrgLimits(Model):
     }
 
   def update_limit(self, new_limit: int, session: Session) -> None:
-    """
-    Update the graph creation limit for this organization.
-
-    Args:
-        new_limit: New maximum number of graphs
-        session: Database session
-    """
+    """Set the org's graph cap; ``-1`` lifts it entirely."""
     self.max_graphs = new_limit
     self.updated_at = datetime.now(UTC)
 

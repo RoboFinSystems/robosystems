@@ -1,8 +1,7 @@
-"""Graph tier change command.
+"""Business logic behind the ``change-tier`` graph operation.
 
-Extracted from ``routers/graphs/subscriptions.py`` so both the subscriptions
-router and the graph operations router can call the same business logic
-without either depending on the other.
+Lives here rather than in a router so the subscriptions router and the graph
+operations router can share it without depending on each other.
 """
 
 from __future__ import annotations

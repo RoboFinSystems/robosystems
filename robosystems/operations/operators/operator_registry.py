@@ -1,7 +1,8 @@
-"""Operator registry for the unified Operator protocol.
+"""Registry of operator implementations, keyed by type string.
 
-Simple registration and lookup. Operators register via the @register_operator
-decorator and are looked up by type string.
+Registration is an import side effect of `@register_operator`, so a module
+defining an operator has to be imported before the registry can find it — see
+`implementations/__init__.py`.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ _adapter_operators_loaded: list[bool] = []
 
 
 def register_operator(operator_type: str):
-  """Decorator to register a new-style Operator.
+  """Register an Operator class under `operator_type`.
+
+  Re-registering a type replaces the previous class and logs a warning.
 
   Example::
 
@@ -40,10 +43,10 @@ def register_operator(operator_type: str):
 
 
 def get_operator(operator_type: str) -> Operator:
-  """Instantiate and return an operator by type.
+  """Instantiate a registered operator, or raise KeyError.
 
-  Raises:
-      KeyError: If operator_type is not registered.
+  A fresh instance per call — operators are stateless, and their per-run state
+  lives on the `OperatorContext` the adapter injects.
   """
   cls = _OPERATORS.get(operator_type)
   if cls is None:
@@ -93,13 +96,11 @@ def is_registered(operator_type: str) -> bool:
 
 
 def load_adapter_operators() -> None:
-  """Load operators from enabled adapters.
+  """Import operator modules contributed by enabled adapters.
 
-  Each adapter can expose a get_operator_components() function that
-  returns {"operator_types": [...]} after importing its operator modules
-  (which triggers @register_operator side effects).
-
-  Called once from operations/operators/__init__.py.
+  Each adapter exposes a `get_operator_components()` that imports its operator
+  modules, which is what fires their `@register_operator` side effects. Called
+  once from `operations/operators/__init__.py`; idempotent thereafter.
   """
   if _adapter_operators_loaded:
     return

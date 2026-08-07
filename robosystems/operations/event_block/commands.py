@@ -94,8 +94,7 @@ def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
 
 # Platform-emitted sources — always valid, no registration involved. Adapter
 # and external sources validate against the graph's registered Connections
-# instead: the registry replaced the events-table CHECK constraint (dropped in
-# extensions migration 0025), so registration is what opens a source name.
+# instead: registering a connection is what opens a source name.
 _STATIC_EVENT_SOURCES = frozenset({"manual", "system", "schedule"})
 
 
@@ -671,9 +670,9 @@ def execute_event_block(
       f"Connection {connection_id} has no realm_id — cannot write to QB."
     )
 
-  # Instantiate the QBClient — this triggers the A1/A2/A3 path: token
-  # rotation gets persisted, AuthClientError flips the connection to
-  # needs_reauth, transient errors raise QBAuthFailedError.
+  # Instantiating QBClient runs the auth path: rotated tokens get persisted,
+  # AuthClientError flips the connection to needs_reauth, and transient
+  # errors raise QBAuthFailedError.
   try:
     qb_client = QBClient(
       realm_id=str(realm_id),

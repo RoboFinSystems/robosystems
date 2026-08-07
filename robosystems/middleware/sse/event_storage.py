@@ -1,8 +1,7 @@
-"""
-Redis-based event storage for Server-Sent Events operations.
+"""Redis-based event storage for Server-Sent Events operations.
 
-This module provides persistent event storage with TTL cleanup for SSE operations,
-enabling event replay for late connections and reliable operation monitoring.
+Events persist with a TTL so late-connecting clients can replay an
+operation's history from any sequence number.
 """
 
 import json
@@ -46,12 +45,7 @@ class OperationStatus(str, Enum):
 
 @dataclass
 class SSEEvent:
-  """
-  Structured event for SSE operations.
-
-  All events are JSON-serializable and include standard metadata
-  for consistent client handling.
-  """
+  """A single SSE event: JSON-serializable payload plus standard metadata."""
 
   event_type: EventType
   operation_id: str
@@ -60,11 +54,11 @@ class SSEEvent:
   sequence_number: int = 0
 
   def to_sse_format(self) -> str:
-    """
-    Convert to Server-Sent Events format.
+    """Render as a raw `event:`/`data:` SSE frame.
 
-    Note: This method is kept for backwards compatibility.
-    New code should use sse-starlette's EventSourceResponse instead.
+    Route handlers should stream through sse-starlette's
+    `EventSourceResponse` instead; this is for callers that need the
+    wire text directly.
     """
     lines = []
     lines.append(f"event: {self.event_type.value}")
@@ -96,9 +90,7 @@ class SSEEvent:
 
 @dataclass
 class OperationMetadata:
-  """
-  Metadata about an operation for tracking and management.
-  """
+  """Tracking record for one operation: identity, status, and result."""
 
   operation_id: str
   operation_type: str
@@ -116,11 +108,12 @@ class OperationMetadata:
 
 
 class SSEEventStorage:
-  """
-  Redis-based storage for SSE events with automatic TTL cleanup.
+  """Redis-backed SSE event store with automatic TTL expiry.
 
-  Provides event persistence for replay capability and operation tracking.
-  Events are stored per operation with automatic expiration.
+  Events are kept per operation in a sorted set keyed by sequence number,
+  so a reconnecting client can replay from where it left off. Every stored
+  event is also published to `sse:events:{operation_id}` so an API process
+  sees events emitted by a worker process.
   """
 
   def __init__(
@@ -128,19 +121,12 @@ class SSEEventStorage:
     redis_client: redis_async.Redis | None = None,
     default_ttl: int = CacheDefaults.LONG,
   ):
-    """
-    Initialize event storage.
-
-    Args:
-        redis_client: Async Redis client instance (uses default if None)
-        default_ttl: Default TTL for events in seconds
-    """
+    """Initialize event storage, defaulting to the shared SSE Valkey DB."""
     self._redis_client = redis_client
     self._async_redis = None
     self._sync_redis = None  # For sync methods (background tasks)
     self.default_ttl = default_ttl
 
-    # Redis key prefixes
     self.event_prefix = "sse:operation:events:"
     self.metadata_prefix = "sse:operation:meta:"
     self.sequence_prefix = "sse:operation:seq:"
@@ -161,9 +147,7 @@ class SSEEventStorage:
       create_async_redis_client,
     )
 
-    # Use SSE events database from registry with proper ElastiCache support
     client = create_async_redis_client(ValkeyDatabase.SSE)
-    # Test connection
     await client.ping()
     return client
 
@@ -172,9 +156,7 @@ class SSEEventStorage:
     if self._sync_redis is None:
       from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
-      # Use SSE events database from registry with proper ElastiCache support
       self._sync_redis = create_redis_client(ValkeyDatabase.SSE)
-      # Test connection
       self._sync_redis.ping()
     return self._sync_redis
 
@@ -192,26 +174,13 @@ class SSEEventStorage:
     operation_id: str | None = None,
     ttl: int | None = None,
   ) -> str:
-    """
-    Create a new operation and return its ID.
-
-    Args:
-        operation_type: Type of operation (e.g., "graph_creation", "agent_analysis")
-        user_id: User who initiated the operation
-        graph_id: Graph database ID (if applicable)
-        operation_id: Custom operation ID (generates one if None)
-        ttl: Custom TTL for this operation (uses default if None)
-
-    Returns:
-        str: The operation ID
-    """
+    """Register a new operation and return its `op_`-prefixed ID."""
     if operation_id is None:
       operation_id = self.generate_operation_id()
 
     ttl = ttl or self.default_ttl
     now = datetime.now(UTC).isoformat()
 
-    # Create operation metadata
     metadata = OperationMetadata(
       operation_id=operation_id,
       operation_type=operation_type,
@@ -222,12 +191,10 @@ class SSEEventStorage:
       updated_at=now,
     )
 
-    # Store metadata with TTL
     redis = await self._get_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     await redis.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
 
-    # Initialize sequence counter
     seq_key = f"{self.sequence_prefix}{operation_id}"
     await redis.setex(seq_key, ttl, "0")
 
@@ -244,34 +211,20 @@ class SSEEventStorage:
     data: dict[str, Any],
     ttl: int | None = None,
   ) -> SSEEvent:
-    """
-    Store an event for an operation.
+    """Append an event to an operation and publish it to subscribers.
 
-    Args:
-        operation_id: Operation identifier
-        event_type: Type of event
-        data: Event data
-        ttl: Custom TTL (uses default if None)
-
-    Returns:
-        SSEEvent: The stored event
-
-    Raises:
-        ValueError: If operation doesn't exist
+    Raises `ValueError` if the operation was never created (or has expired).
     """
     ttl = ttl or self.default_ttl
 
-    # Check if operation exists
     redis = await self._get_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     if not await redis.exists(metadata_key):
       raise ValueError(f"Operation {operation_id} not found")
 
-    # Get and increment sequence number
     seq_key = f"{self.sequence_prefix}{operation_id}"
     sequence_number = await redis.incr(seq_key)
 
-    # Create event
     event = SSEEvent(
       event_type=event_type,
       operation_id=operation_id,
@@ -280,19 +233,15 @@ class SSEEventStorage:
       sequence_number=sequence_number,
     )
 
-    # Store event in a sorted set by sequence number
     events_key = f"{self.event_prefix}{operation_id}"
     await redis.zadd(events_key, {json.dumps(event.to_dict()): sequence_number})
 
-    # Set TTL on events set
     await redis.expire(events_key, ttl)
 
-    # Publish event to Redis pub/sub channel for real-time notifications
-    # This allows the API process to receive events from worker processes
+    # Pub/sub so the API process sees events emitted by worker processes.
     channel = f"sse:events:{operation_id}"
     await redis.publish(channel, json.dumps(event.to_dict()))
 
-    # Update operation metadata timestamp and possibly status
     await self._update_operation_metadata(operation_id, event_type, data)
 
     logger.debug(
@@ -308,38 +257,23 @@ class SSEEventStorage:
     data: dict[str, Any],
     ttl: int | None = None,
   ) -> SSEEvent:
-    """
-    Synchronous version of store_event for use in background tasks.
+    """Sync counterpart to `store_event` for background tasks.
 
-    Args:
-        operation_id: Operation identifier
-        event_type: Type of event
-        data: Event data
-        ttl: Custom TTL (uses default if None)
-
-    Returns:
-        SSEEvent: The stored event
-
-    Raises:
-        ValueError: If operation doesn't exist
+    Unlike the async version this only warns on an unknown operation,
+    since a worker may emit events before the API has registered them.
     """
     ttl = ttl or self.default_ttl
 
-    # Check if operation exists
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     if not redis.exists(metadata_key):
-      # For sync context, we might not have the operation created yet
-      # Just log and continue
       logger.warning(
         f"Operation {operation_id} not found in metadata, continuing anyway"
       )
 
-    # Get and increment sequence number
     seq_key = f"{self.sequence_prefix}{operation_id}"
     sequence_number = cast(int, redis.incr(seq_key))
 
-    # Create event
     event = SSEEvent(
       event_type=event_type,
       operation_id=operation_id,
@@ -348,14 +282,12 @@ class SSEEventStorage:
       sequence_number=sequence_number,
     )
 
-    # Store event in a sorted set by sequence number
     events_key = f"{self.event_prefix}{operation_id}"
     redis.zadd(events_key, {json.dumps(event.to_dict()): sequence_number})
 
-    # Set TTL on events set
     redis.expire(events_key, ttl)
 
-    # Publish event to Redis pub/sub channel for real-time notifications
+    # Pub/sub so the API process sees events emitted by worker processes.
     channel = f"sse:events:{operation_id}"
     redis.publish(channel, json.dumps(event.to_dict()))
 
@@ -371,15 +303,9 @@ class SSEEventStorage:
   def _update_operation_metadata_sync(
     self, operation_id: str, event_type: EventType, data: dict[str, Any]
   ):
-    """Synchronous version to update operation metadata based on event type.
-
-    Uses atomic Redis operations to prevent race conditions when multiple
-    events are stored concurrently. Only status-changing events (started,
-    completed, error, cancelled) update the full metadata. Progress events
-    are skipped to avoid overwriting status changes.
-    """
-    # Skip progress events - they don't change status and can cause race conditions
-    # where a progress event overwrites a completed/failed status
+    """Sync counterpart to `_update_operation_metadata`."""
+    # Progress events carry no status and would race a concurrent
+    # completed/failed event, overwriting the terminal status.
     status_changing_events = {
       EventType.OPERATION_STARTED,
       EventType.OPERATION_COMPLETED,
@@ -392,14 +318,10 @@ class SSEEventStorage:
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
 
-    # Use optimistic locking with WATCH to prevent race conditions
-    # between concurrent status-changing events
     with redis.pipeline() as pipe:
       try:
-        # Watch the key for changes
         pipe.watch(metadata_key)
 
-        # Get current metadata
         metadata_json = redis.get(metadata_key)
         if not metadata_json:
           pipe.unwatch()
@@ -408,7 +330,7 @@ class SSEEventStorage:
         metadata_dict = json.loads(str(metadata_json))
         metadata = OperationMetadata(**metadata_dict)
 
-        # Don't downgrade status (e.g., don't go from COMPLETED back to RUNNING)
+        # Never downgrade a terminal status back to RUNNING.
         status_priority = {
           OperationStatus.PENDING: 0,
           OperationStatus.RUNNING: 1,
@@ -426,16 +348,14 @@ class SSEEventStorage:
         elif event_type == EventType.OPERATION_CANCELLED:
           new_status = OperationStatus.CANCELLED
 
-        # Only update if new status has higher or equal priority
         if new_status and status_priority.get(new_status, 0) >= status_priority.get(
           metadata.status, 0
         ):
           metadata.status = new_status
           metadata.updated_at = datetime.now(UTC).isoformat()
 
-          # Handle result/error data
           if event_type == EventType.OPERATION_COMPLETED:
-            # Merge new data with existing result_data (preserves graph_id from Dagster job)
+            # Merge, so a graph_id recorded by the Dagster job survives.
             new_result = data.get("result") or data
             if metadata.result_data:
               metadata.result_data.update(new_result)
@@ -444,7 +364,6 @@ class SSEEventStorage:
           elif event_type == EventType.OPERATION_ERROR:
             metadata.error_message = data.get("error", "Unknown error")
 
-          # Store atomically
           pipe.multi()
           pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
           pipe.execute()
@@ -452,8 +371,7 @@ class SSEEventStorage:
           pipe.unwatch()
 
       except Exception:
-        # Transaction failed (key was modified), which is fine - another
-        # status-changing event won. Just log and continue.
+        # Key was modified mid-transaction: another status-changing event won.
         logger.debug(
           f"[SYNC] Metadata update skipped for {operation_id} due to concurrent modification"
         )
@@ -461,16 +379,11 @@ class SSEEventStorage:
   def update_operation_result_sync(
     self, operation_id: str, result: dict[str, Any]
   ) -> None:
-    """
-    Update operation metadata with result data (sync version).
+    """Merge result data into an operation's metadata.
 
-    This is used by Dagster jobs to store the graph_id and other result data
-    in the operation metadata before the job completes. When the monitor later
-    emits the OPERATION_COMPLETED event, it will include this result data.
-
-    Args:
-        operation_id: Operation identifier
-        result: Result data to merge into metadata (e.g., {"graph_id": "kg123"})
+    Dagster jobs call this to record the graph_id and other results before
+    finishing, so the OPERATION_COMPLETED event the monitor emits later
+    carries them.
     """
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
@@ -483,7 +396,6 @@ class SSEEventStorage:
     metadata_dict = json.loads(str(metadata_json))
     metadata = OperationMetadata(**metadata_dict)
 
-    # Update timestamp and merge result data
     metadata.updated_at = datetime.now(UTC).isoformat()
 
     # Merge new result with existing result_data (if any)
@@ -492,11 +404,9 @@ class SSEEventStorage:
     else:
       metadata.result_data = result
 
-    # Update graph_id if provided
     if "graph_id" in result:
       metadata.graph_id = result["graph_id"]
 
-    # Store updated metadata
     redis.setex(
       metadata_key,
       self.default_ttl,
@@ -508,18 +418,7 @@ class SSEEventStorage:
     )
 
   def get_operation_result_sync(self, operation_id: str) -> dict[str, Any] | None:
-    """
-    Get operation result data (sync version).
-
-    This is used by the Dagster monitor to retrieve stored result data
-    when emitting the OPERATION_COMPLETED event.
-
-    Args:
-        operation_id: Operation ID to get result for
-
-    Returns:
-        Result data dictionary if found, None otherwise
-    """
+    """Return an operation's stored result data, or None if absent."""
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     metadata_json = redis.get(metadata_key)
@@ -538,15 +437,13 @@ class SSEEventStorage:
   async def _update_operation_metadata(
     self, operation_id: str, event_type: EventType, data: dict[str, Any]
   ):
-    """Update operation metadata based on event type.
+    """Advance operation status from a status-changing event.
 
-    Uses atomic Redis operations to prevent race conditions when multiple
-    events are stored concurrently. Only status-changing events (started,
-    completed, error, cancelled) update the full metadata. Progress events
-    are skipped to avoid overwriting status changes.
+    WATCH-based optimistic locking plus a status priority ladder keeps
+    concurrent writers from downgrading a terminal status.
     """
-    # Skip progress events - they don't change status and can cause race conditions
-    # where a progress event overwrites a completed/failed status
+    # Progress events carry no status and would race a concurrent
+    # completed/failed event, overwriting the terminal status.
     status_changing_events = {
       EventType.OPERATION_STARTED,
       EventType.OPERATION_COMPLETED,
@@ -560,10 +457,8 @@ class SSEEventStorage:
     metadata_key = f"{self.metadata_prefix}{operation_id}"
 
     try:
-      # Watch the key for changes - this enables optimistic locking
       await redis.watch(metadata_key)
 
-      # Get current metadata
       metadata_json = await redis.get(metadata_key)
       if not metadata_json:
         await redis.unwatch()
@@ -572,7 +467,7 @@ class SSEEventStorage:
       metadata_dict = json.loads(metadata_json)
       metadata = OperationMetadata(**metadata_dict)
 
-      # Don't downgrade status (e.g., don't go from COMPLETED back to RUNNING)
+      # Never downgrade a terminal status back to RUNNING.
       status_priority = {
         OperationStatus.PENDING: 0,
         OperationStatus.RUNNING: 1,
@@ -590,14 +485,12 @@ class SSEEventStorage:
       elif event_type == EventType.OPERATION_CANCELLED:
         new_status = OperationStatus.CANCELLED
 
-      # Only update if new status has higher or equal priority
       if new_status and status_priority.get(new_status, 0) >= status_priority.get(
         metadata.status, 0
       ):
         metadata.status = new_status
         metadata.updated_at = datetime.now(UTC).isoformat()
 
-        # Handle result/error data
         if event_type == EventType.OPERATION_COMPLETED:
           new_result = data.get("result") or {}
           if metadata.result_data:
@@ -607,7 +500,6 @@ class SSEEventStorage:
         elif event_type == EventType.OPERATION_ERROR:
           metadata.error_message = data.get("error", "Unknown error")
 
-        # Get TTL and store atomically using pipeline
         ttl = await redis.ttl(metadata_key)
         if ttl > 0:
           pipe = redis.pipeline()
@@ -617,8 +509,7 @@ class SSEEventStorage:
         await redis.unwatch()
 
     except Exception:
-      # Transaction failed (key was modified), which is fine - another
-      # status-changing event won. Just log and continue.
+      # Key was modified mid-transaction: another status-changing event won.
       logger.debug(
         f"Metadata update skipped for {operation_id} due to concurrent modification"
       )
@@ -626,21 +517,10 @@ class SSEEventStorage:
   async def get_events(
     self, operation_id: str, from_sequence: int = 0, limit: int | None = None
   ) -> list[SSEEvent]:
-    """
-    Retrieve events for an operation.
-
-    Args:
-        operation_id: Operation identifier
-        from_sequence: Start from this sequence number (inclusive)
-        limit: Maximum number of events to return
-
-    Returns:
-        List[SSEEvent]: Events in sequence order
-    """
+    """Return an operation's events in sequence order, from `from_sequence`."""
     redis = await self._get_redis()
     events_key = f"{self.event_prefix}{operation_id}"
 
-    # Get events from sorted set
     if limit:
       raw_events = await redis.zrangebyscore(
         events_key, from_sequence, "+inf", start=0, num=limit
@@ -648,7 +528,6 @@ class SSEEventStorage:
     else:
       raw_events = await redis.zrangebyscore(events_key, from_sequence, "+inf")
 
-    # Parse events
     events = []
     for raw_event in raw_events:
       try:
@@ -661,15 +540,7 @@ class SSEEventStorage:
     return events
 
   async def get_operation_metadata(self, operation_id: str) -> OperationMetadata | None:
-    """
-    Get operation metadata.
-
-    Args:
-        operation_id: Operation identifier
-
-    Returns:
-        OperationMetadata or None if not found
-    """
+    """Return an operation's metadata, or None if it is unknown or expired."""
     redis = await self._get_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
     metadata_json = await redis.get(metadata_key)
@@ -687,37 +558,27 @@ class SSEEventStorage:
   async def cancel_operation(
     self, operation_id: str, reason: str = "Cancelled by user"
   ):
-    """
-    Cancel an operation by storing a cancellation event.
-
-    Args:
-        operation_id: Operation identifier
-        reason: Cancellation reason
-    """
+    """Cancel an operation by storing a cancellation event."""
     await self.store_event(
       operation_id, EventType.OPERATION_CANCELLED, {"reason": reason}
     )
 
   async def cleanup_expired_operations(self) -> int:
-    """
-    Clean up expired operations (Redis should handle TTL, but this is a backup).
+    """Backstop for operations whose keys ended up without a TTL.
 
-    Returns:
-        int: Number of operations cleaned up
+    Redis expiry normally handles cleanup; this re-applies the default TTL
+    to any metadata key missing one and returns how many it repaired.
     """
-    # This is mainly for manual cleanup or operations that somehow didn't get TTL
     cleaned = 0
     redis = await self._get_redis()
 
-    # Scan for expired metadata keys
     async for key in redis.scan_iter(match=f"{self.metadata_prefix}*"):
       if not await redis.exists(key):
         # Already expired
         continue
 
       ttl = await redis.ttl(key)
-      if ttl == -1:  # No TTL set (shouldn't happen)
-        # Set default TTL
+      if ttl == -1:
         await redis.expire(key, self.default_ttl)
         cleaned += 1
 

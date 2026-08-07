@@ -1,9 +1,8 @@
-"""
-User Repository Credits Model
+"""Credit pools backing a user's shared-repository subscriptions.
 
-This model tracks credit pools for accessing repositories through user subscriptions.
-Unlike graph credits which are tied to specific graphs, these credits are user-level
-and can be used across any repository the user has access to.
+One pool per ``UserRepository`` row, so a user with several repository
+subscriptions holds several pools — unlike ``GraphCredits``, which is scoped to
+a single graph.
 """
 
 import logging
@@ -31,7 +30,6 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 logger = logging.getLogger(__name__)
 
 
-# Type-safe helpers for SQLAlchemy model attributes
 def safe_float(value: Any) -> float:
   """Safely convert SQLAlchemy model attributes to float."""
   return float(value) if value is not None else 0.0
@@ -59,11 +57,11 @@ class UserRepositoryCreditTransactionType(str, Enum):
 
 
 class UserRepositoryCredits(Base):
-  """
-  Credit balance tracking for user repository access.
+  """Credit pool for one repository subscription (one per ``UserRepository``).
 
-  Each user subscription gets its own credit pool that can be used
-  for accessing the corresponding repository.
+  ``allows_rollover`` / ``max_rollover_credits`` / ``rollover_credits`` exist on
+  the table but are held at no-rollover: the monthly allocation replaces the
+  balance rather than adding to it, matching ``GraphCredits``.
   """
 
   __tablename__ = "user_repository_credits"
@@ -135,7 +133,6 @@ class UserRepositoryCredits(Base):
     """Create credit pool for a new access record."""
     from datetime import timedelta
 
-    # No rollover for repository credits - same as user graph credits
     allows_rollover = False
     max_rollover = Decimal("0")
 
@@ -157,7 +154,6 @@ class UserRepositoryCredits(Base):
       session.commit()
       session.refresh(credits)
 
-      # Record initial allocation
       UserRepositoryCreditTransaction.create_transaction(
         credit_pool_id=cast(str, credits.id),
         transaction_type=UserRepositoryCreditTransactionType.ALLOCATION,
@@ -180,16 +176,16 @@ class UserRepositoryCredits(Base):
     session: Session,
     metadata: dict[str, Any] | None = None,
   ) -> bool:
-    """
-    Consume credits for a repository operation.
+    """Consume credits for a repository operation.
 
-    Returns True if successful, False if insufficient credits.
+    Returns False rather than raising when the pool is inactive or short. The
+    balance check rides inside the UPDATE's WHERE clause, so concurrent callers
+    cannot both pass it.
     """
     if not self.is_active:
       logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
       return False
 
-    # Use atomic update to prevent race conditions
     from sqlalchemy import text
 
     now = datetime.now(UTC)
@@ -208,7 +204,7 @@ class UserRepositoryCredits(Base):
     )
 
     if result.rowcount == 0:
-      # Check if it was due to insufficient balance or inactive status
+      # The WHERE clause covers both causes; re-read to say which one it was.
       session.refresh(self)
       if not self.is_active:
         logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
@@ -218,10 +214,8 @@ class UserRepositoryCredits(Base):
         )
       return False
 
-    # Update the instance with new values
     session.refresh(self)
 
-    # Record transaction
     transaction_metadata = {
       "repository": repository_name,
       "operation_type": operation_type,
@@ -238,7 +232,6 @@ class UserRepositoryCredits(Base):
       session=session,
     )
 
-    # Audit log the credit consumption
     from robosystems.security import SecurityAuditLogger
 
     SecurityAuditLogger.log_financial_transaction(
@@ -258,21 +251,21 @@ class UserRepositoryCredits(Base):
     return True
 
   def allocate_monthly_credits(self, session: Session) -> bool:
-    """Allocate monthly credits if due - no rollover, same as user graphs."""
+    """Allocate monthly credits if due. Credits do not roll over.
+
+    The balance is replaced by ``monthly_allocation``, matching ``GraphCredits``
+    and the no-rollover promise on the offering page.
+    """
     from datetime import timedelta
 
     now = datetime.now(UTC)
 
-    # Check if allocation is due
     if self.next_allocation_date and now < self.next_allocation_date:
       return False
 
-    # No rollover - credits reset each month like user graph credits
-    # Reset monthly consumption counter
     self.credits_consumed_this_month = Decimal("0")
 
-    # Set new balance to monthly allocation (no rollover)
-    MAX_BALANCE = Decimal("99999999.99")  # Max value for Numeric(10,2) field
+    MAX_BALANCE = Decimal("99999999.99")  # Ceiling of the Numeric(10, 2) column
     new_balance = self.monthly_allocation
     allocation_amount = self.monthly_allocation
 
@@ -284,12 +277,11 @@ class UserRepositoryCredits(Base):
       new_balance = MAX_BALANCE
 
     self.current_balance = new_balance
-    self.rollover_credits = Decimal("0")  # No rollover
+    self.rollover_credits = Decimal("0")
     self.last_allocation_date = now
     self.next_allocation_date = now + timedelta(days=30)
     self.updated_at = now
 
-    # Record allocation transaction
     UserRepositoryCreditTransaction.create_transaction(
       credit_pool_id=cast(str, self.id),
       transaction_type=UserRepositoryCreditTransactionType.ALLOCATION,
@@ -307,16 +299,19 @@ class UserRepositoryCredits(Base):
     session: Session,
     immediate_credit: bool = True,
   ) -> None:
-    """Update monthly allocation (e.g., after tier upgrade)."""
+    """Update the monthly allocation, as on a plan change.
+
+    With ``immediate_credit`` an upgrade tops the current balance up by the
+    difference right away, rather than waiting for the next allocation.
+    """
     old_allocation = self.monthly_allocation
     difference = new_allocation - old_allocation
 
     self.monthly_allocation = new_allocation
     self.updated_at = datetime.now(UTC)
 
-    # If immediate credit, add the difference to current balance with overflow protection
     if immediate_credit and difference > 0:
-      MAX_BALANCE = Decimal("99999999.99")  # Max value for Numeric(10,2) field
+      MAX_BALANCE = Decimal("99999999.99")  # Ceiling of the Numeric(10, 2) column
       new_balance = self.current_balance + difference
       if new_balance > MAX_BALANCE:
         logger.warning(
@@ -376,35 +371,22 @@ class UserRepositoryCredits(Base):
     user_id: str | None = None,
     timeout_seconds: int = 300,
   ) -> dict[str, Any]:
-    """
-    Atomically reserve credits for a repository operation with timeout protection.
+    """Reserve credits ahead of an operation, to be confirmed or cancelled.
 
-    This creates a pending reservation that must be confirmed or cancelled.
-    Reservations automatically expire after timeout_seconds.
-
-    Args:
-        amount: Credit amount to reserve (no multiplier for shared repositories)
-        operation_type: Type of operation
-        session: Database session
-        reservation_id: Unique reservation identifier
-        request_id: HTTP request ID for tracing
-        user_id: User performing the operation
-        timeout_seconds: Reservation timeout (default: 5 minutes)
-
-    Returns:
-        Dict with reservation results and status
+    The credits leave the balance immediately, so a reservation that is never
+    resolved strands them until it is cancelled — hence ``timeout_seconds``,
+    after which ``confirm_credit_reservation`` refuses and refunds.
     """
     from datetime import timedelta
 
     from sqlalchemy import text
 
-    # For shared repositories, no credit multiplier - use base amount
     actual_cost = amount
     expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
     try:
-      # Use atomic SELECT FOR UPDATE with immediate reservation
-      # This prevents race conditions by locking the row during the transaction
+      # Balance check rides in the WHERE clause so concurrent reservations
+      # cannot both succeed against the same remaining balance.
       result = session.execute(
         text("""
           UPDATE user_repository_credits
@@ -424,9 +406,7 @@ class UserRepositoryCredits(Base):
 
       reservation_result = result.fetchone()
 
-      # Check if the update affected any rows (i.e., if we had sufficient credits)
       if not reservation_result:
-        # Get current balance for error message
         current_result = session.execute(
           text(
             "SELECT current_balance, is_active FROM user_repository_credits WHERE id = :credits_id"
@@ -451,7 +431,6 @@ class UserRepositoryCredits(Base):
           "reservation_id": reservation_id,
         }
 
-      # Create reservation transaction record
       UserRepositoryCreditTransaction.create_transaction(
         credit_pool_id=self.id,
         transaction_type=UserRepositoryCreditTransactionType.CONSUMPTION,
@@ -470,11 +449,9 @@ class UserRepositoryCredits(Base):
         session=session,
       )
 
-      # Update the local object to match database state
       self.current_balance = reservation_result.new_balance
       self.updated_at = datetime.now(UTC)
 
-      # Commit the reservation
       session.commit()
 
       return {
@@ -503,20 +480,12 @@ class UserRepositoryCredits(Base):
     session: Session,
     final_metadata: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
-    """
-    Confirm a credit reservation and finalize the consumption.
+    """Finalize a reservation, turning the held credits into consumption.
 
-    Args:
-        reservation_id: The reservation ID to confirm
-        operation_type: Type of operation being confirmed
-        session: Database session
-        final_metadata: Final metadata to add to the transaction
-
-    Returns:
-        Dict with confirmation results
+    An expired reservation is cancelled (credits refunded) and reported as a
+    failure rather than confirmed.
     """
     try:
-      # Find the reservation transaction
       reservation_transaction = (
         session.query(UserRepositoryCreditTransaction)
         .filter(
@@ -537,14 +506,12 @@ class UserRepositoryCredits(Base):
           "reservation_id": reservation_id,
         }
 
-      # Check if reservation has expired
       metadata = reservation_transaction.get_metadata()
       if metadata and metadata.get("expires_at"):
         expires_at = datetime.fromisoformat(
           metadata["expires_at"].replace("Z", "+00:00")
         )
         if datetime.now(UTC) > expires_at:
-          # Reservation expired - rollback the credits
           self.cancel_credit_reservation(reservation_id, session, "expired")
           return {
             "success": False,
@@ -553,7 +520,6 @@ class UserRepositoryCredits(Base):
             "expired_at": expires_at.isoformat(),
           }
 
-      # Update transaction to mark as confirmed
       updated_metadata = metadata.copy() if metadata else {}
       updated_metadata.update(
         {
@@ -568,7 +534,7 @@ class UserRepositoryCredits(Base):
 
       reservation_transaction.description = f"{operation_type} operation (confirmed)"
       reservation_transaction.transaction_metadata = json.dumps(updated_metadata)
-      reservation_transaction.created_at = datetime.now(UTC)  # Update timestamp
+      reservation_transaction.created_at = datetime.now(UTC)
 
       session.commit()
 
@@ -594,21 +560,14 @@ class UserRepositoryCredits(Base):
     session: Session,
     reason: str = "cancelled",
   ) -> dict[str, Any]:
-    """
-    Cancel a credit reservation and return the credits to the balance.
+    """Cancel a reservation and return the held credits to the balance.
 
-    Args:
-        reservation_id: The reservation ID to cancel
-        session: Database session
-        reason: Reason for cancellation
-
-    Returns:
-        Dict with cancellation results
+    Posts a REFUND transaction rather than reversing the original row, so the
+    reservation and its unwind both stay in the ledger.
     """
     from sqlalchemy import text
 
     try:
-      # Find the reservation transaction
       reservation_transaction = (
         session.query(UserRepositoryCreditTransaction)
         .filter(
@@ -629,10 +588,9 @@ class UserRepositoryCredits(Base):
           "reservation_id": reservation_id,
         }
 
-      # Get the amount to refund (should be negative, so we add it back)
+      # The reservation row is negative; refund its magnitude.
       refund_amount = abs(reservation_transaction.amount)
 
-      # Atomically return the credits
       result = session.execute(
         text("""
           UPDATE user_repository_credits
@@ -650,7 +608,6 @@ class UserRepositoryCredits(Base):
 
       refund_result = result.fetchone()
 
-      # Create a refund transaction
       UserRepositoryCreditTransaction.create_transaction(
         credit_pool_id=self.id,
         transaction_type=UserRepositoryCreditTransactionType.REFUND,
@@ -665,7 +622,6 @@ class UserRepositoryCredits(Base):
         session=session,
       )
 
-      # Mark original reservation as cancelled
       metadata = reservation_transaction.get_metadata()
       if metadata:
         metadata.update(
@@ -679,7 +635,6 @@ class UserRepositoryCredits(Base):
 
         reservation_transaction.transaction_metadata = json.dumps(metadata)
 
-      # Update the local object to match database state
       if refund_result:
         self.current_balance = refund_result.new_balance
       self.updated_at = datetime.now(UTC)
@@ -730,9 +685,7 @@ class UserRepositoryCredits(Base):
 
 
 class UserRepositoryCreditTransaction(Base):
-  """
-  Transaction log for user repository credit movements.
-  """
+  """Append-only log of movements in a repository credit pool."""
 
   __tablename__ = "user_repository_credit_transactions"
 

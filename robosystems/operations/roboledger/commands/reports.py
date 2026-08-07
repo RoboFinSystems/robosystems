@@ -52,10 +52,10 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_entity_reporting_style,
 )
 
-# The statement-set production core was extracted to ``statement_sets``
-# so the close path can mint canonical (report_id NULL) sets through the
-# same machinery. Names are re-imported here to keep this module's
-# surface stable — tests and the router import them from this module.
+# The statement-set production core lives in ``statement_sets`` so the close
+# path can mint canonical (report_id NULL) sets through the same machinery.
+# Re-exported here because tests and the router import these names from this
+# module.
 from robosystems.operations.roboledger.reports.statement_sets import (  # noqa: F401
   _TAXONOMY_SCOPE_CTE,
   NoEntityError,

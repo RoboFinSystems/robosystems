@@ -103,26 +103,28 @@ class SESEmailService:
   """Service for sending transactional emails via Amazon SES."""
 
   def __init__(self):
-    """Initialize SES client."""
     self.ses_client = boto3.client("ses", region_name=env.AWS_REGION)
     self.from_address = env.EMAIL_FROM_ADDRESS
     self.from_name = env.EMAIL_FROM_NAME
 
-    # App URLs from existing environment variables
     self.app_urls = {
       "roboledger": env.ROBOLEDGER_URL,
       "roboinvestor": env.ROBOINVESTOR_URL,
       "robosystems": env.ROBOSYSTEMS_URL,
     }
 
-    # Check if email is configured
     if not self.from_address:
       logger.warning("EMAIL_FROM_ADDRESS not configured - emails will not be sent")
 
   def _get_email_template(
     self, email_type: str, template_data: dict[str, Any]
   ) -> dict[str, str]:
-    """Get email subject and body templates based on email type."""
+    """Render subject/html/text for `email_type`.
+
+    An unrecognized type falls back to a generic notification that dumps
+    `template_data` rather than raising, so a caller typo degrades to a sent
+    email instead of a failed one.
+    """
     app_name = template_data.get("app_name", "RoboSystems")
     user_name = template_data.get("user_name", "there")
 
@@ -305,7 +307,6 @@ If you weren't expecting this invitation, you can safely ignore this email.
     status_color = _BRAND_DANGER if is_over else "#d97706"  # red or amber
     status_label = "Over Limit" if is_over else "Approaching Limit"
 
-    # Build database breakdown rows
     db_rows = ""
     for db in databases:
       db_id = db.get("graph_id", "")
@@ -363,7 +364,6 @@ If you weren't expecting this invitation, you can safely ignore this email.
       + _button(url, "View Usage Details")
     )
 
-    # Plain text version
     db_lines = ""
     for db in databases:
       db_id = db.get("graph_id", "")
@@ -401,16 +401,11 @@ View usage details: {url}
   async def send_email(
     self, email_type: str, to_email: str, template_data: dict[str, Any]
   ) -> bool:
-    """
-    Send an email via Amazon SES.
+    """Render `email_type` and send it via SES.
 
-    Args:
-        email_type: Type of email (email_verification, password_reset, welcome)
-        to_email: Recipient email address
-        template_data: Data for the email template
-
-    Returns:
-        True if email was sent successfully, False otherwise
+    Never raises: a send failure (unconfigured sender, SES rejection, network
+    error) is logged and reported as False, so email delivery can't fail a
+    request that only needed to notify someone.
     """
     if not self.from_address:
       logger.warning(
@@ -419,10 +414,8 @@ View usage details: {url}
       return False
 
     try:
-      # Get email template
       template = self._get_email_template(email_type, template_data)
 
-      # Prepare the email
       message = {
         "Subject": {"Data": template["subject"], "Charset": "UTF-8"},
         "Body": {
@@ -431,7 +424,6 @@ View usage details: {url}
         },
       }
 
-      # Send email via SES
       response = self.ses_client.send_email(
         Source=f"{self.from_name} <{self.from_address}>",
         Destination={"ToAddresses": [to_email]},
@@ -474,19 +466,7 @@ View usage details: {url}
     token: str,
     app: str = "roboledger",
   ) -> bool:
-    """
-    Send email verification email.
-
-    Args:
-        user_email: User's email address
-        user_name: User's name
-        token: Verification token
-        app: App identifier (roboledger, roboinvestor, robosystems)
-
-    Returns:
-        True if email was sent successfully, False otherwise
-    """
-    # Get app-specific URL
+    """Send the email-verification link for `app` (unknown app → robosystems)."""
     base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
@@ -505,19 +485,7 @@ View usage details: {url}
     token: str,
     app: str = "roboledger",
   ) -> bool:
-    """
-    Send password reset email.
-
-    Args:
-        user_email: User's email address
-        user_name: User's name
-        token: Reset token
-        app: App identifier (roboledger, roboinvestor, robosystems)
-
-    Returns:
-        True if email was sent successfully, False otherwise
-    """
-    # Get app-specific URL
+    """Send the password-reset link for `app` (unknown app → robosystems)."""
     base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
@@ -532,18 +500,7 @@ View usage details: {url}
   async def send_welcome_email(
     self, user_email: str, user_name: str, app: str = "roboledger"
   ) -> bool:
-    """
-    Send welcome email after email verification.
-
-    Args:
-        user_email: User's email address
-        user_name: User's name
-        app: App identifier (roboledger, roboinvestor, robosystems)
-
-    Returns:
-        True if email was sent successfully, False otherwise
-    """
-    # Get app-specific URL
+    """Send the post-verification welcome email."""
     base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
     template_data = {
@@ -562,18 +519,10 @@ View usage details: {url}
     token: str,
     app: str = "robosystems",
   ) -> bool:
-    """
-    Send an organization invitation email.
+    """Invite `user_email` to an org.
 
-    Args:
-        user_email: Invited email address (no account exists yet)
-        inviter_name: Display name of the inviting user
-        org_name: Name of the organization being joined
-        token: Invitation token embedded in the registration link
-        app: App identifier (roboledger, roboinvestor, robosystems)
-
-    Returns:
-        True if email was sent successfully, False otherwise
+    The recipient has no account yet — `token` is carried into the registration
+    link so accepting and signing up are one step.
     """
     base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
@@ -600,23 +549,12 @@ View usage details: {url}
     databases: list[dict[str, Any]],
     app: str = "robosystems",
   ) -> bool:
-    """
-    Send capacity warning email when instance storage approaches or exceeds limits.
+    """Warn that a graph instance is near or past its storage limit.
 
-    Args:
-        user_email: User's email address
-        user_name: User's name
-        graph_id: Parent graph identifier
-        tier: Graph tier name
-        usage_percentage: Current usage as percentage (e.g. 85.3)
-        used_gb: Current storage used in GB
-        limit_gb: Storage limit in GB
-        instance_status: "approaching" or "over_limit"
-        databases: Per-database breakdown list
-        app: App identifier
-
-    Returns:
-        True if email was sent successfully, False otherwise
+    `usage_percentage` is a percentage (85.3, not 0.853) and the two size
+    figures are GB. `instance_status` is "approaching" or "over_limit" — the
+    latter switches the email to the red over-limit treatment. `databases`
+    itemizes the parent and its subgraphs, which share the instance's limit.
     """
     base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
 
@@ -636,5 +574,4 @@ View usage details: {url}
     return await self.send_email("capacity_warning", user_email, template_data)
 
 
-# Create a singleton instance
 ses_service = SESEmailService()

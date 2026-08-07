@@ -381,17 +381,12 @@ class SECClient:
     stop_max_attempt_number=3, wait_random_min=5000, wait_random_max=10000
   )
   def get_largest_xml_file(self, filing_url):
-    """
-    Scrapes the SEC filing page and returns information about the largest XML file.
+    """Scrape a filing index page for its largest XML file.
 
-    Args:
-        filing_url (str): The URL of the SEC filing page
+    The XBRL instance document is reliably the largest XML in a filing, so
+    this is how the instance is located when no manifest is available.
 
-    Returns:
-        dict: Information about the largest XML file including:
-            - filename: Name of the file
-            - size: Size in bytes
-            - url: Full URL to the file
+    Returns `{"filename", "size", "url"}`.
     """
     logger.debug(f"Finding largest XML file at URL: {filing_url}")
     try:

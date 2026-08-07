@@ -109,13 +109,7 @@ class BillingConfig:
   @classmethod
   def get_subscription_plan(cls, tier: str) -> dict[str, Any] | None:
     """
-    Get complete subscription plan information for a tier.
-
-    Args:
-        tier: Subscription tier name (e.g., ladybug-standard, ladybug-large, ladybug-xlarge)
-
-    Returns:
-        Dict with plan details or None if not found
+    Get the full plan record for a tier, or None if the tier is unknown.
     """
     for plan in DEFAULT_GRAPH_BILLING_PLANS:
       if plan["name"] == tier:
@@ -126,13 +120,7 @@ class BillingConfig:
   @classmethod
   def get_monthly_credits(cls, tier: str) -> int:
     """
-    Get monthly credit allocation for a subscription tier.
-
-    Args:
-        tier: Subscription tier name
-
-    Returns:
-        Monthly credit allocation
+    Get monthly credit allocation for a subscription tier; 0 if unknown.
     """
     return TIER_CREDIT_ALLOCATIONS.get(tier, 0)
 
@@ -141,16 +129,10 @@ class BillingConfig:
     cls, operation_type: str, context: dict[str, Any] | None = None
   ) -> Decimal:
     """
-    Get the cost for an operation.
+    Get the credit cost of an operation.
 
-    Only AI operations consume credits. Database operations don't consume credits.
-
-    Args:
-        operation_type: Type of operation
-        context: Optional context (unused in simplified model)
-
-    Returns:
-        Cost in credits (0 for non-AI operations)
+    Only AI operations cost credits; everything else returns 0. ``context`` is
+    accepted but unused.
     """
     # Simply return the operation cost from CreditConfig
     # No multipliers in the simplified model
@@ -161,14 +143,9 @@ class BillingConfig:
     cls, repository_id: str, plan_name: str
   ) -> dict[str, Any] | None:
     """
-    Get plan details for a specific repository subscription.
+    Get plan details for a shared repository subscription.
 
-    Args:
-        repository_id: Repository identifier (e.g., 'sec', 'industry')
-        plan_name: Plan name (e.g., 'sec-starter', 'starter')
-
-    Returns:
-        Dict with plan details including price_cents, monthly_credits, features
+    ``plan_name`` may be bare ("starter") or repo-prefixed ("sec-starter").
     """
     from robosystems.config.shared_repositories import get_manifest, get_plan_details
 
@@ -227,10 +204,7 @@ class BillingConfig:
   @classmethod
   def validate_configuration(cls) -> dict[str, Any]:
     """
-    Validate that all billing configuration is consistent.
-
-    Returns:
-        Dict with validation results and any inconsistencies found
+    Check billing configuration for internal inconsistencies.
     """
     issues = []
 
@@ -263,12 +237,7 @@ class BillingConfig:
   @classmethod
   def get_all_pricing_info(cls) -> dict[str, Any]:
     """
-    Get complete pricing information for all offerings.
-
-    This is what should be used by the offerings API endpoint.
-
-    Returns:
-        Complete pricing structure
+    Get the pricing structure for every offering; backs the offerings endpoint.
     """
     return {
       "subscription_tiers": {

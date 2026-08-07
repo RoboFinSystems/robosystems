@@ -66,11 +66,10 @@ async def list_user_orgs(
     orgs = []
     for membership in org_memberships:
       org = membership.org
-      # Count members and graphs for each org. The graph count matches what the
-      # org detail view will actually list — counting every org graph here left
-      # a member reading "2 graphs" on the org card and then finding an empty
-      # list, since membership alone grants no graph access. Member count stays
-      # org-wide: the roster is visible to everyone in the org.
+      # The graph count is scoped to what this caller can actually see, so it
+      # matches the org detail view; org membership alone grants no graph
+      # access. Member count stays org-wide — the roster is visible to
+      # everyone in the org.
       member_count = len(OrgUser.get_org_users(org.id, db))
       graph_count = len(_visible_org_graphs(org.id, membership, current_user.id, db))
 

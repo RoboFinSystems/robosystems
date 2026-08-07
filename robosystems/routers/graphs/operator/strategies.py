@@ -1,8 +1,7 @@
-"""
-Operator execution strategies and utilities.
+"""Operator execution strategies.
 
-This module provides intelligent strategy selection for AI Operator execution
-based on execution profiles, client capabilities, and system state.
+Selects an execution strategy for an Operator run from its execution profile,
+the client's capabilities, and current system state.
 
 "Operator" is the AI-executor concept (Claude/MCP), distinct from the REA
 ``Agent`` (counterparty).
@@ -37,15 +36,7 @@ class OperatorClientDetector(BaseClientDetector):
 
   @classmethod
   def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
-    """
-    Detect client type and capabilities from request headers.
-
-    Args:
-        headers: Request headers dictionary
-
-    Returns:
-        Dictionary with client detection results
-    """
+    """Detect client type and capabilities from request headers."""
     base_info = cls.detect_client_capabilities(headers)
 
     return {
@@ -74,17 +65,9 @@ class OperatorStrategySelector:
     mode_override: ResponseMode | None = None,
     force_extended: bool = False,
   ) -> tuple[OperatorExecutionStrategy, dict[str, Any]]:
-    """
-    Select optimal execution strategy for operator.
+    """Select the execution strategy for an operator run.
 
-    Args:
-        execution_profile: Operator's execution time profile
-        client_info: Client capabilities and preferences
-        mode_override: Optional mode override from request
-        force_extended: Force extended analysis
-
-    Returns:
-        Tuple of (strategy, metadata)
+    Returns the strategy paired with the metadata explaining the choice.
     """
     metadata = {
       "selection_reason": "",
@@ -164,16 +147,8 @@ class OperatorStrategySelector:
     execution_profile: ExecutionProfile | None,
     mode: OperatorMode,
   ) -> bool:
-    """
-    Quick check if operator should use background queue based on execution profile.
-
-    Args:
-        execution_profile: Operator's execution time profile
-        mode: Operator execution mode
-
-    Returns:
-        True if should use background queue, False for API execution
-    """
+    """True when the operator's profile calls for the background queue rather
+    than inline API execution."""
     if not execution_profile:
       return False
 

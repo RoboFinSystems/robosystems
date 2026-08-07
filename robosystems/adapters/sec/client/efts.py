@@ -1,12 +1,11 @@
 """
 SEC EFTS (Electronic Filing Text Search) Client.
 
-EFTS provides full-text search across all SEC filings, enabling:
+EFTS provides full-text search across all SEC filings:
 - Discovery of filings by form type, date range, CIK, or text content
-- Bulk queries that return all matching filings in one request
+- Bulk queries that return all matching filings in one request — one query
+  per date range instead of iterating company by company
 - Text search within filing content
-
-This replaces the per-company iteration pattern with O(1) discovery.
 
 API Documentation: https://efts.sec.gov/LATEST/
 """
@@ -84,12 +83,7 @@ class EFTSClient:
   """
 
   def __init__(self, requests_per_second: float = 5.0):
-    """
-    Initialize EFTS client.
-
-    Args:
-        requests_per_second: Rate limit for SEC API (default: 5.0)
-    """
+    """SEC allows 10 req/s; the 5.0 default leaves headroom for other callers."""
     self.limiter = AsyncRateLimiter(rate=requests_per_second)
     self.monitor = RateMonitor()
     self._session: aiohttp.ClientSession | None = None
@@ -163,19 +157,10 @@ class EFTSClient:
     text_query: str | None = None,
     include_amendments: bool = False,
   ) -> dict:
-    """
-    Build EFTS query parameters.
+    """Build the EFTS query params.
 
-    Args:
-        form_types: Form types to search for
-        start_date: Start date (YYYY-MM-DD)
-        end_date: End date (YYYY-MM-DD)
-        ciks: CIKs to filter by (will be zero-padded to 10 digits)
-        text_query: Full-text search query
-        include_amendments: If False, excludes /A amendment forms
-
-    Returns:
-        Dict of query parameters for EFTS API.
+    Dates are YYYY-MM-DD and EFTS requires both. CIKs are zero-padded to 10
+    digits. `include_amendments=False` excludes the /A forms.
     """
     params = {}
 
@@ -214,18 +199,10 @@ class EFTSClient:
     max_results: int | None = None,
   ) -> list[EFTSHit]:
     """
-    Query EFTS for filings matching criteria.
+    Query EFTS for matching filings, paging through the full result set.
 
-    Args:
-        form_types: List of form types (e.g., ["10-K", "10-Q"])
-        start_date: Start date in YYYY-MM-DD format
-        end_date: End date in YYYY-MM-DD format
-        ciks: List of CIKs to filter by
-        text_query: Full-text search query
-        max_results: Maximum results to return (default: all)
-
-    Returns:
-        List of EFTSHit objects representing matching filings.
+    `max_results` caps the fetch; by default everything up to the EFTS 10k
+    ceiling is returned.
 
     Example:
         # Get all 10-K filings for 2024
@@ -295,18 +272,10 @@ class EFTSClient:
     ciks: list[str] | None = None,
   ) -> list[EFTSHit]:
     """
-    Convenience method to query filings for a specific year.
+    Query a whole calendar year in one request.
 
     NOTE: Full years often exceed the EFTS 10k result limit.
     Use query_by_quarter for production pipelines.
-
-    Args:
-        year: The fiscal year to query
-        form_types: List of form types (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
-        ciks: Optional list of CIKs to filter by
-
-    Returns:
-        List of EFTSHit objects for the year.
     """
     return await self.query(
       form_types=form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
@@ -327,15 +296,6 @@ class EFTSClient:
 
     EFTS has a hard limit of 10,000 results per query. Quarterly partitions
     typically return 5-7k filings, safely under the limit.
-
-    Args:
-        year: The fiscal year
-        quarter: Quarter (1-4)
-        form_types: List of form types (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
-        ciks: Optional list of CIKs to filter by
-
-    Returns:
-        List of EFTSHit objects for the quarter.
     """
     if quarter not in (1, 2, 3, 4):
       raise ValueError(f"Quarter must be 1-4, got {quarter}")

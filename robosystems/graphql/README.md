@@ -1,47 +1,43 @@
 # Extensions GraphQL
 
-Strawberry GraphQL schema served at `POST /extensions/{graph_id}/graphql`. This is the read surface for the extensions subsystem — RoboLedger and RoboInvestor reads run here; writes go through the named command operation routers at `/extensions/{roboledger,roboinvestor}/{graph_id}/operations/*`.
+Strawberry GraphQL schema served at `POST /extensions/{graph_id}/graphql`. This is the **read** surface for the extensions subsystem; writes go through the named command operations at `POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*`.
 
-## URL shape
+## `graph_id` comes from the URL
 
 ```
 POST /extensions/{graph_id}/graphql
 ```
 
-The endpoint is **graph-scoped at the URL level**. `graph_id` is a path parameter, not a query argument. Auth and per-graph access are validated by `get_context` before any resolver runs — resolvers read the graph id from `info.context["graph_id"]` via the `require_graph_id(info)` helper instead of taking it as a field argument. This avoids leaking a "wrong graph" failure mode where a client could pass a `graphId` argument that didn't match the URL.
+The endpoint is **graph-scoped at the URL level**. `graph_id` is a path parameter, **never a query argument**. Resolvers read it from `info.context["graph_id"]` via `require_graph_id(info)`. There is deliberately no `graphId` field argument, so a client cannot pass one that disagrees with the URL.
 
-In dev, hitting the endpoint in a browser renders the GraphiQL playground with introspection enabled. In staging/prod the playground UI is not mounted (`graphql_ide=None` unless `env.is_development()`); introspection over the API itself is still allowed (Strawberry default).
+`get_context` in `context.py` runs **before any resolver** and:
 
-## What lives here
+1. Reads the user from the `X-API-Key` header or an `Authorization: Bearer` JWT.
+2. Reads `graph_id` from the URL path.
+3. Calls `check_graph_access(user, graph_id)` eagerly — a failure raises HTTP 403 and the request never reaches a resolver.
 
-```
-robosystems/graphql/
-├── schema.py              # Query root, composed per enabled domain flags + always-on mixins
-├── context.py             # get_context / require_user / require_graph_id / GraphQLContext
-├── auth.py                # check_graph_access — wrapped by get_context before resolvers run
-├── resolvers/
-│   ├── _common.py         # Shared helpers (pagination guards, session opener)
-│   ├── information_block.py  # InformationBlockQuery — always-on (not feature-gated)
-│   ├── taxonomy_block.py  # TaxonomyBlockQuery — always-on (CoA / custom ontology / standards)
-│   ├── library.py         # LibraryQuery — always-on (taxonomy library browse)
-│   ├── ledger.py          # LedgerQuery — roboledger read fields (ROBOLEDGER_ENABLED)
-│   └── investor.py        # InvestorQuery — roboinvestor read fields (ROBOINVESTOR_ENABLED)
-└── types/
-    ├── _pydantic.py       # Shared pydantic→Strawberry derivation helpers
-    ├── common.py          # PaginationInfo
-    ├── information_block.py  # Strawberry types for InformationBlockEnvelope and its atoms
-    ├── taxonomy_block.py  # Strawberry types for the Taxonomy Block envelope
-    ├── library.py         # Strawberry types for the taxonomy library surface
-    ├── report_package.py  # Strawberry types for report package responses
-    ├── ledger.py          # Strawberry types wrapping roboledger Pydantic response models
-    └── investor.py        # Same for roboinvestor
-```
+Anonymous introspection and the `hello` probe are allowed on purpose, so SDK codegen and health checks work without credentials. Data resolvers still call `require_user`, so a request that slips through fails cleanly with `UNAUTHENTICATED`.
 
-## Design
+In development the endpoint renders the GraphiQL playground in a browser. In staging and production the playground UI is not mounted (`graphql_ide=None` unless `env.is_development()`); introspection over the API itself stays enabled.
 
-### 1. The schema auto-derives from Pydantic response models
+## Layout
 
-Adding a new read field is a three-line change in most cases. Strawberry's `experimental.pydantic.type(model=..., all_fields=True)` decorator walks the Pydantic model and generates a GraphQL type that exposes every field with matching names (snake_case → camelCase via `auto_camel_case=True`, on by default).
+| Path | Contents |
+| ---- | -------- |
+| `schema.py` | Query root, composed per enabled domain flags, plus the schema-level cost limiters |
+| `context.py` | `GraphQLContext`, `get_context`, `require_user`, `require_graph_id` |
+| `auth.py` | `check_graph_access` — called by `get_context` before resolvers run |
+| `resolvers/_common.py` | Pagination guards, extension gate, session openers |
+| `resolvers/information_block.py` | `InformationBlockQuery` — always on |
+| `resolvers/taxonomy_block.py` | `TaxonomyBlockQuery` — always on |
+| `resolvers/library.py` | `LibraryQuery` — always on |
+| `resolvers/ledger.py` | `LedgerQuery` — gated on `ROBOLEDGER_ENABLED` |
+| `resolvers/investor.py` | `InvestorQuery` — gated on `ROBOINVESTOR_ENABLED` |
+| `types/` | Strawberry types: `_pydantic.py` helpers, `common.py`, and one module per domain |
+
+## The schema auto-derives from Pydantic response models
+
+Adding a read field is usually a three-line change. `strawberry.experimental.pydantic.type(model=..., all_fields=True)` walks the Pydantic model and generates a GraphQL type exposing every field, snake_case to camelCase (`auto_camel_case=True`, Strawberry's default).
 
 ```python
 # graphql/types/ledger.py
@@ -50,18 +46,18 @@ class TrialBalance:
     """Trial balance for posted entries in a date range."""
 ```
 
-That's the whole type definition. When the Pydantic model grows a new field — say `PydanticTrialBalanceResponse.baseline_total: Decimal | None` — it auto-appears on the wire as `baselineTotal` with no code change to the GraphQL layer.
+That is the whole type definition. When the Pydantic model grows `baseline_total: Decimal | None`, it appears on the wire as `baselineTotal` with no edit here.
 
-The single source of truth is the Pydantic model in `robosystems/models/api/extensions/*`. The REST write responses and the GraphQL reads are literally the same schema. This is intentional: it means a new response field lands in both the SDK REST types and the SDK GraphQL types from the same change.
+The single source of truth is the Pydantic model in `robosystems/models/api/extensions/*`. REST write responses and GraphQL reads are literally the same schema, so a new response field lands in both the SDK REST types and the SDK GraphQL types from one change.
 
-### 2. Resolvers are thin — the ops layer is the source of truth
+## Resolvers are thin
 
 ```python
 @strawberry.field
 def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
     """Return the parent ledger entity (company) for a graph."""
     try:
-        with _open_session(info) as session:
+        with _open_session(info, "roboledger") as session:
             response = reads_entity.get_parent_entity(session)
     except (ValueError, ProgrammingError):
         _raise_ledger_not_initialized()
@@ -70,16 +66,16 @@ def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
     return LedgerEntity.from_pydantic(response)
 ```
 
-Every data resolver follows this shape:
+Every data resolver has that shape:
 
-1. Open an extensions session via `_open_session(info)` — the helper pulls `graph_id` from context and returns `extensions_session(graph_id)` as a context manager.
-2. Call into `operations/roboledger/reads/*.py` or `operations/roboinvestor/reads/*.py` — pure functions that take a session and return a Pydantic response model.
-3. Wrap the Pydantic response in the Strawberry type via the auto-generated `from_pydantic()` classmethod.
-4. Domain errors (uninitialized ledger, missing entity) become typed GraphQL errors with `code` extensions.
+1. Open a session with `open_extensions_session(info, extension)` (imported as `_open_session`). It re-asserts auth, gates on the graph having the extension provisioned, and yields `extensions_session(graph_id)`.
+2. Call into `operations/{roboledger,roboinvestor}/reads/*.py` — pure functions taking a session and returning a Pydantic model.
+3. Wrap the result with the generated `from_pydantic()` classmethod.
+4. Let domain errors become typed GraphQL errors with `extensions.code`.
 
-Resolvers never contain business logic. The same `reads/*.py` modules are called by MCP tools and by REST read paths (where they still exist), which is why the ops layer is the single source of truth — GraphQL, MCP, and REST agree by construction.
+**Resolvers never contain business logic.** The same `reads/*.py` modules are called by MCP tools and REST read paths, which is why the ops layer is the single source of truth — GraphQL, MCP, and REST agree by construction.
 
-### 3. Dynamic schema composition
+## Dynamic schema composition
 
 ```python
 # graphql/schema.py
@@ -97,189 +93,105 @@ def _build_query_type() -> type:
     return strawberry.type(type("Query", bases, {}))
 ```
 
-The `Query` root is built at class-construction time from whichever domain mixins are enabled. There are two composition patterns:
+**Always-on mixins** — `InformationBlockQuery`, `TaxonomyBlockQuery`, `LibraryQuery`, and the `_BaseQuery` probe — are composed unconditionally. They work on both the library sentinel (`graph_id='library'`) and any tenant graph, because visibility follows the session `search_path`.
 
-**Always-on mixins** (`InformationBlockQuery`, `TaxonomyBlockQuery`, `LibraryQuery`, plus the `_BaseQuery` probe) are composed into `bases` unconditionally. They work on both the library sentinel (`graph_id='library'`) and any tenant graph — reads are driven by the session's `search_path`. The `informationBlock` / `informationBlocks`, taxonomy-block, and library fields are always present in the schema regardless of which product flags are on.
+**Domain-gated mixins** — `LedgerQuery`, `InvestorQuery` — are guarded by feature flags. A ledger-only deployment simply has no `InvestorQuery` in its schema, so introspection can't discover `portfolios` and a client can branch on the schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection sees a different schema per deployment: there is no single published SDL.
 
-**Domain-gated mixins** (`LedgerQuery`, `InvestorQuery`) are guarded by feature flags. A ledger-only deployment:
+If both domain flags are off, the router mounting `/extensions/{graph_id}/graphql` never mounts. The gate is `EXTENSIONS_GRAPHQL_ENABLED AND (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)`, applied in the application factory in the repo-root `main.py`; the flags are defined in `config/env.py`.
 
-- Has `LedgerQuery` and `InformationBlockQuery` in the schema
-- Does **not** have `InvestorQuery` in the schema
-- Introspection reports only ledger + information-block fields — there's no way for a client to discover or call `portfolios` on a deployment where investor is off
+**Rule for new resolvers**: domain-specific reads go on `LedgerQuery` or `InvestorQuery` behind the existing flag guard. Cross-domain reads that must be available regardless of product flags go on `InformationBlockQuery` (or a new always-on mixin) with no guard.
 
-This is strictly better than the alternative ("expose everything, throw `INVESTOR_NOT_INITIALIZED` at runtime") because clients can branch on the actual schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection tooling sees a different schema per deployment. We don't publish a single SDL; the schema is composed dynamically per tenant feature-flag combination.
+## Query cost limits
 
-Per-domain gating also short-circuits the router: if both flags are off, the FastAPI router that mounts `/extensions/{graph_id}/graphql` never mounts at all. The mount is gated on `EXTENSIONS_GRAPHQL_ENABLED AND (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)` where the app wires up `GraphQLRouter` (the application factory in `main.py`); the flags themselves are defined in `config/env.py`.
+The schema carries three Strawberry limiters, since each resolved field can open a session against the small extensions OLTP pool:
 
-**Rule for new resolvers**: if the read is domain-specific (roboledger data, roboinvestor data), gate it behind the appropriate flag by adding the method to `LedgerQuery` or `InvestorQuery`. If the read is cross-domain or must be available regardless of which product domains are on, add it to `InformationBlockQuery` (or a new always-on mixin) and compose it into `bases` without a flag guard.
+| Limiter | Env / SSM tunable | Default |
+| ------- | ----------------- | ------- |
+| `QueryDepthLimiter` | `EXTENSIONS_GRAPHQL_MAX_DEPTH` (`graphql/MAX_DEPTH`) | 15 |
+| `MaxAliasesLimiter` | `EXTENSIONS_GRAPHQL_MAX_ALIASES` (`graphql/MAX_ALIASES`) | 30 |
+| `MaxTokensLimiter` | `EXTENSIONS_GRAPHQL_MAX_TOKENS` (`graphql/MAX_TOKENS`) | 2000 |
 
-### 4. Auth and graph access are enforced before resolvers run
+The depth limiter does not count introspection fields, so SDK codegen is unaffected. `OpenTelemetryExtensionSync` is also registered — the `Sync` variant, because the async one breaks `schema.execute_sync(...)`.
 
-`get_context` in `context.py` runs **before** any resolver and:
+## Pagination guards
 
-1. Reads the user from the `X-API-Key` header (API keys) or `Authorization: Bearer` header (JWTs)
-2. Reads `graph_id` from the URL path
-3. Calls `check_graph_access(user, graph_id)` — eagerly, not lazily
-
-If auth fails or the user doesn't have access to the graph, the request never reaches a resolver at all. The `_BaseQuery.hello` probe relies on this: it calls `require_user(info)` which re-asserts the auth contract, and the three-way status check is spelled out in its docstring.
-
-The introspection bypass (`hello` + schema introspection allowed without credentials) is intentional — it lets SDK codegen workflows and health checks call the endpoint without auth, while data resolvers still enforce `require_user` so they fail cleanly if the request slips through.
-
-### 5. Pagination guards are re-asserted at the resolver boundary
-
-Strawberry doesn't have a `Field(ge=…, le=…)` equivalent, so bounds that FastAPI enforced via `Query(..., ge=N, le=M)` on the retired REST routes get reasserted in `resolvers/_common.py`:
+Strawberry has no `Field(ge=…, le=…)` equivalent, so bounds are asserted at the resolver boundary in `resolvers/_common.py`. Pagination arguments are declared **nullable** (`Int`, not `Int! = N`) because generated SDK clients pass explicit `null` for omitted variables, and GraphQL rejects explicit null for a non-null argument even when it has a default. `resolve_pagination` defaults them and then bounds-checks:
 
 ```python
-def validate_pagination(limit: int, offset: int) -> None:
-    if not 1 <= limit <= 1000:
-        raise strawberry.exceptions.StrawberryGraphQLError(
-            message="limit must be between 1 and 1000",
-            extensions={"code": "INVALID_PAGINATION"},
-        )
-    if offset < 0:
-        raise strawberry.exceptions.StrawberryGraphQLError(
-            message="offset must be >= 0",
-            extensions={"code": "INVALID_PAGINATION"},
-        )
+resolved_limit, resolved_offset = resolve_pagination(limit, offset, default_limit=50)
+# limit must be 1..1000, offset >= 0, else INVALID_PAGINATION
 ```
 
-Every paginated resolver calls this first-thing. The `INVALID_PAGINATION` extension code matches the pattern used for `UNAUTHENTICATED`, `LEDGER_NOT_INITIALIZED`, etc. — clients branch on `extensions.code`, not on human-readable messages.
+Every paginated resolver calls it first.
 
-## Adding a new read field
+## Adding a read field
 
-Concrete walkthrough — adding `fiscalCalendar.daysUntilClose` to the existing `FiscalCalendar` type as a computed integer.
+Adding `fiscalCalendar.daysUntilClose` to the existing type:
 
-1. **Add the field to the Pydantic response model.**
+1. **Add the field to the Pydantic response model** in `robosystems/models/api/extensions/fiscal_calendar.py`, with a `Field(description=...)`.
+2. **Populate it in the ops-layer read function** in `robosystems/operations/roboledger/reads/fiscal_calendar.py`.
+3. **Nothing to do on the GraphQL side.** The Strawberry type uses `all_fields=True`, so the field appears as `daysUntilClose: Int` automatically.
+4. **Update SDK consumers if the field is client-facing** — the TypeScript and Python facades query fields explicitly, so the field name has to be added to their GraphQL query documents.
 
-   ```python
-   # robosystems/models/api/extensions/fiscal_calendar.py
-   class FiscalCalendarResponse(BaseModel):
-       ...
-       days_until_close: int | None = Field(
-           default=None,
-           description="Days remaining until the next close target date",
-       )
-   ```
+For a whole new query rather than a new attribute:
 
-2. **Populate it in the ops-layer read function.**
+1. Add a Pydantic response model in `models/api/extensions/*.py` (domain) or `models/api/information_block.py` (cross-domain).
+2. Add a read function in `operations/{domain}/reads/` or `operations/information_block/reads.py`.
+3. Add a Strawberry wrapper in `graphql/types/` — usually one decorator line.
+4. Add a resolver method on the appropriate mixin (gated for domain reads, unguarded for cross-domain).
+5. Add a test under `tests/graphql/extensions/`.
 
-   ```python
-   # robosystems/operations/roboledger/reads/fiscal_calendar.py
-   def get_fiscal_calendar(session: Session) -> FiscalCalendarResponse | None:
-       ...
-       days_until_close = (
-           (calendar.close_target - date.today()).days
-           if calendar.close_target else None
-       )
-       return FiscalCalendarResponse(..., days_until_close=days_until_close)
-   ```
+## Hand-written types
 
-3. **That's it for the GraphQL side.** The Strawberry type in `graphql/types/ledger.py` uses `all_fields=True`, so the new `days_until_close` field auto-appears on the wire as `daysUntilClose: Int`. No type edit, no resolver edit, no SDK regen trigger needed — just run the frontend graphql codegen to pick it up.
+`strawberry.experimental.pydantic.type` cannot resolve self-referencing fields. `AccountTreeNode` has `children: list[AccountTreeNode]`, which breaks `all_fields=True`, so it is hand-written with a `from_pydantic` classmethod that recurses manually. The cost is that new fields on `PydanticAccountTreeNode` need a parallel edit here. If you add a second recursive model, use the same pattern — forward references and `update_forward_refs()` do not help, because the decorator's generator doesn't honor them.
 
-4. **Update SDK consumers if needed.** TypeScript and Python SDK facades query the field explicitly, so they need the new field name added to their GraphQL query documents in `sdk-extensions/graphql/queries/*`. Skip this step if the field is backend-internal.
+`InformationBlock` in `types/information_block.py` is hand-written for a different reason: `artifact.mechanics` is a discriminated union on `kind`. It is exposed as a `strawberry.scalars.JSON` payload with the `kind` tag inside, and `from_pydantic` constructs it explicitly. A real `strawberry.union(...)` is deferred until the arms grow field-level query needs. **A new block type therefore requires no change to this layer** — its mechanics ride the JSON scalar.
 
-If the new field is a whole new query (not a new attribute on an existing type):
+The envelope's `FactSet` carries the typed `provenance` field (the discriminated `FactProvenance` union: `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`), also surfaced as a JSON scalar.
 
-1. Add a new Pydantic response model in `models/api/extensions/*.py` (domain) or `models/api/information_block.py` (cross-domain).
-2. Add a new `reads/*.py` function in `operations/{domain}/reads/` or `operations/information_block/reads.py`.
-3. Add a Strawberry wrapper in `graphql/types/{ledger,investor,information_block}.py` — usually one line with the decorator.
-4. Add a resolver method on the appropriate query mixin:
-   - Domain reads (`LedgerQuery`, `InvestorQuery`) — gated by the existing feature-flag guards.
-   - Cross-domain reads (`InformationBlockQuery`) — added unconditionally; no flag guard.
-5. Add a test under `tests/graphql/extensions/test_{ledger,investor,information_block}.py`.
+## Errors
 
-## The recursive escape hatch
+Typed GraphQL errors carry `extensions.code`. Clients branch on the code, not the message.
 
-Strawberry's `experimental.pydantic.type` decorator cannot resolve self-referencing fields. `AccountTreeNode` has `children: list[AccountTreeNode]`, which breaks `all_fields=True`. The workaround is to hand-write the Strawberry type with a `from_pydantic` classmethod that does the recursion manually:
+| Code | Meaning | Raised by |
+| ---- | ------- | --------- |
+| `UNAUTHENTICATED` | No valid credentials | `require_user` |
+| `INVALID_PAGINATION` | `limit` or `offset` out of range | `validate_pagination` |
+| `EXTENSION_NOT_PROVISIONED` | The graph does not have this extension | `require_extension` |
+| `LEDGER_NOT_INITIALIZED` | Graph has no ledger schema yet | ledger resolvers |
+| `INVESTOR_NOT_INITIALIZED` | Same shape for investor | investor resolvers |
+| `INVALID_ARGUMENT` | Argument failed a resolver-level check | library resolvers |
+| `INVALID_EXPIRES_IN`, `REPORT_BUNDLE_NOT_AVAILABLE`, `REPORT_BUNDLE_SIGNING_FAILED` | Report download failures | `reportDownloadUrl` |
 
-```python
-@strawberry.type
-class AccountTreeNode:
-    """Recursive Chart of Accounts tree node.
+Access control is the exception: `check_graph_access` raises **HTTP 403** from `get_context`, before the GraphQL layer, so a forbidden request never produces a GraphQL error body at all.
 
-    Hand-written because `children: list[AccountTreeNode]` is a
-    self-reference — Strawberry's `experimental.pydantic.type` decorator
-    cannot resolve that automatically. Use `from_pydantic` to convert a
-    `PydanticAccountTreeNode` into this type.
-    """
-
-    id: strawberry.ID
-    code: str | None
-    name: str
-    classification: str
-    account_type: str | None
-    balance_type: str
-    depth: int
-    is_active: bool
-    children: list[AccountTreeNode]
-
-    @classmethod
-    def from_pydantic(cls, node: PydanticAccountTreeNode) -> AccountTreeNode:
-        return cls(
-            id=strawberry.ID(node.id),
-            code=node.code,
-            name=node.name,
-            classification=node.classification,
-            account_type=node.account_type,
-            balance_type=node.balance_type,
-            depth=node.depth,
-            is_active=node.is_active,
-            children=[cls.from_pydantic(c) for c in node.children],
-        )
-```
-
-The cost is that new fields on `PydanticAccountTreeNode` require a parallel edit to this class — the auto-derivation is gone for this one type. If you find yourself adding a second recursive model, follow the same pattern. Don't try to be clever with forward references or `update_forward_refs()` — the Strawberry decorator's generator doesn't honor them.
-
-`InformationBlock` (in `types/information_block.py`) is hand-written for a different reason — its `artifact.mechanics` field is a discriminated union on `kind` (`ScheduleMechanics | StatementMechanics | MetricMechanics`), and Strawberry's pydantic decorator can't unwrap union types cleanly. The `from_pydantic` classmethod does the union dispatch manually. New block types add a `*MechanicsType` Strawberry wrapper and extend the union in `InformationBlock.artifact_mechanics`'s return type annotation.
-
-The envelope's `FactSet` now carries a typed `provenance` field — the discriminated `FactProvenance` union (pivot/schedule/derived/asserted) — surfaced as a JSON scalar; it auto-derives like the other Pydantic fields.
+Add a new code when introducing a typed failure a frontend would want to handle distinctly — don't overload an existing one.
 
 ## Testing
 
-Tests live under `tests/graphql/extensions/`:
+Tests live under `tests/graphql/extensions/`: `test_schema.py` (introspection and per-flag composition), `test_schema_limits.py` (the cost limiters), `test_context.py` (auth and context wiring), and one module per resolver group (`test_ledger.py`, `test_investor.py`, `test_information_block.py`, `test_taxonomy_block.py`).
 
-- `test_schema.py` — schema introspection + composition (per-flag variations)
-- `test_ledger.py` — ledger resolvers, happy path + a couple of error paths each
-- `test_investor.py` — investor resolvers, same shape
-- `test_information_block.py` — `informationBlock` / `informationBlocks` fields, always-on
+The pattern is to seed an isolated extensions schema with the `extensions_test_db` fixture, then call through `TestClient` with `POST /extensions/{graph_id}/graphql`. Assert on `response.json()["data"]` for success and `response.json()["errors"][0]["extensions"]["code"]` for typed failures. The `hello` probe is the smoke test — if it fails, auth or context wiring is broken before any domain resolver runs.
 
-Pattern: use the existing `extensions_test_db` fixture to seed an isolated extensions schema, then call through `TestClient` with `POST /extensions/{graph_id}/graphql` and a query string. Assert on `response.json()["data"]` for success, `response.json()["errors"][0]["extensions"]["code"]` for typed failures.
-
-The hello probe at the top of `_BaseQuery` is a good smoke test — if it fails, auth or context wiring is broken before any domain resolver ever runs.
-
-## Error surface
-
-Typed GraphQL errors with `extensions.code`:
-
-| Code | Meaning | Emitted by |
-| --- | --- | --- |
-| `UNAUTHENTICATED` | No valid credentials | `require_user` |
-| `FORBIDDEN` | Credentials valid, but user lacks access to `graph_id` | `check_graph_access` |
-| `INVALID_PAGINATION` | `limit` or `offset` out of range | `validate_pagination` |
-| `LEDGER_NOT_INITIALIZED` | Graph has no ledger schema yet (connect a data source first) | `_raise_ledger_not_initialized()` |
-| `INVESTOR_NOT_INITIALIZED` | Same shape for investor | investor resolvers |
-
-Clients branch on the code, not the message. Add a new code when introducing a new typed failure that a frontend might want to handle distinctly — don't overload an existing one.
-
-## Relationship to the rest of the extensions surface
+## Relationship to the write surface
 
 ```
 Reads                                    Writes
 ─────                                    ──────
 /extensions/{g}/graphql                  /extensions/roboledger/{g}/operations/{op}
-  ↓                                        /extensions/roboinvestor/{g}/operations/{op}
+  ↓                                      /extensions/roboinvestor/{g}/operations/{op}
 graphql/resolvers/*.py                     ↓
   ↓                                      routers/extensions/{domain}/operations.py
 operations/{domain}/reads/*.py             ↓
                                          operations/{domain}/commands/*.py
 ```
 
-Both sides ultimately call into `operations/{domain}/*`. That's the load-bearing invariant of the subsystem: whether a caller hits the GraphQL endpoint, a named operation, or an MCP tool, the same ops-layer functions run. Adding business logic anywhere else — routers, resolvers, MCP tool handlers — is a mistake. Route it through the ops layer.
+Both sides call into `operations/{domain}/*`. Whether a caller hits GraphQL, a named operation, or an MCP tool, the same ops-layer functions run. Adding business logic in a router, resolver, or MCP tool handler is a mistake — route it through the ops layer.
 
-### Downloads are reads (issue #751)
+### Downloads are reads
 
-Serialization-bundle downloads live here too, as the `reportDownloadUrl(reportId, format)` field on the `Report` query — **not** as a REST resource and **not** as a `download-report` operation. A download is a read of stored state, so it belongs on the read surface.
+Serialization-bundle downloads live here as the `reportDownloadUrl(reportId, format)` field on the `Report` query — not as a REST resource and not as a `download-report` operation. A download is a read of stored state, so it belongs on the read surface.
 
-The catch that made this non-obvious: the XBRL flavor used to stream a raw binary zip, which neither a GraphQL JSON response nor an `OperationEnvelope` can carry. The fix is that **every flavor resolves to a presigned S3 URL** — JSON-LD is stamped at publish time, XBRL is materialized + cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to fetch the bytes directly from S3. This also keeps the read surface uniform — there's no REST GET outlier on the roboledger extensions surface anymore.
+The catch: neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. So **every flavor resolves to a presigned S3 URL** — JSON-LD is stamped at publish time, XBRL is materialized and cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to S3.
 
-There is no analytical "view operation" home for it: view operations (`build-fact-grid`, `live-financial-statement`) are LadybugDB-backed analytical queries; a presigned-URL lookup is a plain OLTP read.
+There is no analytical view-operation home for it either: view operations (`build-fact-grid`, `live-financial-statement`) are LadybugDB-backed analytical queries, whereas a presigned-URL lookup is a plain OLTP read.

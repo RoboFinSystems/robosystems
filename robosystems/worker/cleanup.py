@@ -1,12 +1,10 @@
 """Connection cleanup between worker tasks.
 
-Safety net to prevent session/connection leaks between tasks
-processing different tenants. Properly written tasks use
-extensions_session() and close platform sessions in finally blocks,
-but this catches anything that slips through.
-
-See: feedback_session_isolation.md — prior Celery incident where
-leaked search_path caused cross-tenant data contamination.
+Safety net to prevent session/connection leaks between tasks processing
+different tenants. Properly written tasks use extensions_session() and close
+platform sessions in finally blocks, but this catches anything that slips
+through: a pooled connection carrying a leaked ``search_path`` into the next
+task would read another tenant's schema.
 """
 
 import logging

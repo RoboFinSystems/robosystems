@@ -21,14 +21,14 @@ ENVIRONMENT = env.ENVIRONMENT
 
 
 def get_available_plans() -> list[str]:
-  """Get list of available billing plans from centralized config."""
+  """Plan names from the billing config, in tier order."""
   from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
 
   return [plan["name"] for plan in DEFAULT_GRAPH_BILLING_PLANS]
 
 
 def get_max_plan_tier() -> str:
-  """Get the maximum plan tier from centralized config."""
+  """The highest configured plan name, used as the fallback plan."""
   from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
 
   if not DEFAULT_GRAPH_BILLING_PLANS:
@@ -42,20 +42,11 @@ def generate_subscription_invoice(
   description: str,
   session: Session,
 ) -> BillingInvoice:
-  """Generate an invoice for a subscription.
+  """Create and finalize an OPEN invoice for a new subscription.
 
-  Creates an invoice in OPEN status immediately when a subscription is created.
-  The invoice will be paid through Stripe webhook (credit card customers) or
-  manually tracked (enterprise customers with invoice billing).
-
-  Args:
-      subscription: The subscription to invoice
-      customer: The billing customer
-      description: Line item description
-      session: Database session
-
-  Returns:
-      BillingInvoice instance in OPEN status
+  Card customers settle it via the Stripe webhook; invoice-billing customers
+  are tracked manually. Either way the invoice exists from the moment the
+  subscription does.
   """
   invoice = BillingInvoice.create_invoice(
     org_id=subscription.org_id,
@@ -116,7 +107,6 @@ class GraphSubscriptionService:
   """Service for managing graph database subscriptions and billing."""
 
   def __init__(self, session: Session):
-    """Initialize subscription service with database session."""
     self.session = session
 
   def create_graph_subscription(
@@ -126,16 +116,10 @@ class GraphSubscriptionService:
     plan_name: str = "ladybug-standard",
     tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> BillingSubscription:
-    """Create a billing subscription for a graph database.
+    """Subscribe a graph to a billing plan.
 
-    Args:
-        user_id: User ID (authenticated user creating subscription)
-        graph_id: Graph database ID
-        plan_name: Billing plan name
-        tier: Graph tier
-
-    Returns:
-        BillingSubscription instance
+    An unrecognised ``plan_name`` falls back to the highest available plan with
+    a warning rather than raising.
     """
     from ...models.core import OrgUser
 

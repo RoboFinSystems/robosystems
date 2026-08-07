@@ -28,25 +28,20 @@ class UserAPIKey(Model):
   key_hash = Column(
     String, nullable=False, unique=True, index=True
   )  # bcrypt hashed API key
-  # Deterministic SHA-256 of the plaintext key. Used as the cache key for
-  # validate_api_key so that deactivate/delete can invalidate the same entry.
-  # Nullable for rows created before this column existed; backfilled on the
-  # next successful validation since plaintext is available there.
-  #
-  # DEPLOY NOTE: Existing pre-deploy keys cannot be precisely cache-invalidated
-  # until they're validated once post-deploy (which backfills the column).
-  # If a key is revoked before its first post-deploy use, ``_invalidate_cache``
-  # logs a warning and returns — the positive cache entry (if any) will
-  # persist for the cache TTL. Mitigations: (a) flush the API-key Redis
-  # namespace at deploy time as a one-shot, or (b) accept the bounded window.
+  # Deterministic SHA-256 of the plaintext key, used as the cache key in
+  # validate_api_key so deactivate/delete can invalidate the same entry.
+  # Nullable: a row whose key has never been validated may not have one yet
+  # (it is backfilled on validation, the only place plaintext is available).
+  # A key revoked while this is NULL cannot be cache-invalidated by
+  # fingerprint — ``_invalidate_cache`` warns and the entry lapses on TTL.
   key_fingerprint = Column(String(64), nullable=True, unique=True, index=True)
   prefix = Column(
     String, nullable=False, index=True
   )  # First few chars for identification
-  # Scope restriction: NULL = account-wide (full historical behavior); a value
-  # restricts the key to that graph (and its subgraphs). Scoped keys are the
-  # only kind accepted via the MCP endpoint's URL query parameter, and are
-  # rejected on endpoints that carry no graph context.
+  # Scope restriction: NULL = account-wide; a value restricts the key to that
+  # graph and its subgraphs. Scoped keys are the only kind accepted via the
+  # MCP endpoint's URL query parameter, and are rejected on endpoints that
+  # carry no graph context.
   graph_id = Column(String, nullable=True, index=True)
   is_active = Column(Boolean, default=True, nullable=False)
   description = Column(Text, nullable=True)  # Optional description
@@ -71,7 +66,6 @@ class UserAPIKey(Model):
   )
 
   def __repr__(self) -> str:
-    """String representation of the user API key."""
     return f"<UserAPIKey {self.id} {self.name} user={self.user_id}>"
 
   @classmethod
@@ -84,26 +78,20 @@ class UserAPIKey(Model):
     session: Session | None = None,
     graph_id: str | None = None,
   ) -> tuple["UserAPIKey", str]:
-    """
-    Create a new API key for a user with secure bcrypt hashing.
+    """Mint an API key, returning ``(row, plaintext)``.
 
-    Returns:
-        tuple: (UserAPIKey instance, plain text key)
+    The plaintext is returned once and never stored — only its bcrypt hash and
+    its SHA-256 cache fingerprint persist.
     """
-    # Generate a cryptographically secure API key. Graph-scoped keys get a
-    # distinguishable prefix for human/incident legibility; the authoritative
-    # scope check is always the row's graph_id, never the prefix.
+    # Graph-scoped keys get a distinguishable prefix for human/incident
+    # legibility; the authoritative scope check is always the row's graph_id,
+    # never the prefix.
     plain_key = (
       f"rfsc{secrets.token_hex(32)}" if graph_id else f"rfs{secrets.token_hex(32)}"
     )
 
-    # Hash the key using bcrypt with high work factor
     key_hash = cls._hash_api_key(plain_key)
-
-    # Deterministic fingerprint for cache lookup/invalidation
     key_fingerprint = cls._fingerprint_api_key(plain_key)
-
-    # Store prefix for identification (first 8 chars)
     prefix = plain_key[:8]
 
     user_api_key = cls(
@@ -125,7 +113,6 @@ class UserAPIKey(Model):
       session.commit()
       session.refresh(user_api_key)
 
-      # Log secure API key creation
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTH_SUCCESS,
         details={
@@ -155,8 +142,11 @@ class UserAPIKey(Model):
 
   @classmethod
   def get_by_key(cls, plain_key: str, session: Session) -> Optional["UserAPIKey"]:
-    """
-    Get a user API key by its plain text value using secure bcrypt verification.
+    """Resolve a plaintext API key to its row via bcrypt verification.
+
+    Bcrypt hashes are not searchable, so the lookup narrows on the indexed
+    ``prefix`` and then verifies each candidate. Expired keys are skipped, not
+    returned.
     """
     if not plain_key or not isinstance(plain_key, str):
       SecurityAuditLogger.log_input_validation_failure(
@@ -166,7 +156,6 @@ class UserAPIKey(Model):
       )
       return None
 
-    # Get all active API keys with matching prefix for efficiency
     prefix = plain_key[:8] if len(plain_key) >= 8 else plain_key
     potential_keys = (
       session.query(cls).filter(cls.prefix == prefix, cls.is_active).all()
@@ -175,12 +164,11 @@ class UserAPIKey(Model):
     for api_key in potential_keys:
       try:
         if cls._verify_api_key(plain_key, str(api_key.key_hash)):
-          # Backfill key_fingerprint for rows created before the column existed.
-          # Plaintext is only available here, so this is the right place.
+          # The only point in the system holding plaintext, so the only place
+          # a missing cache fingerprint can be filled in.
           if not api_key.key_fingerprint:
             api_key.key_fingerprint = cls._fingerprint_api_key(plain_key)
 
-          # Check if API key is expired
           if api_key.expires_at and datetime.now(UTC) > api_key.expires_at:
             logger.warning(f"API key {api_key.id} is expired")
             SecurityAuditLogger.log_security_event(
@@ -195,11 +183,9 @@ class UserAPIKey(Model):
             )
             continue  # Try next potential key
 
-          # Update last used timestamp
           api_key.update_last_used(session, auto_commit=False)
           session.commit()
 
-          # Log successful API key verification
           SecurityAuditLogger.log_security_event(
             event_type=SecurityEventType.AUTH_SUCCESS,
             details={
@@ -224,7 +210,6 @@ class UserAPIKey(Model):
           risk_level="medium",
         )
 
-    # Log failed verification attempt
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTHORIZATION_DENIED,
       details={
@@ -255,12 +240,7 @@ class UserAPIKey(Model):
     return session.query(cls).filter(cls.user_id == user_id, cls.is_active).all()
 
   def update_last_used(self, session: Session, auto_commit: bool = True) -> None:
-    """Update the last used timestamp.
-
-    Args:
-        session: Database session
-        auto_commit: Whether to automatically commit the transaction (default: True)
-    """
+    """Stamp ``last_used_at``, committing unless the caller batches it."""
     self.last_used_at = datetime.now(UTC)
     self.updated_at = datetime.now(UTC)
 
@@ -283,7 +263,6 @@ class UserAPIKey(Model):
       session.rollback()
       raise
 
-    # Invalidate cache
     self._invalidate_cache()
 
   def activate(self, session: Session) -> None:
@@ -297,12 +276,11 @@ class UserAPIKey(Model):
       session.rollback()
       raise
 
-    # Invalidate cache
     self._invalidate_cache()
 
   def delete(self, session: Session) -> None:
-    """Delete the API key and invalidate cache."""
-    # Invalidate cache before deletion
+    """Delete the API key, clearing its cache entry first — the row's
+    fingerprint is needed to find it."""
     self._invalidate_cache()
 
     session.delete(self)
@@ -332,18 +310,8 @@ class UserAPIKey(Model):
 
   @staticmethod
   def _hash_api_key(plain_key: str) -> str:
-    """
-    Hash an API key using bcrypt with high work factor.
-
-    Args:
-        plain_key: The plain text API key
-
-    Returns:
-        Bcrypt hash string
-    """
+    """Hash an API key with bcrypt at cost 12 (~250ms on current hardware)."""
     try:
-      # Use a high work factor (cost) for security
-      # 12 rounds = ~250ms on modern hardware, good security/performance balance
       salt = bcrypt.gensalt(rounds=12)
       hashed = bcrypt.hashpw(plain_key.encode("utf-8"), salt)
       return hashed.decode("utf-8")
@@ -353,33 +321,22 @@ class UserAPIKey(Model):
 
   @staticmethod
   def _verify_api_key(plain_key: str, stored_hash: str) -> bool:
-    """
-    Verify an API key against its bcrypt hash.
-
-    Args:
-        plain_key: The plain text API key to verify
-        stored_hash: The stored bcrypt hash from database
-
-    Returns:
-        True if verification succeeds
-    """
+    """Constant-time comparison of a plaintext key against its bcrypt hash."""
     try:
-      # Use bcrypt verification (constant-time, secure)
       return bcrypt.checkpw(plain_key.encode("utf-8"), stored_hash.encode("utf-8"))
     except Exception as e:
       logger.error(f"API key verification failed: {e}")
       return False
 
   def _invalidate_cache(self) -> None:
-    """Invalidate cached data for this API key.
+    """Drop this key's cached validation result.
 
-    Uses ``key_fingerprint`` (sha256 of plaintext) which matches the cache key
-    used by ``validate_api_key``. Pre-migration rows may have a NULL
-    fingerprint until they get backfilled on next validation; for those we
-    can't invalidate by fingerprint and the cache will expire on its TTL.
+    Keyed on ``key_fingerprint``, matching what ``validate_api_key`` caches
+    under. A row with a NULL fingerprint (never validated) cannot be targeted;
+    its cache entry, if any, lapses on TTL.
     """
     try:
-      # Dynamically import only when needed to avoid circular dependency
+      # Imported lazily to avoid a circular dependency on the auth middleware.
       import importlib
 
       cache_module = importlib.import_module("robosystems.middleware.auth.cache")
@@ -395,7 +352,6 @@ class UserAPIKey(Model):
 
       api_key_cache.invalidate_api_key(fingerprint)
 
-      # Log cache invalidation
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,
         details={

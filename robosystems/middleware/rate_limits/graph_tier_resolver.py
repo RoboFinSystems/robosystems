@@ -1,10 +1,9 @@
 """Resolve a request's graph and its tier for rate limiting.
 
-The limiter runs on the hottest path in the API and historically did no
-database work at all — every decision came from Valkey. Resolving a tier means
-a `graphs` lookup, so it is cached with a short TTL and every failure mode
-falls back to the *tightest* tier rather than the loosest: a cache outage or a
-deleted graph must not hand out XLarge throughput.
+The limiter runs on the API's hottest path, so the `graphs` lookup a tier
+resolution needs is cached with a short TTL. Every failure mode falls back to
+the *tightest* tier rather than the loosest: a cache outage or a deleted graph
+must not hand out XLarge throughput.
 """
 
 from ...config.graph_tier import GraphTier
@@ -96,11 +95,10 @@ def resolve_graph_tier(graph_id: str) -> str:
   failing open would let an error hand out more throughput than the customer
   bought.
 
-  A tier string with no entry in SUBSCRIPTION_RATE_LIMITS (ladybug-shared on a
-  repository row, or a legacy value predating a rename) also resolves to
-  FALLBACK_TIER: without this guard the limits lookup would fall through to the
-  anonymous "base" table, dropping a paying customer below the floor this
-  module promises.
+  A tier string with no entry in SUBSCRIPTION_RATE_LIMITS — ladybug-shared on
+  a repository row, or any unrecognized value — also resolves to FALLBACK_TIER:
+  without this guard the limits lookup falls through to the anonymous "base"
+  table, dropping a paying customer below the floor this module promises.
   """
   cached = _cached_tier(graph_id)
   if cached == _UNKNOWN:

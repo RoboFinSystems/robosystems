@@ -1,14 +1,13 @@
-"""
-Semantic memory MCP tools (LanceDB vector store).
+"""Semantic memory MCP tools (LanceDB vector store).
 
 Gives AI Operators a stateful memory layer: `remember` (write), `recall` (ranked
 semantic read), `update-memory` (edit in place), `forget` (delete). Thin adapters
 over the transport-independent ``MemoryService`` kernel — no business logic here.
 
-DISTINCT from ``memory_tools.py`` (write-graph-cypher / add-node-table), which is
-structural knowledge-graph construction on memory *subgraphs*. This is the
-per-graph semantic-vector store, gated by SEMANTIC_MEMORY_ENABLED (+ the MCP
-sub-gate MCP_SEMANTIC_MEMORY_ENABLED at registration).
+Distinct from ``subgraph_write_tools.py`` (write-graph-cypher / add-node-table),
+which builds structural knowledge graphs on subgraphs. This is the per-graph
+semantic-vector store, gated by SEMANTIC_MEMORY_ENABLED plus the MCP sub-gate
+MCP_SEMANTIC_MEMORY_ENABLED at registration.
 """
 
 from typing import Any

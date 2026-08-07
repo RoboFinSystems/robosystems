@@ -16,24 +16,15 @@ from robosystems.models.core import Graph
 
 
 def mark_graph_stale(graph_id: str, reason: str) -> None:
-  """Mark a graph as stale after an OLTP write.
+  """Record that a graph's LadybugDB projection is behind its OLTP data.
 
-  This is a synchronous utility — the write is a single UPDATE on the
-  platform database and doesn't benefit from async overhead.
+  ``reason`` is a short tag naming what changed — ``schedule_created``,
+  ``connector_sync``, ``period_closed``, ``journal_entry_updated``, and so on.
+  It is surfaced to operators and the AI, so keep it specific.
 
-  Args:
-      graph_id: The graph whose LadybugDB projection is now out of date.
-      reason: Short tag describing what caused staleness:
-          - schedule_created
-          - closing_entry_created
-          - connector_sync
-          - report_generated
-          - transaction_created
-          - entity_updated
-          - period_closed / period_reopened
-          - event_block_created / event_block_updated / event_published
-          - journal_entry_updated / journal_entry_deleted
-          - obligations_promoted
+  Synchronous by design: this is a single UPDATE on the platform database.
+  Never raises — staleness is advisory, and losing the flag must not fail the
+  write that triggered it.
   """
   try:
     session = SessionFactory()
@@ -47,5 +38,4 @@ def mark_graph_stale(graph_id: str, reason: str) -> None:
     finally:
       session.close()
   except Exception as e:
-    # Non-fatal — staleness is advisory, not critical path
     logger.warning(f"Failed to mark graph {graph_id} stale: {e}")

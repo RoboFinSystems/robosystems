@@ -1,819 +1,292 @@
 # Graph API
 
-HTTP API server for graph database cluster management. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with connection pooling, circuit breaking, and admission control.
+A FastAPI service (port 8001) that owns the graph data plane. It runs on the same
+host as the databases it serves: LadybugDB holds the graph, DuckDB holds the
+staging tables data lands in before it becomes graph, and LanceDB holds vector
+indexes. Everything is embedded and local — the HTTP layer exists so the rest of
+the platform (API, workers, Dagster) can reach a specific instance's files
+without sharing a filesystem with it.
 
-**Backend:**
+The application never talks to this service directly by URL. It goes through
+[`client/`](client/README.md), which resolves a `graph_id` to an instance and
+handles retries, circuit breaking, and failover.
 
-- **LadybugDB**: Embedded graph database built on columnar storage
+| Directory | Contents |
+| --- | --- |
+| [`core/`](core/README.md) | Engines, connection pools, staging, admission control, tasks |
+| [`core/ladybug/`](core/ladybug/README.md) | Graph engine, pooling, database lifecycle, blue-green swap |
+| [`core/duckdb/`](core/duckdb/README.md) | Parquet staging tables and the path into the graph |
+| [`client/`](client/README.md) | Async client, routing factory, circuit breaker |
+| `routers/` | HTTP surface (see endpoints below) |
+| `models/` | Pydantic request/response models |
+| `middleware/` | API-key auth, request size limits |
+| `interfaces/` | Engine protocol shared with `middleware/graph` |
 
-## Table of Contents
+## Authentication
 
-- [Architecture Overview](#architecture-overview)
-- [Deployment Infrastructure](#deployment-infrastructure)
-- [API Endpoints](#api-endpoints)
-- [Client Libraries](#client-libraries)
-- [Configuration](#configuration)
-- [Security](#security)
-- [Monitoring & Observability](#monitoring--observability)
-- [Development](#development)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
+Every request outside `/health` carries the cluster API key:
 
-## Architecture Overview
-
-### System Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Main Application Layer                   │
-│                  (RoboSystems FastAPI App)                  │
-├─────────────────────────────────────────────────────────────┤
-│                     GraphRouter Layer                       │
-│                 (Intelligent Routing Logic)                 │
-├─────────────────────────────────────────────────────────────┤
-│                   GraphClientFactory Layer                  │
-│              (Circuit Breakers, Retry Logic)                │
-├─────────────────────────────────────────────────────────────┤
-│                      Graph API Layer                        │
-│                    (FastAPI on Port 8001)                   │
-├─────────────────────────────────────────────────────────────┤
-│                   Graph Database Engine                     │
-│                    (LadybugDB Embedded)                     │
-└─────────────────────────────────────────────────────────────┘
+```http
+X-Graph-API-Key: <key>
 ```
 
-### Core Components
+`Authorization: Bearer <key>` is accepted as an alternative. Keys live in AWS
+Secrets Manager, are rotated on a schedule, and are compared in constant time.
+The service listens only inside the VPC — there is no public route to port 8001.
 
-```
-graph_api/
-├── app.py                      # FastAPI application factory
-├── main.py                     # Server entry point
-├── __main__.py                 # Module entry point
-│
-├── client/                     # Python clients
-│   ├── base.py                # Shared client base (BaseGraphClient)
-│   ├── client.py              # Async client implementation (GraphClient)
-│   ├── factory.py             # Intelligent routing factory + sync helpers
-│   ├── config.py              # Client configuration
-│   └── exceptions.py          # Custom exceptions
-│
-├── core/                      # Core services (organized by database technology)
-│   ├── ladybug/              # LadybugDB embedded graph database
-│   │   ├── engine.py         # Low-level database driver
-│   │   ├── pool.py           # Connection pooling
-│   │   ├── manager.py        # Database lifecycle and schema
-│   │   ├── service.py        # Service orchestration
-│   │   ├── config.py         # LadybugDB configuration
-│   │   └── materialization_lock.py  # Single-writer materialization lock
-│   ├── duckdb/               # DuckDB data staging
-│   │   ├── pool.py           # DuckDB connection pooling
-│   │   └── manager.py        # Staging table management
-│   ├── lance/                # LanceDB vector storage
-│   │   └── manager.py        # Vector table management
-│   ├── admission_control.py  # CPU/memory backpressure management
-│   ├── backup_service.py     # Backup/restore service
-│   ├── memory_manager.py     # Memory budget management
-│   ├── migration_service.py  # Graph schema migration service
-│   ├── metrics_collector.py  # Performance metrics
-│   ├── task_manager.py       # Async task coordination
-│   └── task_sse.py           # Server-Sent Events for task progress
-│
-├── routers/                   # API endpoints
-│   ├── databases/
-│   │   ├── management.py     # Create/delete databases
-│   │   ├── query.py          # Cypher query execution
-│   │   ├── tables/           # DuckDB staging table management
-│   │   │   ├── management.py # Create/list staging tables
-│   │   │   ├── materialize.py # DuckDB → LadybugDB materialization
-│   │   │   └── query.py      # DuckDB SQL queries on tables
-│   │   ├── schema.py         # Schema management
-│   │   ├── metrics.py        # Database metrics
-│   │   ├── backup.py         # Backup operations
-│   │   ├── restore.py        # Restore operations
-│   │   ├── memory.py         # Per-database memory operations
-│   │   ├── swap.py           # Blue/green database swap
-│   │   └── vector_search.py  # LanceDB vector search
-│   ├── health.py             # Health checks
-│   ├── info.py               # Node information
-│   ├── metrics.py            # Node-level metrics
-│   ├── migration.py          # Schema migration endpoints
-│   └── tasks.py              # Background task tracking
-│
-├── middleware/
-│   ├── auth.py               # API key authentication
-│   └── request_limits.py     # Rate limiting
-│
-└── models/                    # Pydantic models
-    ├── database.py           # Database schemas
-    ├── tables.py             # Staging table requests/responses
-    ├── tasks.py              # Task tracking models
-    ├── migration.py          # Migration request/response models
-    ├── fork.py               # Database fork/swap models
-    └── cluster.py            # Cluster configuration
-```
+## Endpoints
 
-### Node Types
+### Cluster
 
-The system deploys different node types:
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/health` | Load-balancer probe. Returns 503 while a replica is warming or a version migration is running |
+| GET | `/info` | Node identity, type, database list, capacity |
+| GET | `/metrics` | System, database, query, and ingestion metrics |
 
-- **Writer Nodes** (`writer`): Entity database read/write operations on EC2
-- **Shared Master** (`shared_master`): Shared repository ingestion and writes on EC2
+### Databases
 
-## Deployment Infrastructure
+| Method | Path | Body / returns |
+| --- | --- | --- |
+| GET | `/databases` | `DatabaseListResponse` |
+| POST | `/databases` | `DatabaseCreateRequest` → `DatabaseCreateResponse` |
+| GET | `/databases/{graph_id}` | `DatabaseInfo` (size, health, timestamps) |
+| DELETE | `/databases/{graph_id}` | Closes pooled connections, then removes files |
+| POST | `/databases/{graph_id}/query` | `QueryRequest` → `QueryResponse`, NDJSON, or SSE |
+| POST | `/databases/{graph_id}/schema` | `SchemaInstallRequest` → `SchemaInstallResponse` |
+| GET | `/databases/{graph_id}/schema` | Installed node/relationship tables |
+| GET | `/databases/{graph_id}/metrics` | Per-database query and size metrics |
+| GET | `/databases/{graph_id}/storage` | Itemized disk use across LadybugDB, LanceDB, and DuckDB staging |
+| POST | `/databases/{graph_id}/swap` | Promote `{graph_id}-wip` to active |
+| POST | `/databases/{graph_id}/backup` | Starts a task, returns `task_id` |
+| POST | `/databases/{graph_id}/restore` | Starts a task, returns `task_id` |
+| POST | `/databases/{graph_id}/backup-download` | Stream a stored backup |
 
-### CloudFormation Stack Architecture
+### Staging tables
 
-The system uses a multi-stack CloudFormation architecture:
+All under `/databases/{graph_id}/tables`. The whole group returns **501** on
+read-only replicas — staging is a writer-only concern.
 
-```
-1. Infrastructure Stack (ladybug-infra.yaml)
-   ├─ DynamoDB Tables (Instance, Graph, Volume Registry)
-   ├─ Secrets Manager (API Keys with rotation)
-   ├─ SNS Topics (Alerts and notifications)
-   └─ Lambda Functions (Instance monitoring)
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `` | Create a staging table from Parquet in S3 (`TableCreateRequest`) |
+| GET | `` | `list[TableInfo]` |
+| POST | `/{table_name}/insert` | Append more Parquet into an existing table |
+| POST | `/query` | Read-only SQL. Table name goes in the SQL, not the path |
+| POST | `/execute` | Write/DDL SQL — internal materialization paths only |
+| POST | `/{table_name}/materialize` | Copy staged rows into the graph |
+| POST | `/{subgraph_id}/fork-from/{parent_graph_id}` | Seed a subgraph from the parent's staging |
+| DELETE | `/{table_name}` | Drop the staging table |
+| DELETE | `/{table_name}/files/{file_id}` | Drop one file's rows |
 
-2. Volume Management Stack (ladybug-volumes.yaml)
-   ├─ Volume Manager Lambda (EBS lifecycle)
-   ├─ Volume Monitor Lambda (Auto-expansion)
-   ├─ Snapshot Management (Backup/restore)
-   └─ SNS Topics (Volume alerts)
+### Vector and semantic memory
 
-3. Writer Stacks (ladybug-writers.yaml) - Deployed in parallel
-   ├─ Multi-Tenant Writers (configurable instance types and capacity)
-   ├─ Dedicated Writers (single database per instance)
-   ├─ High-Performance Writers (larger instances for demanding workloads)
-   └─ Shared Master (shared repository infrastructure)
-```
+| Method | Path |
+| --- | --- |
+| GET / DELETE | `/databases/{graph_id}/tables/{table_name}/vector` |
+| POST | `/databases/{graph_id}/tables/{table_name}/vector/{build,search,export}` |
+| POST | `/databases/{graph_id}/semantic-memory/{rows,search,list}` |
+| GET / PATCH / DELETE | `/databases/{graph_id}/semantic-memory/rows/{memory_id}` |
 
-### Infrastructure Configuration
+### Memory, tasks, migration
 
-All tiers use dedicated instances (1 database per instance). Configuration is defined in [`.github/configs/graph.yml`](/.github/configs/graph.yml).
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/databases/{graph_id}/memory/{boost,restore,release}` | Temporarily raise or drop a database's memory budget |
+| GET | `/databases/{graph_id}/memory/status` | Current budget and whether a boost is active |
+| GET | `/tasks` · `/tasks/stats` | List and aggregate background tasks |
+| GET | `/tasks/{task_id}/status` | Poll a task |
+| GET | `/tasks/{task_id}/monitor` | SSE progress stream |
+| POST | `/migration/{export,import,cleanup}` · GET `/migration/status` | Engine-version migration of on-disk databases |
 
-#### Production Tiers
-
-| Tier | Instance | Memory | Subgraphs | Use Case |
-| ---- | -------- | ------ | --------- | -------- |
-| **ladybug-standard** | m7g.large | 8 GB | 3 | Cost-efficient entry tier |
-| **ladybug-large** | r7g.large | 16 GB | 10 | Enhanced performance |
-| **ladybug-xlarge** | r7g.xlarge | 32 GB | 25 | Maximum scale |
-| **ladybug-shared** | r7g.2xlarge | 64 GB | — | Public repositories (SEC) |
-
-#### Shared Replica Fleet
-
-Read-only replicas download `.lbug` and `.duckdb` files from S3 on boot and serve queries locally. Refreshed via rolling ASG instance refresh after new databases are published.
-
-### DynamoDB Registry Tables
-
-#### Instance Registry
-
-Tracks all LadybugDB instances across the infrastructure:
-
-```python
-{
-    "instance_id": "i-1234567890",      # EC2 instance ID
-    "cluster_tier": "ladybug-standard", # Actual tier from deployment config
-    "private_ip": "10.0.1.100",
-    "status": "healthy",                # initializing|healthy|unhealthy
-    "database_count": 5,                # Current databases
-    "max_databases": 10,                # Configuration-based limit
-    "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-#### Graph Registry
-
-Maps graph databases to instances:
-
-```python
-{
-    "graph_id": "kg1a2b3c4d5",          # Unique database ID
-    "instance_id": "i-1234567890",
-    "entity_id": "entity_123",          # Owner entity
-    "repository_type": "entity",        # entity|shared
-    "status": "active",
-    "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-#### Volume Registry
-
-Manages EBS volume persistence:
-
-```python
-{
-    "volume_id": "vol-0123456789",      # EBS volume ID
-    "instance_id": "i-1234567890",
-    "database_id": "kg1a2b3c4d5",
-    "tier": "ladybug-standard",
-    "size_gb": 100,
-    "status": "attached"                # available|attached|expanding
-}
-```
-
-### GitHub Actions Deployment Workflow
-
-```yaml
-deploy-ladybug.yml (Orchestrator)
-├── deploy-ladybug-infra.yml
-│   └── Creates DynamoDB, Secrets, SNS
-├── deploy-ladybug-volumes.yml
-│   └── Deploys Lambda functions for volume management
-├── prepare-writer-matrix
-│   └── Parses .github/configs/graph.yml for tier specs
-├── deploy-ladybug-writers.yml (Matrix strategy, parallel)
-│   └── Deploys each tier based on configuration
-└── deploy-ladybug-shared-replicas.yml
-└── Creates read replica infrastructure
-```
-
-### EC2 UserData Initialization
-
-The Graph API starts automatically on EC2 instances via userdata script:
+## Examples
 
 ```bash
-# 1. Register instance in DynamoDB
-aws dynamodb put-item --table-name instance-registry ...
+# Create a database
+curl -X POST http://localhost:8001/databases \
+  -H "X-Graph-API-Key: $GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"graph_id": "kg1a2b3c4d5", "schema_type": "entity"}'
 
-# 2. Invoke Volume Manager for EBS attachment
-aws lambda invoke --function-name volume-manager ...
+# Query it. `database` in the body must match the path segment.
+curl -X POST http://localhost:8001/databases/kg1a2b3c4d5/query \
+  -H "X-Graph-API-Key: $GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"database": "kg1a2b3c4d5", "cypher": "MATCH (n:Entity) RETURN n LIMIT 10"}'
 
-# 3. Pull and start Docker container
-docker run -d \
-  -p 8001:8001 \
-  -v /data/lbug-dbs:/data/lbug-dbs \
-  -e LBUG_NODE_TYPE=writer \
-  -e CLUSTER_TIER=ladybug-standard \
-  -e GRAPH_API_KEY=${GRAPH_API_KEY} \
-  ${ECR_URI}:${ECR_IMAGE_TAG} \
-  /app/bin/entrypoint.sh
+# Stage Parquet from S3
+curl -X POST http://localhost:8001/databases/kg1a2b3c4d5/tables \
+  -H "X-Graph-API-Key: $GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"graph_id": "kg1a2b3c4d5", "table_name": "Entity",
+       "s3_pattern": "s3://bucket/entities/*.parquet"}'
 
-# 4. Signal CloudFormation
-cfn-signal --success --stack ${STACK_NAME} ...
+# Validate it before it becomes graph
+curl -X POST http://localhost:8001/databases/kg1a2b3c4d5/tables/query \
+  -H "X-Graph-API-Key: $GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"graph_id": "kg1a2b3c4d5",
+       "sql": "SELECT count(*) FROM Entity WHERE identifier IS NULL"}'
+
+# Materialize into the graph
+curl -X POST http://localhost:8001/databases/kg1a2b3c4d5/tables/Entity/materialize \
+  -H "X-Graph-API-Key: $GRAPH_API_KEY" \
+  -H "Content-Type: application/json" -d '{}'
 ```
 
-## API Endpoints
+`TableMaterializationRequest` sets `extra = "forbid"` — an unrecognized key in
+that body is a 422, not a silently ignored field. The accepted keys are
+`file_ids`, `source_graph_id`, `batch_num`, `num_batches`,
+`materialize_embeddings`, and `incremental`.
 
-### Database Operations
+## Operational limits
 
-#### Create Database
+These are properties of the engine and the instance, not tunables to be
+optimized away.
 
-```http
-POST /databases
-X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "graph_id": "kg1a2b3c4d5",
-  "schema_type": "entity"  // entity|shared|custom
-}
-```
-
-#### Execute Query
-
-```http
-POST /databases/{graph_id}/query
-X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "cypher": "MATCH (n:Entity) RETURN n LIMIT 10",
-  "parameters": {},
-  "timeout": 30
-}
-```
-
-#### Table Operations
-
-**DuckDB Staging Tables** provide an intermediate staging layer for data validation and transformation before graph ingestion.
-
-**Note:** This is the low-level Graph API (port 8001). Individual file uploads and tracking are handled by the main API layer (port 8000):
-- `POST /v1/graphs/{graph_id}/tables/{table_name}/files` - Get presigned S3 upload URL
-- `PATCH /v1/graphs/{graph_id}/tables/files/{file_id}` - Mark upload complete (automatically calls create table here)
-
-**Create Table:**
-
-```http
-POST /databases/{graph_id}/tables
-X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "table_name": "Entity",
-  "s3_pattern": "s3://bucket/path/*.parquet"
-}
-
-Response: {
-  "status": "success",
-  "graph_id": "kg1a2b3c4d5",
-  "table_name": "Entity",
-  "execution_time_ms": 1250.5
-}
-```
-
-**List Tables:**
-
-```http
-GET /databases/{graph_id}/tables
-X-Graph-API-Key: {api_key}
-
-Response: [
-  {
-    "graph_id": "kg1a2b3c4d5",
-    "table_name": "Entity",
-    "row_count": 1523,
-    "size_bytes": 45678912,
-    "s3_location": "s3://bucket/path/*.parquet"
-  }
-]
-```
-
-**Query Staging Table:**
-
-```http
-POST /databases/{graph_id}/tables/query
-X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "sql": "SELECT * FROM Entity WHERE status = 'active' LIMIT 10"
-}
-
-Response: {
-  "graph_id": "kg1a2b3c4d5",
-  "columns": ["identifier", "name", "status"],
-  "rows": [
-    ["entity-1", "Company A", "active"],
-    ["entity-2", "Company B", "active"]
-  ],
-  "row_count": 2,
-  "execution_time_ms": 45.2
-}
-
-Note: Table name is specified in the SQL query, not the path.
-Supports streaming via Accept: application/x-ndjson or text/event-stream headers.
-```
-
-**Materialize Table to Graph:**
-
-```http
-POST /databases/{graph_id}/tables/{table_name}/materialize
-X-Graph-API-Key: {api_key}
-Content-Type: application/json
-
-{
-  "ignore_errors": true,
-  "rebuild": false
-}
-
-Response: {
-  "status": "success",
-  "graph_id": "kg1a2b3c4d5",
-  "table_name": "Entity",
-  "rows_ingested": 1523,
-  "execution_time_ms": 2340.8
-}
-
-Note: This performs direct DuckDB → LadybugDB materialization via database extensions.
-Use rebuild=true to regenerate the graph database from scratch (safe operation).
-```
-
-**Delete Table:**
-
-```http
-DELETE /databases/{graph_id}/tables/{table_name}
-X-Graph-API-Key: {api_key}
-
-Response: {
-  "status": "success",
-  "message": "Table deleted successfully"
-}
-```
-
-### System Operations
-
-#### Health Check
-
-```http
-GET /health
-Response: {
-  "status": "healthy",
-  "node_type": "writer",
-  "tier": "ladybug-standard",
-  "databases": 5,
-  "max_databases": 10,
-  "memory_usage_mb": 2048,
-  "uptime_seconds": 3600
-}
-```
-
-#### Node Information
-
-```http
-GET /info
-Response: {
-  "instance_id": "i-1234567890",
-  "cluster_tier": "ladybug-standard",
-  "available_capacity": 5,
-  "active_connections": 15,
-  "queue_depth": 3
-}
-```
-
-#### Task Status
-
-```http
-GET /tasks/{task_id}/status
-Response: {
-  "task_id": "task_abc123",
-  "status": "in_progress",
-  "progress": 75,
-  "started_at": "2024-01-01T00:00:00Z",
-  "error": null
-}
-```
-
-## Client Libraries
-
-`GraphClient` (`client.py`, a subclass of `BaseGraphClient`) is the single async
-client. There is no separate sync client class — synchronous access is provided
-by the `get_graph_client_sync` / `create_client_sync` helpers, which return a
-`GraphClient` usable as a sync context manager.
-
-### Async Client
-
-```python
-from robosystems.graph_api.client import GraphClient
-
-async with GraphClient(
-    base_url="http://graph-api:8001",
-    api_key="graph_api_..."
-) as client:
-    # Create database
-    await client.create_database(
-        graph_id="kg1a2b3c4d5",
-        schema_type="entity"
-    )
-
-    # Execute query
-    results = await client.query(
-        graph_id="kg1a2b3c4d5",
-        cypher="MATCH (n) RETURN count(n) as count"
-    )
-```
-
-### Client Factory with Intelligent Routing
-
-```python
-from robosystems.config.graph_tier import GraphTier
-from robosystems.graph_api.client import get_graph_client
-
-# Factory handles routing based on graph type and operation (async)
-client = await get_graph_client(
-    graph_id="sec",              # Routes to shared infrastructure
-    operation_type="read",        # Could use replica
-    environment="prod",
-    tier=GraphTier.LADYBUG_STANDARD
-)
-```
-
-### Sync Access
-
-```python
-from robosystems.graph_api.client import get_graph_client_sync
-
-# Returns a GraphClient usable as a synchronous context manager
-with get_graph_client_sync("kg1a2b3c4d5", operation_type="read") as client:
-    data = client.query(
-        graph_id="kg1a2b3c4d5",
-        cypher="MATCH (n) RETURN n LIMIT 10"
-    )
-```
+- **One writer per database.** LadybugDB permits a single write transaction per
+  database file. Materializations additionally take a per-graph distributed lock
+  so two of them can't interleave — see [`core/ladybug/`](core/ladybug/README.md).
+- **Sequential ingestion.** Files are materialized one at a time per database.
+- **Connection pool: 3 per database.** Both the LadybugDB and DuckDB pools are
+  initialized at 3 in `app.py`. Asking for a fourth does not queue — the pool
+  closes the oldest connection to make room. Concurrency comes from more
+  instances, not a bigger pool.
+- **Admission control rejects before it crashes.** Requests are refused with 503
+  when free memory drops below 1 GB (measured as the tighter of host-available
+  and cgroup headroom) or CPU exceeds 95%. A percentage-of-total memory gate
+  would misfire, because a buffer pool is *supposed* to fill.
+- **No cross-database queries.** Each query is scoped to one database file.
+- **Memory is a fixed per-database budget** derived from the tier config, not a
+  shared heap. Exceeding it is an OOM kill of the container, which is why
+  materialization boosts and then restores the budget rather than running high
+  permanently.
 
 ## Configuration
 
-### Environment Variables
+Read through `robosystems/config/env.py`; never call `os.getenv` directly.
 
 ```bash
-# Node Configuration
-LBUG_NODE_TYPE=writer                    # writer|shared_master
-CLUSTER_TIER=ladybug-standard            # ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
-LBUG_DATABASE_PATH=/data/lbug-dbs        # Storage location
-
-# Performance Settings
-LBUG_DATABASES_PER_INSTANCE=10           # Databases per instance
-LBUG_MAX_MEMORY_MB=14336                 # Total memory allocation
-LBUG_MAX_MEMORY_PER_DB_MB=2048           # Per-database memory
-LBUG_CHUNK_SIZE=1000                     # Streaming chunk size
-GRAPH_QUERY_TIMEOUT=30                   # Query timeout seconds
-LBUG_CONNECTION_POOL_SIZE=10             # Connections per database
-
-# Authentication
-GRAPH_API_KEY=                           # API key
-
-# AWS Configuration
-AWS_DEFAULT_REGION=us-east-1
-DATABASE_URL=postgresql://...           # PostgreSQL for metadata
-USER_DATA_BUCKET=robosystems-user-dev  # S3 for user data ingestion
-SHARED_RAW_BUCKET=robosystems-shared-raw-dev  # S3 for shared raw data
-SHARED_PROCESSED_BUCKET=robosystems-shared-processed-dev  # S3 for shared processed data
-
-# Feature Flags
-GRAPH_CIRCUIT_BREAKERS_ENABLED=true    # Enable circuit breakers
-GRAPH_REDIS_CACHE_ENABLED=true         # Enable Valkey caching of instance locations
-GRAPH_RETRY_LOGIC_ENABLED=true         # Enable automatic retries
-GRAPH_HEALTH_CHECKS_ENABLED=true       # Enable health checking
+LBUG_NODE_TYPE=writer                 # writer | shared_master | shared_replica
+LBUG_ROLE=master                      # replica disables staging + forces read-only opens
+CLUSTER_TIER=ladybug-standard         # selects the tier block in .github/configs/graph.yml
+LBUG_DATABASE_PATH=/data/lbug-dbs     # LadybugDB files
+DUCKDB_STAGING_PATH=./data/staging    # DuckDB staging files
+LBUG_ACCESS_PATTERN=api_auto          # api_auto | api_writer | direct_file
+GRAPH_API_KEY=                        # cluster API key
+GRAPH_QUERY_TIMEOUT=30
 ```
 
-### Schema Types
+Memory, thread counts, chunk sizes, connection-pool size and subgraph caps are
+resolved per tier from [`.github/configs/graph.yml`](/.github/configs/graph.yml)
+using `CLUSTER_TIER`; the `LBUG_MAX_MEMORY_MB` / `LBUG_CHUNK_SIZE` /
+`LBUG_CONNECTION_POOL_SIZE` env vars are only the local-dev fallback when no
+tier block matches.
 
-- **Entity**: Multi-tenant databases with accounting extensions
-- **Shared**: Public repository databases (SEC)
-- **Custom**: Custom schemas with custom DDL
+Client-side behavior (retries, circuit breaker, timeouts) is configured
+separately under the `GRAPH_CLIENT_` prefix — see [`client/`](client/README.md).
 
-## Security
+### Tiers
 
-### Authentication
+Every tier is dedicated: one customer database per instance, with subgraphs
+sharing that instance. `.github/configs/graph.yml` is authoritative.
 
-All API requests require authentication via API key header:
+| Tier | Instance | RAM | Parent buffer pool | Subgraphs |
+| --- | --- | --- | --- | --- |
+| `ladybug-standard` | m7g.medium | 4 GB | 1 GB | 3 |
+| `ladybug-large` | m7g.large | 8 GB | 2 GB | 10 |
+| `ladybug-xlarge` | r7g.xlarge | 32 GB | 8 GB | 25 |
+| `ladybug-shared` | r7g.2xlarge | 64 GB | 10 GB | 10 (platform-managed) |
 
-```http
-X-Graph-API-Key: graph_api_64_character_random_string
-```
+Shared replicas are a separate read-only fleet: they pull `.lbug` and `.duckdb`
+files from S3 on boot, serve queries locally, and return 503 from `/health`
+until warm. They refresh through a rolling ASG instance refresh after new
+database files are published.
 
-### API Key Management
+## Deployment
 
-- **Generation**: Cryptographically secure 64-character keys
-- **Storage**: AWS Secrets Manager with encryption at rest
-- **Rotation**: Automatic 90-day rotation via Lambda
-- **Access**: IAM role-based retrieval
+CloudFormation, deployed through GitHub Actions — never by hand.
 
-### Network Security
+| Template | Workflow | Creates |
+| --- | --- | --- |
+| `cloudformation/graph-infra.yaml` | `deploy-graph-infra.yml` | DynamoDB registries, Secrets Manager entries, SNS topics |
+| `cloudformation/graph-volumes.yaml` | `deploy-graph-volumes.yml` | EBS lifecycle and auto-expansion Lambdas |
+| `cloudformation/graph-ladybug.yaml` | `deploy-graph-ladybug.yml` | Writer ASGs, one stack per tier (matrix) |
+| `cloudformation/graph-ladybug-replicas.yaml` | `deploy-graph-replicas.yml` | Shared read-replica fleet + ALB |
 
-- **VPC Isolation**: All instances in private subnets
-- **Security Groups**: Port 8001 restricted to VPC CIDR
-- **No Public Access**: API only accessible within VPC
-- **TLS Termination**: At ALB for replica traffic
+`deploy-graph.yml` orchestrates all four. `graph-asg-refresh.yml` cycles
+instances when only the S3 userdata changed — CloudFormation does not track
+external S3 content, so a template-free userdata change needs an explicit
+refresh.
 
-### Database Isolation
+Three DynamoDB registries back instance discovery:
 
-- **File System**: Each database in separate directory
-- **Memory**: Isolated memory allocation per database
-- **Query Isolation**: No cross-database queries allowed
-- **Path Validation**: Protection against directory traversal
+| Table | Keyed by | Answers |
+| --- | --- | --- |
+| `robosystems-graph-{env}-instance-registry` | `instance_id` | Which instances exist, their tier, IP, health, capacity |
+| `robosystems-graph-{env}-graph-registry` | `graph_id` | Which instance hosts this graph |
+| `robosystems-graph-{env}-volume-registry` | `volume_id` | Which EBS volume holds which database |
 
-## Monitoring & Observability
+On boot, an instance registers itself, invokes the volume-manager Lambda to
+attach its EBS volume, starts the container, and signals CloudFormation.
 
-### CloudWatch Metrics
-
-**Namespace**: `RoboSystemsLadybugDB/{Environment}`
-
-**Key Metrics**:
-
-- `DatabaseUtilizationPercent`: Database capacity usage
-- `InstanceCapacityUsed`: Databases per instance
-- `QueryResponseTime`: P50, P95, P99 latencies
-- `IngestionQueueDepth`: Pending ingestion tasks
-- `ConnectionPoolUtilization`: Active connections
-- `VolumeUsagePercent`: EBS volume usage
-
-### Health Checks
-
-**Endpoint Monitoring**:
+## Local development
 
 ```bash
-# System health
-curl http://ladybug-writer:8001/health
-
-# Node information
-curl http://ladybug-writer:8001/info
-
-# Detailed metrics
-curl http://ladybug-writer:8001/metrics
+just start                 # full stack on the robosystems profile
+just graph-health          # check the service is up
+just graph-info GRAPH_ID   # database info
+just graph-query GRAPH_ID "MATCH (n) RETURN count(n)"
+just lbug-query GRAPH_ID "MATCH (n) RETURN count(n)"   # bypass the API
 ```
 
-### Logging
-
-**CloudWatch Log Groups**:
-
-- `/robosystems/{env}/ladybug-writer-standard`
-- `/robosystems/{env}/ladybug-writer-large`
-- `/robosystems/{env}/ladybug-writer-xlarge`
-- `/robosystems/{env}/ladybug-shared-master`
-
-**Log Format**:
-
-```json
-{
-  "timestamp": "2024-01-01T00:00:00Z",
-  "level": "INFO",
-  "node_type": "writer",
-  "tier": "ladybug-standard",
-  "instance_id": "i-1234567890",
-  "graph_id": "kg1a2b3c4d5",
-  "operation": "query",
-  "duration_ms": 45,
-  "status": "success"
-}
-```
-
-## Development
-
-### Local Development
+To run only the service against a local directory:
 
 ```bash
-# Start full stack with Docker
-just start robosystems
-
-# Run API server locally
 uv run python -m robosystems.graph_api \
   --base-path ./data/lbug-dbs \
   --node-type writer \
   --port 8001
-
-# Use direct file access (bypass API)
-export LBUG_ACCESS_PATTERN=direct_file
 ```
 
-### Docker Development
+`--help` lists the rest: `--max-databases`, `--repository-type`, `--read-only`,
+`--log-level`, `--workers`. There is no client CLI subcommand — use `just
+graph-*` or `curl`.
 
 ```bash
-docker run -d \
-  -p 8001:8001 \
-  -v lbug_data:/data/lbug-dbs \
-  -e LBUG_NODE_TYPE=writer \
-  -e CLUSTER_TIER=ladybug-standard \
-  robosystems-api:latest \
-  python -m robosystems.graph_api
-```
-
-### CLI Tools
-
-```bash
-# Server mode
-python -m robosystems.graph_api --help
-
-# Client CLI
-python -m robosystems.graph_api cli health
-python -m robosystems.graph_api cli query kg1a2b3c "MATCH (n) RETURN count(n)"
-python -m robosystems.graph_api cli ingest kg1a2b3c /path/to/data.parquet
-```
-
-## Testing
-
-### Unit Tests
-
-```bash
-# Run all tests
 uv run pytest tests/graph_api/ -v
-
-# Run specific test categories
-uv run pytest tests/graph_api/test_client.py -v
-uv run pytest tests/graph_api/test_ingestion.py -v
-```
-
-### Integration Tests
-
-```bash
-# Requires running LadybugDB instance
-uv run pytest tests/graph_api/ -m integration
-
-# Test with real S3
-AWS_ENDPOINT_URL=http://localhost:4566 \
-  uv run pytest tests/graph_api/test_s3_ingestion.py
-```
-
-### Load Testing
-
-```bash
-# Using locust for load testing
-locust -f tests/graph_api/loadtest.py \
-  --host http://localhost:8001 \
-  --users 100 \
-  --spawn-rate 10
-```
-
-### API Testing
-
-```bash
-# Create database
-curl -X POST http://localhost:8001/databases \
-  -H "X-Graph-API-Key: test-key" \
-  -H "Content-Type: application/json" \
-  -d '{"graph_id": "test_db", "schema_type": "entity"}'
-
-# Execute query
-curl -X POST http://localhost:8001/databases/test_db/query \
-  -H "X-Graph-API-Key: test-key" \
-  -H "Content-Type: application/json" \
-  -d '{"cypher": "RETURN 1 as num"}'
+uv run pytest tests/graph_api/ -m integration   # needs a live instance
 ```
 
 ## Troubleshooting
 
-### Common Issues
+**503 from admission control.** The instance is near its memory or CPU limit.
+Check `GET /metrics` and `GET /databases/{graph_id}/storage`. Slow the caller;
+raising thresholds trades a rejected request for an OOM kill that takes every
+database on the instance with it.
 
-#### 1. Connection Pool Exhaustion
+**503 with `"status": "rebuilding"`.** A blue-green materialization is in flight
+for that graph. Queries resume when the swap completes.
 
-**Symptom**: `503 Service Unavailable` with `Connection pool exhausted`
-**Solution**:
+**501 on a `/tables` route.** You reached a replica. Staging is writer-only.
 
-- Reduce concurrent requests
-- Increase `LBUG_CONNECTION_POOL_SIZE`
-- Scale out instances
+**Query returns an empty result with no error.** Usually a LadybugDB aggregation
+quirk rather than an empty database — check that a `WHERE` isn't filtering on a
+column produced by an aggregating `WITH`.
 
-#### 2. Memory Pressure
-
-**Symptom**: Slow queries, OOM errors
-**Solution**:
-
-- Monitor `DatabaseUtilizationPercent` metric
-- Upgrade tier or reduce databases per instance
-- Enable query result streaming
-
-#### 3. Ingestion Queue Full
-
-**Symptom**: `503` with `Retry-After` header
-**Solution**:
-
-- Respect backpressure signals
-- Reduce ingestion rate
-- Tune ingestion batch sizes
-
-#### 4. Volume Space Issues
-
-**Symptom**: Write failures, database corruption
-**Solution**:
-
-- Volume Monitor auto-expands at 80%
-- Manual expansion via AWS Console
-- Check snapshot retention policy
-
-### Debugging Commands
+**No healthy instance found.** Check the graph registry, then the instance
+registry:
 
 ```bash
-# Check instance status (replace 'ladybug-standard' with your tier)
+aws dynamodb get-item \
+  --table-name robosystems-graph-prod-graph-registry \
+  --key '{"graph_id":{"S":"kg1a2b3c4d5"}}'
+
 aws dynamodb scan \
   --table-name robosystems-graph-prod-instance-registry \
   --filter-expression "cluster_tier = :tier" \
   --expression-attribute-values '{":tier":{"S":"ladybug-standard"}}'
-
-# View recent logs (replace with actual log group name for your tier)
-aws logs tail /robosystems/prod/ladybug-writer-standard \
-  --follow --filter-pattern ERROR
-
-# Check volume usage
-aws ec2 describe-volumes \
-  --filters "Name=tag:Component,Values=LadybugDBWriter" \
-  --query 'Volumes[*].[VolumeId,Size,State]'
-
-# Force instance refresh (replace 'standard' with your tier suffix)
-aws autoscaling start-instance-refresh \
-  --auto-scaling-group-name ladybug-writers-standard-prod
 ```
 
-### Performance Tuning
-
-#### Query Optimization
-
-- Use `LIMIT` clauses to reduce result sets
-- Enable streaming for large results
-- Create appropriate indexes
-- Use parameterized queries
-
-#### Ingestion Optimization
-
-- Duplicates are deduplicated in DuckDB staging; materialization uses a plain COPY (ignore_errors is intentionally unused — LadybugDB 0.18 silently drops valid rows with it)
-- Batch multiple files in single request
-- Higher priority (1-10) for urgent data
-- Monitor queue depth metrics
-
-#### Memory Optimization
-
-- Multi-tenant configurations (standard tier) share memory across databases (e.g., 2GB per database with 10 databases per instance)
-- Dedicated configurations (large/xlarge tiers) provide isolated memory per database (14GB for large, 28GB for xlarge)
-- Shared repositories use memory pooling
-- Monitor memory usage metrics in CloudWatch for your configuration
-
-## Known Limitations
-
-1. **Sequential Ingestion**: Files processed one at a time per database (LadybugDB constraint)
-2. **Connection Limit**: Default 3 connections per database, configurable via `LBUG_CONNECTION_POOL_SIZE` (10 in production)
-3. **Single Writer**: Only one write operation per database at a time
-4. **No Cross-Database Queries**: Each query scoped to single database
-5. **Volume Attachment**: One EBS volume per database (no striping)
-
-## Contributing
-
-1. Follow existing patterns in codebase
-2. Add comprehensive tests for new endpoints
-3. Update OpenAPI documentation
-4. Test multi-database isolation
-5. Monitor resource usage during development
-6. Use `just lint` and `just format` before commits
-
-## Support
-
-- **Internal Documentation**: See `/docs/ladybug-architecture.md`
-- **Runbooks**: Available in `/runbooks/ladybug-operations/`
-- **Monitoring Dashboard**: Grafana at `https://grafana.robosystems.ai`
-- **Alerts**: Via PagerDuty integration with SNS topics
+Instances log to the unified CloudWatch group `/robosystems/{env}/graph-api`,
+and publish EC2 alarms under the `RoboSystems/Graph/{env}` namespace.

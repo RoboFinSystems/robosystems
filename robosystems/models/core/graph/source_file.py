@@ -1,12 +1,9 @@
-"""
-Source File Model
+"""Raw archival files in the data lake, and how far each has been processed.
 
-Tracks raw/source files in the data lake that feed into graph processing pipelines.
-These are permanent archival files (e.g., SEC XBRL filings, stock price data) that
-can be processed multiple ways over time.
-
-Unlike GraphFile which tracks processed files through staging/ingestion,
-SourceFile tracks the original source data and its processing status.
+``SourceFile`` tracks the original artifact (an SEC XBRL filing, a stock price
+extract) and can be reprocessed any number of ways over its life. ``GraphFile``
+is the other half: it tracks what a processing run produced on its way through
+staging and ingestion.
 """
 
 from collections.abc import Sequence
@@ -30,12 +27,7 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 
 
 class SourceFile(Base):
-  """Tracks source files in the raw data lake.
-
-  Source files are permanent archival data (SEC filings, stock prices, etc.)
-  that get processed into graph data. One source file may be processed
-  multiple ways over time (e.g., XBRL extraction now, HTML semantic search later).
-  """
+  """One archival file in the raw data lake, keyed by its S3 ``storage_key``."""
 
   __tablename__ = "source_files"
   __table_args__ = (
@@ -147,11 +139,7 @@ class SourceFile(Base):
     partition_key: str | None = None,
     commit: bool = True,
   ) -> tuple["SourceFile", bool]:
-    """Get existing source file or create new one.
-
-    Returns:
-        Tuple of (source_file, created) where created is True if new.
-    """
+    """Look up by ``storage_key`` or insert; returns ``(row, created)``."""
     existing = cls.get_by_storage_key(storage_key, session)
     if existing:
       return existing, False
@@ -186,14 +174,8 @@ class SourceFile(Base):
     limit: int | None = None,
     max_attempts: int | None = None,
   ) -> Sequence["SourceFile"]:
-    """Get pending source files for processing.
-
-    Args:
-        graph_id: Graph to query
-        session: Database session
-        limit: Maximum number of files to return
-        max_attempts: Skip files with >= this many attempts (for retry limiting)
-    """
+    """Pending files, oldest first. ``max_attempts`` caps retry churn by
+    skipping files that have already been tried that many times."""
     query = (
       session.query(cls)
       .filter(cls.graph_id == graph_id, cls.status == "pending")
@@ -213,14 +195,7 @@ class SourceFile(Base):
     max_attempts: int | None = None,
     limit: int | None = None,
   ) -> Sequence["SourceFile"]:
-    """Get failed source files for retry.
-
-    Args:
-        graph_id: Graph to query
-        session: Database session
-        max_attempts: Only return files with fewer than this many attempts
-        limit: Maximum number of files to return
-    """
+    """Errored files eligible for retry, least-recently-attempted first."""
     query = session.query(cls).filter(cls.graph_id == graph_id, cls.status == "error")
     if max_attempts:
       query = query.filter(cls.attempts < max_attempts)

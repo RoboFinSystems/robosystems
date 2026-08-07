@@ -32,9 +32,8 @@ Tools stay hand-written rather than registrar-generated because:
 - Several dispatch async Dagster jobs and return an operation_id that
   the agent can poll via `/v1/operations/{operation_id}/stream`
 
-Descriptions emphasize the workspace / agent-friendly framing the
-user asked for — what a subgraph *is*, when to use a backup, etc. —
-not just the bare operation name.
+Tool descriptions frame each operation for an agent — what a subgraph *is*,
+when a backup is the right move — rather than restating the operation name.
 """
 
 from __future__ import annotations
@@ -717,7 +716,7 @@ class GetGraphSyncStatusTool:
         return {"error": "graph_not_found", "message": f"Graph {graph_id} not found."}
 
       # Source → OLTP edge: per-connection health + the last sync
-      # attempt's outcome (F8 — previously only a worker log line).
+      # attempt's outcome.
       connections = [
         {
           "connection_id": conn.id,

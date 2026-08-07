@@ -5,10 +5,10 @@ Sibling to `views.py` (graph-backed). Both surfaces live under
 reads whose source of truth is the extensions OLTP database rather
 than the materialized graph.
 
-The first (and currently only) op here is ``live-financial-statement``
-— the entity-graph companion to ``financial-statement-analysis``.
-Gated by ``ROBOLEDGER_ENABLED`` (unlike `views.py` which stays
-mounted for SEC-only deployments).
+``live-financial-statement`` is the entity-graph companion to
+``financial-statement-analysis``. This router is gated by
+``ROBOLEDGER_ENABLED``, unlike `views.py`, which stays mounted for
+SEC-only deployments.
 """
 
 from __future__ import annotations

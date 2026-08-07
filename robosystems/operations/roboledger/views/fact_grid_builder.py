@@ -84,15 +84,10 @@ class FactGridBuilder:
     view_config: ViewConfig,
     source: str,
   ) -> FactGrid:
-    """Build FactGrid from fact records.
+    """Scope `query_fact_grid` records per `view_config` into a FactGrid.
 
-    Args:
-        fact_data: Fact records from `query_fact_grid`.
-        view_config: Caller-specified aspect scoping.
-        source: Source identifier for metadata.
-
-    Returns:
-        FactGrid carrying the scoped facts and the aspects they span.
+    The grid carries the scoped facts plus the aspects they span; `source`
+    is recorded on the metadata.
     """
     start_time = time.time()
 

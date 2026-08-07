@@ -1,11 +1,13 @@
-"""
-Credit management service for the graph-based credit system.
+"""Allocation, consumption, and reporting of graph credits.
 
-This service handles all credit-related operations including:
-- Credit allocation and consumption
-- Credit balance management
-- Subscription tier enforcement
-- Credit transaction tracking
+Two credit pools live behind one interface. A user graph draws on
+``GraphCredits``, keyed by graph; a shared repository draws on
+``UserRepositoryCredits``, keyed by (user, repository) — which is why every
+shared-repository path needs a ``user_id`` and a user-graph path does not.
+
+Subgraphs never have their own pool: ``kg0123_dev`` and ``sec_historical``
+resolve to ``kg0123`` and ``sec`` before any lookup, so a subgraph spends its
+parent's credits and shares its cache entry.
 """
 
 import logging
@@ -47,19 +49,15 @@ class CreditService:
   """Service for managing graph credits and billing."""
 
   def __init__(self, session: Session):
-    """Initialize credit service with database session."""
     self.session = session
 
-    # Warm up operation cost cache on initialization
     try:
       from ...middleware.billing.cache import credit_cache
 
       credit_cache.warmup_operation_costs(CREDIT_COSTS)
     except Exception as e:
+      # Non-fatal: the cache populates lazily on first access instead.
       logger.warning(f"Failed to warm up credit cache: {e}")
-      # Fallback: Ensure cache can be populated on-demand if warmup fails
-      # The cache will be populated lazily on first access, which is acceptable
-      # as long as the application continues to function
 
   def create_graph_credits(
     self,
@@ -69,33 +67,22 @@ class CreditService:
     subscription_tier: str,
     graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> GraphCredits:
-    """
-    Create credit pool for a new graph.
+    """Create the graph's credit pool from its subscription plan.
 
-    Args:
-        graph_id: Unique graph identifier
-        user_id: Graph owner user ID
-        billing_admin_id: User responsible for billing
-        subscription_tier: User's subscription tier (ladybug-standard/ladybug-large/ladybug-xlarge)
-        graph_tier: Database tier (ladybug-standard/ladybug-large/ladybug-xlarge)
-
-    Returns:
-        GraphCredits instance
+    Raises ValueError when the subscription tier is unknown or does not permit
+    ``graph_tier``.
     """
-    # Get the billing plan for the subscription tier
     plan_config = BillingConfig.get_subscription_plan(subscription_tier)
     if not plan_config:
       raise ValueError(
         f"No billing plan found for subscription tier: {subscription_tier}"
       )
 
-    # Validate that subscription tier allows this graph tier
     if not self._can_create_graph_tier(subscription_tier, graph_tier):
       raise ValueError(
         f"Subscription tier '{subscription_tier}' does not allow '{graph_tier.value}' graph tier"
       )
 
-    # Create the credit record
     credits = GraphCredits.create_for_graph(
       graph_id=graph_id,
       user_id=user_id,
@@ -110,25 +97,19 @@ class CreditService:
     return credits
 
   def _get_parent_graph_id(self, graph_id: str) -> str:
-    """
-    Get the parent graph ID from any graph ID.
+    """Resolve a graph id to the id its credit pool is keyed by.
 
-    For subgraphs (e.g., 'kg0123_dev'), returns the parent ID ('kg0123').
-    For parent graphs, returns the graph ID unchanged.
-    For shared repositories, returns the graph ID unchanged.
-
-    This ensures subgraphs share the same credit pool as their parent.
+    ``kg0123_dev`` -> ``kg0123``; parents and repositories pass through.
     """
     parent_id, _ = parse_graph_id(graph_id)
     return parent_id
 
   def _is_shared_repository(self, graph_id: str) -> bool:
-    """Check if the graph_id is a shared repository or one of its subgraphs.
+    """True for a shared repository *or* one of its subgraphs.
 
-    Subgraphs count: `sec_historical` bills against the user's `sec`
-    repository pool, exactly as `sec` does. The exact-only check sent shared
-    subgraphs down the user-graph path, where the GraphCredits lookup for a
-    repository finds nothing and AI operations ran unbilled.
+    Subgraphs must match: `sec_historical` bills against the user's `sec`
+    pool. An exact-only check sends them down the user-graph path, where the
+    `GraphCredits` lookup finds nothing and the operation runs unbilled.
     """
     return _is_shared_repository_or_subgraph(graph_id)
 
@@ -144,21 +125,17 @@ class CreditService:
     request_id: str | None = None,
     operation_id: str | None = None,
   ) -> dict[str, Any]:
-    """
-    Consume credits for a graph operation.
+    """Debit ``base_cost`` for an operation, returning the outcome as a dict.
 
-    Args:
-        graph_id: Graph identifier
-        operation_type: Type of operation (e.g., 'api_call', 'query', 'mcp_call')
-        base_cost: Base credit cost (before multiplier)
-        metadata: Optional metadata for the transaction
-        cached: Whether this is a cached operation (no credit consumption)
-        user_id: User ID (required for shared repository operations)
+    Never raises on an insufficient balance — check ``success``. A cached
+    operation is free. Shared repositories route to
+    :meth:`consume_shared_repository_credits` and therefore require
+    ``user_id``.
 
-    Returns:
-        Dict with consumption results
+    The debit itself is atomic; everything after it (cache refresh, OTel
+    metric, usage-ledger row) is best-effort and must never fail a debit that
+    already committed.
     """
-    # Cached operations don't consume credits
     if cached:
       return {
         "success": True,
@@ -167,7 +144,6 @@ class CreditService:
         "message": "Cached operation - no credits consumed",
       }
 
-    # Check if this is a shared repository
     if self._is_shared_repository(graph_id):
       if not user_id:
         return {
@@ -176,30 +152,27 @@ class CreditService:
           "credits_consumed": 0,
         }
 
-      # Route to shared repository credit system. The pool is keyed by the
-      # repository id, so a shared subgraph resolves to its parent first.
+      # The pool is keyed by repository id, so resolve a subgraph first.
       return self.consume_shared_repository_credits(
         user_id=user_id,
         repository_name=self._get_parent_graph_id(graph_id),
         operation_type=operation_type,
         metadata=metadata,
         cached=cached,
-        base_cost=base_cost,  # Pass the base_cost through for AI operations
+        base_cost=base_cost,
       )
 
-    # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # Try to get cached balance first
     from ...middleware.billing.cache import credit_cache
 
     cached_data = credit_cache.get_cached_graph_credit_balance(parent_graph_id)
 
     if cached_data:
-      # Use cached balance for quick check
+      # Cheap reject before touching the database; the authoritative check is
+      # inside the atomic consume below.
       balance, graph_tier = cached_data
 
-      # Quick insufficient check from cache
       if balance < base_cost:
         return {
           "success": False,
@@ -209,8 +182,6 @@ class CreditService:
           "available_credits": float(balance),
         }
 
-    # Get credit record from database using parent graph ID
-    # Subgraphs share the same credit pool as their parent
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
@@ -220,7 +191,6 @@ class CreditService:
         "credits_consumed": 0,
       }
 
-    # Consume credits atomically
     consumption_result = credits.consume_credits_atomic(
       amount=base_cost,
       operation_type=operation_type,
@@ -232,15 +202,11 @@ class CreditService:
     )
 
     if consumption_result["success"]:
-      # Update cache with new balance from atomic operation
-      # Use parent_graph_id for cache to ensure subgraphs share cache with parent
       try:
         from ...middleware.billing.cache import credit_cache
 
-        # Invalidate old cache and set new one with updated balance
         credit_cache.invalidate_graph_credit_balance(parent_graph_id)
 
-        # Cache the new balance from atomic operation
         graph_tier_value = (
           credits.graph_tier.value
           if hasattr(credits.graph_tier, "value")
@@ -254,16 +220,14 @@ class CreditService:
       except Exception as e:
         logger.warning(f"Failed to update credit cache after consumption: {e}")
 
-      # Resolved once, outside the best-effort blocks below: both consume it,
-      # and computing it inside the first one left it unbound for the second
-      # whenever that block raised early.
+      # Resolved out here because both best-effort blocks below read it; a
+      # binding inside the first would be missing whenever that block raised.
       graph_tier_val = (
         credits.graph_tier.value
         if hasattr(credits.graph_tier, "value")
         else str(credits.graph_tier)
       )
 
-      # Record OTel credit consumption metric
       try:
         from ...middleware.otel.metrics import get_endpoint_metrics
 
@@ -275,15 +239,11 @@ class CreditService:
       except Exception:
         pass  # Metrics are best-effort, never break credit consumption
 
-      # Usage-ledger row for the reporting surfaces. This is a different table
-      # from the credit ledger the atomic consume just wrote
-      # (`graph_credit_transactions`, authoritative for billing) — `graph_usage`
-      # is what `/orgs/{org_id}/usage` and the per-graph usage views read.
-      # `record_storage_usage` was the only recorder ever wired up, so
-      # `graph_usage` accumulated storage snapshots and nothing else: an org
-      # that had really run AI operations and spent credits still saw zero of
-      # both on its usage dashboard. Best-effort like the metric above — a
-      # reporting row must never fail a consumption that already committed.
+      # Usage-ledger row, a *different* table from the credit ledger the
+      # atomic consume just wrote: `graph_credit_transactions` is
+      # authoritative for billing, while `graph_usage` is what
+      # `/orgs/{org_id}/usage` and the per-graph usage views read. Both have
+      # to be written or the dashboards under-report real spend.
       try:
         if user_id:
           GraphUsage.record_credit_consumption(
@@ -316,8 +276,7 @@ class CreditService:
         "transaction_id": consumption_result["transaction_id"],
       }
     else:
-      # Invalidate cache on failure to ensure consistency
-      # Use parent_graph_id to ensure subgraphs' shared cache is invalidated
+      # Drop the cached balance so the next check re-reads the database.
       try:
         from ...middleware.billing.cache import credit_cache
 
@@ -339,26 +298,16 @@ class CreditService:
   def get_credit_summary(
     self, graph_id: str, user_id: str | None = None
   ) -> dict[str, Any]:
-    """Get comprehensive credit summary for a graph or shared repository.
+    """Balance and usage for a graph, or for a user's repository pool.
 
-    For user graphs: Returns credit summary from GraphCredits table (graph-specific).
-    For shared repositories: Returns credit summary from UserRepositoryCredits table (user-specific).
-
-    Args:
-        graph_id: Graph or repository identifier
-        user_id: User ID (required for shared repositories)
-
-    Returns:
-        Dict with credit summary information
+    Errors are returned as ``{"error": ...}`` rather than raised.
+    ``user_id`` is required for shared repositories.
     """
-    # Check if this is a shared repository
     if self._is_shared_repository(graph_id):
-      # For shared repositories, we need user_id to fetch user-specific credits
       if not user_id:
         return {"error": "User ID required for shared repository credit summary"}
 
-      # Get user's repository credits. The pool is keyed by the repository id,
-      # so a shared subgraph resolves to its parent first.
+      # The pool is keyed by repository id, so resolve a subgraph first.
       user_repo_credits = UserRepositoryCredits.get_user_repository_credits(
         user_id=user_id,
         repository_type=self._get_parent_graph_id(graph_id),
@@ -370,7 +319,6 @@ class CreditService:
           "error": f"No repository credit pool found for user {user_id} and repository {graph_id}"
         }
 
-      # Get the repository credit summary
       repo_summary = user_repo_credits.get_summary()
 
       # Transform to match CreditSummaryResponse format
@@ -392,24 +340,20 @@ class CreditService:
         "last_allocation_date": repo_summary["last_allocation_date"],
       }
 
-    # For user graphs (and subgraphs), use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # Try cache first
     from ...middleware.billing.cache import credit_cache
 
     cached_summary = credit_cache.get_cached_credit_summary(parent_graph_id)
     if cached_summary:
       return cached_summary
 
-    # Fallback to database using parent graph ID (subgraphs share parent's pool)
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {"error": f"No credit pool found for graph {parent_graph_id}"}
 
     summary = credits.get_usage_summary(self.session)
 
-    # Cache the summary using parent_graph_id (subgraphs share parent's cache)
     try:
       from ...middleware.billing.cache import credit_cache
 
@@ -420,8 +364,7 @@ class CreditService:
     return summary
 
   def allocate_monthly_credits(self, graph_id: str) -> dict[str, Any]:
-    """Allocate monthly credits if due."""
-    # For subgraphs, use parent graph ID to access shared credit pool
+    """Grant the monthly allocation if it is due; a no-op otherwise."""
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
@@ -433,7 +376,6 @@ class CreditService:
     if allocated:
       self.session.commit()
 
-      # Invalidate cache after allocation using parent_graph_id
       try:
         from ...middleware.billing.cache import credit_cache
 
@@ -457,19 +399,16 @@ class CreditService:
     description: str,
     metadata: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
-    """Add bonus credits to a graph."""
-    # For subgraphs, use parent graph ID to access shared credit pool
+    """Credit the pool outside the monthly allocation, ledgered as BONUS."""
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {"error": "No credit pool found for graph"}
 
-    # Add credits
     credits.current_balance += amount
     credits.updated_at = datetime.now(UTC)
 
-    # Record transaction with idempotency using parent_graph_id
     import uuid
 
     idempotency_key = f"bonus_{parent_graph_id}_{uuid.uuid4()}"
@@ -488,7 +427,6 @@ class CreditService:
 
     self.session.commit()
 
-    # Invalidate cache after bonus credits using parent_graph_id
     try:
       from ...middleware.billing.cache import credit_cache
 
@@ -546,8 +484,7 @@ class CreditService:
     transaction_type: CreditTransactionType | None = None,
     limit: int = 100,
   ) -> list[dict[str, Any]]:
-    """Get credit transactions for a graph."""
-    # For subgraphs, use parent graph ID to access shared credit pool
+    """Ledger entries for the graph's pool, newest first."""
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
@@ -580,8 +517,11 @@ class CreditService:
     user_id: str | None = None,
     operation_type: str = "query",
   ) -> dict[str, Any]:
-    """Check if graph has sufficient credits for an operation."""
-    # Check if this is a shared repository
+    """Preflight a spend without debiting anything.
+
+    Advisory only: the balance can move between this check and the atomic
+    consume, which is the real gate.
+    """
     if self._is_shared_repository(graph_id):
       if not user_id:
         return {
@@ -589,16 +529,14 @@ class CreditService:
           "error": "User ID required for shared repository access",
         }
 
-      # Route to shared repository credit system. The pool is keyed by the
-      # repository id, so a shared subgraph resolves to its parent first.
+      # The pool is keyed by repository id, so resolve a subgraph first.
       shared_check = self.check_shared_repository_access(
         user_id=user_id,
         repository_name=self._get_parent_graph_id(graph_id),
         operation_type=operation_type,
-        required_credits=required_credits,  # Pass the required credits for AI operations
+        required_credits=required_credits,
       )
 
-      # Convert shared repository response to standard format
       if shared_check.get("has_access", False):
         return {
           "has_sufficient_credits": shared_check.get("has_sufficient_credits", False),
@@ -617,11 +555,8 @@ class CreditService:
           "requires_addon": shared_check.get("requires_addon", False),
         }
 
-    # Original graph credit logic for regular graphs
-    # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # Try cache first for quick balance check
     from ...middleware.billing.cache import credit_cache
 
     cached_data = credit_cache.get_cached_graph_credit_balance(parent_graph_id)
@@ -639,7 +574,6 @@ class CreditService:
         "repository_type": "graph",
       }
 
-    # Fallback to database using parent graph ID (subgraphs share parent's pool)
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
@@ -647,21 +581,17 @@ class CreditService:
         "error": "No credit pool found for graph",
       }
 
-    # `current_balance` is the column `consume_credits_atomic` decrements and
-    # gates its UPDATE on, so it is the only balance that determines whether a
-    # spend will actually succeed. This used to derive
-    # `monthly_allocation - consumed_this_month` instead and cache it under the
-    # same key the consume path writes — two different definitions of "balance"
-    # sharing one key, so a caller got whichever had written last.
+    # Must be `current_balance`: that is the column `consume_credits_atomic`
+    # decrements and gates its UPDATE on, so it is the only figure that decides
+    # whether a spend succeeds. Any derived alternative would also collide with
+    # the consume path in the shared cache key below.
     actual_balance = float(credits.current_balance)
 
     has_sufficient = Decimal(str(actual_balance)) >= required_credits
 
-    # Cache the balance for future checks using parent_graph_id
     try:
       from ...middleware.billing.cache import credit_cache
 
-      # graph_tier is always a string from the property
       graph_tier_value = credits.graph_tier
 
       credit_cache.cache_graph_credit_balance(
@@ -717,13 +647,11 @@ class CreditService:
   def upgrade_graph_tier(
     self, graph_id: str, new_tier: GraphTier, user_subscription_tier: str
   ) -> dict[str, Any]:
-    """
-    Upgrade a graph to a new tier.
+    """Always refuses. A graph's tier is fixed at creation.
 
-    Note: This is not allowed in the current system design as it would
-    require complex migration logic. This method is for future use.
+    Kept as the explicit answer to "can I change a tier in place?"; use the
+    change-tier operation, which provisions a new graph.
     """
-    # For now, we don't allow tier upgrades
     return {
       "success": False,
       "error": "Graph tier upgrades are not supported",
@@ -731,7 +659,7 @@ class CreditService:
     }
 
   def _get_consumed_this_month(self, graph_id: str) -> Decimal:
-    """Get total credits consumed this month for a graph."""
+    """Sum of this calendar month's consumption, as a positive number."""
     from datetime import datetime
 
     from sqlalchemy import func
@@ -739,15 +667,12 @@ class CreditService:
     now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # Get the graph credits record using parent_graph_id
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return Decimal("0")
 
-    # Sum all consumption transactions for this month
     result = (
       self.session.query(func.sum(GraphCreditTransaction.amount))
       .filter(
@@ -759,7 +684,7 @@ class CreditService:
       .scalar()
     )
 
-    # Return absolute value since consumption transactions are negative
+    # Consumption rows are stored negative.
     return abs(result) if result else Decimal("0")
 
   def _can_create_graph_tier(
@@ -780,12 +705,13 @@ class CreditService:
     return graph_tier in allowed_tiers
 
   def bulk_allocate_monthly_credits(self) -> dict[str, Any]:
-    """Allocate monthly credits for all graphs that are due."""
-    # Get all credit records that need allocation
+    """Run the monthly allocation across every graph that is due.
 
-    # Find graphs that haven't been allocated in the past 30 days
+    Skips inactive graphs (suspended, canceled) so a dormant graph does not
+    keep accruing an allocation.
+    """
     now = datetime.now(UTC)
-    cutoff_date = now.replace(day=1)  # First of current month
+    cutoff_date = now.replace(day=1)  # First of the current month
 
     due_allocations = (
       self.session.query(GraphCredits)
@@ -800,7 +726,6 @@ class CreditService:
     total_credits = Decimal("0")
 
     for credits in due_allocations:
-      # Skip non-active graphs (suspended, canceled, etc.)
       graph = Graph.get_by_id(credits.graph_id, self.session)
       if not graph or not graph.is_active:
         continue
@@ -851,20 +776,12 @@ class CreditService:
     cached: bool = False,
     base_cost: Decimal | None = None,
   ) -> dict[str, Any]:
-    """
-    Consume credits for a shared repository operation.
+    """Debit a user's repository pool. Missing add-on returns
+    ``requires_addon``.
 
-    Args:
-        user_id: User identifier
-        repository_name: Name of shared repository (e.g., 'sec', 'industry')
-        operation_type: Type of operation (e.g., 'query', 'analytics')
-        metadata: Optional metadata for the transaction
-        cached: Whether this is a cached operation (no credit consumption)
-
-    Returns:
-        Dict with consumption results
+    ``base_cost`` overrides the repository's per-operation cost table; AI
+    operations pass their token-derived cost that way.
     """
-    # Cached operations don't consume credits
     if cached:
       return {
         "success": True,
@@ -873,7 +790,6 @@ class CreditService:
         "message": "Cached operation - no credits consumed",
       }
 
-    # Get shared credits for this repository
     shared_credits = UserRepositoryCredits.get_user_repository_credits(
       user_id=user_id, repository_type=repository_name, session=self.session
     )
@@ -886,13 +802,10 @@ class CreditService:
         "requires_addon": True,
       }
 
-    # Get operation cost - use passed base_cost if provided (e.g., for AI tokens)
-    # Otherwise use predefined costs or default
     if base_cost is None:
       repo_costs = _get_credit_costs(repository_name) or {}
       base_cost = repo_costs.get(operation_type, Decimal("1.0"))
 
-    # Consume credits
     success = shared_credits.consume_credits(
       amount=base_cost,
       repository_name=repository_name,
@@ -930,7 +843,7 @@ class CreditService:
       }
 
   def get_shared_repository_summary(self, user_id: str) -> dict[str, Any]:
-    """Get summary of all shared repository credits for a user."""
+    """Every repository pool the user holds, keyed by repository type."""
     access_records = UserRepository.get_user_repositories(user_id, self.session)
 
     summaries = {}
@@ -954,8 +867,10 @@ class CreditService:
     operation_type: str,
     required_credits: Decimal | None = None,
   ) -> dict[str, Any]:
-    """Check if user has access and sufficient credits for a shared repository operation."""
-    # Get shared credits
+    """Preflight a repository spend: subscription, then balance.
+
+    A zero-cost operation short-circuits as included in the plan.
+    """
     shared_credits = UserRepositoryCredits.get_user_repository_credits(
       user_id=user_id, repository_type=repository_name, session=self.session
     )
@@ -967,7 +882,6 @@ class CreditService:
         "requires_subscription": True,
       }
 
-    # Check if subscription is active
     if not shared_credits.user_repository.is_active:
       return {
         "has_access": False,
@@ -976,12 +890,9 @@ class CreditService:
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
-    # Get operation cost - use passed required_credits if provided (e.g., for AI tokens)
-    # Otherwise use predefined costs or default
     if required_credits is None:
       repo_costs = _get_credit_costs(repository_name) or {}
       required_credits = repo_costs.get(operation_type, Decimal("1.0"))
-      # If operation is included (0.0), no credit check needed
       if required_credits == Decimal("0.0"):
         return {
           "has_access": True,
@@ -1011,26 +922,16 @@ class CreditService:
     admin_user_id: str,
     reason: str,
   ) -> dict[str, Any]:
-    """
-    Set storage override limit (admin only).
+    """Raise or lower a graph's storage limit above its tier default.
 
-    Args:
-        graph_id: Graph identifier
-        new_limit_gb: New storage limit in GB
-        admin_user_id: Admin user setting the override
-        reason: Reason for the override
-
-    Returns:
-        Dict with override results
+    Admin-only; this method does not itself check the caller's role.
     """
-    # Get credit record
     credits = GraphCredits.get_by_graph_id(graph_id, self.session)
     if not credits:
       return {"error": "No credit pool found for graph"}
 
     old_limit = credits.get_effective_storage_limit()
 
-    # Set override
     credits.set_storage_override(
       new_limit_gb=new_limit_gb,
       admin_user_id=admin_user_id,
@@ -1060,34 +961,22 @@ class CreditService:
     metadata: dict[str, Any] | None = None,
     user_id: str | None = None,
   ) -> dict[str, Any]:
-    """
-    Consume credits based on actual AI token usage.
+    """Bill an AI call from its measured token counts.
 
-    This method is called AFTER the AI operation completes with actual token counts.
-    It uses the same rock-solid atomic credit consumption but with precise costs.
-
-    Args:
-        graph_id: Graph identifier
-        input_tokens: Actual input tokens used
-        output_tokens: Actual output tokens generated
-        model: AI model used (e.g., 'us.anthropic.claude-sonnet-4-6')
-        operation_description: Description of the AI operation
-        metadata: Optional metadata for the transaction
-        user_id: User ID for tracking
-
-    Returns:
-        Dict with consumption results
+    Called *after* the model responds, so the charge reflects real usage rather
+    than an estimate. Rates are per 1,000 tokens and a floor
+    (``AIBillingConfig.apply_minimum_charge``) applies, so a tiny call still
+    costs the minimum. An unrecognised model falls back to Sonnet pricing
+    rather than billing zero.
     """
     from ...config import AIBillingConfig
 
-    # Map model identifiers to TOKEN_PRICING keys
-    # All active models are Sonnet via AWS Bedrock
     model_pricing_map = {
-      # AWS Bedrock model IDs (actual values from AIClient responses)
+      # Bedrock model IDs as they come back from AIClient
       "us.anthropic.claude-sonnet-4-6": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-5-20250929-v1:0": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-20250514-v1:0": "anthropic_claude_4_sonnet",
-      # Short-form model names
+      # Short-form names
       "claude-4-sonnet": "anthropic_claude_4_sonnet",
       "claude-4.1-sonnet": "anthropic_claude_4_sonnet",
     }
@@ -1099,15 +988,12 @@ class CreditService:
       logger.warning(f"No pricing found for model {model}, using Sonnet pricing")
       pricing = {"input": Decimal("3"), "output": Decimal("15")}
 
-    # Calculate actual cost based on tokens
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]
     raw_cost = input_cost + output_cost
 
-    # Apply minimum charge (rounds up to at least MINIMUM_CHARGE)
     total_cost = AIBillingConfig.apply_minimum_charge(raw_cost)
 
-    # Build metadata
     token_metadata = {
       "input_tokens": input_tokens,
       "output_tokens": output_tokens,
@@ -1122,7 +1008,6 @@ class CreditService:
     if metadata:
       token_metadata.update(metadata)
 
-    # Use existing consume_credits with minimum-applied cost
     return self.consume_credits(
       graph_id=graph_id,
       operation_type="ai_tokens",
@@ -1132,9 +1017,8 @@ class CreditService:
     )
 
 
-# Map operation costs to use centralized configuration
-# Note: AI operations (agent_call) use token-based pricing via consume_ai_tokens()
-# Note: Storage is included in each tier (no metering/overage)
+# Flat per-operation costs. AI operations are not here: they are priced per
+# token by `consume_ai_tokens`. Storage is included in each tier, unmetered.
 CREDIT_COSTS = {
   "api_call": CreditConfig.OPERATION_COSTS["api_call"],
   "query": CreditConfig.OPERATION_COSTS["query"],
@@ -1148,8 +1032,11 @@ CREDIT_COSTS = {
 
 
 def get_operation_cost(operation_type: str) -> Decimal:
-  """Get the base credit cost for an operation type."""
-  # Try cache first
+  """Flat credit cost for an operation; 0 for anything unlisted.
+
+  Zero is the correct default — database operations are free, and only the
+  operations named in ``CREDIT_COSTS`` and AI token usage are billed.
+  """
   try:
     from ...middleware.billing.cache import credit_cache
 
@@ -1157,13 +1044,10 @@ def get_operation_cost(operation_type: str) -> Decimal:
     if cached_cost is not None:
       return cached_cost
   except Exception:
-    pass  # Fallback if cache not available
+    pass
 
-  # Fallback to constant
-  # Default to 0 for unknown operations (database operations don't consume credits)
   cost = CREDIT_COSTS.get(operation_type, Decimal("0"))
 
-  # Cache the cost
   try:
     from ...middleware.billing.cache import credit_cache
 

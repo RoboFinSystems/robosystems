@@ -1,7 +1,6 @@
-"""Cadence Labs' authored disclosure notes — the SaaS disclosure beat.
+"""Cadence Labs' tenant-authored disclosure notes.
 
-Same extend-and-map pattern as the coffee roaster's inventory note: the
-revenue-disaggregation note is authored per-tenant through the
+The revenue-disaggregation note is authored per-tenant through the
 TaxonomyBlock envelope (``reporting_extension``) — two member concepts
 parented under the rs-gaap revenue leaf, one ``regulatory_disclosure``
 structure with ``concept_arrangement='roll_up'``, and presentation +

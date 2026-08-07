@@ -2,8 +2,8 @@
 """
 Create Custom Graph
 
-This script creates a new generic graph for the custom graph demo. It uses saved
-credentials from step 01.
+Creates the graph for the custom graph demo, using the credentials
+`setup_credentials.py` saved to `.local/config.json`.
 
 Usage:
     uv run create_graph.py                           # Auto-generate graph name

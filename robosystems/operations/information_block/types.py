@@ -70,9 +70,8 @@ class BlockTypeRegistryEntry:
   mechanics_schema: type[BaseModel]
   """Pydantic model for the block's Artifact Mechanics (e.g.
   :class:`ScheduleMechanics`). Used by the envelope builder to
-  shape-validate the typed ``artifact_mechanics`` JSONB column (with
-  legacy fallback to ``metadata_`` for rows that pre-date the
-  backfill)."""
+  shape-validate the typed ``artifact_mechanics`` JSONB column, falling
+  back to ``metadata_`` for rows that still carry the shape there."""
 
   create_request_model: type[BaseModel]
   """Pydantic model that the ``create-information-block`` dispatcher
@@ -83,8 +82,7 @@ class BlockTypeRegistryEntry:
   update_request_model: type[BaseModel]
   """Pydantic model for ``update-information-block`` payload validation.
   For block types whose ``dispatch_update`` always raises (e.g. the
-  statement family), this can be a placeholder like
-  ``_EmptyUpdateRequest``."""
+  statement family), this is a placeholder like ``_EmptyPayload``."""
 
   delete_request_model: type[BaseModel]
   """Pydantic model for ``delete-information-block`` payload validation.

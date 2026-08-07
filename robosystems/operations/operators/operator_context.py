@@ -58,21 +58,15 @@ class ToolAccess(Protocol):
 
 @dataclass
 class OperatorContext:
-  """Injected into Operator.run(). Provides all services an operator needs.
+  """Everything an operator needs, injected into `Operator.run()`.
 
-  Constructed by execution adapters (api.py, worker.py) with the appropriate
-  service implementations for the execution context.
+  Built by the execution adapters (`adapters/api.py`, `adapters/worker.py`),
+  which pick the service implementations that suit their context. `extra`
+  carries operator-specific parameters the adapter passed straight through
+  (e.g. `mapping_id` for `MappingOperator`).
 
-  Attributes:
-      graph_id: The graph database identifier.
-      user_id: The authenticated user's ID.
-      query: The user's query or task description.
-      mode: Execution mode (QUICK, STANDARD, EXTENDED).
-      history: Conversation history (for multi-turn operators).
-      extra: Task-specific parameters (e.g., mapping_id for MappingOperator).
-      ai: TrackedAIClient — AI calls with automatic credit tracking.
-      tools: ToolAccess — MCP tool access.
-      progress: ProgressReporter — progress updates and cancellation.
+  The three service fields are optional only so the dataclass can be built
+  incrementally — an operator can assume the adapter populated all of them.
   """
 
   # Identity

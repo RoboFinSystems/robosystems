@@ -4,8 +4,9 @@ Three public commands dispatch by ``taxonomy_type`` to the registered
 handler: :func:`create_taxonomy_block`, :func:`update_taxonomy_block`,
 :func:`delete_taxonomy_block`. No business logic lives here — the
 commands are pure routing. Domain-specific mutation lives in the
-block-type handler module (``chart_of_accounts.py`` today; future
-sub-phases add reporting_extension / custom_ontology / reporting_standard).
+block-type handler modules: ``chart_of_accounts.py``,
+``reporting_extension.py``, ``custom_ontology.py``,
+``reporting_standard.py``.
 
 These are mounted as the ``create-taxonomy-block`` /
 ``update-taxonomy-block`` / ``delete-taxonomy-block`` CQRS operations

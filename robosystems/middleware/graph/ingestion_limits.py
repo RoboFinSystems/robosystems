@@ -6,9 +6,8 @@ Two limit categories, both hard-blocking at the write path:
    instance disk COGS, drives upgrades. Hit at the write path so
    customers can't pile up data they then can't promote.
 2. **Per-operation row caps** (`max_rows_per_copy`,
-   `max_single_table_rows`) — engineering OOM guardrails. Set per
-   instance class, framed internally; not surfaced as the marketing
-   tier limit.
+   `max_single_table_rows`) — OOM guardrails set per instance class.
+   Internal engineering limits, not part of the published tier.
 
 Both block materialization when exceeded.
 
@@ -53,21 +52,11 @@ class IngestionLimitChecker:
     - ``max_rows_per_copy`` — OOM guardrail across all pending tables
     - ``max_single_table_rows`` — OOM guardrail per table
     - aggregate instance storage GB — product cap
-
-    Args:
-        db: Database session
-        graph_id: Graph database identifier
-        tier: Graph tier (ladybug-standard, ladybug-large, ladybug-xlarge)
-        table_name: Optional specific table being materialized
-
-    Returns:
-        Dict with: allowed, errors, warnings, current_usage, limits
     """
     limits = GraphTierConfig.get_graph_limits(tier)
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Get pending row counts from graph_files
     pending_rows = cls._get_pending_row_counts(db, graph_id)
     total_pending_rows = sum(pending_rows.values())
 
@@ -81,7 +70,6 @@ class IngestionLimitChecker:
         f"Total rows ({total_pending_rows:,}) exceeds max_rows_per_copy limit ({max_rows_per_copy:,})"
       )
 
-    # Check individual table row limits (hard limit)
     max_single_table = limits.get("max_single_table_rows", 2_500_000)
     for tbl_name, row_count in pending_rows.items():
       if row_count > max_single_table:
@@ -152,15 +140,6 @@ class IngestionLimitChecker:
     aggregate exceeds the tier's ``instance_storage_limit_gb``. This is
     a hard product cap, blocking at the write path (folded into
     :meth:`check_materialization_limits`).
-
-    Args:
-        db: Database session
-        graph_id: Parent graph database identifier
-        tier: Graph tier
-
-    Returns:
-        Dict with: allowed, errors, total_storage_gb, limit_gb,
-        usage_percentage, status, databases
     """
     limit_gb = GraphTierConfig.get_instance_storage_limit_gb(tier)
     warn_pct = (
@@ -373,9 +352,6 @@ class IngestionLimitChecker:
     instance. The pieces outside the primary ``.lbug`` frequently outweigh
     it, so measuring only that file undercounts the cap denominator and
     therefore real COGS.
-
-    Returns:
-        ``{graph_id, total_bytes, items}``, or None if unavailable
     """
     from robosystems.graph_api.client.factory import GraphClientFactory
 

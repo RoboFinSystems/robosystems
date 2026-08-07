@@ -1,43 +1,42 @@
 """compute-forecast — walk a scenario's driver cascade into forward FactSets.
 
-The forecast engine's derivation path (FP&A F-1). The forecast block
-(:mod:`.forecast`) holds the authored surface — scenario identity +
-lever assertions; this module derives everything downstream, one forward
-month at a time from the block's ``base_period``:
+:mod:`.forecast` holds the authored surface (scenario identity, lever
+assertions, line assertions, growth rates); this module derives everything
+downstream, one forward month at a time from the block's ``base_period``.
+Per month, in order:
 
-1. **Carry-forward** — every IS leaf that carried a fact in the base
-   month's actual report and isn't rule-driven repeats its prior value
-   (the engine default for unmodeled lines — no rules involved).
-   **Line assertions** override both carry and schedule projection for
-   the months they name (the manual-override half of the authored
-   surface — zero out a base-month one-off, hold a line at a budget
-   number), and displace a driver rule targeting the same element that
-   month (the rule lands in ``skipped``, legibly).
-2. **Driver rules** — the rs-driver catalog's ``Derive`` rules, in
-   dependency order (``topo_sort_calculations`` over same-month operand
-   edges). A rule is *active* for the scenario iff every rs-driver
-   operand it names has asserted lever values; lever values bind from
-   the scenario's lever FactSet, ``$X[t-1]`` operands bind the previous
-   month's value (:func:`expressions.desugar_priors` — the documented
-   avg() sibling seam), and same-month rs-gaap operands bind the
-   current month's computed values (prior month as fallback).
+1. **Carry-forward** — every income-statement leaf that carried a fact in the
+   base month's actual report and isn't rule-driven repeats its prior value.
+   Line assertions override both carry and schedule projection for the months
+   they name, and displace a driver rule targeting the same element that
+   month (the rule lands in ``skipped``).
+2. **Driver rules** — the rs-driver catalog's ``Derive`` rules in dependency
+   order (``topo_sort_calculations`` over same-month operand edges). A rule
+   is *active* for the scenario iff every rs-driver operand it names has
+   asserted lever values. Lever values bind from the scenario's lever
+   FactSet, ``$X[t-1]`` operands bind the previous month's value
+   (:func:`.rules.expressions.desugar_priors`), and same-month rs-gaap
+   operands bind the current month's computed values, prior month as
+   fallback.
 3. **Calc-DAG subtotals** — ``resolve_calc_dag`` over the merged
-   rs-gaap-calculations + local IS arcs derives GrossProfit →
-   OperatingIncome → NetIncome exactly the way the report pivot does
-   (articulation is reuse, not new math).
+   rs-gaap-calculations + local income-statement arcs derives GrossProfit →
+   OperatingIncome → NetIncome the same way the report pivot does.
 
-Each month upserts one scenario IS FactSet (``factset_type='report'``,
-congruent with the actual monthly sets so statement envelopes render
-scenario columns unchanged) plus a working-capital BS set (AR/AP
-instants only — the full BS roll is F-2), all keyed by
-``fact_sets.scenario_id`` = the forecast block. Re-running a month
-replaces its values (the compute-metrics drift semantics). Soft-fail
-per rule per month: a missing lever month or unbound operand skips that
-rule with a reason and its target falls back to carry-forward — one
+Each month upserts one scenario income-statement FactSet
+(``factset_type='report'``, congruent with the actual monthly sets so
+statement envelopes render scenario columns unchanged), a balance-sheet set,
+and — when an actual cash-flow statement exists — a derived cash-flow set.
+All are keyed by ``fact_sets.scenario_id`` = the forecast block, and
+re-running a month replaces its values. Without an actual balance sheet at
+the base period there is no articulation context, and the balance-sheet set
+degrades to the rule-driven working-capital instants alone.
+
+Soft-fail per rule per month: a missing lever month or unbound operand skips
+that rule with a reason and its target falls back to carry-forward — one
 broken rule never aborts the walk.
 
-Deterministic and non-AI — free under the credit model. The Operator
-that *proposes* lever values is the credit-consuming layer on top.
+Deterministic and non-AI, so free under the credit model; the Operator that
+*proposes* lever values is the credit-consuming layer on top.
 """
 
 from __future__ import annotations
@@ -290,9 +289,9 @@ def cmd_compute_forecast(
       base_is_element_ids.append(fact.element_id)
     prior_values[fact.element_id] = float(fact.value)
 
-  # BS instants seed [t-1]/carry context for balance-driven rules — and,
-  # since F-2, the full roll: base_bs_element_ids preserves emission
-  # order, bs_prior is the roll's month-zero state.
+  # BS instants seed [t-1]/carry context for balance-driven rules and the
+  # full roll: base_bs_element_ids preserves emission order, bs_prior is the
+  # roll's month-zero state.
   base_bs_set = None
   base_bs_element_ids: list[str] = []
   bs_prior: dict[str, float] = {}
@@ -435,7 +434,7 @@ def cmd_compute_forecast(
     ):
       carry_pool.append(element_id)
 
-  # ── Articulation context (F-2) — BS roll + schedules + derived CF ─────
+  # ── Articulation context — BS roll + schedules + derived CF ───────────
   # The mapping id rides the base report set's PivotProvenance; without
   # it schedule contributions can't route CoA→rs-gaap and are skipped.
   mapping_id: str | None = None
@@ -519,10 +518,9 @@ def cmd_compute_forecast(
     # carried value already contains the previous month's schedule
     # contribution (prior_values rolls at (e)), so a base-anchored delta
     # re-subtracts the base-vs-current gap every month — cumulative
-    # run-off that marches a line negative even on coherent books
-    # (caught live on the first production tenant, 2026-07-30). Mirrors
-    # schedule_instant_movement's prev_end reference on the BS side;
-    # deltas telescope to base + sched[m] - sched[base].
+    # run-off that marches a line negative even on coherent books.
+    # Mirrors schedule_instant_movement's prev_end reference on the BS
+    # side; deltas telescope to base + sched[m] - sched[base].
     if ctx is not None:
       for element_id in list(current):
         delta = schedule_is_delta(ctx, element_id, month, prev_month)
@@ -808,11 +806,10 @@ def cmd_compute_forecast(
         is_facts.append((element, resolved[element_id]))
         emitted_is.add(element_id)
 
-    # (d2) Balance-sheet roll + derived CF (F-2) — with an articulation
-    # context the BS is the full roll (carry, rules, schedules, RE,
-    # balancing cash) and the CF derives from its deltas; without one
-    # (no actual BS at the base period) the F-1 behavior stands: the
-    # rule-driven working-capital instants alone.
+    # (d2) Balance-sheet roll + derived CF. With an articulation context the
+    # BS is the full roll (carry, rules, schedules, RE, balancing cash) and
+    # the CF derives from its deltas; without one (no actual BS at the base
+    # period) only the rule-driven working-capital instants are emitted.
     bs_facts: list[tuple[Element, float]] = []
     cf_facts: list[tuple[Element, float]] = []
     bs_values: dict[str, float] = {}
@@ -1062,21 +1059,18 @@ def _scale_rule_target_children(
   calculations: dict[str, list[tuple[str, float]]],
   pinned: set[str] | None = None,
 ) -> None:
-  """Scale a rule-driven calc parent's present children so the
-  composition articulates with the driven value.
+  """Scale a rule-driven calc parent's present children so the composition
+  articulates with the driven value.
 
-  Proportional: each child (and its own subtree, recursively) multiplies
-  by ``driven / Σ child·weight``. A zero children-sum is left untouched
-  — proportional scaling has no basis, and the visible RollUp failure is
-  more honest than inventing a split. A skipped rule that fell back to
-  carry scales by exactly 1.0 (children carried too), so this is a no-op
-  for inactive months.
+  Proportional: each child (and its own subtree, recursively) multiplies by
+  ``driven / Σ child·weight``. ``pinned`` elements (line-asserted or
+  line-grown leaves) are never scaled — the driven parent's remainder after
+  the pinned contributions distributes over the unpinned children instead.
 
-  ``pinned`` elements (line-asserted or line-grown leaves) are never
-  scaled: the driven parent's remainder after the pinned contributions
-  distributes proportionally over the unpinned children. A parent whose children
-  are all pinned (or whose unpinned sum is zero) is left untouched —
-  the visible RollUp failure again beats inventing a split.
+  A zero unpinned children-sum leaves the parent untouched: proportional
+  scaling has no basis, and the visible RollUp failure beats inventing a
+  split. A skipped rule that fell back to carry scales by exactly 1.0, so
+  this is a no-op for inactive months.
   """
   pinned = pinned or set()
 

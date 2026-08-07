@@ -1,12 +1,13 @@
-"""
-MCP (Model Context Protocol) endpoint module with modular sub-endpoints.
+"""MCP (Model Context Protocol) endpoints for a graph.
 
-This module provides a comprehensive MCP tool execution system optimized for AI agents with:
-- Intelligent strategy selection based on tool type and system load
-- Multiple response formats (JSON, SSE, NDJSON) with transparent handling
-- Shared queue infrastructure with query endpoints
-- Automatic format negotiation for AI agent clients
-- Progress monitoring for long-running operations
+Mounted under `/v1/graphs/{graph_id}/mcp`:
+
+- `tools.py` lists the tools available on the graph.
+- `execute.py` runs a tool, picking an execution strategy from the tool
+  type and system load and negotiating the response format (JSON, SSE, or
+  NDJSON) with the client.
+- `remote.py` serves the Streamable-HTTP JSON-RPC transport for MCP clients
+  that connect by URL.
 """
 
 from fastapi import APIRouter

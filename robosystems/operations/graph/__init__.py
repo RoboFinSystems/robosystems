@@ -1,13 +1,7 @@
-"""
-Graph database operations and services.
+"""High-level graph business logic: lifecycle, billing, metrics, fleet health.
 
-This module contains high-level graph database business logic including:
-- Graph subscription management
-- Graph pricing and billing calculations
-- Graph metrics and analytics
-- Entity graph management
-- Repository subscription management
-- Infrastructure monitoring and maintenance
+Low-level database plumbing lives one level down in
+:mod:`robosystems.operations.graph.engine`.
 """
 
 from .credit_service import CreditService

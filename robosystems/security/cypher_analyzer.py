@@ -1,8 +1,10 @@
 """
-Secure Cypher query analysis for write operation detection.
+Cypher query analysis for write operation detection.
 
-This module provides secure, AST-based analysis of Cypher queries to accurately
-detect write operations without the vulnerabilities of regex-based approaches.
+The sole write barrier for the Cypher query surface: every read-only path
+classifies its query here before execution. Analysis fails closed — an
+unparseable query, or a `CALL` form outside the read-only allowlist, is
+treated as a write.
 """
 
 import logging
@@ -22,11 +24,10 @@ class CypherOperationType(Enum):
 
 class CypherSecurityAnalyzer:
   """
-  Secure analyzer for Cypher queries that uses multiple validation layers
-  to accurately detect write operations.
+  Classifies Cypher queries as read, write, or mixed.
 
-  This replaces vulnerable regex-based detection with a comprehensive
-  approach that handles comments, strings, nested queries, and complex syntax.
+  Comments, string literals, and backtick-quoted identifiers are masked before
+  any keyword matching, so data can never hide code from the classifier.
   """
 
   # Definitive write operation keywords (must be exact matches)
@@ -161,16 +162,11 @@ class CypherSecurityAnalyzer:
 
   def analyze_query(self, query: str) -> CypherOperationType:
     """
-    Securely analyze a Cypher query to determine if it contains write operations.
-
-    Args:
-        query: The Cypher query to analyze
-
-    Returns:
-        CypherOperationType indicating the operation type
+    Classify a Cypher query as READ, WRITE, or MIXED.
 
     Raises:
-        ValueError: If query is invalid or suspicious
+        ValueError: If the query is empty, oversized, or matches an injection
+            pattern.
     """
     if not query or not isinstance(query, str):
       raise ValueError("Query must be a non-empty string")
@@ -194,15 +190,7 @@ class CypherSecurityAnalyzer:
       return CypherOperationType.READ
 
   def is_write_operation(self, query: str) -> bool:
-    """
-    Convenience method to check if a query contains write operations.
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains write operations, False otherwise
-    """
+    """Check whether a query contains write operations."""
     try:
       operation_type = self.analyze_query(query)
       return operation_type in (CypherOperationType.WRITE, CypherOperationType.MIXED)
@@ -212,15 +200,7 @@ class CypherSecurityAnalyzer:
       return True
 
   def is_schema_ddl(self, query: str) -> bool:
-    """
-    Check if a query contains schema DDL operations that modify graph structure.
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains schema DDL operations, False otherwise
-    """
+    """Check whether a query contains schema DDL that modifies graph structure."""
     try:
       cleaned_query = self._clean_query(query)
       schema_ops = self._find_schema_ddl(cleaned_query)
@@ -230,15 +210,7 @@ class CypherSecurityAnalyzer:
       return False
 
   def is_bulk_operation(self, query: str) -> bool:
-    """
-    Check if a query contains bulk operations (COPY, LOAD, IMPORT).
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains bulk operations, False otherwise
-    """
+    """Check whether a query contains bulk operations (COPY, LOAD, IMPORT)."""
     try:
       cleaned_query = self._clean_query(query)
       bulk_ops = self._find_bulk_operations(cleaned_query)
@@ -249,15 +221,7 @@ class CypherSecurityAnalyzer:
       return False
 
   def is_admin_operation(self, query: str) -> bool:
-    """
-    Check if a query contains administrative operations.
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains admin operations, False otherwise
-    """
+    """Check whether a query contains administrative operations."""
     try:
       cleaned_query = self._clean_query(query)
       admin_ops = self._find_admin_operations(cleaned_query)
@@ -275,12 +239,6 @@ class CypherSecurityAnalyzer:
     the operation *family* (bulk / admin / DDL) rather than on
     `is_write_operation`, so they can still refuse the CALL surface without
     refusing ordinary graph writes.
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains non-read CALL forms, False otherwise
     """
     try:
       cleaned_query = self._clean_query(query)
@@ -290,15 +248,7 @@ class CypherSecurityAnalyzer:
       return True
 
   def has_system_calls(self, query: str) -> bool:
-    """
-    Check if a query contains system procedure calls.
-
-    Args:
-        query: The Cypher query to check
-
-    Returns:
-        True if the query contains system calls, False otherwise
-    """
+    """Check whether a query calls a procedure in SYSTEM_PROCEDURES."""
     try:
       cleaned_query = self._clean_query(query)
       system_calls = self._find_system_calls(cleaned_query)
@@ -311,9 +261,6 @@ class CypherSecurityAnalyzer:
   def _validate_query_security(self, query: str) -> None:
     """
     Perform basic security validations on the query.
-
-    Args:
-        query: The query to validate
 
     Raises:
         ValueError: If the query appears suspicious or dangerous
@@ -355,12 +302,8 @@ class CypherSecurityAnalyzer:
     before any comment marker is honoured, so an in-string ``//`` can never
     hide the code after the string.
 
-    Args:
-        query: The original query
-
-    Returns:
-        Cleaned query with comments blanked and strings/identifiers replaced
-        by neutral placeholder tokens.
+    Comments are blanked and strings/identifiers become neutral placeholder
+    tokens.
     """
     out: list[str] = []
     i = 0
@@ -425,15 +368,7 @@ class CypherSecurityAnalyzer:
     return "".join(out)
 
   def _find_write_operations(self, query: str) -> set[str]:
-    """
-    Find write operation keywords in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of write operation keywords found
-    """
+    """Find write operation keywords in the cleaned query."""
     found_operations = set()
 
     # Find all potential write keywords
@@ -469,11 +404,7 @@ class CypherSecurityAnalyzer:
       mutates connection state that outlives the statement, and connections
       are pooled and shared.
 
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of normalized markers describing what was found
+    Returns normalized markers (``CALL:<name>`` / ``CALL_SET:<name>``).
     """
     found: set[str] = set()
 
@@ -488,15 +419,7 @@ class CypherSecurityAnalyzer:
     return found
 
   def _find_read_operations(self, query: str) -> set[str]:
-    """
-    Find read operation keywords in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of read operation keywords found
-    """
+    """Find read operation keywords in the cleaned query."""
     found_operations = set()
 
     # Create pattern for read keywords
@@ -512,15 +435,7 @@ class CypherSecurityAnalyzer:
     return found_operations
 
   def _find_bulk_operations(self, query: str) -> set[str]:
-    """
-    Find bulk operation keywords in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of bulk operation keywords found
-    """
+    """Find bulk operation keywords in the cleaned query."""
     found_operations = set()
 
     # Find all potential bulk keywords
@@ -537,15 +452,7 @@ class CypherSecurityAnalyzer:
     return found_operations
 
   def _find_admin_operations(self, query: str) -> set[str]:
-    """
-    Find administrative operation keywords in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of admin operation keywords found
-    """
+    """Find administrative operation keywords in the cleaned query."""
     found_operations = set()
 
     # Find all potential admin keywords
@@ -570,15 +477,7 @@ class CypherSecurityAnalyzer:
     return found_operations
 
   def _find_system_calls(self, query: str) -> set[str]:
-    """
-    Find system procedure calls in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of system procedure names found
-    """
+    """Find system procedure calls in the cleaned query."""
     found_calls = set()
 
     # Find all CALL statements
@@ -592,15 +491,7 @@ class CypherSecurityAnalyzer:
     return found_calls
 
   def _find_schema_ddl(self, query: str) -> set[str]:
-    """
-    Find schema DDL keywords in the cleaned query.
-
-    Args:
-        query: The cleaned query to analyze
-
-    Returns:
-        Set of schema DDL operation patterns found
-    """
+    """Find schema DDL keywords in the cleaned query."""
     found_operations = set()
 
     # Check for CREATE NODE/REL TABLE
@@ -639,19 +530,7 @@ class CypherSecurityAnalyzer:
     return found_operations
 
   def _validate_keyword_context(self, query: str, keyword: str, position: int) -> bool:
-    """
-    Validate that a keyword is in a valid context and not part of an identifier.
-
-    Args:
-        query: The query string
-        keyword: The keyword found
-        position: Position of the keyword in the query
-
-    Returns:
-        True if the keyword is in a valid context
-    """
-    # Get context around the keyword
-    # Check if keyword is part of a larger identifier
+    """Check that a keyword stands alone rather than being part of an identifier."""
     if position > 0 and query[position - 1].isalnum():
       return False
 
@@ -660,20 +539,14 @@ class CypherSecurityAnalyzer:
     ):
       return False
 
-    # Additional context-specific validations can be added here
-    # For example, checking if CREATE is followed by valid syntax
-
     return True
 
   def get_write_operation_details(self, query: str) -> dict:
     """
     Get detailed information about write operations in the query.
 
-    Args:
-        query: The query to analyze
-
-    Returns:
-        Dictionary with detailed analysis results
+    On analysis failure the result reports ``is_write_operation: True`` and
+    ``analysis_successful: False`` — callers must treat it as a write.
     """
     try:
       operation_type = self.analyze_query(query)
@@ -713,108 +586,60 @@ cypher_analyzer = CypherSecurityAnalyzer()
 
 
 def is_write_operation(query: str) -> bool:
-  """
-  Secure function to determine if a Cypher query contains write operations.
+  """Determine whether a Cypher query contains write operations.
 
-  This function replaces all regex-based write operation detection in the codebase.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains write operations, False otherwise
+  The single entry point for write detection — read-only paths must gate on
+  this rather than pattern-matching the query themselves.
   """
   return cypher_analyzer.is_write_operation(query)
 
 
 def is_bulk_operation(query: str) -> bool:
   """
-  Determine if a Cypher query contains bulk operations (COPY, LOAD, IMPORT).
+  Determine whether a Cypher query contains bulk operations (COPY, LOAD, IMPORT).
 
-  These operations should be performed through DuckDB staging and materialization
-  rather than the general /query endpoint.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains bulk operations, False otherwise
+  These belong on the staging and materialization path, not the general
+  /query endpoint.
   """
   return cypher_analyzer.is_bulk_operation(query)
 
 
 def is_admin_operation(query: str) -> bool:
   """
-  Determine if a Cypher query contains administrative operations.
+  Determine whether a Cypher query contains administrative operations.
 
-  These operations require admin privileges and include operations like
-  EXPORT, INSTALL, ATTACH, DETACH, USE.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains admin operations, False otherwise
+  EXPORT, INSTALL, ATTACH, DETACH, USE and the database-level forms; these
+  require admin privileges.
   """
   return cypher_analyzer.is_admin_operation(query)
 
 
 def is_non_read_call(query: str) -> bool:
   """
-  Determine if a Cypher query contains CALL forms that are not read-only.
+  Determine whether a Cypher query contains CALL forms that are not read-only.
 
   Procedure invocations outside the read-only allowlist and session
   configuration assignments both count. For validators gating on operation
   family rather than write-ness.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains non-read CALL forms, False otherwise
   """
   return cypher_analyzer.is_non_read_call(query)
 
 
 def has_system_calls(query: str) -> bool:
-  """
-  Determine if a Cypher query contains system procedure calls.
-
-  These are CALL statements to system procedures that may need restrictions.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains system calls, False otherwise
-  """
+  """Determine whether a Cypher query calls a system procedure."""
   return cypher_analyzer.has_system_calls(query)
 
 
 def is_schema_ddl(query: str) -> bool:
   """
-  Determine if a Cypher query contains schema DDL operations.
+  Determine whether a Cypher query contains schema DDL operations.
 
-  These operations modify the graph structure (CREATE/DROP/ALTER TABLE, etc.)
-  and are restricted to ensure schema immutability after graph creation.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      True if the query contains schema DDL operations, False otherwise
+  These modify graph structure (CREATE/DROP/ALTER TABLE, INDEX, SEQUENCE) and
+  are restricted so a graph's schema stays immutable after creation.
   """
   return cypher_analyzer.is_schema_ddl(query)
 
 
 def analyze_cypher_query(query: str) -> dict:
-  """
-  Analyze a Cypher query and return detailed information.
-
-  Args:
-      query: The Cypher query to analyze
-
-  Returns:
-      Dictionary with analysis results
-  """
+  """Analyze a Cypher query and return detailed classification results."""
   return cypher_analyzer.get_write_operation_details(query)

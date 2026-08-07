@@ -5,11 +5,11 @@ renderable Structure (``block_type='reporting_style'`` — or legacy
 ``'custom'``) with a complete composition (one Network per required
 statement_type) in the graph's tenant schema.
 
-The Reporting Style lives on the entity now, co-located with the
-``structures`` / ``reporting_style_networks`` it points at, so this is a pure
-extensions-DB write — no platform round-trip. Heterogeneous entities in a
-future multi-entity hierarchy can each carry their own Style while resolving
-to the same canonical calc-DAG subtotals.
+The Reporting Style lives on the entity, co-located with the ``structures``
+/ ``reporting_style_networks`` it points at, so this is a pure extensions-DB
+write — no platform round-trip. Entities in a multi-entity hierarchy can each
+carry their own Style while resolving to the same canonical calc-DAG
+subtotals.
 
 Filed Reports are unaffected — each ``Report``'s FactSet rows pin their
 ``structure_id`` at create-time, so historical packages keep rendering against
@@ -114,9 +114,9 @@ def change_reporting_style(
     raise ReportingStyleInvalidError(
       f"Reporting Style {body.reporting_style_id!r} not found in tenant schema."
     )
-  # Accept legacy 'custom' rows so tenants whose Style rows weren't promoted
-  # by migration 0008 can still be selected. The picker doesn't filter on
-  # block_type either.
+  # ``custom`` is accepted so a Style row that was never promoted to
+  # ``block_type='reporting_style'`` stays selectable. The picker doesn't
+  # filter on block_type either.
   if row.block_type not in ("reporting_style", "custom"):
     raise ReportingStyleInvalidError(
       f"Structure {body.reporting_style_id!r} has block_type={row.block_type!r}; "
@@ -148,7 +148,7 @@ def change_reporting_style(
     )
 
   # 4-segment Reporting Style code (e.g. BSC-CORP-IS02-CF1), stamped into the
-  # Style Structure's metadata by migration 0008. None for legacy/unstamped.
+  # Style Structure's metadata at seed time. None on an unstamped Style.
   metadata = row.metadata if isinstance(row.metadata, dict) else {}
   reporting_style_code = metadata.get("reporting_style_code")
 

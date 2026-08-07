@@ -1,11 +1,8 @@
 """
 Centralized default values for tunable configuration.
 
-These values serve as defaults when SSM parameters are not set.
+These values apply when no SSM parameter is set.
 Override priority: Environment Variable > SSM Parameter Store > Default
-
-This module provides the "source of truth" for all tunable configuration values,
-eliminating scattered magic numbers throughout the codebase.
 
 Categories:
 - CONSTANTS (in constants.py): Values that never change (protocol limits, business rules)
@@ -38,8 +35,8 @@ class DatabaseDefaults:
 
   # Extensions OLTP database — a separate engine/pool from the platform DB.
   # The per-graph OLTP write path (journal entries, etc.) is the hot path, so
-  # this is tuned independently. Previously hardcoded at 3 + 5 = 8, which a
-  # single client could exhaust; now SSM-tunable (raise per RDS instance size).
+  # this is tuned independently, and is SSM-tunable: raise it with RDS
+  # instance size.
   EXTENSIONS_POOL_SIZE = 5
   EXTENSIONS_MAX_OVERFLOW = 10
 

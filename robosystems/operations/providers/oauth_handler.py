@@ -1,80 +1,73 @@
-"""Generic OAuth2 handler for connection providers."""
+"""Generic OAuth2 handler for connection providers.
 
-# Standard library
+`OAuthHandler` drives the authorization-code flow against any provider that
+implements `OAuthProviderProtocol` (see `quickbooks_provider.py` for the one
+concrete implementation). Providers supply endpoints, credentials, and the
+handful of vendor-specific parameters; everything else is shared here.
+"""
+
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from urllib.parse import urlencode, urlparse
 
-# Third-party
 import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...config import env
-
-# Local imports
 from ...logger import logger
 from ...models.core import ConnectionCredentials
 
 
 class OAuthProviderProtocol(Protocol):
-  """Protocol for OAuth providers."""
+  """Per-provider endpoints, credentials, and vendor-specific parameters."""
 
   @property
-  def name(self) -> str:
-    """Provider name."""
-    ...
+  def name(self) -> str: ...
 
   @property
-  def client_id(self) -> str:
-    """OAuth client ID."""
-    ...
+  def client_id(self) -> str: ...
 
   @property
-  def client_secret(self) -> str:
-    """OAuth client secret."""
-    ...
+  def client_secret(self) -> str: ...
 
   @property
-  def authorize_url(self) -> str:
-    """OAuth authorization URL."""
-    ...
+  def authorize_url(self) -> str: ...
 
   @property
-  def token_url(self) -> str:
-    """OAuth token URL."""
-    ...
+  def token_url(self) -> str: ...
 
   @property
-  def scopes(self) -> list[str]:
-    """Required OAuth scopes."""
-    ...
+  def scopes(self) -> list[str]: ...
 
   def get_additional_auth_params(self) -> dict[str, str]:
-    """Get provider-specific auth parameters."""
+    """Extra query parameters for the authorize URL."""
     return {}
 
   def extract_provider_data(self, callback_data: dict[str, Any]) -> dict[str, Any]:
-    """Extract provider-specific data from callback."""
+    """Pull provider-specific fields out of the callback and into credentials."""
     return {}
 
   def get_refresh_params(self) -> dict[str, str]:
-    """Get provider-specific refresh parameters."""
+    """Extra form fields for the token-refresh request."""
     return {}
 
 
 class OAuthState:
-  """Manage OAuth state for security."""
+  """Single-use, 10-minute CSRF state for an in-flight authorization.
 
-  # In production, these should be stored in Redis or database
-  # For now, we'll use in-memory storage
+  Held in process memory, so a flow must complete on the worker that started
+  it and no state survives a restart. Both are acceptable because the window
+  is short and the user simply retries; nothing durable is lost.
+  """
+
   _states: dict[str, dict[str, Any]] = {}
 
   @classmethod
   def create(cls, connection_id: str, user_id: str, redirect_uri: str) -> str:
-    """Create and store OAuth state."""
+    """Mint a state token and record what the callback should resume."""
     state = secrets.token_urlsafe(32)
     state_hash = hashlib.sha256(state.encode()).hexdigest()
 
@@ -90,25 +83,27 @@ class OAuthState:
 
   @classmethod
   def validate(cls, state: str) -> dict[str, Any] | None:
-    """Validate and retrieve OAuth state data."""
+    """Consume a state token, returning what it recorded, or None if invalid.
+
+    Consuming is the point: an expired or already-redeemed token is dropped so
+    the same authorization code can't be replayed.
+    """
     state_hash = hashlib.sha256(state.encode()).hexdigest()
     state_data = cls._states.get(state_hash)
 
     if not state_data:
       return None
 
-    # Check expiry
     if datetime.now(UTC) > state_data["expires_at"]:
       del cls._states[state_hash]
       return None
 
-    # Remove state after validation (one-time use)
     del cls._states[state_hash]
     return state_data
 
   @classmethod
   def cleanup_expired(cls):
-    """Clean up expired states."""
+    """Drop states past their expiry (abandoned flows never call validate)."""
     now = datetime.now(UTC)
     expired_states = [
       state_hash for state_hash, data in cls._states.items() if now > data["expires_at"]
@@ -118,7 +113,7 @@ class OAuthState:
 
 
 class OAuthHandler:
-  """Generic OAuth2 handler."""
+  """Authorization-code flow for one provider."""
 
   def __init__(self, provider: OAuthProviderProtocol):
     self.provider = provider
@@ -145,19 +140,19 @@ class OAuthHandler:
   def get_authorization_url(
     self, connection_id: str, user_id: str, redirect_uri: str | None = None
   ) -> tuple[str, str]:
-    """Generate OAuth authorization URL."""
-    # Use provided redirect_uri or default from environment
+    """Build the provider authorize URL, returning it with its state token.
+
+    Defaults `redirect_uri` to this API's callback; a caller-supplied override
+    must be a trusted frontend origin.
+    """
     if not redirect_uri:
       base_url = env.ROBOSYSTEMS_API_URL
       redirect_uri = f"{base_url}/v1/oauth/callback/{self.provider.name}"
     else:
-      # Caller-supplied override — must be a trusted frontend origin.
       self._validate_redirect_uri(redirect_uri)
 
-    # Create state for security validation
     state = OAuthState.create(connection_id, user_id, redirect_uri)
 
-    # Build authorization URL
     auth_params = {
       "client_id": self.provider.client_id,
       "response_type": "code",
@@ -173,7 +168,12 @@ class OAuthHandler:
   async def exchange_code_for_tokens(
     self, code: str, redirect_uri: str
   ) -> dict[str, Any]:
-    """Exchange authorization code for tokens."""
+    """Exchange an authorization code for tokens.
+
+    `redirect_uri` must be byte-identical to the one sent to the authorize
+    endpoint or the provider rejects the exchange. An absolute `expires_at`
+    is derived from the returned `expires_in` before the value is stored.
+    """
     token_data = {
       "grant_type": "authorization_code",
       "code": code,
@@ -200,7 +200,6 @@ class OAuthHandler:
 
       tokens = response.json()
 
-      # Calculate token expiry if provided
       if "expires_in" in tokens:
         tokens["expires_at"] = datetime.now(UTC) + timedelta(
           seconds=tokens["expires_in"]
@@ -209,7 +208,11 @@ class OAuthHandler:
       return tokens
 
   async def refresh_tokens(self, refresh_token: str) -> dict[str, Any]:
-    """Refresh OAuth tokens."""
+    """Trade a refresh token for a fresh access token.
+
+    Providers commonly rotate the refresh token too, so store the whole
+    response — keeping the old refresh token strands the connection.
+    """
     refresh_data = {
       "grant_type": "refresh_token",
       "refresh_token": refresh_token,
@@ -236,7 +239,6 @@ class OAuthHandler:
 
       tokens = response.json()
 
-      # Calculate token expiry if provided
       if "expires_in" in tokens:
         tokens["expires_at"] = datetime.now(UTC) + timedelta(
           seconds=tokens["expires_in"]
@@ -252,7 +254,11 @@ class OAuthHandler:
     db: Session,
     user_id: str | None = None,
   ):
-    """Store OAuth tokens securely via ConnectionCredentials."""
+    """Persist tokens (encrypted at rest by `ConnectionCredentials`).
+
+    Upserts on `connection_id`, so re-authorizing an existing connection
+    replaces its tokens rather than leaving two credential rows behind.
+    """
     expires_at = tokens.get("expires_at")
     credential_data = {
       "access_token": tokens.get("access_token"),
@@ -263,7 +269,6 @@ class OAuthHandler:
       **provider_data,
     }
 
-    # Check if credentials already exist for this connection
     existing = ConnectionCredentials.get_by_connection_id(connection_id, db)
     if existing:
       existing.update_credentials(credential_data, db)
@@ -282,7 +287,10 @@ class OAuthHandler:
       logger.info(f"Created OAuth tokens for connection {connection_id}")
 
   async def validate_connection(self, access_token: str) -> bool:
-    """Validate OAuth connection is working."""
-    # This should be implemented by specific providers
-    # Default implementation just checks token exists
+    """Whether the connection still works.
+
+    This default only checks that a token is present. Providers that can cheaply
+    call an authenticated endpoint should override it — see
+    `QuickBooksOAuthProvider.validate_connection`.
+    """
     return bool(access_token)

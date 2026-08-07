@@ -843,8 +843,8 @@ class TestSeriesMode:
 
   def test_series_window_trims_to_seam_adjacent_columns(self) -> None:
     """series_history/series_forecast keep the last N actual + first N
-    forecast columns — the §11 #11 server-side window. Facts for the
-    trimmed sets never render."""
+    forecast columns — the server-side window. Facts for the trimmed sets
+    never render."""
     ends = [date(2026, m, 28) for m in (3, 4, 5, 6, 7)]
     sets = [
       self._fact_set("fs_mar", date(2026, 3, 1), ends[0]),

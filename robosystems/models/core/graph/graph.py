@@ -1,18 +1,12 @@
-"""Graph model for storing all graph database metadata.
+"""Metadata for every graph database, user-created or shared repository.
 
-This model tracks metadata for both user-created graphs and shared repositories.
-User graphs use GraphUser for access control (role-based).
-Repository graphs use UserRepository for access control (subscription-based).
+Access control differs by kind: user graphs go through ``GraphUser``
+(role-based), shared repositories through ``UserRepository``
+(subscription-based).
 
-Graph Ownership:
-- Each graph is owned by an organization (org_id)
-- The organization is responsible for billing
-- Only users within the organization can be granted access
-
-Graph Lifecycle:
-- active: Fully operational
-- suspended: Subscription ended, access blocked
-- deprovisioned: Infrastructure torn down
+A graph is owned by one organization (``org_id``), which is the billing party
+and the only source of users who can be granted access. Shared repositories
+have no owning org.
 """
 
 from collections.abc import Sequence
@@ -40,7 +34,11 @@ from robosystems.database import Model
 
 
 class GraphStatus(str, Enum):
-  """Graph lifecycle status states."""
+  """Graph lifecycle state.
+
+  ``suspended`` blocks access while leaving infrastructure in place;
+  ``deprovisioned`` is terminal and means the infrastructure is torn down.
+  """
 
   ACTIVE = "active"
   SUSPENDED = "suspended"
@@ -48,7 +46,7 @@ class GraphStatus(str, Enum):
 
 
 class Graph(Model):
-  """Graph model for managing graph database metadata."""
+  """A graph database and its platform-side metadata."""
 
   __tablename__ = "graphs"
   __table_args__ = (
@@ -159,7 +157,8 @@ class Graph(Model):
     nullable=False,
   )
 
-  # v2 Incremental Ingestion: Staleness tracking for graph database
+  # Staleness tracking: set when the DuckDB staging layer holds changes the
+  # graph database has not materialized yet.
   graph_stale = Column(
     Boolean, default=False, nullable=False
   )  # True if DuckDB has changes not yet in graph database
@@ -168,8 +167,7 @@ class Graph(Model):
   )  # Reason for staleness (e.g., "file_deleted", "file_added")
   graph_stale_at = Column(DateTime, nullable=True)  # When graph became stale
 
-  # Additional metadata that might be useful
-  graph_metadata = Column(JSONB, nullable=True)  # Flexible field for future use
+  graph_metadata = Column(JSONB, nullable=True)  # Free-form extras
 
   # Per-graph taxonomy library pinning: {standard: version, ...}.
   # When NULL, the provisioner falls back to DEFAULT_TAXONOMY_PIN. Each
@@ -198,7 +196,7 @@ class Graph(Model):
     String, nullable=False, default=GraphStatus.ACTIVE.value
   )  # queued, provisioning, active, suspended, deprovisioned
 
-  # Soft-delete support (future: deprovisioned graphs)
+  # Soft-delete marker
   deleted_at = Column(DateTime, nullable=True)
 
   # Relationships
@@ -208,7 +206,6 @@ class Graph(Model):
   )
 
   def __repr__(self) -> str:
-    """String representation of the graph."""
     if bool(self.is_subgraph):
       return f"<Graph {self.graph_id!s} (subgraph of {self.parent_graph_id!s}) type={self.graph_type!s}>"
     return f"<Graph {self.graph_id!s} type={self.graph_type!s} extensions={self.schema_extensions!s}>"
@@ -224,15 +221,14 @@ class Graph(Model):
 
   @property
   def database_name(self) -> str:
-    """Get the actual database name on disk (using underscore notation)."""
+    """Database name on disk: ``{parent_graph_id}_{subgraph_name}`` for a
+    subgraph, the graph ID itself otherwise."""
     if (
       bool(self.is_subgraph)
       and self.parent_graph_id is not None
       and self.subgraph_name is not None
     ):
-      # Subgraph uses parent_id_subgraphname format
       return f"{self.parent_graph_id!s}_{self.subgraph_name!s}"
-    # Regular graph uses its ID directly
     return str(self.graph_id)
 
   @property
@@ -272,22 +268,18 @@ class Graph(Model):
     commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
-    # Validate graph_type
     if graph_type not in ["generic", "entity", "repository"]:
       raise ValueError("graph_type must be 'generic', 'entity', or 'repository'")
 
-    # Entity graphs should have base_schema
     if graph_type == "entity" and not base_schema:
       base_schema = "base"
 
-    # Validate subgraph parameters
     if is_subgraph:
       if not parent_graph_id or subgraph_index is None or not subgraph_name:
         raise ValueError(
           "Subgraphs require parent_graph_id, subgraph_index, and subgraph_name"
         )
 
-      # Validate subgraph_name (alphanumeric only, max 20 chars)
       import re
 
       if not re.match(r"^[a-zA-Z0-9]{1,20}$", subgraph_name):
@@ -336,16 +328,7 @@ class Graph(Model):
   def get_by_id(
     cls, graph_id: str, session: Session, include_deprovisioned: bool = False
   ) -> Optional["Graph"]:
-    """Get a graph by its ID.
-
-    Args:
-        graph_id: Graph ID
-        session: Database session
-        include_deprovisioned: If True, include deprovisioned graphs (default: False)
-
-    Returns:
-        Graph if found and not deprovisioned (unless include_deprovisioned=True)
-    """
+    """Get a graph by its ID, skipping deprovisioned graphs by default."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if not include_deprovisioned:
       query = query.filter(cls.status != GraphStatus.DEPROVISIONED.value)
@@ -402,19 +385,10 @@ class Graph(Model):
     return session.query(cls).filter(cls.graph_type == graph_type).all()
 
   def update_extensions(self, extensions: list[str], session: Session) -> None:
-    """
-    Update the schema extensions for this graph.
+    """Record the schema extensions (``["roboledger", "roboinvestor"]``).
 
-    This modifies the schema extensions list and commits the change to the database.
-    Note: This only updates the metadata - it does not modify the actual database schema.
-    Use SchemaManager.apply_extensions() to update the physical schema.
-
-    Args:
-        extensions: List of extension names (e.g., ["roboledger", "roboinvestor"])
-        session: Database session to use for the update
-
-    Raises:
-        SQLAlchemyError: If the database update fails
+    Metadata only — the physical graph schema is unchanged. Use
+    ``SchemaManager.apply_extensions()`` for that.
     """
     self.schema_extensions = extensions
     self.updated_at = datetime.now(UTC)
@@ -426,18 +400,10 @@ class Graph(Model):
       raise
 
   def delete(self, session: Session) -> None:
-    """
-    Delete the graph metadata from the database.
+    """Delete the Graph row and its ``GraphUser`` grants (cascade).
 
-    This removes the Graph record and all associated relationships (UserGraph entries)
-    via cascade delete. Note: This does NOT delete the actual graph database -
-    use GraphClientFactory to delete the physical database.
-
-    Args:
-        session: Database session to use for the deletion
-
-    Raises:
-        SQLAlchemyError: If the database deletion fails
+    The physical graph database survives — tear that down through
+    ``GraphClientFactory``.
     """
     session.delete(self)
     try:
@@ -513,27 +479,10 @@ class Graph(Model):
     graph_tier: GraphTier = GraphTier.LADYBUG_SHARED,
     graph_instance_id: str = "ladybug-shared-prod",
   ) -> "Graph":
-    """
-    Find or create a repository graph entry.
+    """Find or create a repository graph entry.
 
-    This is used by data pipelines (SEC, etc.) to ensure repository metadata
-    exists on first access.
-
-    Args:
-        graph_id: Unique identifier (e.g., "sec", "industry")
-        graph_name: Human-readable name
-        repository_type: Type of repository (matches graph_id typically)
-        session: Database session
-        base_schema: Base schema name (e.g., "base")
-        schema_extensions: Schema extensions (e.g., ["roboledger"])
-        data_source_type: Source type (e.g., "sec_edgar")
-        data_source_url: URL for data source
-        sync_frequency: Sync frequency ("daily", "weekly", etc.)
-        graph_tier: Infrastructure tier
-        graph_instance_id: Instance identifier
-
-    Returns:
-        Graph: Existing or newly created repository graph
+    Data pipelines (SEC and friends) call this so repository metadata exists on
+    first access.
     """
     existing = cls.get_by_id(graph_id, session)
     if existing:
@@ -574,21 +523,10 @@ class Graph(Model):
     error_message: str | None = None,
     session: Session = None,
   ) -> None:
-    """
-    Update repository sync status and timestamp.
+    """Update a shared repository's sync status.
 
-    This method is used by sync pipelines to track the synchronization state
-    of shared repositories. When status is "active", it records the sync timestamp
-    and clears any error messages. When status is "error", it stores the error message.
-
-    Args:
-        status: Sync status ("active", "syncing", "error", "stale")
-        error_message: Error message if status is "error", otherwise ignored
-        session: Optional database session to commit changes immediately
-
-    Raises:
-        ValueError: If called on a non-repository graph or invalid status
-        SQLAlchemyError: If the database update fails
+    ``active`` stamps ``last_sync_at`` and clears any prior error; ``error``
+    stores ``error_message``. Rejected on non-repository graphs.
     """
     VALID_STATUSES = {"active", "syncing", "error", "stale"}
 
@@ -658,24 +596,17 @@ class Graph(Model):
     return time_since_sync > sync_interval
 
   def mark_stale(self, session: Session, reason: str) -> None:
-    """Mark the graph as stale due to DuckDB changes not yet in graph database.
-
-    Args:
-      session: Database session for committing changes
-      reason: Reason for staleness (e.g., "file_deleted", "file_added")
-    """
+    """Mark the graph stale — DuckDB holds changes the graph lacks."""
     self.graph_stale = True
     self.graph_stale_reason = reason
     self.graph_stale_at = datetime.now(UTC)
     session.commit()
 
   def mark_fresh(self, session: Session) -> None:
-    """Mark the graph as fresh after sync with DuckDB.
+    """Mark the graph fresh after materializing from DuckDB.
 
-    Also records the materialization timestamp in graph_metadata.
-
-    Args:
-      session: Database session for committing changes
+    Stamps ``last_materialized_at`` and bumps ``materialization_count`` in
+    ``graph_metadata``.
     """
     self.graph_stale = False
     self.graph_stale_reason = None

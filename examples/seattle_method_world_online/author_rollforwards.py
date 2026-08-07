@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 """Author rollforward IBs for each World Online BS leaf with activity.
 
-Scaled-up sibling of
-``examples.seattle_method_demo.author_rollforwards``. Reads the World
-Online ``GeneralLedger.csv``, groups LineItems by BS-leaf concept
-(``userDefined2``), derives the unique business-event set per leaf
-(``tags`` column), and creates one ``block_type='rollforward'`` IB per BS
-leaf via ``create-information-block``.
+A rollforward explains a balance-sheet account's movement by decomposing it
+into the business events that produced it. This reads ``GeneralLedger.csv``,
+groups its lines by balance-sheet concept, derives the unique business-event
+set for each, and creates one ``block_type='rollforward'`` Information Block
+per leaf, with one attribution filter per distinct event.
 
-Each business event (including ``mini:OpeningBalance``) becomes one
-attribution filter. With the rollforward period spanning the opening
-date (12/31/2023) through the end of activity, the opening is a genuine
-$0 genesis, so:
+Because the opening balances ingest as ordinary tagged transactions rather
+than as an injected starting figure, the rollforward period can span the
+opening date itself. The account then starts from a true zero and the
+decomposition is complete:
 
     0 (genesis) + OpeningBalance + Σ(flow events) = ending balance
 
-and the residual is 0. The filter engine matches on
-``LineItem.flow_element_id``, so every business event used as a filter
-target must resolve to a loaded Element — ``mini:OpeningBalance`` is
-added as an extension concept in the load step precisely so it is not
-dropped here as a phantom.
+leaving a residual of 0 — which is the check that no posting went untagged.
+The filter engine matches on ``LineItem.flow_element_id``, so every event
+used as a filter target must resolve to a loaded Element; the load step adds
+``mini:OpeningBalance`` as an extension concept for exactly that reason,
+since it would otherwise be dropped here as unresolvable.
 
-Pre-condition: the load + ingest steps have run against this graph.
+Prerequisites: the load and ingest steps have run against this graph.
 
-Usage:
+Run it (the orchestrator runs this as step 6):
     uv run python -m examples.seattle_method_world_online.author_rollforwards <graph_id>
     uv run python -m examples.seattle_method_world_online.author_rollforwards <graph_id> --dry-run
 """
@@ -40,11 +39,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "local" / "datasets" / "seattle_method_world_online"
 GL_PATH = DATA_DIR / "GeneralLedger.csv"
 
-# The balance-sheet leaves with activity in the World Online dataset
-# (per SummaryOfTransactions.csv). Note: no AccruedExpenses in this
-# dataset — unlike Charlie's 14-JE lemonade stand. RetainedEarnings is
-# also intentionally absent: it's auto-derived from NetIncomeLoss by the
-# Report architecture, so authoring a manual rollforward would double-count.
+# The balance-sheet leaves with activity in this dataset. It has no accrued
+# expenses, unlike the 14-JE lemonade stand. Retained earnings is also absent
+# by design: the Report architecture derives it from net income, so a manual
+# rollforward over it would double-count.
 BS_LEAVES: tuple[str, ...] = (
   "mini:CashAndCashEquivalents",
   "mini:Receivables",
@@ -109,10 +107,9 @@ def collect_events_per_bs_leaf(
 ) -> OrderedDict[str, list[str]]:
   """Return ``{bs_qname: [unique_business_event_qnames_in_first-seen order]}``.
 
-  Walks GeneralLedger.csv; for each line whose ``userDefined2`` is a BS
-  leaf, records its ``tags`` (business-event) value. First-seen order is
-  preserved so the rollforward filters list in the order events first
-  appear in the GL stream (opening balance first).
+  For each GL line whose line-item concept is a balance-sheet leaf, records
+  its business-event tag. First-seen order is preserved, so the filters read
+  in the order events appear in the ledger — opening balance first.
   """
   events: OrderedDict[str, list[str]] = OrderedDict((bs, []) for bs in BS_LEAVES)
   seen: dict[str, set[str]] = {bs: set() for bs in BS_LEAVES}
@@ -180,10 +177,9 @@ def author_rollforwards(
     print(f"\nDry run — would create {len(active)} rollforward IB(s).")
     return len(active), []
 
-  # Pre-filter target qnames against loaded mini Elements — a phantom
-  # target (in the GL but not a loaded Element) would crash the create
-  # handler. mini:OpeningBalance is loaded as an extension concept, so
-  # it survives this filter.
+  # Filter targets against the loaded mini Elements: a target present in the
+  # GL but not on the graph would crash the create handler.
+  # mini:OpeningBalance is loaded as an extension concept, so it survives.
   client = _get_ledger_client()
   known_qnames = _build_known_mini_qname_set(client, graph_id)
 

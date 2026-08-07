@@ -1,9 +1,7 @@
 """Taxonomy model — base ontology concept.
 
 Lives at the extensions top level because taxonomies are universal across
-the ontology (any extension can adopt a taxonomy via EntityTaxonomy).
-Historically lived under roboledger because roboledger was the first
-consumer.
+the ontology — any extension can adopt one via EntityTaxonomy.
 
 Defines named taxonomy collections (Chart of Accounts, US GAAP Reporting,
 CoA→GAAP Mapping, entity extensions). Tenant-scoped — per-graph tables

@@ -1,17 +1,19 @@
+"""
+Flatten HTML documents to text that keeps the structure downstream steps need.
+"""
+
 import os
 
 from bs4 import BeautifulSoup
 
 
 def extract_structured_content(html_content):
-  """
-  Process HTML content to extract structured text while preserving formatting
+  """Render HTML `<body>` as text, keeping headings and table layout.
 
-  Args:
-      html_content: Raw HTML content as string
-
-  Returns:
-      structured_text: A formatted text representation of the HTML
+  Headings become Markdown-style `#` lines and tables are fenced by
+  `--- TABLE START/END ---` with pipe-separated cells, so financial tables stay
+  readable as rows and columns instead of collapsing into a run of numbers.
+  Short div and span fragments are dropped as boilerplate.
   """
   # Parse HTML content
   soup = BeautifulSoup(html_content, "html.parser")
@@ -96,16 +98,10 @@ def extract_structured_content(html_content):
 
 
 def save_structured_content(html_content, url, output_dir="./data/input"):
-  """
-  Extract structured content from HTML and save to a file
+  """Write the structured text to a `.txt` file named after `url`'s last segment.
 
-  Args:
-      html_content: Raw HTML content as string
-      url: Source URL (used to generate filename)
-      output_dir: Directory to save the file
-
-  Returns:
-      tuple: (output_path, structured_text, plain_text)
+  Returns `(output_path, structured_text, plain_text)`, where `plain_text` is
+  the same document with all structure stripped.
   """
   # Parse HTML and extract structured content
   structured_text = extract_structured_content(html_content)

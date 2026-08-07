@@ -21,7 +21,11 @@ class OrgType(str, Enum):
 
 
 class Org(Model):
-  """Organization model for grouping users and managing billing."""
+  """The billing and ownership boundary: users, graphs, subscriptions.
+
+  Deletion is soft (``deleted_at``) so billing history survives; the default
+  lookups filter deleted rows out.
+  """
 
   __tablename__ = "orgs"
 
@@ -53,16 +57,7 @@ class Org(Model):
   def get_by_id(
     cls, org_id: str, session: Session, include_deleted: bool = False
   ) -> Optional["Org"]:
-    """Get organization by ID.
-
-    Args:
-        org_id: Organization ID
-        session: Database session
-        include_deleted: If True, include soft-deleted orgs (default: False)
-
-    Returns:
-        Organization if found and not deleted (unless include_deleted=True)
-    """
+    """Get organization by ID, skipping soft-deleted rows by default."""
     query = session.query(cls).filter(cls.id == org_id)
     if not include_deleted:
       query = query.filter(cls.deleted_at.is_(None))
@@ -94,23 +89,12 @@ class Org(Model):
   def create_personal_org_for_user(
     cls, user_id: str, user_name: str, session: Session
   ) -> "Org":
-    """Create a personal organization for a new user.
+    """Create a personal org with the user as OWNER.
 
-    RoboSystems is an org-centric platform - all resources (graphs, subscriptions,
-    billing) belong to organizations, not individual users. When a user registers,
-    we automatically create a personal organization for them as the foundation.
-
-    Users can later upgrade their personal org to a team or enterprise organization
-    by inviting members and changing the org type. This provides a smooth onboarding
-    experience while maintaining the org-centric architecture.
-
-    Args:
-        user_id: The user ID who will be the owner
-        user_name: User's name for workspace naming
-        session: Database session
-
-    Returns:
-        The created personal organization with the user as OWNER
+    Every resource — graphs, subscriptions, billing — hangs off an org rather
+    than a user, so registration has to mint one. A personal org becomes a team
+    or enterprise org by inviting members and changing ``org_type``; no new org
+    is created.
     """
     org = cls.create(
       name="My Organization",
@@ -140,15 +124,7 @@ class Org(Model):
 
   @classmethod
   def get_all(cls, session: Session, include_deleted: bool = False) -> Sequence["Org"]:
-    """Get all organizations.
-
-    Args:
-        session: Database session
-        include_deleted: If True, include soft-deleted orgs (default: False)
-
-    Returns:
-        List of organizations (excluding deleted unless include_deleted=True)
-    """
+    """Get all organizations, skipping soft-deleted rows by default."""
     query = session.query(cls)
     if not include_deleted:
       query = query.filter(cls.deleted_at.is_(None))
@@ -168,13 +144,10 @@ class Org(Model):
       raise
 
   def soft_delete(self, session: Session) -> None:
-    """Soft-delete the organization.
+    """Soft-delete the organization, leaving its data in place.
 
-    Marks the organization as deleted without removing data.
-    Safety checks prevent deletion of orgs with active subscriptions.
-
-    Raises:
-        ValueError: If organization has active subscriptions
+    Raises ``ValueError`` if any subscription is still active, pending, or
+    provisioning — deleting the org would strand the billing relationship.
     """
     from robosystems.models.core.billing import BillingSubscription
 
@@ -222,10 +195,10 @@ class Org(Model):
       raise
 
   def delete(self, session: Session) -> None:
-    """Hard delete the organization (DANGEROUS - use soft_delete instead).
+    """Hard-delete the org and everything cascading off it.
 
-    This permanently removes the organization and all related data.
-    Only use for testing or with extreme caution in production.
+    Prefer ``soft_delete``; this bypasses the active-subscription guard and is
+    irreversible.
     """
     session.delete(self)
     try:
