@@ -1480,7 +1480,9 @@ class ExtensionsMaterializer:
       wip_exists = await client.database_exists(wip_id)
       if wip_exists:
         logger.info(f"Cleaning up leftover WIP database {wip_id}")
-        await client.delete_database(wip_id, preserve_duckdb=True)
+        await client.delete_database(
+          wip_id, preserve_duckdb=True, lock_token=lock.token if lock else None
+        )
 
       # Step 2: Create fresh WIP database with schema. Mark it is_subgraph so
       # its creation bypasses the per-node max_databases cap — on a dedicated
@@ -1520,7 +1522,9 @@ class ExtensionsMaterializer:
           f"({len(result.errors)} errors), abandoning WIP (active graph untouched)"
         )
         try:
-          await client.delete_database(wip_id, preserve_duckdb=True)
+          await client.delete_database(
+            wip_id, preserve_duckdb=True, lock_token=lock.token if lock else None
+          )
         except Exception as cleanup_err:
           logger.warning(f"Failed to clean up WIP {wip_id} after errors: {cleanup_err}")
 
@@ -1530,7 +1534,9 @@ class ExtensionsMaterializer:
       try:
         wip_exists = await client.database_exists(wip_id)
         if wip_exists:
-          await client.delete_database(wip_id, preserve_duckdb=True)
+          await client.delete_database(
+            wip_id, preserve_duckdb=True, lock_token=lock.token if lock else None
+          )
       except Exception as cleanup_err:
         logger.warning(
           f"Failed to clean up WIP {wip_id} after blue-green failure: {cleanup_err}"

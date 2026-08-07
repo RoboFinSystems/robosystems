@@ -776,7 +776,11 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def delete_database(
-    self, graph_id: str, preserve_duckdb: bool = False, staging_only: bool = False
+    self,
+    graph_id: str,
+    preserve_duckdb: bool = False,
+    staging_only: bool = False,
+    lock_token: str | None = None,
   ) -> dict[str, Any]:
     """Delete a database.
 
@@ -786,6 +790,11 @@ class GraphClient(BaseGraphClient):
             Useful when you want to rebuild LadybugDB from existing staging.
         staging_only: If True, delete only DuckDB staging, preserve LadybugDB graph.
             Useful for re-staging with different settings.
+        lock_token: Deleting a `-wip`/`-prev` name is guarded by the base's
+            materialization lock. A caller that already holds it (the
+            materialize flow cleaning up its own WIP) passes the token so the
+            endpoint doesn't re-acquire — without it, that delete would 409
+            against the caller's own lock.
 
     Note: preserve_duckdb and staging_only are mutually exclusive.
     """
@@ -794,7 +803,15 @@ class GraphClient(BaseGraphClient):
       params["preserve_duckdb"] = "true"
     if staging_only:
       params["staging_only"] = "true"
-    response = await self._request("DELETE", f"/databases/{graph_id}", params=params)
+    headers: dict[str, str] = {}
+    if lock_token:
+      headers["X-Materialization-Lock-Token"] = lock_token
+    response = await self._request(
+      "DELETE",
+      f"/databases/{graph_id}",
+      params=params,
+      headers=headers or None,
+    )
     return response.json()
 
   # =========================================================================

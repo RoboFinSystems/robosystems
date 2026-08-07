@@ -87,6 +87,10 @@ from robosystems.dagster.jobs.shared_repository import (
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
 )
+from robosystems.dagster.jobs.storage_reclaim import (
+  daily_storage_reclaim_job,
+  daily_storage_reclaim_schedule,
+)
 from robosystems.dagster.resources import (
   DatabaseResource,
   GraphResource,
@@ -204,6 +208,7 @@ all_jobs = [
   invoice_subscription_renewal_job,
   # Platform: Infrastructure
   daily_backup_cleanup_job,
+  daily_storage_reclaim_job,
   hourly_auth_cleanup_job,
   weekly_health_check_job,
   instance_health_check_job,
@@ -245,6 +250,7 @@ all_schedules = [
   monthly_usage_report_schedule,
   # Platform: Infrastructure
   daily_backup_cleanup_schedule,
+  daily_storage_reclaim_schedule,
   hourly_auth_cleanup_schedule,
   weekly_health_check_schedule,
   instance_health_check_schedule,

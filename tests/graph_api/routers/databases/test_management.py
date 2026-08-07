@@ -369,3 +369,105 @@ class TestDatabaseManagementRouter:
     assert data["graph_id"] == "unhealthy_db"
     assert data["is_healthy"] is False
     assert data["size_bytes"] == 1024000000
+
+
+class TestTransientDeleteLockGuard:
+  """Deleting a `-wip`/`-prev` artifact must not race an in-flight build.
+
+  The route acquires the base's materialization lock (the same lock the
+  build holds for its whole run) before unlinking, and honours the
+  X-Materialization-Lock-Token passthrough so the materialize flow's own
+  cleanup deletes don't 409 against the lock it already holds.
+  """
+
+  @pytest.fixture
+  def client(self):
+    app = create_app()
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    mock_service = MagicMock()
+    mock_service.read_only = False
+    mock_service.node_type = NodeType.WRITER
+    mock_service.db_manager.delete_database.return_value = None
+    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
+    return TestClient(app)
+
+  def _service(self, client):
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    return client.app.dependency_overrides[get_ladybug_service]()
+
+  @staticmethod
+  def _lock_mock(acquire_result: bool) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    lock_cls = MagicMock()
+    lock = lock_cls.return_value
+    lock.acquire = AsyncMock(return_value=acquire_result)
+    lock.release = AsyncMock()
+    lock.acquired = acquire_result
+    return lock_cls
+
+  def test_wip_delete_refused_while_build_holds_lock(self, client):
+    """A live build's WIP cannot be deleted out from under it."""
+    lock_cls = self._lock_mock(acquire_result=False)
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5-wip")
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert "materialization" in response.json()["detail"].lower()
+    self._service(client).db_manager.delete_database.assert_not_called()
+
+  def test_wip_delete_proceeds_when_no_build_running(self, client):
+    lock_cls = self._lock_mock(acquire_result=True)
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5-wip")
+
+    assert response.status_code == status.HTTP_200_OK
+    self._service(client).db_manager.delete_database.assert_called_once_with(
+      "kg1a2b3c4d5-wip", preserve_duckdb=False
+    )
+    lock_cls.return_value.release.assert_awaited_once()
+
+  def test_lock_token_passthrough_skips_acquisition(self, client):
+    """The materialize flow deletes its own WIP while holding the lock —
+    its token must let the delete through without a second acquire."""
+    lock_cls = self._lock_mock(acquire_result=False)
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete(
+        "/databases/kg1a2b3c4d5-wip",
+        headers={"X-Materialization-Lock-Token": "tok-123"},
+      )
+
+    assert response.status_code == status.HTTP_200_OK
+    lock_cls.assert_not_called()
+    self._service(client).db_manager.delete_database.assert_called_once()
+
+  def test_regular_delete_never_touches_the_lock(self, client):
+    lock_cls = self._lock_mock(acquire_result=False)
+    with patch(
+      "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+      lock_cls,
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5")
+
+    assert response.status_code == status.HTTP_200_OK
+    lock_cls.assert_not_called()
