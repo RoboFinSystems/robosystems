@@ -69,25 +69,27 @@ class TestSubgraphToolProfile:
     """Every profile name must be a real tool, or the allowlist silently lies.
 
     A misspelled entry withholds a tool it was meant to keep, and nothing
-    fails — the filter just quietly drops it. Two entries are deliberately
-    absent from the advertised list and must stay allowed anyway:
-
-    - `get-graph-info` registers outside this manager.
-    - `switch-workspace` is the retired name of `resolve-subgraph`, still
-      dispatched so older prompts and bridges keep working; it is never
-      advertised, so it can't appear here.
+    fails — the filter just quietly drops it. `get-graph-info` is the one
+    deliberate exception: it registers outside this manager and is listed
+    only so the call_tool guard admits it.
     """
     real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
     unmatched = SUBGRAPH_TOOL_PROFILE - real
-    assert unmatched == {"get-graph-info", "switch-workspace"}, (
+    assert unmatched == {"get-graph-info"}, (
       f"profile names matching no real tool: {sorted(unmatched)}"
     )
 
-  def test_the_retired_name_still_dispatches(self, all_flags_on):
-    """The rename must not strand callers holding the old tool name."""
+  def test_the_retired_name_is_gone(self, all_flags_on):
+    """`switch-workspace` must not resurface — not advertised, not dispatched.
+
+    It was renamed rather than aliased. A tool list is re-fetched on every
+    connect, so callers pick up `resolve-subgraph` immediately, and an
+    unknown-tool error beats a dead name that outlives everyone's memory of
+    what it did.
+    """
     names = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
     assert "resolve-subgraph" in names
-    assert "switch-workspace" not in names, "the retired name must not be advertised"
+    assert "switch-workspace" not in names
 
   def test_the_surface_that_makes_a_subgraph_useful_survives(self, all_flags_on):
     names = {t["name"] for t in _tools_for(SUBGRAPH).get_tool_definitions_as_dict()}

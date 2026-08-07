@@ -225,7 +225,7 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     sess.close()
 
 
-# On the npx bridge the retired `switch-workspace` mutated client process
+# The npx bridge's own client-side workspace tool mutates client process
 # state. A remote connector has no client process and is URL-anchored to one
 # graph, so the remote surface answers with an address instead — which is why
 # the tool is now named for resolving rather than switching.
@@ -257,8 +257,7 @@ def _remote_resolve_subgraph(graph_id: str, arguments: dict[str, Any]) -> str:
   """
   from robosystems.config import env
 
-  # `workspace_id` is the retired parameter name, still accepted.
-  target = str(arguments.get("subgraph") or arguments.get("workspace_id") or "").strip()
+  target = str(arguments.get("subgraph") or "").strip()
   parent = graph_id.split("_")[0]
   if not target:
     return "Error: subgraph is required (an id, a short name, or 'primary')."
@@ -380,7 +379,7 @@ async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any
     # statement by the StatementKernel and can carry writes on tenant graphs.
     if tool["name"] in READ_ONLY_MCP_TOOLS:
       entry["annotations"] = {"readOnlyHint": True}
-    if tool["name"] in ("resolve-subgraph", "switch-workspace"):
+    if tool["name"] == "resolve-subgraph":
       entry["description"] = _REMOTE_RESOLVE_SUBGRAPH_DESCRIPTION
     mcp_tools.append(entry)
 
@@ -828,9 +827,8 @@ async def _handle_tools_call(
   # resolve-subgraph never reaches the tool layer on this transport: the
   # connector is URL-anchored (a subgraph is another connector URL), so the
   # answer is the target's URL. Runs after the gauntlet — access to THIS
-  # graph is still required to resolve its family's URLs. The retired name
-  # stays accepted so older prompts and bridges keep working.
-  if name in ("resolve-subgraph", "switch-workspace"):
+  # graph is still required to resolve its family's URLs.
+  if name == "resolve-subgraph":
     return _rpc_result(
       msg_id,
       _to_tool_result(

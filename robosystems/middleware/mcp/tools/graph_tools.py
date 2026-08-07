@@ -917,7 +917,7 @@ class SyncConnectionTool:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# resolve-subgraph (was switch-workspace)
+# resolve-subgraph
 # ══════════════════════════════════════════════════════════════════════════
 
 
@@ -934,8 +934,11 @@ class ResolveSubgraphTool:
   calling it a workspace invited exactly the session-switching model the URL
   anchor rules out.
 
-  The retired wire name `switch-workspace` stays accepted at dispatch (never
-  advertised) so saved prompts and older bridges keep working.
+  The old name is gone rather than aliased. A tool list is re-fetched on
+  every connect, so a caller discovers the new name immediately, and an
+  unknown-tool error is louder than a silent alias — the permission files
+  that still allowed a `list-workspaces` tool the server never had are the
+  argument against keeping dead names around.
   """
 
   def __init__(self, graph_client):

@@ -99,7 +99,6 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
     # Navigation back out
     "list-subgraphs",
     "resolve-subgraph",
-    "switch-workspace",  # retired alias, still dispatched
   }
 )
 
@@ -1091,10 +1090,8 @@ class GraphMCPTools:
         result = await self.list_subgraphs_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # `switch-workspace` is the retired name, still dispatched so saved
-      # prompts and older bridge versions keep working after the rename.
-      elif name in ("resolve-subgraph", "switch-workspace"):
-        # Client-side sentinel — the MCP client should intercept locally.
+      elif name == "resolve-subgraph":
+        # Answered by the remote transport, which knows the connector URL.
         if self.resolve_subgraph_tool is None:
           raise ValueError(
             "resolve-subgraph tool is not available. "
