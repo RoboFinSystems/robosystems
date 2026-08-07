@@ -450,6 +450,14 @@ Resources:
               Value: "postgres"
             - Name: DAGSTER_POSTGRES_DB
               Value: dagster
+            # Address of the Dagster webserver's GraphQL API. Without these the
+            # worker falls back to env.py's compose default ("dagster-webserver"),
+            # which doesn't resolve in the VPC, and every job the worker submits
+            # (backup, restore, materialize) fails at DNS resolution.
+            - Name: DAGSTER_HOST
+              Value: !Sub webserver.dagster.${Environment}.robosystems.local
+            - Name: DAGSTER_PORT
+              Value: "3000"
           Secrets:
             - Name: POSTGRES_PASSWORD
               ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
