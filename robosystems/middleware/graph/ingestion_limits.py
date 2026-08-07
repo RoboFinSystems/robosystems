@@ -195,7 +195,7 @@ class IngestionLimitChecker:
         "items": [],
       }
 
-    items = cls._label_orphans(db, graph_id, breakdown.get("items", []))
+    items = cls.label_orphans(db, graph_id, breakdown.get("items", []))
     total_bytes = breakdown.get("total_bytes", 0)
 
     # Roll the itemized view up per database for the summary shape, so a
@@ -274,7 +274,7 @@ class IngestionLimitChecker:
     }
 
   @classmethod
-  def _label_orphans(
+  def label_orphans(
     cls, db: Session, graph_id: str, items: list[dict[str, Any]]
   ) -> list[dict[str, Any]]:
     """Re-label items belonging to subgraphs the graph registry has no row for.

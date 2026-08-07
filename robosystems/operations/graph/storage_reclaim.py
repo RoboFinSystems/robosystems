@@ -15,7 +15,7 @@ them:
   the registry, which is precisely what no longer knows they exist.
 
 Labelling reuses the same registry pass the storage breakdown uses
-(`IngestionLimitChecker._label_orphans`), so this deletes exactly what
+(`IngestionLimitChecker.label_orphans`), so this deletes exactly what
 ``/usage`` reports as `orphan`/`transient` — never anything the breakdown
 still attributes to a live database. A registry read failure leaves items
 unlabelled, so orphans are then *not* deleted: the sweep fails safe.
@@ -61,7 +61,7 @@ async def reclaim_instance_storage(
   client = await get_graph_client(graph_id=graph_id, operation_type="write")
   try:
     breakdown = await client.get_storage_breakdown(graph_id)
-    items = IngestionLimitChecker._label_orphans(
+    items = IngestionLimitChecker.label_orphans(
       db, graph_id, breakdown.get("items", [])
     )
 
