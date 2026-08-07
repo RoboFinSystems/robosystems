@@ -38,12 +38,17 @@ async def perform_restore(
   s3_bucket: str,
   s3_key: str,
   force_overwrite: bool,
+  create_system_backup: bool = True,
   connection_pool=None,
 ) -> None:
   """Run the restore in the background, updating task status for monitoring.
 
   ``connection_pool`` is the LadybugDB pool, needed to close open connections
   before the database files are replaced.
+
+  ``create_system_backup`` snapshots the existing database to S3 before it is
+  overwritten; a failed snapshot aborts the restore rather than leaving the
+  old data unrecoverable.
 
   Encryption and compression are read from the backup's own S3 metadata, so
   the caller does not describe them.
@@ -101,6 +106,7 @@ async def perform_restore(
       create_new_database=False,
       drop_existing=False,
       verify_after_restore=True,
+      create_system_backup=create_system_backup,
       progress_tracker=None,
     )
 
@@ -145,15 +151,16 @@ async def restore_database(
   This endpoint restores a complete LadybugDB database from S3:
   - Downloads the backup from S3
   - Decrypts and decompresses according to the backup's stored metadata
+  - Snapshots the existing database to S3 first, unless
+    ``create_system_backup`` is false; a failed snapshot aborts the restore
   - Replaces the existing database, which requires ``force_overwrite``
   - Runs asynchronously with progress tracking
 
   The restore operation runs as a background task and can be monitored
   using the returned task_id.
 
-  ``create_system_backup`` is accepted for wire compatibility but no
-  pre-restore snapshot is taken; ``encrypted`` and ``compressed`` are
-  likewise inert, since the backup's own metadata governs both.
+  ``encrypted`` and ``compressed`` are accepted for wire compatibility but
+  inert: the backup's own stored metadata governs both.
   """
   # Validate graph_id to prevent path injection
   graph_id = validate_database_name(graph_id)
@@ -192,6 +199,7 @@ async def restore_database(
     s3_bucket=s3_bucket,
     s3_key=s3_key,
     force_overwrite=force_overwrite,
+    create_system_backup=create_system_backup and database_exists,
     connection_pool=ladybug_service.db_manager.connection_pool,
   )
 
@@ -203,8 +211,7 @@ async def restore_database(
     message=f"Restore task started for database {graph_id}",
     database=graph_id,
     monitor_url=f"/tasks/{task_id}/monitor",
-    # No pre-restore snapshot is taken, so this cannot claim otherwise.
-    system_backup_created=False,
+    system_backup_created=create_system_backup and database_exists,
   )
 
 

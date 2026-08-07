@@ -95,6 +95,10 @@ class RestoreJob:
   create_new_database: bool = True
   drop_existing: bool = False
   verify_after_restore: bool = True
+  # Snapshot the existing database to S3 before overwriting it. Defaults on:
+  # a restore is destructive, and a failed snapshot aborts it rather than
+  # leaving the old data unrecoverable.
+  create_system_backup: bool = True
   progress_tracker: Any | None = None
 
   def __post_init__(self):
@@ -453,7 +457,11 @@ class BackupManager:
         await self._ensure_database_exists(graph_id)
 
       await self._import_backup_data(
-        graph_id, backup_data, restore_job.backup_format, restore_job.progress_tracker
+        graph_id,
+        backup_data,
+        restore_job.backup_format,
+        restore_job.progress_tracker,
+        restore_job.create_system_backup,
       )
 
       if restore_job.verify_after_restore:
@@ -946,8 +954,13 @@ class BackupManager:
     backup_data: bytes,
     backup_format: BackupFormat,
     progress_tracker=None,
+    create_system_backup: bool = True,
   ) -> None:
-    """Dispatch to the per-format importer."""
+    """Dispatch to the per-format importer.
+
+    ``create_system_backup`` only reaches the full-dump path — it is the only
+    importer that overwrites the database in place.
+    """
     if backup_format == BackupFormat.CSV:
       await self._import_from_csv(graph_id, backup_data, progress_tracker)
     elif backup_format == BackupFormat.JSON:
@@ -955,7 +968,9 @@ class BackupManager:
     elif backup_format == BackupFormat.PARQUET:
       await self._import_from_parquet(graph_id, backup_data, progress_tracker)
     elif backup_format == BackupFormat.FULL_DUMP:
-      await self._import_full_dump(graph_id, backup_data, progress_tracker)
+      await self._import_full_dump(
+        graph_id, backup_data, progress_tracker, create_system_backup
+      )
     else:
       raise ValueError(f"Unsupported backup format: {backup_format}")
 

@@ -1350,10 +1350,11 @@ class GraphClient(BaseGraphClient):
   ) -> dict[str, Any]:
     """Start a restore from an S3 backup; returns task_id and monitor_url.
 
-    ``force_overwrite`` is required to restore over an existing database.
-    ``create_system_backup``, ``encrypted`` and ``compressed`` are accepted
-    for wire compatibility but inert: no pre-restore snapshot is taken, and
-    the backup's own stored metadata governs decryption and decompression.
+    ``force_overwrite`` is required to restore over an existing database, and
+    ``create_system_backup`` snapshots that database to S3 first — a failed
+    snapshot aborts the restore. ``encrypted`` and ``compressed`` are accepted
+    for wire compatibility but inert: the backup's own stored metadata governs
+    decryption and decompression.
     """
     data = {
       "s3_bucket": s3_bucket,

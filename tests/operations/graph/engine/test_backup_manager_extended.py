@@ -674,9 +674,36 @@ class TestRestoreBackup:
       mock_val.assert_called_once_with(b"backup_bytes", metadata)
       mock_ensure.assert_called_once_with("test_graph")
       mock_import.assert_called_once_with(
-        "test_graph", b"backup_bytes", BackupFormat.FULL_DUMP, None
+        "test_graph", b"backup_bytes", BackupFormat.FULL_DUMP, None, True
       )
       mock_verify.assert_called_once_with("test_graph", metadata)
+
+  @pytest.mark.asyncio
+  async def test_restore_threads_system_backup_opt_out(self, manager, s3_adapter):
+    """`create_system_backup=False` must reach the importer.
+
+    Only `_import_full_dump` snapshots the database before overwriting it, so
+    a job that drops the flag here would force a snapshot the caller declined.
+    """
+    job, _ = self._make_restore_job(create_system_backup=False)
+
+    s3_adapter.download_backup_by_key = AsyncMock(return_value=b"backup_bytes")
+
+    with (
+      patch.object(
+        manager, "_validate_backup_integrity", new_callable=AsyncMock
+      ) as mock_val,
+      patch.object(manager, "_ensure_database_exists", new_callable=AsyncMock),
+      patch.object(
+        manager, "_import_backup_data", new_callable=AsyncMock
+      ) as mock_import,
+      patch.object(manager, "_verify_restore", new_callable=AsyncMock) as mock_verify,
+    ):
+      mock_val.return_value = True
+      mock_verify.return_value = True
+
+      assert await manager.restore_backup(job) is True
+      assert mock_import.call_args.args[4] is False
 
   @pytest.mark.asyncio
   async def test_restore_with_drop_existing(self, manager, s3_adapter):
@@ -1623,7 +1650,17 @@ class TestImportBackupData:
       await manager._import_backup_data(
         "g1", b"dump_data", BackupFormat.FULL_DUMP, None
       )
-      mock_imp.assert_called_once_with("g1", b"dump_data", None)
+      mock_imp.assert_called_once_with("g1", b"dump_data", None, True)
+
+  @pytest.mark.asyncio
+  async def test_full_dump_receives_system_backup_flag(self, manager):
+    """Full dump is the only importer that overwrites in place, so it is the
+    only one that takes the snapshot decision."""
+    with patch.object(manager, "_import_full_dump", new_callable=AsyncMock) as mock_imp:
+      await manager._import_backup_data(
+        "g1", b"dump_data", BackupFormat.FULL_DUMP, None, False
+      )
+      mock_imp.assert_called_once_with("g1", b"dump_data", None, False)
 
   @pytest.mark.asyncio
   async def test_raises_for_unsupported_format(self, manager):

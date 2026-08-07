@@ -171,10 +171,7 @@ def test_restore_initiates_task_with_metadata(restore_client):
   assert payload["task_id"] == "task-456"
   assert payload["database"] == "graph1"
   assert payload["status"] == "initiated"
-  # `perform_restore` takes no pre-restore snapshot, so the response must not
-  # claim one — even when the caller asks for it. The request flag is still
-  # recorded in task metadata below.
-  assert payload["system_backup_created"] is False
+  assert payload["system_backup_created"] is True
 
   client.task_manager.create_task.assert_awaited_once()
   _, kwargs = client.task_manager.create_task.await_args
@@ -186,6 +183,33 @@ def test_restore_initiates_task_with_metadata(restore_client):
   assert kwargs["metadata"]["force_overwrite"] is True
 
   client.task_manager.fail_task.assert_not_awaited()
+
+
+def test_restore_passes_system_backup_choice_to_background_task(restore_client):
+  """The caller's create_system_backup choice must reach `perform_restore`.
+
+  It rides RestoreJob into `_import_full_dump`, which is the only thing that
+  snapshots the database before overwriting it. Dropping the flag here would
+  silently force a snapshot the caller opted out of.
+  """
+  cluster = FakeClusterService(read_only=False, databases=["graph1"])
+  client = restore_client(cluster)
+
+  response = client.post(
+    "/databases/graph1/restore",
+    data={
+      "s3_bucket": "test-bucket",
+      "s3_key": "backups/graph1.zip",
+      "create_system_backup": "false",
+      "force_overwrite": "true",
+    },
+  )
+
+  assert response.status_code == 200
+  assert response.json()["system_backup_created"] is False
+
+  _, kwargs = client.perform_restore_mock.call_args
+  assert kwargs["create_system_backup"] is False
 
 
 @pytest.mark.asyncio

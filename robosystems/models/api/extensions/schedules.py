@@ -179,29 +179,6 @@ class PromoteObligationsResponse(BaseModel):
   )
 
 
-class ManualLineItemRequest(BaseModel):
-  element_id: str = Field(..., description="Element ID (chart of accounts)")
-  debit_amount: int = Field(0, ge=0, description="Debit in cents")
-  credit_amount: int = Field(0, ge=0, description="Credit in cents")
-  description: str | None = None
-
-
-class CreateManualClosingEntryRequest(BaseModel):
-  posting_date: date = Field(..., description="Posting date for the entry")
-  memo: str = Field(
-    ...,
-    min_length=1,
-    description="Memo describing the business event (e.g., 'Sale of computer to Vendor X on 3/15')",
-  )
-  line_items: list[ManualLineItemRequest] = Field(
-    ..., min_length=1, description="Line items; must balance (total DR = total CR)"
-  )
-  entry_type: EntryType = Field(
-    "closing",
-    description="Entry type: 'closing' (default), 'adjusting', 'standard', 'reversing'",
-  )
-
-
 # ── Responses ──────────────────────────────────────────────────────────────
 
 
@@ -237,40 +214,6 @@ class PeriodCloseStatusResponse(BaseModel):
   schedules: list[PeriodCloseItemResponse]
   total_draft: int
   total_posted: int
-
-
-class ClosingEntryResponse(BaseModel):
-  outcome: str = Field(
-    ...,
-    description=(
-      "What the idempotent call did: "
-      "'created' (new draft), 'unchanged' (existing draft still matches), "
-      "'regenerated' (stale draft replaced with fresh one), "
-      "'removed' (stale draft deleted; schedule no longer covers this period), "
-      "'skipped' (nothing to do — no draft and no in-scope fact)."
-    ),
-  )
-  entry_id: str | None = Field(
-    None, description="The draft entry ID. None for 'removed' and 'skipped' outcomes."
-  )
-  status: str | None = Field(
-    None, description="Entry status (always 'draft' when present)."
-  )
-  posting_date: date | None = None
-  memo: str | None = None
-  debit_element_id: str | None = None
-  credit_element_id: str | None = None
-  amount: float | None = Field(
-    None, description="Entry amount in dollars. None for 'removed' and 'skipped'."
-  )
-  reason: str | None = Field(
-    None,
-    description="Explanation for 'removed' and 'skipped' outcomes.",
-  )
-  reversal: ClosingEntryResponse | None = None
-
-
-ClosingEntryResponse.model_rebuild()
 
 
 class ScheduleCreatedResponse(BaseModel):
