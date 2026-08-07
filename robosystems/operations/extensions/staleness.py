@@ -30,6 +30,10 @@ def mark_graph_stale(graph_id: str, reason: str) -> None:
           - report_generated
           - transaction_created
           - entity_updated
+          - period_closed / period_reopened
+          - event_block_created / event_block_updated / event_published
+          - journal_entry_updated / journal_entry_deleted
+          - obligations_promoted
   """
   try:
     session = SessionFactory()

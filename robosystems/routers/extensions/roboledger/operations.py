@@ -1459,6 +1459,7 @@ create_event_block_op = _registrar.register(
     # Source validation resolves the graph's registered Connections
     # (platform DB) — the tenant session alone doesn't carry the graph id.
     requires_graph_id=True,
+    mark_stale_reason="event_block_created",
   )
 )
 
@@ -1489,6 +1490,7 @@ update_event_block_op = _registrar.register(
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
     },
+    mark_stale_reason="event_block_updated",
   )
 )
 
@@ -1528,6 +1530,7 @@ execute_event_block_op = _registrar.register(
       QBAuthFailedError: 401,
       ValueError: 422,
     },
+    mark_stale_reason="event_published",
   )
 )
 
@@ -1627,6 +1630,7 @@ update_journal_entry_op = _registrar.register(
       ValueError: 422,
     },
     requires_created_by=False,
+    mark_stale_reason="journal_entry_updated",
   )
 )
 
@@ -1646,6 +1650,7 @@ delete_journal_entry_op = _registrar.register(
       JournalEntryNotDraftError: 422,
     },
     requires_created_by=False,
+    mark_stale_reason="journal_entry_deleted",
   )
 )
 
@@ -1677,6 +1682,7 @@ promote_obligations_op = _registrar.register(
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
     error_map={ValueError: 422},
+    mark_stale_reason="obligations_promoted",
   )
 )
 

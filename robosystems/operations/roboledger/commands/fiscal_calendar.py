@@ -220,6 +220,15 @@ def close_period(
   )
   session.commit()
 
+  # The close's writes (entries posted, statement sets stamped) change
+  # graph-materialized state, so the blue/green pipeline must rebuild —
+  # without this marker the graph keeps serving pre-close data while
+  # reporting fresh. Placed here (not the routers) so the REST and MCP
+  # surfaces both get it. Non-fatal by design.
+  from robosystems.operations.extensions.staleness import mark_graph_stale
+
+  mark_graph_stale(graph_id, "period_closed")
+
   fc_response = build_fiscal_calendar_response(
     session, graph_id, result.calendar, has_sync, last_sync_at, service
   )
@@ -307,6 +316,12 @@ def reopen_period(
   ps, pe = period_date_range(period)
   retracted = retract_canonical_statement_sets(session, period_start=ps, period_end=pe)
   session.commit()
+
+  # The reopen retracts the month's canonical statement sets — graph
+  # state changed; mirror close_period's marker.
+  from robosystems.operations.extensions.staleness import mark_graph_stale
+
+  mark_graph_stale(graph_id, "period_reopened")
 
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   return ReopenPeriodResult(
