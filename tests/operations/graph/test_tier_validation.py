@@ -87,7 +87,7 @@ class TestValidateStorageCapacity:
   async def test_passes_when_under_limit(self, mock_tier_config, mock_checker):
     mock_tier_config.get_instance_storage_limit_gb.side_effect = [20, 50]
     mock_checker.check_instance_storage = AsyncMock(
-      return_value={"total_storage_gb": 15}
+      return_value={"total_storage_gb": 15, "enforced_storage_gb": 15}
     )
     db = MagicMock()
 
@@ -102,7 +102,7 @@ class TestValidateStorageCapacity:
   async def test_fails_when_over_limit(self, mock_tier_config, mock_checker):
     mock_tier_config.get_instance_storage_limit_gb.side_effect = [20, 50]
     mock_checker.check_instance_storage = AsyncMock(
-      return_value={"total_storage_gb": 45}
+      return_value={"total_storage_gb": 45, "enforced_storage_gb": 45}
     )
     db = MagicMock()
 

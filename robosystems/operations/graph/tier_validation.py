@@ -73,7 +73,9 @@ async def validate_storage_capacity(
   storage_info = await IngestionLimitChecker.check_instance_storage(
     db, graph_id, current_tier
   )
-  total_gb = storage_info.get("total_storage_gb")
+  # Judged on durable bytes: a blue-green `-wip`/`-prev` artifact is reclaimed
+  # by the next successful build and should not pin a graph to a larger tier.
+  total_gb = storage_info.get("enforced_storage_gb")
 
   # Fail closed: approving a downgrade without knowing the usage could land
   # a graph over its new, smaller cap the moment the change completes.

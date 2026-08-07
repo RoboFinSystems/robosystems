@@ -23,12 +23,17 @@ def _storage_check(
   retryable: bool = False,
   total_storage_gb: float | None = 1.0,
   limit_gb: float = 20.0,
+  enforced_storage_gb: float | None = None,
 ) -> dict:
   return {
     "allowed": allowed,
     "retryable": retryable,
     "errors": [] if allowed else ["Instance storage exceeds limit"],
     "total_storage_gb": total_storage_gb,
+    # Enforced == total unless a test says otherwise (no transient artifacts).
+    "enforced_storage_gb": (
+      enforced_storage_gb if enforced_storage_gb is not None else total_storage_gb
+    ),
     "limit_gb": limit_gb,
     "usage_percentage": None,
     "status": "healthy" if allowed else "over_limit",
@@ -146,6 +151,30 @@ async def test_upload_without_headroom_blocks():
       await _run()
 
   assert exc.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_headroom_reads_enforced_not_total():
+  """An in-flight blue-green rebuild must not reject uploads.
+
+  Total includes the `-wip` copy and sits at the cap; the durable (enforced)
+  figure has room. Headroom is judged on the latter, same as the cap itself.
+  """
+  mock_graph = MagicMock()
+  mock_graph.parent_graph_id = None
+  mock_graph.graph_tier = "ladybug-standard"
+
+  files, s3, graph, storage = _gate_mocks(
+    50 * MB,
+    graph=mock_graph,
+    storage_check=_storage_check(
+      total_storage_gb=19.99, enforced_storage_gb=10.0, limit_gb=20.0
+    ),
+  )
+  with files, s3, graph, storage:
+    result = await _run()
+
+  assert result is not None
 
 
 @pytest.mark.asyncio

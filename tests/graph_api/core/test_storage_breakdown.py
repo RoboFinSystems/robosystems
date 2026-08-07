@@ -94,6 +94,49 @@ class TestComputeStorageBreakdown:
     assert items[f"{GRAPH_ID}_memory"] == "memory"
     assert items[f"{GRAPH_ID}_dev"] == "subgraph"
 
+  def test_classifies_blue_green_artifacts_as_transient(self, roots):
+    """A build artifact must not read as the subgraph it was built for.
+
+    `{parent}_{name}-wip` matches the subgraph prefix, so the classifier's
+    fallthrough labelled it `subgraph` — and `/usage`, which sums by type,
+    reported a footprint the subgraph list (which sums by registered id) could
+    never match.
+    """
+    _write(roots["lbug"] / f"{GRAPH_ID}.lbug", 10)
+    _write(roots["lbug"] / f"{GRAPH_ID}_dev.lbug", 20)
+    _write(roots["lbug"] / f"{GRAPH_ID}_dev-wip.lbug", 40)
+    _write(roots["lbug"] / f"{GRAPH_ID}-prev.lbug", 80)
+
+    items = {i["id"]: i["type"] for i in compute_storage_breakdown(GRAPH_ID)["items"]}
+
+    assert items[f"{GRAPH_ID}_dev"] == "subgraph"
+    assert items[f"{GRAPH_ID}_dev-wip"] == "transient"
+    assert items[f"{GRAPH_ID}-prev"] == "transient"
+
+  def test_subgraph_type_sums_to_live_subgraphs_only(self, roots):
+    """The `subgraph` bucket is what the subgraph list is reconciled against."""
+    _write(roots["lbug"] / f"{GRAPH_ID}_dev.lbug", 20)
+    _write(roots["lbug"] / f"{GRAPH_ID}_dev.lbug.wal", 5)
+    _write(roots["lbug"] / f"{GRAPH_ID}_dev-wip.lbug", 40)
+
+    items = compute_storage_breakdown(GRAPH_ID)["items"]
+    subgraph_bytes = sum(i["bytes"] for i in items if i["type"] == "subgraph")
+
+    assert subgraph_bytes == 25
+
+  def test_counts_the_parents_own_build_artifacts(self, roots):
+    """`{parent}-wip` is hyphenated, so it escaped the ownership test entirely.
+
+    A subgraph's artifact was counted and the parent's was not — the same
+    disk, visible or invisible depending on which database produced it.
+    """
+    _write(roots["lbug"] / f"{GRAPH_ID}.lbug", 100)
+    _write(roots["lbug"] / f"{GRAPH_ID}-wip.lbug", 700)
+
+    result = compute_storage_breakdown(GRAPH_ID)
+
+    assert result["total_bytes"] == 800
+
   def test_folds_wal_into_its_database(self, roots):
     """A WAL is the same logical object as its database to a quota reader."""
     _write(roots["lbug"] / f"{GRAPH_ID}.lbug", 100)

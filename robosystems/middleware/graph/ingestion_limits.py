@@ -187,6 +187,7 @@ class IngestionLimitChecker:
           "(Graph API unavailable). Retry shortly."
         ],
         "total_storage_gb": None,
+        "enforced_storage_gb": None,
         "limit_gb": limit_gb,
         "usage_percentage": None,
         "status": "unknown",
@@ -194,7 +195,7 @@ class IngestionLimitChecker:
         "items": [],
       }
 
-    items: list[dict[str, Any]] = breakdown.get("items", [])
+    items = cls._label_orphans(db, graph_id, breakdown.get("items", []))
     total_bytes = breakdown.get("total_bytes", 0)
 
     # Roll the itemized view up per database for the summary shape, so a
@@ -210,14 +211,37 @@ class IngestionLimitChecker:
       {
         "graph_id": gid,
         "is_parent": gid == graph_id,
-        "size_mb": round(size / (1024**2), 2),
+        # Same reason as total_storage_gb below: 2 decimals of MB bottoms out
+        # at ~10.24 KB, which is larger than a freshly created subgraph.
+        "size_mb": round(size / (1024**2), 6),
       }
       for gid, size in sorted(bytes_by_database.items())
     ]
 
-    total_storage_gb = round((total_bytes or 0) / (1024**3), 2)
+    # Not rounded to 2 decimals. A tenant's whole footprint is routinely tens
+    # of megabytes against a 20 GB cap, and 0.01 GB is a ~10.7 MB quantum —
+    # enough to erase the entire number and to disagree visibly with the
+    # itemized bytes below it. 9 decimals is byte-level.
+    total_storage_gb = round((total_bytes or 0) / (1024**3), 9)
+
+    # The cap is enforced on durable bytes only. A blue-green build briefly
+    # holds a `-wip` copy the size of the database it is rebuilding — counting
+    # it would fail a tenant near the cap in the middle of every materialize,
+    # and a `-wip` left by a crashed build would block the very operation
+    # (materialization) that rebuilds and reclaims it. Orphans stay counted:
+    # they are durable, and blocking on them surfaces registry drift instead
+    # of hiding it. `total_storage_gb` above stays the full real-disk figure —
+    # it is what metering records and what the itemized list sums to.
+    from robosystems.graph_api.core.storage_breakdown import TYPE_TRANSIENT
+
+    transient_bytes = sum(
+      item.get("bytes", 0) for item in items if item.get("type") == TYPE_TRANSIENT
+    )
+    enforced_storage_gb = round(
+      max((total_bytes or 0) - transient_bytes, 0) / (1024**3), 9
+    )
     usage_percentage = (
-      round((total_storage_gb / limit_gb) * 100, 1) if limit_gb > 0 else 0
+      round((enforced_storage_gb / limit_gb) * 100, 1) if limit_gb > 0 else 0
     )
 
     # Determine status
@@ -231,7 +255,7 @@ class IngestionLimitChecker:
     errors: list[str] = []
     if instance_status == "over_limit":
       errors.append(
-        f"Aggregate instance storage {total_storage_gb:.2f} GB exceeds "
+        f"Aggregate instance storage {enforced_storage_gb:.2f} GB exceeds "
         f"{tier} limit of {limit_gb:.0f} GB ({usage_percentage:.1f}%). "
         f"Upgrade tier or reduce data before materializing."
       )
@@ -241,12 +265,81 @@ class IngestionLimitChecker:
       "retryable": False,
       "errors": errors,
       "total_storage_gb": total_storage_gb,
+      "enforced_storage_gb": enforced_storage_gb,
       "limit_gb": limit_gb,
       "usage_percentage": usage_percentage,
       "status": instance_status,
       "databases": databases,
       "items": items,
     }
+
+  @classmethod
+  def _label_orphans(
+    cls, db: Session, graph_id: str, items: list[dict[str, Any]]
+  ) -> list[dict[str, Any]]:
+    """Re-label items belonging to subgraphs the graph registry has no row for.
+
+    ``compute_storage_breakdown`` runs on the instance and classifies every
+    ``{parent}_*`` database as a subgraph, because from there a live subgraph
+    and the remains of a deleted one look identical. Only here, with a session
+    in hand, can the two be told apart.
+
+    That mattered beyond tidiness: ``/usage`` sums these items by type while
+    the subgraphs page sums by registered id, so leftovers inflated one number
+    and not the other, and the same graph reported two different subgraph
+    footprints. The pass covers a deleted subgraph's whole estate — its
+    database, its vector index, and any staging file it accumulated before
+    staging was closed to subgraphs — not just the ``.lbug`` file. Bytes are
+    untouched — this is a labelling pass, and orphans still occupy disk and
+    still count against the cap.
+    """
+    from robosystems.graph_api.core.storage_breakdown import (
+      TYPE_ORPHAN,
+      TYPE_STAGING,
+      TYPE_SUBGRAPH,
+      TYPE_VECTORS,
+    )
+
+    subgraph_shaped_types = (TYPE_SUBGRAPH, TYPE_VECTORS, TYPE_STAGING)
+
+    def _subgraph_estate(item: dict[str, Any]) -> bool:
+      """Whether this item's id names a subgraph (live or deleted).
+
+      The ``_memory`` exclusion matters for the vectors arm: the memory
+      database's index is ``{parent}_memory``, which is subgraph-shaped but
+      never registered, and must not read as an orphan.
+      """
+      item_id = item.get("id") or ""
+      return (
+        item.get("type") in subgraph_shaped_types
+        and item_id.startswith(f"{graph_id}_")
+        and item_id != f"{graph_id}_memory"
+      )
+
+    if not any(_subgraph_estate(item) for item in items):
+      return items
+
+    try:
+      from robosystems.models.core import Graph
+
+      registered = {
+        str(row[0])
+        for row in db.query(Graph.graph_id)
+        .filter(Graph.parent_graph_id == graph_id, Graph.deleted_at.is_(None))
+        .all()
+      }
+    except Exception as e:
+      # A labelling refinement is not worth failing a storage check over —
+      # the cap reads bytes, which this pass does not touch.
+      logger.debug(f"Could not resolve registered subgraphs for {graph_id}: {e}")
+      return items
+
+    return [
+      {**item, "type": TYPE_ORPHAN}
+      if _subgraph_estate(item) and item.get("id") not in registered
+      else item
+      for item in items
+    ]
 
   @classmethod
   def _get_pending_row_counts(cls, db: Session, graph_id: str) -> dict[str, int]:

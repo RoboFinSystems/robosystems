@@ -120,7 +120,12 @@ class StorageItem(BaseModel):
 
   type: str = Field(
     ...,
-    description="One of: graph, memory, subgraph, vectors, staging",
+    description=(
+      "One of: graph, memory, subgraph, vectors, staging, transient "
+      "(blue-green build artifact), orphan (a `{parent}_*` database, vector "
+      "index, or staging file with no row in the graph registry — reclaimable "
+      "leftover of a deleted subgraph)"
+    ),
   )
   id: str = Field(..., description="Database or index identifier")
   bytes: int = Field(..., description="Size in bytes")
@@ -141,7 +146,13 @@ class InstanceUsage(BaseModel):
   )
   limit_gb: float = Field(..., description="Soft storage limit for this tier in GB")
   usage_percentage: float | None = Field(
-    None, description="Storage usage as percentage of limit (e.g. 105.2)"
+    None,
+    description=(
+      "Storage usage as percentage of limit (e.g. 105.2). Derived from the "
+      "enforced figure — durable bytes only, excluding `transient` build "
+      "artifacts — so it can read lower than total_storage_gb/limit_gb "
+      "while a blue-green rebuild is in flight."
+    ),
   )
   status: str = Field(
     ...,
@@ -154,8 +165,10 @@ class InstanceUsage(BaseModel):
   items: list[StorageItem] = Field(
     default_factory=list,
     description=(
-      "Itemized storage by type — graph, memory, subgraph, vectors, staging. "
-      "Sums to total_storage_gb."
+      "Itemized storage by type — graph, memory, subgraph, vectors, staging, "
+      "transient, orphan. Sums to total_storage_gb. Only `subgraph` items "
+      "correspond to live subgraphs, so this is the type to sum when "
+      "reconciling against the subgraph list."
     ),
   )
 

@@ -103,7 +103,10 @@ async def ingest_file_cmd(
     )
 
   storage_limit_bytes = storage_check["limit_gb"] * 1024**3
-  current_storage_bytes = (storage_check["total_storage_gb"] or 0) * 1024**3
+  # Headroom is judged on the enforced figure, which excludes blue-green
+  # `-wip`/`-prev` build artifacts — same basis as the cap check itself, so an
+  # in-flight rebuild doesn't reject uploads the durable footprint can absorb.
+  current_storage_bytes = (storage_check["enforced_storage_gb"] or 0) * 1024**3
   if (
     not storage_check["allowed"]
     or current_storage_bytes + actual_file_size > storage_limit_bytes
