@@ -5,8 +5,6 @@ Write operations (create, delete) live at
 ``POST /v1/graphs/{graph_id}/operations/{create-subgraph,delete-subgraph}``.
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -45,27 +43,49 @@ from .utils import (
 router = APIRouter(dependencies=[Depends(subscription_aware_rate_limit_dependency)])
 
 
-async def get_database_size_mb(graph_id: str) -> float | None:
-  """Returns None if Graph API has no size data — expected for empty or new databases."""
+async def get_subgraph_sizes(parent_graph_id: str) -> dict[str, int]:
+  """On-disk bytes per subgraph, from one instance-wide storage breakdown.
+
+  Replaces an N+1 of `get_database_metrics` calls that also measured
+  something different. Two problems came from that path, and both are fixed
+  by reading the breakdown the storage cap already reads:
+
+  - **It undercounted.** `get_database_metrics` reports `db_info.size_bytes`,
+    the primary `.lbug` only. Writes land in the write-ahead log first, so
+    during a write burst this page sat frozen while `/usage` — which scans
+    disk and counts `.lbug` + `.lbug.wal` — climbed. Same subgraph, two
+    numbers, and the smaller one looked stuck.
+  - **It rounded to a floor.** `round(bytes / 1024**2, 2)` cannot represent
+    less than ~10.24 KB, so a subgraph under ~5 KB reported 0.0 and rendered
+    as nothing at all.
+
+  Returns an empty mapping when the breakdown is unavailable; callers report
+  `None` rather than zero, because "not measured" is not "empty".
+  """
   try:
     from robosystems.graph_api.client.factory import GraphClientFactory
 
-    # Create client using factory for endpoint discovery
     graph_client = await GraphClientFactory.create_client(
-      graph_id=graph_id, operation_type="read"
+      graph_id=parent_graph_id, operation_type="read"
     )
+    try:
+      breakdown = await graph_client.get_storage_breakdown(parent_graph_id)
+    finally:
+      await graph_client.close()
 
-    # Get database metrics from Graph API
-    metrics = await graph_client.get_database_metrics(graph_id=graph_id)
-
-    if metrics and "size_mb" in metrics:
-      return metrics["size_mb"]
-
-    logger.debug(f"Size metric not available for database {graph_id}")
-    return None
+    # A subgraph's footprint is spread across item types — its database
+    # (with WAL folded in) and its vector index share the subgraph's id, so
+    # summing by id rather than filtering to type="subgraph" is what makes
+    # this agree with the instance total.
+    sizes: dict[str, int] = {}
+    for item in breakdown.get("items", []):
+      item_id = item.get("id")
+      if item_id:
+        sizes[item_id] = sizes.get(item_id, 0) + int(item.get("bytes") or 0)
+    return sizes
   except Exception as e:
-    logger.warning(f"Failed to get size for database {graph_id}: {e}")
-    return None
+    logger.warning(f"Failed to get subgraph sizes for {parent_graph_id}: {e}")
+    return {}
 
 
 @router.get(
@@ -115,22 +135,25 @@ async def list_subgraphs(
       .all()
     )
 
-    # Get all sizes concurrently for better performance
-    size_tasks = [get_database_size_mb(sg.graph_id) for sg in subgraphs]
-    sizes = await asyncio.gather(*size_tasks)
+    # One instance-wide breakdown covers every subgraph — they all live on
+    # the parent's box. Absent means "could not measure", which is reported
+    # as None per subgraph rather than 0.
+    sizes = await get_subgraph_sizes(parent_graph.graph_id)
 
     subgraph_summaries = []
-    total_size_mb = 0.0
-    for subgraph, size_mb in zip(subgraphs, sizes, strict=False):
+    total_size_bytes = 0
+    measured_any = False
+    for subgraph in subgraphs:
+      size_bytes = sizes.get(subgraph.graph_id)
       # Extract subgraph name from graph_id (format: {parent_id}_{subgraph_name})
       subgraph_name = subgraph.subgraph_name
       if not subgraph_name and "_" in subgraph.graph_id:
         # Fallback: extract from graph_id if subgraph_name is not set
         subgraph_name = subgraph.graph_id.split("_", 1)[1]
 
-      # Sum sizes
-      if size_mb:
-        total_size_mb += size_mb
+      if size_bytes is not None:
+        total_size_bytes += size_bytes
+        measured_any = True
 
       # Determine status from graph_stale field
       subgraph_status = "stale" if subgraph.graph_stale else "active"
@@ -154,7 +177,12 @@ async def list_subgraphs(
           subgraph_type=subgraph_type,
           status=subgraph_status,
           created_at=subgraph.created_at,
-          size_mb=size_mb,
+          size_bytes=size_bytes,
+          # Enough precision to stay non-zero at subgraph scale; the old
+          # 2-decimal rounding bottomed out at ~10.24 KB.
+          size_mb=(
+            round(size_bytes / (1024 * 1024), 6) if size_bytes is not None else None
+          ),
           last_accessed=None,
         )
       )
@@ -188,7 +216,12 @@ async def list_subgraphs(
       subgraphs=subgraph_summaries,
       subgraph_count=len(subgraph_summaries),
       max_subgraphs=max_subgraphs,
-      total_size_mb=round(total_size_mb, 2) if total_size_mb > 0 else None,
+      # Null when nothing could be measured — distinct from a genuine zero,
+      # which is what a graph with empty subgraphs legitimately reports.
+      total_size_bytes=total_size_bytes if measured_any else None,
+      total_size_mb=(
+        round(total_size_bytes / (1024 * 1024), 6) if measured_any else None
+      ),
     )
 
   except HTTPException:

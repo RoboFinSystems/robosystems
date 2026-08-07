@@ -137,8 +137,12 @@ class CreateSubgraphTool:
         "- name: Alphanumeric only, 1-20 chars (no hyphens or underscores)\n"
         "- fork_parent: Copy all parent data into the new subgraph\n"
         "- subgraph_type: `static` (default), `knowledge` (auto-includes the knowledge schema), or `empty` (bare database, no schema — define your own)\n\n"
-        "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) — use it "
-        "as the `graph_id` in future tool calls to target the new subgraph."
+        "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) and "
+        "`connector_url`. A subgraph is a separate MCP endpoint, not a mode of "
+        "this one: this connector is anchored to its own graph by URL and "
+        "cannot reach the new subgraph. To work in it, add an MCP connector "
+        "for `connector_url` — the API key this connector already uses covers "
+        "its own subgraphs, so reuse it as-is rather than generating a new one."
       ),
       "inputSchema": {
         "type": "object",
@@ -225,14 +229,30 @@ class CreateSubgraphTool:
         logger.error("create-subgraph failed for %s: %s", parent_graph_id, exc)
         return {"error": "create_failed", "message": str(exc)}
 
+      # An id with no way to reach it is the whole friction here: under the
+      # stdio bridge you created then switched in-session, but a remote
+      # connector is URL-anchored, so the caller needs the address and the
+      # (already-satisfied) credential answer handed to them, not inferred.
+      from robosystems.config import env
+
+      subgraph_id = result.get("graph_id")
       return {
-        "subgraph_id": result.get("graph_id"),
+        "subgraph_id": subgraph_id,
         "name": name,
         "parent_graph_id": parent_graph_id,
         "description": description,
         "forked_from_parent": fork_parent,
         "subgraph_type": subgraph_type,
         "operation_id": result.get("operation_id"),
+        "connector_url": f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{subgraph_id}/mcp",
+        "credential": (
+          "Reuse this connector's API key — a key scoped to "
+          f"'{parent_graph_id}' covers its subgraphs. No new key needed."
+        ),
+        "next_step": (
+          "Add an MCP connector for connector_url. This connector is anchored "
+          "to its own graph by URL and cannot switch to the new subgraph."
+        ),
       }
     finally:
       close()

@@ -57,6 +57,52 @@ if TYPE_CHECKING:
   from .registrar import _RegistrarMCPTool
 
 
+# The tool surface a tenant subgraph advertises.
+#
+# A subgraph is a modality container, not an extensions domain target: it has
+# no extensions OLTP schema (`extensions_session` validates `^kg[0-9a-f]{16,}$`,
+# which `{parent}_{name}` cannot match), no connections, and no OLTP→OLAP
+# materialization relationship. It inherits `schema_extensions` from its parent
+# (`subgraph_service` copies the column), so without this cut every roboledger
+# tool registers and roughly seventy percent of the advertised surface fails —
+# the OLTP ones with an internal schema-validator string, the platform ones by
+# confidently answering about a relationship that does not exist.
+#
+# The doctrine is not new: `graphql_tool` has rejected subgraphs on exactly
+# this reasoning since it shipped. This propagates that one-tool decision to
+# the tool-list layer.
+#
+# The short list is the product statement, not a consolation. A subgraph is a
+# live, writable graph database — schema plus Cypher — and it is the *only*
+# such surface, since `_validate_subgraph_context` blocks raw writes on the
+# parent. Naming that plainly is what makes it legible to an agent.
+SUBGRAPH_TOOL_PROFILE = frozenset(
+  {
+    # Schema DDL — the point of a subgraph
+    "add-node-table",
+    "add-relationship-table",
+    "get-graph-schema",
+    # Registered outside this manager (see routers/graphs/mcp), so it never
+    # appears in the list this filter trims. Listed anyway so the call_tool
+    # guard below treats it as allowed rather than refusing a tool that is
+    # perfectly meaningful on a subgraph.
+    "get-graph-info",
+    # Cypher, both directions
+    "read-graph-cypher",
+    "write-graph-cypher",
+    "get-example-queries",
+    # Per-graph semantic memory (LanceDB, genuinely per-graph)
+    "recall",
+    "remember",
+    "forget",
+    "update-memory",
+    # Navigation back out
+    "list-subgraphs",
+    "switch-workspace",
+  }
+)
+
+
 def resolve_schema_extensions(graph_id: str) -> list[str]:
   """Resolve schema extensions for a graph.
 
@@ -548,6 +594,24 @@ class GraphMCPTools:
     except Exception:
       return False
 
+  def _is_tenant_subgraph(self) -> bool:
+    """Whether this graph is a subgraph of a *tenant* graph.
+
+    Shared-repository subgraphs (``sec_historical``) are deliberately not
+    included: they already take the `_is_shared_repository` path, which cuts a
+    different and larger surface. This predicate governs only the tenant case
+    — ``{kg…}_{name}`` — where the parent's `schema_extensions` are inherited
+    but none of the OLTP or platform-lifecycle machinery follows.
+    """
+    if self._is_shared_repository():
+      return False
+    try:
+      from robosystems.middleware.graph.utils import is_subgraph
+
+      return is_subgraph(self.client.graph_id)
+    except Exception:
+      return False
+
   def _should_include_semantic_tools(self) -> bool:
     """Check if semantic enrichment tools should be included.
 
@@ -838,6 +902,14 @@ class GraphMCPTools:
     for tool in self._registrar_dispatch.values():
       tools.append(tool.get_tool_definition())
 
+    # Applied last, over the assembled list, rather than as a condition on
+    # each of the ~20 registration gates above. One place to read, one place
+    # to change, and it can't drift out of step with a gate someone adds
+    # later — a new OLTP tool is excluded by default rather than by
+    # remembering to exclude it.
+    if self._is_tenant_subgraph():
+      tools = [t for t in tools if t.get("name") in SUBGRAPH_TOOL_PROFILE]
+
     return tools
 
   def _get_document_tool_definitions(self) -> list[dict[str, Any]]:
@@ -871,6 +943,26 @@ class GraphMCPTools:
     Returns:
         Tool execution result
     """
+    # A client that listed tools before switching graphs — or that ignored
+    # `tools/list_changed` — can still call a tool this graph no longer
+    # advertises. Answer it, rather than letting the call dead-end in an
+    # extensions schema validator whose message ("Invalid graph_id for schema
+    # name: kg…_entities") describes an internal invariant the caller has no
+    # way to act on.
+    if self._is_tenant_subgraph() and name not in SUBGRAPH_TOOL_PROFILE:
+      result = {
+        "error": "not_applicable_on_subgraph",
+        "message": (
+          f"'{name}' is not available on a subgraph. Subgraphs are graph "
+          f"databases — schema and Cypher — with no ledger tables, "
+          f"connections, or materialization of their own. Run this against "
+          f"the parent graph."
+        ),
+        "graph_id": self.client.graph_id,
+        "available_tools": sorted(SUBGRAPH_TOOL_PROFILE),
+      }
+      return result if return_raw else json.dumps(result, indent=2)
+
     try:
       # Layer 0: Registrar-generated tools (auto-derived from OperationSpec)
       # Checked first so hand-written if/elif branches can be pruned as
