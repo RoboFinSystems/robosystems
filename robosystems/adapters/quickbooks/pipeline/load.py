@@ -83,22 +83,30 @@ def _run_qb_load(
   sync_started_at = datetime.now(UTC)
 
   loader = OLTPLoader()
-  result = loader.load(
-    graph_id=config.graph_id,
-    source="quickbooks",
-    connection_id=config.connection_id,
-    duckdb_path=duckdb_path,
-    created_by=config.user_id,
-    # Only operator-explicit full rebuilds trigger the
-    # pre-sync wipe. Incremental window syncs (since_date set) and
-    # default lookback (neither set) skip the wipe entirely and rely
-    # on the UPSERT path.
-    full_rebuild=config.full_rebuild,
-    since_date=config.since_date or None,
-  )
+  try:
+    result = loader.load(
+      graph_id=config.graph_id,
+      source="quickbooks",
+      connection_id=config.connection_id,
+      duckdb_path=duckdb_path,
+      created_by=config.user_id,
+      # Only operator-explicit full rebuilds trigger the
+      # pre-sync wipe. Incremental window syncs (since_date set) and
+      # default lookback (neither set) skip the wipe entirely and rely
+      # on the UPSERT path.
+      full_rebuild=config.full_rebuild,
+      since_date=config.since_date or None,
+    )
+  except Exception as exc:
+    # Legibility on failure: the operator surface that triggered this
+    # sync must be able to see it failed without CloudWatch. Recorded
+    # without advancing last_sync (the close gate reads that).
+    _record_failed_sync_result(context, config, exc)
+    raise
 
-  # Update last sync timestamp
-  _update_last_sync(context, config)
+  # Update last sync timestamp + persist the outcome summary the loader
+  # previously emitted only as a worker log line.
+  _update_last_sync(context, config, _sync_result_summary(config, result))
 
   # Advance CDC watermark only after load success.
   # `result.errors` carries non-fatal load warnings already; the truly
@@ -198,8 +206,70 @@ def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> 
     )
 
 
-def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> None:
-  """Update the connection's last_sync timestamp.
+def _sync_result_summary(config: QBSyncConfig, result) -> dict:
+  """Shape a LoadResult into the Connection.last_sync_result payload."""
+  return {
+    "status": "succeeded",
+    "synced_at": datetime.now(UTC).isoformat(),
+    "window": {
+      "since_date": config.since_date or None,
+      "full_rebuild": bool(config.full_rebuild),
+    },
+    "counts": {
+      "events_captured": result.events_captured,
+      "events_updated": result.events_updated,
+      "drift_detected": result.events_drift_detected,
+      "dispatch_failed": result.events_dispatch_failed,
+      "cross_source_matched": result.events_cross_source_matched,
+      "skipped_same_sync_token": result.events_skipped_same_sync_token,
+      "skipped_stale_sync_token": result.events_skipped_stale_sync_token,
+      "dropped_unbalanced_entries": result.dropped_unbalanced_entries,
+      "dropped_empty_transactions": result.dropped_empty_transactions,
+      "elements": result.elements,
+      "agents_inserted": result.agents_inserted,
+      "agents_updated": result.agents_updated,
+    },
+    "errors": list(result.errors[:10]),
+  }
+
+
+def _record_failed_sync_result(
+  context: AssetExecutionContext, config: QBSyncConfig, exc: Exception
+) -> None:
+  """Persist a failed-attempt outcome without advancing last_sync."""
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.connection.connection import Connection
+
+  try:
+    session = SessionFactory()
+    try:
+      conn = Connection.get_by_id(config.connection_id, session)
+      if conn:
+        conn.record_sync_result(
+          session,
+          {
+            "status": "failed",
+            "synced_at": datetime.now(UTC).isoformat(),
+            "window": {
+              "since_date": config.since_date or None,
+              "full_rebuild": bool(config.full_rebuild),
+            },
+            "error": {"code": type(exc).__name__, "message": str(exc)[:500]},
+          },
+        )
+        context.log.info("Recorded failed sync result on connection")
+    finally:
+      session.close()
+  except Exception as e:
+    context.log.warning(f"Failed to record sync failure (non-fatal): {e}")
+
+
+def _update_last_sync(
+  context: AssetExecutionContext,
+  config: QBSyncConfig,
+  result_summary: dict | None = None,
+) -> None:
+  """Update the connection's last_sync timestamp + outcome summary.
 
   Uses sync DB access directly to avoid asyncio.run() issues in Dagster workers
   where an event loop may already be running.
@@ -212,8 +282,8 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
     try:
       conn = Connection.get_by_id(config.connection_id, session)
       if conn:
-        conn.update_last_sync(session)
-        context.log.info("Updated connection last_sync timestamp")
+        conn.update_last_sync(session, result_summary)
+        context.log.info("Updated connection last_sync timestamp + result")
       else:
         context.log.warning(
           "Connection %s not found for last_sync update", config.connection_id

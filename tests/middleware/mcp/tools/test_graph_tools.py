@@ -429,11 +429,13 @@ class TestGetGraphSyncStatusExecute:
       "last_materialized_at": "2026-04-16T00:00:00Z",
       "materialization_count": 7,
     }
+    mock_db.query.return_value.filter.return_value.all.return_value = []
     with patch("robosystems.models.core.Graph.get_by_id", return_value=graph):
       result = await GetGraphSyncStatusTool(_client()).execute({})
     assert result["sync_status"] == "fresh"
     assert result["materialization_count"] == 7
     assert result["hours_since_materialization"] is not None
+    assert result["connections"] == []
 
   @pytest.mark.asyncio
   async def test_stale_graph(self, mock_db: MagicMock) -> None:
@@ -442,6 +444,7 @@ class TestGetGraphSyncStatusExecute:
     graph.graph_stale_reason = "schedule_created"
     graph.graph_stale_at = datetime(2026, 4, 16, tzinfo=UTC)
     graph.graph_metadata = {}
+    mock_db.query.return_value.filter.return_value.all.return_value = []
 
     with patch("robosystems.models.core.Graph.get_by_id", return_value=graph):
       result = await GetGraphSyncStatusTool(_client()).execute({})
@@ -450,6 +453,45 @@ class TestGetGraphSyncStatusExecute:
     assert result["stale_reason"] == "schedule_created"
     assert result["stale_since"] is not None
     assert result["stale_duration_minutes"] is not None
+
+  @pytest.mark.asyncio
+  async def test_connection_health_and_last_sync_result_ride_along(
+    self, mock_db: MagicMock
+  ) -> None:
+    """F8: the source→OLTP edge is legible — connection status (incl.
+    needs_reauth) and the last sync attempt's outcome summary."""
+    graph = MagicMock()
+    graph.graph_stale = False
+    graph.graph_stale_reason = None
+    graph.graph_stale_at = None
+    graph.graph_metadata = {}
+
+    conn = MagicMock()
+    conn.id = "conn_qb1"
+    conn.provider = "quickbooks"
+    conn.status = "needs_reauth"
+    conn.last_sync = datetime(2026, 8, 6, tzinfo=UTC)
+    conn.last_sync_result = {
+      "status": "succeeded",
+      "counts": {"events_captured": 46, "drift_detected": 11},
+    }
+    mock_db.query.return_value.filter.return_value.all.return_value = [conn]
+
+    with patch("robosystems.models.core.Graph.get_by_id", return_value=graph):
+      result = await GetGraphSyncStatusTool(_client()).execute({})
+
+    assert result["connections"] == [
+      {
+        "connection_id": "conn_qb1",
+        "provider": "quickbooks",
+        "status": "needs_reauth",
+        "last_sync_at": "2026-08-06T00:00:00+00:00",
+        "last_sync_result": {
+          "status": "succeeded",
+          "counts": {"events_captured": 46, "drift_detected": 11},
+        },
+      }
+    ]
 
 
 # ══════════════════════════════════════════════════════════════════════════

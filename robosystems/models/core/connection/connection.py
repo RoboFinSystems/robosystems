@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -135,6 +136,15 @@ class Connection(Model):
   # Sync tracking
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
   last_sync = Column(DateTime, nullable=True)
+  # Outcome summary of the most recent sync ATTEMPT (success or failure):
+  # status, window, per-category counts (captured / updated / drift /
+  # dispatch_failed / …), truncated errors. The loader used to emit this
+  # only as a worker log line, leaving the surface that triggered the
+  # sync — MCP operator, frontend — unable to answer "did it finish, and
+  # what did it do?" without CloudWatch. Written on success alongside
+  # `last_sync`; on failure alone (`last_sync` only ever advances on
+  # success — the close gate's sync-current check reads it).
+  last_sync_result = Column(JSONB, nullable=True)
 
   # Source-of-truth policy. Default `'native'` means no outbound writes
   # without explicit operator opt-in via UI / API. The loader's
@@ -331,9 +341,27 @@ class Connection(Model):
       session.rollback()
       raise
 
-  def update_last_sync(self, session: Session) -> None:
-    """Update last sync timestamp."""
+  def update_last_sync(self, session: Session, result: dict | None = None) -> None:
+    """Update last sync timestamp (success path) + optional outcome summary."""
     self.last_sync = datetime.now(UTC)
+    if result is not None:
+      self.last_sync_result = result
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def record_sync_result(self, session: Session, result: dict) -> None:
+    """Persist a sync outcome WITHOUT advancing `last_sync`.
+
+    The failure path: `last_sync` feeds the close gate's sync-current
+    check, so it only ever advances on success — but the failed
+    attempt's outcome must still be legible to the operator surface.
+    """
+    self.last_sync_result = result
     self.updated_at = datetime.now(UTC)
     try:
       session.commit()
@@ -481,6 +509,7 @@ class Connection(Model):
         "source_name": self.source_name,
         "auto_sync_enabled": self.auto_sync_enabled,
         "last_sync": self.last_sync.isoformat() if self.last_sync else None,
+        "last_sync_result": self.last_sync_result,
       },
       "created_at": self.created_at,
       "updated_at": self.updated_at,

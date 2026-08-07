@@ -643,14 +643,23 @@ class GetGraphSyncStatusTool:
     return {
       "name": "get-graph-sync-status",
       "description": (
-        "Check if the LadybugDB graph is in sync with its source OLTP data.\n\n"
+        "Check data freshness on BOTH sync edges: source system → OLTP "
+        "(per-connection health + last sync outcome) and OLTP → LadybugDB "
+        "graph (staleness / materialization).\n\n"
         "**WHEN TO USE:**\n"
         "- Before querying financial data, to verify the graph is current\n"
         "- After OLTP writes, to check if rematerialization is needed\n"
-        "- When the user asks about data freshness\n\n"
+        "- After sync-connection, to verify the sync finished and see what "
+        "it did (captured / updated / drift / dispatch_failed counts)\n"
+        "- When the user asks about data freshness or a connection's health\n\n"
         "**RETURNS:** sync_status (`fresh`/`stale`), stale_since, "
         "stale_reason, stale_duration_minutes, last_materialized_at, "
-        "hours_since_materialization, materialization_count."
+        "hours_since_materialization, materialization_count, and "
+        "`connections`: per source connection — provider, status "
+        "(`connected` / `needs_reauth` = operator must re-OAuth / `error`), "
+        "last_sync_at, and last_sync_result (the most recent attempt's "
+        "outcome summary: status, window, counts, errors — `failed` status "
+        "means the last attempt raised and last_sync_at did NOT advance)."
       ),
       "inputSchema": {
         "type": "object",
@@ -661,6 +670,7 @@ class GetGraphSyncStatusTool:
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     from robosystems.models.core import Graph
+    from robosystems.models.core.connection.connection import Connection
 
     graph_id = self.client.graph_id
     session, close = _open_platform_session()
@@ -668,6 +678,24 @@ class GetGraphSyncStatusTool:
       graph = Graph.get_by_id(graph_id, session)
       if graph is None:
         return {"error": "graph_not_found", "message": f"Graph {graph_id} not found."}
+
+      # Source → OLTP edge: per-connection health + the last sync
+      # attempt's outcome (F8 — previously only a worker log line).
+      connections = [
+        {
+          "connection_id": conn.id,
+          "provider": conn.provider,
+          "status": conn.status,
+          "last_sync_at": conn.last_sync.isoformat() if conn.last_sync else None,
+          "last_sync_result": conn.last_sync_result,
+        }
+        for conn in session.query(Connection)
+        .filter(
+          Connection.graph_id == graph_id,
+          Connection.deleted_at.is_(None),
+        )
+        .all()
+      ]
 
       is_stale = bool(graph.graph_stale)
       stale_reason = graph.graph_stale_reason
@@ -708,6 +736,7 @@ class GetGraphSyncStatusTool:
         "last_materialized_at": last_materialized_at,
         "hours_since_materialization": hours_since_materialization,
         "materialization_count": materialization_count,
+        "connections": connections,
       }
     finally:
       close()
