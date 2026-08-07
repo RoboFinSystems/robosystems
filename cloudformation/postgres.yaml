@@ -195,6 +195,24 @@ Conditions:
   RDSProxyEnabledCondition: !Equals [!Ref EnableRDSProxy, "true"]
   PerformanceInsightsEnabledCondition: !Equals [!Ref EnablePerformanceInsights, "true"]
 
+Mappings:
+  # FreeableMemory alarm thresholds (~6% of instance RAM, in bytes). Postgres
+  # plus OS overhead legitimately consumes most of a small instance's memory,
+  # so a flat threshold pins the alarm on micro-class instances.
+  InstanceClassAlarmThresholds:
+    db.t4g.micro:
+      MemoryLowBytes: 67108864 # 64 MB of 1 GB
+    db.t4g.small:
+      MemoryLowBytes: 134217728 # 128 MB of 2 GB
+    db.t4g.medium:
+      MemoryLowBytes: 268435456 # 256 MB of 4 GB
+    db.r7g.large:
+      MemoryLowBytes: 1073741824 # 1 GB of 16 GB
+    db.r7g.xlarge:
+      MemoryLowBytes: 2147483648 # 2 GB of 32 GB
+    db.r7g.2xlarge:
+      MemoryLowBytes: 4294967296 # 4 GB of 64 GB
+
 Resources:
   # Common IAM policy for EC2 instances
   CommonEC2Policy:
@@ -717,7 +735,10 @@ Resources:
       Statistic: Minimum
       Period: 300
       EvaluationPeriods: 3
-      Threshold: 268435456
+      Threshold: !FindInMap
+        - InstanceClassAlarmThresholds
+        - !Ref DBInstanceClass
+        - MemoryLowBytes
       ComparisonOperator: LessThanThreshold
       TreatMissingData: breaching
       AlarmActions:
