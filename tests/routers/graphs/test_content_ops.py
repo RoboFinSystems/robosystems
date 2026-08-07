@@ -366,3 +366,133 @@ async def test_create_file_upload_op_enforces_write_role():
       )
   assert e.value.status_code == 403
   cmd.assert_not_awaited()
+
+
+# ── Subgraph gates ─────────────────────────────────────────────────────────
+#
+# A subgraph is the direct-write surface: raw Cypher and schema extension,
+# which the parent graph refuses. The staging pipeline is the parent's write
+# path and rebuilds the database into a `-wip` copy that it renames over the
+# active one — so pointing both at one database means the swap silently
+# discards every direct write made since staging. These assert the gate fires
+# before any command runs, on REST and on the MCP mirror.
+
+SUBGRAPH_ID = "kg19ed34f81c37ba3f31fa_entities"
+PARENT_ID = "kg19ed34f81c37ba3f31fa"
+
+
+async def test_ingest_file_blocked_on_subgraph():
+  cmd = AsyncMock()
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(INGEST_CMD, new=cmd),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await ingest_file_op(
+        IngestFileOp(file_id="gf_1"),
+        background_tasks=MagicMock(),
+        graph_id=SUBGRAPH_ID,
+        user=_user(),
+        idempotency_key=None,
+        cache=MagicMock(),
+        db=MagicMock(),
+      )
+  assert e.value.status_code == 403
+  assert "staging" in e.value.detail.lower()
+  cmd.assert_not_awaited()
+
+
+async def test_create_file_upload_blocked_on_subgraph():
+  cmd = AsyncMock()
+  body = FileUploadRequest(
+    file_name="x.parquet", table_name="t", content_type="application/x-parquet"
+  )
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(CREATE_UPLOAD_CMD, new=cmd),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await create_file_upload_op(
+        body,
+        graph_id=SUBGRAPH_ID,
+        user=_user(),
+        idempotency_key=None,
+        cache=MagicMock(),
+        db=MagicMock(),
+      )
+  assert e.value.status_code == 403
+  cmd.assert_not_awaited()
+
+
+async def test_update_memory_blocked_on_subgraph():
+  with (
+    patch(f"{MODULE}._require_memory_enabled"),
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await update_memory_op(
+        UpdateMemoryOp(memory_id="mem_" + "0" * 32, text="hi"),
+        graph_id=SUBGRAPH_ID,
+        user=_user(),
+        idempotency_key=None,
+        cache=MagicMock(),
+      )
+  assert e.value.status_code == 403
+  assert "memory" in e.value.detail.lower()
+
+
+async def test_delete_file_still_allowed_on_subgraph():
+  """The way out stays open — closing it would strand data already staged."""
+  resp = DeleteFileResponse(
+    status="deleted",
+    file_id="gf_1",
+    file_name="x.parquet",
+    message="ok",
+    cascade_deleted=False,
+    tables_affected=[],
+    graph_marked_stale=False,
+  )
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(DELETE_FILE_CMD, new=AsyncMock(return_value=resp)),
+  ):
+    env = await delete_file_op(
+      DeleteFileOp(file_id="gf_1", cascade=False),
+      graph_id=SUBGRAPH_ID,
+      user=_user(),
+      idempotency_key=None,
+      cache=MagicMock(),
+      db=MagicMock(),
+    )
+  assert env.status == "completed"
+
+
+async def test_parent_graph_is_unaffected():
+  """The gate keys on subgraph-ness, not on the id merely containing `_`."""
+  resp = FileUploadResponse(
+    upload_url="https://s3.example/presigned",
+    expires_in=3600,
+    file_id="gf_1",
+    s3_key="user-staging/u/kg/t/gf_1/x.parquet",
+  )
+  body = FileUploadRequest(
+    file_name="x.parquet", table_name="t", content_type="application/x-parquet"
+  )
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(CREATE_UPLOAD_CMD, new=AsyncMock(return_value=resp)),
+  ):
+    env = await create_file_upload_op(
+      body,
+      graph_id=PARENT_ID,
+      user=_user(),
+      idempotency_key=None,
+      cache=MagicMock(),
+      db=MagicMock(),
+    )
+  assert env.status == "completed"

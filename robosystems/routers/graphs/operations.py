@@ -64,6 +64,44 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 _GRAPH_OPS_PATH = "/v1/graphs/{graph_id}/operations"
 _AUDIT_EVENT = "graph.operation"
 
+# ── Surfaces refused on subgraphs ──────────────────────────────────────────
+#
+# A subgraph exists to be written to *directly*: raw Cypher and schema
+# extension, which the parent graph refuses outright (see
+# `middleware/mcp/tools/subgraph_write_tools` — "the main graph is read-only to
+# raw statements"). The staging pipeline is the parent's write path and works
+# the opposite way round: it rebuilds the database from DuckDB into a `-wip`
+# copy and file-renames it over the active one (`_materialize_blue_green`).
+# Point both at one database and the swap silently discards every direct write
+# made since staging began. They are not two ways to write — they are two
+# owners of the same file, and only one can win.
+_SUBGRAPH_NO_STAGING = (
+  "The file staging pipeline is not available on subgraphs. Staging rebuilds "
+  "the database and swaps it into place, which would discard the direct writes "
+  "a subgraph exists for. Upload to the parent graph, or write to the subgraph "
+  "directly through its own MCP connector."
+)
+
+# Semantic memory is per-database storage on the parent's instance. A subgraph
+# is meant to be cheap to create and throw away, and its memory would be a
+# second store to keep in step with the parent's for no gain.
+_SUBGRAPH_NO_MEMORY = (
+  "Semantic memory is not available on subgraphs. Store memories on the parent "
+  "graph, or keep the data in the subgraph itself as nodes."
+)
+
+
+def _block_subgraph(graph_id: str, detail: str) -> None:
+  """Refuse a surface that a subgraph must not have.
+
+  Distinct from `_block_shared_repo`, which is about ownership — this is about
+  two write models that cannot share one database.
+  """
+  from robosystems.middleware.graph.utils import is_subgraph
+
+  if is_subgraph(graph_id):
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
 
 def _ctx(
   *,
@@ -886,6 +924,8 @@ async def materialize_op(
 
   op_name = "materialize"
   user_id = str(user.id)
+
+  _block_subgraph(graph_id, _SUBGRAPH_NO_STAGING)
 
   # `get_current_user_with_graph` proves graph membership only; a read-only
   # `viewer` would otherwise reach this write. Enforce member/admin, fail-closed.

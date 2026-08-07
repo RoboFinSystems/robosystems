@@ -568,3 +568,62 @@ class TestTaxonomyToolRegistration:
       "create-mapping-association", {"mapping_id": "x"}
     )
     assert "Unknown tool" in registrar_result
+
+
+@pytest.mark.unit
+class TestSubgraphToolGating:
+  """A subgraph connector must not offer the pipeline or memory surfaces.
+
+  MCP dispatch bypasses FastAPI DI, so the REST gate in
+  `routers/graphs/operations` does not cover it — without this mirror the
+  connector handed out by `create-subgraph` is a way around it.
+  """
+
+  @staticmethod
+  def _tools(graph_id: str):
+    client = AsyncMock()
+    client.graph_id = graph_id
+    client.close = AsyncMock()
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
+      mock_env.EXTENSIONS_ENABLED = True
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.SEMANTIC_MEMORY_ENABLED = True
+      mock_env.MCP_SEMANTIC_MEMORY_ENABLED = True
+      return GraphMCPTools(client, schema_extensions=["roboledger"], read_only=False)
+
+  def test_materialize_withheld_from_subgraph(self):
+    assert self._tools("kg0123456789abcdef_dev").materialize_tool is None
+
+  def test_materialize_offered_on_parent(self):
+    assert self._tools("kg0123456789abcdef").materialize_tool is not None
+
+  def test_memory_writes_withheld_from_subgraph(self):
+    tools = self._tools("kg0123456789abcdef_dev")
+    assert tools.semantic_remember_tool is None
+    assert tools.semantic_update_memory_tool is None
+
+  def test_memory_cleanup_survives_on_subgraph(self):
+    """Forget stays reachable so anything already stored can be removed."""
+    tools = self._tools("kg0123456789abcdef_dev")
+    assert tools.semantic_forget_tool is not None
+    assert tools.semantic_recall_tool is not None
+
+  def test_memory_writes_offered_on_parent(self):
+    tools = self._tools("kg0123456789abcdef")
+    assert tools.semantic_remember_tool is not None
+    assert tools.semantic_update_memory_tool is not None
+
+  def test_sync_connection_withheld_from_subgraph(self):
+    """Connections belong to the parent, and a sync feeds the staging
+    pipeline the subgraph doesn't have — withheld with its read half."""
+    assert self._tools("kg0123456789abcdef_dev").sync_connection_tool is None
+
+  def test_sync_connection_offered_on_parent(self):
+    assert self._tools("kg0123456789abcdef").sync_connection_tool is not None

@@ -58,6 +58,9 @@ from robosystems.routers.graphs.operations import (
   _AUDIT_EVENT,
   _GRAPH_OPS_PATH,
   _RATE_LIMIT,
+  _SUBGRAPH_NO_MEMORY,
+  _SUBGRAPH_NO_STAGING,
+  _block_subgraph,
   _ctx,
   _dispatch,
 )
@@ -169,6 +172,7 @@ async def remember_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_MEMORY)
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "remember"
@@ -231,6 +235,9 @@ async def forget_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
+  # Deliberately not `_block_subgraph`: `remember` is closed, but anything a
+  # subgraph stored before that must still be removable without deleting the
+  # whole subgraph. Closing the way out as well as the way in strands data.
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "forget"
@@ -291,6 +298,7 @@ async def update_memory_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_MEMORY)
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "update-memory"
@@ -512,6 +520,7 @@ async def create_file_upload_op(
   )
 
   _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_STAGING)
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "create-file-upload"
@@ -568,6 +577,7 @@ async def ingest_file_op(
   from robosystems.operations.graph.commands.ingest_file import ingest_file_cmd
 
   _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_STAGING)
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "ingest-file"
@@ -649,6 +659,8 @@ async def delete_file_op(
   from robosystems.operations.graph.commands.delete_file import delete_file_cmd
 
   _block_shared_repo(graph_id)
+  # Deliberately not `_block_subgraph`: uploads are closed, but files staged
+  # before that must stay removable. See the note on `forget`.
   _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "delete-file"

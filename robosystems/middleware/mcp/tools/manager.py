@@ -270,6 +270,7 @@ class GraphMCPTools:
       self._has_extension("roboledger")
       and env.ROBOLEDGER_ENABLED
       and not self._is_shared_repository()
+      and not self._is_subgraph()
       and not read_only
     ):
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
@@ -286,9 +287,11 @@ class GraphMCPTools:
     # sync-freshness pair; get-fiscal-calendar / get-graph-sync-status are
     # the read half). Same gate as set-write-policy: platform-DB,
     # writable user graphs only — not roboledger-gated because the REST
-    # sync endpoint isn't either.
+    # sync endpoint isn't either. Withheld from subgraphs alongside its
+    # read half above: connections are registered to the parent, and a sync
+    # feeds the staging pipeline the subgraph doesn't have.
     self.sync_connection_tool = None
-    if not read_only and not self._is_shared_repository():
+    if not read_only and not self._is_shared_repository() and not self._is_subgraph():
       self.sync_connection_tool = SyncConnectionTool(graph_client)
 
     # Layer 2: Period-workflow read tools (gated by roboledger extension
@@ -469,8 +472,13 @@ class GraphMCPTools:
 
       self.semantic_recall_tool = SemanticRecallTool(graph_client)
       if not read_only:
-        self.semantic_remember_tool = SemanticRememberTool(graph_client)
-        self.semantic_update_memory_tool = SemanticUpdateMemoryTool(graph_client)
+        # A subgraph gets no memory store of its own, so the two tools that
+        # would create one are withheld. Forget stays — see the note on the
+        # REST `forget` op: anything stored before the gate must still be
+        # removable.
+        if not self._is_subgraph():
+          self.semantic_remember_tool = SemanticRememberTool(graph_client)
+          self.semantic_update_memory_tool = SemanticUpdateMemoryTool(graph_client)
         self.semantic_forget_tool = SemanticForgetTool(graph_client)
 
     # Layer 3: Document management tools (user graphs only, not shared repos)
@@ -586,6 +594,23 @@ class GraphMCPTools:
       )
 
       return is_shared_repository_or_subgraph(self.client.graph_id)
+    except Exception:
+      return False
+
+  def _is_subgraph(self) -> bool:
+    """Whether this connector is pointed at a subgraph.
+
+    Subgraphs are the direct-write surface (write-cypher, schema extension),
+    which is mutually exclusive with the staging pipeline: materialization
+    swaps a rebuilt database over the active one and would discard those
+    writes. They also get no semantic memory. MCP dispatch bypasses FastAPI
+    DI, so the REST gate in `routers/graphs/operations` has to be mirrored
+    here or the connector is a way around it.
+    """
+    try:
+      from robosystems.middleware.graph.utils import is_subgraph
+
+      return is_subgraph(self.client.graph_id)
     except Exception:
       return False
 
