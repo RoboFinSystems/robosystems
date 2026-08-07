@@ -179,13 +179,6 @@ class PromoteObligationsResponse(BaseModel):
   )
 
 
-class CreateClosingEntryRequest(BaseModel):
-  posting_date: date = Field(..., description="Posting date for the entry")
-  period_start: date = Field(..., description="Period start")
-  period_end: date = Field(..., description="Period end")
-  memo: str | None = Field(None, description="Override memo")
-
-
 class ManualLineItemRequest(BaseModel):
   element_id: str = Field(..., description="Element ID (chart of accounts)")
   debit_amount: int = Field(0, ge=0, description="Debit in cents")
@@ -206,18 +199,6 @@ class CreateManualClosingEntryRequest(BaseModel):
   entry_type: EntryType = Field(
     "closing",
     description="Entry type: 'closing' (default), 'adjusting', 'standard', 'reversing'",
-  )
-
-
-class CreateClosingEntryOperation(CreateClosingEntryRequest):
-  """CQRS-shaped body for `POST /operations/create-closing-entry`.
-
-  `structure_id` moves into the body so REST + MCP share a single body
-  type via the registrar.
-  """
-
-  structure_id: str = Field(
-    ..., description="Schedule structure the closing entry is derived from."
   )
 
 
