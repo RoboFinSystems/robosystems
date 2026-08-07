@@ -7,7 +7,7 @@ functionality for interacting with graph databases.
 Tool availability is schema-driven:
 - Core tools (cypher, schema) are always available
 - Extension tools (financial statements, etc.) require matching schema_extensions
-- Infrastructure tools (workspace, subgraph writes) are gated by feature flags
+- Infrastructure tools (subgraph navigation + writes) are gated by feature flags
 
 **Registrar-generated tools:** Extensions with an `OperationRegistrar`
 (roboledger, roboinvestor) contribute their `OperationSpec`s as
@@ -39,8 +39,8 @@ from .graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
+  ResolveSubgraphTool,
   SetWritePolicyTool,
-  SwitchWorkspaceTool,
   SyncConnectionTool,
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
@@ -55,6 +55,53 @@ if TYPE_CHECKING:
   from robosystems.middleware.extensions import GraphExtensionContext
 
   from .registrar import _RegistrarMCPTool
+
+
+# The tool surface a tenant subgraph advertises.
+#
+# A subgraph is a modality container, not an extensions domain target: it has
+# no extensions OLTP schema (`extensions_session` validates `^kg[0-9a-f]{16,}$`,
+# which `{parent}_{name}` cannot match), no connections, and no OLTP→OLAP
+# materialization relationship. It inherits `schema_extensions` from its parent
+# (`subgraph_service` copies the column), so without this cut every roboledger
+# tool registers and roughly seventy percent of the advertised surface fails —
+# the OLTP ones with an internal schema-validator string, the platform ones by
+# confidently answering about a relationship that does not exist.
+#
+# The doctrine is not new: `graphql_tool` has rejected subgraphs on exactly
+# this reasoning since it shipped. This propagates that one-tool decision to
+# the tool-list layer.
+#
+# The short list is the product statement, not a consolation. A subgraph is a
+# live, writable graph database — schema plus Cypher — and it is the *only*
+# such surface, since `_validate_subgraph_context` blocks raw writes on the
+# parent. Naming that plainly is what makes it legible to an agent.
+SUBGRAPH_TOOL_PROFILE = frozenset(
+  {
+    # Schema DDL — the point of a subgraph
+    "add-node-table",
+    "add-relationship-table",
+    "get-graph-schema",
+    # Registered outside this manager (see routers/graphs/mcp), so it never
+    # appears in the list this filter trims. Listed anyway so the call_tool
+    # guard below treats it as allowed rather than refusing a tool that is
+    # perfectly meaningful on a subgraph.
+    "get-graph-info",
+    # Cypher, both directions
+    "read-graph-cypher",
+    "write-graph-cypher",
+    "get-example-queries",
+    # Per-graph semantic memory (LanceDB, genuinely per-graph)
+    "recall",
+    "remember",
+    "forget",
+    "update-memory",
+    # Navigation back out
+    "list-subgraphs",
+    "resolve-subgraph",
+    "switch-workspace",  # retired alias, still dispatched
+  }
+)
 
 
 def resolve_schema_extensions(graph_id: str) -> list[str]:
@@ -112,7 +159,7 @@ class GraphMCPTools:
   Tool availability is layered:
   - Layer 1 (Core): cypher, schema — always available
   - Layer 2 (Schema): financial tools — only when schema_extensions includes "roboledger"
-  - Layer 3 (Infrastructure): workspace, subgraph writes, data — gated by feature flags
+  - Layer 3 (Infrastructure): subgraph navigation + writes, data — gated by feature flags
   """
 
   def __init__(
@@ -180,9 +227,8 @@ class GraphMCPTools:
 
     # Layer 3: Graph lifecycle tools — subgraph navigation + lifecycle ops
     # mirroring a subset of the REST `/v1/graphs/{g}/operations/*` surface.
-    # Writes are gated by `read_only`; `switch-workspace` is a client-side
-    # sentinel so it stays always-available when the workspace feature
-    # flag is set.
+    # Writes are gated by `read_only`; `resolve-subgraph` only resolves an
+    # address, so it stays available whenever the navigation flag is set.
     #
     # Deliberately **not exposed on MCP** — both still live on REST for
     # humans:
@@ -193,12 +239,12 @@ class GraphMCPTools:
     self.create_subgraph_tool = None
     self.delete_subgraph_tool = None
     self.list_subgraphs_tool = None
-    self.switch_workspace_tool = None
+    self.resolve_subgraph_tool = None
     self.create_backup_tool = None
     if env.MCP_WORKSPACE_ENABLED:
       # Navigation tools (list / switch) — always available.
       self.list_subgraphs_tool = ListSubgraphsTool(graph_client)
-      self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
+      self.resolve_subgraph_tool = ResolveSubgraphTool(graph_client)
       # Write tools — blocked on shared-repo or read-only graphs.
       if not read_only:
         self.create_subgraph_tool = CreateSubgraphTool(graph_client)
@@ -548,6 +594,24 @@ class GraphMCPTools:
     except Exception:
       return False
 
+  def _is_tenant_subgraph(self) -> bool:
+    """Whether this graph is a subgraph of a *tenant* graph.
+
+    Shared-repository subgraphs (``sec_historical``) are deliberately not
+    included: they already take the `_is_shared_repository` path, which cuts a
+    different and larger surface. This predicate governs only the tenant case
+    — ``{kg…}_{name}`` — where the parent's `schema_extensions` are inherited
+    but none of the OLTP or platform-lifecycle machinery follows.
+    """
+    if self._is_shared_repository():
+      return False
+    try:
+      from robosystems.middleware.graph.utils import is_subgraph
+
+      return is_subgraph(self.client.graph_id)
+    except Exception:
+      return False
+
   def _should_include_semantic_tools(self) -> bool:
     """Check if semantic enrichment tools should be included.
 
@@ -584,7 +648,7 @@ class GraphMCPTools:
       self.resolve_element_tool.get_tool_definition(),
     ]
 
-  def _get_workspace_tool_definitions(self) -> list[dict[str, Any]]:
+  def _get_navigation_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get graph-lifecycle tool definitions (navigation + write ops).
 
@@ -594,8 +658,8 @@ class GraphMCPTools:
         are included.
     """
     tools = []
-    if self.switch_workspace_tool is not None:
-      tools.append(self.switch_workspace_tool.get_tool_definition())
+    if self.resolve_subgraph_tool is not None:
+      tools.append(self.resolve_subgraph_tool.get_tool_definition())
     if self.list_subgraphs_tool is not None:
       tools.append(self.list_subgraphs_tool.get_tool_definition())
     if self.create_subgraph_tool is not None:
@@ -821,7 +885,7 @@ class GraphMCPTools:
       tools.extend(self._get_event_block_tool_definitions())
 
     # Layer 3: Infrastructure tools (feature-flag gated)
-    tools.extend(self._get_workspace_tool_definitions())
+    tools.extend(self._get_navigation_tool_definitions())
     if self.set_write_policy_tool is not None:
       tools.append(self.set_write_policy_tool.get_tool_definition())
     if self.sync_connection_tool is not None:
@@ -837,6 +901,14 @@ class GraphMCPTools:
     # enumerate by name, not index.
     for tool in self._registrar_dispatch.values():
       tools.append(tool.get_tool_definition())
+
+    # Applied last, over the assembled list, rather than as a condition on
+    # each of the ~20 registration gates above. One place to read, one place
+    # to change, and it can't drift out of step with a gate someone adds
+    # later — a new OLTP tool is excluded by default rather than by
+    # remembering to exclude it.
+    if self._is_tenant_subgraph():
+      tools = [t for t in tools if t.get("name") in SUBGRAPH_TOOL_PROFILE]
 
     return tools
 
@@ -871,6 +943,26 @@ class GraphMCPTools:
     Returns:
         Tool execution result
     """
+    # A client that listed tools before switching graphs — or that ignored
+    # `tools/list_changed` — can still call a tool this graph no longer
+    # advertises. Answer it, rather than letting the call dead-end in an
+    # extensions schema validator whose message ("Invalid graph_id for schema
+    # name: kg…_entities") describes an internal invariant the caller has no
+    # way to act on.
+    if self._is_tenant_subgraph() and name not in SUBGRAPH_TOOL_PROFILE:
+      result = {
+        "error": "not_applicable_on_subgraph",
+        "message": (
+          f"'{name}' is not available on a subgraph. Subgraphs are graph "
+          f"databases — schema and Cypher — with no ledger tables, "
+          f"connections, or materialization of their own. Run this against "
+          f"the parent graph."
+        ),
+        "graph_id": self.client.graph_id,
+        "available_tools": sorted(SUBGRAPH_TOOL_PROFILE),
+      }
+      return result if return_raw else json.dumps(result, indent=2)
+
     try:
       # Layer 0: Registrar-generated tools (auto-derived from OperationSpec)
       # Checked first so hand-written if/elif branches can be pruned as
@@ -999,14 +1091,16 @@ class GraphMCPTools:
         result = await self.list_subgraphs_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      elif name == "switch-workspace":
+      # `switch-workspace` is the retired name, still dispatched so saved
+      # prompts and older bridge versions keep working after the rename.
+      elif name in ("resolve-subgraph", "switch-workspace"):
         # Client-side sentinel — the MCP client should intercept locally.
-        if self.switch_workspace_tool is None:
+        if self.resolve_subgraph_tool is None:
           raise ValueError(
-            "switch-workspace tool is not available. "
+            "resolve-subgraph tool is not available. "
             "Set MCP_WORKSPACE_ENABLED=true to enable this feature."
           )
-        result = await self.switch_workspace_tool.execute(arguments)
+        result = await self.resolve_subgraph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "create-backup":

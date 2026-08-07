@@ -12,7 +12,7 @@ The MCP middleware:
 - Handles query validation and complexity management
 - Integrates with the Graph API for backend communication
 - Supports both shared repositories (SEC) and user graphs
-- Enables workspace management for isolated development environments
+- Enables subgraph navigation for isolated development environments
 - Provides data operation tools for staging, querying, and graph materialization
 
 **Operations kernel integration.** MCP tools are a **transport layer**, not a domain. Tools that touch extension OLTP data (period close, fiscal calendar, CoA→GAAP mapping, information blocks, events) delegate directly to the same `operations/roboledger/{reads,commands}/*` functions that the GraphQL resolvers and the named command operation routers call. An information block created via the `create-information-block` MCP tool goes through the exact same operations function as one created via `POST /extensions/roboledger/{g}/operations/create-information-block`. This is the single-source-of-truth contract that makes agent-driven workflows byte-identical to UI-driven workflows. Never add business logic to an MCP tool file — wire it into `operations/` and have the tool delegate.
@@ -60,14 +60,14 @@ mcp/
     ├── playbook_tools.py           # get-close-playbook (close-workflow guidance)
     ├── graph_tools.py              # create-subgraph, delete-subgraph, list-subgraphs,
     │                               # materialize, get-graph-sync-status, create-backup,
-    │                               # set-write-policy, switch-workspace (client-side)
+    │                               # set-write-policy, resolve-subgraph
     │
     │ # Layer 3: Document search + management (SEMANTIC_SEARCH_ENABLED)
     ├── search_tools.py      # search-documents, get-document-section
     ├── document_tools.py    # create-document, update-document, get-document, list-documents
     │
     │ # Layer 4: Infrastructure (feature-flag gated)
-    │ # (switch-workspace lives in graph_tools.py; it is a client-side tool)
+    │ # (resolve-subgraph lives in graph_tools.py; answered by the remote transport)
     └── subgraph_write_tools.py  # write-graph-cypher, add-node-table, add-relationship-table (MCP_SUBGRAPH_OPS_ENABLED)
 ```
 
@@ -205,18 +205,24 @@ Gated by `SEMANTIC_SEARCH_ENABLED`. Document management tools additionally skip 
 
 ### Layer 4: Infrastructure (feature-flag gated)
 
-**Workspaces:**
+**Subgraph navigation:**
 
-Only `switch-workspace` is registered. It is a **client-side** tool
-(defined in `graph_tools.py`): the MCP client intercepts it to retarget
-the active graph context before sending; there is no server handler.
-There are no `list-workspaces` / `create-workspace` / `delete-workspace`
-tools — create a subgraph with `create-subgraph` and then point
-`switch-workspace` (or the `graph_id`) at it.
+`resolve-subgraph` maps a subgraph in this graph's family to the MCP
+endpoint that serves it. It does **not** switch: a connector is anchored to
+one graph by its URL, so the remote transport answers with an address and
+the caller adds that endpoint as its own connector, reusing the same API
+key. Create with `create-subgraph` (which returns the URL directly), then
+`list-subgraphs` to enumerate and `resolve-subgraph` to address.
+
+It was called `switch-workspace`. The name promised a switch it never
+performed on the remote transport, and "workspace" framed a subgraph as a
+context you inhabit rather than the lightweight artifact it is. The old
+name is still dispatched, unadvertised, so existing prompts and older
+bridge versions keep working.
 
 | Tool | Description | Read-only OK |
 |------|-------------|--------------|
-| `switch-workspace` | Switch active workspace context (client-side) | Yes |
+| `resolve-subgraph` | Resolve a subgraph to its MCP endpoint | Yes |
 
 **Subgraph writes** (`MCP_SUBGRAPH_OPS_ENABLED`, writable subgraphs only):
 
@@ -237,7 +243,7 @@ tools — create a subgraph with `create-subgraph` and then point
 | Manifest `has_semantic_enrichment=True` | `resolve-element` |
 | `FACT_GRID_ENABLED=true` | `build-fact-grid` |
 | `SEMANTIC_SEARCH_ENABLED=true` | Layer 3 (search + document management) |
-| `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `switch-workspace`) |
+| `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `resolve-subgraph`) |
 | `MCP_SUBGRAPH_OPS_ENABLED=true` | Layer 4 subgraph write/DDL tools |
 
 A tool that would otherwise be unavailable due to any of these gates returns a structured error via `_tool_unavailable_reason` instead of silently no-oping — clients always see a typed reason when a tool isn't mounted in a given context.
@@ -388,7 +394,7 @@ ROBOLEDGER_ENABLED=true                # Enables all Layer 2b roboledger OLTP to
 ROBOINVESTOR_ENABLED=false             # Parallel flag for future roboinvestor OLTP MCP tools (no such tools exist today)
 FACT_GRID_ENABLED=false                # Gates build-fact-grid tool
 SEMANTIC_SEARCH_ENABLED=false          # Gates search-documents, get-document-section, and Layer 3 document management tools
-MCP_WORKSPACE_ENABLED=false            # Gates Layer 4 workspace tools
+MCP_WORKSPACE_ENABLED=false            # Gates Layer 4 subgraph navigation + lifecycle tools
 MCP_SUBGRAPH_OPS_ENABLED=false         # Gates Layer 4 subgraph write/DDL tools (write-cypher, add-node/rel-table)
 ```
 

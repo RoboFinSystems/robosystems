@@ -66,8 +66,8 @@ class TestGetToolDefinitionsAsDict:
 
 
 class TestGetToolDefinitionHelpers:
-  def test_workspace_tools_empty_when_disabled(self, tools):
-    assert tools._get_workspace_tool_definitions() == []
+  def test_navigation_tools_empty_when_disabled(self, tools):
+    assert tools._get_navigation_tool_definitions() == []
 
   def test_subgraph_write_tools_empty_when_disabled(self, tools):
     assert tools._get_subgraph_write_tool_definitions() == []
@@ -223,8 +223,8 @@ class TestCallToolErrors:
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio
-  async def test_disabled_switch_workspace_raises(self, tools):
-    result = await tools.call_tool("switch-workspace", {})
+  async def test_disabled_resolve_subgraph_raises(self, tools):
+    result = await tools.call_tool("resolve-subgraph", {})
     assert "not available" in result or "Error" in result
 
   @pytest.mark.asyncio

@@ -9,7 +9,7 @@ Covers the six tools in `middleware/mcp/tools/graph_tools.py`:
 5. `CreateBackupTool`
 6. `GetGraphSyncStatusTool`
 
-Plus the client-side sentinel `SwitchWorkspaceTool` and the platform-DB
+Plus the client-side sentinel `ResolveSubgraphTool` and the platform-DB
 connection tools `SetWritePolicyTool` and `SyncConnectionTool`.
 
 Shared-repo gate coverage (the primary defense-in-depth concern) lives
@@ -32,8 +32,8 @@ from robosystems.middleware.mcp.tools.graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
+  ResolveSubgraphTool,
   SetWritePolicyTool,
-  SwitchWorkspaceTool,
   SyncConnectionTool,
 )
 
@@ -495,23 +495,26 @@ class TestGetGraphSyncStatusExecute:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# SwitchWorkspaceTool (client-side sentinel)
+# ResolveSubgraphTool (client-side sentinel)
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class TestSwitchWorkspace:
+class TestResolveSubgraph:
   def test_definition(self) -> None:
-    defn = SwitchWorkspaceTool(_client()).get_tool_definition()
-    assert defn["name"] == "switch-workspace"
-    assert "workspace_id" in defn["inputSchema"]["required"]
+    defn = ResolveSubgraphTool(_client()).get_tool_definition()
+    assert defn["name"] == "resolve-subgraph"
+    assert "subgraph" in defn["inputSchema"]["required"]
 
   @pytest.mark.asyncio
-  async def test_server_side_execute_is_a_no_op_error(self) -> None:
-    """The MCP client should intercept before calling the server. If the
-    server executes, we return an explicit error — this is load-bearing
-    for the "client-side tool" contract documented in the description."""
-    result = await SwitchWorkspaceTool(_client()).execute({"workspace_id": "primary"})
-    assert result["error"] == "client_side_tool"
+  async def test_base_execute_defers_to_the_remote_transport(self) -> None:
+    """Only the remote transport can answer this — it knows the connector URL.
+
+    The base class returns an explicit error rather than a wrong answer, so a
+    caller reaching it through some other path is told where the real
+    implementation lives instead of getting silence.
+    """
+    result = await ResolveSubgraphTool(_client()).execute({"subgraph": "primary"})
+    assert result["error"] == "remote_transport_only"
 
 
 # ══════════════════════════════════════════════════════════════════════════

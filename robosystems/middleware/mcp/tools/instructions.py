@@ -2,7 +2,7 @@
 Per-graph MCP instructions generator.
 
 Produces the routing guidance handed to MCP clients via the server's
-`instructions` handshake field (and the `switch-workspace` tool result). The
+`instructions` handshake field (and the `resolve-subgraph` tool result). The
 string is always in the connected agent's context, so it stays short and points
 at the live tool *families* rather than restating each tool's schema — the
 discovery layer that tells an agent which tool to reach for, given an intent.

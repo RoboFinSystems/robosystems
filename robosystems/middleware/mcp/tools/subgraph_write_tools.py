@@ -51,7 +51,8 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
       "error": "subgraph_required",
       "message": "This tool only works on subgraphs, not the parent graph. "
       "Use create-subgraph to create a subgraph first, "
-      "then switch-workspace to activate it.",
+      "then connect to that subgraph's own MCP endpoint "
+      "(resolve-subgraph returns its URL).",
     }
 
   # Shared repository subgraphs are always read-only

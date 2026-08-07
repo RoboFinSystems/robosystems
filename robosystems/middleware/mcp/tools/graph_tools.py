@@ -137,8 +137,12 @@ class CreateSubgraphTool:
         "- name: Alphanumeric only, 1-20 chars (no hyphens or underscores)\n"
         "- fork_parent: Copy all parent data into the new subgraph\n"
         "- subgraph_type: `static` (default), `knowledge` (auto-includes the knowledge schema), or `empty` (bare database, no schema — define your own)\n\n"
-        "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) — use it "
-        "as the `graph_id` in future tool calls to target the new subgraph."
+        "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) and "
+        "`connector_url`. A subgraph is a separate MCP endpoint, not a mode of "
+        "this one: this connector is anchored to its own graph by URL and "
+        "cannot reach the new subgraph. To work in it, add an MCP connector "
+        "for `connector_url` — the API key this connector already uses covers "
+        "its own subgraphs, so reuse it as-is rather than generating a new one."
       ),
       "inputSchema": {
         "type": "object",
@@ -225,14 +229,30 @@ class CreateSubgraphTool:
         logger.error("create-subgraph failed for %s: %s", parent_graph_id, exc)
         return {"error": "create_failed", "message": str(exc)}
 
+      # An id with no way to reach it is the whole friction here: under the
+      # stdio bridge you created then switched in-session, but a remote
+      # connector is URL-anchored, so the caller needs the address and the
+      # (already-satisfied) credential answer handed to them, not inferred.
+      from robosystems.config import env
+
+      subgraph_id = result.get("graph_id")
       return {
-        "subgraph_id": result.get("graph_id"),
+        "subgraph_id": subgraph_id,
         "name": name,
         "parent_graph_id": parent_graph_id,
         "description": description,
         "forked_from_parent": fork_parent,
         "subgraph_type": subgraph_type,
         "operation_id": result.get("operation_id"),
+        "connector_url": f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{subgraph_id}/mcp",
+        "credential": (
+          "Reuse this connector's API key — a key scoped to "
+          f"'{parent_graph_id}' covers its subgraphs. No new key needed."
+        ),
+        "next_step": (
+          "Add an MCP connector for connector_url. This connector is anchored "
+          "to its own graph by URL and cannot switch to the new subgraph."
+        ),
       }
     finally:
       close()
@@ -374,7 +394,7 @@ class ListSubgraphsTool:
       "description": (
         "List every subgraph (workspace) under this parent graph, plus the "
         "parent itself as the `primary` entry. Use the returned "
-        "`subgraph_id` with `switch-workspace` or as the `graph_id` in "
+        "`subgraph_id` with `resolve-subgraph` or as the `graph_id` in "
         "future tool calls."
       ),
       "inputSchema": {
@@ -897,16 +917,25 @@ class SyncConnectionTool:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# switch-workspace (kept name for backwards compat — client-side only)
+# resolve-subgraph (was switch-workspace)
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class SwitchWorkspaceTool:
-  """Client-side workspace switcher.
+class ResolveSubgraphTool:
+  """Resolve a subgraph in this graph's family to its MCP endpoint.
 
-  The MCP client intercepts `switch-workspace` before sending; the
-  server-side execute is a no-op error. Kept as-is (name + behavior)
-  because the client already treats it as a sentinel.
+  Named for what it does. It was `switch-workspace`, which promised a switch
+  it has never performed on the remote transport: a connector is anchored to
+  one graph by its URL, so the remote handler answers with an address rather
+  than changing anything (see `_remote_resolve_subgraph`).
+
+  The "workspace" framing went with it. A subgraph is a lightweight artifact
+  — closer to a document or a memory than to a context you inhabit — and
+  calling it a workspace invited exactly the session-switching model the URL
+  anchor rules out.
+
+  The retired wire name `switch-workspace` stays accepted at dispatch (never
+  advertised) so saved prompts and older bridges keep working.
   """
 
   def __init__(self, graph_client):
@@ -914,35 +943,36 @@ class SwitchWorkspaceTool:
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
-      "name": "switch-workspace",
+      "name": "resolve-subgraph",
       "description": (
-        "Switch the active graph context to a different subgraph (or "
-        "`primary` to return to the parent). **Client-side tool** — the "
-        "MCP client should intercept this locally rather than calling the "
-        "server. Server-side invocation returns an error."
+        "Resolve a subgraph in this graph's family to the MCP endpoint that "
+        "serves it, so you can reach it. This connector is anchored to one "
+        "graph by its URL and does not change graphs — the subgraph is a "
+        "separate endpoint you add as its own connector, reusing this "
+        "connector's API key. Pair with `list-subgraphs` to see what exists."
       ),
       "inputSchema": {
         "type": "object",
         "properties": {
-          "workspace_id": {
+          "subgraph": {
             "type": "string",
             "description": (
-              "Target subgraph id (e.g. `kg123_dev`), or `primary` to "
-              "switch to the parent graph."
+              "Subgraph id (e.g. `kg123_dev`), its short name (`dev`), or "
+              "`primary` for the parent graph."
             ),
           },
         },
-        "required": ["workspace_id"],
+        "required": ["subgraph"],
         "additionalProperties": False,
       },
     }
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     return {
-      "error": "client_side_tool",
+      "error": "remote_transport_only",
       "message": (
-        "switch-workspace is a client-side tool. The MCP client should "
-        "intercept it locally rather than calling the server."
+        "resolve-subgraph is answered by the remote MCP transport, which "
+        "knows this connector's URL. Call it over the graph's /mcp endpoint."
       ),
     }
 

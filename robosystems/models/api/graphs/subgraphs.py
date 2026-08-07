@@ -125,6 +125,14 @@ class SubgraphResponse(BaseModel):
 
   updated_at: datetime = Field(..., description="When the subgraph was last updated")
 
+  size_bytes: int | None = Field(
+    None,
+    description=(
+      "On-disk footprint in bytes — the database, its write-ahead log, and "
+      "its vector index. Prefer this over size_mb at subgraph scale."
+    ),
+  )
+
   size_mb: float | None = Field(
     None, description="Size of the subgraph database in megabytes"
   )
@@ -159,7 +167,21 @@ class SubgraphSummary(BaseModel):
 
   status: str = Field(..., description="Current status", examples=["active"])
 
-  size_mb: float | None = Field(None, description="Size in megabytes")
+  size_bytes: int | None = Field(
+    None,
+    description=(
+      "On-disk footprint in bytes — the database, its write-ahead log, and "
+      "its vector index. Prefer this over size_mb at subgraph scale."
+    ),
+  )
+
+  size_mb: float | None = Field(
+    None,
+    description=(
+      "Same footprint in megabytes. Derived from size_bytes; kept for "
+      "callers that render MB directly."
+    ),
+  )
 
   created_at: datetime = Field(..., description="Creation timestamp")
 
@@ -190,6 +212,10 @@ class ListSubgraphsResponse(BaseModel):
 
   max_subgraphs: int | None = Field(
     None, description="Maximum allowed subgraphs for this tier (None = unlimited)"
+  )
+
+  total_size_bytes: int | None = Field(
+    None, description="Combined on-disk footprint of all subgraphs in bytes"
   )
 
   total_size_mb: float | None = Field(

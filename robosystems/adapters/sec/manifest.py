@@ -43,7 +43,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "\n"
     "NOTES\n"
     "- Deeper historical filings live in the `sec_historical` subgraph — switch "
-    "to it with `switch-workspace` when you need older periods.\n"
+    "to it with `resolve-subgraph` when you need older periods.\n"
     "- This is shared public data: period close, chart-of-accounts mapping, and "
     "all write operations are unavailable here."
   ),
