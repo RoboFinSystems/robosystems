@@ -49,7 +49,9 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
     currency=event.currency,
     description=event.description,
     metadata=dict(event.metadata_ or {}),
-    payload_drift=bool(event.payload_drift),
+    # API vocabulary is "reconciling item"; the storage column keeps its
+    # mechanical name (Event.payload_drift + metadata.drift_payload).
+    is_reconciling_item=bool(event.payload_drift),
     dimension_ids=dimension_ids,
     agent_id=event.agent_id,
     resource_type=event.resource_type,
@@ -78,7 +80,7 @@ def list_event_blocks(
   status: str | None = None,
   agent_id: str | None = None,
   source: str | None = None,
-  payload_drift: bool | None = None,
+  is_reconciling_item: bool | None = None,
   limit: int = 50,
   offset: int = 0,
 ) -> list[EventBlockEnvelope]:
@@ -93,9 +95,10 @@ def list_event_blocks(
     stmt = stmt.where(Event.agent_id == agent_id)
   if source is not None:
     stmt = stmt.where(Event.source == source)
-  if payload_drift is not None:
-    # payload_drift=True rides idx_events_payload_drift (partial index).
-    stmt = stmt.where(Event.payload_drift.is_(payload_drift))
+  if is_reconciling_item is not None:
+    # True rides idx_events_payload_drift (partial index on the storage
+    # column, which keeps its mechanical name).
+    stmt = stmt.where(Event.payload_drift.is_(is_reconciling_item))
 
   stmt = stmt.order_by(Event.occurred_at.desc()).limit(limit).offset(offset)
   events = session.execute(stmt).scalars().all()

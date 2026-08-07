@@ -1,9 +1,10 @@
 """Tests for event block read operations.
 
-Focus is the ``payload_drift`` surface added for post-sync reconciliation:
-the envelope must carry the flag off the ORM row, and ``list_event_blocks``
-must compose (or omit) the drift predicate so the reconciliation worklist
-is enumerable.
+Focus is the reconciling-item surface added for post-sync reconciliation:
+the envelope must carry ``is_reconciling_item`` off the ORM row (whose
+storage column keeps the mechanical name ``payload_drift``), and
+``list_event_blocks`` must compose (or omit) the predicate so the
+reconciliation worklist is enumerable.
 """
 
 from __future__ import annotations
@@ -45,13 +46,13 @@ def _captured_list_stmt(session: MagicMock) -> str:
 class TestEnvelopeCarriesDrift:
   def test_drifted_row_maps_true(self) -> None:
     envelope = _to_envelope(_event(payload_drift=True), [])
-    assert envelope.payload_drift is True
+    assert envelope.is_reconciling_item is True
 
   def test_unset_column_maps_false(self) -> None:
     # A row constructed without the flag (Python-side default is None
     # until flush) must read as not-drifted, never None.
     envelope = _to_envelope(_event(), [])
-    assert envelope.payload_drift is False
+    assert envelope.is_reconciling_item is False
 
 
 class TestListDriftFilter:
@@ -62,12 +63,12 @@ class TestListDriftFilter:
 
   def test_true_filter_composes_drift_predicate(self) -> None:
     session = self._session()
-    list_event_blocks(session, payload_drift=True)
+    list_event_blocks(session, is_reconciling_item=True)
     assert "payload_drift IS true" in _captured_list_stmt(session)
 
   def test_false_filter_composes_drift_predicate(self) -> None:
     session = self._session()
-    list_event_blocks(session, payload_drift=False)
+    list_event_blocks(session, is_reconciling_item=False)
     assert "payload_drift IS false" in _captured_list_stmt(session)
 
   def test_omitted_filter_leaves_drift_out(self) -> None:

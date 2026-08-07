@@ -41,15 +41,15 @@ _RECURRING_SEQUENCE: list[str] = [
   "means the attempt raised and last_sync_at did not advance) — and poll "
   "get-fiscal-calendar until last_sync_at advances and the blocker clears. "
   "Prefer all of this over closing with allow_stale_sync=true.",
-  "If the sync outcome reports drift_detected > 0: those are reconciling "
-  "items — transactions edited in the source system after they were synced. "
+  "If the sync outcome reports reconciling_items > 0: those are "
+  "transactions edited in the source system after they were synced. "
   "That's normal customer behavior, not an alarm. List them with "
-  "list-event-blocks (payload_drift=true) and agree an explicit disposition "
-  "with the user for each: RESTATE the affected months (reopen → re-close) "
-  "when no external reporting binds them — the usual default inside the "
-  "current fiscal year — or book a CATCH-UP entry in the open period when "
-  "the reporting cadence has locked prior months. Don't close over "
-  "unreviewed drift.",
+  "list-event-blocks (is_reconciling_item=true) and agree an explicit "
+  "disposition with the user for each: RESTATE the affected months "
+  "(reopen → re-close) when no external reporting binds them — the usual "
+  "default inside the current fiscal year — or book a CATCH-UP entry in "
+  "the open period when the reporting cadence has locked prior months. "
+  "Don't close over unreviewed reconciling items.",
   "get-period-close-status (period_start/period_end as YYYY-MM-DD) — see "
   "which schedules are pending / drafted / posted and their amounts.",
   "promote-obligations (dispatch_handlers=true) — draft every matured "

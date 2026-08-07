@@ -338,7 +338,7 @@ class TestSyncResultPersistence:
     assert summary["status"] == "succeeded"
     assert summary["window"] == {"since_date": None, "full_rebuild": False}
     assert summary["counts"]["events_captured"] == 46
-    assert summary["counts"]["drift_detected"] == 11
+    assert summary["counts"]["reconciling_items"] == 11
     assert summary["counts"]["dispatch_failed"] == 2
     assert summary["counts"]["elements"] == 179
     assert summary["errors"] == ["w1"]

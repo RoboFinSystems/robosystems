@@ -130,7 +130,7 @@ class TestGetClosePlaybookContent:
     # Verify-the-sync half of step 1 (the outcome now persists).
     assert "last_sync_result" in seq
     # Reconciling items reviewed with an explicit per-item disposition.
-    assert "payload_drift=true" in seq
+    assert "is_reconciling_item=true" in seq
     assert "RESTATE" in seq and "CATCH-UP" in seq
     # Post-close: the receipt is verified, not assumed, and graph reads
     # wait for the rebuild.
@@ -139,7 +139,7 @@ class TestGetClosePlaybookContent:
     # Forecast seam: recompute after close; bases track closed_through.
     assert "compute-forecast" in seq
     # Ordering: drift review before drafting; verification after close.
-    assert seq.index("payload_drift=true") < seq.index("promote-obligations")
+    assert seq.index("is_reconciling_item=true") < seq.index("promote-obligations")
     assert seq.index("close-period (period as YYYY-MM)") < seq.index(
       "entries_published_to_qb"
     )
