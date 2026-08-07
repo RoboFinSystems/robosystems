@@ -27,9 +27,10 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 
 **Graph and infrastructure state:**
 
-- **Subgraphs**: List subgraphs, quota, and storage information
+- **Subgraphs**: List subgraphs with per-subgraph storage information
 - **Backups**: List backups, download URLs, and storage statistics (each backup reports its `download_extension` — `.lbug.zip` or zstd `.lbug.zst`)
 - **Usage**: Graph content metrics and consumption usage (storage, credits)
+- **Limits**: Tier limits and capacity in one read — storage, queries, rate limits, and the count-based caps on documents and subgraphs
 
 **Lifecycle commands** (`/operations/{op_name}`):
 
@@ -57,8 +58,8 @@ Reads are REST `GET`s; content writes share the same `/operations/{op_name}` env
 ### Data Synchronization
 
 - **Connections**: Provider connections with OAuth flows, sync triggers, and status
-- **SEC Filings**: Process XBRL documents and build filing knowledge graphs
-- **QuickBooks**: Sync transactions, accounts, and financial reports
+- **QuickBooks**: Sync transactions, accounts, and counterparties
+- **External sources**: Register a source namespace for integrations that run outside the platform and write through the public API — registration only, no credentials and no sync
 
 ### Extensions Surface
 
