@@ -120,6 +120,11 @@ class GetFiscalCalendarTool:
   - `period_incomplete`: the month hasn't ended yet (current month)
   - `sync_stale`: QB sync is older than the period end
   - `calendar_not_initialized`: fiscal calendar not yet set up
+  - `pending_obligations`: matured schedule obligations not yet promoted
+    (count + sample ride on the response)
+  - `stranded_obligations`: matured obligations already classified but
+    with no drafted closing entry — adjusting entries a close would
+    silently omit (count + sample ride on the response)
 - `last_sync_at`: most recent QB sync timestamp (null if no QB connection)
 - `periods`: list of all fiscal period rows with status
 
@@ -128,7 +133,10 @@ class GetFiscalCalendarTool:
 2. If `closeable_now` is true, proceed with drafting
 3. If blocked by `sync_stale`, tell user to sync QB first
 4. If blocked by `period_incomplete`, tell user the month hasn't ended
-5. If `gap_periods > 1`, the user is behind — acknowledge and plan a catch-up
+5. If blocked by `pending_obligations` or `stranded_obligations`, run
+   promote-obligations (dispatch_handlers=true) — it reaches both — then
+   re-check
+6. If `gap_periods > 1`, the user is behind — acknowledge and plan a catch-up
 
 **READ-ONLY**: safe to call repeatedly, no side effects.""",
       "inputSchema": {"type": "object", "properties": {}, "required": []},
@@ -199,10 +207,17 @@ class ClosePeriodTool:
 - allow_stale_sync (optional): override the sync-current gate. Only use
   when the user has explicitly verified that QB data is complete despite
   a stale sync timestamp.
+- allow_stranded_obligations (optional): override the stranded-obligation
+  gate — close even though matured classified obligations have no drafted
+  closing entry, knowingly omitting those adjusting entries. Prefer
+  promote-obligations (dispatch_handlers=true) or voiding them instead.
 
 **RETURNS:**
 - period: the period that was closed
-- entries_posted: number of drafts transitioned to posted
+- entries_posted: TOTAL drafts transitioned to posted, across both post
+  paths; entries_published_to_qb / entries_posted_locally carry the
+  split (drafts published to QuickBooks are promoted at publish time,
+  before the local bulk transition)
 - target_auto_advanced: true if close_target moved forward after this close
 - fiscal_calendar: updated calendar state (same shape as get-fiscal-calendar)
 - rule_summary: aggregated rule-eval tally across every schedule Structure
@@ -222,6 +237,9 @@ class ClosePeriodTool:
 - Cannot close out of sequence
 - Cannot close the current (still-open) month
 - Cannot close with a stale QB sync unless allow_stale_sync=true
+- Cannot close over stranded obligations (matured, classified, but no
+  drafted entry) unless allow_stranded_obligations=true — run
+  promote-obligations (dispatch_handlers=true) to draft them first
 - Cannot close if BS equation doesn't balance for the period
 
 **NOTES:**
@@ -243,6 +261,15 @@ class ClosePeriodTool:
               "true when the user has verified QB data is complete."
             ),
           },
+          "allow_stranded_obligations": {
+            "type": "boolean",
+            "description": (
+              "Override the stranded-obligation gate (default false). "
+              "Closes over matured classified obligations that have no "
+              "drafted closing entry, knowingly omitting them; the "
+              "override is recorded in the close audit note."
+            ),
+          },
           "note": {
             "type": "string",
             "description": "Optional note captured in the audit event",
@@ -262,6 +289,9 @@ class ClosePeriodTool:
 
     period = arguments["period"]
     allow_stale_sync = bool(arguments.get("allow_stale_sync", False))
+    allow_stranded_obligations = bool(
+      arguments.get("allow_stranded_obligations", False)
+    )
     note = arguments.get("note")
 
     # Best-effort user identity from the graph client context; fall back to
@@ -284,6 +314,7 @@ class ClosePeriodTool:
           service=svc,
           close_service=close_svc,
           actor_type="agent",
+          allow_stranded_obligations=allow_stranded_obligations,
         )
         # ops_close_period commits the session internally.
         fc_payload = result.fiscal_calendar.model_dump(mode="json")
@@ -295,6 +326,8 @@ class ClosePeriodTool:
         return {
           "period": result.period,
           "entries_posted": result.entries_posted,
+          "entries_published_to_qb": result.entries_published_to_qb,
+          "entries_posted_locally": result.entries_posted_locally,
           "target_auto_advanced": result.target_auto_advanced,
           "fiscal_calendar": fc_payload,
           # Rule eval outcomes from the auto-run on close. Pairs with
@@ -333,6 +366,17 @@ class ClosePeriodTool:
           for d in exc.gate.pending_obligation_sample
         ]
         payload["earliest_pending_period"] = exc.gate.earliest_pending_period
+      if exc.gate.stranded_obligation_count:
+        payload["stranded_obligation_count"] = exc.gate.stranded_obligation_count
+        payload["stranded_obligation_sample"] = [
+          {
+            "event_id": d.event_id,
+            "schedule_id": d.schedule_id,
+            "schedule_name": d.schedule_name,
+            "period": d.period,
+          }
+          for d in exc.gate.stranded_obligation_sample
+        ]
       if exc.gate.sync_stale_days is not None:
         payload["sync_stale_days"] = exc.gate.sync_stale_days
       return payload
@@ -549,6 +593,9 @@ class BackfillPlanHistoryTool:
 - max_periods (optional, default 12, max 24): months to restamp this call.
 - allow_stale_sync (optional): override the sync gate on each reclose —
   rarely needed since historical months predate the last sync.
+- allow_stranded_obligations (optional): override the stranded-obligation
+  gate on each reclose — only when a matured classified obligation with
+  no drafted entry sits inside the backfill window.
 - restamp (optional, default false): also re-derive months that already
   have canonical sets — the healing pass after an engine improvement.
   Advance start_period between chunks (a restamp run is not
@@ -594,6 +641,15 @@ class BackfillPlanHistoryTool:
               "sync in the normal case."
             ),
           },
+          "allow_stranded_obligations": {
+            "type": "boolean",
+            "description": (
+              "Override the stranded-obligation gate on each reclose "
+              "(default false). Only needed when a matured classified "
+              "obligation without a drafted entry sits inside the "
+              "backfill window."
+            ),
+          },
           "restamp": {
             "type": "boolean",
             "description": (
@@ -626,6 +682,9 @@ class BackfillPlanHistoryTool:
       start_period=arguments.get("start_period"),
       max_periods=int(arguments.get("max_periods", 12)),
       allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
+      allow_stranded_obligations=bool(
+        arguments.get("allow_stranded_obligations", False)
+      ),
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
     )

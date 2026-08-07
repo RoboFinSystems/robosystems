@@ -193,6 +193,7 @@ def close_period(
   service: FiscalCalendarService,
   close_service: PeriodCloseService,
   actor_type: str = "user",
+  allow_stranded_obligations: bool = False,
 ) -> ClosePeriodResponse:
   """Close a fiscal period — the final commit action.
 
@@ -214,9 +215,19 @@ def close_period(
     has_sync_connection=has_sync,
     last_sync_at=last_sync_at,
     allow_stale_sync=allow_stale_sync,
+    allow_stranded_obligations=allow_stranded_obligations,
     note=note,
   )
   session.commit()
+
+  # The close's writes (entries posted, statement sets stamped) change
+  # graph-materialized state, so the blue/green pipeline must rebuild —
+  # without this marker the graph keeps serving pre-close data while
+  # reporting fresh. Placed here (not the routers) so the REST and MCP
+  # surfaces both get it. Non-fatal by design.
+  from robosystems.operations.extensions.staleness import mark_graph_stale
+
+  mark_graph_stale(graph_id, "period_closed")
 
   fc_response = build_fiscal_calendar_response(
     session, graph_id, result.calendar, has_sync, last_sync_at, service
@@ -225,6 +236,8 @@ def close_period(
     fiscal_calendar=fc_response,
     period=result.period,
     entries_posted=result.entries_posted,
+    entries_published_to_qb=result.entries_published_to_qb,
+    entries_posted_locally=result.entries_posted_locally,
     target_auto_advanced=result.target_auto_advanced,
     rule_summary=result.rule_summary,
     evaluated_structure_ids=list(result.evaluated_structure_ids),
@@ -303,6 +316,12 @@ def reopen_period(
   ps, pe = period_date_range(period)
   retracted = retract_canonical_statement_sets(session, period_start=ps, period_end=pe)
   session.commit()
+
+  # The reopen retracts the month's canonical statement sets — graph
+  # state changed; mirror close_period's marker.
+  from robosystems.operations.extensions.staleness import mark_graph_stale
+
+  mark_graph_stale(graph_id, "period_reopened")
 
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   return ReopenPeriodResult(
@@ -457,6 +476,7 @@ def backfill_plan_history(
         service=service,
         close_service=close_service,
         actor_type=actor_type,
+        allow_stranded_obligations=body.allow_stranded_obligations,
       )
       processed.append(
         BackfillPeriodOutcome(

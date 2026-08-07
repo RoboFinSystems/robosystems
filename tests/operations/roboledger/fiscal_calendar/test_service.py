@@ -870,6 +870,139 @@ class TestPendingObligationsGate:
     assert CloseableGateResult.PENDING_OBLIGATIONS in result.blockers
 
 
+class TestStrandedObligationsGate:
+  """Gate 4b (F9): a matured `classified` obligation whose (schedule, period)
+  has no drafted closing entry blocks close — those are adjusting entries the
+  close would otherwise silently omit. Bypassable with
+  allow_stranded_obligations; the count still populates for the audit trail.
+  """
+
+  @staticmethod
+  def _classified_event(
+    event_id: str = "evt_stranded",
+    *,
+    schedule_id: str = "struct_a",
+    period_start: str = "2026-01-01",
+    period_end: str = "2026-01-31",
+  ):
+    from robosystems.models.extensions.roboledger.event import Event
+
+    return Event(
+      id=event_id,
+      event_type="schedule_entry_due",
+      event_category="recognition",
+      event_class="economic",
+      occurred_at=datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC),
+      status="classified",
+      source="internal",
+      created_by="usr_test",
+      metadata_={
+        "schedule_id": schedule_id,
+        "posting_date": period_end,
+        "period_start": period_start,
+        "period_end": period_end,
+      },
+    )
+
+  @staticmethod
+  def _draft_entry(schedule_id: str = "struct_a", posting_date: str = "2026-01-31"):
+    from robosystems.models.extensions.roboledger.entry import Entry
+
+    return Entry(
+      type="closing",
+      status="draft",
+      posting_date=date.fromisoformat(posting_date),
+      source_structure_id=schedule_id,
+      created_by="usr_test",
+    )
+
+  def _service_with_calendar(self):
+    svc, session = _service()
+    svc.initialize(session, GRAPH_ID, closed_through="2025-12", actor_id="u1")
+    return svc, session
+
+  def test_stranded_obligation_blocks(self):
+    svc, session = self._service_with_calendar()
+    session.add(self._classified_event())
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert not result.is_closeable
+    assert CloseableGateResult.STRANDED_OBLIGATIONS in result.blockers
+    assert result.stranded_obligation_count == 1
+    assert result.stranded_obligation_sample[0].schedule_id == "struct_a"
+    assert result.stranded_obligation_sample[0].period == "2026-01"
+
+  def test_classified_with_draft_passes(self):
+    """An entries row for the (schedule, period) settles the obligation —
+    regardless of which event triggered it."""
+    svc, session = self._service_with_calendar()
+    session.add(self._classified_event())
+    session.add(self._draft_entry())
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+    assert result.stranded_obligation_count == 0
+
+  def test_entry_in_other_period_still_blocks(self):
+    svc, session = self._service_with_calendar()
+    session.add(self._classified_event())
+    session.add(self._draft_entry(posting_date="2025-12-31"))
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert not result.is_closeable
+    assert CloseableGateResult.STRANDED_OBLIGATIONS in result.blockers
+
+  def test_allow_stranded_obligations_bypasses_but_reports(self):
+    """The override closes anyway, but the count still populates so the
+    close audit note can record how many entries were knowingly omitted."""
+    svc, session = self._service_with_calendar()
+    session.add(self._classified_event())
+
+    result = svc.closeable_gate(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      today=date(2026, 2, 1),
+      allow_stranded_obligations=True,
+    )
+
+    assert result.is_closeable
+    assert CloseableGateResult.STRANDED_OBLIGATIONS not in result.blockers
+    assert result.stranded_obligation_count == 1
+
+  def test_future_period_obligation_does_not_block(self):
+    """A stranded obligation for a later month belongs to a later close."""
+    svc, session = self._service_with_calendar()
+    from robosystems.models.extensions.roboledger.event import Event
+
+    session.add(
+      Event(
+        id="evt_future",
+        event_type="schedule_entry_due",
+        event_category="recognition",
+        event_class="economic",
+        occurred_at=datetime(2026, 2, 28, 23, 59, 59, tzinfo=UTC),
+        status="classified",
+        source="internal",
+        created_by="usr_test",
+        metadata_={
+          "schedule_id": "struct_a",
+          "posting_date": "2026-02-28",
+          "period_start": "2026-02-01",
+          "period_end": "2026-02-28",
+        },
+      )
+    )
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+    assert result.stranded_obligation_count == 0
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Derived state — gap_periods + catch_up_sequence
 # ────────────────────────────────────────────────────────────────────────────

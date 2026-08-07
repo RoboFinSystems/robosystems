@@ -32,15 +32,34 @@ _RECURRING_SEQUENCE: list[str] = [
   "closeable_now, blockers, catch_up_sequence. Confirm the period you intend "
   "to close is exactly closed_through + 1.",
   "If blockers include sync_stale: run sync-connection (incremental, no "
-  "arguments needed — it auto-resolves the graph's sync connection), then "
-  "poll get-fiscal-calendar until last_sync_at advances and the blocker "
-  "clears. Prefer this over closing with allow_stale_sync=true.",
+  "arguments needed — it auto-resolves the graph's sync connection). The "
+  "default incremental window reaches back ~60 days: when the user edited "
+  "months older than that, pass an explicit since_date covering the oldest "
+  "edit or those changes are silently missed. Then VERIFY the sync: "
+  "get-graph-sync-status reports each connection's last_sync_result "
+  "(captured / updated / drift / dispatch_failed counts; a 'failed' status "
+  "means the attempt raised and last_sync_at did not advance) — and poll "
+  "get-fiscal-calendar until last_sync_at advances and the blocker clears. "
+  "Prefer all of this over closing with allow_stale_sync=true.",
+  "If the sync outcome reports drift_detected > 0: those are reconciling "
+  "items — transactions edited in the source system after they were synced. "
+  "That's normal customer behavior, not an alarm. List them with "
+  "list-event-blocks (payload_drift=true) and agree an explicit disposition "
+  "with the user for each: RESTATE the affected months (reopen → re-close) "
+  "when no external reporting binds them — the usual default inside the "
+  "current fiscal year — or book a CATCH-UP entry in the open period when "
+  "the reporting cadence has locked prior months. Don't close over "
+  "unreviewed drift.",
   "get-period-close-status (period_start/period_end as YYYY-MM-DD) — see "
   "which schedules are pending / drafted / posted and their amounts.",
   "promote-obligations (dispatch_handlers=true) — draft every matured "
   "schedule's closing entry for the period in one sweep. This is how "
   "schedule-derived drafts come into being; there is no create-closing-entry "
-  "tool. Idempotent.",
+  "tool. Reaches stranded obligations too (already 'classified' by a "
+  "flip-only background sweep but never drafted — reported via "
+  "stranded_count). Idempotent. Then verify: list-period-drafts should show "
+  "one draft per active schedule for the period; investigate any gap before "
+  "closing.",
   "(optional) create-event-block(event_type='journal_entry_recorded') — for "
   "any manual / one-off adjusting entries that aren't schedule-driven.",
   "list-period-drafts (period as YYYY-MM) — review every draft with DR/CR "
@@ -53,6 +72,20 @@ _RECURRING_SEQUENCE: list[str] = [
   "allow_stale_sync=true only when the user has verified QB is complete "
   "despite a stale sync — normally run sync-connection instead (see the "
   "sync_stale step above).",
+  "Post-close verification — read the receipt back to the user, don't "
+  "assume: entries_posted should equal the reviewed draft count "
+  "(entries_published_to_qb / entries_posted_locally carry the split); "
+  "statements_stamped=true with statement_rule_summary passing; "
+  "get-period-close-status shows every schedule posted. The close marks "
+  "the graph stale and the rebuild pipeline picks it up — poll "
+  "get-graph-sync-status until sync_status=fresh before running graph "
+  "reads (statements, fact grids) against the newly closed month.",
+  "If the tenant runs forecast scenarios: re-run compute-forecast for each "
+  "forecast block after the close so the actuals/forecast seam advances to "
+  "the new closed_through. A scenario whose base_period lags closed_through "
+  "re-bases at the seam — keep scenario bases at the current closed_through "
+  "(advance or rebuild them after each close, per the tenant's "
+  "procedures doc).",
 ]
 
 _INITIATE_SEQUENCE: list[str] = [
@@ -153,12 +186,16 @@ _KEY_RULES: list[str] = [
   "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
   "(month not over yet), sync_stale (QuickBooks sync older than period end "
   "— run sync-connection and poll get-fiscal-calendar until it clears), "
-  "calendar_not_initialized, and pending_obligations (matured "
+  "calendar_not_initialized, pending_obligations (matured "
   "schedule_entry_due events still 'pending' at/before the period — run "
   "promote-obligations to draft them, or, if they belong to a "
   "pre-watermark month that should never close, the schedule's "
   "closed_through was set wrong; earliest_pending_period names the oldest "
-  "one). Resolve before close-period; get-fiscal-calendar reports them.",
+  "one), and stranded_obligations (matured obligations already "
+  "'classified' but with no drafted closing entry — adjusting entries the "
+  "close would otherwise silently omit; promote-obligations with "
+  "dispatch_handlers=true drafts them, or void the obligation). Resolve "
+  "before close-period; get-fiscal-calendar reports them.",
   "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
   "'close procedures' / 'month-end' document before authoring or closing. It "
   "captures this company's specifics and should reference this playbook.",

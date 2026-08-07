@@ -1245,12 +1245,17 @@ class TestResolveSyncConnection:
 
 
 class TestDispatchConnectionSync:
-  def _lock_patches(self, acquired=True, holder_id=None, ttl_remaining=None):
+  def _lock_patches(
+    self, acquired=True, holder_id=None, ttl_remaining=None, error_message=None
+  ):
     lock_result = MagicMock()
     lock_result.acquired = acquired
     lock_result.holder_id = holder_id
     lock_result.ttl_remaining = ttl_remaining
     lock_result.lock_id = "lock_abc" if acquired else None
+    if error_message is None and not acquired:
+      error_message = "Lock is currently held by another process"
+    lock_result.error_message = error_message
     lock_instance = MagicMock()
     lock_instance.acquire.return_value = lock_result
     return (
@@ -1390,3 +1395,68 @@ class TestDispatchConnectionSync:
     assert result["task_id"] == "run_888"
     options = mock_registry.sync_connection.call_args.args[2]
     assert options is None or "sync_lock_id" not in options
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_lock_acquire_redis_error_proceeds_without_lock(self):
+    """`acquire` swallows Redis failures into acquired=False — that must
+    take the same fail-open posture as a client-creation failure, not
+    409 every sync attempt for as long as Valkey stays degraded."""
+    from robosystems.operations.connection_service import dispatch_connection_sync
+
+    lock_patch, valkey_patch = self._lock_patches(
+      acquired=False,
+      error_message="Redis error: NOAUTH Authentication required.",
+    )
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+      lock_patch,
+      valkey_patch,
+    ):
+      mock_registry.get_provider.return_value = MagicMock()
+      mock_registry.sync_connection = AsyncMock(return_value="run_999")
+
+      result = await dispatch_connection_sync(
+        graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
+      )
+
+    assert result["task_id"] == "run_999"
+    options = mock_registry.sync_connection.call_args.args[2]
+    assert options is None or "sync_lock_id" not in options
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_dispatch_failure_releases_lock(self):
+    """A failed dispatch never starts the Dagster run that would release
+    the lock — without the release, the leaked lock 409s every sync on
+    this connection for its full 30-minute TTL."""
+    from robosystems.operations.connection_service import dispatch_connection_sync
+
+    lock_patch, valkey_patch = self._lock_patches(acquired=True)
+    with (
+      patch(
+        f"{MODULE}.ConnectionService.get_connection",
+        new=AsyncMock(return_value=_conn_dict()),
+      ),
+      patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
+      lock_patch,
+      valkey_patch,
+      patch(f"{LOCK_MODULE}.release_lock_by_id") as release,
+    ):
+      mock_registry.get_provider.return_value = MagicMock()
+      mock_registry.sync_connection = AsyncMock(
+        side_effect=ValueError("provider disabled")
+      )
+
+      with pytest.raises(ValueError):
+        await dispatch_connection_sync(
+          graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
+        )
+
+    release.assert_called_once()
+    assert release.call_args.kwargs["lock_key"] == "qb_sync:conn_1"
+    assert release.call_args.kwargs["lock_id"] == "lock_abc"

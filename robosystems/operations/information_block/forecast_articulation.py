@@ -84,6 +84,21 @@ _PPE_ROUTES: dict[str, float] = {
   "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment": -1.0,
 }
 
+# Contra polarity for direct-routed instants. Unlike PP&E, a Net-only
+# presentation (intangibles) maps its contra CoA account straight onto
+# the Net anchor — the trial-balance path nets naturally there (the
+# contra carries a credit balance), but a schedule's running balance is
+# stored positive, so applying it at +1 marches the Net line UP by the
+# monthly amortization instead of down (June-close F14). balance_type
+# can't catch this — QB files contra-asset accounts under an asset
+# AccountType, so the loader's contra EFS trait is the only signal (see
+# the loader's contra-promotion note). Flip the sign whenever source and
+# target disagree on contra-ness; congruent pairs (contra→contra
+# concept, plain→plain) keep +1.
+_CONTRA_TRAIT_IDENTIFIERS = frozenset(
+  {"contraAsset", "contraLiability", "contraEquity"}
+)
+
 # The library's original AP derivation arc sourced only the combined
 # AccountsPayableAndAccruedLiabilitiesCurrent anchor; tenants mapped to
 # the sibling AccountsPayableCurrent (the DPO rule's target) would land
@@ -194,8 +209,10 @@ def _load_schedule_projection(
   Each schedule CoA element routes through its **primary** mapping
   target (trait-classified targets outrank inferred, qname tiebreak —
   the ``_read_mapped_balances`` close-primary designation), then into
-  the element the base set carries: direct when present, the PP&E
-  gross/contra pair onto Net, anything else → ``unrouted``.
+  the element the base set carries: direct when present (with the
+  contra sign flip when source and target disagree on contra-ness —
+  see ``_CONTRA_TRAIT_IDENTIFIERS``), the PP&E gross/contra pair onto
+  Net, anything else → ``unrouted``.
 
   Deliberately NOT filtered on ``fact_scope``: the base month sits left
   of ``closed_through``, so its schedule facts are ``historical`` — and
@@ -213,7 +230,8 @@ def _load_schedule_projection(
       SELECT f.fact_set_id, f.value, f.period_end, f.period_type,
              f.element_id AS source_id,
              m.to_element_id AS target_id, target.qname AS target_qname,
-             tcls.identifier AS classification
+             tcls.identifier AS classification,
+             scls.identifier AS source_classification
       FROM facts f
       JOIN fact_sets fs ON fs.id = f.fact_set_id
         AND fs.factset_type = 'schedule'
@@ -232,6 +250,13 @@ def _load_schedule_projection(
         WHERE et.is_primary = TRUE
           AND t.category = 'elementsOfFinancialStatements'
       ) tcls ON tcls.element_id = target.id
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) scls ON scls.element_id = f.element_id
       WHERE f.fact_type = 'Numeric'
         AND f.value IS NOT NULL
         AND f.period_end >= :window_start
@@ -271,6 +296,16 @@ def _load_schedule_projection(
       weight = 1.0
       if target_id in base_bs_element_ids:
         routed_id = target_id
+        # Contra netting on the direct route (F14): a contra CoA account
+        # mapped straight onto a Net anchor (intangibles' Accumulated
+        # Amortization → IntangibleAssetsNetExcludingGoodwill) must
+        # reduce it — its schedule running balance is stored positive.
+        # The _PPE_ROUTES arm below encodes its own netting sign, so the
+        # flip applies only here.
+        source_contra = row.source_classification in _CONTRA_TRAIT_IDENTIFIERS
+        target_contra = row.classification in _CONTRA_TRAIT_IDENTIFIERS
+        if source_contra != target_contra:
+          weight = -1.0
       elif target_qname in _PPE_ROUTES and ppe_net_element_id in base_bs_element_ids:
         routed_id = ppe_net_element_id
         weight = _PPE_ROUTES[target_qname]

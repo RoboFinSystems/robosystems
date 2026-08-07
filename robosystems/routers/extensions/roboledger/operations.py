@@ -1459,6 +1459,7 @@ create_event_block_op = _registrar.register(
     # Source validation resolves the graph's registered Connections
     # (platform DB) — the tenant session alone doesn't carry the graph id.
     requires_graph_id=True,
+    mark_stale_reason="event_block_created",
   )
 )
 
@@ -1489,6 +1490,7 @@ update_event_block_op = _registrar.register(
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
     },
+    mark_stale_reason="event_block_updated",
   )
 )
 
@@ -1528,6 +1530,7 @@ execute_event_block_op = _registrar.register(
       QBAuthFailedError: 401,
       ValueError: 422,
     },
+    mark_stale_reason="event_published",
   )
 )
 
@@ -1627,6 +1630,7 @@ update_journal_entry_op = _registrar.register(
       ValueError: 422,
     },
     requires_created_by=False,
+    mark_stale_reason="journal_entry_updated",
   )
 )
 
@@ -1646,6 +1650,7 @@ delete_journal_entry_op = _registrar.register(
       JournalEntryNotDraftError: 422,
     },
     requires_created_by=False,
+    mark_stale_reason="journal_entry_deleted",
   )
 )
 
@@ -1664,7 +1669,10 @@ promote_obligations_op = _registrar.register(
       "Promote matured pending schedule obligations (schedule_entry_due "
       "events whose period boundary has passed) to 'classified', and — when "
       "dispatch_handlers=true (default) — draft their closing entries in the "
-      "same transaction. This is the on-demand form of the background "
+      "same transaction. Also reaches stranded obligations: events already "
+      "'classified' (by an earlier flip-only sweep) whose closing entry was "
+      "never drafted are dispatched in the same pass, and reported via "
+      "stranded_count. This is the on-demand form of the background "
       "obligation-promotion sweep; run it before close-period when a schedule "
       "was just created or when you can't wait for the Dagster sensor. "
       "Idempotent: re-running skips already-classified obligations and "
@@ -1674,6 +1682,7 @@ promote_obligations_op = _registrar.register(
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
     error_map={ValueError: 422},
+    mark_stale_reason="obligations_promoted",
   )
 )
 
@@ -1857,6 +1866,7 @@ async def close_period_op(
           note=body.note,
           service=_fiscal_svc,
           close_service=_close_svc,
+          allow_stranded_obligations=body.allow_stranded_obligations,
         )
     except CloseGateFailed as e:
       if e.no_calendar:
@@ -1885,6 +1895,17 @@ async def close_period_op(
           for d in e.gate.pending_obligation_sample
         ]
         detail["earliest_pending_period"] = e.gate.earliest_pending_period
+      if e.gate.stranded_obligation_count:
+        detail["stranded_obligation_count"] = e.gate.stranded_obligation_count
+        detail["stranded_obligation_sample"] = [
+          PendingObligationDetailResponse(
+            event_id=d.event_id,
+            schedule_id=d.schedule_id,
+            schedule_name=d.schedule_name,
+            period=d.period,
+          ).model_dump()
+          for d in e.gate.stranded_obligation_sample
+        ]
       if e.gate.sync_stale_days is not None:
         detail["sync_stale_days"] = e.gate.sync_stale_days
       raise HTTPException(status_code=422, detail=detail)

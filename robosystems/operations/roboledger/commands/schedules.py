@@ -308,9 +308,11 @@ def promote_obligations(
   Flips matured `pending` `schedule_entry_due` events to `classified` and,
   when ``dispatch_handlers`` is set, drafts their closing entries — so a
   schedule-driven close can be completed in one session without waiting for
-  the background sensor. The data scope is the session's search_path (the
-  tenant graph); the sweep is idempotent (re-running skips already-classified
-  rows and reconciles to existing drafts).
+  the background sensor. Stranded obligations (already `classified` but
+  never drafted, e.g. by an earlier flip-only sweep) are dispatched too.
+  The data scope is the session's search_path (the tenant graph); the
+  sweep is idempotent (re-running skips already-classified rows and
+  reconciles to existing drafts).
   """
   from robosystems.operations.event_block.promotion import promote_pending_obligations
 
@@ -326,7 +328,9 @@ def promote_obligations(
     classified_count=result.classified_count,
     dispatched_count=result.dispatched_count,
     error_count=result.error_count,
+    stranded_count=result.stranded_count,
     classified_event_ids=result.classified_event_ids,
+    stranded_event_ids=result.stranded_event_ids,
     errors=[{"event_id": eid, "error": msg} for eid, msg in result.errors],
   )
 

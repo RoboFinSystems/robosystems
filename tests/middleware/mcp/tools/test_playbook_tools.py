@@ -118,3 +118,29 @@ class TestGetClosePlaybookContent:
       ("list-period-drafts", "close-period"),
     ]:
       assert seq.index(earlier) < seq.index(later), (earlier, later)
+
+  def test_recurring_carries_the_close_audit_deltas(self) -> None:
+    """The durable deltas absorbed from a real close: sync window +
+    verify-the-sync, reconciling-item dispositions, post-close receipt
+    verification, and the forecast seam advance."""
+    seq_list = _run("recurring")["recurring_close_sequence"]
+    seq = " || ".join(seq_list)
+    # Sync-window rule: the default incremental window misses older edits.
+    assert "since_date" in seq
+    # Verify-the-sync half of step 1 (the outcome now persists).
+    assert "last_sync_result" in seq
+    # Reconciling items reviewed with an explicit per-item disposition.
+    assert "payload_drift=true" in seq
+    assert "RESTATE" in seq and "CATCH-UP" in seq
+    # Post-close: the receipt is verified, not assumed, and graph reads
+    # wait for the rebuild.
+    assert "entries_published_to_qb" in seq
+    assert "sync_status=fresh" in seq
+    # Forecast seam: recompute after close; bases track closed_through.
+    assert "compute-forecast" in seq
+    # Ordering: drift review before drafting; verification after close.
+    assert seq.index("payload_drift=true") < seq.index("promote-obligations")
+    assert seq.index("close-period (period as YYYY-MM)") < seq.index(
+      "entries_published_to_qb"
+    )
+    assert seq.index("entries_published_to_qb") < seq.index("compute-forecast")

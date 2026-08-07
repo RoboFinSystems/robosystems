@@ -130,7 +130,9 @@ class PromoteObligationsRequest(BaseModel):
   Flips matured ``pending`` ``schedule_entry_due`` events (period boundary
   passed) to ``classified``; with ``dispatch_handlers`` it also drafts the
   closing entries in the same transaction (idempotent — reconciles to an
-  existing draft).
+  existing draft). The sweep also reaches *stranded* obligations —
+  already ``classified`` (by an earlier flip-only sweep) but with no
+  closing entry ever drafted — dispatching them in the same pass.
   """
 
   dispatch_handlers: bool = Field(
@@ -156,7 +158,21 @@ class PromoteObligationsResponse(BaseModel):
   error_count: int = Field(
     ..., description="Per-obligation handler errors (non-fatal)."
   )
+  stranded_count: int = Field(
+    0,
+    description=(
+      "Matured obligations found already at 'classified' with no drafted "
+      "closing entry. With dispatch_handlers=true they were drafted this "
+      "run (included in dispatched_count); with dispatch_handlers=false "
+      "they still have no draft — re-run with dispatch_handlers=true or "
+      "void them."
+    ),
+  )
   classified_event_ids: list[str] = Field(default_factory=list)
+  stranded_event_ids: list[str] = Field(
+    default_factory=list,
+    description="Event ids of the stranded obligations found this sweep.",
+  )
   errors: list[dict[str, str]] = Field(
     default_factory=list,
     description="Per-obligation errors as {event_id, error}; the sweep continues past them.",

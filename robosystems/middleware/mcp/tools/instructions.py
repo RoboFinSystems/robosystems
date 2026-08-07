@@ -103,7 +103,9 @@ def build_instructions(
     if has("sync-connection"):
       close_lines.append(
         "- Stale source data (`sync_stale` blocker)? Pull fresh data with "
-        "`sync-connection`, then re-check `get-fiscal-calendar`."
+        "`sync-connection`, verify the outcome via `get-graph-sync-status` "
+        "(connections[].last_sync_result), then re-check "
+        "`get-fiscal-calendar`."
       )
     sections.append(_block(*close_lines))
 

@@ -41,18 +41,35 @@ so re-running the function is safe — already-classified rows are
 skipped. Handler dispatch is idempotent at the schedule-entry level
 (``ScheduleService.create_closing_entry`` reconciles to the existing
 draft when one already exists).
+
+Stranded obligations
+--------------------
+
+A co-pilot sweep flips pending → classified *without* dispatching, so an
+obligation can sit at ``classified`` with no closing entry ever drafted —
+invisible to a later autopilot sweep that only dispatches what it flips,
+and invisible to the close gate's pending count. Those are adjusting
+entries a close would silently omit. The sweep therefore also scans
+matured ``classified`` obligations whose (schedule, period) has no
+``entries`` row — "stranded" — and dispatches them in autopilot mode
+(co-pilot surfaces them on the result for the operator). The has-a-draft
+test is keyed the same way ``create_closing_entry``'s reconcile is
+(``source_structure_id`` + ``posting_date`` inside the period, any
+status), so an obligation whose entry was drafted through a *different*
+event — or already posted — is never re-dispatched.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import Structure
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.python_handlers.types import (
@@ -68,11 +85,21 @@ class PromotionResult:
   classified_event_ids: list[str] = field(default_factory=list)
   dispatched_event_ids: list[str] = field(default_factory=list)
   voided_orphan_event_ids: list[str] = field(default_factory=list)
+  # Matured obligations found already at `classified` with no closing entry
+  # drafted for their (schedule, period) — after orphan voiding. In autopilot
+  # mode these were dispatched this sweep (also present in
+  # dispatched_event_ids); in co-pilot mode they're surfaced so the operator
+  # can re-run with dispatch_handlers=True or void them.
+  stranded_event_ids: list[str] = field(default_factory=list)
   errors: list[tuple[str, str]] = field(default_factory=list)
 
   @property
   def classified_count(self) -> int:
     return len(self.classified_event_ids)
+
+  @property
+  def stranded_count(self) -> int:
+    return len(self.stranded_event_ids)
 
   @property
   def dispatched_count(self) -> int:
@@ -87,6 +114,90 @@ class PromotionResult:
     return len(self.errors)
 
 
+def _obligation_window(event: Event) -> tuple[str, date, date] | None:
+  """Extract (schedule_id, period_start, period_end) from obligation metadata.
+
+  Returns None when any of the three is missing or unparseable — such an
+  event can't be checked for a draft (and handler dispatch would reject
+  its metadata anyway).
+  """
+  meta = event.metadata_ or {}
+  schedule_id = meta.get("schedule_id")
+  if not schedule_id:
+    return None
+  try:
+    period_start = date.fromisoformat(meta.get("period_start") or "")
+    period_end = date.fromisoformat(meta.get("period_end") or "")
+  except ValueError:
+    return None
+  return str(schedule_id), period_start, period_end
+
+
+def filter_stranded_obligations(session: Session, events: list[Event]) -> list[Event]:
+  """Return the subset of obligation `events` with no drafted closing entry.
+
+  "Has a draft" mirrors ``ScheduleService.create_closing_entry``'s
+  reconcile lookup: any ``entries`` row — draft or posted, regardless of
+  which event triggered it — with ``source_structure_id`` equal to the
+  obligation's schedule and ``posting_date`` inside its period window.
+  Matching on the (schedule, period) key rather than
+  ``triggered_by_event_id`` keeps obligations whose entry was drafted
+  through a different event (or already posted) out of the stranded set.
+  """
+  windows: dict[str, tuple[str, date, date]] = {}
+  for evt in events:
+    window = _obligation_window(evt)
+    if window is not None:
+      windows[evt.id] = window
+  if not windows:
+    return []
+
+  schedule_ids = {sid for sid, _, _ in windows.values()}
+  entry_dates: dict[str, list[date]] = {}
+  for entry in (
+    session.query(Entry).filter(Entry.source_structure_id.in_(schedule_ids)).all()
+  ):
+    entry_dates.setdefault(str(entry.source_structure_id), []).append(
+      entry.posting_date
+    )
+
+  stranded: list[Event] = []
+  for evt in events:
+    window = windows.get(evt.id)
+    if window is None:
+      continue
+    schedule_id, period_start, period_end = window
+    has_entry = any(
+      period_start <= posting_date <= period_end
+      for posting_date in entry_dates.get(schedule_id, ())
+    )
+    if not has_entry:
+      stranded.append(evt)
+  return stranded
+
+
+def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Event]:
+  """Matured `classified` obligations whose closing entry was never drafted.
+
+  The population a co-pilot sweep creates: flipped past `pending` without
+  dispatch, so invisible to both the promote sweep's old pending-only
+  scope and the close gate's pending count — adjusting entries a close
+  would silently omit. The close gate counts these; the autopilot sweep
+  dispatches them.
+  """
+  classified = (
+    session.query(Event)
+    .filter(
+      Event.event_type == "schedule_entry_due",
+      Event.status == "classified",
+      Event.occurred_at <= as_of,
+    )
+    .order_by(Event.occurred_at.asc())
+    .all()
+  )
+  return filter_stranded_obligations(session, classified)
+
+
 def promote_pending_obligations(
   session: Session,
   graph_id: str,
@@ -96,6 +207,10 @@ def promote_pending_obligations(
   created_by: str = "system:obligation_promoter",
 ) -> PromotionResult:
   """Flip matured `pending` `schedule_entry_due` events to `classified`.
+
+  Also scans matured `classified` obligations with no drafted closing
+  entry ("stranded" — see module docstring): autopilot dispatches them,
+  co-pilot surfaces them on ``result.stranded_event_ids``.
 
   Args:
     session: Tenant-scoped extensions session (search_path already set
@@ -119,25 +234,32 @@ def promote_pending_obligations(
     session.query(Event)
     .filter(
       Event.event_type == "schedule_entry_due",
-      Event.status == "pending",
+      Event.status.in_(("pending", "classified")),
       Event.occurred_at <= as_of,
     )
     .all()
   )
+  pending = [evt for evt in candidates if evt.status == "pending"]
+  classified = [evt for evt in candidates if evt.status == "classified"]
 
   result = PromotionResult(graph_id=graph_id)
+
+  stranded = filter_stranded_obligations(session, classified) if classified else []
 
   # Orphan guard (Layer 2): an obligation whose schedule structure no longer
   # exists is orphaned — the schedule was deleted but its register wasn't
   # voided (e.g. a pre-fix delete, or the void's silent no-op). Never draft an
   # orphan into a closing entry: void it in place so it stops blocking close,
   # and surface it. The catch-all that stops a deleted schedule from
-  # double-posting at promotion regardless of how the orphan arose. See
+  # double-posting at promotion regardless of how the orphan arose. Covers
+  # stranded classified obligations too — a deleted schedule's classified
+  # leftovers void rather than error at dispatch. See
   # specs/schedule-delete-obligation-integrity.md (Layer 2).
-  if candidates:
+  guard_pool = pending + stranded
+  if guard_pool:
     candidate_schedule_ids = {
       evt.metadata_.get("schedule_id")
-      for evt in candidates
+      for evt in guard_pool
       if evt.metadata_ and evt.metadata_.get("schedule_id")
     }
     live_schedule_ids: set[str] = set()
@@ -150,7 +272,7 @@ def promote_pending_obligations(
       }
     orphans = [
       evt
-      for evt in candidates
+      for evt in guard_pool
       if evt.metadata_
       and evt.metadata_.get("schedule_id")
       and evt.metadata_.get("schedule_id") not in live_schedule_ids
@@ -158,7 +280,7 @@ def promote_pending_obligations(
     if orphans:
       orphan_ids = [evt.id for evt in orphans]
       session.query(Event).filter(
-        Event.id.in_(orphan_ids), Event.status == "pending"
+        Event.id.in_(orphan_ids), Event.status.in_(("pending", "classified"))
       ).update({"status": "voided"}, synchronize_session="fetch")
       result.voided_orphan_event_ids.extend(orphan_ids)
       for evt in orphans:
@@ -170,9 +292,12 @@ def promote_pending_obligations(
           evt.metadata_.get("schedule_id"),
         )
       orphan_id_set = set(orphan_ids)
-      candidates = [evt for evt in candidates if evt.id not in orphan_id_set]
+      pending = [evt for evt in pending if evt.id not in orphan_id_set]
+      stranded = [evt for evt in stranded if evt.id not in orphan_id_set]
 
-  if not candidates:
+  result.stranded_event_ids.extend(evt.id for evt in stranded)
+
+  if not pending and not stranded:
     return result
 
   if not dispatch_handlers:
@@ -180,21 +305,25 @@ def promote_pending_obligations(
     # No need to keep the ORM objects in the dirty set — we don't dispatch
     # a handler that would read event.status, so the round-trip savings are
     # significant on long schedules (a 30-year mortgage is 360 rows).
-    candidate_ids = [evt.id for evt in candidates]
-    session.query(Event).filter(Event.id.in_(candidate_ids)).update(
-      {"status": "classified"}, synchronize_session="fetch"
-    )
-    result.classified_event_ids.extend(candidate_ids)
+    # Stranded obligations are already classified — a status flip can't help
+    # them; they ride out on result.stranded_event_ids instead.
+    if pending:
+      candidate_ids = [evt.id for evt in pending]
+      session.query(Event).filter(Event.id.in_(candidate_ids)).update(
+        {"status": "classified"}, synchronize_session="fetch"
+      )
+      result.classified_event_ids.extend(candidate_ids)
     logger.info(
-      "promote_pending_obligations[%s]: classified %s events (co-pilot mode)",
+      "promote_pending_obligations[%s]: classified=%s stranded=%s (co-pilot mode)",
       graph_id,
       result.classified_count,
+      result.stranded_count,
     )
     return result
 
   # Autopilot mode: mutate ORM rows so subsequent handler.dispatch calls
   # see status='classified' without an extra round trip.
-  for event in candidates:
+  for event in pending:
     event.status = "classified"
     result.classified_event_ids.append(event.id)
 
@@ -202,7 +331,9 @@ def promote_pending_obligations(
   if handler is None:  # pragma: no cover — registered at module import
     raise RuntimeError("schedule_entry_due handler is missing from the registry")
 
-  for event in candidates:
+  # Dispatch newly flipped obligations AND stranded ones — the reconcile
+  # inside the handler is idempotent per (schedule, period).
+  for event in pending + stranded:
     try:
       typed_metadata = handler.metadata_schema.model_validate(event.metadata_ or {})
     except ValidationError as e:
@@ -226,10 +357,11 @@ def promote_pending_obligations(
       result.errors.append((event.id, f"dispatch raised {type(e).__name__}: {e}"))
 
   logger.info(
-    "promote_pending_obligations[%s]: classified=%s dispatched=%s errors=%s "
-    "(autopilot mode)",
+    "promote_pending_obligations[%s]: classified=%s stranded=%s dispatched=%s "
+    "errors=%s (autopilot mode)",
     graph_id,
     result.classified_count,
+    result.stranded_count,
     result.dispatched_count,
     result.error_count,
   )

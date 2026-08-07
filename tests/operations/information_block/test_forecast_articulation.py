@@ -317,3 +317,128 @@ class TestDerivedCashFlow:
       calc_order=CALC_ORDER,
     )
     assert cf["dda"] == pytest.approx(2.0)
+
+
+class TestScheduleInstantRouting:
+  """Contra polarity on the direct route (June-close F14).
+
+  A Net-only presentation maps its contra CoA account straight onto the
+  Net anchor; the schedule's running balance is stored positive, so a +1
+  application marches the Net line UP by the monthly amortization. The
+  sign flips whenever source and target disagree on contra-ness; the
+  PP&E routes arm keeps its own encoded sign (no double flip).
+  """
+
+  @staticmethod
+  def _row(
+    *,
+    source_id: str,
+    target_id: str,
+    target_qname: str,
+    value: float,
+    classification: str | None = "asset",
+    source_classification: str | None = "asset",
+    period_type: str = "instant",
+    fact_set_id: str = "fs1",
+    period_end: date = JUN,
+  ):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      fact_set_id=fact_set_id,
+      value=value,
+      period_end=period_end,
+      period_type=period_type,
+      source_id=source_id,
+      target_id=target_id,
+      target_qname=target_qname,
+      classification=classification,
+      source_classification=source_classification,
+    )
+
+  def _project(self, rows, *, base_bs, ppe_net_element_id=None):
+    from unittest.mock import MagicMock
+
+    from robosystems.operations.information_block.forecast_articulation import (
+      _load_schedule_projection,
+    )
+
+    session = MagicMock()
+    session.execute.return_value.fetchall.return_value = rows
+    return _load_schedule_projection(
+      session,
+      mapping_id="struct_mapping",
+      entity_id="ent_1",
+      window_start=MAY,
+      window_end=JUL,
+      base_is_element_ids=set(),
+      base_bs_element_ids=base_bs,
+      ppe_net_element_id=ppe_net_element_id,
+    )
+
+  def test_contra_source_onto_net_anchor_flips_sign(self):
+    """Accumulated Amortization (contraAsset) → IntangibleAssetsNet: the
+    running balance must REDUCE the Net line."""
+    rows = [
+      self._row(
+        source_id="coa_accum_amort",
+        target_id="intangibles_net",
+        target_qname="rs-gaap:IntangibleAssetsNetExcludingGoodwill",
+        value=10.49,
+        source_classification="contraAsset",
+      )
+    ]
+    projection = self._project(rows, base_bs={"intangibles_net"})
+    assert projection.instant_by_set[("fs1", "intangibles_net")][JUN] == pytest.approx(
+      -10.49
+    )
+
+  def test_plain_source_direct_route_keeps_sign(self):
+    rows = [
+      self._row(
+        source_id="coa_prepaid",
+        target_id="prepaid",
+        target_qname="rs-gaap:PrepaidExpenseCurrent",
+        value=12.0,
+      )
+    ]
+    projection = self._project(rows, base_bs={"prepaid"})
+    assert projection.instant_by_set[("fs1", "prepaid")][JUN] == pytest.approx(12.0)
+
+  def test_congruent_contra_pair_keeps_sign(self):
+    """A contra source mapped onto a contra CONCEPT the base presents
+    directly (classified gross/contra presentation) applies at +1 — the
+    line itself is contra, its balance grows positive."""
+    rows = [
+      self._row(
+        source_id="coa_accum_dep",
+        target_id="accum_dep_concept",
+        target_qname="rs-gaap:SomeContraConcept",
+        value=194.83,
+        classification="contraAsset",
+        source_classification="contraAsset",
+      )
+    ]
+    projection = self._project(rows, base_bs={"accum_dep_concept"})
+    assert projection.instant_by_set[("fs1", "accum_dep_concept")][
+      JUN
+    ] == pytest.approx(194.83)
+
+  def test_ppe_routes_arm_unchanged_no_double_flip(self):
+    """The PP&E contra concept routes onto Net at the encoded -1; the
+    source's contra trait must not flip it back to +1."""
+    rows = [
+      self._row(
+        source_id="coa_accum_dep",
+        target_id="accum_dep_concept",
+        target_qname=(
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortization"
+          "PropertyPlantAndEquipment"
+        ),
+        value=194.83,
+        classification="contraAsset",
+        source_classification="contraAsset",
+      )
+    ]
+    projection = self._project(rows, base_bs={"ppe_net"}, ppe_net_element_id="ppe_net")
+    assert projection.instant_by_set[("fs1", "ppe_net")][JUN] == pytest.approx(-194.83)

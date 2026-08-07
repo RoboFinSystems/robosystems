@@ -148,6 +148,17 @@ class ClosePeriodRequest(BaseModel):
       "verified that the source data for the period is complete."
     ),
   )
+  allow_stranded_obligations: bool = Field(
+    False,
+    description=(
+      "Override the stranded-obligation gate — close even though matured "
+      "classified obligations have no drafted closing entry, knowingly "
+      "omitting those adjusting entries from the period. Prefer running "
+      "promote-obligations with dispatch_handlers=true (which drafts "
+      "them) or voiding the obligations instead. The override is "
+      "recorded in the close audit note."
+    ),
+  )
 
 
 class ReopenPeriodRequest(BaseModel):
@@ -214,6 +225,15 @@ class BackfillPlanHistoryRequest(BaseModel):
       "Override the sync-currency gate on each reclose. Historical "
       "months predate the last sync in the normal case, so this is "
       "rarely needed."
+    ),
+  )
+  allow_stranded_obligations: bool = Field(
+    False,
+    description=(
+      "Override the stranded-obligation gate on each reclose. Only "
+      "needed when a matured classified obligation without a drafted "
+      "entry exists inside the backfill window and you have decided "
+      "not to draft or void it first."
     ),
   )
   restamp: bool = Field(
@@ -307,7 +327,7 @@ class FiscalCalendarResponse(BaseModel):
       "Structured blocker codes when closeable_now is False: "
       "'sequence_violation', 'period_incomplete', 'sync_stale', "
       "'calendar_not_initialized', 'period_already_closed', "
-      "'pending_obligations'"
+      "'pending_obligations', 'stranded_obligations'"
     ),
   )
   # Detail fields for actionable blockers — populated only when the
@@ -344,6 +364,23 @@ class FiscalCalendarResponse(BaseModel):
       "exists (null when there's a connection but no sync has ever run)."
     ),
   )
+  stranded_obligation_count: int = Field(
+    0,
+    description=(
+      "Matured schedule_entry_due events already at 'classified' with no "
+      "drafted closing entry for their (schedule, period) — adjusting "
+      "entries a close would silently omit. Resolve by running "
+      "promote-obligations with dispatch_handlers=true (which reaches "
+      "them) or voiding the obligation."
+    ),
+  )
+  stranded_obligation_sample: list[PendingObligationDetailResponse] = Field(
+    default_factory=list,
+    description=(
+      "Sample of up to 5 stranded obligations (schedule_id, schedule_name, "
+      "period, event_id) ordered by occurred_at."
+    ),
+  )
   last_close_at: datetime | None = None
   initialized_at: datetime | None = None
   last_sync_at: datetime | None = Field(
@@ -373,7 +410,27 @@ class ClosePeriodResponse(BaseModel):
   fiscal_calendar: FiscalCalendarResponse
   period: str
   entries_posted: int = Field(
-    0, description="Number of draft entries transitioned to posted"
+    0,
+    description=(
+      "Total draft entries the close transitioned to posted, across both "
+      "post paths (QB pre-publish + local bulk transition). See "
+      "entries_published_to_qb / entries_posted_locally for the split."
+    ),
+  )
+  entries_published_to_qb: int = Field(
+    0,
+    description=(
+      "Drafts published to QuickBooks by the close's pre-publish step "
+      "(each is promoted to posted at publish time)."
+    ),
+  )
+  entries_posted_locally: int = Field(
+    0,
+    description=(
+      "Drafts posted by the local bulk transition (entries that don't "
+      "publish to QuickBooks, e.g. native-only graphs or local-only "
+      "sources)."
+    ),
   )
   target_auto_advanced: bool = Field(
     False,

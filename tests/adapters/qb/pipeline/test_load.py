@@ -299,7 +299,7 @@ class TestUpdateLastSync:
       _update_last_sync(context, config)
 
     MockConnection.get_by_id.assert_called_once_with("conn_sync", mock_session)
-    mock_conn.update_last_sync.assert_called_once_with(mock_session)
+    mock_conn.update_last_sync.assert_called_once_with(mock_session, None)
     context.log.info.assert_called()
 
   def test_update_last_sync_failure_is_non_fatal(self):
@@ -317,3 +317,83 @@ class TestUpdateLastSync:
       _update_last_sync(context, config)
 
     context.log.warning.assert_called()
+
+
+@pytest.mark.unit
+class TestSyncResultPersistence:
+  """F8: the loader's outcome summary persists on the Connection instead of
+  living only in a worker log line."""
+
+  def test_summary_shape(self):
+    from robosystems.adapters.quickbooks.pipeline.load import _sync_result_summary
+
+    config = _make_config()
+    result = _make_load_result(events_captured=46, elements=179)
+    result.events_drift_detected = 11
+    result.events_dispatch_failed = 2
+    result.errors = ["w1"]
+
+    summary = _sync_result_summary(config, result)
+
+    assert summary["status"] == "succeeded"
+    assert summary["window"] == {"since_date": None, "full_rebuild": False}
+    assert summary["counts"]["events_captured"] == 46
+    assert summary["counts"]["drift_detected"] == 11
+    assert summary["counts"]["dispatch_failed"] == 2
+    assert summary["counts"]["elements"] == 179
+    assert summary["errors"] == ["w1"]
+
+  def test_failed_sync_records_outcome_without_advancing_last_sync(self):
+    """last_sync feeds the close gate's sync-current check — a failed
+    attempt must be legible without pretending the data is current."""
+    from robosystems.adapters.quickbooks.pipeline.load import (
+      _record_failed_sync_result,
+    )
+
+    context = Mock()
+    config = _make_config(connection_id="conn_sync")
+    mock_conn = Mock()
+    mock_session = Mock()
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection"
+      ) as MockConnection,
+    ):
+      MockConnection.get_by_id.return_value = mock_conn
+      _record_failed_sync_result(context, config, RuntimeError("token dead"))
+
+    mock_conn.record_sync_result.assert_called_once()
+    payload = mock_conn.record_sync_result.call_args.args[1]
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "RuntimeError"
+    assert "token dead" in payload["error"]["message"]
+    mock_conn.update_last_sync.assert_not_called()
+
+  def test_loader_failure_stamps_failed_result_and_reraises(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import qb_load
+
+    config = _make_config()
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+    work_dir.mkdir(parents=True)
+
+    mock_loader = MagicMock()
+    mock_loader.load.side_effect = RuntimeError("QB API down")
+
+    with (
+      patch(_PATCH_LOAD_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._record_failed_sync_result"
+      ) as record_failed,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._update_last_sync"
+      ) as update_sync,
+      pytest.raises(RuntimeError),
+    ):
+      context = build_asset_context()
+      qb_load(context, config)
+
+    record_failed.assert_called_once()
+    update_sync.assert_not_called()

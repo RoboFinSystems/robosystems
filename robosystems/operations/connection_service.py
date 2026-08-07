@@ -737,6 +737,15 @@ async def dispatch_connection_sync(
     )
     lock_result = sync_lock.acquire(blocking=False)
     if not lock_result.acquired:
+      # `acquire` swallows Redis failures into `acquired=False` — only a
+      # genuinely-held lock is a sync-in-progress. A degraded Valkey
+      # takes the same fail-open posture as the client-creation failure
+      # below (proceed unlocked), instead of 409ing every sync attempt
+      # for as long as Valkey stays unreachable.
+      if isinstance(
+        lock_result.error_message, str
+      ) and lock_result.error_message.startswith("Redis error"):
+        raise RuntimeError(f"lock backend degraded: {lock_result.error_message}")
       raise SyncInProgressError(
         connection_id, lock_result.holder_id, lock_result.ttl_remaining
       )
@@ -773,12 +782,36 @@ async def dispatch_connection_sync(
   if sync_lock_id:
     effective_options["sync_lock_id"] = sync_lock_id
 
-  task_id = await asyncio.wait_for(
-    provider_registry.sync_connection(
-      provider, connection, effective_options or None, graph_id
-    ),
-    timeout=dispatch_timeout,
-  )
+  try:
+    task_id = await asyncio.wait_for(
+      provider_registry.sync_connection(
+        provider, connection, effective_options or None, graph_id
+      ),
+      timeout=dispatch_timeout,
+    )
+  except BaseException:
+    # The Dagster job releases the lock on run completion — but a failed
+    # DISPATCH never starts a run, so without this release the leaked
+    # lock 409s every sync attempt on this connection for its full
+    # 30-minute TTL (observed: a disabled-provider rejection locking the
+    # connection out). Best-effort, mirroring qb_load's release.
+    if sync_lock_id:
+      try:
+        from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+
+        release_lock_by_id(
+          create_redis_client(ValkeyDatabase.LOCKS),
+          lock_key=f"qb_sync:{connection_id}",
+          lock_id=sync_lock_id,
+        )
+      except Exception as release_exc:
+        logger.warning(
+          "Failed to release sync lock for connection %s after dispatch "
+          "failure (TTL is the fallback): %s",
+          connection_id,
+          release_exc,
+        )
+    raise
 
   logger.info(f"Sync initiated for connection {connection_id}: task_id={task_id}")
 

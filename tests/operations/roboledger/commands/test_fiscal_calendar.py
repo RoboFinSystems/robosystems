@@ -107,6 +107,26 @@ class TestClosePeriodResponseMapping:
     assert resp.stamped_statement_sets == {}
     assert resp.statement_rule_summary is None
 
+  def test_post_path_split_rides_the_response(self):
+    resp = self._run(
+      _close_result(
+        entries_posted=36, entries_published_to_qb=36, entries_posted_locally=0
+      )
+    )
+    assert resp.entries_posted == 36
+    assert resp.entries_published_to_qb == 36
+    assert resp.entries_posted_locally == 0
+
+  def test_close_marks_graph_stale(self):
+    """The close's writes change graph-materialized state — without the
+    marker the graph serves pre-close data while reporting fresh
+    (June-close F11)."""
+    with patch(
+      "robosystems.operations.extensions.staleness.mark_graph_stale"
+    ) as mark_stale:
+      self._run(_close_result())
+    mark_stale.assert_called_once_with(GRAPH_ID, "period_closed")
+
 
 class TestReopenRetractsCanonicalSets:
   def _run(self, fp_status="closed", retracted=("fs_a", "fs_b")):
