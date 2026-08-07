@@ -150,23 +150,23 @@ class TestSyncConnectionMCPSharedRepoGate:
 
 class TestSharedRepoNavigationStillAllowed:
   """SEC users should still be able to switch between `sec` and
-  `sec_historical`. `switch-workspace` is a client-side sentinel, but
+  `sec_historical`. `resolve-subgraph` only resolves an address, but
   verify the server-side dispatch doesn't reject it on shared repos."""
 
-  def test_switch_workspace_tool_registered_on_shared_repo(self) -> None:
-    from robosystems.middleware.mcp.tools.graph_tools import SwitchWorkspaceTool
+  def test_resolve_subgraph_tool_registered_on_shared_repo(self) -> None:
+    from robosystems.middleware.mcp.tools.graph_tools import ResolveSubgraphTool
 
     client = MagicMock()
     client.graph_id = "sec"
     client.user = _user()
 
-    tool = SwitchWorkspaceTool(client)
+    tool = ResolveSubgraphTool(client)
     defn = tool.get_tool_definition()
 
     # The tool advertises itself normally — the MCP client intercepts
     # before calling execute. The definition must still be emitted.
-    assert defn["name"] == "switch-workspace"
-    assert "workspace_id" in defn["inputSchema"]["properties"]
+    assert defn["name"] == "resolve-subgraph"
+    assert "subgraph" in defn["inputSchema"]["properties"]
 
   def test_list_subgraphs_tool_defined_on_shared_repo(self) -> None:
     from robosystems.middleware.mcp.tools.graph_tools import ListSubgraphsTool

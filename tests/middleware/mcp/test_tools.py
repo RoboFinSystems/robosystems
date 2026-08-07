@@ -1,7 +1,7 @@
 """Tests for standalone MCP tools (BuildFactGridTool).
 
 Graph lifecycle tools (`create-subgraph`, `delete-subgraph`,
-`list-subgraphs`, `switch-workspace`, `create-backup`, `restore-backup`,
+`list-subgraphs`, `resolve-subgraph`, `create-backup`, `restore-backup`,
 `materialize`, `get-graph-sync-status`) have dedicated coverage in
 `tests/middleware/mcp/tools/test_graph_tools.py`.
 

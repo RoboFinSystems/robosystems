@@ -105,7 +105,8 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "get-example-queries",
     "query-graphql",
     "list-subgraphs",
-    "switch-workspace",
+    "resolve-subgraph",
+    "switch-workspace",  # retired alias of resolve-subgraph
     # Financial analysis / reporting reads
     "financial-statement-analysis",
     "live-financial-statement",

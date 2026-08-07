@@ -15,7 +15,7 @@ from robosystems.routers.graphs.mcp.remote import (
   METHOD_NOT_FOUND,
   PARSE_ERROR,
   _event_to_progress,
-  _remote_switch_workspace,
+  _remote_resolve_subgraph,
   _to_tool_result,
   _tool_error_payload,
   _tool_failure,
@@ -104,48 +104,44 @@ class TestEventToProgress:
 KG = "kg19fb490f76871d22e835"
 
 
-class TestRemoteSwitchWorkspace:
+class TestRemoteResolveSubgraph:
   def test_named_subgraph_builds_id_and_url(self):
-    text = _remote_switch_workspace(KG, {"workspace_id": "dev"})
+    text = _remote_resolve_subgraph(KG, {"subgraph": "dev"})
     payload = json.loads(text)
     assert payload["switched"] is False
     assert payload["target_graph_id"] == f"{KG}_dev"
     assert payload["connector_url"].endswith(f"/v1/graphs/{KG}_dev/mcp")
 
   def test_full_subgraph_id_passes_through(self):
-    payload = json.loads(_remote_switch_workspace(KG, {"workspace_id": f"{KG}_dev"}))
+    payload = json.loads(_remote_resolve_subgraph(KG, {"subgraph": f"{KG}_dev"}))
     assert payload["target_graph_id"] == f"{KG}_dev"
 
   def test_primary_resolves_parent_from_subgraph(self):
-    payload = json.loads(
-      _remote_switch_workspace(f"{KG}_dev", {"workspace_id": "primary"})
-    )
+    payload = json.loads(_remote_resolve_subgraph(f"{KG}_dev", {"subgraph": "primary"}))
     assert payload["target_graph_id"] == KG
 
   def test_shared_repo_subgraph_resolves(self):
-    payload = json.loads(
-      _remote_switch_workspace("sec", {"workspace_id": "historical"})
-    )
+    payload = json.loads(_remote_resolve_subgraph("sec", {"subgraph": "historical"}))
     assert payload["target_graph_id"] == "sec_historical"
 
   def test_missing_workspace_id_is_error_text(self):
-    assert _remote_switch_workspace(KG, {}).startswith("Error:")
+    assert _remote_resolve_subgraph(KG, {}).startswith("Error:")
 
   def test_invalid_characters_rejected(self):
-    text = _remote_switch_workspace(KG, {"workspace_id": "../etc/passwd"})
+    text = _remote_resolve_subgraph(KG, {"subgraph": "../etc/passwd"})
     assert text.startswith("Error:")
 
   def test_foreign_graph_family_rejected(self):
     # A full id outside this connector's family must not resolve to a URL.
     other = "kg29fb490f76871d22e835_dev"
-    text = _remote_switch_workspace(KG, {"workspace_id": other})
+    text = _remote_resolve_subgraph(KG, {"subgraph": other})
     assert text.startswith("Error:")
     assert "family" in text
 
   def test_message_never_claims_current_key_transfers(self):
     # A URL-token connector's credential may not cover the target; the
     # guidance must point at minting one, not claim the same key works.
-    payload = json.loads(_remote_switch_workspace(KG, {"workspace_id": "dev"}))
+    payload = json.loads(_remote_resolve_subgraph(KG, {"subgraph": "dev"}))
     assert "same API key" not in payload["message"]
     assert "credential" in payload["message"]
 
@@ -242,7 +238,7 @@ def _make_handler(tools=None, instructions="per-graph guidance"):
         "inputSchema": {"type": "object", "properties": {}},
       },
       {
-        "name": "switch-workspace",
+        "name": "resolve-subgraph",
         "description": "client-side text",
         "inputSchema": {"type": "object", "properties": {}},
       },
@@ -309,8 +305,8 @@ class TestToolsList:
     tools = {tool["name"]: tool for tool in body["result"]["tools"]}
     assert tools["get-graph-schema"]["annotations"] == {"readOnlyHint": True}
     # The npx "client-side tool" text must never reach a remote client.
-    assert "client-side" not in tools["switch-workspace"]["description"]
-    assert "connector" in tools["switch-workspace"]["description"].lower()
+    assert "client-side" not in tools["resolve-subgraph"]["description"]
+    assert "connector" in tools["resolve-subgraph"]["description"].lower()
 
 
 @pytest.mark.asyncio
@@ -346,7 +342,7 @@ class TestToolsCall:
     assert body["result"]["isError"] is True
     assert "need a sub" in body["result"]["content"][0]["text"]
 
-  async def test_switch_workspace_intercepted_after_gauntlet(self):
+  async def test_resolve_subgraph_intercepted_after_gauntlet(self):
     authorize = AsyncMock(return_value="read")
     with (
       patch.object(remote, "circuit_breaker", Mock()),
@@ -357,7 +353,7 @@ class TestToolsCall:
           "jsonrpc": "2.0",
           "id": 1,
           "method": "tools/call",
-          "params": {"name": "switch-workspace", "arguments": {"workspace_id": "dev"}},
+          "params": {"name": "resolve-subgraph", "arguments": {"subgraph": "dev"}},
         }
       )
       body = _body(await dispatch_jsonrpc(request, KG, _make_user()))
