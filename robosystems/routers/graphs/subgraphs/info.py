@@ -66,8 +66,17 @@ async def get_subgraph_info(
         detail=f"{subgraph.graph_id} is not a subgraph. Use the regular graph info endpoint.",
       )
 
-    # TODO: Get actual metrics from LadybugDB
-    size_mb = None
+    # Same source as the list read, so the two agree. One instance-wide
+    # breakdown covers every subgraph on the parent's box; None means "could
+    # not measure", which is distinct from an empty subgraph's genuine 0.
+    from .main import get_subgraph_sizes
+
+    sizes = await get_subgraph_sizes(graph_id)
+    size_bytes = sizes.get(subgraph.graph_id)
+    size_mb = round(size_bytes / (1024 * 1024), 6) if size_bytes is not None else None
+
+    # Node and edge counts still need a Graph API read this endpoint doesn't
+    # make; size was the field that disagreed across surfaces.
     node_count = None
     edge_count = None
     last_accessed = None
@@ -101,6 +110,7 @@ async def get_subgraph_info(
       status="active",
       created_at=subgraph.created_at,
       updated_at=subgraph.updated_at,
+      size_bytes=size_bytes,
       size_mb=size_mb,
       node_count=node_count,
       edge_count=edge_count,

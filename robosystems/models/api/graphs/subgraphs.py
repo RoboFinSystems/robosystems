@@ -125,6 +125,14 @@ class SubgraphResponse(BaseModel):
 
   updated_at: datetime = Field(..., description="When the subgraph was last updated")
 
+  size_bytes: int | None = Field(
+    None,
+    description=(
+      "On-disk footprint in bytes — the database, its write-ahead log, and "
+      "its vector index. Prefer this over size_mb at subgraph scale."
+    ),
+  )
+
   size_mb: float | None = Field(
     None, description="Size of the subgraph database in megabytes"
   )
