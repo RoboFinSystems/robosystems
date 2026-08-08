@@ -155,11 +155,123 @@ def cleanup_instance_backups(
   }
 
 
+@op
+def cleanup_orphaned_backups(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+  s3: S3Resource,
+) -> dict[str, Any]:
+  """Delete application backup objects that no ``GraphBackup`` row references.
+
+  ``cleanup_tracked_backups`` can only act on rows, so an object whose record
+  was never written — or was removed — is invisible to it, and survives until
+  the 90-day S3 lifecycle rule regardless of the graph's tier. A standard-tier
+  orphan therefore outlives its 7-day retention by more than twelve weeks.
+  Observed in prod: a 2026-06-06 object under ``kg19dcbe757481af06fc9b`` with
+  no row at all.
+
+  Retention comes from the owning graph's tier, parsed out of the key, so an
+  orphan expires on the same clock its tracked siblings would have. Unknown or
+  unparseable graphs fall back to the 90-day maximum rather than deleting
+  early — this op removes data, so every ambiguity resolves toward keeping it.
+  """
+  from robosystems.config.graph_tier import GraphTierConfig
+  from robosystems.config.storage.graph import get_backup_prefix
+  from robosystems.models.core import Graph, GraphBackup
+
+  prefix = get_backup_prefix()
+  now = datetime.now(UTC)
+
+  deleted_count = 0
+  skipped_tracked = 0
+  objects_to_delete: list[dict[str, str]] = []
+
+  try:
+    with db.get_session() as session:
+      # Every key any row still points at, whatever its status. An EXPIRED row
+      # whose S3 delete failed is already the lifecycle rule's problem, and
+      # deleting it here would race op 1.
+      tracked_keys: set[str] = {
+        key
+        for (key,) in session.query(GraphBackup.s3_key).filter(
+          GraphBackup.s3_key.isnot(None)
+        )
+      }
+      tracked_keys |= {
+        key
+        for (key,) in session.query(GraphBackup.s3_metadata_key).filter(
+          GraphBackup.s3_metadata_key.isnot(None)
+        )
+      }
+
+      retention_by_graph: dict[str, int] = {}
+
+      def _retention_days(graph_id: str) -> int:
+        """Tier retention for a graph, defaulting to the 90-day maximum."""
+        if graph_id not in retention_by_graph:
+          graph = Graph.get_by_id(graph_id, session)
+          tier = str(graph.graph_tier) if graph and graph.graph_tier else None
+          retention_by_graph[graph_id] = (
+            GraphTierConfig.get_backup_limits(tier).get(
+              "backup_retention_days", MAX_RETENTION_DAYS
+            )
+            if tier
+            else MAX_RETENTION_DAYS
+          )
+        return retention_by_graph[graph_id]
+
+      paginator = s3.client.get_paginator("list_objects_v2")
+      for page in paginator.paginate(Bucket=s3.bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+          key = obj["Key"]
+
+          if key in tracked_keys:
+            skipped_tracked += 1
+            continue
+
+          # graph-backups/databases/{graph_id}/{backup_type}/backup-{ts}{ext}
+          parts = key[len(prefix) :].split("/")
+          if len(parts) < 2 or not parts[0]:
+            context.log.warning(f"Unparseable backup key, leaving in place: {key}")
+            continue
+
+          cutoff = now - timedelta(days=_retention_days(parts[0]))
+          if obj["LastModified"].replace(tzinfo=UTC) >= cutoff:
+            continue
+
+          objects_to_delete.append({"Key": key})
+          if len(objects_to_delete) >= 1000:
+            s3.client.delete_objects(
+              Bucket=s3.bucket, Delete={"Objects": objects_to_delete}
+            )
+            deleted_count += len(objects_to_delete)
+            objects_to_delete = []
+
+    if objects_to_delete:
+      s3.client.delete_objects(Bucket=s3.bucket, Delete={"Objects": objects_to_delete})
+      deleted_count += len(objects_to_delete)
+
+  except Exception as e:
+    context.log.error(f"Failed to clean up orphaned backups: {e}")
+
+  context.log.info(
+    f"Orphaned backup cleanup: {deleted_count} deleted, {skipped_tracked} tracked"
+  )
+
+  return {
+    "deleted_count": deleted_count,
+    "skipped_tracked": skipped_tracked,
+    "prefix": prefix,
+    "timestamp": now.isoformat(),
+  }
+
+
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def daily_backup_cleanup_job():
   """Daily cleanup of expired backups across all storage layers."""
   cleanup_tracked_backups()
   cleanup_instance_backups()
+  cleanup_orphaned_backups()
 
 
 daily_backup_cleanup_schedule = ScheduleDefinition(

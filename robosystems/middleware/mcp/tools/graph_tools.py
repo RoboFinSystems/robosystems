@@ -584,7 +584,7 @@ class CreateBackupTool:
           "retention_days": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 2555,
+            "maximum": 90,
             "default": 30,
           },
         },
@@ -622,13 +622,21 @@ class CreateBackupTool:
       if admin_err:
         return admin_err
 
-      # Cap retention to the tier max.
+      # Cap retention to the tier max. Unconditional, mirroring the REST
+      # route: a missing graph row or tier falls back to the smallest tier's
+      # cap rather than skipping the clamp. Skipping it would let an uncapped
+      # value reach `expires_at` while the 90-day S3 lifecycle rule still
+      # deletes the object, leaving a completed record pointing at nothing.
       graph_record = Graph.get_by_id(graph_id, session)
-      if graph_record and graph_record.graph_tier:
-        tier_max = GraphTierConfig.get_backup_limits(graph_record.graph_tier).get(
-          "backup_retention_days", 90
-        )
-        retention_days = min(retention_days, tier_max)
+      backup_tier = (
+        str(graph_record.graph_tier)
+        if graph_record and graph_record.graph_tier
+        else "ladybug-standard"
+      )
+      tier_max = GraphTierConfig.get_backup_limits(backup_tier).get(
+        "backup_retention_days", 7
+      )
+      retention_days = min(retention_days, tier_max)
 
       run_config = build_graph_job_config(
         "backup_graph_job",
