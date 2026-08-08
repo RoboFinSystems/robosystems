@@ -1659,3 +1659,91 @@ class TestCreateBackupManagerFactory:
       mgr = create_backup_manager()
 
       assert isinstance(mgr, BackupManager)
+
+
+# ===========================================================================
+# _import_full_dump — the only place the existing database is removed
+# ===========================================================================
+
+
+def _full_dump_zip(graph_id: str, payload: bytes) -> bytes:
+  """A full-dump archive of the single-file shape the engine writes today."""
+  buf = io.BytesIO()
+  with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr(f"{graph_id}.lbug", payload)
+  return buf.getvalue()
+
+
+@pytest.mark.unit
+class TestImportFullDumpRemovesTarget:
+  """The importer owns removal of the outgoing database.
+
+  `perform_restore` used to clear the files before the payload was downloaded,
+  which lost the graph outright on a failed download and silently disabled the
+  snapshot guard below (it is conditioned on the target still existing).
+  """
+
+  @pytest.mark.asyncio
+  async def test_replaces_existing_file_and_deletes_stale_wal(self, manager, tmp_path):
+    target = tmp_path / "test_graph.lbug"
+    target.write_bytes(b"outgoing database")
+    wal = tmp_path / "test_graph.lbug.wal"
+    wal.write_bytes(b"un-checkpointed writes from the outgoing database")
+
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+    ) as mock_mt:
+      mock_mt.get_database_path_for_graph.return_value = str(target)
+
+      await manager._import_full_dump(
+        "test_graph",
+        _full_dump_zip("test_graph", b"restored database"),
+        create_system_backup=False,
+      )
+
+    assert target.read_bytes() == b"restored database"
+    # A surviving WAL is replayed against whatever now holds the same name.
+    assert not wal.exists()
+
+  @pytest.mark.asyncio
+  async def test_replaces_existing_directory_shape(self, manager, tmp_path):
+    """Older engine versions stored a database as a directory."""
+    target = tmp_path / "test_graph.lbug"
+    target.mkdir()
+    (target / "stale.bin").write_bytes(b"outgoing")
+
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+    ) as mock_mt:
+      mock_mt.get_database_path_for_graph.return_value = str(target)
+
+      await manager._import_full_dump(
+        "test_graph",
+        _full_dump_zip("test_graph", b"restored database"),
+        create_system_backup=False,
+      )
+
+    assert target.is_file()
+    assert target.read_bytes() == b"restored database"
+
+  @pytest.mark.asyncio
+  async def test_failed_snapshot_leaves_database_untouched(self, manager, tmp_path):
+    """The abort-on-failed-snapshot guard must fire before anything is removed."""
+    target = tmp_path / "test_graph.lbug"
+    target.write_bytes(b"outgoing database")
+
+    manager.s3_adapter.upload_backup = AsyncMock(return_value=None)
+
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.MultiTenantUtils"
+    ) as mock_mt:
+      mock_mt.get_database_path_for_graph.return_value = str(target)
+
+      with pytest.raises(RuntimeError, match="system backup"):
+        await manager._import_full_dump(
+          "test_graph",
+          _full_dump_zip("test_graph", b"restored database"),
+          create_system_backup=True,
+        )
+
+    assert target.read_bytes() == b"outgoing database"
