@@ -1,13 +1,17 @@
-"""Tests for the provisioning claim — the idempotency gate at the sink.
+"""Tests for the provisioning claim and its terminal counterpart.
 
 Provisioning has more than one legitimate trigger, and a provider can also
 redeliver an event whose first attempt never finished. Both converge on
 ``claim_for_provisioning``, which has to hand the work to exactly one caller
 while still letting a genuinely dead attempt be retried.
+``write_off_stalled_provisioning`` is the other half of the same protocol:
+the one place a dead attempt is finally declared dead, guarded by the same
+staleness predicate so it can never write off a run that a redelivery has
+legitimately re-claimed in the meantime.
 
 These run against a real Postgres because the guarantee being tested is a
 database one: the predicate is re-evaluated after the winner's row lock
-clears, and no mock reproduces that. The concurrency case uses real threads on
+clears, and no mock reproduces that. The concurrency cases use real threads on
 independent connections for the same reason — asserting the mutex against a
 mocked session would only assert that the mock was called.
 """
@@ -59,6 +63,7 @@ def _make_subscription(
   status: str = SubscriptionStatus.PENDING_PAYMENT.value,
   resource_id: str | None = None,
   updated_at: datetime | None = None,
+  metadata: dict | None = None,
 ) -> BillingSubscription:
   subscription = BillingSubscription(
     org_id=org_id,
@@ -67,7 +72,7 @@ def _make_subscription(
     plan_name="ladybug-standard",
     base_price_cents=9900,
     status=status,
-    subscription_metadata={},
+    subscription_metadata=metadata or {},
   )
   session.add(subscription)
   session.commit()
@@ -285,3 +290,152 @@ class TestStaleReclaim:
 
     # Freshly stamped, so the next caller is refused.
     assert subscription.claim_for_provisioning(db_session) is False
+
+
+class TestWriteOffStalledProvisioning:
+  """The terminal half of the protocol: only a still-stale attempt dies.
+
+  The reaper's sensor read and its write are minutes apart. In that gap a
+  redelivery may legitimately re-claim the row — status still ``provisioning``
+  but heartbeat fresh — so a status check alone would write off a live run,
+  and the expired-graph sensor could then suspend the graph that run had just
+  created. The write-off's own predicate re-checks staleness at write time,
+  which is what these pin.
+  """
+
+  def test_stale_attempt_is_written_off(self, db_session: Session, test_org_id: str):
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=STALE_PROVISIONING_MINUTES + 5),
+    )
+
+    assert subscription.write_off_stalled_provisioning(db_session) is True
+    assert subscription.status == SubscriptionStatus.FAILED.value
+    assert subscription.ends_at is not None
+    assert subscription.subscription_metadata["error"]
+    assert subscription.subscription_metadata["failed_at"]
+
+  def test_fresh_attempt_is_left_alone(self, db_session: Session, test_org_id: str):
+    """An attempt inside the staleness window is a live run, not a stall."""
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+
+    assert subscription.write_off_stalled_provisioning(db_session) is False
+    assert subscription.status == SubscriptionStatus.PROVISIONING.value
+    assert subscription.ends_at is None
+
+  def test_reclaimed_attempt_is_not_written_off(
+    self, db_session: Session, test_org_id: str
+  ):
+    """The race the predicate exists for.
+
+    The sensor saw the row stale; before the reaper ran, a redelivery
+    re-claimed it. The claim stamped a fresh heartbeat, so the write-off must
+    find nothing — that run is live and about to build the resource.
+    """
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=STALE_PROVISIONING_MINUTES + 5),
+    )
+
+    assert subscription.claim_for_provisioning(db_session) is True
+
+    assert subscription.write_off_stalled_provisioning(db_session) is False
+    assert subscription.status == SubscriptionStatus.PROVISIONING.value
+
+  def test_written_off_row_is_not_claimable(
+    self, db_session: Session, test_org_id: str
+  ):
+    """Once written off, a late redelivery must not resurrect the attempt."""
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=STALE_PROVISIONING_MINUTES + 5),
+    )
+
+    assert subscription.write_off_stalled_provisioning(db_session) is True
+    assert subscription.claim_for_provisioning(db_session) is False
+    assert subscription.status == SubscriptionStatus.FAILED.value
+
+  def test_write_off_preserves_prior_metadata(
+    self, db_session: Session, test_org_id: str
+  ):
+    """The error a failed attempt recorded must survive the write-off."""
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=STALE_PROVISIONING_MINUTES + 5),
+      metadata={"last_provisioning_error": "no capacity"},
+    )
+
+    assert subscription.write_off_stalled_provisioning(db_session) is True
+    assert subscription.subscription_metadata["last_provisioning_error"] == (
+      "no capacity"
+    )
+    assert subscription.subscription_metadata["error"]
+
+  def test_concurrent_claim_and_write_off_resolve_to_one_winner(
+    self, db_session: Session, test_org_id: str
+  ):
+    """A stale row contested by a redelivery and the reaper goes to exactly one.
+
+    Both operations carry the same staleness predicate, so whichever commits
+    first flips the row out of the other's reach: a won claim stamps a fresh
+    heartbeat, a won write-off leaves ``failed``. Either order is correct;
+    both winning is the bug.
+    """
+    import threading
+
+    subscription = _make_subscription(
+      db_session,
+      test_org_id,
+      status=SubscriptionStatus.PROVISIONING.value,
+      updated_at=datetime.now(UTC) - timedelta(minutes=STALE_PROVISIONING_MINUTES + 5),
+    )
+    subscription_id = subscription.id
+
+    engine = db_session.get_bind()
+    SessionFactory = sessionmaker(bind=engine)
+
+    results: dict[str, bool] = {}
+    results_lock = threading.Lock()
+    start = threading.Barrier(2)
+
+    def run(name: str, method: str) -> None:
+      session = SessionFactory()
+      try:
+        row = (
+          session.query(BillingSubscription)
+          .filter(BillingSubscription.id == subscription_id)
+          .one()
+        )
+        start.wait(timeout=10)
+        won = getattr(row, method)(session)
+        with results_lock:
+          results[name] = won
+      finally:
+        session.close()
+
+    threads = [
+      threading.Thread(target=run, args=("claim", "claim_for_provisioning")),
+      threading.Thread(
+        target=run, args=("write_off", "write_off_stalled_provisioning")
+      ),
+    ]
+    for thread in threads:
+      thread.start()
+    for thread in threads:
+      thread.join(timeout=30)
+
+    assert len(results) == 2, "both threads must complete"
+    assert sum(results.values()) == 1, f"exactly one side must win, got {results}"

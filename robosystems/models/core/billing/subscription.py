@@ -353,6 +353,11 @@ class BillingSubscription(Base):
     now = datetime.now(UTC)
     stale_cutoff = now - timedelta(minutes=stale_after_minutes)
 
+    # Pre-state for observability only — correctness comes from the UPDATE's
+    # predicate. If this still reads "provisioning" when the claim succeeds,
+    # the claim was taken from a stale holder rather than a first entry.
+    prior_status = self.status
+
     claimed = (
       session.query(BillingSubscription)
       .filter(
@@ -384,7 +389,16 @@ class BillingSubscription(Base):
     session.refresh(self)
 
     if claimed:
-      logger.info(f"Claimed subscription {self.id} for provisioning")
+      if prior_status == SubscriptionStatus.PROVISIONING.value:
+        logger.warning(
+          f"Re-claimed a stale provisioning attempt for subscription {self.id} — "
+          f"the prior run held the claim past {stale_after_minutes} minutes "
+          "without finishing. If this recurs, compare real provisioning "
+          "durations against STALE_PROVISIONING_MINUTES before trusting the "
+          "window."
+        )
+      else:
+        logger.info(f"Claimed subscription {self.id} for provisioning")
     else:
       logger.info(
         f"Provisioning claim refused for subscription {self.id} "
@@ -393,6 +407,70 @@ class BillingSubscription(Base):
       )
 
     return bool(claimed)
+
+  def write_off_stalled_provisioning(
+    self, session: Session, stale_after_minutes: int = STALE_PROVISIONING_MINUTES
+  ) -> bool:
+    """Terminally fail a provisioning attempt that is stale *right now*.
+
+    The claim's terminal counterpart, built with the same care: one
+    conditional UPDATE whose predicate re-checks staleness at write time.
+    The reaper's sensor read and this write are minutes apart, and in that
+    gap a provider redelivery may legitimately re-claim the row — which
+    leaves the status at ``provisioning`` but stamps a fresh heartbeat, so a
+    status check alone would write off a live run. Here a concurrent claim
+    either committed first (fresh heartbeat, no match) or blocks on the row
+    lock and then finds ``failed``, which it refuses.
+
+    ``ends_at`` starts the retention clock the lifecycle sensors measure —
+    terminal status plus that timestamp is what makes any infrastructure the
+    attempt created reclaimable on the ordinary schedule.
+
+    The metadata merge reads from ``self``, which is safe under the
+    predicate: any interleaved write stamps ``updated_at`` via ``onupdate``
+    and defeats the staleness check, so a row this method actually updates is
+    one nobody has touched since it was loaded.
+    """
+    now = datetime.now(UTC)
+    stale_cutoff = now - timedelta(minutes=stale_after_minutes)
+
+    wrote_off = (
+      session.query(BillingSubscription)
+      .filter(
+        BillingSubscription.id == self.id,
+        BillingSubscription.status == SubscriptionStatus.PROVISIONING.value,
+        BillingSubscription.updated_at < stale_cutoff,
+      )
+      .update(
+        {
+          BillingSubscription.status: SubscriptionStatus.FAILED.value,
+          BillingSubscription.subscription_metadata: {
+            **(self.subscription_metadata or {}),
+            "error": "Provisioning stalled and was written off",
+            "failed_at": now.isoformat(),
+          },
+          BillingSubscription.ends_at: self.ends_at or now,
+        },
+        synchronize_session=False,
+      )
+    )
+
+    session.commit()
+    session.refresh(self)
+
+    if wrote_off:
+      self._invalidate_access_cache()
+      logger.warning(
+        f"Wrote off stalled provisioning for subscription {self.id} "
+        f"(org={self.org_id}, resource_type={self.resource_type})"
+      )
+    else:
+      logger.info(
+        f"Stalled write-off refused for subscription {self.id} "
+        f"(status={self.status}) — completed or re-claimed since it was read"
+      )
+
+    return bool(wrote_off)
 
   def activate(self, session: Session) -> None:
     """Activate the subscription."""

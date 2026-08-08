@@ -126,8 +126,13 @@ class TestRunGraphProvisioning:
             mock_manager.complete_operation.assert_not_called()
 
   @pytest.mark.asyncio
-  async def test_graph_provisioning_failure_marks_subscription_failed(self):
-    """Test that provisioning failure marks subscription as failed."""
+  async def test_graph_provisioning_failure_fails_the_sse_operation(self):
+    """A failed attempt fails the SSE operation and nothing more.
+
+    Disposition of the subscription row is the caller's, not this function's —
+    pinned against real Postgres in
+    ``tests/operations/graph/test_provisioning_failure_disposition.py``.
+    """
     with patch(
       "robosystems.operations.graph.provisioning_service.get_operation_manager"
     ) as mock_get_manager:
@@ -162,94 +167,6 @@ class TestRunGraphProvisioning:
             )
 
           mock_manager.fail_operation.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_graph_provisioning_failure_cancels_stripe_subscription(self):
-    """Test that provisioning failure cancels the Stripe subscription."""
-    with patch(
-      "robosystems.operations.graph.provisioning_service.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.side_effect = [iter([mock_db]), iter([mock_db])]
-
-        mock_subscription = MagicMock()
-        mock_subscription.id = "sub123"
-        mock_subscription.status = "provisioning"
-        mock_subscription.subscription_metadata = {}
-        mock_subscription.stripe_subscription_id = "stripe_sub_abc"
-        mock_db.query.return_value.filter.return_value.first.return_value = (
-          mock_subscription
-        )
-
-        with patch(
-          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create.side_effect = Exception("Provisioning failed")
-          mock_service_class.return_value = mock_service
-
-          with patch(
-            "robosystems.operations.providers.payment_provider.get_payment_provider"
-          ) as mock_get_provider:
-            mock_provider = MagicMock()
-            mock_get_provider.return_value = mock_provider
-
-            with pytest.raises(Exception, match="Provisioning failed"):
-              await run_graph_provisioning(
-                operation_id="op123",
-                subscription_id="sub123",
-                user_id="user456",
-                tier="ladybug-standard",
-              )
-
-            mock_provider.cancel_subscription.assert_called_once_with("stripe_sub_abc")
-            assert mock_subscription.status == "failed"
-
-  @pytest.mark.asyncio
-  async def test_graph_provisioning_failure_skips_cancel_without_stripe(self):
-    """Test that failure without Stripe subscription doesn't attempt cancel."""
-    with patch(
-      "robosystems.operations.graph.provisioning_service.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.side_effect = [iter([mock_db]), iter([mock_db])]
-
-        mock_subscription = MagicMock()
-        mock_subscription.id = "sub123"
-        mock_subscription.status = "provisioning"
-        mock_subscription.subscription_metadata = {}
-        mock_subscription.stripe_subscription_id = None
-        mock_db.query.return_value.filter.return_value.first.return_value = (
-          mock_subscription
-        )
-
-        with patch(
-          "robosystems.operations.graph.graph_creation_service.GraphCreationService"
-        ) as mock_service_class:
-          mock_service = AsyncMock()
-          mock_service.create.side_effect = Exception("Failed")
-          mock_service_class.return_value = mock_service
-
-          with patch(
-            "robosystems.operations.providers.payment_provider.get_payment_provider"
-          ) as mock_get_provider:
-            with pytest.raises(Exception, match="Failed"):
-              await run_graph_provisioning(
-                operation_id=None,
-                subscription_id="sub123",
-                user_id="user456",
-                tier="ladybug-standard",
-              )
-
-            mock_get_provider.assert_not_called()
 
 
 class TestRunUserRepositoryProvisioning:
@@ -354,64 +271,6 @@ class TestRunUserRepositoryProvisioning:
               user_id="user456",
               repository_name="invalid_repo",
             )
-
-  @pytest.mark.asyncio
-  async def test_repository_provisioning_failure_cancels_stripe_subscription(self):
-    """Test that repository provisioning failure cancels the Stripe subscription."""
-    with patch(
-      "robosystems.operations.graph.provisioning_service.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.side_effect = [iter([mock_db]), iter([mock_db])]
-
-        mock_subscription = MagicMock()
-        mock_subscription.id = "sub123"
-        mock_subscription.status = "provisioning"
-        mock_subscription.plan_name = "sec-starter"
-        mock_subscription.subscription_metadata = {}
-        mock_subscription.stripe_subscription_id = "stripe_sub_xyz"
-
-        mock_customer = MagicMock()
-        mock_customer.org_id = "org123"
-
-        mock_db.query.return_value.filter.return_value.first.return_value = (
-          mock_subscription
-        )
-
-        with patch(
-          "robosystems.models.core.billing.BillingCustomer"
-        ) as mock_billing_customer:
-          mock_billing_customer.get_by_user_id.return_value = mock_customer
-
-          with patch(
-            "robosystems.operations.graph.repository_subscription_service.RepositorySubscriptionService"
-          ) as mock_repo_service_class:
-            mock_repo_service = MagicMock()
-            mock_repo_service.grant_access.side_effect = Exception("Access denied")
-            mock_repo_service_class.return_value = mock_repo_service
-
-            with patch(
-              "robosystems.operations.providers.payment_provider.get_payment_provider"
-            ) as mock_get_provider:
-              mock_provider = MagicMock()
-              mock_get_provider.return_value = mock_provider
-
-              with pytest.raises(Exception, match="Access denied"):
-                await run_user_repository_provisioning(
-                  operation_id="op123",
-                  subscription_id="sub123",
-                  user_id="user456",
-                  repository_name="sec",
-                )
-
-              mock_provider.cancel_subscription.assert_called_once_with(
-                "stripe_sub_xyz"
-              )
-              assert mock_subscription.status == "failed"
 
 
 class TestDagsterMaterialization:

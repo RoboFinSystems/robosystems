@@ -161,11 +161,8 @@ def reap_stalled_provisioning(
   unbilled forever. ``failed`` is also terminal, so the customer's route back
   — a fresh checkout — is already open.
   """
-  from datetime import UTC, datetime
-
   from robosystems.models.core.billing.subscription import BillingSubscription
 
-  now = datetime.now(UTC)
   reaped: list[str] = []
 
   with db.get_session() as session:
@@ -179,24 +176,22 @@ def reap_stalled_provisioning(
         context.log.warning(f"Subscription {subscription_id} not found, skipping")
         continue
 
-      # Re-check under this transaction: the sensor's read and this write are
-      # minutes apart, and a redelivery may have completed in between.
       if subscription.status != "provisioning":
         context.log.info(
           f"Subscription {subscription_id} is now {subscription.status}, skipping"
         )
         continue
 
-      subscription.status = "failed"
-      subscription.subscription_metadata = {
-        **(subscription.subscription_metadata or {}),
-        "error": "Provisioning stalled and was written off",
-        "failed_at": now.isoformat(),
-      }
-      if subscription.ends_at is None:
-        subscription.ends_at = now
-      session.commit()
-      subscription._invalidate_access_cache()
+      # The write-off re-checks staleness atomically at write time. Between
+      # the sensor's read and this run a redelivery may have re-claimed the
+      # row — status still "provisioning" but heartbeat fresh — and that run
+      # is live, not stalled.
+      if not subscription.write_off_stalled_provisioning(session):
+        context.log.info(
+          f"Subscription {subscription_id} completed or was re-claimed since "
+          "the sensor's read, skipping"
+        )
+        continue
 
       reaped.append(subscription_id)
       context.log.error(

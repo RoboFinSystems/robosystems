@@ -194,21 +194,22 @@ class TestReapStalledProvisioning:
       ReapStalledProvisioningConfig(subscription_ids=subscription_ids),
     )
 
-  def test_marks_stalled_subscription_failed_and_starts_retention(self):
-    """`failed` + `ends_at` is what makes the lifecycle sensors act on it."""
+  def test_delegates_the_write_off_to_the_model(self):
+    """The op's job is wiring; the disposition lives on the model.
+
+    ``write_off_stalled_provisioning`` carries the staleness predicate and the
+    ``failed`` + ``ends_at`` write — its behavior is pinned against real
+    Postgres in ``tests/models/core/billing/test_provisioning_claim.py``.
+    """
     subscription = MagicMock()
     subscription.id = "bsub_stalled"
     subscription.status = "provisioning"
-    subscription.ends_at = None
-    subscription.subscription_metadata = {}
+    subscription.write_off_stalled_provisioning = MagicMock(return_value=True)
 
     result = self._run(subscription, ["bsub_stalled"])
 
     assert result["reaped_count"] == 1
-    assert subscription.status == "failed"
-    assert subscription.ends_at is not None
-    assert subscription.subscription_metadata["error"]
-    assert subscription.subscription_metadata["failed_at"]
+    subscription.write_off_stalled_provisioning.assert_called_once()
 
   def test_skips_a_subscription_that_completed_since_the_sensor_read(self):
     """The sensor's read and this write are minutes apart.
@@ -219,13 +220,25 @@ class TestReapStalledProvisioning:
     subscription = MagicMock()
     subscription.id = "bsub_recovered"
     subscription.status = "active"
-    subscription.ends_at = None
+    subscription.write_off_stalled_provisioning = MagicMock(return_value=True)
 
     result = self._run(subscription, ["bsub_recovered"])
 
     assert result["reaped_count"] == 0
-    assert subscription.status == "active"
-    assert subscription.ends_at is None
+    subscription.write_off_stalled_provisioning.assert_not_called()
+
+  def test_skips_a_subscription_reclaimed_since_the_sensor_read(self):
+    """Still `provisioning`, but the write-off refuses: a redelivery re-claimed
+    the row and stamped a fresh heartbeat, so the run is live, not stalled."""
+    subscription = MagicMock()
+    subscription.id = "bsub_reclaimed"
+    subscription.status = "provisioning"
+    subscription.write_off_stalled_provisioning = MagicMock(return_value=False)
+
+    result = self._run(subscription, ["bsub_reclaimed"])
+
+    assert result["reaped_count"] == 0
+    subscription.write_off_stalled_provisioning.assert_called_once()
 
   def test_missing_subscription_is_skipped(self):
     result = self._run(None, ["bsub_gone"])
