@@ -442,6 +442,127 @@ class TestUserRepositoryCredits:
     assert credits.current_balance == Decimal("99999999.99")  # Capped at MAX_BALANCE
     mock_logger.warning.assert_called_once()
 
+  def _make_pool(self, *, balance: str, allocation: str) -> UserRepositoryCredits:
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal(balance),
+      monthly_allocation=Decimal(allocation),
+    )
+    self.session.add(credits)
+    self.session.commit()
+    return credits
+
+  def _transaction_sum(self, credits: UserRepositoryCredits) -> Decimal:
+    rows = (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .all()
+    )
+    return sum((row.amount for row in rows), Decimal("0"))
+
+  def test_downgrade_deducts_the_allocation_difference(self):
+    """A downgrade takes back what the mirror upgrade would have granted."""
+    credits = self._make_pool(balance="2000", allocation="2000")
+
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+    )
+
+    assert credits.monthly_allocation == Decimal("1000")
+    assert credits.current_balance == Decimal("1000")
+    assert self._transaction_sum(credits) == Decimal("-1000")
+
+  def test_cycling_plans_does_not_accumulate_credits(self):
+    """The property the whole fix exists for.
+
+    Granting on the way up without deducting on the way down compounds: each
+    upgrade's delta is computed against the lowered allocation, so the same
+    net position can be bought over and over. Both the balance and the
+    transaction ledger must come back to the single-upgrade value no matter
+    how many times the cycle runs.
+    """
+    credits = self._make_pool(balance="1000", allocation="1000")
+
+    for _ in range(3):
+      credits.update_monthly_allocation(
+        new_allocation=Decimal("5000"), session=self.session, immediate_credit=True
+      )
+      credits.update_monthly_allocation(
+        new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+      )
+
+    # One last upgrade, so the end state is the same net change as a single
+    # 1000 -> 5000 move.
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("5000"), session=self.session, immediate_credit=True
+    )
+
+    assert credits.monthly_allocation == Decimal("5000")
+    assert credits.current_balance == Decimal("5000")
+    assert self._transaction_sum(credits) == Decimal("4000")
+
+  def test_downgrade_cannot_drive_the_balance_negative(self):
+    """Credits already spent are not clawed back into an overage."""
+    credits = self._make_pool(balance="200", allocation="5000")
+
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+    )
+
+    assert credits.current_balance == Decimal("0")
+    assert self._transaction_sum(credits) == Decimal("-200")
+
+    transaction = (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .one()
+    )
+    uncollected = json.loads(transaction.transaction_metadata)["uncollected"]
+    assert Decimal(uncollected) == Decimal("3800")
+
+  def test_downgrade_on_an_empty_pool_writes_no_transaction(self):
+    credits = self._make_pool(balance="0", allocation="5000")
+
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("1000"), session=self.session, immediate_credit=True
+    )
+
+    assert credits.current_balance == Decimal("0")
+    assert (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .count()
+      == 0
+    )
+
+  def test_downgrade_without_immediate_credit_leaves_the_balance_alone(self):
+    """The opt-out has to be symmetric too, or it becomes a free downgrade."""
+    credits = self._make_pool(balance="2000", allocation="2000")
+
+    credits.update_monthly_allocation(
+      new_allocation=Decimal("1000"), session=self.session, immediate_credit=False
+    )
+
+    assert credits.monthly_allocation == Decimal("1000")
+    assert credits.current_balance == Decimal("2000")
+    assert self._transaction_sum(credits) == Decimal("0")
+
+  def test_repeating_the_same_change_is_a_no_op(self):
+    """A retried plan change must not adjust twice.
+
+    Idempotency falls out of the delta being computed against the stored
+    allocation rather than being tracked separately.
+    """
+    credits = self._make_pool(balance="1000", allocation="1000")
+
+    for _ in range(3):
+      credits.update_monthly_allocation(
+        new_allocation=Decimal("3000"), session=self.session, immediate_credit=True
+      )
+
+    assert credits.current_balance == Decimal("3000")
+    assert self._transaction_sum(credits) == Decimal("2000")
+
   def test_get_summary(self):
     """Test getting credit summary."""
     now = datetime.now(UTC)

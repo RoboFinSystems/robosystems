@@ -301,8 +301,22 @@ class UserRepositoryCredits(Base):
   ) -> None:
     """Update the monthly allocation, as on a plan change.
 
-    With ``immediate_credit`` an upgrade tops the current balance up by the
-    difference right away, rather than waiting for the next allocation.
+    With ``immediate_credit`` the balance moves by the change in allocation
+    right away, rather than waiting for the next monthly allocation, so a
+    same-day plan change takes effect the day it is bought.
+
+    The adjustment is **symmetric**: a downgrade takes back what an upgrade
+    would have granted. Granting on the way up without deducting on the way
+    down does not merely under-charge — it compounds, because the next
+    upgrade's delta is computed against the new, lower allocation and grants
+    the difference a second time for the same net position.
+
+    Two properties bound it. The deduction never drives the balance below
+    zero, so a downgrade cannot manufacture an overage out of credits already
+    spent; and the operation is idempotent for a given target, since a repeat
+    call finds ``monthly_allocation`` already at ``new_allocation`` and
+    computes a zero delta. That makes a retried plan change a no-op without
+    needing a separate idempotency record.
     """
     old_allocation = self.monthly_allocation
     difference = new_allocation - old_allocation
@@ -332,6 +346,35 @@ class UserRepositoryCredits(Base):
         },
         session=session,
       )
+
+    elif immediate_credit and difference < 0:
+      # Clamped to what is actually there. A balance already drawn down (or
+      # negative from an overage) must not be pushed further down by a plan
+      # change — the user keeps what they have already used.
+      available = max(Decimal("0"), cast(Decimal, self.current_balance))
+      deduction = min(-difference, available)
+
+      if deduction > 0:
+        self.current_balance = cast(Decimal, self.current_balance) - deduction
+
+        UserRepositoryCreditTransaction.create_transaction(
+          credit_pool_id=cast(str, self.id),
+          transaction_type=UserRepositoryCreditTransactionType.BONUS,
+          amount=-deduction,
+          description="Tier downgrade credit adjustment",
+          metadata={
+            "old_allocation": str(old_allocation),
+            "new_allocation": str(new_allocation),
+            "uncollected": str(-difference - deduction),
+          },
+          session=session,
+        )
+      else:
+        logger.info(
+          f"Downgrade on user pool {self.id} deducted nothing: balance "
+          f"{self.current_balance} leaves no headroom against a "
+          f"{-difference} reduction"
+        )
 
     try:
       session.commit()
