@@ -142,6 +142,70 @@ def user_activity(client, user_id):
       console.print(f"  {login['timestamp'][:19]} ({login['type']})")
 
 
+def _resolve_user_id(client, identifier):
+  """Accept an email or a user ID and return the user ID."""
+  if "@" not in identifier:
+    return identifier
+
+  matches = client._make_request(
+    "GET", "/admin/v1/users", params={"email": identifier, "limit": 10}
+  )
+  exact = [u for u in matches or [] if u["email"].lower() == identifier.lower()]
+  if not exact:
+    console.print(f"\n[red]No user found with email {identifier}[/red]")
+    raise SystemExit(1)
+  return exact[0]["id"]
+
+
+@users.command("deactivate")
+@click.argument("identifier")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_obj
+def deactivate_user(client, identifier, yes):
+  """Deactivate a user by email or ID, cutting off all access.
+
+  Invalidates every session and revokes every API key — the escalation above a
+  password change, which rotates the credential but leaves keys working so
+  routine rotation doesn't break integrations. Use this for a compromised or
+  suspended account. Reactivating does not restore the revoked keys.
+  """
+  user_id = _resolve_user_id(client, identifier)
+
+  if not yes:
+    click.confirm(
+      f"\nDeactivate {identifier}? This ends all sessions and revokes all API keys.",
+      abort=True,
+      default=False,
+    )
+
+  result = client._make_request("POST", f"/admin/v1/users/{user_id}/deactivate")
+
+  console.print(f"\n[green]Deactivated {result['email']}[/green]")
+  console.print(f"  API keys revoked: {result['api_keys_revoked']}")
+  console.print("  All sessions invalidated.")
+  if not result["changed"]:
+    console.print("[yellow]  (was already inactive — re-ran the revocation)[/yellow]")
+
+
+@users.command("activate")
+@click.argument("identifier")
+@click.pass_obj
+def activate_user(client, identifier):
+  """Reactivate a deactivated user by email or ID.
+
+  Restores sign-in only. Revoked API keys are not reinstated — the user must
+  issue new ones.
+  """
+  user_id = _resolve_user_id(client, identifier)
+  result = client._make_request("POST", f"/admin/v1/users/{user_id}/activate")
+
+  console.print(f"\n[green]Activated {result['email']}[/green]")
+  if result["changed"]:
+    console.print("  They can sign in again; API keys must be re-issued.")
+  else:
+    console.print("[yellow]  (was already active — nothing changed)[/yellow]")
+
+
 @users.command("delete")
 @click.argument("identifier")
 @click.option(
@@ -155,16 +219,7 @@ def delete_user(client, identifier, dry_run, yes):
   Refuses while the user's org still has live graphs, subscriptions in force,
   or active repository access. Billing and audit history is retained.
   """
-  user_id = identifier
-  if "@" in identifier:
-    matches = client._make_request(
-      "GET", "/admin/v1/users", params={"email": identifier, "limit": 10}
-    )
-    exact = [u for u in matches or [] if u["email"].lower() == identifier.lower()]
-    if not exact:
-      console.print(f"\n[red]No user found with email {identifier}[/red]")
-      raise SystemExit(1)
-    user_id = exact[0]["id"]
+  user_id = _resolve_user_id(client, identifier)
 
   assessment = client._make_request(
     "DELETE", f"/admin/v1/users/{user_id}", params={"dry_run": True}

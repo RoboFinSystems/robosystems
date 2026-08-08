@@ -1,0 +1,82 @@
+"""Activate or deactivate a user account.
+
+Deactivation is the support-plane response to a compromised or suspended
+account, and the only one short of deletion. It is deliberately heavier than a
+credential rotation: a password change invalidates sessions but leaves API keys
+alone, because rotation is routine and revoking keys on it would break
+integrations. Deactivation is the escalation — it invalidates sessions *and*
+revokes every key.
+"""
+
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from ...logger import get_logger
+from ...models.core import User
+from ...models.core.user.user_api_key import UserAPIKey
+from .user_deletion import UserNotFound
+
+logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class UserStatusChange:
+  """Outcome of an activate/deactivate, including what it revoked."""
+
+  user_id: str
+  email: str
+  is_active: bool
+  changed: bool
+  api_keys_revoked: int
+
+
+def set_user_active(
+  user_id: str,
+  active: bool,
+  session: Session,
+  *,
+  actor: str | None = None,
+) -> UserStatusChange:
+  """Set a user's active flag, revoking access when deactivating.
+
+  The underlying model call is always performed rather than skipped when the
+  user is already in the target state. Key revocation is best-effort per key, so
+  a re-run after a partial failure must be able to finish the job — a no-op
+  short-circuit would leave keys live on exactly the retry an operator reaches
+  for during an incident.
+
+  Reactivation does **not** restore revoked keys: `UserAPIKey.deactivate` flips
+  each key's own flag, and nothing flips it back. The user must issue new ones.
+  """
+  user = User.get_by_id(user_id, session)
+  if not user:
+    raise UserNotFound(user_id)
+
+  was_active = bool(user.is_active)
+
+  if active:
+    revoked = 0
+    user.activate(session)
+  else:
+    # Count before the call: afterwards there are none left to count.
+    revoked = len(UserAPIKey.get_active_by_user_id(str(user.id), session))
+    user.deactivate(session)
+
+  logger.info(
+    f"User {user_id} {'activated' if active else 'deactivated'}",
+    extra={
+      "user_id": user_id,
+      "actor": actor,
+      "was_active": was_active,
+      "api_keys_revoked": revoked,
+    },
+  )
+
+  return UserStatusChange(
+    user_id=str(user.id),
+    email=str(user.email),
+    is_active=active,
+    changed=was_active != active,
+    api_keys_revoked=revoked,
+  )

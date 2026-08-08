@@ -72,6 +72,16 @@ class UserDeletionResponse(BaseModel):
   orgs_retained: list[str]
 
 
+class UserStatusResponse(BaseModel):
+  """Result of activating or deactivating a user."""
+
+  user_id: str
+  email: str
+  is_active: bool
+  changed: bool
+  api_keys_revoked: int
+
+
 class UserActivityResponse(BaseModel):
   """Response with user's recent activity."""
 

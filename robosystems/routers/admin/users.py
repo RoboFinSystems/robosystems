@@ -16,6 +16,7 @@ from ...models.api.admin import (
   UserGraphAccessResponse,
   UserRepositoryAccessResponse,
   UserResponse,
+  UserStatusResponse,
 )
 from ...models.core import Graph, GraphUser, OrgUser, User
 from ...models.core.graph.graph_credits import (
@@ -30,6 +31,7 @@ from ...operations.admin import (
   UserNotFound,
   execute_user_deletion,
   plan_user_deletion,
+  set_user_active,
 )
 
 logger = get_logger(__name__)
@@ -365,6 +367,72 @@ async def get_user_activity(request: Request, user_id: str):
     )
   finally:
     session.close()
+
+
+async def _set_active(
+  request: Request, user_id: str, active: bool
+) -> UserStatusResponse:
+  session = next(get_db_session())
+  try:
+    try:
+      change = set_user_active(
+        user_id,
+        active,
+        session,
+        actor=f"admin:{request.state.admin.get('name', 'unknown')}",
+      )
+    except UserNotFound:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"User {user_id} not found",
+      )
+
+    logger.info(
+      f"Admin {'activated' if active else 'deactivated'} user {user_id}",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "user_id": user_id,
+        "changed": change.changed,
+        "api_keys_revoked": change.api_keys_revoked,
+      },
+    )
+
+    return UserStatusResponse(
+      user_id=change.user_id,
+      email=change.email,
+      is_active=change.is_active,
+      changed=change.changed,
+      api_keys_revoked=change.api_keys_revoked,
+    )
+  finally:
+    session.close()
+
+
+@router.post("/{user_id}/deactivate", response_model=UserStatusResponse)
+@require_admin(permissions=["users:write"])
+async def deactivate_user(request: Request, user_id: str):
+  """Deactivate a user, cutting off both interactive and programmatic access.
+
+  Invalidates every session and revokes every API key. This is the escalation
+  above a password change — that rotates a credential and invalidates sessions,
+  but deliberately leaves keys alone so routine rotation doesn't break
+  integrations. Use this when an account is compromised or must be suspended.
+
+  Safe to re-run: key revocation is best-effort per key, so a repeat call
+  finishes anything a partial failure left behind.
+  """
+  return await _set_active(request, user_id, active=False)
+
+
+@router.post("/{user_id}/activate", response_model=UserStatusResponse)
+@require_admin(permissions=["users:write"])
+async def activate_user(request: Request, user_id: str):
+  """Reactivate a deactivated user.
+
+  Restores sign-in only. Revoked API keys are **not** reinstated — the user
+  must issue new ones.
+  """
+  return await _set_active(request, user_id, active=True)
 
 
 @router.delete("/{user_id}", response_model=UserDeletionResponse)
