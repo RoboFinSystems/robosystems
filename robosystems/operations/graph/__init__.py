@@ -18,7 +18,6 @@ from .infrastructure import (
   MetricsResult,
 )
 from .metrics_service import GraphMetricsService
-from .pricing_service import GraphPricingService
 from .repository_subscription_service import RepositorySubscriptionService
 from .subscription_service import GraphSubscriptionService
 
@@ -31,7 +30,6 @@ __all__ = [
   "GraphCreationService",
   "GraphDeprovisionService",
   "GraphMetricsService",
-  "GraphPricingService",
   "GraphSubscriptionService",
   "HealthCheckResult",
   # Infrastructure monitoring
