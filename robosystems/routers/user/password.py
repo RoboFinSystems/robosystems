@@ -1,7 +1,5 @@
 """User password management endpoints."""
 
-from datetime import UTC, datetime
-
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -126,10 +124,12 @@ async def update_user_password(
       )
 
     user_in_session.password_hash = new_password_hash
-    user_in_session.updated_at = datetime.now(UTC)
 
-    db.commit()
-    db.refresh(user_in_session)
+    # Bump session_version so every JWT minted before this change stops
+    # authenticating. invalidate_sessions() commits the new hash alongside the
+    # bump, so the two cannot diverge: a failure rolls both back rather than
+    # leaving the password changed while prior sessions stay live.
+    user_in_session.invalidate_sessions(db)
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(

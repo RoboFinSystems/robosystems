@@ -912,8 +912,11 @@ class TestUserPasswordUpdate:
     assert data["success"] is True
     assert "updated" in data["message"].lower()
 
-    # Verify session operations were called
-    mock_db.commit.assert_called_once()
+    # The new hash and the session_version bump are committed together by
+    # invalidate_sessions, so prior JWTs cannot outlive a password change.
+    client_with_password_user.mock_user.invalidate_sessions.assert_called_once_with(
+      mock_db
+    )
 
   @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_wrong_current(
