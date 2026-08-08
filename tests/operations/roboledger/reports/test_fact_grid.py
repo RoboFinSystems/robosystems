@@ -6,6 +6,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.operations.roboledger.reports.fact_grid import (
   _EQUITY_FLOW_REDUCER_QNAMES,
   PeriodSpec,
@@ -55,22 +57,100 @@ class TestNaturalSign:
 
 
 class TestComputePriorPeriod:
-  def test_quarterly(self):
-    start, end = _compute_prior_period(date(2026, 1, 1), date(2026, 3, 31))
-    assert end == date(2025, 12, 31)
-    # Q1 = 90 days, so prior period is 90 days ending Dec 31
-    duration = (date(2026, 3, 31) - date(2026, 1, 1)).days + 1
-    assert (end - start).days + 1 == duration
+  """A whole-month range compares against whole calendar months.
 
-  def test_monthly(self):
-    start, end = _compute_prior_period(date(2026, 3, 1), date(2026, 3, 31))
-    assert end == date(2026, 2, 28)
-    assert start.month == 1 or start.month == 2  # 31-day month prior
+  These assertions used to be written against day-count arithmetic — the
+  quarterly case pinned "prior period is 90 days" and the monthly case
+  allowed `start.month == 1 or start.month == 2`, which is loose enough to
+  accept 2026-01-29. Both encoded the defect: months differ in length, so
+  subtracting a duration walks a monthly period off its own boundaries and
+  the comparative column queries a window no FactSet was ever stamped into.
+  """
+
+  @pytest.mark.parametrize(
+    ("label", "start", "end", "want_start", "want_end"),
+    [
+      (
+        "month",
+        date(2026, 3, 1),
+        date(2026, 3, 31),
+        date(2026, 2, 1),
+        date(2026, 2, 28),
+      ),
+      (
+        "short month",
+        date(2026, 2, 1),
+        date(2026, 2, 28),
+        date(2026, 1, 1),
+        date(2026, 1, 31),
+      ),
+      (
+        "year boundary",
+        date(2026, 1, 1),
+        date(2026, 1, 31),
+        date(2025, 12, 1),
+        date(2025, 12, 31),
+      ),
+      (
+        "quarter",
+        date(2026, 1, 1),
+        date(2026, 3, 31),
+        date(2025, 10, 1),
+        date(2025, 12, 31),
+      ),
+      (
+        "full year",
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+      ),
+      (
+        "leap February",
+        date(2024, 3, 1),
+        date(2024, 3, 31),
+        date(2024, 2, 1),
+        date(2024, 2, 29),
+      ),
+    ],
+  )
+  def test_whole_month_ranges_step_back_by_calendar(
+    self, label, start, end, want_start, want_end
+  ):
+    assert _compute_prior_period(start, end) == (want_start, want_end)
+
+  def test_arbitrary_range_falls_back_to_equal_length(self):
+    """Only whole-month ranges get calendar treatment.
+
+    "The previous one" has no calendar meaning for an arbitrary window, so
+    equal length is the honest reading — and the original behaviour.
+    """
+    start, end = _compute_prior_period(date(2026, 3, 5), date(2026, 3, 20))
+
+    assert end == date(2026, 3, 4)
+    assert (end - start).days + 1 == 16  # same span as Mar 5-20
 
   def test_single_day(self):
     start, end = _compute_prior_period(date(2026, 6, 15), date(2026, 6, 15))
     assert start == date(2026, 6, 14)
     assert end == date(2026, 6, 14)
+
+  def test_both_call_sites_agree(self):
+    """The duplicate is gone; reads/reports.py delegates to this function.
+
+    That file imported this helper *and* kept a hand-copy of its body, so a
+    fix to one silently left the other behind. Pinning the agreement is what
+    stops the copy growing back.
+    """
+    from robosystems.operations.roboledger.reads.reports import (
+      build_current_and_prior_periods,
+    )
+
+    start, end = date(2026, 3, 1), date(2026, 3, 31)
+    specs = build_current_and_prior_periods(start, end)
+
+    assert (specs[1].start, specs[1].end) == _compute_prior_period(start, end)
+    assert (specs[1].start, specs[1].end) == (date(2026, 2, 1), date(2026, 2, 28))
 
 
 class TestBuildRows:
