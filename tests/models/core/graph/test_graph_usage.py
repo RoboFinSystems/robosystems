@@ -279,8 +279,72 @@ class TestGraphUsage:
     assert graph_summary["measurement_count"] == 6  # 3 days * 2 hours
     assert graph_summary["max_storage_gb"] == 3.0
     assert graph_summary["min_storage_gb"] == 1.0
-    assert graph_summary["total_gb_hours"] == 12.0  # 1+1+2+2+3+3
-    assert graph_summary["avg_storage_gb"] == 2.0
+
+    # Snapshots are 12h apart and span 01-01 00:00 -> 01-03 12:00 (60h).
+    # Each reading is weighted by the span since the previous one, so the
+    # first (at the period start) carries no weight:
+    #   12h*1 + 12h*2 + 12h*2 + 12h*3 + 12h*3 = 132 GB-hours over 60h.
+    # This assertion previously read 12.0 ("1+1+2+2+3+3") — the raw sum of
+    # readings, which is only GB-hours if snapshots are exactly 1h apart.
+    assert graph_summary["total_gb_hours"] == 132.0
+    assert graph_summary["avg_storage_gb"] == pytest.approx(2.2)
+
+  def test_gb_hours_is_independent_of_snapshot_cadence(self):
+    """The same storage held for the same time bills the same either way.
+
+    This is the property the raw-sum version could not have: it scaled the
+    answer with how often the sensor happened to run. Two graphs hold 2 GB
+    across the same 24h window, sampled hourly vs every six hours.
+    """
+    for hour in range(0, 25):  # hourly
+      self.session.add(self._snapshot("graph_hourly", hour, 2.0))
+    for hour in range(0, 25, 6):  # every 6h
+      self.session.add(self._snapshot("graph_six_hourly", hour, 2.0))
+    self.session.commit()
+
+    hourly = GraphUsage.get_monthly_storage_summary(
+      graph_id="graph_hourly", year=2024, month=2, session=self.session
+    )["graph_hourly"]
+    six_hourly = GraphUsage.get_monthly_storage_summary(
+      graph_id="graph_six_hourly", year=2024, month=2, session=self.session
+    )["graph_six_hourly"]
+
+    assert hourly["total_gb_hours"] == pytest.approx(48.0)  # 2 GB * 24h
+    assert six_hourly["total_gb_hours"] == pytest.approx(48.0)
+    assert hourly["measurement_count"] != six_hourly["measurement_count"]
+
+  def test_gb_hours_caps_the_span_a_stale_reading_covers(self):
+    """A sensor outage must not let one reading bill for the whole gap."""
+    from robosystems.models.core.graph.graph_usage import MAX_SNAPSHOT_WEIGHT_HOURS
+
+    self.session.add(self._snapshot("graph_gap", 0, 1.0))
+    # Next reading lands 10 days later — the sensor was down in between.
+    self.session.add(self._snapshot("graph_gap", 0, 1.0, day=11))
+    self.session.commit()
+
+    summary = GraphUsage.get_monthly_storage_summary(
+      graph_id="graph_gap", year=2024, month=2, session=self.session
+    )["graph_gap"]
+
+    # Uncapped this would be 1 GB * 240h; the cap holds it to one span.
+    assert summary["total_gb_hours"] == pytest.approx(MAX_SNAPSHOT_WEIGHT_HOURS)
+
+  def _snapshot(self, graph_id: str, hour: int, storage_gb: float, day: int = 1):
+    """A storage snapshot in Feb 2024, `hour` hours after the period start."""
+    recorded_at = datetime(2024, 2, day, 0, 0, 0, tzinfo=UTC) + timedelta(hours=hour)
+    return GraphUsage(
+      user_id=self.test_user_id,
+      graph_id=graph_id,
+      event_type=UsageEventType.STORAGE_SNAPSHOT.value,
+      graph_tier="standard",
+      storage_bytes=int(storage_gb * 1024**3),
+      storage_gb=storage_gb,
+      billing_year=2024,
+      billing_month=2,
+      billing_day=recorded_at.day,
+      billing_hour=recorded_at.hour,
+      recorded_at=recorded_at,
+    )
 
   def test_get_monthly_storage_summary_no_data(self):
     """Test getting monthly storage summary with no data."""
