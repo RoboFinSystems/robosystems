@@ -40,6 +40,7 @@ from .users import (
   UserGraphAccessResponse,
   UserRepositoryAccessResponse,
   UserResponse,
+  UserStatusResponse,
 )
 
 __all__ = [
@@ -78,4 +79,5 @@ __all__ = [
   "UserGraphAccessResponse",
   "UserRepositoryAccessResponse",
   "UserResponse",
+  "UserStatusResponse",
 ]
