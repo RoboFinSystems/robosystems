@@ -89,8 +89,13 @@ class OAuthState:
     not a human-chosen secret. A KDF exists to make low-entropy guesses
     expensive; against full entropy it buys nothing and costs latency on
     every callback. Same construction and same reasoning as
-    ``UserApiKey._fingerprint_api_key``, so CodeQL's "weak hash on
-    sensitive data" is a false positive here too.
+    ``UserApiKey._fingerprint_api_key``.
+
+    CodeQL's ``py/weak-sensitive-data-hashing`` fires here (the taint
+    source is ``secrets.token_urlsafe``) and is dismissed as a false
+    positive in code scanning — as it already was against this same call
+    at its previous line number. The marker below is for readers; the
+    dismissal is what actually silences it.
     """
     return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"  # lgtm[py/weak-sensitive-data-hashing]
 
