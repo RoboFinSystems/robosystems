@@ -30,7 +30,6 @@ from .graph.graph_creation_service import (
   GraphCreationService,
 )
 from .graph.metrics_service import GraphMetricsService
-from .graph.pricing_service import GraphPricingService
 from .graph.repository_subscription_service import RepositorySubscriptionService
 from .graph.subscription_service import GraphSubscriptionService
 from .providers.registry import ConnectionProvider, ProviderRegistry
@@ -51,7 +50,6 @@ __all__ = [
   "GraphCreationResult",
   "GraphCreationService",
   "GraphMetricsService",
-  "GraphPricingService",
   "GraphSubscriptionService",
   "InstanceInfo",
   "InstanceStatus",
