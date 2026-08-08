@@ -310,6 +310,79 @@ class TestCallMcpToolValidation:
       assert exc_info.value.status_code == 403
       assert "not allowed" in exc_info.value.detail.lower()
 
+  @pytest.mark.asyncio
+  async def test_queue_simple_returns_202_with_operation_id(self):
+    """The QUEUE_SIMPLE branch answers 202 with the queued operation's id.
+
+    Regression: this branch read ``sse_response.operation_id`` while
+    ``create_operation_response`` returns a plain ``dict``, so the caller got an
+    AttributeError-driven 500 *after* ``submit_query`` had already enqueued the
+    work. The strategy-selection test above proves we reach this branch; only
+    this one proves the branch answers.
+
+    Reached by a non-MCP, non-SSE client (plain SDK/curl) calling a cypher read
+    tool while the queue is deep — see ``_select_high_load_strategy``.
+    """
+    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
+
+    mock_request = Mock()
+    mock_request.headers = {
+      "user-agent": "python-httpx/0.27",
+      "accept": "application/json",
+    }
+    user = _make_mock_user()
+    tool_call = _make_mock_tool_call(
+      "read-graph-cypher", {"query": "MATCH (n) RETURN n"}
+    )
+
+    queue = Mock()
+    # Over the high-load thresholds (queue_size > 10 or running_queries > 5).
+    queue.get_stats = Mock(return_value={"queue_size": 20, "running_queries": 10})
+    queue.submit_query = AsyncMock(return_value="queue-abc")
+
+    operation_response = {
+      "operation_id": "op-xyz",
+      "status": "pending",
+      "_links": {"stream": "/v1/operations/op-xyz/stream"},
+    }
+
+    with (
+      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
+      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
+      patch("robosystems.routers.graphs.mcp.execute.log_shared_query_start"),
+      patch("robosystems.routers.graphs.mcp.execute.record_shared_query_outcome"),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.get_query_queue", return_value=queue
+      ),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.get_graph_repository", new=AsyncMock()
+      ),
+      patch("robosystems.models.core.GraphUser.user_has_access", return_value=True),
+      patch("robosystems.routers.graphs.mcp.execute.MCPHandler") as handler_cls,
+      patch(
+        "robosystems.routers.graphs.mcp.execute.create_operation_response",
+        new=AsyncMock(return_value=operation_response),
+      ),
+    ):
+      handler_cls.return_value.close = AsyncMock()
+
+      response = await call_mcp_tool(
+        full_request=mock_request,
+        graph_id="kg01234567890abcdef",
+        tool_call=tool_call,
+        format=None,
+        test_mode=False,
+        current_user=user,
+        _rate_limit=None,
+      )
+
+    assert response.status_code == 202
+    body = json.loads(response.body)
+    assert body["queued"] is True
+    assert body["operation_id"] == "op-xyz"
+    assert body["monitor_url"] == "/v1/operations/op-xyz/stream"
+    queue.submit_query.assert_awaited_once()
+
   def test_non_cypher_tool_not_in_cypher_tool_list(self):
     """Test that non-cypher tools are not in the cypher validation tool list.
 
