@@ -61,6 +61,7 @@ exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
 | Restore backup | `POST /v1/graphs/{g}/operations/restore-backup` |
 |  Change tier | `POST /v1/graphs/{g}/operations/change-tier` |
 | Materialize | `POST /v1/graphs/{g}/operations/materialize` |
+| Update metadata | `POST /v1/graphs/{g}/operations/update-graph-metadata` |
 
 All graph operation responses are `OperationEnvelope` and support `Idempotency-Key`. Reads (list subgraphs, list backups, health, etc.) remain REST GETs at their existing paths.
 

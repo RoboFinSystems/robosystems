@@ -40,6 +40,7 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 - **restore-backup**: Restore from backup (blocked for entity graphs — use `materialize` instead)
 - **change-tier**: Change graph infrastructure tier with Stripe billing integration
 - **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)
+- **update-graph-metadata**: Edit the graph's display name, description and tags (admin only; partial update)
 
 ### Documents, Search & Memory
 

@@ -81,6 +81,18 @@ def _raise_http_exception(
   )
 
 
+def _label_fields(graph: Graph | None) -> tuple[str, list[str]]:
+  """Read the ``(description, tags)`` pair off a graph, tolerating ``None``.
+
+  A repository row can be absent (``UserRepository.graph``), which the model
+  properties cannot express on their own. Coercion of the underlying JSONB
+  lives on the model so this and the update command agree on it.
+  """
+  if graph is None:
+    return "", []
+  return graph.description, graph.tags
+
+
 @router.get(
   "",
   response_model=UserGraphsResponse,
@@ -131,10 +143,13 @@ async def get_graphs(
       else:
         member_graphs += 1
 
+      description, tags = _label_fields(user_graph.graph)
       graphs.append(
         GraphInfo(
           graphId=user_graph.graph_id,
           graphName=user_graph.graph.graph_name,
+          description=description,
+          tags=tags,
           role=user_graph.role,
           isSelected=user_graph.is_selected,
           createdAt=user_graph.created_at.isoformat(),
@@ -173,10 +188,13 @@ async def get_graphs(
           continue
 
         admin_graphs += 1
+        description, tags = _label_fields(graph)
         graphs.append(
           GraphInfo(
             graphId=graph.graph_id,
             graphName=graph.graph_name,
+            description=description,
+            tags=tags,
             role="admin",
             isSelected=False,
             createdAt=graph.created_at.isoformat(),
@@ -200,10 +218,13 @@ async def get_graphs(
         else user_repo.repository_name.upper()
       )
 
+      description, tags = _label_fields(user_repo.graph)
       graphs.append(
         GraphInfo(
           graphId=user_repo.repository_name,
           graphName=graph_name,
+          description=description,
+          tags=tags,
           role=user_repo.access_level.value,
           isSelected=False,
           createdAt=user_repo.created_at.isoformat(),

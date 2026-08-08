@@ -86,6 +86,16 @@ class GraphInfo(BaseModel):
     description="Display name for the graph",
     examples=["Acme Consulting LLC", "SEC EDGAR Filings"],
   )
+  description: str = Field(
+    default="",
+    description="Free-form description ('' when unset)",
+    examples=["", "Primary operating entity, consolidated monthly"],
+  )
+  tags: list[str] = Field(
+    default_factory=list,
+    description="Organizational tags for the graph",
+    examples=[[], ["consulting", "production"]],
+  )
   role: str = Field(
     ..., description="User's role/access level", examples=["admin", "member", "read"]
   )
@@ -139,6 +149,8 @@ class GraphInfo(BaseModel):
         {
           "graphId": "kg1a2b3c4d5",
           "graphName": "Acme Consulting LLC",
+          "description": "Primary operating entity, consolidated monthly",
+          "tags": ["consulting", "production"],
           "role": "admin",
           "isSelected": True,
           "createdAt": "2024-01-15T10:00:00Z",
@@ -153,6 +165,8 @@ class GraphInfo(BaseModel):
         {
           "graphId": "kg9z8y7x6w5_dev",
           "graphName": "TechCorp Enterprises - Dev",
+          "description": "",
+          "tags": ["sandbox"],
           "role": "member",
           "isSelected": False,
           "createdAt": "2024-02-20T14:30:00Z",
@@ -167,6 +181,8 @@ class GraphInfo(BaseModel):
         {
           "graphId": "sec",
           "graphName": "SEC EDGAR Filings",
+          "description": "",
+          "tags": [],
           "role": "read",
           "isSelected": False,
           "createdAt": "2024-01-01T00:00:00Z",

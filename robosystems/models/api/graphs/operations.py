@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DeleteSubgraphOp(BaseModel):
@@ -49,6 +49,103 @@ class ChangeTierOp(BaseModel):
   new_tier: Literal["ladybug-standard", "ladybug-large", "ladybug-xlarge"] = Field(
     ...,
     description="Target infrastructure tier",
+  )
+
+
+class UpdateGraphMetadataOp(BaseModel):
+  """Body for the update-graph-metadata operation.
+
+  Partial update — only supplied (non-null) fields change, so a caller
+  editing just the display name need not resend the description and tags.
+  Because ``None`` means "leave alone", clearing a field uses its empty
+  value instead: pass ``""`` to clear the description and ``[]`` to clear
+  the tags. ``graph_name`` cannot be cleared; it is the graph's label
+  everywhere it is listed.
+
+  This is the platform-level label for the graph, independent of the
+  entity name shown on financial statements — change that through
+  ``POST /extensions/roboledger/{graph_id}/operations/update-entity``.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"graph_name": "Acme Consulting LLC"},
+        {
+          "graph_name": "Acme Consulting LLC",
+          "description": "Primary operating entity, consolidated monthly",
+          "tags": ["consulting", "production"],
+        },
+        {"description": "", "tags": []},
+      ]
+    }
+  )
+
+  graph_name: str | None = Field(
+    default=None,
+    min_length=1,
+    max_length=255,
+    description="New display name. Omit to leave unchanged; cannot be cleared.",
+  )
+  description: str | None = Field(
+    default=None,
+    max_length=1000,
+    description="New description. Omit to leave unchanged; pass '' to clear.",
+  )
+  tags: list[str] | None = Field(
+    default=None,
+    max_length=20,
+    description=(
+      "Replaces the full tag list (not a merge). Omit to leave unchanged; "
+      "pass [] to clear. Tags are trimmed, de-duplicated, and capped at 50 "
+      "characters each."
+    ),
+  )
+
+  @field_validator("graph_name")
+  @classmethod
+  def _strip_name(cls, value: str | None) -> str | None:
+    if value is None:
+      return None
+    stripped = value.strip()
+    if not stripped:
+      raise ValueError("graph_name cannot be blank")
+    return stripped
+
+  @field_validator("tags")
+  @classmethod
+  def _normalize_tags(cls, value: list[str] | None) -> list[str] | None:
+    if value is None:
+      return None
+    normalized: list[str] = []
+    for tag in value:
+      cleaned = tag.strip()
+      if not cleaned:
+        continue
+      if len(cleaned) > 50:
+        raise ValueError(f"Tag exceeds 50 characters: {cleaned[:50]}...")
+      if cleaned not in normalized:
+        normalized.append(cleaned)
+    return normalized
+
+
+class GraphMetadataResult(BaseModel):
+  """Result payload for the update-graph-metadata operation."""
+
+  graph_id: str = Field(description="Graph the metadata belongs to")
+  graph_name: str = Field(description="Display name after the update")
+  description: str = Field(
+    default="", description="Description after the update ('' when unset)"
+  )
+  tags: list[str] = Field(
+    default_factory=list, description="Tags after the update (empty when unset)"
+  )
+  updated_fields: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Fields this call actually changed. Empty when the submitted values "
+      "already matched what was stored."
+    ),
   )
 
 

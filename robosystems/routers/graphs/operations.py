@@ -49,8 +49,10 @@ from robosystems.models.api.graphs.operations import (
   ChangeTierOp,
   DeleteGraphOp,
   DeleteSubgraphOp,
+  GraphMetadataResult,
   MaterializeOp,
   RestoreBackupOp,
+  UpdateGraphMetadataOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
 from robosystems.models.core import User
@@ -884,6 +886,68 @@ async def change_tier_op(
     event=_AUDIT_EVENT,
   )
   return envelope
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# update-graph-metadata
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/update-graph-metadata",
+  response_model=OperationEnvelope[GraphMetadataResult],
+  operation_id="updateGraphMetadata",
+  summary="Update Graph Metadata",
+  description=(
+    "Edit the graph's platform-level label: display name, description, and "
+    'tags. Partial — only supplied (non-null) fields change; pass `""` to '
+    "clear the description and `[]` to clear the tags. Requires admin on the "
+    "graph. This is not the entity name that appears on financial statements "
+    "— change that through the roboledger `update-entity` operation."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/update-graph-metadata",
+  method="POST",
+  business_event_type="graph_update_metadata",
+)
+async def update_graph_metadata_op(
+  body: UpdateGraphMetadataOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.operations.graph.commands.metadata import update_graph_metadata_cmd
+
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="update-graph-metadata",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    if body.graph_name is None and body.description is None and body.tags is None:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="No fields provided for update.",
+      )
+    return update_graph_metadata_cmd(
+      graph_id,
+      graph_name=body.graph_name,
+      description=body.description,
+      tags=body.tags,
+      user_id=str(user.id),
+      db=db,
+    )
+
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
