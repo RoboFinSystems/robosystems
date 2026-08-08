@@ -7,6 +7,7 @@ handful of vendor-specific parameters; everything else is shared here.
 """
 
 import hashlib
+import json
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -17,6 +18,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...config import env
+from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 from ...models.core import ConnectionCredentials
 
@@ -55,29 +57,59 @@ class OAuthProviderProtocol(Protocol):
     return {}
 
 
+STATE_TTL_SECONDS = 600
+_STATE_KEY_PREFIX = "oauth:state:"
+
+
 class OAuthState:
   """Single-use, 10-minute CSRF state for an in-flight authorization.
 
-  Held in process memory, so a flow must complete on the worker that started
-  it and no state survives a restart. Both are acceptable because the window
-  is short and the user simply retries; nothing durable is lost.
+  Held in Valkey rather than process memory: the API runs multiple tasks
+  behind a load balancer with no session affinity, so the callback lands on
+  an arbitrary one. Per-process storage meant a flow only completed when the
+  callback happened to hit the task that started it — a coin flip at two
+  tasks, worse as the service scales out.
+
+  Expiry is the key's TTL, so abandoned flows evict themselves. Redemption
+  is a single ``GETDEL``, which makes single-use atomic *across* tasks; the
+  previous ``del`` on a local dict only held within one process.
+
+  This is defense in depth, not the only guard — the callback route is
+  authenticated and separately checks that the caller matches the user the
+  state was minted for.
   """
 
-  _states: dict[str, dict[str, Any]] = {}
+  @staticmethod
+  def _key(state: str) -> str:
+    return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"
 
   @classmethod
   def create(cls, connection_id: str, user_id: str, redirect_uri: str) -> str:
-    """Mint a state token and record what the callback should resume."""
-    state = secrets.token_urlsafe(32)
-    state_hash = hashlib.sha256(state.encode()).hexdigest()
+    """Mint a state token and record what the callback should resume.
 
-    cls._states[state_hash] = {
+    Raises if the store is unreachable: a flow whose state was never
+    persisted can only fail later at the callback, so failing here keeps the
+    error next to its cause.
+    """
+    state = secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    payload = {
       "connection_id": connection_id,
       "user_id": user_id,
       "redirect_uri": redirect_uri,
-      "created_at": datetime.now(UTC),
-      "expires_at": datetime.now(UTC) + timedelta(minutes=10),
+      "created_at": now.isoformat(),
+      "expires_at": (now + timedelta(seconds=STATE_TTL_SECONDS)).isoformat(),
     }
+
+    try:
+      client = create_redis_client(ValkeyDatabase.AUTH)
+      client.setex(cls._key(state), STATE_TTL_SECONDS, json.dumps(payload))
+    except Exception as exc:
+      logger.error(f"Failed to persist OAuth state: {exc}")
+      raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Unable to start the authorization flow. Please try again.",
+      ) from exc
 
     return state
 
@@ -85,31 +117,30 @@ class OAuthState:
   def validate(cls, state: str) -> dict[str, Any] | None:
     """Consume a state token, returning what it recorded, or None if invalid.
 
-    Consuming is the point: an expired or already-redeemed token is dropped so
-    the same authorization code can't be replayed.
+    Consuming is the point: an expired or already-redeemed token is gone, so
+    the same authorization code can't be replayed. Fails closed — an
+    unreachable or unparseable store reads as an invalid state rather than
+    waving the callback through.
     """
-    state_hash = hashlib.sha256(state.encode()).hexdigest()
-    state_data = cls._states.get(state_hash)
-
-    if not state_data:
+    try:
+      client = create_redis_client(ValkeyDatabase.AUTH)
+      raw = client.getdel(cls._key(state))
+    except Exception as exc:
+      logger.error(f"Failed to read OAuth state: {exc}")
       return None
 
-    if datetime.now(UTC) > state_data["expires_at"]:
-      del cls._states[state_hash]
+    if not raw:
       return None
 
-    del cls._states[state_hash]
-    return state_data
+    try:
+      payload = json.loads(raw)
+      payload["created_at"] = datetime.fromisoformat(payload["created_at"])
+      payload["expires_at"] = datetime.fromisoformat(payload["expires_at"])
+    except (ValueError, KeyError, TypeError) as exc:
+      logger.error(f"Discarding malformed OAuth state: {exc}")
+      return None
 
-  @classmethod
-  def cleanup_expired(cls):
-    """Drop states past their expiry (abandoned flows never call validate)."""
-    now = datetime.now(UTC)
-    expired_states = [
-      state_hash for state_hash, data in cls._states.items() if now > data["expires_at"]
-    ]
-    for state_hash in expired_states:
-      del cls._states[state_hash]
+    return payload
 
 
 class OAuthHandler:
