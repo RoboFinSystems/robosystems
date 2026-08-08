@@ -166,8 +166,6 @@ class TestBackupManager:
         timestamp=datetime.now(UTC),
         retention_days=90,
         compression=True,
-        encryption=True,
-        allow_export=False,  # Required when encryption is True
       )
 
       # Execute backup
@@ -198,7 +196,6 @@ class TestBackupManager:
         backup_type=BackupType.FULL,
         backup_format=BackupFormat.FULL_DUMP,
         timestamp=datetime.now(UTC),
-        encryption=False,  # Disable encryption for this test
       )
 
       with pytest.raises(Exception, match="Database connection failed"):
@@ -238,7 +235,6 @@ class TestBackupManager:
         graph_id=graph_id,
         backup_type=BackupType.FULL,
         backup_format=BackupFormat.FULL_DUMP,
-        encryption=False,  # Disable encryption for this test
       )
 
       with pytest.raises(Exception, match="S3 upload failed"):
@@ -295,7 +291,6 @@ class TestBackupManager:
           graph_id=graph_id,
           backup_format=backup_format,
           backup_type=BackupType.FULL,
-          encryption=False,  # Disable encryption for this test
         )
 
         result = await backup_manager.create_backup(backup_job)
@@ -313,32 +308,9 @@ class TestBackupManager:
       graph_id="test_graph",
       backup_format=BackupFormat.FULL_DUMP,
       backup_type=BackupType.FULL,
-      encryption=True,
-      allow_export=False,  # Required for encryption
     )
-    assert valid_job.encryption is True
-    assert valid_job.allow_export is False
-
-    # Test invalid encryption with export
-    with pytest.raises(
-      ValueError, match="Encryption can only be enabled for non-exportable backups"
-    ):
-      BackupJob(
-        graph_id="test_graph",
-        encryption=True,
-        allow_export=True,  # Invalid combination
-      )
-
-    # Test invalid encryption format
-    with pytest.raises(
-      ValueError, match="Encryption is only supported for full dump backups"
-    ):
-      BackupJob(
-        graph_id="test_graph",
-        backup_format=BackupFormat.CSV,
-        encryption=True,
-        allow_export=False,
-      )
+    assert valid_job.backup_format == BackupFormat.FULL_DUMP
+    assert valid_job.backup_type == BackupType.FULL
 
     # Test invalid graph ID
     with pytest.raises(ValueError):
@@ -481,7 +453,6 @@ class TestBackupManager:
     # Mock GraphBackup database record
     mock_backup = MagicMock()
     mock_backup.is_completed = True
-    mock_backup.encryption_enabled = False
     mock_backup.s3_bucket = "test-bucket"
     mock_backup.s3_key = "test-key"
 
@@ -509,17 +480,9 @@ class TestBackupManager:
         backup_id, graph_id, mock_session
       )
 
-      # Test encrypted backup download (should return None)
-      mock_backup.encryption_enabled = True
-      mock_graph_backup.get_by_id_and_graph.reset_mock()
-
-      url = await backup_manager.get_backup_download_url(graph_id, backup_id)
-      assert url is None
-
     # Test download_backup
     backup_manager.s3_adapter.get_backup_metadata = AsyncMock(
       return_value={
-        "encryption_enabled": False,
         "backup_format": "full_dump",
       }
     )
@@ -596,7 +559,6 @@ class TestBackupManager:
     # Mock metadata
     metadata = MagicMock()
     metadata.checksum = "expected_checksum"
-    metadata.encryption_key = None
 
     # Test successful validation
     with patch("hashlib.sha256") as mock_sha:
@@ -657,19 +619,17 @@ class TestBackupJobDataclass:
 
   @pytest.mark.unit
   def test_backup_job_defaults(self):
-    """BackupJob auto-sets timestamp and uses correct compression/encryption defaults."""
+    """BackupJob auto-sets timestamp and uses correct compression defaults."""
     before = datetime.now(UTC)
-    job = BackupJob(graph_id="test_graph", encryption=False)
+    job = BackupJob(graph_id="test_graph")
     after = datetime.now(UTC)
 
     assert job.timestamp is not None
     assert before <= job.timestamp <= after
     assert job.compression is True
-    assert job.encryption is False
     assert job.backup_format == BackupFormat.FULL_DUMP
     assert job.backup_type == BackupType.FULL
     assert job.retention_days == 90
-    assert job.allow_export is True
     assert job.schedule is None
 
   @pytest.mark.unit
@@ -715,7 +675,7 @@ class TestBackupJobDataclass:
       "sec",
     ]
     for graph_id in valid_ids:
-      job = BackupJob(graph_id=graph_id, encryption=False)
+      job = BackupJob(graph_id=graph_id)
       assert job.graph_id == graph_id
 
 

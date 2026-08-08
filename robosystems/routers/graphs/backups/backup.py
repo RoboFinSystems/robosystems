@@ -39,6 +39,7 @@ from robosystems.models.api.graphs.backups import (
   DownloadQuota,
 )
 from robosystems.models.core import User, UserRepository
+from robosystems.routers.graphs.backups.utils import restore_unsupported_reason
 
 # Create router
 router = APIRouter()
@@ -141,13 +142,9 @@ async def list_backups(
           node_count=backup.node_count or 0,
           relationship_count=backup.relationship_count or 0,
           backup_duration_seconds=backup.backup_duration_seconds or 0.0,
-          encryption_enabled=backup.encryption_enabled,
           compression_enabled=backup.compression_enabled,
-          allow_export=not backup.encryption_enabled,  # Encrypted backups cannot be exported
           download_extension=(
-            get_download_extension(backup.s3_key)
-            if backup.s3_key and not backup.encryption_enabled
-            else None
+            get_download_extension(backup.s3_key) if backup.s3_key else None
           ),
           created_at=backup.created_at.isoformat()
           if backup.created_at
@@ -209,6 +206,7 @@ async def list_backups(
       total_count=total_count,
       graph_id=graph_id,
       is_shared_repository=is_shared_repo,
+      restore_supported=restore_unsupported_reason(graph_id, db) is None,
       download_quota=download_quota,
     )
 

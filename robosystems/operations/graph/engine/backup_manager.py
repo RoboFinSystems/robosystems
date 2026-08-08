@@ -2,14 +2,16 @@
 
 Two families of backup, and they are not interchangeable:
 
-- ``FULL_DUMP`` is the only restorable format, and the only one that may be
-  encrypted. It is the on-disk database, not a re-importable export.
+- ``FULL_DUMP`` is the only restorable format. It is the on-disk database, not
+  a re-importable export.
 - ``CSV`` / ``JSON`` / ``PARQUET`` are export formats. They can be downloaded
   and converted between each other, but never restored.
 
-Encryption and export are mutually exclusive: an encrypted backup cannot be
-downloaded, so ``allow_export`` must be False whenever ``encryption`` is True.
-Storage lives in :mod:`robosystems.operations.aws.s3`.
+Backups are not encrypted at the application layer. Objects are written with
+S3 server-side encryption (SSE-AES256) and served over TLS through short-lived
+signed URLs; the plaintext is a ``.lbug`` database the owner can open directly,
+which is the point of offering a download at all. Storage lives in
+:mod:`robosystems.operations.aws.s3`.
 """
 
 import asyncio
@@ -59,11 +61,9 @@ class BackupJob:
   schedule: str | None = None
   retention_days: int = 90
   compression: bool = True
-  encryption: bool = True
-  allow_export: bool = True  # If True, backup can be exported/downloaded
 
   def __post_init__(self):
-    """Fill in the timestamp and reject incompatible flag combinations."""
+    """Fill in the timestamp and reject invalid formats."""
     if self.timestamp is None:
       self.timestamp = datetime.now(UTC)
 
@@ -72,15 +72,6 @@ class BackupJob:
 
     if self.backup_type not in BackupType:
       raise ValueError(f"Invalid backup_type: {self.backup_type}")
-
-    if self.encryption and self.allow_export:
-      raise ValueError(
-        "Encryption can only be enabled for non-exportable backups. "
-        "Set allow_export=False to enable encryption."
-      )
-
-    if self.encryption and self.backup_format != BackupFormat.FULL_DUMP:
-      raise ValueError("Encryption is only supported for full dump backups")
 
     MultiTenantUtils.validate_graph_id(self.graph_id)
 
@@ -142,11 +133,7 @@ class BackupManager:
   async def get_backup_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
   ) -> str | None:
-    """Presign a download URL, or None when the backup can't be served.
-
-    Refuses encrypted backups: the payload is only decryptable by the restore
-    path, so a signed URL would hand out unusable bytes.
-    """
+    """Presign a download URL, or None when the backup can't be served."""
     try:
       from robosystems.database import session as SessionLocal
       from robosystems.models.core.graph.graph_backup import GraphBackup
@@ -169,9 +156,6 @@ class BackupManager:
             f"Backup {backup_id} is not completed (status: {backup.status})"
           )
           return None
-
-        if backup.encryption_enabled:
-          raise ValueError("Encrypted backups cannot be downloaded")
 
         # Use completed_at for filename timestamp — for shared repos the record
         # is upserted so created_at stays fixed while completed_at reflects
@@ -240,16 +224,12 @@ class BackupManager:
     """Fetch backup bytes as ``(data, content_type, filename)``.
 
     Converts to ``target_format`` when it differs from what was stored.
-    Encrypted backups are refused.
     """
     try:
       backup_metadata = await self.s3_adapter.get_backup_metadata(graph_id, backup_id)
 
       if not backup_metadata:
         raise ValueError(f"Backup {backup_id} not found")
-
-      if backup_metadata.get("encryption_enabled", False):
-        raise ValueError("Encrypted backups cannot be downloaded")
 
       backup_data = await self.s3_adapter.download_backup(graph_id, backup_id)
 
@@ -393,8 +373,6 @@ class BackupManager:
         "backup_duration_seconds": backup_duration,
         "backup_format": backup_job.backup_format.value,
         "database_engine": "graph",
-        "allow_export": backup_job.allow_export,
-        "encryption_enabled": backup_job.encryption,
         "compression_enabled": backup_job.compression,
       }
 
@@ -1176,7 +1154,6 @@ class BackupManager:
             "backup_type": "system_restore",
             "timestamp": timestamp_str,
             "compression_enabled": True,
-            "encryption_enabled": False,
           }
 
           backup_metadata = await self.s3_adapter.upload_backup(
@@ -1297,18 +1274,10 @@ class BackupManager:
   async def export_backup(
     self, backup_metadata: BackupMetadata, export_format: str = "original"
   ) -> bytes | None:
-    """Download backup bytes for export, or None when export is disallowed.
+    """Download backup bytes for export, or None when the fetch fails.
 
     Verifies the checksum before returning; a mismatch raises.
     """
-    if backup_metadata.metadata.get(
-      "encryption_enabled"
-    ) and not backup_metadata.metadata.get("allow_export", True):
-      logger.warning(
-        f"Cannot export encrypted backup {backup_metadata.s3_key} - export not allowed"
-      )
-      return None
-
     try:
       if backup_metadata.s3_key:
         backup_data = await self.s3_adapter.download_backup_by_key(

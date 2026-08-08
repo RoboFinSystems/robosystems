@@ -1236,7 +1236,6 @@ class GraphClient(BaseGraphClient):
     graph_id: str,
     backup_format: str = "full_dump",
     compression: bool = True,
-    encryption: bool = False,
     backup_type: str = "standard",
     s3_destination: dict[str, str] | None = None,
     checkpoint: bool = True,
@@ -1252,7 +1251,6 @@ class GraphClient(BaseGraphClient):
     payload = {
       "backup_format": backup_format,
       "compression": compression,
-      "encryption": encryption,
       "backup_type": backup_type,
       "checkpoint": checkpoint,
       "vacuum": vacuum,
@@ -1273,7 +1271,6 @@ class GraphClient(BaseGraphClient):
     graph_id: str,
     backup_format: str = "full_dump",
     compression: bool = True,
-    encryption: bool = False,
     timeout: int = 3600,  # 1 hour default
     backup_type: str = "standard",
     s3_destination: dict[str, str] | None = None,
@@ -1293,7 +1290,6 @@ class GraphClient(BaseGraphClient):
         graph_id=graph_id,
         backup_format=backup_format,
         compression=compression,
-        encryption=encryption,
         backup_type=backup_type,
         s3_destination=s3_destination,
         checkpoint=checkpoint,
@@ -1345,23 +1341,21 @@ class GraphClient(BaseGraphClient):
     s3_key: str,
     create_system_backup: bool = True,
     force_overwrite: bool = False,
-    encrypted: bool = True,
     compressed: bool = True,
   ) -> dict[str, Any]:
     """Start a restore from an S3 backup; returns task_id and monitor_url.
 
     ``force_overwrite`` is required to restore over an existing database, and
     ``create_system_backup`` snapshots that database to S3 first — a failed
-    snapshot aborts the restore. ``encrypted`` and ``compressed`` are accepted
-    for wire compatibility but inert: the backup's own stored metadata governs
-    decryption and decompression.
+    snapshot aborts the restore. ``compressed`` is accepted for wire
+    compatibility but inert: the backup's own stored metadata governs
+    decompression.
     """
     data = {
       "s3_bucket": s3_bucket,
       "s3_key": s3_key,
       "create_system_backup": str(create_system_backup).lower(),
       "force_overwrite": str(force_overwrite).lower(),
-      "encrypted": str(encrypted).lower(),
       "compressed": str(compressed).lower(),
     }
 
@@ -1379,7 +1373,6 @@ class GraphClient(BaseGraphClient):
     s3_key: str,
     create_system_backup: bool = True,
     force_overwrite: bool = False,
-    encrypted: bool = True,
     compressed: bool = True,
     timeout: int = 3600,  # 1 hour default
   ) -> dict[str, Any]:
@@ -1397,7 +1390,6 @@ class GraphClient(BaseGraphClient):
         s3_key=s3_key,
         create_system_backup=create_system_backup,
         force_overwrite=force_overwrite,
-        encrypted=encrypted,
         compressed=compressed,
       )
 

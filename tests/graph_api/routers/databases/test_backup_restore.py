@@ -95,7 +95,6 @@ def test_create_backup_rejects_on_read_only(backup_client):
       "backup_format": "full_dump",
       "include_metadata": True,
       "compression": True,
-      "encryption": False,
     },
   )
 
@@ -114,7 +113,6 @@ def test_create_backup_initiates_task(backup_client):
       "backup_format": "full_dump",
       "include_metadata": True,
       "compression": True,
-      "encryption": False,
     },
   )
 

@@ -31,9 +31,6 @@ class BackupCreateRequest(BaseModel):
   compression: bool = Field(
     True, description="Enable compression (always enabled for optimal storage)"
   )
-  encryption: bool = Field(
-    False, description="Enable encryption (encrypted backups cannot be downloaded)"
-  )
   schedule: str | None = Field(
     None, description="Optional cron schedule for automated backups"
   )
@@ -63,16 +60,14 @@ class BackupResponse(BaseModel):
   node_count: int
   relationship_count: int
   backup_duration_seconds: float
-  encryption_enabled: bool
   compression_enabled: bool
-  allow_export: bool
   download_extension: str | None = Field(
     None,
     description=(
       "Extension the download will carry, and therefore how to unpack it: "
       "'.lbug.zip' is a ZIP holding the LadybugDB database file, '.lbug.zst' "
-      "is zstd-compressed (`zstd -d`). Null when the backup is encrypted and "
-      "so cannot be downloaded."
+      "is zstd-compressed (`zstd -d`). Null only when the backup has no stored "
+      "object yet."
     ),
   )
   created_at: str
@@ -97,6 +92,15 @@ class BackupListResponse(BaseModel):
   graph_id: str
   is_shared_repository: bool = Field(
     False, description="Whether this is a shared repository (limits apply)"
+  )
+  restore_supported: bool = Field(
+    True,
+    description=(
+      "Whether backups on this graph can be restored. False for entity graphs, "
+      "which are materialized from the extensions database (use the materialize "
+      "operation instead), and for shared repositories, which are "
+      "platform-managed and download-only."
+    ),
   )
   download_quota: DownloadQuota | None = Field(
     None, description="Download quota for shared repositories"

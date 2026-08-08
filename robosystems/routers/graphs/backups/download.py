@@ -42,7 +42,7 @@ router = APIRouter()
   operation_id="getBackupDownloadUrl",
   summary="Get temporary download URL for backup",
   description=(
-    "Generate a temporary download URL for a backup (unencrypted backups only). "
+    "Generate a temporary download URL for a backup. "
     "The filename carries the extension listed as `download_extension` on the "
     "backup: `.lbug.zip` is a ZIP holding the LadybugDB database file "
     "`{graph_id}.lbug`; `.lbug.zst` (shared repository snapshots) is a single "
@@ -53,7 +53,7 @@ router = APIRouter()
   status_code=status.HTTP_200_OK,
   responses={
     200: {"description": "Download URL generated successfully"},
-    403: {"description": "Access denied or backup is encrypted"},
+    403: {"description": "Access denied"},
     404: {"description": "Backup not found"},
     500: {"description": "Failed to generate download URL"},
   },
@@ -81,7 +81,6 @@ async def get_backup_download_url(
   of compressed .lbug backup files without going through the API.
 
   Requirements:
-  - Only unencrypted backups can be downloaded
   - Backup must be in full_dump format (complete .lbug file)
   - File will be compressed
 
@@ -232,17 +231,11 @@ async def get_backup_download_url(
       graph_id=graph_id,
     )
 
-  except ValueError as e:
-    if "encrypted" in str(e).lower():
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Cannot generate download URL for encrypted backup",
-      )
-    else:
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Invalid backup operation",
-      )
+  except ValueError:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Invalid backup operation",
+    )
   except HTTPException:
     raise
   except Exception as e:

@@ -179,8 +179,6 @@ class GraphDeprovisionService:
         backup_format=BackupFormat.FULL_DUMP,
         retention_days=retention_days,
         compression=True,
-        encryption=False,
-        allow_export=True,
       )
       metadata = await backup_manager.create_backup(backup_job)
       result.backup_created = True

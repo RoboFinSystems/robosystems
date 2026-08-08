@@ -84,7 +84,9 @@ class GraphBackup(Model):
   checksum = Column(
     String, nullable=True
   )  # SHA-256 checksum (calculated after backup completion)
-  encryption_enabled = Column(Boolean, nullable=False, default=True)
+  # Retained for historical rows only. Backups are not encrypted at the
+  # application layer; S3 SSE-AES256 protects the objects at rest.
+  encryption_enabled = Column(Boolean, nullable=False, default=False)
   compression_enabled = Column(Boolean, nullable=False, default=True)
 
   # Error handling
@@ -442,7 +444,7 @@ class GraphBackup(Model):
 
   @property
   def storage_efficiency(self) -> float:
-    """Calculate storage efficiency (compression + encryption overhead)."""
+    """Calculate storage efficiency (stored size over original size)."""
     if self.original_size_bytes == 0 or self.original_size_bytes is None:
       return 0.0
     return self.encrypted_size_bytes / self.original_size_bytes

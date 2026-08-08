@@ -318,7 +318,6 @@ generate-key:
 # Generate secure random keys for all secrets
 generate-keys:
     @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
-    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
     @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
     @echo "ADMIN_API_KEY=$(openssl rand -base64 32)"
 

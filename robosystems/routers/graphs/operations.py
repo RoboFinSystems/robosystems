@@ -639,7 +639,6 @@ async def create_backup_op(
     backup_format=body.backup_format,
     retention_days=effective_retention_days,
     compression=True,
-    encryption=body.encryption,
   )
 
   response = await enqueue_task(
@@ -698,7 +697,7 @@ async def create_backup_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="restoreBackup",
   summary="Restore Backup",
-  description="Only encrypted backups can be restored. Not allowed on entity graphs (use `materialize` instead) or shared repositories.",
+  description="Not allowed on entity graphs (use `materialize` instead) or shared repositories. Destructive: the existing database is snapshotted, then overwritten. Monitor progress via SSE at `/v1/operations/{operation_id}/stream`.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -716,10 +715,12 @@ async def restore_backup_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
-  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.middleware.sse import build_graph_job_config
-  from robosystems.models.core import Graph, GraphBackup
-  from robosystems.routers.graphs.backups.utils import verify_admin_access
+  from robosystems.models.core import GraphBackup
+  from robosystems.routers.graphs.backups.utils import (
+    restore_unsupported_reason,
+    verify_admin_access,
+  )
   from robosystems.worker.client import enqueue_task
 
   op_name = "restore-backup"
@@ -734,22 +735,16 @@ async def restore_backup_op(
 
   verify_admin_access(user, graph_id, db)
 
-  if is_shared_repository_or_subgraph(graph_id):
+  # Restore availability is a property of the graph, not of the backup.
+  unsupported = restore_unsupported_reason(graph_id, db)
+  if unsupported:
+    unsupported_status, unsupported_detail = unsupported
     raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail=f"Restore operations are not allowed on shared repository '{graph_id}'.",
+      status_code=unsupported_status,
+      detail=unsupported_detail,
     )
 
-  # Entity graph guard
-  graph_record = Graph.get_by_id(graph_id, db)
-  if graph_record and graph_record.graph_type == "entity":
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Cannot restore backups for entity graphs. The graph is automatically "
-      "materialized from the extensions database. Use the materialize operation instead.",
-    )
-
-  # Verify backup exists, belongs to this graph, is encrypted
+  # Verify the backup exists and belongs to this graph
   backup_record = GraphBackup.get_by_id(body.backup_id, db)
   if not backup_record:
     raise HTTPException(
@@ -759,11 +754,6 @@ async def restore_backup_op(
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Backup does not belong to this graph",
-    )
-  if not backup_record.encryption_enabled:
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Only encrypted backups can be restored for security reasons",
     )
 
   run_config = build_graph_job_config(
@@ -788,7 +778,7 @@ async def restore_backup_op(
     operation_id=operation_id,
     partial_result={
       "status": "pending",
-      "message": "Graph database restore scheduled from encrypted backup",
+      "message": "Graph database restore scheduled",
     },
     created_by=user_id,
   )
