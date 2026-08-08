@@ -81,7 +81,18 @@ class OAuthState:
 
   @staticmethod
   def _key(state: str) -> str:
-    return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"
+    """Storage key for a state token: a SHA-256 of the token, never the token.
+
+    Hashing at rest means a read of the store can't replay an in-flight
+    flow. It is *not* credential storage, so the password-hashing rules
+    don't apply: the input is a 256-bit ``secrets.token_urlsafe`` value,
+    not a human-chosen secret. A KDF exists to make low-entropy guesses
+    expensive; against full entropy it buys nothing and costs latency on
+    every callback. Same construction and same reasoning as
+    ``UserApiKey._fingerprint_api_key``, so CodeQL's "weak hash on
+    sensitive data" is a false positive here too.
+    """
+    return f"{_STATE_KEY_PREFIX}{hashlib.sha256(state.encode()).hexdigest()}"  # lgtm[py/weak-sensitive-data-hashing]
 
   @classmethod
   def create(cls, connection_id: str, user_id: str, redirect_uri: str) -> str:
