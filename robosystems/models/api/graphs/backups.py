@@ -99,7 +99,9 @@ class BackupListResponse(BaseModel):
       "Whether backups on this graph can be restored. False for entity graphs, "
       "which are materialized from the extensions database (use the materialize "
       "operation instead), and for shared repositories, which are "
-      "platform-managed and download-only."
+      "platform-managed and download-only. True for subgraphs of an entity "
+      "graph: only the parent is materialized, so a subgraph has no other "
+      "recovery path."
     ),
   )
   download_quota: DownloadQuota | None = Field(

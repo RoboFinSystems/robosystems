@@ -697,7 +697,7 @@ async def create_backup_op(
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="restoreBackup",
   summary="Restore Backup",
-  description="Not allowed on entity graphs (use `materialize` instead) or shared repositories. Destructive: the existing database is snapshotted, then overwritten. Monitor progress via SSE at `/v1/operations/{operation_id}/stream`.",
+  description="Not allowed on entity graphs (use `materialize` instead) or shared repositories. Entity *subgraphs* are restorable — they are written directly and have no materialization path. Destructive: the existing database is snapshotted, then overwritten. Monitor progress via SSE at `/v1/operations/{operation_id}/stream`.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
