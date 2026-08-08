@@ -1,4 +1,4 @@
-"""Restore LadybugDB databases from encrypted S3 backups.
+"""Restore LadybugDB databases from S3 backups.
 
 Restores run as background tasks; progress is monitored through the generic
 ``GET /tasks/{task_id}/monitor`` SSE endpoint in
@@ -141,7 +141,6 @@ async def restore_database(
     True, description="Create system backup before restore"
   ),
   force_overwrite: bool = Form(False, description="Force overwrite existing database"),
-  encrypted: bool = Form(True, description="Whether the backup is encrypted"),
   compressed: bool = Form(True, description="Whether the backup is compressed"),
   ladybug_service=Depends(get_ladybug_service),
 ) -> RestoreResponse:
@@ -150,7 +149,7 @@ async def restore_database(
 
   This endpoint restores a complete LadybugDB database from S3:
   - Downloads the backup from S3
-  - Decrypts and decompresses according to the backup's stored metadata
+  - Decompresses according to the backup's stored metadata
   - Snapshots the existing database to S3 first, unless
     ``create_system_backup`` is false; a failed snapshot aborts the restore
   - Replaces the existing database, which requires ``force_overwrite``
@@ -159,8 +158,8 @@ async def restore_database(
   The restore operation runs as a background task and can be monitored
   using the returned task_id.
 
-  ``encrypted`` and ``compressed`` are accepted for wire compatibility but
-  inert: the backup's own stored metadata governs both.
+  ``compressed`` is accepted for wire compatibility but inert: the backup's
+  own stored metadata governs it.
   """
   # Validate graph_id to prevent path injection
   graph_id = validate_database_name(graph_id)
@@ -187,7 +186,6 @@ async def restore_database(
       "s3_key": s3_key,
       "create_system_backup": create_system_backup and database_exists,
       "force_overwrite": force_overwrite,
-      "encrypted": encrypted,
       "compressed": compressed,
     },
   )

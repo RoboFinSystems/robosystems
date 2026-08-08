@@ -869,7 +869,6 @@ class LadybugService:
     graph_id: str,
     backup_format: str = "full_dump",
     compression: bool = True,
-    encryption: bool = False,
   ) -> None:
     """Back up a database to a local ZIP under ``{base_path}/backups``.
 

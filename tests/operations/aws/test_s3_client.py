@@ -799,8 +799,6 @@ class TestBackupMetadata:
       database_version="0.10.1",
       backup_format="cypher",
       s3_key="graph-backups/databases/kg999/incremental/backup-20250615_123000.lbug.gz",
-      is_encrypted=True,
-      encryption_method="fernet",
     )
 
     d = original.to_dict()
@@ -812,8 +810,6 @@ class TestBackupMetadata:
     assert restored.original_size == original.original_size
     assert restored.compressed_size == original.compressed_size
     assert restored.checksum == original.checksum
-    assert restored.is_encrypted == original.is_encrypted
-    assert restored.encryption_method == original.encryption_method
 
   def test_from_dict_with_json_roundtrip(self):
     """BackupMetadata survives JSON serialization and deserialization."""

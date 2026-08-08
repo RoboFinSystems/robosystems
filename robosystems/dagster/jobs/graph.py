@@ -117,7 +117,6 @@ class BackupGraphConfig(Config):
   backup_format: str = "full_dump"
   retention_days: int = 30
   compression: bool = True
-  encryption: bool = True
 
 
 class RestoreGraphConfig(Config):
@@ -203,8 +202,6 @@ def create_backup(
 
   if config.compression:
     extension += ".gz"
-  if config.encryption:
-    extension += ".enc"
 
   s3_key = f"graph-backups/databases/{config.graph_id}/{config.backup_type}/backup-{timestamp_str}{extension}"
 
@@ -220,7 +217,6 @@ def create_backup(
       session=session,
       created_by_user_id=config.user_id,
       compression_enabled=config.compression,
-      encryption_enabled=config.encryption,
       expires_at=datetime.now(UTC) + timedelta(days=config.retention_days),
     )
 
@@ -237,8 +233,6 @@ def create_backup(
     backup_format=BackupFormat(config.backup_format),
     retention_days=config.retention_days,
     compression=config.compression,
-    encryption=config.encryption,
-    allow_export=not config.encryption,
   )
 
   loop = asyncio.new_event_loop()
@@ -263,8 +257,6 @@ def create_backup(
         metadata={
           "backup_format": backup_info.backup_format,
           "compression_ratio": backup_info.compression_ratio,
-          "is_encrypted": backup_info.is_encrypted,
-          "encryption_method": backup_info.encryption_method,
         },
       )
 
@@ -286,7 +278,6 @@ def create_backup(
         "original_size_bytes": MetadataValue.int(backup_info.original_size),
         "compressed_size_bytes": MetadataValue.int(backup_info.compressed_size),
         "compression_ratio": MetadataValue.float(backup_info.compression_ratio),
-        "encrypted": MetadataValue.bool(config.encryption),
         "node_count": MetadataValue.int(backup_info.node_count),
         "relationship_count": MetadataValue.int(backup_info.relationship_count),
         "duration_seconds": MetadataValue.float(backup_info.backup_duration_seconds),
@@ -355,7 +346,6 @@ def restore_backup(
 
     s3_bucket = backup_record.s3_bucket
     s3_key = backup_record.s3_key
-    encryption_enabled = backup_record.encryption_enabled
     compression_enabled = backup_record.compression_enabled
 
   # Create system backup before restore if requested
@@ -367,8 +357,6 @@ def restore_backup(
         graph_id=config.graph_id,
         backup_type=BackupType.FULL,
         backup_format=BackupFormat.FULL_DUMP,
-        encryption=True,
-        allow_export=False,
       )
 
       loop = asyncio.new_event_loop()
@@ -398,7 +386,6 @@ def restore_backup(
           s3_key=s3_key,
           create_system_backup=False,  # Already done above
           force_overwrite=True,
-          encrypted=encryption_enabled,
           compressed=compression_enabled,
           timeout=3600,
         )

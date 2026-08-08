@@ -8,7 +8,7 @@ Fetches secrets at runtime instead of passing them through userdata scripts.
 Secrets are organized in AWS Secrets Manager with the following structure:
 - Base secret: `robosystems/{environment}` (e.g., robosystems/prod, robosystems/staging)
   Contains:
-    Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, GRAPH_BACKUP_ENCRYPTION_KEY
+    Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY
     JWT/Auth: JWT_ISSUER, JWT_AUDIENCE
     Service URLs: ROBOSYSTEMS_URL, ROBOLEDGER_URL, ROBOINVESTOR_URL
     Email: EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME
@@ -208,7 +208,6 @@ def get_secrets_manager() -> SecretsManager:
 SECRET_MAPPINGS = {
   # --- Core: Encryption Keys ---
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
-  "GRAPH_BACKUP_ENCRYPTION_KEY": (None, "GRAPH_BACKUP_ENCRYPTION_KEY"),
   # --- Core: JWT & Auth ---
   "JWT_SECRET_KEY": (None, "JWT_SECRET_KEY"),
   "JWT_ISSUER": (None, "JWT_ISSUER"),

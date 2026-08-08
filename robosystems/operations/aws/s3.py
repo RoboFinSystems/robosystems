@@ -1,5 +1,5 @@
 """
-S3 adapter for graph database backup storage with encryption and lifecycle management.
+S3 adapter for graph database backup storage with compression and lifecycle management.
 """
 
 import asyncio
@@ -442,8 +442,6 @@ class BackupMetadata:
   database_version: str | None = None
   backup_format: str = "cypher"
   s3_key: str | None = None
-  is_encrypted: bool = False  # Track if data was encrypted before S3 upload
-  encryption_method: str | None = None  # e.g., "fernet", "aes-256-gcm"
 
   def to_dict(self) -> dict[str, Any]:
     """Convert metadata to dictionary for JSON serialization."""
@@ -466,8 +464,9 @@ class S3BackupAdapter:
   Callers must pass the *same* timestamp to upload and to any later lookup —
   the timestamp is the only join key between the two paths.
 
-  This class compresses; it does not encrypt. Encryption/decryption belongs to
-  the backup and restore tasks (``robosystems/security/encryption.py``).
+  This class compresses; it does not encrypt at the application layer. Objects
+  are written with S3 server-side encryption (SSE-AES256), which is what
+  protects them at rest.
   """
 
   def __init__(
@@ -764,7 +763,6 @@ class S3BackupAdapter:
             "timestamp": timestamp.isoformat(),
             "original-size": str(original_size),
             "compressed": str(self.enable_compression),
-            "encrypted": str(metadata.get("is_encrypted", False)),
           },
         )
       else:
@@ -782,7 +780,6 @@ class S3BackupAdapter:
               "timestamp": timestamp.isoformat(),
               "original-size": str(original_size),
               "compressed": str(self.enable_compression),
-              "encrypted": str(metadata.get("is_encrypted", False)),
             },
           ),
         )
@@ -802,8 +799,6 @@ class S3BackupAdapter:
         or metadata.get("lbug_version"),
         backup_format="full_dump",
         s3_key=backup_path,
-        is_encrypted=metadata.get("is_encrypted", False),
-        encryption_method=metadata.get("encryption_method"),
       )
 
       metadata_json = json.dumps(backup_metadata.to_dict(), indent=2)
@@ -837,11 +832,7 @@ class S3BackupAdapter:
     return await self.download_backup_by_key(backup_path)
 
   async def download_backup_by_key(self, s3_key: str) -> bytes:
-    """Fetch a backup payload by exact key and decompress it.
-
-    Still encrypted on return when the backup was written encrypted — the
-    restore task decrypts.
-    """
+    """Fetch a backup payload by exact key and decompress it."""
     logger.info(f"Attempting to download from S3 key: {s3_key}")
 
     try:
@@ -850,9 +841,7 @@ class S3BackupAdapter:
         lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key),
       )
 
-      encrypted_data = response["Body"].read()
-
-      processed_data = encrypted_data
+      processed_data = response["Body"].read()
 
       if self.enable_compression:
         original_size = len(processed_data)
@@ -1126,14 +1115,12 @@ class S3BackupAdapter:
     try:
       self.s3_client.head_bucket(Bucket=self.bucket_name)
 
-      encryption_status = "handled by backup task"
-
       return {
         "status": "healthy",
         "bucket": self.bucket_name,
         "region": self.region,
         "compression": self.enable_compression,
-        "encryption": encryption_status,
+        "encryption": "s3-sse-aes256",
       }
 
     except Exception as e:

@@ -57,7 +57,6 @@ class OnInstanceBackupService:
     backup_type: str,
     s3_destination: dict[str, str],
     compression: bool = True,
-    encryption: bool = False,
     checkpoint: bool = True,
     vacuum: bool = False,
   ) -> dict[str, Any]:

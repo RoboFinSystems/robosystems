@@ -74,9 +74,6 @@ class BackupRequest(BaseModel):
   compression: bool = Field(
     default=True, description="Enable compression (always recommended)"
   )
-  encryption: bool = Field(
-    default=False, description="Enable encryption for secure storage"
-  )
   backup_type: str = Field(
     default="standard",
     description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbug to S3), 'duckdb_staging' (raw .duckdb to S3), 'r2_download' (zstd .lbug.zst to R2)",

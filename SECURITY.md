@@ -80,7 +80,9 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 - PostgreSQL: AES-256 encryption via AWS RDS
 - LadybugDB: EBS volume encryption
 - S3: AES256 server-side encryption (SSE-S3) on all buckets
-- All backups encrypted
+- Graph backups: SSE-AES256 on the stored object; served only over TLS through
+  short-lived signed URLs. Not additionally encrypted at the application layer —
+  a backup download is a usable `.lbug` database by design.
 
 ### Encryption in Transit
 
@@ -90,10 +92,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### Application-Level Encryption
 
-**Implementation:** `robosystems/security/encryption.py`, `robosystems/models/core/connection/connection_credentials.py`
+**Implementation:** `robosystems/models/core/connection/connection_credentials.py`, `robosystems/middleware/auth/cache.py`
 
-- Fernet (AES-128-CBC + HMAC) for graph backup encryption
 - Fernet encryption for OAuth tokens and connection credentials in PostgreSQL
+- Fernet encryption for the authentication cache, with daily key rotation
 - Encryption keys stored in AWS Secrets Manager (not environment variables in prod)
 
 ### Secrets Management

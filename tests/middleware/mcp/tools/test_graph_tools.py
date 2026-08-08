@@ -389,15 +389,12 @@ class TestCreateBackupExecute:
         new=AsyncMock(return_value={"operation_id": "op_backup_01"}),
       ),
     ):
-      result = await CreateBackupTool(_client()).execute(
-        {"retention_days": 999, "encryption": True}
-      )
+      result = await CreateBackupTool(_client()).execute({"retention_days": 999})
 
     assert result["status"] == "accepted"
     assert result["operation_id"] == "op_backup_01"
     # Retention capped at the tier max (30), not the caller's 999
     assert result["retention_days"] == 30
-    assert result["encryption"] is True
 
 
 # ══════════════════════════════════════════════════════════════════════════

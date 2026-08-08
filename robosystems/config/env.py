@@ -367,7 +367,6 @@ class EnvConfig:
 
   # Encryption Keys
   CONNECTION_CREDENTIALS_KEY = get_secret_value("CONNECTION_CREDENTIALS_KEY", "")
-  GRAPH_BACKUP_ENCRYPTION_KEY = get_secret_value("GRAPH_BACKUP_ENCRYPTION_KEY", "")
 
   # Service URLs
   # ROBOSYSTEMS_API_URL is set by CloudFormation based on access mode (domain or ALB DNS)

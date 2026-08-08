@@ -27,7 +27,7 @@ echo ""
 # =============================================================================
 #
 # SECRETS MANAGER (robosystems/{env}):
-# - Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, GRAPH_BACKUP_ENCRYPTION_KEY
+# - Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY
 # - External API keys: INTUIT_*, STRIPE_*, OPENFIGI_*, TURNSTILE_*
 # - Internal credentials: SEC_GOV_USER_AGENT
 #
@@ -79,7 +79,6 @@ function create_production_secret() {
     echo "Generating secure keys..."
     PROD_JWT_SECRET=$(generate_secret_key)
     PROD_CONNECTION_KEY=$(generate_secret_key)
-    PROD_BACKUP_KEY=$(generate_secret_key)
 
     echo "Setting production secret values..."
 
@@ -99,7 +98,6 @@ function create_production_secret() {
 
         "CONNECTION_CREDENTIALS_KEY": "'"$PROD_CONNECTION_KEY"'",
         "JWT_SECRET_KEY": "'"$PROD_JWT_SECRET"'",
-        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$PROD_BACKUP_KEY"'",
         "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
         "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
 
@@ -137,7 +135,6 @@ function create_staging_secret() {
     echo "Generating secure keys..."
     STAGING_JWT_SECRET=$(generate_secret_key)
     STAGING_CONNECTION_KEY=$(generate_secret_key)
-    STAGING_BACKUP_KEY=$(generate_secret_key)
 
     echo "Setting staging secret values..."
 
@@ -157,7 +154,6 @@ function create_staging_secret() {
 
         "CONNECTION_CREDENTIALS_KEY": "'"$STAGING_CONNECTION_KEY"'",
         "JWT_SECRET_KEY": "'"$STAGING_JWT_SECRET"'",
-        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$STAGING_BACKUP_KEY"'",
         "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
         "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
 

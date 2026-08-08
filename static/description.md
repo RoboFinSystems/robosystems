@@ -36,7 +36,7 @@ The core platform surface for querying and managing graphs. Reads are REST `GET`
 
 - **create-subgraph**: Initialize a subgraph with optional fork of parent data
 - **delete-subgraph**: Remove a subgraph with optional pre-delete backup
-- **create-backup**: Encrypted backup with configurable format and retention
+- **create-backup**: Full-dump backup with configurable retention, downloadable via a signed URL
 - **restore-backup**: Restore from backup (blocked for entity graphs — use `materialize` instead)
 - **change-tier**: Change graph infrastructure tier with Stripe billing integration
 - **materialize**: Ingest DuckDB-staged tables or OLTP data into the graph (direct or Dagster-orchestrated)

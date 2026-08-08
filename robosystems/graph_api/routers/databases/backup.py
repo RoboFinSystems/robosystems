@@ -31,7 +31,6 @@ async def perform_backup(
   graph_id: str,
   backup_format: str,
   compression: bool,
-  encryption: bool,
   backup_type: str = "standard",
   s3_destination: dict | None = None,
   checkpoint: bool = True,
@@ -61,7 +60,6 @@ async def perform_backup(
         backup_type=backup_type,
         s3_destination=s3_destination,
         compression=compression,
-        encryption=encryption,
         checkpoint=checkpoint,
         vacuum=vacuum,
       )
@@ -86,8 +84,6 @@ async def perform_backup(
         backup_type=BackupType.FULL,
         backup_format=BackupFormat(backup_format),
         compression=compression,
-        encryption=encryption,
-        allow_export=not encryption,
       )
 
       backup_info = await backup_manager.create_backup(backup_job)
@@ -127,7 +123,7 @@ async def create_backup(
   Initiates a background task to create a complete backup of the LadybugDB database.
 
   Backup types:
-  - **standard**: Full dump ZIP, optionally encrypted, uploaded to S3
+  - **standard**: Full dump ZIP uploaded to S3
   - **replica**: Raw .lbug uploaded to S3 (downloaded by replica fleet at startup)
   - **duckdb_staging**: Raw .duckdb uploaded to S3 (for local dev / analytics)
   - **r2_download**: zstd-compressed .lbug.zst uploaded to R2 (subscriber downloads)
@@ -183,7 +179,6 @@ async def create_backup(
       "backup_format": request.backup_format,
       "backup_type": request.backup_type,
       "compression": request.compression,
-      "encryption": request.encryption,
     },
   )
 
@@ -206,7 +201,6 @@ async def create_backup(
     graph_id=graph_id,
     backup_format=request.backup_format,
     compression=request.compression,
-    encryption=request.encryption,
     backup_type=request.backup_type,
     s3_destination=s3_dest_dict,
     checkpoint=request.checkpoint,

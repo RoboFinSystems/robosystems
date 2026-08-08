@@ -5,7 +5,7 @@ REST API for LadybugDB graph database operations. Provides multi-tenant database
 - **Multi-Tenant Architecture**: Isolated database instances per graph with API key authentication
 - **Cypher Query Execution**: Run graph queries with streaming results and batching support
 - **Data Ingestion**: DuckDB staging from S3 Parquet, PostgreSQL (postgres_scanner), and queries
-- **Backup & Restore**: On-demand full database backups with optional encryption and compression
+- **Backup & Restore**: On-demand full database backups with compression
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
 - **Vector Search**: LadybugDB-native HNSW indexes built at materialization and searched in Cypher (`QUERY_VECTOR_INDEX`)
 - **Semantic Memory**: Per-graph LanceDB memory store backing the platform AI-memory surface (writer/master only)

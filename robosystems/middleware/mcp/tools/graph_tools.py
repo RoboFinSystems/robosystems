@@ -576,8 +576,7 @@ class CreateBackupTool:
         "- On a scheduled basis for disaster-recovery hygiene\n"
         "- Before running large agent-driven workflows\n\n"
         "**PARAMETERS:**\n"
-        "- retention_days: How long to keep the backup (default 30, capped at tier max).\n"
-        "- encryption: Enable encryption (required for restore later)."
+        "- retention_days: How long to keep the backup (default 30, capped at tier max)."
       ),
       "inputSchema": {
         "type": "object",
@@ -588,7 +587,6 @@ class CreateBackupTool:
             "maximum": 2555,
             "default": 30,
           },
-          "encryption": {"type": "boolean", "default": False},
         },
         "additionalProperties": False,
       },
@@ -617,7 +615,6 @@ class CreateBackupTool:
       }
 
     retention_days = int(arguments.get("retention_days", 30))
-    encryption = bool(arguments.get("encryption", False))
 
     session, close = _open_platform_session()
     try:
@@ -641,7 +638,6 @@ class CreateBackupTool:
         backup_format="full_dump",
         retention_days=retention_days,
         compression=True,
-        encryption=encryption,
       )
       response = await enqueue_task(
         task_type="dagster_job_monitor",
@@ -654,7 +650,6 @@ class CreateBackupTool:
         "status": "accepted",
         "operation_id": operation_id,
         "retention_days": retention_days,
-        "encryption": encryption,
         "message": (
           f"Backup started. Monitor via /v1/operations/{operation_id}/stream"
         ),

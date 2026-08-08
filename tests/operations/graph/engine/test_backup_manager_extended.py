@@ -285,7 +285,6 @@ class TestGetBackupDownloadUrl:
   async def test_returns_presigned_url_for_completed_backup(self, manager):
     mock_backup = MagicMock()
     mock_backup.is_completed = True
-    mock_backup.encryption_enabled = False
     mock_backup.s3_bucket = "my-bucket"
     mock_backup.s3_key = "backups/graph1/file.zip"
     mock_backup.created_at = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
@@ -341,29 +340,9 @@ class TestGetBackupDownloadUrl:
       assert url is None
 
   @pytest.mark.asyncio
-  async def test_returns_none_for_encrypted_backup(self, manager):
-    mock_backup = MagicMock()
-    mock_backup.is_completed = True
-    mock_backup.encryption_enabled = True
-
-    with (
-      patch("robosystems.database.session") as mock_sl,
-      patch("robosystems.models.core.graph.graph_backup.GraphBackup") as mock_gb,
-    ):
-      mock_session = MagicMock()
-      mock_sl.return_value = mock_session
-      mock_gb.get_by_id_and_graph.return_value = mock_backup
-
-      # encrypted -> raises ValueError internally, caught and returns None
-      url = await manager.get_backup_download_url("graph1", "bk_enc")
-
-      assert url is None
-
-  @pytest.mark.asyncio
   async def test_localstack_hostname_replacement(self, manager):
     mock_backup = MagicMock()
     mock_backup.is_completed = True
-    mock_backup.encryption_enabled = False
     mock_backup.s3_bucket = "test-bucket"
     mock_backup.s3_key = "test-key"
     mock_backup.created_at = datetime(2025, 1, 1, tzinfo=UTC)
@@ -399,7 +378,6 @@ class TestDownloadBackup:
   async def test_download_without_conversion(self, manager, s3_adapter):
     s3_adapter.get_backup_metadata = AsyncMock(
       return_value={
-        "encryption_enabled": False,
         "backup_format": "json",
       }
     )
@@ -415,7 +393,6 @@ class TestDownloadBackup:
   async def test_download_with_format_conversion(self, manager, s3_adapter):
     s3_adapter.get_backup_metadata = AsyncMock(
       return_value={
-        "encryption_enabled": False,
         "backup_format": "csv",
       }
     )
@@ -437,7 +414,6 @@ class TestDownloadBackup:
   ):
     s3_adapter.get_backup_metadata = AsyncMock(
       return_value={
-        "encryption_enabled": False,
         "backup_format": "csv",
       }
     )
@@ -447,15 +423,6 @@ class TestDownloadBackup:
 
     assert data == b"csv_data"
     assert ct == "text/csv"
-
-  @pytest.mark.asyncio
-  async def test_download_encrypted_raises(self, manager, s3_adapter):
-    s3_adapter.get_backup_metadata = AsyncMock(
-      return_value={"encryption_enabled": True, "backup_format": "full_dump"}
-    )
-
-    with pytest.raises(ValueError, match="Encrypted backups cannot be downloaded"):
-      await manager.download_backup("g1", "bk_enc")
 
   @pytest.mark.asyncio
   async def test_download_not_found_raises(self, manager, s3_adapter):
@@ -468,7 +435,6 @@ class TestDownloadBackup:
   async def test_download_full_dump_format(self, manager, s3_adapter):
     s3_adapter.get_backup_metadata = AsyncMock(
       return_value={
-        "encryption_enabled": False,
         "backup_format": "full_dump",
       }
     )
@@ -508,7 +474,6 @@ class TestCreateBackup:
         graph_id="test_graph",
         backup_format=BackupFormat.FULL_DUMP,
         backup_type=BackupType.FULL,
-        encryption=False,
       )
 
       result = await manager.create_backup(job)
@@ -535,7 +500,6 @@ class TestCreateBackup:
 
       job = BackupJob(
         graph_id="test_graph",
-        encryption=False,
       )
 
       with pytest.raises(ConnectionError, match="db unreachable"):
@@ -554,7 +518,6 @@ class TestCreateBackup:
 
       job = BackupJob(
         graph_id="test_graph",
-        encryption=False,
       )
 
       with pytest.raises(RuntimeError, match="export exploded"):
@@ -581,9 +544,7 @@ class TestCreateBackup:
         graph_id="test_graph",
         backup_format=BackupFormat.CSV,
         backup_type=BackupType.FULL,
-        encryption=False,
         compression=True,
-        allow_export=True,
       )
 
       await manager.create_backup(job)
@@ -591,8 +552,6 @@ class TestCreateBackup:
       uploaded_metadata = s3_adapter.upload_backup.call_args.kwargs["metadata"]
       assert uploaded_metadata["backup_format"] == "csv"
       assert uploaded_metadata["database_engine"] == "graph"
-      assert uploaded_metadata["allow_export"] is True
-      assert uploaded_metadata["encryption_enabled"] is False
       assert uploaded_metadata["compression_enabled"] is True
 
   @pytest.mark.asyncio
@@ -616,7 +575,6 @@ class TestCreateBackup:
         graph_id="test_graph",
         backup_format=BackupFormat.JSON,
         backup_type=BackupType.INCREMENTAL,
-        encryption=False,
       )
 
       await manager.create_backup(job)
@@ -1361,9 +1319,9 @@ class TestEnsureDatabaseExists:
 @pytest.mark.unit
 class TestExportBackup:
   @pytest.mark.asyncio
-  async def test_export_returns_data_for_non_encrypted(self, manager, s3_adapter):
+  async def test_export_returns_data(self, manager, s3_adapter):
     metadata = MagicMock(spec=BackupMetadata)
-    metadata.metadata = {"encryption_enabled": False}
+    metadata.metadata = {}
     metadata.s3_key = "backups/g1/file.zip"
     metadata.checksum = hashlib.sha256(b"original_data").hexdigest()
 
@@ -1374,21 +1332,12 @@ class TestExportBackup:
     assert result == b"original_data"
 
   @pytest.mark.asyncio
-  async def test_export_returns_none_for_encrypted_non_exportable(self, manager):
-    metadata = MagicMock(spec=BackupMetadata)
-    metadata.metadata = {"encryption_enabled": True, "allow_export": False}
-
-    result = await manager.export_backup(metadata)
-
-    assert result is None
-
-  @pytest.mark.asyncio
   async def test_export_downloads_by_timestamp_when_no_s3_key(
     self, manager, s3_adapter
   ):
     data = b"ts_backup"
     metadata = MagicMock(spec=BackupMetadata)
-    metadata.metadata = {"encryption_enabled": False}
+    metadata.metadata = {}
     metadata.s3_key = None
     metadata.graph_id = "g2"
     metadata.timestamp = datetime(2025, 6, 1, tzinfo=UTC)
@@ -1405,7 +1354,7 @@ class TestExportBackup:
   @pytest.mark.asyncio
   async def test_export_raises_on_integrity_failure(self, manager, s3_adapter):
     metadata = MagicMock(spec=BackupMetadata)
-    metadata.metadata = {"encryption_enabled": False}
+    metadata.metadata = {}
     metadata.s3_key = "key"
     metadata.checksum = "wrong_checksum"
 
@@ -1488,53 +1437,10 @@ class TestBackupManagerProperties:
 
 @pytest.mark.unit
 class TestBackupJobValidation:
-  def test_encryption_with_csv_raises(self):
-    with pytest.raises(ValueError, match="Encryption is only supported for full dump"):
-      BackupJob(
-        graph_id="test_graph",
-        backup_format=BackupFormat.CSV,
-        encryption=True,
-        allow_export=False,
-      )
-
-  def test_encryption_with_json_raises(self):
-    with pytest.raises(ValueError, match="Encryption is only supported for full dump"):
-      BackupJob(
-        graph_id="test_graph",
-        backup_format=BackupFormat.JSON,
-        encryption=True,
-        allow_export=False,
-      )
-
-  def test_encryption_with_parquet_raises(self):
-    with pytest.raises(ValueError, match="Encryption is only supported for full dump"):
-      BackupJob(
-        graph_id="test_graph",
-        backup_format=BackupFormat.PARQUET,
-        encryption=True,
-        allow_export=False,
-      )
-
-  def test_encryption_with_export_raises(self):
-    with pytest.raises(
-      ValueError, match="Encryption can only be enabled for non-exportable"
-    ):
-      BackupJob(
-        graph_id="test_graph",
-        backup_format=BackupFormat.FULL_DUMP,
-        encryption=True,
-        allow_export=True,
-      )
-
-  def test_encryption_full_dump_no_export_succeeds(self):
-    job = BackupJob(
-      graph_id="test_graph",
-      backup_format=BackupFormat.FULL_DUMP,
-      encryption=True,
-      allow_export=False,
-    )
-    assert job.encryption is True
-    assert job.allow_export is False
+  def test_every_format_is_accepted(self):
+    for backup_format in BackupFormat:
+      job = BackupJob(graph_id="test_graph", backup_format=backup_format)
+      assert job.backup_format == backup_format
 
   def test_invalid_graph_id_raises(self):
     with pytest.raises(ValueError):
@@ -1542,7 +1448,7 @@ class TestBackupJobValidation:
 
   def test_timestamp_auto_assigned(self):
     before = datetime.now(UTC)
-    job = BackupJob(graph_id="test_graph", encryption=False)
+    job = BackupJob(graph_id="test_graph")
     after = datetime.now(UTC)
 
     assert job.timestamp is not None
@@ -1550,7 +1456,7 @@ class TestBackupJobValidation:
 
   def test_explicit_timestamp_preserved(self):
     ts = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
-    job = BackupJob(graph_id="test_graph", encryption=False, timestamp=ts)
+    job = BackupJob(graph_id="test_graph", timestamp=ts)
 
     assert job.timestamp == ts
 

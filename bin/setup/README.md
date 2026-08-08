@@ -192,7 +192,6 @@ just setup-aws
   "JWT_ISSUER": "localhost",
   "JWT_AUDIENCE": "localhost",
   "CONNECTION_CREDENTIALS_KEY": "[generated]",
-  "GRAPH_BACKUP_ENCRYPTION_KEY": "[generated]",
   "INTUIT_CLIENT_ID": "...",
   "INTUIT_CLIENT_SECRET": "...",
   "STRIPE_SECRET_KEY": "...",

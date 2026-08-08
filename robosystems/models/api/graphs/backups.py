@@ -32,7 +32,14 @@ class BackupCreateRequest(BaseModel):
     True, description="Enable compression (always enabled for optimal storage)"
   )
   encryption: bool = Field(
-    False, description="Enable encryption (encrypted backups cannot be downloaded)"
+    False,
+    deprecated=True,
+    description=(
+      "Deprecated and ignored. Backups were never encrypted at the application "
+      "layer; the flag only suppressed downloads. Objects are encrypted at rest "
+      "with S3 SSE-AES256 and served over TLS through short-lived signed URLs. "
+      "Scheduled for removal in the next client major."
+    ),
   )
   schedule: str | None = Field(
     None, description="Optional cron schedule for automated backups"
@@ -63,16 +70,31 @@ class BackupResponse(BaseModel):
   node_count: int
   relationship_count: int
   backup_duration_seconds: float
-  encryption_enabled: bool
+  encryption_enabled: bool = Field(
+    False,
+    deprecated=True,
+    description=(
+      "Deprecated. Reports the historical value of the flag on this record and "
+      "no longer affects what you can do with the backup. Scheduled for removal "
+      "in the next client major."
+    ),
+  )
   compression_enabled: bool
-  allow_export: bool
+  allow_export: bool = Field(
+    True,
+    deprecated=True,
+    description=(
+      "Deprecated, always true for a completed backup. Scheduled for removal in "
+      "the next client major."
+    ),
+  )
   download_extension: str | None = Field(
     None,
     description=(
       "Extension the download will carry, and therefore how to unpack it: "
       "'.lbug.zip' is a ZIP holding the LadybugDB database file, '.lbug.zst' "
-      "is zstd-compressed (`zstd -d`). Null when the backup is encrypted and "
-      "so cannot be downloaded."
+      "is zstd-compressed (`zstd -d`). Null only when the backup has no stored "
+      "object yet."
     ),
   )
   created_at: str
@@ -97,6 +119,15 @@ class BackupListResponse(BaseModel):
   graph_id: str
   is_shared_repository: bool = Field(
     False, description="Whether this is a shared repository (limits apply)"
+  )
+  restore_supported: bool = Field(
+    True,
+    description=(
+      "Whether backups on this graph can be restored. False for entity graphs, "
+      "which are materialized from the extensions database (use the materialize "
+      "operation instead), and for shared repositories, which are "
+      "platform-managed and download-only."
+    ),
   )
   download_quota: DownloadQuota | None = Field(
     None, description="Download quota for shared repositories"

@@ -498,7 +498,7 @@ async def get_graph_backups(request: Request, graph_id: str):
 
     last_backup = backups[0] if backups else None
     backup_count = len(backups)
-    total_size = sum(float(b.size_bytes or 0) for b in backups) / (1024**3)
+    total_size = sum(float(b.compressed_size_bytes or 0) for b in backups) / (1024**3)
 
     backup_status = "healthy"
     if not backups:
