@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,19 +15,38 @@ from robosystems.graph_api.routers.databases import backup as backup_module
 from robosystems.graph_api.routers.databases import restore as restore_module
 
 
+class FakeConnection:
+  def __init__(self, recorder, fail=False):
+    self._recorder = recorder
+    self._fail = fail
+
+  def execute(self, sql):
+    if self._fail:
+      raise RuntimeError("checkpoint boom")
+    self._recorder.append(sql)
+
+
 class FakeDBManager:
-  def __init__(self, databases):
+  def __init__(self, databases, checkpoint_fails=False):
     self._databases = databases
     self.connection_pool = None
+    self.executed: list[str] = []
+    self.opened_read_only: list[bool] = []
+    self._checkpoint_fails = checkpoint_fails
 
   def list_databases(self):
     return list(self._databases)
 
+  @contextmanager
+  def get_connection(self, graph_id, read_only=True):
+    self.opened_read_only.append(read_only)
+    yield FakeConnection(self.executed, fail=self._checkpoint_fails)
+
 
 class FakeClusterService:
-  def __init__(self, read_only=False, databases=None):
+  def __init__(self, read_only=False, databases=None, checkpoint_fails=False):
     self.read_only = read_only
-    self.db_manager = FakeDBManager(databases or [])
+    self.db_manager = FakeDBManager(databases or [], checkpoint_fails)
 
 
 @pytest.fixture
@@ -238,6 +258,53 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
     assert namelist == ["graph1.lbug"]
     extracted = zf.read("graph1.lbug")
     assert extracted == b"lbug-data"
+
+  # The WAL must be folded into the main file before it is copied — without
+  # this the backup captures the database as of its last pool eviction, which
+  # for a graph written to since then is stale and for a young one is empty.
+  assert cluster.db_manager.executed == ["CHECKPOINT"]
+  assert cluster.db_manager.opened_read_only == [False]
+
+
+@pytest.mark.asyncio
+async def test_download_backup_aborts_when_checkpoint_fails(monkeypatch, tmp_path):
+  """A failed checkpoint must fail the backup, not fall through to a stale copy.
+
+  Falling through is the whole defect class: a backup that reports success over
+  incomplete data is worse than one that never ran.
+  """
+  cluster = FakeClusterService(
+    read_only=False, databases=["graph1"], checkpoint_fails=True
+  )
+  db_file = tmp_path / "graph1.lbug"
+  db_file.write_bytes(b"lbug-data")
+
+  monkeypatch.setattr(
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
+    lambda graph_id: str(db_file),
+  )
+
+  with pytest.raises(HTTPException) as exc:
+    await restore_module.download_backup(graph_id="graph1", ladybug_service=cluster)
+
+  assert exc.value.status_code == 500
+  assert "checkpoint" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_download_backup_checkpoints_only_known_databases():
+  """The membership check must precede the checkpoint.
+
+  LadybugDB creates a database when the path is absent, so checkpointing an
+  unknown graph would mint an empty one and satisfy the existence guard.
+  """
+  cluster = FakeClusterService(read_only=False, databases=["graph1"])
+
+  with pytest.raises(HTTPException) as exc:
+    await restore_module.download_backup(graph_id="ghost", ladybug_service=cluster)
+
+  assert exc.value.status_code == 404
+  assert cluster.db_manager.executed == []
 
 
 @pytest.mark.asyncio

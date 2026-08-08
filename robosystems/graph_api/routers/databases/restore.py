@@ -249,6 +249,31 @@ async def download_backup(
 
     from robosystems.middleware.graph.utils import MultiTenantUtils
 
+    # Fold the WAL into the main database file before copying it. LadybugDB
+    # holds recent writes in {graph_id}.lbug.wal until a checkpoint, and this
+    # path copies only the main file — so without this, a graph that has not
+    # been evicted since its last write backs up as of its last checkpoint,
+    # which for a young graph is an empty database. The default
+    # checkpoint_threshold is 512 MB, which a tenant graph never reaches.
+    #
+    # Mirrors OnInstanceBackupService._checkpoint, which the replica and
+    # duckdb_staging paths have always used. Safe to open here because the
+    # list_databases() membership check above already ran: LadybugDB creates a
+    # database when the path is absent, so checkpointing an unknown graph would
+    # mint an empty one and pass the existence guard below.
+    try:
+      with ladybug_service.db_manager.get_connection(graph_id, read_only=False) as conn:
+        conn.execute("CHECKPOINT")
+    except Exception as e:
+      # Fail the backup rather than fall through to a silently stale copy —
+      # a backup that reports success over incomplete data is worse than none.
+      logger.error(f"CHECKPOINT failed for {graph_id}, aborting backup: {e!s}")
+      raise HTTPException(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not checkpoint the database; backup aborted rather than "
+        "producing a possibly-stale copy.",
+      )
+
     db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
 
     if not os.path.exists(db_path):
