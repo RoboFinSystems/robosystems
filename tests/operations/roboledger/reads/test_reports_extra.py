@@ -109,6 +109,15 @@ class TestResolveReportingWindow:
 
 
 class TestBuildCurrentAndPriorPeriods:
+  """Whole-month ranges compare against whole calendar months.
+
+  Both assertions here previously pinned day-count arithmetic — April's
+  prior was 2026-03-02 ("30-day duration match") and Q1's was 2025-10-03
+  ("90-day duration"). Those are the defect written down: neither window
+  matches a stored monthly FactSet, so the comparative column queried a
+  range nothing was stamped into.
+  """
+
   @pytest.mark.unit
   def test_month_pair(self):
     periods = build_current_and_prior_periods(date(2026, 4, 1), date(2026, 4, 30))
@@ -117,17 +126,16 @@ class TestBuildCurrentAndPriorPeriods:
     assert periods[0].start == date(2026, 4, 1)
     assert periods[0].end == date(2026, 4, 30)
     assert periods[1].label == "Prior"
+    assert periods[1].start == date(2026, 3, 1)
     assert periods[1].end == date(2026, 3, 31)
-    assert periods[1].start == date(2026, 3, 2)  # 30-day duration match
 
   @pytest.mark.unit
   def test_quarter_pair(self):
     periods = build_current_and_prior_periods(date(2026, 1, 1), date(2026, 3, 31))
     assert periods[0].start == date(2026, 1, 1)
     assert periods[0].end == date(2026, 3, 31)
+    assert periods[1].start == date(2025, 10, 1)
     assert periods[1].end == date(2025, 12, 31)
-    # 90-day duration: prior_start = 2025-10-03
-    assert periods[1].start == date(2025, 10, 3)
 
 
 class TestGetLiveFinancialStatement:

@@ -1873,12 +1873,57 @@ def _count_unmapped(
   return row.cnt if row else 0
 
 
+def _whole_month_span(period_start: date, period_end: date) -> int | None:
+  """Months spanned when the range is exactly N whole calendar months, else None."""
+  from robosystems.operations.roboledger.fiscal_calendar.periods import (
+    last_day_of_month,
+  )
+
+  if period_start.day != 1:
+    return None
+  if period_end.day != last_day_of_month(period_end.year, period_end.month):
+    return None
+  months = (
+    (period_end.year - period_start.year) * 12
+    + (period_end.month - period_start.month)
+    + 1
+  )
+  return months if months >= 1 else None
+
+
 def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, date]:
-  """Compute the prior period of equal length ending the day before period_start."""
-  duration = (period_end - period_start).days + 1
+  """Compute the comparative prior period ending the day before period_start.
+
+  Calendar-aware, because subtracting a day count is not the same thing.
+  Months have different lengths, so equal-length arithmetic walks a monthly
+  period off its own boundaries: March 2026 (31 days) would compare against
+  2026-01-29 → 2026-02-28, and February against 2026-01-04 → 2026-01-31.
+  Neither matches any stored monthly FactSet, so the comparative column
+  queries a window nothing was ever stamped into — it returns empty or wrong
+  rather than failing.
+
+  When the range is exactly N whole calendar months, the prior period is the
+  N calendar months immediately before. Otherwise — an arbitrary range, where
+  "the previous one" has no calendar meaning — it falls back to equal length,
+  which is the only sensible reading and the original behaviour.
+  """
+  from robosystems.operations.roboledger.fiscal_calendar.periods import (
+    add_months,
+    parse_period,
+    period_name,
+  )
+
   prior_end = period_start - timedelta(days=1)
-  prior_start = prior_end - timedelta(days=duration - 1)
-  return prior_start, prior_end
+
+  months = _whole_month_span(period_start, period_end)
+  if months is not None:
+    prior_year, prior_month = parse_period(
+      add_months(period_name(period_start.year, period_start.month), -months)
+    )
+    return date(prior_year, prior_month, 1), prior_end
+
+  duration = (period_end - period_start).days + 1
+  return prior_end - timedelta(days=duration - 1), prior_end
 
 
 # Anonymous element id used when no rs-gaap RE fact is present in the

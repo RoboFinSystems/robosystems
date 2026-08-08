@@ -915,10 +915,13 @@ def resolve_reporting_window(
 
 
 def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSpec]:
-  """Return [current, prior] period specs of matching duration."""
-  duration = (end - start).days + 1
-  prior_end = start - timedelta(days=1)
-  prior_start = prior_end - timedelta(days=duration - 1)
+  """Return [current, prior] period specs.
+
+  Delegates to ``_compute_prior_period`` — which this module already
+  imported while also keeping a hand-copy of its body, so the two drifted
+  the moment one of them was fixed.
+  """
+  prior_start, prior_end = _compute_prior_period(start, end)
   return [
     FactPeriodSpec(start=start, end=end, label="Current"),
     FactPeriodSpec(start=prior_start, end=prior_end, label="Prior"),
