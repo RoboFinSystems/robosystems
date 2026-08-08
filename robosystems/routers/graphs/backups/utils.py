@@ -45,6 +45,12 @@ def restore_unsupported_reason(graph_id: str, db: Session) -> tuple[int, str] | 
   are a projection of the extensions OLTP database, so overwriting one with a
   snapshot desynchronizes it from its source of truth.
 
+  Subgraphs are the exception to the entity rule, and they inherit
+  ``graph_type`` from their parent. Only the parent is materialized —
+  ``materialize`` refuses subgraphs outright — so a subgraph is a separate
+  database written directly via Cypher with no upstream to rebuild from.
+  Refusing restore there would leave it with no recovery path at all.
+
   Fails closed on an unresolvable graph: a restore is destructive, so an
   unknown graph type is a refusal rather than a default-allow.
   """
@@ -66,7 +72,12 @@ def restore_unsupported_reason(graph_id: str, db: Session) -> tuple[int, str] | 
       "confirmed. Restore is refused rather than attempted.",
     )
 
-  if graph_record.graph_type == "entity":
+  # Subgraphs inherit graph_type from the parent, so an entity subgraph reads
+  # as "entity" here — but it is not materialized from anything. `materialize`
+  # blocks subgraphs (`_block_subgraph`), so refusing restore too would leave a
+  # subgraph with no recovery path while pointing at an operation that would
+  # also refuse it.
+  if graph_record.graph_type == "entity" and not graph_record.is_subgraph:
     return (
       status.HTTP_400_BAD_REQUEST,
       "Cannot restore backups for entity graphs. The graph is automatically "
