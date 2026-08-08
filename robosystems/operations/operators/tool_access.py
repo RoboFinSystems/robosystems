@@ -15,6 +15,26 @@ from typing import Any
 from robosystems.logger import logger
 
 
+class _RemoteToolHandle:
+  """A tool-shaped object whose ``execute`` goes over the MCP HTTP surface.
+
+  Duck-types the one method imperative operators use, so the same operator
+  body runs against either access implementation.
+
+  ``return_raw=True`` is not incidental: ``GraphMCPTools.call_tool`` returns
+  a JSON *string* by default, while a direct tool returns its native dict.
+  Callers test results with ``"error" in result``, which silently degrades
+  to substring matching on a string — passing where it should fail.
+  """
+
+  def __init__(self, access: HttpToolAccess, tool_name: str) -> None:
+    self._access = access
+    self._tool_name = tool_name
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await self._access.call_tool(self._tool_name, arguments, return_raw=True)
+
+
 class HttpToolAccess:
   """MCP tool access via HTTP client.
 
@@ -68,6 +88,23 @@ class HttpToolAccess:
     if self._tools is None:
       await self.initialize()
     return await self._tools.call_tool(tool_name, arguments, return_raw=return_raw)
+
+  def get_tool_instance(self, tool_class: type) -> Any:
+    """Return a call-by-name handle for a tool class.
+
+    Operators that drive tools imperatively hold a tool *object* and call
+    ``.execute(args)`` on it. On the direct path that object is the tool
+    itself; here it is a handle that routes back through
+    :meth:`call_tool`, so execution still goes through ``GraphMCPTools`` —
+    which is what applies the ``read_only`` gating and the registrar
+    dispatch. Instantiating the tool class and executing it in-process
+    would work and would bypass both, so the handle is the point.
+
+    The class is instantiated once here purely to read its declared name;
+    that instance is discarded and never executed.
+    """
+    tool_name = tool_class(self).get_tool_definition()["name"]
+    return _RemoteToolHandle(self, tool_name)
 
   async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
     """Return Anthropic-shaped tool definitions for the requested names.
