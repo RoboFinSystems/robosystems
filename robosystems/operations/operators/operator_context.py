@@ -55,6 +55,18 @@ class ToolAccess(Protocol):
     `{"name", "description", "input_schema"}` ready to hand to the model.
     """
 
+  def get_tool_instance(self, tool_class: type) -> Any:
+    """Return an object exposing ``await .execute(arguments)`` for a tool.
+
+    For operators that drive tools imperatively rather than through the
+    model-driven loop (MappingOperator). Declared on the protocol because
+    both implementations provide it and an operator calling it must not
+    have to know which context it is running in — it was previously
+    implemented only on ``DirectToolAccess``, so every operator using it
+    raised ``AttributeError`` on the API path while working from the
+    worker.
+    """
+
 
 @dataclass
 class OperatorContext:
