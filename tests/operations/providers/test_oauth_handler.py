@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.operations.providers.oauth_handler import (
+  STATE_TTL_SECONDS,
   OAuthHandler,
   OAuthState,
 )
@@ -52,12 +53,38 @@ class MockProvider:
     return {}
 
 
+class FakeValkey:
+  """Minimal Valkey stand-in with real TTL and GETDEL semantics.
+
+  A plain Mock would let the store's contract drift silently — single-use
+  redemption and expiry are the two properties under test, so they have to
+  actually happen here.
+  """
+
+  def __init__(self):
+    self.store: dict[str, tuple[str, float]] = {}
+    self.now = 1000.0
+
+  def setex(self, key: str, ttl_seconds: int, value: str) -> None:
+    self.store[key] = (value, self.now + ttl_seconds)
+
+  def getdel(self, key: str) -> str | None:
+    entry = self.store.pop(key, None)
+    if entry is None:
+      return None
+    value, expires_at = entry
+    return None if self.now >= expires_at else value
+
+  def advance(self, seconds: float) -> None:
+    self.now += seconds
+
+
 @pytest.fixture(autouse=True)
-def _clear_oauth_states():
-  """Clear OAuth state storage before each test."""
-  OAuthState._states.clear()
-  yield
-  OAuthState._states.clear()
+def fake_valkey():
+  """Back OAuthState with an in-test Valkey for the whole module."""
+  fake = FakeValkey()
+  with patch(f"{MODULE}.create_redis_client", return_value=fake):
+    yield fake
 
 
 @pytest.mark.unit
@@ -78,6 +105,35 @@ class TestOAuthState:
     assert data["user_id"] == "usr_1"
     assert data["redirect_uri"] == "https://example.com/callback"
 
+  def test_raw_state_is_not_the_storage_key(self, fake_valkey):
+    """The token is hashed at rest, so a store read can't replay a flow."""
+    state = OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
+
+    assert state not in fake_valkey.store
+    assert len(fake_valkey.store) == 1
+
+  def test_state_survives_across_processes(self, fake_valkey):
+    """The whole point: a callback served by another task still validates.
+
+    Reloading the module gives a genuinely fresh class — the stand-in for a
+    second API task, which has none of the first one's in-process memory.
+    Only the shared store carries over. This is the assertion that fails
+    against a per-process dict, where the reloaded class starts empty and
+    every cross-task callback 400s.
+    """
+    import importlib
+
+    state = OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
+
+    second_task = importlib.reload(
+      importlib.import_module("robosystems.operations.providers.oauth_handler")
+    )
+    with patch.object(second_task, "create_redis_client", return_value=fake_valkey):
+      data = second_task.OAuthState.validate(state)
+
+    assert data is not None
+    assert data["connection_id"] == "conn_1"
+
   def test_validate_one_time_use(self):
     state = OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
 
@@ -92,41 +148,43 @@ class TestOAuthState:
 
     assert result is None
 
-  def test_validate_expired_state(self):
-    import hashlib
-
+  def test_validate_expired_state(self, fake_valkey):
     state = OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
-    state_hash = hashlib.sha256(state.encode()).hexdigest()
 
-    # Manually expire the state
-    OAuthState._states[state_hash]["expires_at"] = datetime.now(UTC) - timedelta(
-      minutes=1
-    )
+    fake_valkey.advance(STATE_TTL_SECONDS + 1)
 
-    result = OAuthState.validate(state)
+    assert OAuthState.validate(state) is None
 
-    assert result is None
-    assert state_hash not in OAuthState._states
+  def test_abandoned_states_evict_on_ttl(self, fake_valkey):
+    """Abandoned flows expire on their own — the old dict grew forever."""
+    OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
+    live = OAuthState.create("conn_2", "usr_2", "https://example.com/callback")
 
-  def test_cleanup_expired(self):
-    import hashlib
+    assert fake_valkey.store  # both persisted with a TTL...
+    for _, (_, expires_at) in fake_valkey.store.items():
+      assert expires_at == fake_valkey.now + STATE_TTL_SECONDS
 
-    # Create two states
-    state1 = OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
-    state2 = OAuthState.create("conn_2", "usr_2", "https://example.com/callback")
-
-    hash1 = hashlib.sha256(state1.encode()).hexdigest()
-
-    # Expire only state1
-    OAuthState._states[hash1]["expires_at"] = datetime.now(UTC) - timedelta(minutes=1)
-
-    OAuthState.cleanup_expired()
-
-    assert hash1 not in OAuthState._states
-    # state2 should still be valid
-    data = OAuthState.validate(state2)
+    data = OAuthState.validate(live)
     assert data is not None
     assert data["connection_id"] == "conn_2"
+
+  def test_validate_fails_closed_when_store_unreachable(self):
+    """An outage must read as an invalid state, never as a pass."""
+    with patch(f"{MODULE}.create_redis_client", side_effect=RuntimeError("down")):
+      assert OAuthState.validate("any_state") is None
+
+  def test_validate_discards_malformed_payload(self, fake_valkey):
+    fake_valkey.store[OAuthState._key("s")] = ("not json", fake_valkey.now + 600)
+
+    assert OAuthState.validate("s") is None
+
+  def test_create_raises_when_store_unreachable(self):
+    """Fail at mint time, not silently three redirects later."""
+    with patch(f"{MODULE}.create_redis_client", side_effect=RuntimeError("down")):
+      with pytest.raises(HTTPException) as exc_info:
+        OAuthState.create("conn_1", "usr_1", "https://example.com/callback")
+
+    assert exc_info.value.status_code == 503
 
 
 @pytest.mark.unit
@@ -150,7 +208,7 @@ class TestOAuthHandlerAuthorizationUrl:
     assert isinstance(state, str)
 
   @patch(f"{MODULE}.env")
-  def test_rejects_redirect_uri_outside_allowlist(self, mock_env):
+  def test_rejects_redirect_uri_outside_allowlist(self, mock_env, fake_valkey):
     """A client-supplied redirect_uri outside the trusted origins is rejected
     (open-redirect / auth-code-theft guard)."""
     mock_env.get_main_cors_origins.return_value = ["https://roboledger.ai"]
@@ -163,7 +221,7 @@ class TestOAuthHandlerAuthorizationUrl:
 
     assert exc_info.value.status_code == 400
     # The flow never started — no state was persisted.
-    assert OAuthState._states == {}
+    assert fake_valkey.store == {}
 
   @patch(f"{MODULE}.env")
   def test_generates_url_with_default_redirect(self, mock_env):
