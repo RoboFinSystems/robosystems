@@ -107,3 +107,54 @@ class TestMissingUser:
   def test_unknown_user_raises(self, test_db):
     with pytest.raises(UserNotFound):
       set_user_active(f"user_{uuid4().hex}", False, test_db)
+
+
+class TestRevocationCountIsWhatActuallyHappened:
+  """The reported number must be revocations, not attempts.
+
+  It used to be counted before the attempt, so a partial revocation — the case
+  an operator most needs to see, mid-incident — was indistinguishable from a
+  clean one. "3 keys revoked" while one is still live is worse than no number.
+  """
+
+  def test_partial_revocation_is_reported(self, test_db, test_user, monkeypatch):
+    user = _create_user(test_db, test_user.password_hash)
+    UserAPIKey.create(user_id=user.id, name="key one", session=test_db)
+    UserAPIKey.create(user_id=user.id, name="key two", session=test_db)
+    UserAPIKey.create(user_id=user.id, name="key three", session=test_db)
+
+    original = UserAPIKey.deactivate
+    calls = {"n": 0}
+
+    def _flaky(self, session):
+      calls["n"] += 1
+      if calls["n"] == 2:
+        raise RuntimeError("redis down")
+      return original(self, session)
+
+    monkeypatch.setattr(UserAPIKey, "deactivate", _flaky)
+
+    change = set_user_active(user.id, False, test_db)
+
+    assert change.api_keys_revoked == 2
+    assert change.api_keys_failed == 1
+    # And the survivor is genuinely still live in the key table, which is what
+    # the count is warning about.
+    assert len(UserAPIKey.get_active_by_user_id(str(user.id), test_db)) == 1
+
+  def test_clean_revocation_reports_no_failures(self, test_db, test_user):
+    user = _create_user(test_db, test_user.password_hash)
+    UserAPIKey.create(user_id=user.id, name="key one", session=test_db)
+
+    change = set_user_active(user.id, False, test_db)
+
+    assert change.api_keys_revoked == 1
+    assert change.api_keys_failed == 0
+
+  def test_activate_reports_zero(self, test_db, test_user):
+    user = _create_user(test_db, test_user.password_hash)
+
+    change = set_user_active(user.id, True, test_db)
+
+    assert change.api_keys_revoked == 0
+    assert change.api_keys_failed == 0

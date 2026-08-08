@@ -382,3 +382,51 @@ class TestDesugarPriors:
       assert synth == {}
       with pytest.raises(InvalidRuleExpression, match="disallowed"):
         parse_arithmetic_expression(expr, ["X", "Y"])
+
+
+class TestVariableBindingIsTokenized:
+  """An unknown `$Name` must be rejected at authoring time, always.
+
+  Binding was substring replacement over each known name in turn, so a known
+  name that was a *prefix* of an unknown one consumed the `$` and let the rest
+  through: with `Revenue` bound, `$RevenueNet` became `_var_RevenueNet`, no `$`
+  survived to trip the leftover check, and the rule saved clean — then raised
+  `unbound name` on every evaluation for the rest of its life. That authoring-
+  vs-evaluation split is exactly what this module exists to close.
+  """
+
+  def test_rejects_unknown_name_extending_a_known_one(self) -> None:
+    with pytest.raises(InvalidRuleExpression, match="RevenueNet"):
+      parse_arithmetic_expression("$RevenueNet = $Revenue * 2", ["Revenue"])
+
+  def test_rejects_unknown_name_extending_a_single_letter(self) -> None:
+    with pytest.raises(InvalidRuleExpression, match="Assets"):
+      parse_arithmetic_expression("$Assets = 1", ["A"])
+
+  def test_reports_every_unknown_name(self) -> None:
+    with pytest.raises(InvalidRuleExpression, match="Bar, Foo"):
+      parse_arithmetic_expression("$Foo = $Bar + $A", ["A"])
+
+  def test_known_name_that_is_a_prefix_of_another_still_binds(self) -> None:
+    """The legitimate case the old replacement got right only by accident."""
+    import ast
+
+    parsed = parse_arithmetic_expression("$Revenue = $Rev * 2", ["Rev", "Revenue"])
+    names = {n.id for n in ast.walk(parsed.tree) if isinstance(n, ast.Name)}
+
+    assert names == {"_var_Revenue", "_var_Rev"}
+
+  def test_synthesized_operands_still_bind(self) -> None:
+    """`avg()` and `[t-1]` desugar to `$__avg_X` / `$__prior_X` before parse."""
+    import ast
+
+    parsed = parse_arithmetic_expression(
+      "$__avg_X = $__prior_Y", ["__avg_X", "__prior_Y"]
+    )
+    names = {n.id for n in ast.walk(parsed.tree) if isinstance(n, ast.Name)}
+
+    assert names == {"_var___avg_X", "_var___prior_Y"}
+
+  def test_bare_dollar_is_still_rejected(self) -> None:
+    with pytest.raises(InvalidRuleExpression, match="unbound"):
+      parse_arithmetic_expression("$A = $", ["A"])

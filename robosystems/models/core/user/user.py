@@ -125,8 +125,8 @@ class User(Model):
       session.rollback()
       raise
 
-  def deactivate(self, session: Session) -> None:
-    """Deactivate the user.
+  def deactivate(self, session: Session) -> int:
+    """Deactivate the user, returning how many API keys were revoked.
 
     Bumps ``session_version``, which invalidates every JWT issued for this
     user, and revokes all of the user's API keys. If the user is reactivated
@@ -146,7 +146,7 @@ class User(Model):
       session.commit()
       session.refresh(self)
       self._invalidate_auth_cache()
-      self._revoke_api_keys(session)
+      return self._revoke_api_keys(session)
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -175,14 +175,20 @@ class User(Model):
       session.rollback()
       raise
 
-  def _revoke_api_keys(self, session: Session) -> None:
-    """Deactivate all of this user's active API keys and clear their caches.
+  def _revoke_api_keys(self, session: Session) -> int:
+    """Deactivate this user's active API keys and clear their caches.
+
+    Returns how many were actually revoked, which is what callers must report:
+    revocation is best-effort per key, so the number attempted is not the
+    number that took, and an incident response that reads "4 keys revoked"
+    when one failed is worse than no number at all.
 
     Called on deactivate so programmatic access is revoked alongside JWT
     invalidation. Each key's ``deactivate`` flips ``is_active`` and invalidates
     that key's validation-cache entry. Failures are logged per-key but never
-    abort the user deactivation (best-effort); the ``user.is_active`` guard in
-    ``validate_api_key`` is the authoritative backstop if a key is missed.
+    abort the user deactivation; the ``user.is_active`` guard in
+    ``validate_api_key`` is the authoritative backstop if a key is missed, and
+    re-running the deactivation retries whatever did not take.
     """
     from .user_api_key import UserAPIKey
 
@@ -190,15 +196,27 @@ class User(Model):
       active_keys = UserAPIKey.get_active_by_user_id(str(self.id), session)
     except Exception as e:
       logger.error(f"Failed to load API keys for deactivated user {self.id}: {e}")
-      return
+      return 0
 
+    revoked = 0
     for key in active_keys:
       try:
         key.deactivate(session)
+        revoked += 1
       except Exception as e:
         logger.error(
           f"Failed to revoke API key {key.id} for deactivated user {self.id}: {e}"
         )
+
+    if revoked != len(active_keys):
+      logger.error(
+        f"CRITICAL: revoked {revoked} of {len(active_keys)} API keys for "
+        f"deactivated user {self.id}; the remainder are still live in the key "
+        f"table and are refused only by the user.is_active guard. Re-run the "
+        f"deactivation."
+      )
+
+    return revoked
 
   def _invalidate_auth_cache(self) -> None:
     """Invalidate auth caches derived from this user.

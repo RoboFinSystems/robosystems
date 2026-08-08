@@ -168,12 +168,52 @@ def _normalize_equality(expr: str) -> str:
   return re.sub(r"(?<![=<>!])=(?!=)", "==", expr)
 
 
+_VARIABLE_REF_RE = re.compile(r"\$([A-Za-z_]\w*)")
+
+
+def _bind_variables(expr: str, variable_names: list[str]) -> str:
+  """Rewrite each ``$Name`` to ``_var_Name``, rejecting any unknown name.
+
+  Tokenized rather than substring-replaced. Replacing ``$`` + each known name
+  in turn let an unknown name through whenever a known one was a prefix of it:
+  with ``Revenue`` bound, ``$RevenueNet`` became ``_var_RevenueNet``, no ``$``
+  survived to trip the unbound check, and the rule saved cleanly — then raised
+  ``unbound name`` on every evaluation for the rest of its life. That is the
+  authoring-vs-evaluation split this module exists to close.
+
+  A trailing ``$`` or one followed by a non-identifier character matches no
+  token and is caught by the leftover check.
+  """
+  known = set(variable_names)
+  unknown: list[str] = []
+
+  def _sub(match: re.Match[str]) -> str:
+    name = match.group(1)
+    if name not in known:
+      unknown.append(name)
+      return match.group(0)
+    return f"_var_{name}"
+
+  bound = _VARIABLE_REF_RE.sub(_sub, expr)
+
+  if unknown:
+    raise InvalidRuleExpression(
+      f"unbound $Variable(s) in expression: {expr!r}: "
+      f"{', '.join(sorted(set(unknown)))}. Known variables: {variable_names}"
+    )
+  if "$" in bound:
+    raise InvalidRuleExpression(
+      f"unbound $Variable in expression: {expr!r}. Known variables: {variable_names}"
+    )
+  return bound
+
+
 def parse_arithmetic_expression(
   expr: str, variable_names: list[str]
 ) -> ParsedExpression:
   """Parse a rule expression string into a validated AST.
 
-  1. Replaces ``$Name`` with ``_var_Name``.
+  1. Replaces each ``$Name`` token with ``_var_Name``, rejecting unknown names.
   2. Normalizes bare ``=`` to ``==`` (XBRL-style equality).
   3. Parses with ``ast.parse(mode='eval')``.
   4. Walks the tree and rejects any node outside the allowed whitelist.
@@ -189,13 +229,7 @@ def parse_arithmetic_expression(
   Raises :class:`InvalidRuleExpression` for unbound variables, syntax
   errors, or disallowed constructs.
   """
-  preprocessed = expr
-  for name in variable_names:
-    preprocessed = preprocessed.replace(f"${name}", f"_var_{name}")
-  if "$" in preprocessed:
-    raise InvalidRuleExpression(
-      f"unbound $Variable in expression: {expr!r}. Known variables: {variable_names}"
-    )
+  preprocessed = _bind_variables(expr, variable_names)
   preprocessed = _normalize_equality(preprocessed)
   try:
     tree = ast.parse(preprocessed, mode="eval")
