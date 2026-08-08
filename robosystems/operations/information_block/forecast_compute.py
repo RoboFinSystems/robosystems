@@ -495,6 +495,8 @@ def cmd_compute_forecast(
 
   # ── The walk ──────────────────────────────────────────────────────────
   months_computed: list[ForecastMonthLite] = []
+  halted_at: str | None = None
+  unverified_months: list[str] = []
   months = [add_months(mechanics.base_period, i) for i in range(1, months_n + 1)]
   active_instant_ids = {
     ar.target.id for ar in ordered_active if ar.target.period_type == "instant"
@@ -934,6 +936,36 @@ def cmd_compute_forecast(
       )
     )
 
+    # (f.1) Stop the walk on a failed month.
+    #
+    # Step (e) below rolls this month's closing balances into the next
+    # month's opening context, so continuing past a failure does not
+    # produce N-1 unverified months — it produces N-1 months *derived from
+    # a known-wrong one*, each reporting its own verification status as
+    # though it stood alone. Truncating is the honest answer: the caller
+    # gets the months that verified plus the one that broke, and
+    # ``halted_at`` names where to look.
+    #
+    # The failed month's facts are deliberately kept. They are already
+    # written by the time verification runs, and they are what you need in
+    # order to see *why* it failed.
+    #
+    # `None` does not halt. It means no rules produced results — an
+    # absence, not a failure — and halting on it would break any graph
+    # whose scenario structures carry no bound rules. But it must not read
+    # as a pass either, so it is collected and surfaced once below.
+    if verification_passed is False:
+      halted_at = month
+      diagnostics.append(
+        f"Walk halted at {month}: verification failed, and every later "
+        f"month would be derived from it. "
+        f"{len(months_computed)} of {months_n} months computed. "
+        f"Failures: {'; '.join(verification_failures[:3]) or 'unreported'}"
+      )
+      break
+    if verification_passed is None:
+      unverified_months.append(month)
+
     # (e) Roll the window: next month's [t-1]/carry context is this
     # month's resolved IS values + the full balance sheet.
     prior_values.clear()
@@ -948,6 +980,18 @@ def cmd_compute_forecast(
     prev_period_end = month_end
     prev_month = month
 
+  # An unverified month is not a verified one. Reported once rather than
+  # per-month so a rule corpus that never binds reads as one loud fact
+  # instead of N quiet ones — the failure mode being that `None` has always
+  # been indistinguishable from a pass to every consumer.
+  if unverified_months:
+    diagnostics.append(
+      f"{len(unverified_months)} month(s) ran no verification rules and are "
+      f"unverified, not verified: {', '.join(unverified_months[:6])}"
+      f"{' …' if len(unverified_months) > 6 else ''}. "
+      f"A scenario whose structures carry no bound rules cannot be gated."
+    )
+
   session.flush()
   return ComputeForecastResponse(
     structure_id=structure.id,
@@ -956,6 +1000,7 @@ def cmd_compute_forecast(
     base_period=mechanics.base_period,
     months=months_n,
     months_computed=months_computed,
+    halted_at=halted_at,
     skipped=skipped,
     diagnostics=diagnostics,
   )
