@@ -76,11 +76,13 @@ def update_graph_metadata_cmd(
     graph.graph_name = graph_name
     updated_fields.append("graph_name")
 
-  if description is not None and description != metadata.get("description", ""):
+  # Compare against the model's coerced view, not the raw blob: a malformed
+  # stored value should read as unset and be overwritten, not compared as-is.
+  if description is not None and description != graph.description:
     metadata["description"] = description
     updated_fields.append("description")
 
-  if tags is not None and tags != metadata.get("tags", []):
+  if tags is not None and tags != graph.tags:
     metadata["tags"] = tags
     updated_fields.append("tags")
 
@@ -100,7 +102,7 @@ def update_graph_metadata_cmd(
   return GraphMetadataResult(
     graph_id=str(graph.graph_id),
     graph_name=str(graph.graph_name),
-    description=metadata.get("description", ""),
-    tags=metadata.get("tags", []),
+    description=graph.description,
+    tags=graph.tags,
     updated_fields=updated_fields,
   )

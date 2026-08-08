@@ -220,6 +220,37 @@ class Graph(Model):
     return len(extensions) > 0
 
   @property
+  def description(self) -> str:
+    """Free-form description, or ``""`` when unset.
+
+    Stored inside the ``graph_metadata`` JSONB blob rather than in a column
+    of its own, so nothing at the database level constrains what a row can
+    hold. Type-check rather than trust: a malformed value reaching a
+    response model fails validation for the *whole* response, so a single
+    bad row would take out the entire graph list.
+    """
+    metadata = self.graph_metadata
+    if not isinstance(metadata, dict):
+      return ""
+    description = metadata.get("description")
+    return description if isinstance(description, str) else ""
+
+  @property
+  def tags(self) -> list[str]:
+    """Organizational tags, or ``[]`` when unset.
+
+    Same free-form JSONB caveat as ``description`` — non-string entries are
+    dropped rather than passed through to a response model.
+    """
+    metadata = self.graph_metadata
+    if not isinstance(metadata, dict):
+      return []
+    tags = metadata.get("tags")
+    if not isinstance(tags, list):
+      return []
+    return [tag for tag in tags if isinstance(tag, str)]
+
+  @property
   def database_name(self) -> str:
     """Database name on disk: ``{parent_graph_id}_{subgraph_name}`` for a
     subgraph, the graph ID itself otherwise."""

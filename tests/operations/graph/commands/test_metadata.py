@@ -165,6 +165,81 @@ class TestUpdateGraphMetadata:
     assert result.updated_fields == ["description"]
 
 
+class TestMalformedStoredMetadata:
+  """`graph_metadata` is free-form JSONB — nothing stops a row holding a
+  non-string description or a tag list with junk in it. Those must read as
+  unset rather than reach a response model, where they would fail validation
+  for the whole response."""
+
+  def test_non_string_description_reads_as_empty(
+    self, test_db, test_user, test_user_graph
+  ):
+    from robosystems.models.core.graph import Graph
+
+    graph = Graph.get_by_id(test_user_graph.graph_id, test_db)
+    assert graph is not None
+    graph.graph_metadata = {**(graph.graph_metadata or {}), "description": 42}
+    test_db.commit()
+
+    result = _update(
+      test_user_graph.graph_id, test_user.id, test_db, graph_name="Renamed"
+    )
+
+    assert result.description == ""
+
+  def test_non_list_tags_read_as_empty(self, test_db, test_user, test_user_graph):
+    from robosystems.models.core.graph import Graph
+
+    graph = Graph.get_by_id(test_user_graph.graph_id, test_db)
+    assert graph is not None
+    graph.graph_metadata = {**(graph.graph_metadata or {}), "tags": "not-a-list"}
+    test_db.commit()
+
+    result = _update(
+      test_user_graph.graph_id, test_user.id, test_db, graph_name="Renamed"
+    )
+
+    assert result.tags == []
+
+  def test_non_string_tag_entries_are_dropped(
+    self, test_db, test_user, test_user_graph
+  ):
+    from robosystems.models.core.graph import Graph
+
+    graph = Graph.get_by_id(test_user_graph.graph_id, test_db)
+    assert graph is not None
+    graph.graph_metadata = {
+      **(graph.graph_metadata or {}),
+      "tags": ["keep", 7, None, "also-keep"],
+    }
+    test_db.commit()
+
+    result = _update(
+      test_user_graph.graph_id, test_user.id, test_db, graph_name="Renamed"
+    )
+
+    assert result.tags == ["keep", "also-keep"]
+
+  def test_malformed_value_is_overwritten_not_treated_as_equal(
+    self, test_db, test_user, test_user_graph
+  ):
+    """A malformed stored value reads as unset, so submitting a real one is a
+    change — not a no-op that leaves the junk in place."""
+    from robosystems.models.core.graph import Graph
+
+    graph = Graph.get_by_id(test_user_graph.graph_id, test_db)
+    assert graph is not None
+    graph.graph_metadata = {**(graph.graph_metadata or {}), "description": 42}
+    test_db.commit()
+
+    result = _update(
+      test_user_graph.graph_id, test_user.id, test_db, description="A real one"
+    )
+
+    assert result.updated_fields == ["description"]
+    assert result.description == "A real one"
+
+
 class TestUpdateGraphMetadataGuards:
   @pytest.mark.parametrize("graph_id", ["sec", "sec_historical"])
   def test_rejects_shared_repository(self, test_db, test_user, graph_id: str):

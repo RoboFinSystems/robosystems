@@ -82,14 +82,15 @@ def _raise_http_exception(
 
 
 def _label_fields(graph: Graph | None) -> tuple[str, list[str]]:
-  """Read the ``(description, tags)`` pair out of ``graph_metadata``.
+  """Read the ``(description, tags)`` pair off a graph, tolerating ``None``.
 
-  Both live in the free-form JSONB blob rather than in columns of their own,
-  so tolerate absence and legacy rows that never had the keys written. Keeps
-  the three list branches below from repeating the same defaulting.
+  A repository row can be absent (``UserRepository.graph``), which the model
+  properties cannot express on their own. Coercion of the underlying JSONB
+  lives on the model so this and the update command agree on it.
   """
-  metadata = (graph.graph_metadata if graph else None) or {}
-  return metadata.get("description") or "", metadata.get("tags") or []
+  if graph is None:
+    return "", []
+  return graph.description, graph.tags
 
 
 @router.get(
