@@ -3,9 +3,13 @@
 Driven by Stripe billing webhooks or direct subscription creation, and called
 synchronously from the Dagster billing jobs and the subscription routers.
 
-Both entry points end the same way on failure: the subscription is marked
-failed and its Stripe subscription cancelled, so a customer is never left
-paying for a resource that was never created.
+Failure disposition belongs to the caller's protocol, not to these functions.
+The webhook path holds the provisioning claim, so a failed attempt stays
+claim-held and non-terminal — the provider's redelivery retries it once the
+staleness window passes, and the stalled-provisioning reaper is the one place
+a dead attempt is finally written off. The direct router path has no
+redelivery behind it, so it records the failure on the row itself and cancels
+the payment subscription. Writing a terminal status here would preempt both.
 """
 
 import time
@@ -25,8 +29,10 @@ async def run_graph_provisioning(
   """Create the graph, activate the subscription, and report to Dagster.
 
   ``operation_id`` streams progress over SSE; it is None on the
-  webhook-triggered path, which has no client listening. On failure the
-  subscription is marked failed and the error re-raised.
+  webhook-triggered path, which has no client listening. On failure the error
+  is re-raised and the row is left exactly as the caller staged it — the
+  webhook path still holds the provisioning claim, so the attempt stays
+  retryable by redelivery until the reaper writes it off.
   """
   from robosystems.database import get_db_session
   from robosystems.models.core.billing import (
@@ -211,7 +217,6 @@ async def run_graph_provisioning(
         error_details={"error_type": type(e).__name__},
       )
 
-    _mark_subscription_failed(subscription_id, str(e))
     raise
 
 
@@ -224,8 +229,10 @@ async def run_user_repository_provisioning(
   """Grant repository access, allocate credits, and activate the subscription.
 
   ``operation_id`` streams progress over SSE; it is None on the
-  webhook-triggered path. On failure the subscription is marked failed and the
-  error re-raised.
+  webhook-triggered path. On failure the error is re-raised and disposition is
+  the caller's: the webhook path keeps the claim held for redelivery, and the
+  subscription router marks the row failed and cancels the payment
+  subscription itself.
   """
   from robosystems.database import get_db_session
   from robosystems.models.core import RepositoryType
@@ -397,56 +404,4 @@ async def run_user_repository_provisioning(
         error_details={"error_type": type(e).__name__},
       )
 
-    _mark_subscription_failed(subscription_id, str(e))
     raise
-
-
-def _mark_subscription_failed(subscription_id: str, error: str) -> None:
-  """Mark a subscription as failed and cancel its Stripe subscription."""
-  from robosystems.database import get_db_session
-  from robosystems.models.core.billing import BillingSubscription
-
-  try:
-    db_gen = get_db_session()
-    db = next(db_gen)
-    try:
-      subscription = (
-        db.query(BillingSubscription)
-        .filter(BillingSubscription.id == subscription_id)
-        .first()
-      )
-      if subscription:
-        subscription.status = "failed"
-        if subscription.subscription_metadata:
-          metadata = dict(subscription.subscription_metadata)
-          metadata["error"] = error
-          subscription.subscription_metadata = metadata
-        else:
-          subscription.subscription_metadata = {"error": error}
-
-        if subscription.stripe_subscription_id:
-          try:
-            from robosystems.operations.providers.payment_provider import (
-              get_payment_provider,
-            )
-
-            provider = get_payment_provider("stripe")
-            provider.cancel_subscription(subscription.stripe_subscription_id)
-          except Exception as cancel_error:
-            logger.error(
-              f"Failed to cancel Stripe subscription "
-              f"{subscription.stripe_subscription_id}: {cancel_error}"
-            )
-
-        try:
-          db.commit()
-        except Exception as commit_error:
-          logger.error(f"Failed to commit subscription failure status: {commit_error}")
-          db.rollback()
-    finally:
-      try:
-        next(db_gen)
-      except StopIteration:
-        pass
-  except Exception as cleanup_error:
-    logger.error(f"Failed to mark subscription as failed: {cleanup_error}")

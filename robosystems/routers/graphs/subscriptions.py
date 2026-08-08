@@ -1,5 +1,7 @@
 """Unified subscription management endpoints for graphs and repositories."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
@@ -378,6 +380,10 @@ async def create_repository_subscription(
           exc_info=True,
         )
         subscription.status = SubscriptionStatus.FAILED.value
+        # Terminal rows carry ends_at — it is the retention timestamp the
+        # lifecycle machinery keys on, and a terminal row without it is
+        # invisible to that machinery.
+        subscription.ends_at = datetime.now(UTC)
         db.commit()
         raise HTTPException(
           status_code=402,
@@ -428,6 +434,7 @@ async def create_repository_subscription(
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
       if failed_sub:
         failed_sub.status = SubscriptionStatus.FAILED.value
+        failed_sub.ends_at = datetime.now(UTC)
         # Cancel Stripe subscription so the customer isn't charged
         if failed_sub.stripe_subscription_id:
           try:
