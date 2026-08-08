@@ -207,7 +207,7 @@ class TestHandleCheckoutCompleted:
   async def test_happy_path_paid_checkout(
     self, mock_db_session, mock_context, mock_subscription, mock_customer
   ):
-    """Payment collected: updates customer, sets provisioning, triggers provisioning."""
+    """Payment collected: updates customer and hands off to the provisioning sink."""
     session_data = make_checkout_session(
       session_id="cs_session_abc",
       subscription_id="sub_stripe_new",
@@ -231,8 +231,12 @@ class TestHandleCheckoutCompleted:
     assert mock_customer.has_payment_method is True
     assert mock_subscription.stripe_subscription_id == "sub_stripe_new"
     assert mock_subscription.provider_subscription_id == "sub_stripe_new"
-    assert mock_subscription.status == "provisioning"
     assert mock_subscription.provider_customer_id == "cus_stripe_abc"
+    # The status transition belongs to the provisioning claim, not to this
+    # caller. Setting it here would hand this event the claim before the sink
+    # could arbitrate between it and invoice.payment_succeeded, and would also
+    # stamp "provisioning" onto an already-active subscription.
+    assert mock_subscription.status == "pending_payment"
     mock_db_session.commit.assert_called()
     mock_trigger.assert_awaited_once_with(
       mock_subscription, mock_db_session, mock_context
@@ -299,7 +303,7 @@ class TestHandleCheckoutCompleted:
     with (
       patch(PATCH_BILLING_SUB) as MockSub,
       patch(PATCH_BILLING_CUST),
-      patch(PATCH_TRIGGER, new_callable=AsyncMock),
+      patch(PATCH_TRIGGER, new_callable=AsyncMock) as mock_trigger,
     ):
       MockSub.get_by_provider_subscription_id.return_value = None
       # First call is metadata lookup (BillingSubscription.id == ...)
@@ -313,7 +317,12 @@ class TestHandleCheckoutCompleted:
 
       await _handle_checkout_completed(session_data, mock_db_session, mock_context)
 
-    assert mock_subscription.status == "provisioning"
+    # Reaching the provisioning hand-off is what proves the fallback resolved
+    # the subscription; the status itself is the claim's to set, not this
+    # handler's.
+    mock_trigger.assert_awaited_once_with(
+      mock_subscription, mock_db_session, mock_context
+    )
 
   async def test_subscription_not_found_logs_warning_and_returns(
     self, mock_db_session, mock_context
@@ -1806,6 +1815,29 @@ class TestHandleSetupIntentSucceeded:
 # ---------------------------------------------------------------------------
 
 
+def _granting_claim(sub):
+  """Make a mock subscription's provisioning claim behave like the real one.
+
+  The claim is the gate every trigger now passes through, so a mock that
+  returns a bare truthy MagicMock would let these tests pass while telling us
+  nothing about the status the provisioner actually sees. Granting the claim
+  here mirrors the real transition; ``_refusing_claim`` is its counterpart.
+  """
+
+  def claim(_session):
+    sub.status = "provisioning"
+    return True
+
+  sub.claim_for_provisioning = MagicMock(side_effect=claim)
+  return sub
+
+
+def _refusing_claim(sub):
+  """Model a claim held by another trigger, or a resource already built."""
+  sub.claim_for_provisioning = MagicMock(return_value=False)
+  return sub
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestTriggerResourceProvisioning:
@@ -1817,10 +1849,11 @@ class TestTriggerResourceProvisioning:
     sub.resource_type = "graph"
     sub.resource_id = "kg_01ABC123"
     sub.plan_name = "ladybug-standard"
+    sub.status = "pending_payment"
     # Legacy row: subscriber recorded only in metadata.
     sub.user_id = None
     sub.subscription_metadata = {"user_id": "user_01ABC123", "resource_config": {}}
-    return sub
+    return _granting_claim(sub)
 
   @pytest.fixture
   def repository_subscription(self):
@@ -1830,12 +1863,89 @@ class TestTriggerResourceProvisioning:
     sub.resource_type = "repository"
     sub.resource_id = None
     sub.plan_name = "starter"
+    sub.status = "pending_payment"
     sub.user_id = None
     sub.subscription_metadata = {
       "user_id": "user_01ABC123",
       "resource_config": {"repository_name": "sec"},
     }
-    return sub
+    return _granting_claim(sub)
+
+  async def test_refused_claim_skips_provisioning_entirely(
+    self, mock_db_session, mock_context, graph_subscription
+  ):
+    """The second trigger for one subscription must do nothing at all.
+
+    This is the whole point of the gate: two provider events reach this
+    function for the same payment, and only the one holding the claim may
+    provision. See ``tests/models/core/billing/test_provisioning_claim.py``
+    for the database-level proof that exactly one caller can hold it.
+    """
+    _refusing_claim(graph_subscription)
+
+    with (
+      patch(PATCH_IAM_ORG_USER),
+      patch(PATCH_IAM_ORG_ROLE),
+      patch(PATCH_RUN_GRAPH, new_callable=AsyncMock) as mock_run_graph,
+      patch(PATCH_RUN_REPO, new_callable=AsyncMock) as mock_run_repo,
+    ):
+      from robosystems.dagster.jobs.billing import _trigger_resource_provisioning
+
+      await _trigger_resource_provisioning(
+        graph_subscription, mock_db_session, mock_context
+      )
+
+    mock_run_graph.assert_not_awaited()
+    mock_run_repo.assert_not_awaited()
+
+  async def test_refused_claim_skips_repository_provisioning(
+    self, mock_db_session, mock_context, repository_subscription
+  ):
+    _refusing_claim(repository_subscription)
+
+    with (
+      patch(PATCH_IAM_ORG_USER),
+      patch(PATCH_IAM_ORG_ROLE),
+      patch(PATCH_RUN_GRAPH, new_callable=AsyncMock) as mock_run_graph,
+      patch(PATCH_RUN_REPO, new_callable=AsyncMock) as mock_run_repo,
+    ):
+      from robosystems.dagster.jobs.billing import _trigger_resource_provisioning
+
+      await _trigger_resource_provisioning(
+        repository_subscription, mock_db_session, mock_context
+      )
+
+    mock_run_graph.assert_not_awaited()
+    mock_run_repo.assert_not_awaited()
+
+  async def test_provisioning_failure_records_error_without_a_terminal_status(
+    self, mock_db_session, mock_context, graph_subscription
+  ):
+    """A failed attempt stays retryable and says why it failed.
+
+    Marking it failed here would discard both the provider's redelivery and
+    the claim's staleness window, stranding a customer who has paid. The
+    stalled-provisioning reaper is the one place that decision is made.
+    """
+    with (
+      patch(PATCH_IAM_ORG_USER),
+      patch(PATCH_IAM_ORG_ROLE),
+      patch(PATCH_RUN_GRAPH, side_effect=RuntimeError("no capacity")),
+      patch(PATCH_RUN_REPO, new_callable=AsyncMock),
+    ):
+      from robosystems.dagster.jobs.billing import _trigger_resource_provisioning
+
+      with pytest.raises(RuntimeError):
+        await _trigger_resource_provisioning(
+          graph_subscription, mock_db_session, mock_context
+        )
+
+    assert graph_subscription.status != "failed"
+    assert (
+      graph_subscription.subscription_metadata["last_provisioning_error"]
+      == "no capacity"
+    )
+    assert "last_provisioning_error_at" in graph_subscription.subscription_metadata
 
   async def test_graph_provisioning_happy_path(
     self, mock_db_session, mock_context, graph_subscription

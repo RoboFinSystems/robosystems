@@ -52,6 +52,7 @@ from robosystems.dagster.jobs.graph import (
 )
 from robosystems.dagster.jobs.graph_lifecycle import (
   deprovision_suspended_graphs_job,
+  reap_stalled_provisioning_job,
   suspend_expired_graphs_job,
 )
 from robosystems.dagster.jobs.infrastructure import (
@@ -98,6 +99,7 @@ from robosystems.dagster.resources import (
 )
 from robosystems.dagster.sensors.graph_lifecycle import (
   expired_graph_subscription_sensor,
+  stalled_provisioning_sensor,
   suspended_graph_deprovisioning_sensor,
 )
 from robosystems.dagster.sensors.invoice_billing import (
@@ -225,6 +227,7 @@ all_jobs = [
   # Platform: Graph lifecycle
   suspend_expired_graphs_job,
   deprovision_suspended_graphs_job,
+  reap_stalled_provisioning_job,
   # Platform: Shared repository
   shared_master_wake_job,
   shared_master_sleep_job,
@@ -268,6 +271,7 @@ all_sensors = [
   # Platform: Graph lifecycle
   expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
+  stalled_provisioning_sensor,
   # Platform: Materialization (auto-rematerialize stale graphs)
   stale_graph_materialization_sensor,
   # Platform: Usage monitoring

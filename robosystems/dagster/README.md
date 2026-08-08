@@ -69,6 +69,7 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 | `materialize_graph_job` | `stale_graph_materialization_sensor` | Rebuild a graph marked stale |
 | `suspend_expired_graphs_job` | `expired_graph_subscription_sensor` | Move graphs with expired subscriptions to suspended |
 | `deprovision_suspended_graphs_job` | `suspended_graph_deprovisioning_sensor` | Deprovision after the retention window |
+| `reap_stalled_provisioning_job` | `stalled_provisioning_sensor` | Write off subscriptions stuck mid-provisioning so their infrastructure is reclaimed |
 | `invoice_subscription_renewal_job` | `invoice_subscription_renewal_sensor` | Rotate billing periods and generate invoices for invoice-billed subscriptions |
 | `send_email_job` | API | Email notifications |
 | `shared_master_wake_job`, `shared_master_sleep_job`, `shared_replicas_refresh_job`, `shared_repository_refresh_replicas_job` | Schedule / sensor / manual | Shared repository master lifecycle and replica refresh |
@@ -82,6 +83,7 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 | `stale_graph_materialization_sensor` | Graphs marked stale; batches writes within a window to avoid excessive rebuilds |
 | `expired_graph_subscription_sensor` | Graphs whose subscription lapsed |
 | `suspended_graph_deprovisioning_sensor` | Suspended graphs past their retention window |
+| `stalled_provisioning_sensor` | Subscriptions left in `provisioning` past the staleness window — the state no other sensor looks at |
 | `invoice_subscription_renewal_sensor` | Invoice-billed subscriptions whose period ended |
 | `graph_usage_monitor_sensor` | Storage usage against tier limits (email alerts at 80% and 100%) |
 | `worker_inflight_reaper_sensor` | Stale `worker:inflight:*` keys in Valkey DB 6 — runs in the always-on daemon, so no cold start |

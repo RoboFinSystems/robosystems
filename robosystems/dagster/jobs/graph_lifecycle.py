@@ -128,3 +128,100 @@ def deprovision_suspended_graphs(
 def deprovision_suspended_graphs_job():
   """Deprovision graphs that have been suspended past retention period."""
   deprovision_suspended_graphs()
+
+
+# ============================================================================
+# Stalled provisioning
+# ============================================================================
+
+
+class ReapStalledProvisioningConfig(Config):
+  """Configuration for writing off stalled provisioning attempts."""
+
+  subscription_ids: list[str]
+
+
+@op
+def reap_stalled_provisioning(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+  config: ReapStalledProvisioningConfig,
+) -> dict:
+  """Write off subscriptions stuck mid-provisioning.
+
+  A provisioning attempt that dies — a killed worker, an exception, a provider
+  event that was never redelivered — leaves the row in ``provisioning``, which
+  is not terminal and which neither lifecycle sensor looks at. Nothing else in
+  the system ever revisits that state, so this is the only place it ends.
+
+  Marking the row ``failed`` does two things: it makes the attempt visible to
+  ``admin subscriptions list``, and it puts the row in a state the lifecycle
+  sensors act on, so any graph the attempt managed to create is suspended and
+  then reclaimed on the ordinary retention schedule rather than running
+  unbilled forever. ``failed`` is also terminal, so the customer's route back
+  — a fresh checkout — is already open.
+  """
+  from datetime import UTC, datetime
+
+  from robosystems.models.core.billing.subscription import BillingSubscription
+
+  now = datetime.now(UTC)
+  reaped: list[str] = []
+
+  with db.get_session() as session:
+    for subscription_id in config.subscription_ids:
+      subscription = (
+        session.query(BillingSubscription)
+        .filter(BillingSubscription.id == subscription_id)
+        .first()
+      )
+      if not subscription:
+        context.log.warning(f"Subscription {subscription_id} not found, skipping")
+        continue
+
+      # Re-check under this transaction: the sensor's read and this write are
+      # minutes apart, and a redelivery may have completed in between.
+      if subscription.status != "provisioning":
+        context.log.info(
+          f"Subscription {subscription_id} is now {subscription.status}, skipping"
+        )
+        continue
+
+      subscription.status = "failed"
+      subscription.subscription_metadata = {
+        **(subscription.subscription_metadata or {}),
+        "error": "Provisioning stalled and was written off",
+        "failed_at": now.isoformat(),
+      }
+      if subscription.ends_at is None:
+        subscription.ends_at = now
+      session.commit()
+      subscription._invalidate_access_cache()
+
+      reaped.append(subscription_id)
+      context.log.error(
+        f"Wrote off stalled provisioning for subscription {subscription_id} "
+        f"(org={subscription.org_id}, resource_type={subscription.resource_type}, "
+        f"resource_id={subscription.resource_id}). The customer paid and has no "
+        "working resource — this needs an operator."
+      )
+
+  context.log.info(
+    f"Wrote off {len(reaped)}/{len(config.subscription_ids)} stalled subscriptions"
+  )
+
+  return {
+    "reaped_count": len(reaped),
+    "total_requested": len(config.subscription_ids),
+    "subscription_ids": reaped,
+  }
+
+
+@job(
+  tags={
+    "dagster/priority": "1",
+  }
+)
+def reap_stalled_provisioning_job():
+  """Write off subscriptions stuck mid-provisioning."""
+  reap_stalled_provisioning()
