@@ -34,10 +34,11 @@ class StorageSummary(BaseModel):
   """Storage usage summary."""
 
   graph_tier: str = Field(..., description="Subscription tier")
-  avg_storage_gb: float = Field(..., description="Average storage in GB")
+  avg_storage_gb: float = Field(
+    ..., description="Time-weighted average storage in GB over the period"
+  )
   max_storage_gb: float = Field(..., description="Peak storage in GB")
   min_storage_gb: float = Field(..., description="Minimum storage in GB")
-  total_gb_hours: float = Field(..., description="Total GB-hours for billing")
   measurement_count: int = Field(..., description="Number of measurements taken")
 
 

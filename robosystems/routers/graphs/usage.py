@@ -348,7 +348,6 @@ async def get_graph_usage(
           avg_storage_gb=graph_storage["avg_storage_gb"],
           max_storage_gb=graph_storage["max_storage_gb"],
           min_storage_gb=graph_storage["min_storage_gb"],
-          total_gb_hours=graph_storage["total_gb_hours"],
           measurement_count=graph_storage["measurement_count"],
         )
 
