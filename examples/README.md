@@ -87,6 +87,33 @@ uv run python -m examples.coffee_roaster_demo.data
 uv run python -m examples.saas_startup_demo.data
 ```
 
+#### Loading an episode into a deployed environment
+
+Because every step but the reset is an ordinary API call, an episode can load
+into a deployed environment as easily as the local stack — which is how these
+two become demo tenants a prospect can be shown, rather than something that
+only exists on a laptop. Point `DEMO_API_URL` at the API and pass the graph id
+of an already-provisioned graph:
+
+```bash
+DEMO_API_URL=https://api.robosystems.ai just demo-coffee-roaster kg…
+```
+
+Three things differ off-local, all deliberate:
+
+- **Credentials and the demo-slot map** go to `.local/config.<host>.json`
+  instead of `.local/config.json`. The slot map is keyed on the scenario slug
+  and the runner reuses a graph on a hit, so a shared file would make a later
+  local run silently operate on the remote graph.
+- **The reset is skipped.** It issues raw `DELETE`s against whatever
+  `EXTENSIONS_DATABASE_URL` names, which an SSM tunnel can make look local, so
+  it is never run against a remote target. Give the episode a freshly
+  provisioned graph — re-running it over one that already holds demo data will
+  duplicate the data rather than replace it.
+- **The graph must already exist.** Provision it the way a customer would
+  (checkout, or `POST /v1/graphs` with a payment method on file) and pass its
+  id; the runner will not create one on a deployed environment.
+
 ### SEC — public company financial data
 
 `examples/sec_demo/` · [walkthrough](sec_demo/README.md)
