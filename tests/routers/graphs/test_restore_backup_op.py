@@ -54,9 +54,10 @@ def _user(user_id: str = "usr_test") -> MagicMock:
   return u
 
 
-def _graph(graph_type: str = "generic") -> MagicMock:
+def _graph(graph_type: str = "generic", is_subgraph: bool = False) -> MagicMock:
   g = MagicMock()
   g.graph_type = graph_type
+  g.is_subgraph = is_subgraph
   return g
 
 
@@ -105,6 +106,52 @@ class TestRestoreGraphTypeGates:
     assert exc.value.status_code == 400
     assert "entity graphs" in exc.value.detail
     assert "materialize" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.Graph.get_by_id")
+  async def test_allows_entity_subgraph(self, mock_get_graph: MagicMock) -> None:
+    """A subgraph inherits `entity` from its parent but is not materialized
+    from anything — `materialize` refuses subgraphs, so refusing restore too
+    would leave it with no recovery path at all."""
+    mock_get_graph.return_value = _graph("entity", is_subgraph=True)
+
+    with patch("robosystems.models.core.GraphBackup.get_by_id") as mock_backup:
+      mock_backup.return_value = _backup()
+      with patch(
+        "robosystems.worker.client.enqueue_task",
+        new=AsyncMock(return_value={"operation_id": "op_sub"}),
+      ):
+        envelope = await _call()
+
+    assert envelope.operation_id == "op_sub"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.Graph.get_by_id")
+  async def test_still_rejects_parent_entity_graph(
+    self, mock_get_graph: MagicMock
+  ) -> None:
+    """The parent itself stays refused — it *is* materialized from extensions."""
+    mock_get_graph.return_value = _graph("entity", is_subgraph=False)
+
+    with pytest.raises(HTTPException) as exc:
+      await _call()
+    assert exc.value.status_code == 400
+    assert "entity graphs" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("graph_id", ["sec", "sec_historical"])
+  @patch("robosystems.models.core.Graph.get_by_id")
+  async def test_shared_repo_subgraph_still_rejected(
+    self, mock_get_graph: MagicMock, graph_id: str
+  ) -> None:
+    """Shared repositories are refused on ownership, before graph type is even
+    consulted — the subgraph carve-out must not reach them."""
+    mock_get_graph.return_value = _graph("repository", is_subgraph=True)
+
+    with pytest.raises(HTTPException) as exc:
+      await _call(graph_id=graph_id)
+    assert exc.value.status_code == 403
+    assert "shared repository" in exc.value.detail
 
   @pytest.mark.asyncio
   @patch("robosystems.models.core.Graph.get_by_id")
