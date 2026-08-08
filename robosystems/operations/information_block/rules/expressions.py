@@ -134,6 +134,29 @@ def _validate(node: ast.AST) -> None:
       raise InvalidRuleExpression(f"disallowed AST node: {type(child).__name__}")
 
 
+def require_single_equality(
+  body: ast.expr, what: str = "equality pattern"
+) -> ast.Compare:
+  """Return ``body`` as a single ``LHS = RHS`` comparison, or raise.
+
+  The whitelist walker permits ``ast.Compare`` and ``ast.Eq`` without
+  bounding how many of each, so ``$A = $B = $C`` is structurally legal
+  while every consumer here requires exactly one operator. This was
+  open-coded in four places — parse, equality evaluation, derivation
+  evaluation, and LHS extraction — which is why the parser never grew the
+  check the other three all assumed. ``what`` keeps each caller's wording.
+  """
+  if (
+    not isinstance(body, ast.Compare)
+    or len(body.ops) != 1
+    or not isinstance(body.ops[0], ast.Eq)
+  ):
+    raise InvalidRuleExpression(
+      f"{what} expects a single LHS = RHS expression, got: {ast.dump(body)}"
+    )
+  return body
+
+
 def _normalize_equality(expr: str) -> str:
   """Replace bare ``=`` with ``==`` for Python's parser.
 
@@ -154,6 +177,14 @@ def parse_arithmetic_expression(
   2. Normalizes bare ``=`` to ``==`` (XBRL-style equality).
   3. Parses with ``ast.parse(mode='eval')``.
   4. Walks the tree and rejects any node outside the allowed whitelist.
+  5. Dry-runs the evaluator to reject anything it could not evaluate.
+
+  Step 5 is what keeps authoring and evaluation from describing different
+  grammars. The whitelist is structural — it exists to keep ``Call``,
+  ``Subscript`` and friends out — and is deliberately coarser than the
+  evaluator: it admits any ``ast.Constant`` and any number of ``Eq``
+  operators. Anything in that gap used to save cleanly and then raise on
+  every evaluation for the life of the rule.
 
   Raises :class:`InvalidRuleExpression` for unbound variables, syntax
   errors, or disallowed constructs.
@@ -171,17 +202,37 @@ def parse_arithmetic_expression(
   except SyntaxError as exc:
     raise InvalidRuleExpression(f"syntax error in expression {expr!r}: {exc}") from exc
   _validate(tree)
+  compare = require_single_equality(tree.body)
+  _eval_arith(compare.left, {}, shape_only=True)
+  _eval_arith(compare.comparators[0], {}, shape_only=True)
   return ParsedExpression(tree=tree, variable_names=variable_names)
 
 
-def _eval_arith(node: ast.expr, values: dict[str, float]) -> float:
-  """Recursively evaluate an arithmetic AST node to a float."""
+def _eval_arith(
+  node: ast.expr, values: dict[str, float], *, shape_only: bool = False
+) -> float:
+  """Recursively evaluate an arithmetic AST node to a float.
+
+  With ``shape_only``, variables resolve to a placeholder instead of a
+  bound value, so the walk checks only whether the tree is *evaluable*.
+  That is how :func:`parse_arithmetic_expression` validates at authoring
+  time — by running this function rather than by maintaining a second
+  description of the same grammar. The two used to be separate, and every
+  shape one accepted and the other rejected produced a rule that saved
+  cleanly and then raised on every evaluation, forever.
+  """
   if isinstance(node, ast.Constant):
-    if not isinstance(node.value, (int, float)):
+    # bool first: isinstance(True, int) is True in Python, so without this
+    # `$Assets = True` passes the numeric check and silently evaluates as 1.0.
+    if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
       raise InvalidRuleExpression(f"non-numeric constant: {node.value!r}")
     return float(node.value)
   if isinstance(node, ast.Name):
     key = node.id
+    if shape_only:
+      # Not 0.0 — that would trip the division guard below on a tree whose
+      # only fault is that we haven't bound values yet.
+      return 1.0
     if key not in values:
       raise InvalidRuleExpression(f"unbound name in expression: {key!r}")
     val = values[key]
@@ -189,10 +240,10 @@ def _eval_arith(node: ast.expr, values: dict[str, float]) -> float:
       raise InvalidRuleExpression(f"null value for variable {key!r}")
     return float(val)
   if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-    return -_eval_arith(node.operand, values)
+    return -_eval_arith(node.operand, values, shape_only=shape_only)
   if isinstance(node, ast.BinOp):
-    lhs = _eval_arith(node.left, values)
-    rhs = _eval_arith(node.right, values)
+    lhs = _eval_arith(node.left, values, shape_only=shape_only)
+    rhs = _eval_arith(node.right, values, shape_only=shape_only)
     if isinstance(node.op, ast.Add):
       return lhs + rhs
     if isinstance(node.op, ast.Sub):
@@ -220,16 +271,7 @@ def evaluate_equality(
   The ``tolerance`` parameter defaults to :data:`EQUALITY_TOLERANCE`
   (``0.01``); callers can pass a rule-specific override.
   """
-  compare = parsed.tree.body
-  if (
-    not isinstance(compare, ast.Compare)
-    or len(compare.ops) != 1
-    or not isinstance(compare.ops[0], ast.Eq)
-  ):
-    raise InvalidRuleExpression(
-      f"equality pattern expects a single LHS = RHS expression, got: "
-      f"{ast.dump(compare)}"
-    )
+  compare = require_single_equality(parsed.tree.body)
   mapped: dict[str, float] = {}
   for name in parsed.variable_names:
     if name not in values:
@@ -261,16 +303,7 @@ def lhs_variable_names(parsed: ParsedExpression) -> list[str]:
   (which must have a bound fact) from the RHS children (a missing child
   is treated as 0, matching the renderer's sum-of-present-children).
   """
-  body = parsed.tree.body
-  if (
-    not isinstance(body, ast.Compare)
-    or len(body.ops) != 1
-    or not isinstance(body.ops[0], ast.Eq)
-  ):
-    raise InvalidRuleExpression(
-      f"expected a single LHS = RHS expression, got: {ast.dump(body)}"
-    )
-  return variable_names_in(body.left)
+  return variable_names_in(require_single_equality(parsed.tree.body).left)
 
 
 def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> float:
@@ -294,15 +327,7 @@ def evaluate_derivation(parsed: ParsedExpression, values: dict[str, float]) -> f
   :class:`InvalidRuleExpression` for a non-equality expression, a missing
   or null operand, or division by zero.
   """
-  compare = parsed.tree.body
-  if (
-    not isinstance(compare, ast.Compare)
-    or len(compare.ops) != 1
-    or not isinstance(compare.ops[0], ast.Eq)
-  ):
-    raise InvalidRuleExpression(
-      f"derivation expects a single LHS = RHS expression, got: {ast.dump(compare)}"
-    )
+  compare = require_single_equality(parsed.tree.body, "derivation")
   mapped = {f"_var_{name}": value for name, value in values.items()}
   return _eval_arith(compare.comparators[0], mapped)
 
