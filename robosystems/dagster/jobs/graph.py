@@ -348,7 +348,11 @@ def restore_backup(
     s3_key = backup_record.s3_key
     compression_enabled = backup_record.compression_enabled
 
-  # Create system backup before restore if requested
+  # Snapshot the current database before overwriting it. A failure here aborts:
+  # the restore is destructive and irreversible, `create_system_backup=False` is
+  # passed downstream on the strength of this snapshot existing, and continuing
+  # would leave the graph with no rollback at all. An operator who wants the
+  # restore anyway can re-run with create_system_backup=false and say so.
   if config.create_system_backup:
     context.log.info("Creating system backup before restore...")
     try:
@@ -368,7 +372,11 @@ def restore_backup(
       finally:
         loop.close()
     except Exception as e:
-      context.log.warning(f"Failed to create system backup: {e}")
+      raise Failure(
+        f"Safety backup failed for graph {config.graph_id}, so the restore was "
+        f"not attempted — it would have overwritten the database with no "
+        f"rollback: {e}"
+      ) from e
 
   context.log.info(f"Restoring from {s3_bucket}/{s3_key}")
 
@@ -395,14 +403,23 @@ def restore_backup(
   finally:
     loop.close()
 
-  verification_status = "not_verified"
+  # `restore_with_sse` reports failure by returning rather than raising, so an
+  # unchecked result reads as success and the op returns "completed" over a
+  # graph that was just overwritten by a restore that did not finish. The
+  # worker fails its task on a failed integrity check or post-restore
+  # verification, so this status is the authoritative outcome.
+  if restore_result.get("status") != "completed":
+    raise Failure(
+      f"Restore of graph {config.graph_id} from backup {config.backup_id} did "
+      f"not complete (status={restore_result.get('status')!r}): "
+      f"{restore_result.get('error') or 'no error reported'}"
+    )
+
+  # Verification is not optional in the worker — `verify_after_restore` only
+  # decides whether the caller is told about it.
+  verification_status = "verified" if config.verify_after_restore else "not_verified"
   if config.verify_after_restore:
-    if restore_result.get("status") == "completed":
-      verification_status = "verified"
-      context.log.info("Restore verification successful")
-    else:
-      verification_status = "failed"
-      context.log.warning(f"Restore status: {restore_result.get('status')}")
+    context.log.info("Restore verification successful")
 
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(config.backup_id, session)

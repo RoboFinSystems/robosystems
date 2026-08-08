@@ -50,6 +50,12 @@ async def perform_restore(
   overwritten; a failed snapshot aborts the restore rather than leaving the
   old data unrecoverable.
 
+  Nothing on disk is touched until the replacement payload has been downloaded
+  and its checksum verified. ``restore_backup`` does both before it reaches the
+  importer, and the importer takes the safety snapshot immediately before it
+  overwrites — so every abort short of the final copy leaves the existing
+  database exactly as it was.
+
   Encryption and compression are read from the backup's own S3 metadata, so
   the caller does not describe them.
   """
@@ -77,28 +83,20 @@ async def perform_restore(
       f"original_size: {backup_metadata.original_size}"
     )
 
-    # Deleting here rather than in the backup manager: only this process holds
-    # the LadybugDB connections that must close before the files go away.
+    # Only this process holds the LadybugDB connections, so they must close
+    # here — but closing is all that happens now. The files themselves are
+    # replaced by the importer, after the payload is verified and the safety
+    # snapshot is taken. Deleting them here instead used to defeat both: a
+    # failed download left the graph with nothing, and the importer's
+    # abort-on-failed-snapshot guard was dead code because it is conditioned on
+    # the database still existing.
     if connection_pool and force_overwrite:
-      import shutil
-      from pathlib import Path
-
-      from robosystems.middleware.graph.utils import MultiTenantUtils
-
-      logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
-
       connection_pool.close_database_connections(graph_id)
-      logger.info(f"[Task {task_id}] Closed LadybugDB connections")
+      logger.info(f"[Task {task_id}] Closed LadybugDB connections for {graph_id}")
 
-      db_path = Path(MultiTenantUtils.get_database_path_for_graph(graph_id))
-      if db_path.exists():
-        if db_path.is_file():
-          db_path.unlink()
-        else:
-          shutil.rmtree(db_path)
-        logger.info(f"[Task {task_id}] Deleted existing database files at {db_path}")
-
-    # drop_existing=False: the force_overwrite branch above already removed it.
+    # drop_existing=False: the full-dump importer overwrites in place, and
+    # doing it there keeps the existing database intact until the replacement
+    # is on disk and checksum-verified.
     restore_job = RestoreJob(
       graph_id=graph_id,
       backup_metadata=backup_metadata,

@@ -1100,6 +1100,12 @@ class BackupManager:
     ``create_system_backup`` is False, the existing database is snapshotted to
     S3 first and a snapshot failure aborts the restore — losing the old data
     with no rollback is worse than not restoring.
+
+    This is the only place the existing database is removed. Callers must not
+    clear it first: the snapshot above is conditioned on the target still
+    existing, so a caller that deletes ahead of us silently turns the safety
+    net off, and a download or checksum failure then has nothing to fall back
+    to. ``backup_data`` is already verified by the time it arrives here.
     """
     logger.info(f"Importing full dump to graph '{graph_id}'")
 
@@ -1194,11 +1200,26 @@ class BackupManager:
       with zipfile.ZipFile(zip_file, "r") as zf:
         zf.extractall(temp_path)
 
+      # The WAL goes before the database file, same as DatabaseManager.delete:
+      # left behind, LadybugDB replays the outgoing database's un-checkpointed
+      # writes on top of the restored one.
+      wal_path = Path(f"{target_path}.wal")
+      if wal_path.exists():
+        wal_path.unlink()
+        logger.info(f"Removed stale WAL before restoring graph '{graph_id}'")
+
+      # Clear the existing target whatever shape it has — a single .lbug file
+      # in current engine versions, a directory in older ones — since the
+      # incoming dump may not be the same shape.
+      if os.path.exists(target_path):
+        if os.path.isfile(target_path):
+          os.unlink(target_path)
+        else:
+          shutil.rmtree(target_path)
+
       if (temp_path / f"{graph_id}.lbug").exists():
         shutil.copy2(temp_path / f"{graph_id}.lbug", target_path)
       else:
-        if os.path.exists(target_path):
-          shutil.rmtree(target_path)
         shutil.copytree(temp_path / graph_id, target_path)
 
       if progress_tracker:
