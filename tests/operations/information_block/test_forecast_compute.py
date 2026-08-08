@@ -291,7 +291,15 @@ def _run(
   calc_dag: dict | None = None,
   base_is_facts: list[Any] | None = None,
   schedule_projection: ScheduleProjection | None = None,
+  verify: Any = None,
 ):
+  """``verify`` controls ``_verify_month_sets``.
+
+  Default ``None`` keeps the historical stub — ``(None, [])``, i.e. no
+  rules ran. Pass a callable to vary the result per month, which is what
+  makes the stop-the-walk behaviour testable at all; the fixed stub is
+  precisely why it never was.
+  """
   structure = _structure(mechanics)
   recorder = _Recorder()
 
@@ -342,7 +350,11 @@ def _run(
       return_value=SimpleNamespace(id="fs_lever", entity_id="ent_1"),
     ),
     patch.object(fc, "_upsert_month_set", recorder),
-    patch.object(fc, "_verify_month_sets", return_value=(None, [])),
+    patch.object(
+      fc,
+      "_verify_month_sets",
+      **({"side_effect": verify} if callable(verify) else {"return_value": (None, [])}),
+    ),
   ):
     response = fc.cmd_compute_forecast(
       _session(structure),
@@ -1009,3 +1021,112 @@ class TestEnsureScenarioDimension:
     assert dimension.value == "struct_a"
     assert dimension.name == "Scenario A"
     session.flush.assert_called_once()
+
+
+class TestStopTheWalk:
+  """A failed month halts the walk instead of seeding the next one.
+
+  Each month's opening balances are the previous month's closing balances,
+  so computing past a verification failure does not produce N-1 *unverified*
+  months — it produces N-1 months derived from a known-wrong one, each
+  reporting its own status as though it stood alone.
+
+  This class exists because nothing could have caught that: the harness
+  pinned `_verify_month_sets` to `(None, [])`, so `verification_passed` was
+  never anything but None in any test, and `grep verification_passed tests/`
+  returned zero hits.
+  """
+
+  @staticmethod
+  def _fail_on(period: str):
+    """Verification that fails for exactly one month."""
+
+    def _verify(session, *, sets, period_end, created_by, global_calculations):
+      month = f"{period_end.year:04d}-{period_end.month:02d}"
+      if month == period:
+        return False, [f"A = L + E off by 1200.00 in {month}"]
+      return True, []
+
+    return _verify
+
+  def test_halts_at_the_failing_month(self) -> None:
+    response, _ = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=6,
+      verify=self._fail_on("2026-09"),
+    )
+
+    assert response.halted_at == "2026-09"
+    # The failing month is computed and kept — it is the evidence.
+    assert [m.period for m in response.months_computed] == [
+      "2026-07",
+      "2026-08",
+      "2026-09",
+    ]
+    assert response.months_computed[-1].verification_passed is False
+    assert response.months_computed[-1].verification_failures
+
+  def test_months_after_the_failure_are_never_computed(self) -> None:
+    """The point of halting: no month is derived from a known-wrong one."""
+    response, rec = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=6,
+      verify=self._fail_on("2026-08"),
+    )
+
+    computed = {m.period for m in response.months_computed}
+    assert computed.isdisjoint({"2026-09", "2026-10", "2026-11", "2026-12"})
+    assert len(response.months_computed) < response.months
+    # And nothing was written for them either.
+    written = {str(p) for p in getattr(rec, "periods", [])}
+    assert not (written & {"2026-10", "2026-11", "2026-12"})
+
+  def test_halt_is_explained_not_inferred(self) -> None:
+    """A caller must not have to spot a length mismatch to notice."""
+    response, _ = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=6,
+      verify=self._fail_on("2026-08"),
+    )
+
+    assert any("halted at 2026-08" in d for d in response.diagnostics)
+    assert any("off by 1200.00" in d for d in response.diagnostics)
+
+  def test_all_passing_runs_the_full_horizon(self) -> None:
+    response, _ = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=4,
+      verify=lambda *a, **k: (True, []),
+    )
+
+    assert response.halted_at is None
+    assert len(response.months_computed) == 4
+    assert all(m.verification_passed is True for m in response.months_computed)
+
+  def test_no_rules_does_not_halt_but_is_not_a_pass(self) -> None:
+    """`None` is absence of evidence, not evidence of correctness.
+
+    Halting on it would break any graph whose scenario structures carry no
+    bound rules. But it has always been indistinguishable from a pass to
+    every consumer, so it has to say so out loud.
+    """
+    response, _ = _run(
+      _mechanics(FULL_LEVERS),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=3,
+      verify=lambda *a, **k: (None, []),
+    )
+
+    assert response.halted_at is None
+    assert len(response.months_computed) == 3
+    assert all(m.verification_passed is None for m in response.months_computed)
+    assert any("unverified, not verified" in d for d in response.diagnostics)

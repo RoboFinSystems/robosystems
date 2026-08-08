@@ -2002,7 +2002,11 @@ class ForecastMonthLite(BaseModel):
     None,
     description=(
       "Whether every rule evaluated against the month's scenario sets "
-      "passed (None = no rules ran for the month)."
+      "passed. Three states, and the third is not the first: ``true`` = "
+      "rules ran and all passed; ``false`` = at least one failed or "
+      "errored, which halts the walk (see ``halted_at``); ``null`` = **no "
+      "rules ran**, so the month is unverified rather than verified. "
+      "Treat null as absence of evidence, never as a pass."
     ),
   )
   verification_failures: list[str] = Field(
@@ -2084,6 +2088,18 @@ class ComputeForecastResponse(BaseModel):
   base_period: str = Field(..., description="Seed month the walk projected from.")
   months: int = Field(..., description="Forward months requested.")
   months_computed: list[ForecastMonthLite] = Field(default_factory=list)
+  halted_at: str | None = Field(
+    None,
+    description=(
+      "Month (``YYYY-MM``) where the walk stopped because verification "
+      "failed, or null if it ran the full horizon. Each month's opening "
+      "balances are the previous month's closing balances, so computing "
+      "past a failure yields months derived from a known-wrong one rather "
+      "than merely unverified months. When set, ``months_computed`` ends "
+      "at this month and is shorter than ``months``; the failing month's "
+      "facts are kept so the failure can be inspected."
+    ),
+  )
   skipped: list[SkippedForecastLite] = Field(default_factory=list)
   diagnostics: list[str] = Field(
     default_factory=list,
