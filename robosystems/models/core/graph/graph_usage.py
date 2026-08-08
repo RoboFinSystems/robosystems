@@ -34,7 +34,7 @@ class UsageEventType(str, Enum):
   """Types of usage events we track."""
 
   # Storage events
-  STORAGE_SNAPSHOT = "storage_snapshot"  # Hourly storage measurements
+  STORAGE_SNAPSHOT = "storage_snapshot"  # Periodic storage measurements
   STORAGE_GROWTH = "storage_growth"  # Storage increase events
   STORAGE_CLEANUP = "storage_cleanup"  # Storage reduction events
 
@@ -57,6 +57,52 @@ class UsageEventType(str, Enum):
   SLOW_QUERY = "slow_query"  # Queries over threshold
   HIGH_MEMORY = "high_memory"  # Memory usage spikes
   ERROR_EVENT = "error_event"  # Error occurrences
+
+
+# A single reading stands in for the time since the one before it. Cap that
+# span so a sensor outage — or a graph deleted mid-month, whose last reading
+# would otherwise stretch to the period end — can't inflate the integral.
+# Deliberately generous relative to the snapshot cadence: this is a ceiling
+# on damage, not an encoding of the schedule.
+MAX_SNAPSHOT_WEIGHT_HOURS = 24.0
+
+
+def _integrate_gb_hours(
+  measurements: list[dict[str, Any]], period_start: datetime
+) -> tuple[float, float]:
+  """Integrate storage readings into GB-hours, returning (gb_hours, hours).
+
+  GB-hours is an integral over time, not a count of readings: each reading
+  is weighted by how long it stood. Summing the raw readings instead only
+  gives GB-hours when snapshots land exactly one hour apart, and the
+  usage-monitor sensor runs every six — which understated the figure ~6x.
+
+  Weighting off the timestamps rather than the sensor's nominal interval is
+  the point. The cadence has changed before and lives in a different module;
+  a consumer that hardcodes it is wrong the next time it moves, which is
+  precisely how this drifted.
+
+  Backward-looking on purpose: a reading is credited for the span *since*
+  the previous one, so the total never covers time nobody observed and a
+  graph stops accruing the moment snapshots stop.
+  """
+  gb_hours = 0.0
+  observed_hours = 0.0
+  previous_at = period_start
+
+  for measurement in measurements:
+    recorded_at = measurement["timestamp"]
+    if recorded_at.tzinfo is None:
+      recorded_at = recorded_at.replace(tzinfo=UTC)
+
+    span_hours = (recorded_at - previous_at).total_seconds() / 3600.0
+    span_hours = max(0.0, min(span_hours, MAX_SNAPSHOT_WEIGHT_HOURS))
+
+    gb_hours += (measurement["storage_gb"] or 0.0) * span_hours
+    observed_hours += span_hours
+    previous_at = recorded_at
+
+  return gb_hours, observed_hours
 
 
 class GraphUsage(Model):
@@ -390,15 +436,17 @@ class GraphUsage(Model):
       if record.storage_gb < graph_storage[record.graph_id]["min_storage_gb"]:
         graph_storage[record.graph_id]["min_storage_gb"] = record.storage_gb
 
+    period_start = datetime(year, month, 1, tzinfo=UTC)
+
     for graph_id, data in graph_storage.items():
       measurements = data["measurements"]
       data["measurement_count"] = len(measurements)
 
-      # Snapshots are hourly, so summing GB across measurements yields GB-hours.
-      data["total_gb_hours"] = sum(m["storage_gb"] for m in measurements)
+      gb_hours, observed_hours = _integrate_gb_hours(measurements, period_start)
+      data["total_gb_hours"] = gb_hours
 
-      if measurements:
-        data["avg_storage_gb"] = data["total_gb_hours"] / len(measurements)
+      if observed_hours > 0:
+        data["avg_storage_gb"] = gb_hours / observed_hours
 
       if data["min_storage_gb"] == float("inf"):
         data["min_storage_gb"] = 0.0
