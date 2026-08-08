@@ -18,17 +18,26 @@ from outside the system" the way a real customer's integration would. The ONLY
 exception is ``reset.py``, which uses direct DB access for demo cleanup between
 runs — that path is intentionally NOT a product operation.
 
-Requires: Docker stack running (just start)
+That rule is what lets an episode load into a deployed environment as well as
+the local stack: set ``DEMO_API_URL`` and the whole run is ordinary API traffic
+against an account that already holds a provisioned graph. Credentials and the
+demo-slot map are kept in a per-target file so a remote run cannot capture the
+local slots, and the reset is skipped entirely off-local (see ``reset_demo``).
+
+Requires: the local Docker stack (just start), or ``DEMO_API_URL`` pointing at
+a deployed API.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .drivers import Scenario
 
@@ -37,8 +46,35 @@ from .drivers import Scenario
 # ---------------------------------------------------------------------------
 
 SOURCE = "native"
-CREDENTIALS_FILE = Path(".local/config.json")
-BASE_URL = "http://localhost:8000"
+
+# The API the demo loads into. Defaults to the local stack; set DEMO_API_URL to
+# aim an episode at a deployed environment (for demo tenants a prospect will
+# actually be shown). Everything the runner does is a public API call, so the
+# only thing that changes with the target is the base URL — except the reset,
+# which is not a product operation. See ``reset_demo``.
+BASE_URL = os.environ.get("DEMO_API_URL", "http://localhost:8000").rstrip("/")
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"})
+
+
+def _is_local_target() -> bool:
+  return (urlparse(BASE_URL).hostname or "") in _LOCAL_HOSTS
+
+
+def _credentials_file() -> Path:
+  """Credentials + demo-slot map, kept separate per target.
+
+  The slot map is keyed on ``scenario.slug`` and ``create_demo_graph`` returns
+  early on a hit, so sharing one file across targets would make a later local
+  run silently reuse a remote graph id — and point the reset at it.
+  """
+  if _is_local_target():
+    return Path(".local/config.json")
+  host = (urlparse(BASE_URL).hostname or "remote").replace(".", "-")
+  return Path(f".local/config.{host}.json")
+
+
+CREDENTIALS_FILE = _credentials_file()
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +85,12 @@ BASE_URL = "http://localhost:8000"
 def _client_config() -> dict[str, str]:
   """Build the standard SDK client config from saved credentials."""
   if not CREDENTIALS_FILE.exists():
-    print("  ERROR: No credentials file. Run `just demo-user` first.")
+    if _is_local_target():
+      print("  ERROR: No credentials file. Run `just demo-user` first.")
+    else:
+      print(f"  ERROR: No credentials for {BASE_URL}.")
+      print(f"  Write the account's API key to {CREDENTIALS_FILE} as")
+      print('  {"api_key": "..."} — demo-user only registers against local.')
     sys.exit(1)
   creds = json.loads(CREDENTIALS_FILE.read_text())
   return {"base_url": BASE_URL, "token": creds.get("api_key", "")}
@@ -94,7 +135,20 @@ def create_demo_graph(scenario: Scenario, entity_type: str) -> str:
   ``entity_type`` sets the entity's legal form on the create request, which
   the backend uses to prefill the graph's Reporting Style (partnership →
   PART, llc → LLC, else corporate).
+
+  Local targets only. Registering a user and creating a graph on a deployed
+  environment are billed, gated product actions with their own flows — a demo
+  runner reaching for them would either fail confusingly or quietly commit an
+  org's payment method. Provision the graph the way a customer does, then pass
+  its id.
   """
+  if not _is_local_target():
+    print(f"\n  ERROR: {BASE_URL} is not a local target, so this runner will")
+    print("  not register a user or create a graph. Provision the graph the")
+    print("  way a customer would (checkout, or POST /v1/graphs with a payment")
+    print("  method on file) and pass its id as the last argument.")
+    sys.exit(1)
+
   project_root = Path(__file__).resolve().parents[2]
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -224,7 +278,20 @@ def reset_demo(graph_id: str) -> None:
   This is the ONLY direct-DB operation in the demo. Everything else
   goes through the HTTP API. Drops the tenant schema and re-provisions
   it with the shared taxonomy seed data.
+
+  **Local targets only.** It issues raw DELETEs against whatever database
+  ``EXTENSIONS_DATABASE_URL`` currently points at, which is not necessarily
+  the same system as ``DEMO_API_URL`` — an SSM tunnel makes a remote database
+  look local. Rather than try to prove those two agree, the reset is simply
+  not run against a remote target: a graph provisioned there is empty anyway,
+  so there is nothing to reset on the intended path.
   """
+  if not _is_local_target():
+    print(f"  SKIPPED — reset is local-only, and the target is {BASE_URL}")
+    print("  Expecting a freshly provisioned graph; re-running this episode")
+    print("  against a graph that already holds demo data will duplicate it.")
+    return
+
   from .reset import reset_demo_state
 
   reset_demo_state(graph_id)
