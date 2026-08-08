@@ -38,6 +38,12 @@ TERMINAL_SUBSCRIPTION_STATUSES = (
   SubscriptionStatus.FAILED.value,
 )
 
+# How long a subscription may sit in ``provisioning`` before another trigger
+# may re-claim it, and before the reaper writes it off as stalled. Provisioning
+# is a seconds-to-minutes operation; anything still holding the claim past this
+# is not running any more, it just never said so.
+STALE_PROVISIONING_MINUTES = 30
+
 
 class BillingInterval(str, Enum):
   """Billing interval options."""
@@ -314,6 +320,79 @@ class BillingSubscription(Base):
         invalidate_subscription_cache(self.resource_id)
       except Exception as e:
         logger.warning(f"Cache invalidation failed for graph {self.resource_id}: {e}")
+
+  def claim_for_provisioning(
+    self, session: Session, stale_after_minutes: int = STALE_PROVISIONING_MINUTES
+  ) -> bool:
+    """Atomically claim this subscription for a provisioning run.
+
+    Returns True to exactly one caller. Provisioning has more than one
+    trigger — separate provider events, each legitimate on its own — so the
+    guard has to live at the sink rather than at each caller, or adding a
+    trigger later silently re-opens the hole.
+
+    The whole decision is one conditional UPDATE, which makes it a mutex
+    without an advisory lock or a new table:
+
+    * ``resource_id IS NULL`` is the terminal condition. Once a resource
+      exists the subscription is never re-provisioned, whatever its status
+      and however many callers arrive.
+    * ``pending``/``pending_payment`` is the ordinary first entry.
+    * A ``provisioning`` row is re-claimable only once it has gone stale,
+      which is what makes a genuinely dead attempt retryable (a killed
+      worker, a provider redelivery after a timeout) while two concurrent
+      callers still resolve to one winner: the loser re-evaluates the
+      predicate after the winner's row lock clears, sees a freshly stamped
+      row, and matches nothing.
+
+    ``updated_at`` is stamped by the claim itself, so it doubles as the
+    heartbeat the staleness window is measured against.
+    """
+    from sqlalchemy import and_, or_
+
+    now = datetime.now(UTC)
+    stale_cutoff = now - timedelta(minutes=stale_after_minutes)
+
+    claimed = (
+      session.query(BillingSubscription)
+      .filter(
+        BillingSubscription.id == self.id,
+        BillingSubscription.resource_id.is_(None),
+        or_(
+          BillingSubscription.status.in_(
+            (
+              SubscriptionStatus.PENDING.value,
+              SubscriptionStatus.PENDING_PAYMENT.value,
+            )
+          ),
+          and_(
+            BillingSubscription.status == SubscriptionStatus.PROVISIONING.value,
+            BillingSubscription.updated_at < stale_cutoff,
+          ),
+        ),
+      )
+      .update(
+        {
+          BillingSubscription.status: SubscriptionStatus.PROVISIONING.value,
+          BillingSubscription.updated_at: now,
+        },
+        synchronize_session=False,
+      )
+    )
+
+    session.commit()
+    session.refresh(self)
+
+    if claimed:
+      logger.info(f"Claimed subscription {self.id} for provisioning")
+    else:
+      logger.info(
+        f"Provisioning claim refused for subscription {self.id} "
+        f"(status={self.status}, resource_id={self.resource_id}) — "
+        "another trigger already holds it or the resource exists"
+      )
+
+    return bool(claimed)
 
   def activate(self, session: Session) -> None:
     """Activate the subscription."""

@@ -114,10 +114,18 @@ async def run_graph_provisioning(
       graph_id = creation_result.graph_id
       logger.info(f"Created graph {graph_id} for subscription {subscription_id}")
 
+      # Link the graph before anything else can fail. The lifecycle sensors
+      # join subscriptions to graphs on resource_id, so a graph created here
+      # and orphaned by a later failure would otherwise be unreachable by the
+      # machinery whose whole job is reclaiming it — running, unbilled, and
+      # invisible. Committing the link also makes the claim's terminal
+      # condition true, so no redelivery can create a second graph.
+      subscription.resource_id = graph_id
+      db.commit()
+
       if operation_id:
         await manager.emit_progress(operation_id, "Activating subscription...", 70)
 
-      subscription.resource_id = graph_id
       subscription.activate(db)
 
       BillingAuditLog.log_event(

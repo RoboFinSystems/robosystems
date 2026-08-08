@@ -102,14 +102,17 @@ async def _handle_checkout_completed(
         }
       subscription.provider_subscription_id = stripe_subscription_id
 
-    subscription.status = "provisioning"
     subscription.provider_customer_id = customer_id
 
     db_session.commit()
 
     context.log.info(f"Payment collected for org {customer.org_id}")
 
-    # Trigger provisioning via sensor (set status to provisioning)
+    # Deliberately does NOT set "provisioning" here. The status transition is
+    # the provisioning claim, and it belongs to the sink so that every trigger
+    # contends for it on the same terms — setting it up front would hand this
+    # caller the claim before the sink could arbitrate, and would also stamp
+    # "provisioning" onto an already-active subscription.
     await _trigger_resource_provisioning(subscription, db_session, context)
 
   else:
@@ -809,6 +812,60 @@ async def _handle_setup_intent_succeeded(
     context.log.info(f"Customer {customer.org_id} already has payment method on file")
 
 
+def _merge_subscription_metadata(
+  subscription: Any, updates: dict, db_session: Any
+) -> None:
+  """Merge keys into ``subscription_metadata`` so SQLAlchemy sees the change.
+
+  The column is JSONB and mutating the dict in place is invisible to the unit
+  of work, so every write has to rebind the attribute to a new dict.
+  """
+  subscription.subscription_metadata = {
+    **(subscription.subscription_metadata or {}),
+    **updates,
+  }
+  db_session.commit()
+
+
+def _fail_subscription(subscription: Any, error: str, db_session: Any) -> None:
+  """Mark a subscription failed with a reason an operator can read.
+
+  ``failed`` is terminal, so this is only for conditions no retry can fix.
+  ``ends_at`` starts the retention clock the lifecycle sensors measure, which
+  is what lets any infrastructure the attempt created get reclaimed instead of
+  running unbilled forever.
+  """
+  now = datetime.now(UTC)
+  subscription.status = "failed"
+  subscription.subscription_metadata = {
+    **(subscription.subscription_metadata or {}),
+    "error": error,
+    "failed_at": now.isoformat(),
+  }
+  if subscription.ends_at is None:
+    subscription.ends_at = now
+  db_session.commit()
+
+
+def _record_provisioning_error(
+  subscription: Any, error: Exception, db_session: Any
+) -> None:
+  """Record why a provisioning attempt failed, leaving the row retryable.
+
+  Deliberately does not mark the subscription failed. The customer has paid,
+  the provider will redeliver, and the claim's staleness window will let that
+  redelivery through — writing a terminal status on the first failure would
+  throw away both. A row that never succeeds is written off by the stalled
+  provisioning reaper instead, which is the one place that decision is made.
+  """
+  subscription.subscription_metadata = {
+    **(subscription.subscription_metadata or {}),
+    "last_provisioning_error": str(error),
+    "last_provisioning_error_at": datetime.now(UTC).isoformat(),
+  }
+  db_session.commit()
+
+
 async def _trigger_resource_provisioning(
   subscription: Any, db_session: Any, context: OpExecutionContext
 ) -> None:
@@ -816,11 +873,24 @@ async def _trigger_resource_provisioning(
 
   Directly provisions the resource, eliminating sensor polling delay and
   ECS cold start.
+
+  More than one provider event legitimately reaches this function for the same
+  subscription, and provider redelivery can re-enter it with an event that was
+  never marked processed because the first attempt did not finish. Both are
+  arbitrated by ``claim_for_provisioning``, which is the single gate here — a
+  future third trigger inherits it for free.
   """
   from robosystems.models.core import OrgRole, OrgUser
 
   resource_config = subscription.subscription_metadata.get("resource_config", {})
   resource_type = subscription.resource_type
+
+  if not subscription.claim_for_provisioning(db_session):
+    context.log.info(
+      f"Skipping provisioning for subscription {subscription.id}: "
+      "claim held elsewhere or resource already provisioned"
+    )
+    return
 
   # The subscriber column is authoritative; the metadata copy covers rows
   # written before it existed. The org-owner fallback is last resort — with
@@ -837,9 +907,7 @@ async def _trigger_resource_provisioning(
     )
     if not owner:
       context.log.error(f"No owner found for org {subscription.org_id}")
-      subscription.status = "failed"
-      subscription.subscription_metadata["error"] = "No org owner found"
-      db_session.commit()
+      _fail_subscription(subscription, "No org owner found", db_session)
       return
     user_id = owner.user_id
 
@@ -857,11 +925,9 @@ async def _trigger_resource_provisioning(
   )
 
   if resource_type == "graph":
-    if not subscription.subscription_metadata:
-      subscription.subscription_metadata = {}
-    subscription.subscription_metadata.update(resource_config)
-    subscription.status = "provisioning"
-    db_session.commit()
+    # The claim already put the row in "provisioning"; only the config copy
+    # is left to persist.
+    _merge_subscription_metadata(subscription, resource_config, db_session)
 
     tier = subscription.plan_name
 
@@ -879,16 +945,15 @@ async def _trigger_resource_provisioning(
       )
     except Exception as e:
       context.log.error(f"Graph provisioning failed: {e}")
+      _record_provisioning_error(subscription, e, db_session)
       raise
 
   elif resource_type == "repository":
     repository_name = resource_config.get("repository_name")
 
-    if not subscription.subscription_metadata:
-      subscription.subscription_metadata = {}
-    subscription.subscription_metadata["repository_name"] = repository_name
-    subscription.status = "provisioning"
-    db_session.commit()
+    _merge_subscription_metadata(
+      subscription, {"repository_name": repository_name}, db_session
+    )
 
     context.log.info(
       f"Provisioning repository {repository_name} for subscription {subscription.id}"
@@ -906,15 +971,14 @@ async def _trigger_resource_provisioning(
       )
     except Exception as e:
       context.log.error(f"Repository provisioning failed: {e}")
+      _record_provisioning_error(subscription, e, db_session)
       raise
 
   else:
     context.log.error(f"Unknown resource type: {resource_type}")
-    subscription.status = "failed"
-    subscription.subscription_metadata["error"] = (
-      f"Unknown resource type: {resource_type}"
+    _fail_subscription(
+      subscription, f"Unknown resource type: {resource_type}", db_session
     )
-    db_session.commit()
 
 
 # ============================================================================

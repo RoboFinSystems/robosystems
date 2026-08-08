@@ -14,6 +14,7 @@ from dagster import (
 
 from robosystems.dagster.jobs.graph_lifecycle import (
   deprovision_suspended_graphs_job,
+  reap_stalled_provisioning_job,
   suspend_expired_graphs_job,
 )
 from robosystems.logger import get_logger
@@ -32,14 +33,21 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
 
   Query: BillingSubscription where:
   - resource_type = "graph"
-  - status = "canceled"
+  - status IN ("canceled", "failed")
   - ends_at IS NOT NULL AND ends_at < now()
   - Linked graph status = "active" (not already suspended)
+
+  ``failed`` belongs here alongside ``canceled`` for the same reason: both are
+  terminal, so neither is a subscription still in force, and a graph left
+  running under one is infrastructure nobody is paying for.
   """
   from datetime import UTC, datetime
 
   from robosystems.database import session as db_session_factory
-  from robosystems.models.core.billing.subscription import BillingSubscription
+  from robosystems.models.core.billing.subscription import (
+    TERMINAL_SUBSCRIPTION_STATUSES,
+    BillingSubscription,
+  )
   from robosystems.models.core.graph import Graph, GraphStatus
 
   db = db_session_factory()
@@ -52,7 +60,7 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
       .filter(
         BillingSubscription.resource_type == "graph",
-        BillingSubscription.status == "canceled",
+        BillingSubscription.status.in_(TERMINAL_SUBSCRIPTION_STATUSES),
         BillingSubscription.ends_at.isnot(None),
         BillingSubscription.ends_at < now,
         Graph.status == GraphStatus.ACTIVE.value,
@@ -96,6 +104,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   Query: Graph where:
   - status = "suspended"
   - deleted_at IS NULL (not already deprovisioned)
+  - BillingSubscription.status IN ("canceled", "failed")
   - BillingSubscription.ends_at < (now - retention_days), OR
   - BillingSubscription.cancellation_type == "immediate" (retention bypassed
     when the user explicitly requested immediate teardown)
@@ -107,6 +116,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   from robosystems.config.deprovisioning import get_deprovisioning_config
   from robosystems.database import session as db_session_factory
   from robosystems.models.core.billing.subscription import (
+    TERMINAL_SUBSCRIPTION_STATUSES,
     BillingSubscription,
     CancellationType,
   )
@@ -128,7 +138,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
       .filter(
         BillingSubscription.resource_type == "graph",
-        BillingSubscription.status == "canceled",
+        BillingSubscription.status.in_(TERMINAL_SUBSCRIPTION_STATUSES),
         BillingSubscription.ends_at.isnot(None),
         or_(
           BillingSubscription.ends_at < cutoff,
@@ -156,6 +166,84 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
           "deprovision_suspended_graphs": {
             "config": {
               "graph_ids": graph_ids,
+            }
+          }
+        }
+      },
+    )
+  finally:
+    db_session_factory.remove()
+
+
+@sensor(
+  job=reap_stalled_provisioning_job,
+  minimum_interval_seconds=300,  # 5 minutes
+  default_status=DefaultSensorStatus.RUNNING,
+  description="Writes off subscriptions stuck mid-provisioning",
+)
+def stalled_provisioning_sensor(context: SensorEvaluationContext):
+  """Find subscriptions stuck in `provisioning` and hand them to the reaper.
+
+  Query: BillingSubscription where:
+  - status = "provisioning"
+  - updated_at < now() - STALE_PROVISIONING_MINUTES
+
+  ``provisioning`` is the state a paid subscription sits in while its resource
+  is being built. Nothing revisits it if the attempt dies, and because it is
+  neither active nor terminal it is invisible to both lifecycle sensors — so a
+  customer who paid can hold a subscription that no process will ever advance
+  or clean up. This sensor is the only thing that ends that state.
+
+  The window is the same constant the provisioning claim uses, so a row this
+  sensor considers dead is exactly a row a redelivery would have been allowed
+  to re-claim. The reaper re-checks status under its own transaction, which
+  covers the case where a retry succeeds between this read and that write.
+
+  Deliberately scoped to `provisioning` only. A stalled `upgrading` row is the
+  same shape of problem with no safe automatic disposition — the graph exists
+  and is serving reads, so writing the subscription off would tear down a
+  paying customer's graph, while forcing it back to active would claim a
+  migration succeeded when its volume may still be detached. That one wants an
+  operator, and the tier task's own timeout is what keeps it rare.
+  """
+  from datetime import UTC, datetime, timedelta
+
+  from robosystems.database import session as db_session_factory
+  from robosystems.models.core.billing.subscription import (
+    STALE_PROVISIONING_MINUTES,
+    BillingSubscription,
+  )
+
+  db = db_session_factory()
+  try:
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=STALE_PROVISIONING_MINUTES)
+
+    stalled = (
+      db.query(BillingSubscription)
+      .filter(
+        BillingSubscription.status == "provisioning",
+        BillingSubscription.updated_at < cutoff,
+      )
+      .all()
+    )
+
+    if not stalled:
+      return
+
+    subscription_ids = [sub.id for sub in stalled]
+    context.log.warning(
+      f"Found {len(subscription_ids)} subscriptions stalled in provisioning "
+      f"for more than {STALE_PROVISIONING_MINUTES} minutes"
+    )
+
+    yield RunRequest(
+      run_key=f"reap-stalled-{now.strftime('%Y%m%d%H%M')}",
+      run_config={
+        "ops": {
+          "reap_stalled_provisioning": {
+            "config": {
+              "subscription_ids": subscription_ids,
             }
           }
         }
