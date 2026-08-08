@@ -280,21 +280,19 @@ class TestGraphUsage:
     assert graph_summary["max_storage_gb"] == 3.0
     assert graph_summary["min_storage_gb"] == 1.0
 
-    # Snapshots are 12h apart and span 01-01 00:00 -> 01-03 12:00 (60h).
+    # Snapshots are 12h apart, spanning 01-01 00:00 -> 01-03 12:00 (60h).
     # Each reading is weighted by the span since the previous one, so the
     # first (at the period start) carries no weight:
-    #   12h*1 + 12h*2 + 12h*2 + 12h*3 + 12h*3 = 132 GB-hours over 60h.
-    # This assertion previously read 12.0 ("1+1+2+2+3+3") — the raw sum of
-    # readings, which is only GB-hours if snapshots are exactly 1h apart.
-    assert graph_summary["total_gb_hours"] == 132.0
+    #   (12h*1 + 12h*2 + 12h*2 + 12h*3 + 12h*3) / 60h = 2.2 GB average.
     assert graph_summary["avg_storage_gb"] == pytest.approx(2.2)
+    assert "total_gb_hours" not in graph_summary
 
-  def test_gb_hours_is_independent_of_snapshot_cadence(self):
-    """The same storage held for the same time bills the same either way.
+  def test_average_is_independent_of_snapshot_cadence(self):
+    """Sampling more often must not change the answer.
 
-    This is the property the raw-sum version could not have: it scaled the
-    answer with how often the sensor happened to run. Two graphs hold 2 GB
-    across the same 24h window, sampled hourly vs every six hours.
+    A plain mean of readings cannot have this property — it weights by how
+    often the sensor happened to run. Two graphs hold 2 GB across the same
+    24h window, sampled hourly vs every six hours.
     """
     for hour in range(0, 25):  # hourly
       self.session.add(self._snapshot("graph_hourly", hour, 2.0))
@@ -309,25 +307,30 @@ class TestGraphUsage:
       graph_id="graph_six_hourly", year=2024, month=2, session=self.session
     )["graph_six_hourly"]
 
-    assert hourly["total_gb_hours"] == pytest.approx(48.0)  # 2 GB * 24h
-    assert six_hourly["total_gb_hours"] == pytest.approx(48.0)
+    assert hourly["avg_storage_gb"] == pytest.approx(2.0)
+    assert six_hourly["avg_storage_gb"] == pytest.approx(2.0)
     assert hourly["measurement_count"] != six_hourly["measurement_count"]
 
-  def test_gb_hours_caps_the_span_a_stale_reading_covers(self):
-    """A sensor outage must not let one reading bill for the whole gap."""
-    from robosystems.models.core.graph.graph_usage import MAX_SNAPSHOT_WEIGHT_HOURS
+  def test_stale_reading_cannot_dominate_the_average(self):
+    """A sensor outage must not let one reading stand for the whole gap.
 
-    self.session.add(self._snapshot("graph_gap", 0, 1.0))
-    # Next reading lands 10 days later — the sensor was down in between.
-    self.session.add(self._snapshot("graph_gap", 0, 1.0, day=11))
+    Needs three readings to be a real test: with only two, the post-gap
+    value is the sole weighted sample and the cap changes nothing, so the
+    assertion would pass either way.
+    """
+    self.session.add(self._snapshot("graph_gap", 0, 1.0))  # period start
+    self.session.add(self._snapshot("graph_gap", 6, 1.0))  # +6h, weight 6
+    # Sensor then goes dark for ~10 days and comes back on a bigger number.
+    self.session.add(self._snapshot("graph_gap", 0, 5.0, day=11))
     self.session.commit()
 
     summary = GraphUsage.get_monthly_storage_summary(
       graph_id="graph_gap", year=2024, month=2, session=self.session
     )["graph_gap"]
 
-    # Uncapped this would be 1 GB * 240h; the cap holds it to one span.
-    assert summary["total_gb_hours"] == pytest.approx(MAX_SNAPSHOT_WEIGHT_HOURS)
+    # Capped:   (1*6 + 5*24)  / 30  = 4.2
+    # Uncapped: (1*6 + 5*234) / 240 = 4.9  <- what this test rules out
+    assert summary["avg_storage_gb"] == pytest.approx(4.2)
 
   def _snapshot(self, graph_id: str, hour: int, storage_gb: float, day: int = 1):
     """A storage snapshot in Feb 2024, `hour` hours after the period start."""

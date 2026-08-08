@@ -330,7 +330,6 @@ class TestGetGraphUsageAnalytics:
         "avg_storage_gb": 5.0,
         "max_storage_gb": 8.0,
         "min_storage_gb": 2.0,
-        "total_gb_hours": 120.0,
         "measurement_count": 24,
       }
     }
