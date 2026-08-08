@@ -27,9 +27,31 @@ class TestLhsVariableNames:
     assert lhs_variable_names(parsed) == ["Assets"]
 
   def test_raises_when_not_an_equality(self) -> None:
-    parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
+    """A non-equality body is now refused at the gate, not here.
+
+    This used to parse and then raise on LHS extraction. The parser
+    enforces the same contract, so the tree can no longer be built —
+    which is the point of the change, not a gap in this test.
+    """
     with pytest.raises(InvalidRuleExpression):
-      lhs_variable_names(parsed)
+      parse_arithmetic_expression("$A + $B", ["A", "B"])
+
+  def test_require_single_equality_guards_a_handbuilt_tree(self) -> None:
+    """The function keeps its own guard for trees not built by the parser."""
+    import ast
+
+    from robosystems.operations.information_block.rules.expressions import (
+      ParsedExpression,
+      require_single_equality,
+    )
+
+    handbuilt = ParsedExpression(
+      tree=ast.parse("_var_A + _var_B", mode="eval"), variable_names=["A", "B"]
+    )
+    with pytest.raises(InvalidRuleExpression):
+      lhs_variable_names(handbuilt)
+    with pytest.raises(InvalidRuleExpression):
+      require_single_equality(handbuilt.tree.body)
 
 
 class TestParseArithmeticExpression:
@@ -66,10 +88,41 @@ class TestParseArithmeticExpression:
     with pytest.raises(InvalidRuleExpression, match="disallowed"):
       parse_arithmetic_expression("$A[0] = $B", ["A", "B"])
 
+  @pytest.mark.parametrize(
+    ("label", "expression", "names"),
+    [
+      ("string constant", '$Assets = "hello"', ["Assets"]),
+      ("none constant", "$Assets = None", ["Assets"]),
+      ("bool constant", "$Assets = True", ["Assets"]),
+      ("chained equality", "$Assets = $L = $E", ["Assets", "L", "E"]),
+    ],
+  )
+  def test_rejects_what_the_evaluator_cannot_evaluate(
+    self, label: str, expression: str, names: list[str]
+  ) -> None:
+    """Authoring must refuse anything evaluation would refuse.
+
+    Each of these passed the structural whitelist and then failed at
+    evaluation, so the rule saved cleanly and raised on every run for the
+    life of the rule. The bool case was worse: isinstance(True, int) is
+    True, so it evaluated silently as 1.0 rather than failing at all.
+    """
+    with pytest.raises(InvalidRuleExpression):
+      parse_arithmetic_expression(expression, names)
+
   def test_nested_arithmetic_parses(self) -> None:
     parsed = parse_arithmetic_expression(
       "$Total = ($A + $B + $C - $D)", ["Total", "A", "B", "C", "D"]
     )
+    assert parsed is not None
+
+  def test_shape_check_does_not_reject_a_valid_division(self) -> None:
+    """The dry-run binds a non-zero placeholder, or every ratio would 400.
+
+    Guards the obvious way to get the parse-time check wrong: binding 0.0
+    would trip the evaluator's division-by-zero guard on a sound rule.
+    """
+    parsed = parse_arithmetic_expression("$Ratio = $A / $B", ["Ratio", "A", "B"])
     assert parsed is not None
 
   def test_empty_variable_list_with_no_dollar_signs(self) -> None:
@@ -114,9 +167,22 @@ class TestEvaluateEquality:
     assert passed is True
 
   def test_raises_on_non_equality_expression(self) -> None:
-    parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
+    """Kept as the evaluator's own guard, on a tree the parser won't build.
+
+    The parser now rejects a non-equality body up front, so this can only
+    be reached by handing evaluate_equality a tree from somewhere else.
+    """
+    import ast
+
+    from robosystems.operations.information_block.rules.expressions import (
+      ParsedExpression,
+    )
+
+    handbuilt = ParsedExpression(
+      tree=ast.parse("_var_A + _var_B", mode="eval"), variable_names=["A", "B"]
+    )
     with pytest.raises(InvalidRuleExpression, match="equality pattern"):
-      evaluate_equality(parsed, {"A": 1.0, "B": 2.0})
+      evaluate_equality(handbuilt, {"A": 1.0, "B": 2.0})
 
   def test_unary_negation(self) -> None:
     parsed = parse_arithmetic_expression("$A = -$B", ["A", "B"])
@@ -210,9 +276,22 @@ class TestEvaluateDerivation:
       evaluate_derivation(parsed, {"A": 1.0})
 
   def test_non_equality_expression_raises(self) -> None:
-    parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
+    """The derivation guard survives the collapse, wording included.
+
+    Reachable only via a tree the parser didn't build, now that parsing
+    enforces the same contract.
+    """
+    import ast
+
+    from robosystems.operations.information_block.rules.expressions import (
+      ParsedExpression,
+    )
+
+    handbuilt = ParsedExpression(
+      tree=ast.parse("_var_A + _var_B", mode="eval"), variable_names=["A", "B"]
+    )
     with pytest.raises(InvalidRuleExpression, match="derivation expects"):
-      evaluate_derivation(parsed, {"A": 1.0, "B": 2.0})
+      evaluate_derivation(handbuilt, {"A": 1.0, "B": 2.0})
 
 
 class TestDesugarAggregates:
