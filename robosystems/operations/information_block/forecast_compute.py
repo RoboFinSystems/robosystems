@@ -992,6 +992,23 @@ def cmd_compute_forecast(
       f"A scenario whose structures carry no bound rules cannot be gated."
     )
 
+  # The scenario must hold exactly the months this run produced. Anything past
+  # the last one belongs to a longer previous run, and the month it chained
+  # from has just been rewritten underneath it — halting without this leaves
+  # the tail of the old forecast readable, and reading as verified.
+  if months_computed:
+    dropped = _invalidate_stale_tail(
+      session,
+      scenario_id=scenario_id,
+      entity_id=entity_id,
+      through_period_end=months_computed[-1].period_end,
+    )
+    if dropped:
+      diagnostics.append(
+        f"Dropped {dropped} scenario fact set(s) past {months_computed[-1].period}, "
+        f"left over from a longer previous run."
+      )
+
   session.flush()
   return ComputeForecastResponse(
     structure_id=structure.id,
@@ -1203,6 +1220,60 @@ def _verify_month_sets(
   if not any_results:
     return None, []
   return not failures, failures
+
+
+def _invalidate_stale_tail(
+  session: Session,
+  *,
+  scenario_id: str,
+  entity_id: str,
+  through_period_end: date,
+) -> int:
+  """Delete scenario sets beyond the last month this run produced.
+
+  The walk upserts month by month, so a run that halts at month 3 — or one
+  asked for a shorter horizon than the run before it — leaves the previous
+  run's months 4..N sitting in the scenario, fully queryable, each carrying
+  its own passing verification result. They do not merely go stale: every one
+  of them was chained off a month that has since been replaced, so they
+  describe a forecast that no longer exists while reading as current.
+
+  Safe to scope by ``scenario_id`` alone: it points at the owning forecast
+  block, and every set carrying it is produced here.
+
+  Facts cascade with their FactSet at the DB level;
+  ``VerificationResult.fact_set_id`` carries no FK, so those rows go
+  explicitly — the same sweep ``delete_scenario`` does.
+  """
+  stale = (
+    session.execute(
+      select(FactSet).where(
+        FactSet.scenario_id == scenario_id,
+        FactSet.entity_id == entity_id,
+        FactSet.period_end > through_period_end,
+      )
+    )
+    .scalars()
+    .all()
+  )
+  if not stale:
+    return 0
+
+  from robosystems.models.extensions import VerificationResult
+
+  set_ids = [fs.id for fs in stale]
+  for result in (
+    session.execute(
+      select(VerificationResult).where(VerificationResult.fact_set_id.in_(set_ids))
+    )
+    .scalars()
+    .all()
+  ):
+    session.delete(result)
+  for fact_set in stale:
+    session.delete(fact_set)
+  session.flush()
+  return len(set_ids)
 
 
 def _upsert_month_set(
