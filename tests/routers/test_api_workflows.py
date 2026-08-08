@@ -309,6 +309,53 @@ class TestAuthenticationWorkflow:
     new_user_data = new_login_response.json()["user"]
     assert new_user_data["email"] == "passwordchange@example.com"
 
+  @patch("robosystems.middleware.otel.metrics.get_endpoint_metrics")
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_password_change_invalidates_existing_sessions(
+    self, mock_get_metrics, client: TestClient, test_db
+  ):
+    """A password change must kill every JWT minted before it.
+
+    Covers the case where a stolen session is the reason the user is changing
+    their password at all: without the session_version bump the thief keeps
+    access until the token expires on its own.
+    """
+    mock_metrics_instance = MagicMock()
+    mock_get_metrics.return_value = mock_metrics_instance
+
+    registration_data = {
+      "name": "Session Invalidation User",
+      "email": "sessioninvalidation@example.com",
+      "password": "0r1g1n@lP@ssw0rd!",
+    }
+
+    register_response = client.post("/v1/auth/register", json=registration_data)
+    assert register_response.status_code == 201
+
+    auth_headers = {"Authorization": f"Bearer {register_response.json()['token']}"}
+
+    # The session authenticates before the change...
+    assert client.get("/v1/auth/me", headers=auth_headers).status_code == 200
+
+    password_change_data = {
+      "current_password": "0r1g1n@lP@ssw0rd!",
+      "new_password": "N3wS3cur3P@ssw0rd!456",
+      "confirm_password": "N3wS3cur3P@ssw0rd!456",
+    }
+
+    password_response = client.put(
+      "/v1/user/password", json=password_change_data, headers=auth_headers
+    )
+    assert password_response.status_code == 200
+
+    # ...and is rejected immediately after it.
+    assert client.get("/v1/auth/me", headers=auth_headers).status_code == 401
+
 
 class TestErrorHandlingWorkflow:
   """Test error handling and recovery workflows."""
