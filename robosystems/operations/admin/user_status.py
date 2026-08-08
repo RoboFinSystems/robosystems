@@ -29,6 +29,7 @@ class UserStatusChange:
   is_active: bool
   changed: bool
   api_keys_revoked: int
+  api_keys_failed: int = 0
 
 
 def set_user_active(
@@ -48,6 +49,11 @@ def set_user_active(
 
   Reactivation does **not** restore revoked keys: `UserAPIKey.deactivate` flips
   each key's own flag, and nothing flips it back. The user must issue new ones.
+
+  ``api_keys_revoked`` counts keys that were actually revoked, and
+  ``api_keys_failed`` the ones that were not. It used to report the number
+  found before the attempt, so a partial revocation — the case an operator
+  most needs to see, mid-incident — was indistinguishable from a clean one.
   """
   user = User.get_by_id(user_id, session)
   if not user:
@@ -56,12 +62,14 @@ def set_user_active(
   was_active = bool(user.is_active)
 
   if active:
+    found = 0
     revoked = 0
     user.activate(session)
   else:
-    # Count before the call: afterwards there are none left to count.
-    revoked = len(UserAPIKey.get_active_by_user_id(str(user.id), session))
-    user.deactivate(session)
+    found = len(UserAPIKey.get_active_by_user_id(str(user.id), session))
+    revoked = user.deactivate(session)
+
+  failed = found - revoked
 
   logger.info(
     f"User {user_id} {'activated' if active else 'deactivated'}",
@@ -70,6 +78,7 @@ def set_user_active(
       "actor": actor,
       "was_active": was_active,
       "api_keys_revoked": revoked,
+      "api_keys_failed": failed,
     },
   )
 
@@ -79,4 +88,5 @@ def set_user_active(
     is_active=active,
     changed=was_active != active,
     api_keys_revoked=revoked,
+    api_keys_failed=failed,
   )

@@ -182,6 +182,11 @@ def deactivate_user(client, identifier, yes):
 
   console.print(f"\n[green]Deactivated {result['email']}[/green]")
   console.print(f"  API keys revoked: {result['api_keys_revoked']}")
+  if result.get("api_keys_failed"):
+    console.print(
+      f"[red]  {result['api_keys_failed']} API key(s) could NOT be revoked — "
+      f"the account is only partially locked down. Re-run this command.[/red]"
+    )
   console.print("  All sessions invalidated.")
   if not result["changed"]:
     console.print("[yellow]  (was already inactive — re-ran the revocation)[/yellow]")

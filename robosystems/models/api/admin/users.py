@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserResponse(BaseModel):
@@ -79,7 +79,18 @@ class UserStatusResponse(BaseModel):
   email: str
   is_active: bool
   changed: bool
-  api_keys_revoked: int
+  api_keys_revoked: int = Field(
+    ..., description="API keys actually revoked, not the number attempted."
+  )
+  api_keys_failed: int = Field(
+    0,
+    description=(
+      "API keys that could not be revoked. Non-zero means the account is only "
+      "partially locked down — the surviving keys are refused by the "
+      "user.is_active guard, but the rows are still live. Re-run the "
+      "deactivation."
+    ),
+  )
 
 
 class UserActivityResponse(BaseModel):

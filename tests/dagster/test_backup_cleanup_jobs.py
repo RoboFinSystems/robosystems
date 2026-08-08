@@ -165,3 +165,96 @@ class TestOrphanedBackupCleanup:
   def test_unparseable_key_is_left_in_place(self):
     _, deleted = self._run([self._obj("graph-backups/databases/", 3650)], tracked=set())
     assert deleted == []
+
+
+class TestTrackedBackupCleanupRetries:
+  """A failed S3 delete must stay retryable.
+
+  Marking the row EXPIRED first dropped it out of `get_expired_backups`
+  forever, and the orphan sweep skips every key a row still references — so
+  one transient S3 error meant nothing retried the delete and the object rode
+  the 90-day lifecycle rule regardless of tier. A standard-tier backup
+  outlived its 7-day retention by twelve weeks on a single failed API call.
+  """
+
+  @staticmethod
+  def _run(delete_fails=False, metadata_key="meta/key"):
+    from unittest.mock import MagicMock, patch
+
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.backup_cleanup import cleanup_tracked_backups
+
+    backup = MagicMock()
+    backup.id = "bk_1"
+    backup.graph_id = "kg123"
+    backup.s3_bucket = "bucket"
+    backup.s3_key = "graph-backups/databases/kg123/full/backup-1.zip"
+    backup.s3_metadata_key = metadata_key
+
+    session = MagicMock()
+    db = MagicMock()
+    db.get_session.return_value.__enter__ = lambda *_: session
+    db.get_session.return_value.__exit__ = lambda *_: False
+
+    s3 = MagicMock()
+    if delete_fails:
+      s3.client.delete_object.side_effect = Exception("throttled")
+
+    with patch(
+      "robosystems.models.core.GraphBackup.get_expired_backups",
+      return_value=[backup],
+    ):
+      result = cleanup_tracked_backups(build_op_context(), db, s3)
+
+    return result, backup
+
+  @pytest.mark.unit
+  def test_expires_row_only_after_objects_are_gone(self):
+    result, backup = self._run()
+
+    assert result["expired_count"] == 1
+    assert result["deferred_count"] == 0
+    backup.expire_backup.assert_called_once()
+
+  @pytest.mark.unit
+  def test_failed_delete_leaves_row_unexpired_for_the_next_run(self):
+    result, backup = self._run(delete_fails=True)
+
+    assert result["expired_count"] == 0
+    assert result["deferred_count"] == 1
+    # Still un-EXPIRED, so tomorrow's get_expired_backups picks it up again.
+    backup.expire_backup.assert_not_called()
+
+  @pytest.mark.unit
+  def test_metadata_delete_failure_also_defers(self):
+    """Both objects have to go before the row is settled."""
+    from unittest.mock import MagicMock, patch
+
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.backup_cleanup import cleanup_tracked_backups
+
+    backup = MagicMock()
+    backup.id = "bk_1"
+    backup.graph_id = "kg123"
+    backup.s3_bucket = "bucket"
+    backup.s3_key = "key"
+    backup.s3_metadata_key = "meta"
+
+    session = MagicMock()
+    db = MagicMock()
+    db.get_session.return_value.__enter__ = lambda *_: session
+    db.get_session.return_value.__exit__ = lambda *_: False
+
+    s3 = MagicMock()
+    s3.client.delete_object.side_effect = [None, Exception("throttled")]
+
+    with patch(
+      "robosystems.models.core.GraphBackup.get_expired_backups",
+      return_value=[backup],
+    ):
+      result = cleanup_tracked_backups(build_op_context(), db, s3)
+
+    assert result["deferred_count"] == 1
+    backup.expire_backup.assert_not_called()

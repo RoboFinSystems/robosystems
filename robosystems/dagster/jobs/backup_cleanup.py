@@ -39,15 +39,26 @@ def cleanup_tracked_backups(
   db: DatabaseResource,
   s3: S3Resource,
 ) -> dict[str, Any]:
-  """Delete S3 objects and mark GraphBackup records as EXPIRED.
+  """Delete S3 objects, then mark the GraphBackup records EXPIRED.
 
   Covers both customer API backups and SEC pipeline backups,
   since both create GraphBackup records with expires_at.
+
+  Order matters, and it used to be the other way around. Marking the row
+  first drops it out of ``get_expired_backups`` forever, and the orphan sweep
+  skips every key a row still references — so a single transient S3 error
+  meant nothing ever retried the delete and the object rode the 90-day
+  lifecycle rule regardless of the graph's tier. A standard-tier backup
+  outlived its 7-day retention by twelve weeks on one failed API call.
+
+  Leaving the row un-expired is the retry: tomorrow's run picks it up again.
+  Deleting an absent key is a success in S3, so a row whose object is already
+  gone still settles on the next pass.
   """
   from robosystems.models.core import GraphBackup
 
   expired_count = 0
-  error_count = 0
+  deferred_count = 0
 
   with db.get_session() as session:
     expired_backups = GraphBackup.get_expired_backups(session)
@@ -55,41 +66,29 @@ def cleanup_tracked_backups(
 
     for backup in expired_backups:
       try:
-        # Mark record as expired FIRST — if S3 deletion fails afterward,
-        # the record is already expired and the S3 lifecycle rule (90 days)
-        # will clean up the orphaned object as a safety net.
-        backup.expire_backup(session)
+        s3.client.delete_object(Bucket=backup.s3_bucket, Key=backup.s3_key)
 
-        # Delete S3 backup object
-        try:
-          s3.client.delete_object(Bucket=backup.s3_bucket, Key=backup.s3_key)
-        except Exception as e:
-          context.log.warning(f"Failed to delete S3 object {backup.s3_key}: {e}")
-
-        # Delete S3 metadata object if present
         if backup.s3_metadata_key:
-          try:
-            s3.client.delete_object(Bucket=backup.s3_bucket, Key=backup.s3_metadata_key)
-          except Exception as e:
-            context.log.warning(
-              f"Failed to delete metadata {backup.s3_metadata_key}: {e}"
-            )
+          s3.client.delete_object(Bucket=backup.s3_bucket, Key=backup.s3_metadata_key)
 
+        backup.expire_backup(session)
         expired_count += 1
 
       except Exception as e:
-        context.log.error(
-          f"Failed to clean up backup {backup.id} for graph {backup.graph_id}: {e}"
+        # Deliberately left un-expired so the next daily run retries it.
+        context.log.warning(
+          f"Deferred cleanup of backup {backup.id} for graph {backup.graph_id} "
+          f"to the next run: {e}"
         )
-        error_count += 1
+        deferred_count += 1
 
   context.log.info(
-    f"Tracked backup cleanup: {expired_count} expired, {error_count} errors"
+    f"Tracked backup cleanup: {expired_count} expired, {deferred_count} deferred"
   )
 
   return {
     "expired_count": expired_count,
-    "error_count": error_count,
+    "deferred_count": deferred_count,
     "timestamp": datetime.now(UTC).isoformat(),
   }
 
@@ -188,9 +187,11 @@ def cleanup_orphaned_backups(
 
   try:
     with db.get_session() as session:
-      # Every key any row still points at, whatever its status. An EXPIRED row
-      # whose S3 delete failed is already the lifecycle rule's problem, and
-      # deleting it here would race op 1.
+      # Every key any row still points at, whatever its status — deleting one
+      # here would race op 1. Op 1 no longer strands anything behind this
+      # guard: a row is marked EXPIRED only once its objects are actually
+      # gone, so a failed delete stays visible to tomorrow's tracked sweep
+      # instead of becoming the lifecycle rule's problem.
       tracked_keys: set[str] = {
         key
         for (key,) in session.query(GraphBackup.s3_key).filter(
