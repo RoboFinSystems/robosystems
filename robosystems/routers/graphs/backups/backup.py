@@ -142,9 +142,7 @@ async def list_backups(
           node_count=backup.node_count or 0,
           relationship_count=backup.relationship_count or 0,
           backup_duration_seconds=backup.backup_duration_seconds or 0.0,
-          encryption_enabled=backup.encryption_enabled,
           compression_enabled=backup.compression_enabled,
-          allow_export=True,
           download_extension=(
             get_download_extension(backup.s3_key) if backup.s3_key else None
           ),

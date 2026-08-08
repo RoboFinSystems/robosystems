@@ -22,7 +22,6 @@ class TestBackupCreateRequest:
     assert model.backup_type == "full"
     assert model.retention_days == 30
     assert model.compression is True
-    assert model.encryption is False
     assert model.schedule is None
 
   def test_invalid_backup_format(self):
@@ -66,10 +65,6 @@ class TestBackupCreateRequest:
   def test_compression_true_accepted(self):
     model = BackupCreateRequest(compression=True)
     assert model.compression is True
-
-  def test_encryption_optional(self):
-    model = BackupCreateRequest(encryption=True)
-    assert model.encryption is True
 
   def test_schedule_optional(self):
     model = BackupCreateRequest(schedule="0 2 * * *")
@@ -125,9 +120,7 @@ class TestBackupResponse:
       node_count=100,
       relationship_count=200,
       backup_duration_seconds=5.5,
-      encryption_enabled=False,
       compression_enabled=True,
-      allow_export=True,
       created_at="2024-01-01T00:00:00Z",
       completed_at="2024-01-01T00:00:05Z",
       expires_at="2024-02-01T00:00:00Z",

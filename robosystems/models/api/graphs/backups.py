@@ -31,16 +31,6 @@ class BackupCreateRequest(BaseModel):
   compression: bool = Field(
     True, description="Enable compression (always enabled for optimal storage)"
   )
-  encryption: bool = Field(
-    False,
-    deprecated=True,
-    description=(
-      "Deprecated and ignored. Backups were never encrypted at the application "
-      "layer; the flag only suppressed downloads. Objects are encrypted at rest "
-      "with S3 SSE-AES256 and served over TLS through short-lived signed URLs. "
-      "Scheduled for removal in the next client major."
-    ),
-  )
   schedule: str | None = Field(
     None, description="Optional cron schedule for automated backups"
   )
@@ -70,27 +60,7 @@ class BackupResponse(BaseModel):
   node_count: int
   relationship_count: int
   backup_duration_seconds: float
-  # Deprecated but still required: the server always sends them, and dropping
-  # them out of `required` would widen the generated client types to
-  # `boolean | undefined` — a breaking read for every consumer, to no purpose.
-  encryption_enabled: bool = Field(
-    ...,
-    deprecated=True,
-    description=(
-      "Deprecated. Reports the historical value of the flag on this record and "
-      "no longer affects what you can do with the backup. Scheduled for removal "
-      "in the next client major."
-    ),
-  )
   compression_enabled: bool
-  allow_export: bool = Field(
-    ...,
-    deprecated=True,
-    description=(
-      "Deprecated, always true for a completed backup. Scheduled for removal in "
-      "the next client major."
-    ),
-  )
   download_extension: str | None = Field(
     None,
     description=(
