@@ -1130,3 +1130,107 @@ class TestStopTheWalk:
     assert len(response.months_computed) == 3
     assert all(m.verification_passed is None for m in response.months_computed)
     assert any("unverified, not verified" in d for d in response.diagnostics)
+
+
+class TestStaleTailInvalidation:
+  """A scenario must hold exactly the months the last run produced.
+
+  `_upsert_month_set` only touches months the walk reaches, so a run that
+  halts at month 3 — or one asked for a shorter horizon than the run before
+  it — used to leave the previous run's months 4..N in place. They stayed
+  fully queryable and carried their own passing verification results, while
+  the month they chained from had just been rewritten underneath them.
+  """
+
+  @staticmethod
+  def _session_with(stale_sets, verification_rows=()):
+    """A session whose first query returns fact sets, second verification rows."""
+    session = MagicMock()
+    results = [list(stale_sets), list(verification_rows)]
+    calls = []
+
+    def _execute(stmt):
+      calls.append(stmt)
+      out = MagicMock()
+      out.scalars.return_value.all.return_value = results.pop(0) if results else []
+      return out
+
+    session.execute.side_effect = _execute
+    return session
+
+  def test_drops_sets_past_the_last_computed_month(self) -> None:
+    from datetime import date
+
+    stale = [
+      SimpleNamespace(id="fs_oct"),
+      SimpleNamespace(id="fs_nov"),
+    ]
+    vr = [SimpleNamespace(id="vr_oct")]
+    session = self._session_with(stale, vr)
+
+    dropped = fc._invalidate_stale_tail(
+      session,
+      scenario_id="struct_budget",
+      entity_id="ent_1",
+      through_period_end=date(2026, 9, 30),
+    )
+
+    assert dropped == 2
+    deleted = [c.args[0] for c in session.delete.call_args_list]
+    # Verification rows carry no FK to fact_sets, so they must go explicitly
+    # or they orphan invisibly and keep reporting a pass.
+    assert vr[0] in deleted
+    assert stale[0] in deleted and stale[1] in deleted
+
+  def test_no_tail_is_a_no_op(self) -> None:
+    from datetime import date
+
+    session = self._session_with([])
+
+    assert (
+      fc._invalidate_stale_tail(
+        session,
+        scenario_id="struct_budget",
+        entity_id="ent_1",
+        through_period_end=date(2026, 9, 30),
+      )
+      == 0
+    )
+    session.delete.assert_not_called()
+
+  def test_halted_walk_invalidates_from_the_halt_month(self) -> None:
+    """The boundary is the last month actually produced, not the horizon."""
+    with patch.object(fc, "_invalidate_stale_tail", return_value=3) as mock_inv:
+      response, _ = _run(
+        _mechanics(FULL_LEVERS, horizon=6),
+        FULL_RULES,
+        FULL_LEVERS,
+        months=6,
+        verify=TestStopTheWalk._fail_on("2026-09"),
+      )
+
+    assert response.halted_at == "2026-09"
+    assert (
+      mock_inv.call_args.kwargs["through_period_end"]
+      == response.months_computed[-1].period_end
+    )
+    assert mock_inv.call_args.kwargs["scenario_id"] == "struct_budget"
+    assert any("past 2026-09" in d for d in response.diagnostics)
+
+  def test_shorter_horizon_invalidates_the_previous_tail(self) -> None:
+    """Not only halts: a 3-month rerun after a 12-month one has the same tail."""
+    with patch.object(fc, "_invalidate_stale_tail", return_value=9) as mock_inv:
+      response, _ = _run(
+        _mechanics(FULL_LEVERS, horizon=12),
+        FULL_RULES,
+        FULL_LEVERS,
+        months=3,
+        verify=lambda *a, **k: (True, []),
+      )
+
+    assert response.halted_at is None
+    assert len(response.months_computed) == 3
+    assert (
+      mock_inv.call_args.kwargs["through_period_end"]
+      == response.months_computed[-1].period_end
+    )
