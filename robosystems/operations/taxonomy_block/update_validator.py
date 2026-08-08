@@ -77,6 +77,33 @@ def validate_update_envelope(
   element_id_by_qname = {e.qname: e.id for e in current_elements if e.qname}
   trait_by_element_id = _load_efs_traits(session, current_elements)
 
+  # Elements without a qname cannot be projected: patches key on qname, and
+  # an association endpoint reconstructing as None crashes the request
+  # models. Report them once, legibly, and exclude them (and their arcs)
+  # from the projection so the rest of the update still validates. Adapter
+  # elements get their qname written at connection sync — the heal is a
+  # re-sync, not a manual repair.
+  missing_qname_element_ids = {str(e.id) for e in current_elements if not e.qname}
+  if missing_qname_element_ids:
+    unnamed = [e for e in current_elements if not e.qname]
+    issues.append(
+      ValidationIssue(
+        phase="projection",
+        code="element_missing_qname",
+        message=(
+          f"{len(unnamed)} element(s) in this taxonomy have no qname and "
+          "cannot be addressed or projected for update validation. "
+          "Adapter-loaded elements receive their qname during connection "
+          "sync — re-run the sync to heal them, then retry this update."
+        ),
+        context={
+          "count": len(unnamed),
+          "element_ids": [str(e.id) for e in unnamed[:20]],
+          "element_names": [str(e.name) for e in unnamed[:20]],
+        },
+      )
+    )
+
   _resolve_foreign_element_qnames(
     session, qname_by_element_id, current_elements, current_associations
   )
@@ -94,6 +121,8 @@ def validate_update_envelope(
 
   virtual_elements: list[TaxonomyBlockElementRequest] = []
   for e in current_elements:
+    if str(e.id) in missing_qname_element_ids:
+      continue  # reported once via element_missing_qname above
     qname = str(e.qname) if e.qname else ""
     if qname in elements_to_remove_qnames:
       continue
@@ -177,8 +206,13 @@ def validate_update_envelope(
       continue
     if a.structure_id in structures_to_remove:
       continue
-    from_qname = qname_by_element_id.get(a.from_element_id, "")
-    to_qname = qname_by_element_id.get(a.to_element_id, "")
+    if (
+      str(a.from_element_id) in missing_qname_element_ids
+      or str(a.to_element_id) in missing_qname_element_ids
+    ):
+      continue  # endpoint reported via element_missing_qname above
+    from_qname = qname_by_element_id.get(a.from_element_id, "") or ""
+    to_qname = qname_by_element_id.get(a.to_element_id, "") or ""
     if from_qname in elements_to_remove_qnames:
       continue
     if to_qname in elements_to_remove_qnames:

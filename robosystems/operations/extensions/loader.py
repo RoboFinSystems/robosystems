@@ -169,6 +169,100 @@ def _is_qb_contra_asset_sub_type(sub_type: str | None) -> bool:
   )
 
 
+# Contra-asset account-NAME markers — the fallback signal when the source
+# system's sub-type is uninformative. QuickBooks detail types are user-chosen:
+# an accumulated-amortization account created under a generic detail type
+# (e.g. "Other long-term assets") carries no contra sub-type at all, so the
+# sub-type rule alone silently misses it and the account lands as a plain
+# asset. An asset-classified account *named* for the accumulation convention
+# is a contra by accounting convention. Only consulted when the account_type
+# already classified the account as an asset, so equity Accumulated-* names
+# (AOCI) can never match.
+_CONTRA_ASSET_NAME_MARKERS: tuple[str, ...] = (
+  "accumulated depreciation",
+  "accumulated amortization",
+  "accumulated depletion",
+  "allowance for",
+)
+
+
+def _looks_like_contra_asset_name(name: str | None) -> bool:
+  if not name:
+    return False
+  lowered = name.lower()
+  return any(marker in lowered for marker in _CONTRA_ASSET_NAME_MARKERS)
+
+
+def _account_efs_identifier(meta: dict, name: str | None) -> str | None:
+  """Classify a source-system account into its FASB EFS trait identifier.
+
+  ``account_type`` drives the base classification; asset-typed accounts are
+  promoted to ``contraAsset`` on either signal — a known contra
+  ``account_sub_type``, or (fallback) a contra-convention account name.
+  Returns None when the account_type is missing or unknown; callers decide
+  whether that is a warning.
+  """
+  acct_type = meta.get("account_type")
+  if not acct_type:
+    return None
+  efs_identifier = _QB_ACCOUNT_TYPE_TO_TRAIT.get(acct_type)
+  if efs_identifier == "asset" and (
+    _is_qb_contra_asset_sub_type(meta.get("account_sub_type"))
+    or _looks_like_contra_asset_name(name)
+  ):
+    return "contraAsset"
+  return efs_identifier
+
+
+# qname prefix per adapter source. MUST stay in lockstep with the
+# materializer's Element projection (materialize.py ``tables["Element"]``),
+# which prefers the stored qname and falls back to this same
+# ``{prefix}:{code}`` derivation only for rows loaded before qnames were
+# written at sync time. The stored value is authoritative once healed.
+_ADAPTER_QNAME_PREFIXES: dict[str, str] = {
+  "quickbooks": "qb",
+  "xero": "xero",
+  "plaid": "plaid",
+}
+
+
+def _derive_adapter_qname(external_source: str | None, code: str | None) -> str | None:
+  """``qb:Intangible Assets:Accumulated Amortization``-style adapter qname.
+
+  Derived from the source system's fully-qualified account code, which the
+  source guarantees unique per book. Returns None for unknown sources or
+  blank codes — never guess an identity.
+  """
+  prefix = _ADAPTER_QNAME_PREFIXES.get(str(external_source or "").lower())
+  if not prefix or not code:
+    return None
+  return f"{prefix}:{code}"
+
+
+# Balance-sheet EFS classifications are stock concepts (point-in-time →
+# instant); everything else is a flow (duration). Mirrors
+# ``_INSTANT_CLASSIFICATIONS`` in operations/roboledger/commands/elements.py
+# — kept local so the sync path doesn't import the command layer.
+_INSTANT_EFS_IDENTIFIERS: frozenset[str] = frozenset(
+  {
+    "asset",
+    "contraAsset",
+    "liability",
+    "contraLiability",
+    "equity",
+    "contraEquity",
+    "temporaryEquity",
+  }
+)
+
+
+def _derive_element_period_type(efs_identifier: str | None) -> str:
+  """'instant' for stock classifications, 'duration' otherwise/unknown."""
+  if efs_identifier in _INSTANT_EFS_IDENTIFIERS:
+    return "instant"
+  return "duration"
+
+
 def _parse_metadata(raw) -> dict:
   """Parse metadata from dbt output — may be a dict, JSON string, or None."""
   if isinstance(raw, dict):
@@ -594,6 +688,58 @@ class OLTPLoader:
           ):
             existing_elements[str(el.external_id)] = el
 
+        # Adapter elements carry a derived qname (``{prefix}:{code}``) so
+        # they are addressable everywhere library elements are — envelope
+        # patches, the update validator's projection, and the OLAP graph
+        # (which now prefers this stored value over its own synthesis).
+        # Derived from the book-unique account code; healed on every sync
+        # (NULL from pre-qname loader versions, or a source-side rename
+        # moving the code).
+        desired_qnames: dict[str, str] = {}
+        for row in rows:
+          derived = _derive_adapter_qname(
+            str(row.get("external_source") or source), str(row["code"])
+          )
+          if derived:
+            desired_qnames[str(row["external_id"])] = derived
+
+        # qname uniqueness is schema-wide while the derivation is only
+        # book-unique — a second connection (or a native element) may
+        # already own the string. Fail loud and leave identity unset
+        # rather than stealing it or crashing the sync.
+        qname_owner_by_qname: dict[str, Element] = {}
+        if desired_qnames:
+          for el in (
+            session.query(Element)
+            .filter(Element.qname.in_(set(desired_qnames.values())))
+            .all()
+          ):
+            qname_owner_by_qname[str(el.qname)] = el
+
+        def _resolve_element_qname(ext_id: str) -> str | None:
+          desired = desired_qnames.get(ext_id)
+          if desired is None:
+            return None
+          owner = qname_owner_by_qname.get(desired)
+          if owner is None or (
+            str(owner.external_source or "") == source
+            and str(owner.connection_id or "") == str(connection_id)
+            and str(owner.external_id or "") == ext_id
+          ):
+            return desired
+          logger.warning(
+            "Element qname collision: %r is already owned by element %s "
+            "(source=%s connection=%s) — leaving qname unset for %s "
+            "account %s; resolve the collision, then re-sync to heal",
+            desired,
+            owner.id,
+            owner.external_source,
+            owner.connection_id,
+            source,
+            ext_id,
+          )
+          return None
+
         new_element_objects: list[Element] = []
         updated_count = 0
         for row in rows:
@@ -604,6 +750,10 @@ class OLTPLoader:
             if ext_parent and str(ext_parent) not in ("", "None", "nan")
             else None
           )
+
+          meta = _parse_metadata(row.get("metadata"))
+          efs_identifier = _account_efs_identifier(meta, str(row["name"]))
+          resolved_qname = _resolve_element_qname(ext_id)
 
           if ext_id in existing_elements:
             # UPDATE in place — preserve elem_* ULID.
@@ -617,7 +767,18 @@ class OLTPLoader:
             el.currency = str(row.get("currency", "USD"))
             el.is_active = bool(row.get("is_active", True))
             el.is_placeholder = bool(row.get("is_placeholder", False))
-            el.metadata_ = _parse_metadata(row.get("metadata"))
+            el.metadata_ = meta
+            # Heal XBRL-intrinsic metadata rows loaded before the loader
+            # wrote it (or drifted since): qname follows the source code;
+            # period_type follows the account's stock/flow classification.
+            if resolved_qname is not None and el.qname != resolved_qname:
+              el.qname = resolved_qname
+            if efs_identifier is not None:
+              desired_period_type = _derive_element_period_type(efs_identifier)
+              if el.period_type != desired_period_type:
+                el.period_type = desired_period_type
+            if el.item_type is None:
+              el.item_type = "monetary"
             el.updated_at = now
             element_lookup[ext_id] = el.id
             if parent_external:
@@ -635,6 +796,7 @@ class OLTPLoader:
                 code=str(row["code"]),
                 name=str(row["name"]),
                 description=str(row["description"]) if row.get("description") else None,
+                qname=resolved_qname,
                 balance_type=str(row["balance_type"]),
                 parent_id=None,  # resolved in second pass
                 depth=int(row.get("depth", 0)),
@@ -643,14 +805,15 @@ class OLTPLoader:
                 is_active=bool(row.get("is_active", True)),
                 is_placeholder=bool(row.get("is_placeholder", False)),
                 source=source,
-                period_type="duration",
+                period_type=_derive_element_period_type(efs_identifier),
                 element_type="concept",
                 is_abstract=False,
                 is_monetary=True,
+                item_type="monetary",
                 external_id=ext_id,
                 external_source=str(row["external_source"]),
                 connection_id=connection_id,
-                metadata_=_parse_metadata(row.get("metadata")),
+                metadata_=meta,
                 version=1,
                 created_at=now,
                 updated_at=now,
@@ -832,9 +995,14 @@ class OLTPLoader:
     liquidity instead of inferring it from the account name. Returns the
     number of rows actually inserted (EFS + liquidity).
 
-    Idempotent: skips elements that already carry an EFS trait (could
-    happen if a downstream classifier ran first), and uses an INSERT
-    with ON CONFLICT DO NOTHING to handle re-syncs cleanly.
+    Idempotent, and self-healing for adapter-written rows: an element
+    whose stored EFS trait no longer matches what this pass derives
+    (e.g. a contra-asset loaded before contra-promotion existed, stuck
+    on plain ``asset``) has its adapter-written rows replaced. Rows with
+    any other provenance (``source`` not equal to this adapter — the
+    envelope/manual path leaves source NULL) are deliberate overrides
+    and are never touched. Inserts use ON CONFLICT DO NOTHING to handle
+    re-syncs cleanly.
 
     Currently only QuickBooks is wired. Xero / NetSuite layer in by
     adding their classification dict + a source check. The cross-source
@@ -890,7 +1058,26 @@ class OLTPLoader:
       .all()
     )
 
+    # Existing EFS rows per element — loaded so a stale adapter-written
+    # classification can be HEALED, not just left alongside a new row.
+    # Joined on category rather than the adapter's identifier set so a
+    # manual override pointing at any EFS trait is still seen (and
+    # protected) here.
+    existing_efs_rows: dict[str, list[ElementTrait]] = {}
+    if elements:
+      for et, _t in (
+        session.query(ElementTrait, Trait)
+        .join(Trait, ElementTrait.trait_id == Trait.id)
+        .filter(
+          Trait.category == "elementsOfFinancialStatements",
+          ElementTrait.element_id.in_([e.id for e in elements]),
+        )
+        .all()
+      ):
+        existing_efs_rows.setdefault(str(et.element_id), []).append(et)
+
     rows: list[ElementTrait] = []
+    healed = 0
 
     def _trait_row(element_id: str, trait_id: str) -> ElementTrait:
       return ElementTrait(
@@ -909,7 +1096,12 @@ class OLTPLoader:
       acct_type = meta.get("account_type")
       if not acct_type:
         continue
-      efs_identifier = type_to_efs.get(acct_type)
+      # ``_account_efs_identifier`` carries the contra-asset promotion:
+      # asset-typed accounts flip to ``contraAsset`` on a known contra
+      # AccountSubType OR a contra-convention account name (the fallback
+      # for user-chosen generic detail types). The asset guard inside it
+      # keeps equity Accumulated-* names (AOCI) from ever matching.
+      efs_identifier = _account_efs_identifier(meta, str(elem.name))
       if efs_identifier is None:
         # Unknown source-system AccountType — log so unmapped types
         # surface in sync logs rather than silently producing
@@ -921,20 +1113,28 @@ class OLTPLoader:
           elem.id,
         )
         continue
-      # A contra-asset is asset-typed in QB but offsets the gross asset —
-      # override the account_type's plain ``asset`` trait with
-      # ``contraAsset`` so rollups subtract it and the schedule generator
-      # rolls it forward in the accumulate (not deplete) direction. Guard on
-      # the asset classification so a non-asset Accumulated-* sub-type (e.g.
-      # the equity AccumulatedOtherComprehensiveIncome) can never be
-      # mislabeled as a contra-asset.
-      if efs_identifier == "asset" and _is_qb_contra_asset_sub_type(
-        meta.get("account_sub_type")
-      ):
-        efs_identifier = "contraAsset"
       efs_trait_id = efs_id_by_identifier.get(efs_identifier)
       if efs_trait_id is not None:
-        rows.append(_trait_row(elem.id, efs_trait_id))
+        current_rows = existing_efs_rows.get(str(elem.id), [])
+        if not current_rows:
+          rows.append(_trait_row(elem.id, efs_trait_id))
+        elif all(str(r.trait_id) == str(efs_trait_id) for r in current_rows):
+          pass  # already classified correctly
+        elif all((r.source or "") == source for r in current_rows):
+          # Every existing EFS row was written by this adapter and no
+          # longer matches the derived classification — heal in place.
+          for stale_row in current_rows:
+            session.delete(stale_row)
+          rows.append(_trait_row(elem.id, efs_trait_id))
+          healed += 1
+        else:
+          logger.debug(
+            "Element %s EFS trait differs from %s derivation (%s) but "
+            "carries non-adapter provenance — leaving the override",
+            elem.id,
+            source,
+            efs_identifier,
+          )
 
       # Liquidity (current / noncurrent) — assets & liabilities only;
       # absent for equity / revenue / expense. Additive narrowing signal.
@@ -944,6 +1144,12 @@ class OLTPLoader:
         if liquidity_trait_id is not None:
           rows.append(_trait_row(elem.id, liquidity_trait_id))
 
+    if healed:
+      logger.info(
+        "Healed %d stale adapter-written EFS trait assignment(s) from %s",
+        healed,
+        source,
+      )
     if not rows:
       return 0
 
