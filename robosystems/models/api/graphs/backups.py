@@ -70,8 +70,11 @@ class BackupResponse(BaseModel):
   node_count: int
   relationship_count: int
   backup_duration_seconds: float
+  # Deprecated but still required: the server always sends them, and dropping
+  # them out of `required` would widen the generated client types to
+  # `boolean | undefined` — a breaking read for every consumer, to no purpose.
   encryption_enabled: bool = Field(
-    False,
+    ...,
     deprecated=True,
     description=(
       "Deprecated. Reports the historical value of the flag on this record and "
@@ -81,7 +84,7 @@ class BackupResponse(BaseModel):
   )
   compression_enabled: bool
   allow_export: bool = Field(
-    True,
+    ...,
     deprecated=True,
     description=(
       "Deprecated, always true for a completed backup. Scheduled for removal in "
