@@ -769,6 +769,8 @@ async def call_mcp_tool(
             graph_id=graph_id,
           )
 
+          operation_id = sse_response["operation_id"]
+
           if strategy == MCPExecutionStrategy.QUEUE_WITH_MONITORING:
 
             async def monitor_queue():
@@ -797,8 +799,8 @@ async def call_mcp_tool(
               status_code=http_status.HTTP_202_ACCEPTED,
               content={
                 "queued": True,
-                "operation_id": sse_response.operation_id,  # Unified SSE operation ID
-                "monitor_url": f"/v1/operations/{sse_response.operation_id}/stream",  # Unified monitoring only
+                "operation_id": operation_id,
+                "monitor_url": sse_response["_links"]["stream"],
                 "message": "Tool execution queued. Monitor via SSE endpoint.",
               },
             )

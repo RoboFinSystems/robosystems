@@ -331,7 +331,7 @@ async def execute_cypher_query(
         current_user=current_user,
         priority=_get_user_priority(current_user),
         chunk_size=chunk_size,
-        operation_id=sse_response.operation_id,  # Pass operation_id for unified events
+        operation_id=sse_response["operation_id"],
       )
 
     elif strategy == ExecutionStrategy.SSE_STREAMING:
