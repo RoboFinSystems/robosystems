@@ -301,12 +301,11 @@ class UserAPIKey(Model):
     ``key_hash`` (see ``_hash_api_key`` below). This SHA-256 is solely a
     deterministic lookup fingerprint so the cache key derived from the
     plaintext (``sha256(plain_key)``) matches what ``_invalidate_cache``
-    reads off the row. CodeQL's "weak hash on sensitive data" rule is a
-    false positive here — silenced via lgtm[py/weak-sensitive-data-hashing].
+    reads off the row. A KDF would be the wrong tool: those exist to make
+    low-entropy human secrets expensive to guess, and an API key is
+    generated at full entropy.
     """
-    return hashlib.sha256(  # lgtm[py/weak-sensitive-data-hashing]
-      plain_key.encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(plain_key.encode("utf-8")).hexdigest()
 
   @staticmethod
   def _hash_api_key(plain_key: str) -> str:
