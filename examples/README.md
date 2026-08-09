@@ -2,8 +2,9 @@
 
 Runnable demos that load real and synthetic data into RoboSystems and query it
 back. Each one is a working reference for a different slice of the platform:
-double-entry accounting on a graph, SEC XBRL filings, a custom domain schema,
-and cross-taxonomy financial reporting.
+double-entry accounting on a graph, a venture portfolio with a cross-graph
+report share, SEC XBRL filings, a custom domain schema, and cross-taxonomy
+financial reporting.
 
 ## Prerequisites
 
@@ -24,6 +25,7 @@ just demo
 
 # Or pick one
 just demo-roboledger
+just demo-roboinvestor
 just demo-custom-graph
 just demo-sec --ticker NVDA --year 2025
 ```
@@ -113,6 +115,41 @@ Three things differ off-local, all deliberate:
 - **The graph must already exist.** Provision it the way a customer would
   (checkout, or `POST /v1/graphs` with a payment method on file) and pass its
   id; the runner will not create one on a deployed environment.
+
+### RoboInvestor — a venture portfolio, and a report that crosses graphs
+
+`examples/roboinvestor_demo/` · [walkthrough](roboinvestor_demo/README.md)
+
+The investment side, and the only demo that spans two tenants. Meridian
+Ventures Fund I holds five private instruments — a Series A preferred, a
+bridge warrant, a post-money SAFE, LLC units, and a seed position that
+gets disposed mid-run. Two of them are issued by Cadence Labs, which keeps
+its books on this platform, so the fund declares the relationship with
+`source_graph_id` before any link exists.
+
+Cadence then shares its filed annual report into the fund's graph. That
+share creates a linked entity, resolves both pre-associated securities,
+and makes one query possible:
+
+```
+Portfolio → Position → Security → Entity → Report → Fact
+```
+
+A private holding joined to its issuer's reported financials — the thing
+a single-tenant product cannot offer.
+
+```bash
+just demo-roboinvestor                  # provisions both graphs, runs everything
+just demo-roboinvestor --skip-share     # portfolio surface only, no handshake
+just demo-roboinvestor --revoke         # also withdraw the share at the end
+just demo-roboinvestor --dry-run        # preview the portfolio, write nothing
+```
+
+The issuer is the `saas_startup` scenario, provisioned inline on the first
+run and reused afterwards. The run ends with a hard validation pass and
+exits non-zero if any invariant fails — including that every RoboInvestor
+write marked its graph stale, which is the check that materialization
+depends on.
 
 ### SEC — public company financial data
 
