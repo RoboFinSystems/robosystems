@@ -670,12 +670,12 @@ def create_mappings(
   offset = 0
   while True:
     page = client.list_elements(graph_id, source="rs-gaap", limit=1000, offset=offset)
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        rs_gaap_by_qname[e["qname"]] = e["id"]
+      if e.qname:
+        rs_gaap_by_qname[e.qname] = e.id
     if len(items) < 1000:
       break
     offset += 1000
@@ -731,7 +731,7 @@ def create_disclosure_notes(
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
   rs_gaap = next(
-    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+    (t for t in taxonomies if (t.standard or "").startswith("rs-gaap")), None
   )
   if rs_gaap is None:
     print("  ERROR: rs-gaap reporting standard not found in graph")
@@ -955,7 +955,7 @@ def create_text_block_notes(
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
   rs_gaap = next(
-    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+    (t for t in taxonomies if (t.standard or "").startswith("rs-gaap")), None
   )
   if rs_gaap is None:
     print("  ERROR: rs-gaap reporting standard not found in graph")
@@ -1058,28 +1058,26 @@ def verify_disclosure_notes(graph_id: str) -> None:
     print("  WARNING: no disclosure notes rendered")
     return
   for block in blocks:
-    # parse_information_blocks snake_cases every key.
-    name = block.get("name") or block.get("display_name") or block.get("id")
-    facts = block.get("facts") or []
-    summary = block.get("verification_summary") or {}
-    rendering = (block.get("view") or {}).get("rendering") or {}
-    rows = rendering.get("rows") or []
+    name = block.name or block.display_name or block.id
+    facts = block.facts or []
+    summary = block.verification_summary
+    rendering = block.view.rendering if block.view else None
+    rows = (rendering.rows if rendering else None) or []
     print(f"  {name}: {len(facts)} facts, {len(rows)} rendered rows")
     for row in rows:
-      text_value = row.get("text_value")
-      if text_value:
+      if row.text_value:
         # Text-block row — show the narrative head, not a numeric column.
-        head = " ".join(str(text_value).split())[:100]
-        print(f"      {row.get('element_name')}: “{head}…”")
+        head = " ".join(str(row.text_value).split())[:100]
+        print(f"      {row.element_name}: “{head}…”")
         continue
-      values = row.get("values") or []
+      values = row.values or []
       latest = values[-1] if values else None
-      marker = "Σ" if row.get("is_subtotal") else " "
+      marker = "Σ" if row.is_subtotal else " "
       # Report fact values are natural-signed dollars (not cents).
       amount = f"${latest:,.2f}" if isinstance(latest, (int, float)) else "—"
-      print(f"    {marker} {row.get('element_name')}: {amount}")
-    passed = summary.get("passed", 0)
-    total = summary.get("total", 0)
+      print(f"    {marker} {row.element_name}: {amount}")
+    passed = summary.passed if summary else 0
+    total = summary.total if summary else 0
     if total:
       print(f"    Verification: {passed}/{total} rules passed")
 
@@ -1163,11 +1161,9 @@ def verify_metrics(
     return
   # Pick the library-seeded catalog by name — tenant-authored metric
   # blocks (create_custom_metrics) share the block_type.
-  block = next(
-    (b for b in blocks if b.get("name") == "Key Financial Metrics"), blocks[0]
-  )
-  structure_id = block.get("id")
-  print(f"  Metric block: {block.get('name')} ({structure_id})")
+  block = next((b for b in blocks if b.name == "Key Financial Metrics"), blocks[0])
+  structure_id = block.id
+  print(f"  Metric block: {block.name} ({structure_id})")
 
   windows = _metric_period_windows(scenario, period_windows)
   if not windows:
@@ -1195,20 +1191,20 @@ def verify_metrics(
   # Re-read the block — the standing sets are now the rendered series.
   blocks = client.list_information_blocks(graph_id, block_type="metric")
   block = next(
-    (b for b in blocks if b.get("name") == "Key Financial Metrics"),
+    (b for b in blocks if b.name == "Key Financial Metrics"),
     blocks[0] if blocks else None,
   )
-  rendering = ((block.get("view") or {}).get("rendering") or {}) if block else {}
-  periods = rendering.get("periods") or []
-  rows = rendering.get("rows") or []
+  rendering = block.view.rendering if block and block.view else None
+  periods = (rendering.periods if rendering else None) or []
+  rows = (rendering.rows if rendering else None) or []
   print(f"  Time series: {len(periods)} period(s), {len(rows)} metric row(s)")
   current_ratio = next(
-    (r for r in rows if r.get("element_qname") == "rs-metric:CurrentRatio"), None
+    (r for r in rows if r.element_qname == "rs-metric:CurrentRatio"), None
   )
   if current_ratio is None:
     print("  WARNING: Current Ratio row missing from the rendering")
     return
-  values = current_ratio.get("values") or []
+  values = current_ratio.values or []
   print(f"    Current Ratio series: {values}")
   numeric = [v for v in values if isinstance(v, (int, float))]
   if len(periods) >= len(windows) and len(numeric) >= len(windows):
@@ -1244,7 +1240,7 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
   rs_gaap = next(
-    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+    (t for t in taxonomies if (t.standard or "").startswith("rs-gaap")), None
   )
   if rs_gaap is None:
     print("  ERROR: rs-gaap reporting standard not found in graph")
@@ -1339,7 +1335,7 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
       continue
 
     structures = client.list_structures(graph_id, block_type="metric")
-    structure = next((s for s in structures if s.get("name") == struct_name), None)
+    structure = next((s for s in structures if s.name == struct_name), None)
     if structure is None:
       print(f"  ERROR: metric structure {struct_name!r} not found after create")
       continue
@@ -1436,9 +1432,9 @@ def _statement_block_id(graph_id: str, block_type: str) -> str | None:
   client = _get_ledger_client()
   blocks = client.list_information_blocks(graph_id, block_type=block_type)
   for block in blocks:
-    if block.get("facts"):
-      return block.get("id")
-  return blocks[0].get("id") if blocks else None
+    if block.facts:
+      return block.id
+  return blocks[0].id if blocks else None
 
 
 def run_forecast_scenario(
@@ -1635,12 +1631,12 @@ def run_forecast_scenario(
   client = _get_ledger_client()
   blocks = client.list_information_blocks(graph_id, block_type="metric")
   metric_block = next(
-    (b for b in blocks if b.get("name") == "Key Financial Metrics"),
+    (b for b in blocks if b.name == "Key Financial Metrics"),
     blocks[0] if blocks else None,
   )
   if metric_block is None:
     return scenario_id
-  metric_id = metric_block.get("id")
+  metric_id = metric_block.id
   actual_rendering = _graphql_rendering(graph_id, metric_id, headers)
   actual_periods = len(actual_rendering.get("periods") or [])
 
@@ -2151,24 +2147,18 @@ def generate_annual_report(
   # Pull the package to confirm it rehydrates
   package = client.get_report_package(graph_id, report_id)
   if package:
-    items = package.get("items", []) or []
+    items = package.items or []
     # `block_type` lives nested at item.block.block_type on the
     # rehydrated InformationBlockEnvelope, not on the item itself.
-    block_names = [
-      (i.get("block") or {}).get("name")
-      or (i.get("block") or {}).get("block_type")
-      or "?"
-      for i in items
-    ]
+    block_names = [i.block.name or i.block.block_type or "?" for i in items]
     print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
 
     # Fact provenance — every FactSet records how its facts were
     # constructed (the auditability spine). Surfaced via the SDK on
-    # block.fact_set.provenance; report blocks pivot from the posted ledger.
+    # block.fact_set.provenance; report blocks pivot from the posted
+    # ledger. `provenance` is a JSON scalar, so it stays a dict.
     origins = [
-      (((i.get("block") or {}).get("fact_set") or {}).get("provenance") or {}).get(
-        "origin"
-      )
+      ((i.block.fact_set.provenance or {}).get("origin") if i.block.fact_set else None)
       for i in items
     ]
     if origins and all(origins):
