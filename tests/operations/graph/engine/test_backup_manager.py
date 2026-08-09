@@ -224,7 +224,7 @@ class TestBackupManager:
       mock_get_repo.side_effect = mock_get_graph_repository
 
       # Mock export to return backup data
-      mock_export.return_value = (b"backup_data", "zip")
+      mock_export.return_value = (b"backup_data", "zip", None)
 
       # Mock S3 upload failure
       backup_manager.s3_adapter.upload_backup = AsyncMock(
@@ -270,11 +270,15 @@ class TestBackupManager:
 
         # Mock export to return appropriate data and extension based on format
         if backup_format == BackupFormat.CSV:
-          mock_export.return_value = (b"col1,col2\nval1,val2\n", "zip")
+          mock_export.return_value = (b"col1,col2\nval1,val2\n", "zip", None)
         elif backup_format == BackupFormat.JSON:
-          mock_export.return_value = (b'[{"col1": "val1", "col2": "val2"}]', "zip")
+          mock_export.return_value = (
+            b'[{"col1": "val1", "col2": "val2"}]',
+            "zip",
+            None,
+          )
         elif backup_format == BackupFormat.PARQUET:
-          mock_export.return_value = (b"parquet_data", "zip")
+          mock_export.return_value = (b"parquet_data", "zip", None)
 
         # Mock S3 upload
         mock_backup_metadata = MagicMock()

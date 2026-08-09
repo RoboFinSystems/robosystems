@@ -34,6 +34,77 @@ from ....middleware.graph import get_universal_repository
 from ....middleware.graph.utils import MultiTenantUtils
 
 
+class BackupPayloadMismatch(RuntimeError):
+  """The archive's contents disagree with the database it claims to back up."""
+
+
+def _reconcile_payload_against_stats(
+  graph_id: str,
+  stats: dict[str, Any],
+  payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+  """Check the archive holds what the record is about to claim.
+
+  The record's counts come from a live query while the archive is produced
+  separately, and nothing used to compare them — so a backup could report
+  ``completed, node_count: 23`` over an archive containing nothing at all.
+
+  **The check is deliberately not strict equality.** The live count is read
+  before the export, so any write in between moves the numbers legitimately;
+  failing on that would make a nightly backup flap red on an active graph, and
+  a job that cries wolf is one nobody reads. Instead:
+
+  - **an empty archive over a non-empty database fails the backup.** That is
+    the entire dropped-WAL failure class, and it has no benign explanation — a
+    graph does not go from thousands of nodes to zero between two adjacent
+    operations.
+  - **any other difference is recorded, not raised.** It rides in the backup
+    metadata as ``payload_delta`` so drift is visible and reviewable without
+    being load-bearing.
+
+  Skipped when the payload was not measured: export formats have no artifact to
+  reconcile, and a graph node predating the measurement sends no counts. Both
+  arrive as ``None``, meaning "no claim" — treating that as zero would fail
+  every backup taken against an older node.
+  """
+  if payload is None:
+    return None
+
+  payload_nodes = payload.get("node_count")
+  payload_rels = payload.get("relationship_count")
+  if payload_nodes is None or payload_rels is None:
+    logger.info(
+      f"Backup payload for '{graph_id}' was not measured; skipping reconciliation"
+    )
+    return None
+
+  live_nodes = stats.get("node_count", 0) or 0
+  live_rels = stats.get("relationship_count", 0) or 0
+
+  if payload_nodes == 0 and payload_rels == 0 and (live_nodes or live_rels):
+    raise BackupPayloadMismatch(
+      f"Backup archive for '{graph_id}' is empty while the database holds "
+      f"{live_nodes} nodes / {live_rels} relationships. Refusing to record a "
+      f"completed backup over an archive with no contents."
+    )
+
+  if payload_nodes != live_nodes or payload_rels != live_rels:
+    delta = {
+      "payload_node_count": payload_nodes,
+      "payload_relationship_count": payload_rels,
+      "live_node_count": live_nodes,
+      "live_relationship_count": live_rels,
+    }
+    logger.warning(
+      f"Backup archive for '{graph_id}' differs from the live database "
+      f"({payload_nodes}/{payload_rels} vs {live_nodes}/{live_rels}); "
+      f"expected when the graph is written during the backup"
+    )
+    return delta
+
+  return None
+
+
 def restore_unsupported_reason(graph_id: str, db) -> tuple[int, str] | None:
   """Why this graph can't be restored to as ``(status_code, detail)``, or None.
 
@@ -410,9 +481,11 @@ class BackupManager:
     try:
       stats = await self._get_database_stats(graph_id)
 
-      backup_data, file_extension = await self._export_database(
+      backup_data, file_extension, payload = await self._export_database(
         graph_id, backup_job.backup_format, backup_job.backup_type
       )
+
+      payload_delta = _reconcile_payload_against_stats(graph_id, stats, payload)
 
       backup_duration = asyncio.get_event_loop().time() - start_time
 
@@ -424,6 +497,10 @@ class BackupManager:
         "database_engine": "graph",
         "compression_enabled": backup_job.compression,
       }
+      if payload and payload.get("memory") is not None:
+        metadata["memory"] = payload["memory"]
+      if payload_delta is not None:
+        metadata["payload_delta"] = payload_delta
 
       backup_metadata = await self.s3_adapter.upload_backup(
         graph_id=graph_id,
@@ -565,14 +642,23 @@ class BackupManager:
 
   async def _export_database(
     self, graph_id: str, backup_format: BackupFormat, backup_type: BackupType
-  ) -> tuple[bytes, str]:
-    """Dispatch to the per-format exporter. Returns ``(data, file_extension)``."""
+  ) -> tuple[bytes, str, dict[str, Any] | None]:
+    """Dispatch to the per-format exporter.
+
+    Returns ``(data, file_extension, payload_measurement)``. Only the full dump
+    measures itself — the export formats are re-serializations of query results
+    rather than a copy of the database file, so there is no artifact to
+    reconcile. ``None`` therefore means "not applicable", not "did not match".
+    """
     if backup_format == BackupFormat.CSV:
-      return await self._export_to_csv(graph_id, backup_type)
+      data, ext = await self._export_to_csv(graph_id, backup_type)
+      return data, ext, None
     elif backup_format == BackupFormat.JSON:
-      return await self._export_to_json(graph_id, backup_type)
+      data, ext = await self._export_to_json(graph_id, backup_type)
+      return data, ext, None
     elif backup_format == BackupFormat.PARQUET:
-      return await self._export_to_parquet(graph_id, backup_type)
+      data, ext = await self._export_to_parquet(graph_id, backup_type)
+      return data, ext, None
     elif backup_format == BackupFormat.FULL_DUMP:
       return await self._export_full_dump(graph_id, backup_type)
     else:
@@ -945,11 +1031,15 @@ class BackupManager:
 
   async def _export_full_dump(
     self, graph_id: str, backup_type: BackupType
-  ) -> tuple[bytes, str]:
+  ) -> tuple[bytes, str, dict[str, Any] | None]:
     """Pull the on-disk database through the Graph API, not the filesystem.
 
     The worker doesn't share a volume with the graph nodes, so the dump has to
     cross the container boundary as an HTTP response.
+
+    The third element carries what the *payload* contains, measured on the copy
+    at dump time, so the caller can check it against the live database rather
+    than trusting that they agree.
     """
     logger.info(f"Creating full dump for graph '{graph_id}' via Graph API")
 
@@ -969,7 +1059,12 @@ class BackupManager:
         f"Successfully retrieved backup from Graph API: {len(backup_data)} bytes"
       )
 
-      return backup_data, ".lbug.zip"
+      payload = {
+        "node_count": response.get("payload_node_count"),
+        "relationship_count": response.get("payload_relationship_count"),
+        "memory": response.get("memory"),
+      }
+      return backup_data, ".lbug.zip", payload
 
     except Exception as e:
       logger.error(f"Failed to create backup via Graph API for {graph_id}: {e}")
