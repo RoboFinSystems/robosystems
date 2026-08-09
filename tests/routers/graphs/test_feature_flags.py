@@ -571,6 +571,13 @@ class TestGraphOperationFeatureFlags:
             "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
             return_value=False,
           ),
+          # The daily quota reads the platform DB, which this test mocks
+          # wholesale. Stub the count so the flag under test is the only thing
+          # deciding the outcome.
+          patch(
+            "robosystems.models.core.GraphBackup.count_user_initiated_today",
+            return_value=0,
+          ),
           patch(
             "robosystems.worker.client.enqueue_task",
             new_callable=AsyncMock,

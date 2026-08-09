@@ -22,6 +22,7 @@ from .billing import (
 from .connection import Connection, ConnectionCredentials, ConnectionStatus
 from .document import Document
 from .graph import (
+  BackupInitiator,
   BackupStatus,
   BackupType,
   CreditTransactionType,
@@ -61,6 +62,7 @@ from .user import (
 )
 
 __all__ = [
+  "BackupInitiator",
   "BackupStatus",
   "BackupType",
   "BillingAuditLog",

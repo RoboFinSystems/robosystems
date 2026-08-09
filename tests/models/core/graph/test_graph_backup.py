@@ -4,7 +4,11 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 from robosystems.models.core import GraphBackup, User
-from robosystems.models.core.graph.graph_backup import BackupStatus, BackupType
+from robosystems.models.core.graph.graph_backup import (
+  BackupInitiator,
+  BackupStatus,
+  BackupType,
+)
 
 
 class TestGraphBackupModel:
@@ -783,3 +787,74 @@ class TestGraphBackupModel:
     assert backup.created_by_user_id == user.id
     assert backup.created_by_user is not None
     assert backup.created_by_user.email == "relation@example.com"
+
+
+class TestDailyBackupQuotaCounting:
+  """`max_backups_per_day` was published by /limits and /tiers but enforced
+  nowhere. These pin the counting rules the enforcement depends on."""
+
+  def _make(self, db_session, graph_id, **kwargs):
+    return GraphBackup.create(
+      graph_id=graph_id,
+      database_name=f"{graph_id}_db",
+      backup_type=BackupType.FULL.value,
+      s3_bucket="bucket",
+      s3_key=f"backups/{graph_id}/x.zip",
+      session=db_session,
+      **kwargs,
+    )
+
+  def test_counts_only_user_initiated(self, db_session):
+    """A scheduled backup must not consume the customer's allowance.
+
+    The entry tier allows two per day; charging one to the nightly platform
+    job would take half of it for something they never asked for.
+    """
+    self._make(db_session, "kg_quota_a", initiated_by=BackupInitiator.USER.value)
+    self._make(db_session, "kg_quota_a", initiated_by=BackupInitiator.SCHEDULED.value)
+    self._make(db_session, "kg_quota_a", initiated_by=BackupInitiator.SYSTEM.value)
+
+    assert GraphBackup.count_user_initiated_today("kg_quota_a", db_session) == 1
+
+  def test_excludes_failed_attempts(self, db_session):
+    """A backup that errored should not burn the day's allowance."""
+    self._make(
+      db_session,
+      "kg_quota_b",
+      initiated_by=BackupInitiator.USER.value,
+      status=BackupStatus.FAILED.value,
+    )
+    self._make(
+      db_session,
+      "kg_quota_b",
+      initiated_by=BackupInitiator.USER.value,
+      status=BackupStatus.COMPLETED.value,
+    )
+
+    assert GraphBackup.count_user_initiated_today("kg_quota_b", db_session) == 1
+
+  def test_scoped_to_the_graph(self, db_session):
+    self._make(db_session, "kg_quota_c", initiated_by=BackupInitiator.USER.value)
+    self._make(db_session, "kg_quota_d", initiated_by=BackupInitiator.USER.value)
+
+    assert GraphBackup.count_user_initiated_today("kg_quota_c", db_session) == 1
+
+  def test_ignores_earlier_days(self, db_session):
+    """The window is the current UTC day, not a rolling 24 hours."""
+    stale = self._make(
+      db_session, "kg_quota_e", initiated_by=BackupInitiator.USER.value
+    )
+    stale.created_at = datetime.now(UTC) - timedelta(days=1)
+    db_session.commit()
+
+    assert GraphBackup.count_user_initiated_today("kg_quota_e", db_session) == 0
+
+  def test_defaults_to_user_initiated(self, db_session):
+    """Rows written without an explicit initiator count against the quota.
+
+    Anything the platform starts sets it deliberately, so an unset value
+    means a caller asked for it.
+    """
+    self._make(db_session, "kg_quota_f")
+
+    assert GraphBackup.count_user_initiated_today("kg_quota_f", db_session) == 1

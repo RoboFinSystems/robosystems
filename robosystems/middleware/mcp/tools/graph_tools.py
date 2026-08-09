@@ -636,10 +636,28 @@ class CreateBackupTool:
         if graph_record and graph_record.graph_tier
         else "ladybug-standard"
       )
-      tier_max = GraphTierConfig.get_backup_limits(backup_tier).get(
-        "backup_retention_days", 7
-      )
+      backup_limits = GraphTierConfig.get_backup_limits(backup_tier)
+      tier_max = backup_limits.get("backup_retention_days", 7)
       retention_days = min(retention_days, tier_max)
+
+      # Daily limit, mirroring the REST route for the same reason the clamp
+      # above mirrors it: this path enqueues the same job, so a check that
+      # lives on only one of them is not a limit. A negative value means
+      # unlimited; an unresolvable tier gets the smallest allowance.
+      max_per_day = backup_limits.get("max_backups_per_day", 2)
+      if max_per_day is not None and max_per_day >= 0:
+        from robosystems.models.core import GraphBackup
+
+        taken_today = GraphBackup.count_user_initiated_today(graph_id, session)
+        if taken_today >= max_per_day:
+          return {
+            "error": "daily_backup_limit_reached",
+            "message": (
+              f"Daily backup limit reached for this graph "
+              f"({taken_today}/{max_per_day} on the {backup_tier} tier). "
+              f"Scheduled backups do not count against this limit."
+            ),
+          }
 
       run_config = build_graph_job_config(
         "backup_graph_job",
@@ -649,6 +667,7 @@ class CreateBackupTool:
         backup_format="full_dump",
         retention_days=retention_days,
         compression=True,
+        initiated_by="user",
       )
       response = await enqueue_task(
         task_type="dagster_job_monitor",

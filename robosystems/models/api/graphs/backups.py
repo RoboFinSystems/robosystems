@@ -51,6 +51,22 @@ class BackupResponse(BaseModel):
   graph_id: str
   backup_format: str
   backup_type: str
+  initiated_by: str = Field(
+    "user",
+    description=(
+      "Who started this backup. 'user' is one you requested and it counts "
+      "against the tier's daily backup limit; 'scheduled' is taken nightly on "
+      "your behalf and does not."
+    ),
+  )
+  memory_included: bool | None = Field(
+    None,
+    description=(
+      "Whether the archive carries this graph's semantic memory store. Null "
+      "for backups taken before memory was included, which make no claim "
+      "either way — distinct from false, which means the graph had none."
+    ),
+  )
   status: str
   # Storage location (bucket/key) is deliberately not exposed — callers
   # address backups by backup_id, never by infrastructure path.

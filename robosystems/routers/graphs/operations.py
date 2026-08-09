@@ -625,10 +625,28 @@ async def create_backup_op(
     if graph_record and graph_record.graph_tier
     else "ladybug-standard"
   )
-  tier_max = GraphTierConfig.get_backup_limits(backup_tier).get(
-    "backup_retention_days", 7
-  )
+  backup_limits = GraphTierConfig.get_backup_limits(backup_tier)
+  tier_max = backup_limits.get("backup_retention_days", 7)
   effective_retention_days = min(body.retention_days, tier_max)
+
+  # Enforce the per-tier daily limit that /limits and /tiers have been
+  # publishing all along. Same fail-small posture as the retention clamp: an
+  # unresolvable tier gets the smallest allowance rather than an exemption.
+  # A negative limit means unlimited (the xlarge tier).
+  max_per_day = backup_limits.get("max_backups_per_day", 2)
+  if max_per_day is not None and max_per_day >= 0:
+    from robosystems.models.core import GraphBackup as _GraphBackup
+
+    taken_today = _GraphBackup.count_user_initiated_today(graph_id, db)
+    if taken_today >= max_per_day:
+      raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=(
+          f"Daily backup limit reached for this graph "
+          f"({taken_today}/{max_per_day} on the {backup_tier} tier). "
+          f"Scheduled backups do not count against this limit."
+        ),
+      )
 
   run_config = build_graph_job_config(
     "backup_graph_job",
@@ -638,6 +656,7 @@ async def create_backup_op(
     backup_format=body.backup_format,
     retention_days=effective_retention_days,
     compression=True,
+    initiated_by="user",
   )
 
   response = await enqueue_task(

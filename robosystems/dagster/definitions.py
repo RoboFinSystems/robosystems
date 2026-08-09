@@ -37,6 +37,9 @@ from robosystems.dagster.jobs.backup_cleanup import (
   daily_backup_cleanup_job,
   daily_backup_cleanup_schedule,
 )
+from robosystems.dagster.jobs.backup_schedule import (
+  nightly_graph_backup_schedule,
+)
 from robosystems.dagster.jobs.billing import (
   monthly_credit_allocation_job,
   monthly_credit_allocation_schedule,
@@ -253,6 +256,7 @@ all_schedules = [
   monthly_usage_report_schedule,
   # Platform: Infrastructure
   daily_backup_cleanup_schedule,
+  nightly_graph_backup_schedule,
   daily_storage_reclaim_schedule,
   hourly_auth_cleanup_schedule,
   weekly_health_check_schedule,

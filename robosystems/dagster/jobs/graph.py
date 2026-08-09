@@ -117,6 +117,7 @@ class BackupGraphConfig(Config):
   backup_format: str = "full_dump"
   retention_days: int = 30
   compression: bool = True
+  initiated_by: str = "user"
 
 
 class RestoreGraphConfig(Config):
@@ -200,9 +201,9 @@ def create_backup(
   }
   extension = format_extensions.get(config.backup_format.lower(), ".lbug.zip")
 
-  if config.compression:
-    extension += ".gz"
-
+  # Placeholder only: the authoritative key comes back from the upload and
+  # overwrites this below. It carries no compression suffix because the payload
+  # is already a compressed archive and is stored as-is.
   s3_key = f"graph-backups/databases/{config.graph_id}/{config.backup_type}/backup-{timestamp_str}{extension}"
 
   with db.get_session() as session:
@@ -212,6 +213,7 @@ def create_backup(
       graph_id=config.graph_id,
       database_name=database_name,
       backup_type=config.backup_type,
+      initiated_by=config.initiated_by,
       s3_bucket=s3_adapter.bucket_name,
       s3_key=s3_key,
       session=session,
