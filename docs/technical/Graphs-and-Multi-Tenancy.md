@@ -58,14 +58,15 @@ A tier determines the instance size, storage budget, subgraph capacity, backup l
 
 | Tier (technical) | Display | Instance | Max subgraphs | Storage | API rate multiplier | Backup retention |
 | --- | --- | --- | --- | --- | --- | --- |
-| **`ladybug-standard`** | Standard | m7g.large (8 GB, 2 vCPU) | 3 | 20 GB | 1.0x | 7 days |
-| **`ladybug-large`** | Large | r7g.large (16 GB, 2 vCPU) | 10 | 50 GB | 1.5x | 30 days |
-| **`ladybug-xlarge`** | XLarge | r7g.xlarge (32 GB, 4 vCPU) | 25 | 100 GB | 2.5x | 90 days |
+| **`ladybug-standard`** | Standard | m7g.medium (4 GB, 1 vCPU) | 3 | 20 GB | 1.0x | 7 days |
+| **`ladybug-large`** | Large | m7g.large (8 GB, 2 vCPU) | 10 | 50 GB | 2.0x | 30 days |
+| **`ladybug-xlarge`** | XLarge | r7g.xlarge (32 GB, 4 vCPU) | 25 | 100 GB | 4.0x | 90 days |
 | **`ladybug-shared`** | Shared Repository | r7g.2xlarge (64 GB) | Platform-managed | — | — | 90 days |
 
 Notes:
 
-- **A graph and its subgraphs share one instance.** On `ladybug-standard`, that is 1 parent plus up to 3 subgraphs (4 databases total) on a single m7g.large. The subgraph cap, storage budget, and RAM are shared across the whole instance.
+- **A graph and its subgraphs share one instance.** On `ladybug-standard`, that is 1 parent plus up to 3 subgraphs (4 databases total) on a single m7g.medium. The subgraph cap, storage budget, and RAM are shared across the whole instance.
+- **The API rate multiplier applies to dedicated-resource categories only**, and scales with instance vCPU using Standard (1 vCPU) as the anchor — Large has 2 vCPU and XLarge has 4, hence 2.0x and 4.0x. **Shared categories are the same on every tier**: auth, status, billing, and SSE do not scale, because they consume platform resources rather than your instance.
 - **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
 

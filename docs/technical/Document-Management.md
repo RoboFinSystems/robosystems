@@ -2,7 +2,7 @@
 
 This guide shows you how to manage the institutional-knowledge document store that lives over each entity graph — uploading policies, procedures, and notes as markdown, and feeding them into the search and retrieval layer your AI agents read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
 
-**Quick Start:** Upload a markdown document to `POST /v1/graphs/{graph_id}/documents` with your `X-API-Key`, and it is automatically split into sections and indexed for search.
+**Quick Start:** Create a markdown document with the `create-document` MCP tool, and it is automatically split into sections and indexed for search. Document **creation is MCP-only today** — the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get); there is no REST upload endpoint.
 
 ## Overview
 

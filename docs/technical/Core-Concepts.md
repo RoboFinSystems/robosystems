@@ -45,8 +45,8 @@ A graph's tier is the dedicated AWS instance size it runs on, plus its subgraph 
 
 | Technical name | Display name | Instance | Subgraphs |
 | --- | --- | --- | --- |
-| `ladybug-standard` | Standard | Dedicated m7g.large (8 GB) | 3 max |
-| `ladybug-large` | Large | Dedicated r7g.large (16 GB) | 10 max |
+| `ladybug-standard` | Standard | Dedicated m7g.medium (4 GB) | 3 max |
+| `ladybug-large` | Large | Dedicated m7g.large (8 GB) | 10 max |
 | `ladybug-xlarge` | XLarge | Dedicated r7g.xlarge (32 GB) | 25 max |
 | `ladybug-shared` | — | Platform-managed | Platform-managed |
 

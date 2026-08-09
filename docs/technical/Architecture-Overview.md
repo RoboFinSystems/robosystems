@@ -323,8 +323,8 @@ The platform offers multiple tiers with different isolation levels and capabilit
 
 | Tier | Display Name | Instance | Subgraphs | Description |
 |------|--------------|----------|-----------|-------------|
-| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.large (8 GB) | 3 max | Cost-efficient entry tier with subgraph support |
-| `ladybug-large` | LadybugDB Large | Dedicated r7g.large (16 GB) | 10 max | Enhanced performance for growing teams |
+| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.medium (4 GB) | 3 max | Cost-efficient entry tier with subgraph support |
+| `ladybug-large` | LadybugDB Large | Dedicated m7g.large (8 GB) | 10 max | Enhanced performance for growing teams |
 | `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge (32 GB) | 25 max | Maximum performance and scale |
 | `ladybug-shared` | — | Platform r7g.2xlarge (64 GB) | 10 (platform-managed) | Public repositories (SEC) |
 
@@ -535,7 +535,6 @@ adapters/
 
 **Observability** (`/middleware/otel/`):
 - OpenTelemetry integration
-- Distributed request tracing
 - Performance metrics collection
 
 **Real-time** (`/middleware/sse/`):
@@ -794,7 +793,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 - **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
 - **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
-- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters for LadybugDB (multi-tenant and dedicated tiers)
+- **`graph-ladybug.yaml`**: EC2 writer clusters for LadybugDB (all customer tiers are dedicated — one database per instance)
 - **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download .lbug and .lance.tar.gz from S3 on boot)
 
 #### Search
@@ -941,8 +940,9 @@ See individual app repositories for specific deployment workflows.
 
 ### Multi-Tenancy
 
-- **Database Isolation**: Each entity gets dedicated graph database
-- **Access Control**: Row-level security in PostgreSQL
+- **Database Isolation**: Each entity gets a dedicated graph database on a dedicated instance
+- **Access Control**: Schema-per-graph isolation in PostgreSQL (`SET search_path` re-stamped per
+  session), enforced by application-layer scoping on every read and write
 - **Resource Limits**: Tier-based resource allocation
 
 ### Scalability

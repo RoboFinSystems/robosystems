@@ -57,9 +57,9 @@ Each graph has a credit pool that receives a fresh allocation every month based 
 
 | Technical name | Display name | Instance | Price | Monthly credits | Approx. agent calls/month |
 | --- | --- | --- | --- | --- | --- |
-| `ladybug-standard` | **Standard** | Dedicated m7g.large | $149/mo | **8,000** | ~200 (~7/day) |
-| `ladybug-large` | **Large** | Dedicated r7g.large | $299/mo | **32,000** | ~800 (~27/day) |
-| `ladybug-xlarge` | **XLarge** | Dedicated r7g.xlarge | $699/mo | **100,000** | ~2,600 (~87/day) |
+| `ladybug-standard` | **Standard** | Dedicated m7g.medium | $99/mo | **8,000** | ~200 (~7/day) |
+| `ladybug-large` | **Large** | Dedicated m7g.large | $249/mo | **32,000** | ~800 (~27/day) |
+| `ladybug-xlarge` | **XLarge** | Dedicated r7g.xlarge | $599/mo | **100,000** | ~2,600 (~87/day) |
 
 The "approx. agent calls/month" column is derived from the ~38-credit typical-call figure and is an estimate for planning only — actual usage depends on the size of each call.
 
@@ -119,11 +119,11 @@ Each credit transaction has a type drawn from a fixed set:
 For a combined view of credits alongside storage, performance, and event metrics, use the analytics endpoint:
 
 ```bash
-curl -X GET "http://localhost:8000/v1/graphs/kg1a2b3c4d5e/analytics/usage" \
+curl -X GET "http://localhost:8000/v1/graphs/kg1a2b3c4d5e/usage" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)"
 ```
 
-This returns a usage report that includes both a `credit_summary` and a `storage_summary`, so it is the right call when you want the storage and credit pictures together. A graph-level metrics endpoint is also available at `GET /v1/graphs/{graph_id}/analytics`.
+This returns a usage report that includes both a `credit_summary` and a `storage_summary`, so it is the right call when you want the storage and credit pictures together. A graph-level metrics endpoint is also available at `GET /v1/graphs/{graph_id}/metrics`.
 
 For the exact request parameters and response schemas of every endpoint on this page, see the live OpenAPI reference at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` against a local stack) rather than re-deriving them here.
 
