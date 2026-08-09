@@ -25,6 +25,9 @@ jobs:
       # Use fixed ports for robosystems
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
+      # The second of the two databases — per-graph OLTP for the extensions.
+      # Created in its own step below; the service container only makes one.
+      EXTENSIONS_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/extensions
       POSTGRES_PASSWORD: postgres
       # Graph API Configuration
       GRAPH_API_URL: http://localhost:8001
@@ -172,6 +175,24 @@ jobs:
       - name: Validate lockfile
         run: |
           uv lock --locked
+
+      - name: Create and migrate the extensions database
+        run: |
+          # The platform DB (robosystems_test) comes from the service
+          # container's POSTGRES_DB; the extensions DB is the second of the two
+          # databases this repo runs, and CI never made it — so every DB-backed
+          # extensions test skipped itself, silently, forever.
+          #
+          # Migrating is what makes them worth running: 0002 seeds the taxonomy
+          # library from the JSON-LD frameworks, which is exactly what the
+          # library-backed suites assert against. ~25s on a cold database.
+          echo "🗄️  Creating the extensions database..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+            -c "CREATE DATABASE extensions" \
+            || echo "extensions database already exists"
+          echo "🚀 Applying extensions migrations..."
+          uv run alembic -c migrations/extensions.ini upgrade head
+          echo "✅ extensions database ready"
 
       - name: Configure Valkey authentication
         run: |

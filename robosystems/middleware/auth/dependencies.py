@@ -554,6 +554,29 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
     session.close()
 
 
+def user_is_graph_admin(user_id: str, graph_id: str) -> bool:
+  """Whether the user holds the admin role on the graph.
+
+  A predicate, not a gate — unlike ``require_graph_write_role`` this returns a
+  bool rather than raising, because callers use it to *widen* an authorization
+  rule rather than to deny. The cross-graph share surface is the first such
+  caller: a report copied in from another graph carries the *sender's* user id
+  in ``created_by``, so the receiving graph's owner rule can never match, and a
+  graph admin is who gets to remove it.
+
+  Opens a short-lived platform session — ``GraphUser`` lives in the platform DB,
+  not the per-graph OLTP DB.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.models.core import GraphUser
+
+  session = SessionFactory()
+  try:
+    return GraphUser.user_has_admin_access(user_id, graph_id, session)
+  finally:
+    session.close()
+
+
 async def get_current_user_with_repository_access(
   request: Request,
   repository_id: str,

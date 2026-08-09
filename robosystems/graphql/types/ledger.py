@@ -60,6 +60,12 @@ from robosystems.models.api.extensions.ar_ap import (
 from robosystems.models.api.extensions.ar_ap import (
   OpenBalanceByAgent as PydanticOpenBalanceByAgent,
 )
+from robosystems.models.api.extensions.blocked_source_graphs import (
+  BlockedSourceGraphListResponse as PydanticBlockedSourceGraphListResponse,
+)
+from robosystems.models.api.extensions.blocked_source_graphs import (
+  BlockedSourceGraphResponse as PydanticBlockedSourceGraphResponse,
+)
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookCategory as PydanticClosingBookCategory,
 )
@@ -720,6 +726,19 @@ class PublishListDetail:
 @pydantic_type(model=PydanticPublishListListResponse, all_fields=True)
 class PublishListList:
   """Paginated list of publish lists."""
+
+
+# ── Blocked source graphs ─────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticBlockedSourceGraphResponse, all_fields=True)
+class BlockedSourceGraph:
+  """A source graph barred from sharing reports into this graph."""
+
+
+@pydantic_type(model=PydanticBlockedSourceGraphListResponse, all_fields=True)
+class BlockedSourceGraphList:
+  """Paginated list of blocked source graphs."""
 
 
 # ── Mapped trial balance ──────────────────────────────────────────────────

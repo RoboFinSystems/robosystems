@@ -23,6 +23,8 @@ from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
   ReportResponse,
+  RevokeReportShareRequest,
+  RevokeReportShareResponse,
   ShareReportRequest,
   ShareReportResponse,
   ShareResultItem,
@@ -39,6 +41,9 @@ from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.reads.blocked_source_graphs import (
+  is_source_blocked,
+)
 from robosystems.operations.roboledger.reads.reports import (
   build_periods,
   load_structures,
@@ -92,6 +97,24 @@ class PublishListEmptyError(Exception):
 
 class ReportNotPublishedError(Exception):
   """Raised when trying to share a report that isn't in 'published' state."""
+
+
+class ReportShareNotFoundError(LookupError):
+  """Raised when revoking a share that doesn't exist or is already revoked."""
+
+
+class ReportHasActiveSharesError(Exception):
+  """Raised when deleting a report that is still shared to other graphs."""
+
+  def __init__(self, report_id: str, target_graph_ids: list[str]) -> None:
+    super().__init__(
+      f"Report '{report_id}' is still shared to {len(target_graph_ids)} "
+      f"graph(s). Revoke each share first — deleting the report here would "
+      f"strand the delivered copies in their schemas with no way to withdraw "
+      f"them."
+    )
+    self.report_id = report_id
+    self.target_graph_ids = target_graph_ids
 
 
 class TaxonomyNotFoundError(LookupError):
@@ -694,7 +717,13 @@ def transition_filing_status(
   return report_to_response(report_def, structures, entity_name)
 
 
-def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool:
+def delete_report(
+  session: Session,
+  report_id: str,
+  acting_user_id: str,
+  *,
+  acting_user_is_graph_admin: bool = False,
+) -> bool:
   """Delete a report and its generated facts.
 
   Raises `NotAuthorizedError` if the caller doesn't own the report.
@@ -702,12 +731,43 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
   state (``filed`` or ``archived``) — the Report Block lifecycle treats
   filed/archived as immutable so the audit trail can't be erased.
   Returns True if a row was deleted, False if the report did not exist.
+
+  A report shared in from another graph (``source_graph_id`` set) is the one
+  exception to the owner rule: its ``created_by`` is the *sender's* user id, so
+  no one in the receiving graph could ever match it. An admin of the receiving
+  graph may delete such a copy — the recipient's exit from a share they did not
+  ask for. Native reports are unaffected; only their owner can delete them.
+
+  Deleting the copy deliberately leaves the sender's ``ReportShare`` row alone:
+  the sender's record that they sent it is theirs, not the recipient's to erase.
+
+  Raises `ReportHasActiveSharesError` if the report is still shared out to
+  other graphs. `revoke_report_share` needs this row to find and authorize the
+  withdrawal, so deleting first would strand every delivered copy in its
+  recipient's schema permanently — precisely when withdrawal matters most,
+  since a report deleted after distribution is usually one that was wrong.
+  Revoke each recipient first. Shared *copies* are unaffected: the recipient's
+  schema holds no share rows for a report they did not send.
   """
   report_def = session.get(Report, report_id)
   if report_def is None:
     return False
   if report_def.created_by != acting_user_id:
-    raise NotAuthorizedError("Not authorized to delete this report.")
+    is_shared_copy = report_def.source_graph_id is not None
+    if not (is_shared_copy and acting_user_is_graph_admin):
+      raise NotAuthorizedError("Not authorized to delete this report.")
+  active_share_targets = list(
+    session.execute(
+      select(ReportShare.target_graph_id).where(
+        ReportShare.report_id == report_id,
+        ReportShare.revoked_at.is_(None),
+      )
+    )
+    .scalars()
+    .all()
+  )
+  if active_share_targets:
+    raise ReportHasActiveSharesError(report_id, active_share_targets)
   if report_def.filing_status in {"filed", "archived"}:
     raise ReportNotFiledError(
       f"Report '{report_id}' is '{report_def.filing_status}' and cannot "
@@ -768,6 +828,16 @@ def share_report(
     report_def = source_session.get(Report, report_id)
     if report_def is None:
       raise ReportNotFoundError(report_id)
+    # Strict ownership, deliberately — NOT the graph-admin widening that
+    # `delete_report` and `revoke_report_share` carry. Sharing is a publishing
+    # act, and this rule is load-bearing beyond authorization: because only an
+    # author can share, a report that arrived from elsewhere can never acquire
+    # outbound shares of its own. That is what lets `_purge_shared_reports` and
+    # the re-share replace in `_share_to_target` delete copies in raw SQL
+    # without tripping `ReportHasActiveSharesError` — they cannot orphan a share
+    # row, because a shared copy has none. Widen this to admins and both paths
+    # start stranding delivered copies in recipients' schemas with no way to
+    # withdraw them, which is precisely what that guard exists to prevent.
     if report_def.created_by != acting_user_id:
       raise NotAuthorizedError("Not authorized to share this report.")
     if report_def.generation_status != "published":
@@ -811,19 +881,177 @@ def share_report(
 
   successful = [r for r in results if r.status == "shared"]
   if successful:
+    now = datetime.now(UTC)
     with extensions_session(graph_id) as source_session:
       for result in successful:
-        source_session.add(
-          ReportShare(
-            report_id=report_id,
-            target_graph_id=result.target_graph_id,
-            shared_by=acting_user_id,
-            fact_count=result.fact_count,
+        # One active share row per (report, recipient). A re-share replaces
+        # the recipient's copy rather than adding a second, so the record of
+        # it must not fan out either — a second active row would describe a
+        # delivery that no longer exists, and revocation would have to guess
+        # which one it withdrew.
+        existing = (
+          source_session.execute(
+            select(ReportShare).where(
+              ReportShare.report_id == report_id,
+              ReportShare.target_graph_id == result.target_graph_id,
+              ReportShare.revoked_at.is_(None),
+            )
           )
+          .scalars()
+          .all()
         )
+        if existing:
+          for share in existing:
+            share.shared_by = acting_user_id
+            share.shared_at = now
+            share.fact_count = result.fact_count
+        else:
+          source_session.add(
+            ReportShare(
+              report_id=report_id,
+              target_graph_id=result.target_graph_id,
+              shared_by=acting_user_id,
+              shared_at=now,
+              fact_count=result.fact_count,
+            )
+          )
       source_session.commit()
 
   return ShareReportResponse(report_id=report_id, results=results)
+
+
+def revoke_report_share(
+  graph_id: str,
+  report_id: str,
+  body: RevokeReportShareRequest,
+  acting_user_id: str,
+  *,
+  acting_user_is_graph_admin: bool = False,
+) -> RevokeReportShareResponse:
+  """Withdraw a shared report from one recipient graph.
+
+  The sender's half of the share controls. Takes `graph_id` rather than a
+  session for the same reason `share_report` does — it spans the source and
+  target tenant schemas.
+
+  Stamps `ReportShare.revoked_at` in the source and deletes the copied Report
+  (and its fact sets, whose facts cascade) from the target. A recipient who
+  already deleted the copy themselves is not an error: the share is still
+  marked revoked and `copy_deleted` comes back False.
+
+  Revocation is *plural on both sides*: `_delete_shared_copy` removes every
+  copy carrying this provenance pair, so every active share row for the target
+  is stamped to match. Two shares of one report to one recipient are ordinary —
+  two overlapping publish lists, or a resend after a correction — and leaving
+  one row active would claim a delivery that no longer exists.
+
+  The linked `Entity` in the target is deliberately left in place. An investor's
+  `Security` points at it, and the relationship survives one report being
+  pulled — deleting it would break the link over a single withdrawal.
+
+  Normally restricted to the report's author, who is also the only user who
+  could have shared it. A graph admin may also revoke, so an author's departure
+  does not strand delivered copies in recipients' schemas — the same reasoning
+  that widened `delete_report`.
+
+  Raises `ReportNotFoundError`, `NotAuthorizedError`, or
+  `ReportShareNotFoundError`.
+  """
+  from robosystems.db.extensions import extensions_session
+
+  active_shares = (
+    ReportShare.report_id == report_id,
+    ReportShare.target_graph_id == body.target_graph_id,
+    ReportShare.revoked_at.is_(None),
+  )
+
+  with extensions_session(graph_id) as source_session:
+    report_def = source_session.get(Report, report_id)
+    if report_def is None:
+      raise ReportNotFoundError(report_id)
+    if report_def.created_by != acting_user_id and not acting_user_is_graph_admin:
+      raise NotAuthorizedError("Not authorized to revoke shares of this report.")
+
+    if not source_session.execute(select(ReportShare.id).where(*active_shares)).first():
+      raise ReportShareNotFoundError(
+        f"No active share of report '{report_id}' to '{body.target_graph_id}'."
+      )
+
+  copy_deleted = _delete_shared_copy(
+    source_graph_id=graph_id,
+    source_report_id=report_id,
+    target_graph_id=body.target_graph_id,
+  )
+
+  # Stamp only after the copy is gone. If the target write fails, the shares
+  # stay un-revoked and the operation is safe to retry — the alternative
+  # leaves a record claiming the data was withdrawn while it is still there.
+  now = datetime.now(UTC)
+  with extensions_session(graph_id) as source_session:
+    for share in (
+      source_session.execute(select(ReportShare).where(*active_shares)).scalars().all()
+    ):
+      share.revoked_at = now
+    source_session.commit()
+
+  return RevokeReportShareResponse(
+    report_id=report_id,
+    target_graph_id=body.target_graph_id,
+    revoked_at=now,
+    copy_deleted=copy_deleted,
+  )
+
+
+def _delete_copies_in_session(
+  target_session: Session, source_graph_id: str, source_report_id: str
+) -> int:
+  """Delete copies of one shared report from an open target session.
+
+  Returns how many were removed. Matches on the provenance pair, so it can
+  only ever reach a report that arrived from this sender — a report the target
+  authored has a null `source_graph_id` and cannot match. Does not commit; the
+  caller owns the transaction.
+  """
+  copy_ids = list(
+    target_session.execute(
+      select(Report.id).where(
+        Report.source_graph_id == source_graph_id,
+        Report.source_report_id == source_report_id,
+      )
+    )
+    .scalars()
+    .all()
+  )
+  if not copy_ids:
+    return 0
+
+  # Facts cascade from their parent fact_sets, so the fact_sets go first.
+  target_session.execute(
+    text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
+    {"report_ids": copy_ids},
+  )
+  target_session.execute(
+    text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
+    {"report_ids": copy_ids},
+  )
+  return len(copy_ids)
+
+
+def _delete_shared_copy(
+  source_graph_id: str, source_report_id: str, target_graph_id: str
+) -> bool:
+  """Delete the copy of a shared report from the target tenant schema.
+
+  Returns True when a copy was found and removed.
+  """
+  from robosystems.db.extensions import extensions_session
+
+  with extensions_session(target_graph_id) as target_session:
+    deleted = _delete_copies_in_session(
+      target_session, source_graph_id, source_report_id
+    )
+    target_session.commit()
+    return deleted > 0
 
 
 def _share_to_target(
@@ -869,6 +1097,28 @@ def _share_to_target(
   try:
     now = datetime.now(UTC)
     with extensions_session(target_graph_id) as target_session:
+      # The recipient's exit, checked before anything is written. Blocked
+      # senders are told rather than silently dropped: they already had a
+      # relationship with the recipient, so a bounce is more honest than a
+      # shadow ban and stops them retrying forever. (If the block table is
+      # somehow missing — code ahead of migration — this raises and the
+      # handler below turns it into an error item, so the share fails closed.)
+      if is_source_blocked(target_session, source_graph_id):
+        return ShareResultItem(
+          target_graph_id=target_graph_id,
+          status="error",
+          error="Recipient has blocked shares from this graph.",
+        )
+
+      # A re-share replaces rather than accumulates. Sharing one report to one
+      # recipient twice is ordinary — two overlapping publish lists, or a
+      # resend after a correction — and without this the recipient's books
+      # collect duplicate copies of the same statement, each materializing
+      # into their graph. The provenance pair can only ever match a copy from
+      # this sender; a report the recipient authored has a null
+      # `source_graph_id`.
+      _delete_copies_in_session(target_session, source_graph_id, report_snapshot["id"])
+
       shared_report = Report(
         name=report_snapshot["name"],
         description=report_snapshot.get("description"),
@@ -949,11 +1199,15 @@ def _share_to_target(
       )
 
   except Exception as e:
+    # The detail stays in the log, not in the response: this exception was
+    # raised against the *recipient's* schema, and the sender is a different
+    # tenant. A raw driver message would tell them about the recipient's
+    # database — the same reason `enrich_blocks` resolves a name and not an org.
     logger.error(f"Failed to share report to {target_graph_id}: {e}")
     return ShareResultItem(
       target_graph_id=target_graph_id,
       status="error",
-      error=f"Failed to copy report data: {e!s}",
+      error="Failed to copy report data.",
     )
 
 

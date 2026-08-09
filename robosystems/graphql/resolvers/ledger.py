@@ -34,6 +34,7 @@ from robosystems.graphql.types.ledger import (
   AccountTree,
   AccountTreeNode,
   Agent,
+  BlockedSourceGraphList,
   ClosingBookStructures,
   Element,
   ElementList,
@@ -76,6 +77,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   ar_ap as reads_ar_ap,
+)
+from robosystems.operations.roboledger.reads import (
+  blocked_source_graphs as reads_blocked_source_graphs,
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
@@ -982,3 +986,27 @@ class LedgerQuery:
     if response is None:
       return None
     return PublishListDetail.from_pydantic(response)
+
+  # ── Blocked source graphs ───────────────────────────────────────────────
+
+  @strawberry.field
+  def blocked_source_graphs(
+    self,
+    info: Info[GraphQLContext, None],
+    limit: int | None = None,
+    offset: int | None = None,
+  ) -> BlockedSourceGraphList | None:
+    """Source graphs barred from sharing reports into this graph.
+
+    The read side of the recipient's exit from cross-graph sharing; manage the
+    list with the `block-source-graph` / `unblock-source-graph` operations.
+    """
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_blocked_source_graphs.list_blocked_source_graphs(
+          session, limit=limit, offset=offset
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return BlockedSourceGraphList.from_pydantic(response)

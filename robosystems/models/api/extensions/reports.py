@@ -198,6 +198,21 @@ class ShareReportRequest(BaseModel):
   )
 
 
+class RevokeReportShareRequest(BaseModel):
+  """Withdraw a report previously shared to one recipient graph.
+
+  The sender's half of the share controls: deletes the copy from that
+  recipient's tenant schema and stamps the share record ``revoked_at``. Scoped
+  to a single target — revoking a distribution to a whole publish list means
+  one call per member, so a withdrawal is always a deliberate act.
+  """
+
+  target_graph_id: str = Field(
+    ...,
+    description="Recipient graph whose copy should be withdrawn.",
+  )
+
+
 # ── Responses ────────────────────────────────────────────────────────────────
 
 
@@ -408,6 +423,22 @@ class ShareReportResponse(BaseModel):
     description=(
       "Per-recipient outcomes. Inspect to find partial failures — the "
       "share operation does not fail-fast across targets."
+    ),
+  )
+
+
+class RevokeReportShareResponse(BaseModel):
+  """Outcome of withdrawing a shared report from one recipient."""
+
+  report_id: str = Field(..., description="The report whose share was revoked.")
+  target_graph_id: str = Field(..., description="Recipient the copy was pulled from.")
+  revoked_at: datetime = Field(..., description="When the share was revoked.")
+  copy_deleted: bool = Field(
+    ...,
+    description=(
+      "True when a copy was found and deleted in the recipient's schema. "
+      "False when the recipient had already deleted it themselves — the "
+      "share is still marked revoked."
     ),
   )
 
