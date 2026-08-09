@@ -55,13 +55,17 @@ The production model of record is Claude Sonnet served via AWS Bedrock. A typica
 
 Each graph has a credit pool that receives a fresh allocation every month based on its tier. The technical tier names and their authoritative display names are below. (Use **Standard / Large / XLarge** — not marketing labels.)
 
-| Technical name | Display name | Instance | Price | Monthly credits | Approx. agent calls/month |
-| --- | --- | --- | --- | --- | --- |
-| `ladybug-standard` | **Standard** | Dedicated m7g.medium | $99/mo | **8,000** | ~200 (~7/day) |
-| `ladybug-large` | **Large** | Dedicated m7g.large | $249/mo | **32,000** | ~800 (~27/day) |
-| `ladybug-xlarge` | **XLarge** | Dedicated r7g.xlarge | $599/mo | **100,000** | ~2,600 (~87/day) |
+The three customer tiers are **Standard** (`ladybug-standard`), **Large** (`ladybug-large`) and
+**XLarge** (`ladybug-xlarge`). Their prices, monthly credit allocations and instance sizes are
+deliberately **not restated here** — they are served live from the configuration that provisions the
+infrastructure, so a copy on this page could only ever be a copy that goes stale:
 
-The "approx. agent calls/month" column is derived from the ~38-credit typical-call figure and is an estimate for planning only — actual usage depends on the size of each call.
+- **`GET /v1/offering`** — `monthly_price_per_graph`, `monthly_credits_per_graph`, `infrastructure`,
+  and the per-tier limits, all computed from the authoritative config
+- **[robosystems.ai/pricing](https://robosystems.ai/pricing)** — the public pricing page
+
+To estimate agent calls from an allocation, divide the monthly credits by the ~38-credit typical-call
+figure above. That is a planning estimate only; the charge is always the real measured token cost.
 
 A graph's **current balance** is its monthly allocation minus the credits consumed so far in the current calendar month. Subgraphs do not receive their own allocation — they draw from the parent graph's pool, so checking a subgraph's credits reports the parent pool's numbers. The single source of truth for these allocations is the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) in the codebase.
 

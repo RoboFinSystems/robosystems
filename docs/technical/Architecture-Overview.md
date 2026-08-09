@@ -321,12 +321,21 @@ Embedded vector search on graph API instances — no additional infrastructure r
 The platform offers multiple tiers with different isolation levels and capabilities:
 
 
-| Tier | Display Name | Instance | Subgraphs | Description |
-|------|--------------|----------|-----------|-------------|
-| `ladybug-standard` | LadybugDB Standard | Dedicated m7g.medium (4 GB) | 3 max | Cost-efficient entry tier with subgraph support |
-| `ladybug-large` | LadybugDB Large | Dedicated m7g.large (8 GB) | 10 max | Enhanced performance for growing teams |
-| `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge (32 GB) | 25 max | Maximum performance and scale |
-| `ladybug-shared` | — | Platform r7g.2xlarge (64 GB) | 10 (platform-managed) | Public repositories (SEC) |
+| Tier | Display Name | Description |
+|------|--------------|-------------|
+| `ladybug-standard` | LadybugDB Standard | Cost-efficient entry tier with subgraph support |
+| `ladybug-large` | LadybugDB Large | Enhanced performance for growing teams |
+| `ladybug-xlarge` | LadybugDB XLarge | Maximum performance and scale |
+| `ladybug-shared` | — | Platform-managed fleet for public repositories (SEC) |
+
+Every customer tier is **dedicated** — one database per instance. Instance types, RAM, vCPU,
+subgraph caps, storage limits, backup retention and API rate multipliers are deliberately **not
+duplicated here**, because they are served live from the same configuration that provisions the
+infrastructure:
+
+- **`GET /v1/offering`** — machine-readable, computed from the authoritative config
+- **[robosystems.ai/pricing](https://robosystems.ai/pricing)** — the public pricing page
+- **[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** — the source itself, used by the GHA deployment layer and imported by the application at runtime
 
 *Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 

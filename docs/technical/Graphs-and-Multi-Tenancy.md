@@ -56,17 +56,24 @@ Because the `graph_id` lives in the URL path, the tenant scope is unambiguous an
 
 A tier determines the instance size, storage budget, subgraph capacity, backup limits, and API rate multiplier for a graph. RoboSystems uses **instance-based naming** so the tier name reflects exactly what infrastructure you get.
 
-| Tier (technical) | Display | Instance | Max subgraphs | Storage | API rate multiplier | Backup retention |
-| --- | --- | --- | --- | --- | --- | --- |
-| **`ladybug-standard`** | Standard | m7g.medium (4 GB, 1 vCPU) | 3 | 20 GB | 1.0x | 7 days |
-| **`ladybug-large`** | Large | m7g.large (8 GB, 2 vCPU) | 10 | 50 GB | 2.0x | 30 days |
-| **`ladybug-xlarge`** | XLarge | r7g.xlarge (32 GB, 4 vCPU) | 25 | 100 GB | 4.0x | 90 days |
-| **`ladybug-shared`** | Shared Repository | r7g.2xlarge (64 GB) | Platform-managed | — | — | 90 days |
+| Tier (technical) | Display |
+| --- | --- |
+| **`ladybug-standard`** | Standard |
+| **`ladybug-large`** | Large |
+| **`ladybug-xlarge`** | XLarge |
+| **`ladybug-shared`** | Shared Repository (platform-managed, not customer-selectable) |
+
+**Instance type, RAM, vCPU, max subgraphs, storage limit, API rate multiplier and backup retention
+are served, not documented here.** Call **`GET /v1/offering`** for the machine-readable set, or see
+**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. Both are computed from
+[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)
+— the same file the GHA deployment layer uses to provision the instances and the application imports
+at runtime. A number in that response is a number the platform is actually enforcing.
 
 Notes:
 
-- **A graph and its subgraphs share one instance.** On `ladybug-standard`, that is 1 parent plus up to 3 subgraphs (4 databases total) on a single m7g.medium. The subgraph cap, storage budget, and RAM are shared across the whole instance.
-- **The API rate multiplier applies to dedicated-resource categories only**, and scales with instance vCPU using Standard (1 vCPU) as the anchor — Large has 2 vCPU and XLarge has 4, hence 2.0x and 4.0x. **Shared categories are the same on every tier**: auth, status, billing, and SSE do not scale, because they consume platform resources rather than your instance.
+- **A graph and its subgraphs share one instance.** The subgraph cap, storage budget, and RAM are budgets for the whole instance, not per database — a parent plus its subgraphs draw on the same pool.
+- **The API rate multiplier applies to dedicated-resource categories only**, and scales with the tier's instance vCPU using Standard as the anchor. **Shared categories are the same on every tier**: auth, status, billing, and SSE do not scale, because they consume platform resources rather than your instance. The multiplier in `/v1/offering` is derived from the limit table the rate limiter actually enforces, so what is advertised cannot drift from what a caller receives.
 - **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
 

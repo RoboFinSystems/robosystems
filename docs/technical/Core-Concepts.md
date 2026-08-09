@@ -43,12 +43,17 @@ curl "http://localhost:8000/v1/graphs" \
 
 A graph's tier is the dedicated AWS instance size it runs on, plus its subgraph allowance. RoboSystems uses **instance-based naming** for transparency — the tier name tells you exactly what infrastructure you get, rather than a marketing label.
 
-| Technical name | Display name | Instance | Subgraphs |
-| --- | --- | --- | --- |
-| `ladybug-standard` | Standard | Dedicated m7g.medium (4 GB) | 3 max |
-| `ladybug-large` | Large | Dedicated m7g.large (8 GB) | 10 max |
-| `ladybug-xlarge` | XLarge | Dedicated r7g.xlarge (32 GB) | 25 max |
-| `ladybug-shared` | — | Platform-managed | Platform-managed |
+| Technical name | Display name |
+| --- | --- |
+| `ladybug-standard` | Standard |
+| `ladybug-large` | Large |
+| `ladybug-xlarge` | XLarge |
+| `ladybug-shared` | — (platform-managed) |
+
+For the instance size, subgraph allowance and limits behind each tier, see **`GET /v1/offering`** or
+**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. Those are computed from
+[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml),
+the same file that drives provisioning — so they cannot fall out of step with what you actually get.
 
 `ladybug-shared` is not a customer-selectable tier. It is the platform's read-only fleet that serves public repositories such as SEC filings, accessible to all users but owned by the platform. Customer graphs run on one of the three dedicated tiers.
 

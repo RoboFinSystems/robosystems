@@ -122,7 +122,7 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 │  └── Jobs: Download, process Arelle, call Graph API          │
 ├──────────────────────────────────────────────────────────────┤
 │  SHARED MASTER (graph-ladybug.yaml) - Heavy Compute          │
-│  ├── EC2 r7g.large with dynamic EBS (Volume Manager Lambda)  │
+│  ├── Memory-optimized EC2 + dynamic EBS (Volume Mgr Lambda)  │
 │  ├── DuckDB staging + LadybugDB materialization              │
 │  ├── node_type: shared_master (in DynamoDB registry)         │
 │  └── Single source of truth for shared repositories          │
@@ -130,12 +130,17 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 │  SHARED REPLICAS (graph-ladybug-replicas.yaml)               │
 │  ├── ASG: Min=2, Max=10, TargetTracking on CPU               │
 │  ├── S3 download: Pull .lbug + .duckdb from S3 on boot      │
-│  ├── Instance: r7g.medium (read-only, smaller than master)   │
+│  ├── Read-only; sized below the master (no DuckDB staging)   │
 │  └── ALB on port 8001, health check /status                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 **Key insight**: Dagster orchestrates (lightweight), Graph API computes (heavy). This keeps Dagster simple and reuses existing graph infrastructure.
+
+Instance types are deliberately omitted above — they live in
+[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml),
+which the GHA deployment layer provisions from directly. The diagram carries the shape; the config
+carries the sizes, and it has been resized more than once.
 
 ### What Dagster Does vs What Graph API Does
 
