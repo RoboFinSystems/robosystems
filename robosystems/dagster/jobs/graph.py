@@ -256,9 +256,20 @@ def create_backup(
         node_count=backup_info.node_count,
         relationship_count=backup_info.relationship_count,
         backup_duration=backup_info.backup_duration_seconds,
+        # `memory` and `payload_delta` have to be carried onto the row
+        # explicitly: the richer metadata the manager assembles goes to the S3
+        # sidecar, and only what is copied here is readable through the API.
+        # Without them the listing's memory tri-state would always report "no
+        # claim", which is the one answer it must never give by accident.
         metadata={
           "backup_format": backup_info.backup_format,
           "compression_ratio": backup_info.compression_ratio,
+          **({"memory": backup_info.memory} if backup_info.memory else {}),
+          **(
+            {"payload_delta": backup_info.payload_delta}
+            if backup_info.payload_delta
+            else {}
+          ),
         },
       )
 

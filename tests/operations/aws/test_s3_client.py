@@ -1377,3 +1377,57 @@ class TestS3BackupAdapterDownloadBackupByKey:
 
     with pytest.raises(ClientError):
       await adapter.download_backup_by_key("missing/key")
+
+
+@pytest.mark.unit
+class TestBackupMetadataCarriesPayloadFacts:
+  """`memory` and `payload_delta` have to survive onto BackupMetadata.
+
+  The manager assembles them, the S3 sidecar gets the full dict, but only what
+  BackupMetadata carries is available to the caller that writes the database
+  row — and only what reaches the row is readable through the API. Dropping
+  them here makes the listing's memory tri-state answer "no claim" for every
+  backup, which is the one answer it must never give by accident.
+  """
+
+  def test_memory_and_delta_round_trip(self):
+    from robosystems.operations.aws.s3 import BackupMetadata
+
+    meta = BackupMetadata(
+      graph_id="kg1",
+      backup_type="full",
+      timestamp=datetime.now(UTC),
+      original_size=10,
+      compressed_size=10,
+      checksum="abc",
+      compression_ratio=0.0,
+      node_count=23,
+      relationship_count=27,
+      backup_duration_seconds=0.5,
+      memory="included",
+      payload_delta={"payload_node_count": 22, "live_node_count": 23},
+    )
+
+    assert meta.memory == "included"
+    assert meta.to_dict()["memory"] == "included"
+    assert meta.to_dict()["payload_delta"]["live_node_count"] == 23
+
+  def test_defaults_are_none_not_absent(self):
+    """None means "not measured"; "absent" means "measured, had none"."""
+    from robosystems.operations.aws.s3 import BackupMetadata
+
+    meta = BackupMetadata(
+      graph_id="kg1",
+      backup_type="full",
+      timestamp=datetime.now(UTC),
+      original_size=10,
+      compressed_size=10,
+      checksum="abc",
+      compression_ratio=0.0,
+      node_count=0,
+      relationship_count=0,
+      backup_duration_seconds=0.5,
+    )
+
+    assert meta.memory is None
+    assert meta.payload_delta is None

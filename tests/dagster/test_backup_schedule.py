@@ -148,3 +148,27 @@ class TestFanOut:
 
   def test_no_graphs_produces_no_runs(self):
     assert self._evaluate([]) == []
+
+
+@pytest.mark.unit
+class TestKillSwitch:
+  def test_disabled_flag_stops_the_nightly_run(self):
+    """The kill switch has to cover this path too.
+
+    Both manual paths check it. A flag honoured on two of the three paths that
+    create backups is not a kill switch — and this is the one nobody is
+    watching when they flip it during an incident.
+    """
+    from robosystems.config import env as env_module
+
+    with (
+      patch.object(env_module, "BACKUP_CREATION_ENABLED", False),
+      patch(
+        "robosystems.dagster.jobs.backup_schedule._graphs_to_back_up",
+        return_value=["kg_a", "kg_b"],
+      ) as enumerate_graphs,
+    ):
+      assert nightly_graph_backup_schedule(build_schedule_context()) == []
+
+    # Short-circuits before touching the database at all.
+    enumerate_graphs.assert_not_called()

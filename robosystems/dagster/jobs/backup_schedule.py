@@ -120,6 +120,13 @@ def nightly_graph_backup_schedule(context: ScheduleEvaluationContext):
   """
   from robosystems.models.core import Graph
 
+  # The same kill switch both manual paths check. A flag honoured on two of
+  # three paths that create backups is not a kill switch — and this is the one
+  # path nobody is watching when they flip it during an incident.
+  if not env.BACKUP_CREATION_ENABLED:
+    context.log.info("Backup creation is disabled; skipping nightly backups")
+    return []
+
   run_date = datetime.now(UTC).date().isoformat()
   requests: list[RunRequest] = []
 

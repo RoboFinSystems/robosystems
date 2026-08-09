@@ -442,6 +442,14 @@ class BackupMetadata:
   database_version: str | None = None
   backup_format: str = "cypher"
   s3_key: str | None = None
+  # Whether the archive carries the graph's semantic memory store: "included",
+  # "absent", or None for a backup taken before memory was captured at all.
+  # None is a third state, not a synonym for "absent" — see the manifest
+  # contract in the backup spec.
+  memory: str | None = None
+  # Set only when the archive's contents differed from the live database at
+  # backup time. Absent on the ordinary path.
+  payload_delta: dict[str, Any] | None = None
 
   def to_dict(self) -> dict[str, Any]:
     """Convert metadata to dictionary for JSON serialization."""
@@ -826,6 +834,8 @@ class S3BackupAdapter:
         or metadata.get("lbug_version"),
         backup_format="full_dump",
         s3_key=backup_path,
+        memory=metadata.get("memory"),
+        payload_delta=metadata.get("payload_delta"),
       )
 
       metadata_json = json.dumps(backup_metadata.to_dict(), indent=2)
