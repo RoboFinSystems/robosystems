@@ -568,6 +568,23 @@ class S3BackupAdapter:
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
     return f"graph-backups/metadata/{graph_id}/backup-{timestamp_str}.json"
 
+  # Payload extensions that are already compressed archives. Gzipping one of
+  # these buys almost nothing and breaks the contract the extension states: the
+  # download endpoint presigns the stored object directly, so a `.lbug.zip` that
+  # is really gzip-wrapping-a-zip cannot be opened by anything that trusts the
+  # name. Every export format lands as a zip, so in practice this covers them all.
+  _ALREADY_COMPRESSED_EXTENSIONS = (".zip", ".gz", ".zst")
+
+  _GZIP_MAGIC = b"\x1f\x8b"
+
+  def _should_compress(self, file_extension: str | None) -> bool:
+    """Whether to gzip a payload with this extension before storing it."""
+    if not self.enable_compression:
+      return False
+    if not file_extension:
+      return True
+    return not file_extension.lower().endswith(self._ALREADY_COMPRESSED_EXTENSIONS)
+
   def _compress_data(self, data: bytes) -> bytes:
     """Gzip, unless compression is disabled for this adapter."""
     if not self.enable_compression:
@@ -576,11 +593,18 @@ class S3BackupAdapter:
     return gzip.compress(data)
 
   def _decompress_data(self, data: bytes) -> bytes:
-    """Inverse of :meth:`_compress_data`; must agree on ``enable_compression``."""
-    if not self.enable_compression:
-      return data
+    """Un-gzip a payload if it is gzipped, otherwise return it unchanged.
 
-    return gzip.decompress(data)
+    Detection is by magic bytes rather than by the adapter's ``enable_compression``
+    flag, because the stored population is mixed: objects written before archives
+    stopped being double-compressed are gzipped, and newer ones are not. A flag
+    cannot describe both, and gzip is self-identifying, so the payload is allowed
+    to answer the question itself. This also removes the old requirement that read
+    and write agree on a setting that could be changed between them.
+    """
+    if data[:2] == self._GZIP_MAGIC:
+      return gzip.decompress(data)
+    return data
 
   def _calculate_checksum(self, data: bytes) -> str:
     """SHA-256 of the *uncompressed* payload."""
@@ -721,7 +745,7 @@ class S3BackupAdapter:
 
     processed_data = backup_data
 
-    if self.enable_compression:
+    if self._should_compress(file_extension):
       processed_data = self._compress_data(processed_data)
       compressed_size = len(processed_data)
       if original_size > 0:
@@ -737,6 +761,9 @@ class S3BackupAdapter:
     else:
       compressed_size = original_size
       compression_ratio = 0.0
+      logger.info(
+        f"Storing {file_extension or 'payload'} as-is: already a compressed archive"
+      )
 
     backup_path = self._generate_backup_path(
       graph_id, backup_type, timestamp, file_extension
@@ -843,9 +870,9 @@ class S3BackupAdapter:
 
       processed_data = response["Body"].read()
 
-      if self.enable_compression:
-        original_size = len(processed_data)
-        processed_data = self._decompress_data(processed_data)
+      original_size = len(processed_data)
+      processed_data = self._decompress_data(processed_data)
+      if len(processed_data) != original_size:
         logger.info(f"Decompression: {original_size} -> {len(processed_data)} bytes")
 
       logger.info(f"Backup downloaded successfully: {s3_key}")

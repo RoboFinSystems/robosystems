@@ -964,15 +964,56 @@ class TestS3BackupAdapterCompression:
 
     assert result == original
 
-  def test_decompress_data_disabled(self):
-    """With compression disabled, returns data unchanged."""
+  def test_decompress_passes_through_non_gzip_data(self):
+    """Uncompressed payloads are returned unchanged.
+
+    Detection is by magic bytes, not by the adapter flag, so this holds
+    whatever ``enable_compression`` says.
+    """
     adapter = self._make_adapter()
     adapter.enable_compression = False
     data = b"raw data"
 
-    result = adapter._decompress_data(data)
+    assert adapter._decompress_data(data) == data
 
-    assert result == data
+    adapter.enable_compression = True
+    assert adapter._decompress_data(data) == data
+
+  def test_decompress_handles_gzip_with_compression_disabled(self):
+    """A gzipped object must still decompress when the flag says otherwise.
+
+    The stored population is mixed: objects written before archives stopped
+    being double-compressed are gzipped, newer ones are not. Keying off the
+    adapter flag cannot describe both, so the payload answers for itself.
+    """
+    adapter = self._make_adapter()
+    adapter.enable_compression = False
+    original = b"an older, gzipped backup payload"
+
+    assert adapter._decompress_data(gzip.compress(original)) == original
+
+  def test_should_compress_skips_already_compressed_archives(self):
+    """Gzipping a zip breaks the contract its extension states.
+
+    The download endpoint presigns the stored object, so a `.lbug.zip` that is
+    really gzip-wrapping-a-zip cannot be opened by anything trusting the name.
+    """
+    adapter = self._make_adapter()
+    adapter.enable_compression = True
+
+    assert adapter._should_compress(".lbug.zip") is False
+    assert adapter._should_compress(".csv.zip") is False
+    assert adapter._should_compress(".lbug.zst") is False
+    assert adapter._should_compress(".GZ") is False
+
+    assert adapter._should_compress(".cypher") is True
+    assert adapter._should_compress(None) is True
+
+  def test_should_compress_respects_disabled_adapter(self):
+    adapter = self._make_adapter()
+    adapter.enable_compression = False
+
+    assert adapter._should_compress(".cypher") is False
 
   def test_compress_decompress_roundtrip(self):
     """compress then decompress produces original data."""
