@@ -1,8 +1,9 @@
 """Dagster backup cleanup job.
 
-Daily job to enforce backup retention policies:
-- Op 1: Clean up tracked backups (GraphBackup records past their expires_at)
-- Op 2: Clean up instance-level daemon backups older than 90 days
+Daily job to enforce backup retention and verify creation kept up:
+- Op 1: Expire tracked backups (GraphBackup records past their expires_at)
+- Op 2: Sweep orphaned objects no row references
+- Op 3: Assert every graph that should have a backup has a recent one
 
 S3 lifecycle rules (cloudformation/s3.yaml) provide a 90-day safety net.
 This job handles tier-specific shorter retention via the GraphBackup model.
@@ -89,67 +90,6 @@ def cleanup_tracked_backups(
   return {
     "expired_count": expired_count,
     "deferred_count": deferred_count,
-    "timestamp": datetime.now(UTC).isoformat(),
-  }
-
-
-@op
-def cleanup_instance_backups(
-  context: OpExecutionContext,
-  s3: S3Resource,
-) -> dict[str, Any]:
-  """Clean up old instance-level daemon backups from S3.
-
-  These backups under graph-databases/{env}/ are created by the daemon
-  on writer instances and aren't tracked in PostgreSQL.
-  """
-  from robosystems.config.storage.graph import get_instance_backup_prefix
-
-  environment = env.ENVIRONMENT
-  prefix = get_instance_backup_prefix(environment)
-  cutoff = datetime.now(UTC) - timedelta(days=MAX_RETENTION_DAYS)
-
-  context.log.info(
-    f"Scanning instance backups under {prefix} older than {MAX_RETENTION_DAYS} days"
-  )
-
-  deleted_count = 0
-  objects_to_delete: list[dict[str, str]] = []
-
-  try:
-    paginator = s3.client.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=s3.bucket, Prefix=prefix)
-
-    for page in pages:
-      if "Contents" not in page:
-        continue
-
-      for obj in page["Contents"]:
-        if obj["LastModified"].replace(tzinfo=UTC) < cutoff:
-          objects_to_delete.append({"Key": obj["Key"]})
-
-          # Batch delete in groups of 1000 (S3 API limit)
-          if len(objects_to_delete) >= 1000:
-            s3.client.delete_objects(
-              Bucket=s3.bucket, Delete={"Objects": objects_to_delete}
-            )
-            deleted_count += len(objects_to_delete)
-            objects_to_delete = []
-
-    # Delete remaining
-    if objects_to_delete:
-      s3.client.delete_objects(Bucket=s3.bucket, Delete={"Objects": objects_to_delete})
-      deleted_count += len(objects_to_delete)
-
-  except Exception as e:
-    context.log.error(f"Failed to clean up instance backups: {e}")
-
-  context.log.info(f"Instance backup cleanup: {deleted_count} objects deleted")
-
-  return {
-    "deleted_count": deleted_count,
-    "prefix": prefix,
-    "cutoff_date": cutoff.isoformat(),
     "timestamp": datetime.now(UTC).isoformat(),
   }
 
@@ -364,7 +304,6 @@ def assert_backup_coverage(
 def daily_backup_cleanup_job():
   """Daily cleanup of expired backups, plus a check that creation kept up."""
   cleanup_tracked_backups()
-  cleanup_instance_backups()
   cleanup_orphaned_backups()
   assert_backup_coverage()
 

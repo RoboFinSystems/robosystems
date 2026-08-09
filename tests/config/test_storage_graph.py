@@ -11,9 +11,6 @@ from robosystems.config.storage.graph import (
   get_backup_prefix,
   get_backup_uri,
   get_download_extension,
-  get_instance_backup_key,
-  get_instance_backup_prefix,
-  get_instance_backup_uri,
   get_shared_repo_backup_key,
   get_shared_repo_backup_prefix,
   get_shared_repo_database_key,
@@ -42,7 +39,6 @@ class TestGraphStorageType:
   def test_storage_type_values(self):
     assert GraphStorageType.USER_STAGING.value == "user-staging"
     assert GraphStorageType.BACKUPS.value == "graph-backups"
-    assert GraphStorageType.DATABASES.value == "graph-databases"
 
 
 class TestStagingKeys:
@@ -112,23 +108,6 @@ class TestBackupKeys:
   def test_get_backup_prefix_type_without_graph_ignored(self):
     result = get_backup_prefix(backup_type="full")
     assert result == "graph-backups/databases/"
-
-
-class TestInstanceBackupKeys:
-  """Tests for instance-level database backup S3 key builders."""
-
-  def test_get_instance_backup_key(self):
-    ts = datetime(2024, 1, 15, 12, 30, 45, tzinfo=UTC)
-    result = get_instance_backup_key("prod", "kg456", ts)
-    assert result == "graph-databases/prod/kg456/kg456_20240115_123045.tar.gz"
-
-  def test_get_instance_backup_prefix_env_only(self):
-    result = get_instance_backup_prefix("staging")
-    assert result == "graph-databases/staging/"
-
-  def test_get_instance_backup_prefix_with_graph(self):
-    result = get_instance_backup_prefix("prod", graph_id="kg456")
-    assert result == "graph-databases/prod/kg456/"
 
 
 class TestSharedRepoKeys:
@@ -202,8 +181,3 @@ class TestURIBuilders:
     ts = datetime(2024, 3, 1, 10, 0, 0, tzinfo=UTC)
     result = get_backup_uri("my-bucket", "kg1", "full", ts)
     assert result.startswith("s3://my-bucket/graph-backups/")
-
-  def test_get_instance_backup_uri(self):
-    ts = datetime(2024, 3, 1, 10, 0, 0, tzinfo=UTC)
-    result = get_instance_backup_uri("my-bucket", "prod", "kg1", ts)
-    assert result.startswith("s3://my-bucket/graph-databases/")

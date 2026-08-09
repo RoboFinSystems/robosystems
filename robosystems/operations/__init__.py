@@ -16,7 +16,6 @@ from .connection_service import (
   ConnectionService,
 )
 from .graph.credit_service import CreditService
-from .graph.engine.backup import LadybugGraphBackupError, LadybugGraphBackupService
 from .graph.engine.backup_manager import (
   BackupFormat,
   BackupJob,
@@ -55,8 +54,6 @@ __all__ = [
   "InstanceStatus",
   # LadybugDB operations
   "LadybugAllocationManager",
-  "LadybugGraphBackupError",
-  "LadybugGraphBackupService",
   "MultiTenantUtils",
   # Providers
   "ProviderRegistry",

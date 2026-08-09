@@ -8,12 +8,12 @@ class TestBackupCleanupJobDefinition:
   """Tests for backup cleanup job structure and registration."""
 
   @pytest.mark.unit
-  def test_job_has_four_ops(self):
-    """Three cleanup ops, plus the coverage assertion."""
+  def test_job_has_three_ops(self):
+    """Two cleanup ops, plus the coverage assertion."""
     from robosystems.dagster.jobs.backup_cleanup import daily_backup_cleanup_job
 
     assert isinstance(daily_backup_cleanup_job, JobDefinition)
-    assert len(daily_backup_cleanup_job.all_node_defs) == 4
+    assert len(daily_backup_cleanup_job.all_node_defs) == 3
 
   @pytest.mark.unit
   def test_job_op_names(self):
@@ -23,7 +23,6 @@ class TestBackupCleanupJobDefinition:
     op_names = {op_def.name for op_def in daily_backup_cleanup_job.all_node_defs}
     assert op_names == {
       "cleanup_tracked_backups",
-      "cleanup_instance_backups",
       "cleanup_orphaned_backups",
       "assert_backup_coverage",
     }

@@ -219,11 +219,6 @@ Resources:
             Status: Enabled
             Prefix: graph-backups/
             ExpirationInDays: 90
-          # Instance-level database backups expire after 90 days
-          - Id: ExpireInstanceBackups
-            Status: Enabled
-            Prefix: graph-databases/
-            ExpirationInDays: 90
           # Shared repository subscriber backups expire after 90 days
           - Id: ExpireSharedRepoBackups
             Status: Enabled
@@ -235,12 +230,6 @@ Resources:
           - Id: TransitionGraphBackupsToIA
             Status: Enabled
             Prefix: graph-backups/
-            Transitions:
-              - TransitionInDays: 30
-                StorageClass: STANDARD_IA
-          - Id: TransitionGraphDatabasesToIA
-            Status: Enabled
-            Prefix: graph-databases/
             Transitions:
               - TransitionInDays: 30
                 StorageClass: STANDARD_IA
