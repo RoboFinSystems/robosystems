@@ -276,7 +276,6 @@ def create_backup(
         session=session,
         original_size=backup_info.original_size,
         compressed_size=backup_info.compressed_size,
-        encrypted_size=backup_info.compressed_size,
         checksum=backup_info.checksum,
         node_count=backup_info.node_count,
         relationship_count=backup_info.relationship_count,

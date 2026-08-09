@@ -14,6 +14,17 @@ Existing ``backup_type = 'system'`` rows are pre-restore snapshots and
 migration-export artifacts. They are re-encoded as a full backup with a system
 initiator, which is what they always were.
 
+Also drops ``encrypted_size_bytes``. Application-layer encryption was retired
+before it ever ran, and both writers always passed the compressed size into
+this column, so it has never held anything but a duplicate of
+``compressed_size_bytes``. That makes the drop reversible: the downgrade
+repopulates it from its twin and loses nothing.
+
+Note the contrast with ``encryption_enabled``, which stays. That column records
+which backups were once *marked* encrypted — real information, and worth
+keeping given the SOC 2 angle. This one records a number that was always
+identical to another column.
+
 """
 
 import sqlalchemy as sa
@@ -50,8 +61,20 @@ def upgrade() -> None:
     """
   )
 
+  op.drop_column("graph_backups", "encrypted_size_bytes")
+
 
 def downgrade() -> None:
+  # Restored from its twin rather than defaulted: the column was always a copy
+  # of compressed_size_bytes, so this reproduces every historical value exactly.
+  op.add_column(
+    "graph_backups",
+    sa.Column(
+      "encrypted_size_bytes", sa.BigInteger(), nullable=False, server_default="0"
+    ),
+  )
+  op.execute("UPDATE graph_backups SET encrypted_size_bytes = compressed_size_bytes")
+
   # Fold system-initiated rows back into the old shared encoding. Scheduled
   # backups have no pre-split representation, so they come back as plain user
   # backups — the distinction is genuinely absent from the old schema rather

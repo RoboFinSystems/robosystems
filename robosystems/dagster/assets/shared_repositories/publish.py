@@ -383,7 +383,6 @@ def _upsert_r2_backup_record(
       existing.completed_at = now
       existing.original_size_bytes = original_size
       existing.compressed_size_bytes = compressed_size
-      existing.encrypted_size_bytes = compressed_size
       existing.s3_bucket = bucket
       existing.s3_key = key
       existing.backup_metadata = {
@@ -408,7 +407,6 @@ def _upsert_r2_backup_record(
         session=session,
         original_size=original_size,
         compressed_size=compressed_size,
-        encrypted_size=compressed_size,
         checksum="",
         metadata={
           "storage": "r2",
