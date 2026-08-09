@@ -25,6 +25,8 @@ from robosystems.models.api.graphs.schema import (
 )
 from robosystems.models.core import OrgLimits
 from robosystems.routers.graphs.main import (
+  _ROBOINVESTOR_DESCRIPTION,
+  _ROBOLEDGER_DESCRIPTION,
   CreateGraphRequest,
   _create_error_response,
   _raise_http_exception,
@@ -462,15 +464,17 @@ class TestGetAvailableExtensions:
           assert "extensions" in data
           assert len(data["extensions"]) == 2  # Only available ones
 
-          # Check first extension
+          # Assert the curated descriptions verbatim, not keywords in them: the
+          # thing worth pinning is that each branch served its own copy rather
+          # than falling through to the module-docstring default. A substring
+          # match on prose breaks on any honest copy edit and proves less.
           ext1 = data["extensions"][0]
           assert ext1["name"] == "roboledger"
-          assert "accounting" in ext1["description"].lower()
+          assert ext1["description"] == _ROBOLEDGER_DESCRIPTION
 
-          # Check second extension
           ext2 = data["extensions"][1]
           assert ext2["name"] == "roboinvestor"
-          assert "investment" in ext2["description"].lower()
+          assert ext2["description"] == _ROBOINVESTOR_DESCRIPTION
 
   async def test_get_available_extensions_schema_manager_failure(
     self, async_client: AsyncClient
