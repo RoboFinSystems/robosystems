@@ -9,7 +9,7 @@ class TestBackupCleanupJobDefinition:
 
   @pytest.mark.unit
   def test_job_has_three_ops(self):
-    """Test that the job graph contains exactly 3 ops."""
+    """Two cleanup ops, plus the coverage assertion."""
     from robosystems.dagster.jobs.backup_cleanup import daily_backup_cleanup_job
 
     assert isinstance(daily_backup_cleanup_job, JobDefinition)
@@ -23,8 +23,8 @@ class TestBackupCleanupJobDefinition:
     op_names = {op_def.name for op_def in daily_backup_cleanup_job.all_node_defs}
     assert op_names == {
       "cleanup_tracked_backups",
-      "cleanup_instance_backups",
       "cleanup_orphaned_backups",
+      "assert_backup_coverage",
     }
 
   @pytest.mark.unit
@@ -258,3 +258,124 @@ class TestTrackedBackupCleanupRetries:
 
     assert result["deferred_count"] == 1
     backup.expire_backup.assert_not_called()
+
+
+class TestBackupCoverageAssertion:
+  """The check that catches the failure Dagster structurally cannot show.
+
+  A backup job that errors leaves a failed run in the list. A schedule that
+  stops evaluating leaves nothing at all — and an absent run is exactly what a
+  run list cannot surface. This asks the outcome question instead: does every
+  graph that should have a backup have one.
+  """
+
+  def _session(self, graphs: list[str], covered: set[str]):
+    """Session whose first query enumerates graphs and whose second probes one."""
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    calls = {"n": 0}
+    probe_order: list[str] = list(graphs)
+
+    def query(_entity):
+      q = MagicMock()
+      if calls["n"] == 0:
+        calls["n"] += 1
+        q.filter.return_value.all.return_value = [(g,) for g in graphs]
+      else:
+        graph_id = probe_order.pop(0)
+        q.filter.return_value.first.return_value = (
+          ("backup_row",) if graph_id in covered else None
+        )
+      return q
+
+    session.query.side_effect = query
+    return session
+
+  @pytest.mark.unit
+  def test_names_uncovered_graphs(self):
+    """A gap names the graphs, so the log line is actionable on its own."""
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import patch
+
+    from robosystems.dagster.jobs.backup_cleanup import find_uncovered_graphs
+
+    session = self._session(["kg_a", "kg_b", "kg_c"], covered={"kg_b"})
+
+    with patch(
+      "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+      return_value=False,
+    ):
+      checked, uncovered = find_uncovered_graphs(
+        session, datetime.now(UTC) - timedelta(days=2)
+      )
+
+    assert checked == 3
+    assert uncovered == ["kg_a", "kg_c"]
+
+  @pytest.mark.unit
+  def test_full_coverage_reports_nothing(self):
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import patch
+
+    from robosystems.dagster.jobs.backup_cleanup import find_uncovered_graphs
+
+    session = self._session(["kg_a"], covered={"kg_a"})
+
+    with patch(
+      "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+      return_value=False,
+    ):
+      checked, uncovered = find_uncovered_graphs(
+        session, datetime.now(UTC) - timedelta(days=2)
+      )
+
+    assert checked == 1
+    assert uncovered == []
+
+  @pytest.mark.unit
+  def test_scope_matches_the_producer(self):
+    """Shared repositories are out of the nightly schedule, so out of the check.
+
+    Checking a different population than the producer would either cry wolf or
+    stay silent about a real gap.
+    """
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import patch
+
+    from robosystems.dagster.jobs.backup_cleanup import find_uncovered_graphs
+
+    session = self._session(["kg_a", "sec"], covered=set())
+
+    with patch(
+      "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+      side_effect=lambda g: g == "sec",
+    ):
+      checked, uncovered = find_uncovered_graphs(
+        session, datetime.now(UTC) - timedelta(days=2)
+      )
+
+    assert checked == 1
+    assert uncovered == ["kg_a"]
+
+  @pytest.mark.unit
+  def test_survives_a_query_failure_without_aborting_cleanup(self):
+    """This op runs after the cleanup ops.
+
+    Raising here would make a coverage gap look like a retention malfunction,
+    so a failure degrades to a log and an empty result.
+    """
+    from unittest.mock import MagicMock
+
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.backup_cleanup import assert_backup_coverage
+
+    db = MagicMock()
+    db.get_session.side_effect = RuntimeError("database is down")
+
+    result = assert_backup_coverage(build_op_context(), db)
+
+    assert result["checked"] == 0
+    assert result["uncovered"] == []
+    assert "error" in result

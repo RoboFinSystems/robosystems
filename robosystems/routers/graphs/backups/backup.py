@@ -86,7 +86,11 @@ async def list_backups(
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
 
-    from robosystems.models.core import BackupStatus, BackupType, GraphBackup
+    # Listing shows what the customer can act on: their own backups and the
+    # scheduled ones taken on their behalf. System-initiated rows are
+    # pre-restore snapshots and migration-export artifacts — internal to an
+    # operation they did not request, so surfacing them would be noise.
+    from robosystems.models.core import BackupInitiator, BackupStatus, GraphBackup
 
     # Query database for backups
     backup_records = (
@@ -94,7 +98,7 @@ async def list_backups(
       .filter(
         GraphBackup.graph_id == graph_id,
         GraphBackup.status.in_([BackupStatus.COMPLETED, BackupStatus.IN_PROGRESS]),
-        GraphBackup.backup_type != BackupType.SYSTEM.value,
+        GraphBackup.initiated_by != BackupInitiator.SYSTEM.value,
       )
       .order_by(GraphBackup.created_at.desc())
       .offset(offset)
@@ -107,7 +111,7 @@ async def list_backups(
       .filter(
         GraphBackup.graph_id == graph_id,
         GraphBackup.status.in_([BackupStatus.COMPLETED, BackupStatus.IN_PROGRESS]),
-        GraphBackup.backup_type != BackupType.SYSTEM.value,
+        GraphBackup.initiated_by != BackupInitiator.SYSTEM.value,
       )
       .count()
     )
@@ -137,6 +141,16 @@ async def list_backups(
           graph_id=graph_id,
           backup_format=backup_format,
           backup_type=backup.backup_type,
+          initiated_by=backup.initiated_by,
+          # Tri-state flattened for the API: the manifest records "included" /
+          # "absent", and a backup predating memory support records nothing at
+          # all. That last case stays None rather than collapsing to False,
+          # because "makes no claim" and "had none" are different answers.
+          memory_included=(
+            {"included": True, "absent": False}.get(
+              (backup.backup_metadata or {}).get("memory")
+            )
+          ),
           status=backup.status.value
           if hasattr(backup.status, "value")
           else str(backup.status),

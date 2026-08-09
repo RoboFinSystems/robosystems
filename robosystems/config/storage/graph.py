@@ -20,11 +20,6 @@ Every storage type lives in USER_DATA_BUCKET under a fixed prefix. The
         {graph_id}/
           backup-{timestamp}.json
 
-    graph-databases/                 # Instance-level backups (via daemon)
-      {environment}/
-        {graph_id}/
-          {graph_id}_{timestamp}.tar.gz
-
     report-bundles/                  # Per-Report serialization artifacts (JSON-LD)
       {graph_id}/
         {report_id}/
@@ -49,7 +44,6 @@ class GraphStorageType(Enum):
 
   USER_STAGING = "user-staging"  # Pre-ingestion file uploads
   BACKUPS = "graph-backups"  # Application-level backups
-  DATABASES = "graph-databases"  # Instance-level database backups
   REPORT_BUNDLES = "report-bundles"  # Per-Report serialization artifacts
   SHARED_REPO_DATABASES = "shared-repositories/databases"  # Published snapshots
   SHARED_REPO_BACKUPS = "shared-repositories/backups"  # Subscriber backups
@@ -76,11 +70,6 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
     storage_type=GraphStorageType.BACKUPS,
     prefix="graph-backups/",
     description="Application-level graph database backups with metadata",
-  ),
-  GraphStorageType.DATABASES: GraphStorageConfig(
-    storage_type=GraphStorageType.DATABASES,
-    prefix="graph-databases/",
-    description="Instance-level database backups from writer nodes",
   ),
   GraphStorageType.REPORT_BUNDLES: GraphStorageConfig(
     storage_type=GraphStorageType.REPORT_BUNDLES,
@@ -217,43 +206,6 @@ def get_backup_prefix(
 # =============================================================================
 # Instance Database Backup Helpers
 # =============================================================================
-
-
-def get_instance_backup_key(
-  environment: str,
-  graph_id: str,
-  timestamp: datetime,
-) -> str:
-  """Build S3 key for an instance-level database backup.
-
-  Example:
-      >>> from datetime import datetime, UTC
-      >>> ts = datetime(2024, 1, 15, 12, 30, 45, tzinfo=UTC)
-      >>> get_instance_backup_key("prod", "kg456", ts)
-      'graph-databases/prod/kg456/kg456_20240115_123045.tar.gz'
-  """
-  config = GRAPH_STORAGE[GraphStorageType.DATABASES]
-  timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-  return f"{config.prefix}{environment}/{graph_id}/{graph_id}_{timestamp_str}.tar.gz"
-
-
-def get_instance_backup_prefix(
-  environment: str,
-  graph_id: str | None = None,
-) -> str:
-  """Build S3 prefix for listing instance backups.
-
-  Example:
-      >>> get_instance_backup_prefix("prod", "kg456")
-      'graph-databases/prod/kg456/'
-  """
-  config = GRAPH_STORAGE[GraphStorageType.DATABASES]
-  prefix = f"{config.prefix}{environment}/"
-
-  if graph_id:
-    prefix += f"{graph_id}/"
-
-  return prefix
 
 
 # =============================================================================
@@ -439,13 +391,6 @@ def get_staging_uri(bucket: str, *args, **kwargs) -> str:
 def get_backup_uri(bucket: str, *args, **kwargs) -> str:
   """Build full ``s3://`` URI for a backup; forwards to get_backup_key."""
   key = get_backup_key(*args, **kwargs)
-  return f"s3://{bucket}/{key}"
-
-
-def get_instance_backup_uri(bucket: str, *args, **kwargs) -> str:
-  """Build full ``s3://`` URI for an instance backup; forwards to
-  get_instance_backup_key."""
-  key = get_instance_backup_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"
 
 

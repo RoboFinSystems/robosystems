@@ -45,8 +45,17 @@ GRAPH_REGISTRY_TABLE = os.environ.get(
   "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
 )
 ALERT_TOPIC = os.environ["ALERT_TOPIC_ARN"]
-# Retention for fallback cleanup of orphaned volume snapshots (tagged AutoDelete: true)
-# Note: DLM handles primary snapshot lifecycle with 3-day retention
+# Retention for pre-detach volume snapshots (tagged AutoDelete: true).
+#
+# This is the ONLY reaper. There is no DLM policy and no AWS Backup plan —
+# volume-layer scheduling was evaluated and declined, because a volume rule
+# protects kilobytes of irreplaceable data by copying gigabytes of rebuildable
+# data, and could not be made graceful across shared master, replicas and user
+# writers. Snapshots here are instance-lifecycle protection, not a backup
+# product; graph backups live in S3 and are taken nightly.
+#
+# Note this value governs cleanup while the snapshot tag says RetentionDays: 3.
+# The tag is descriptive; this is what actually deletes.
 RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
 
 # How long a volume may sit in `claiming` before another launch may take it.
@@ -831,8 +840,14 @@ def _maybe_snapshot_pre_detach(
   retaining a window's worth accumulates expensively — and the master's real
   backup is S3 anyway, making the EBS snapshot a single last-known-good fallback
   rather than a history. Prune runs only AFTER a successful create, so there is
-  never a moment with zero fallback. Dedicated writers instead keep a full
-  3-day multi-snapshot history (unique data, infrequent detaches).
+  never a moment with zero fallback.
+
+  Dedicated writers are not pruned, so they accumulate a history bounded only by
+  ``RETENTION_DAYS``. In practice that history is usually empty: writers run
+  on-demand rather than Spot, so their volumes detach only on a deliberate fleet
+  cycle, and long stretches pass with no snapshot at all. **Do not read this as
+  backup coverage for writer graphs** — they are protected by the nightly S3
+  backups. This is a fast-recovery convenience for instance replacement.
   """
   if node_type == "shared_replica":
     logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")

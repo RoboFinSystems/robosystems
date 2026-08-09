@@ -378,7 +378,11 @@ class TestCreateBackupExecute:
       ),
       patch(
         "robosystems.config.graph_tier.GraphTierConfig.get_backup_limits",
-        return_value={"backup_retention_days": 30},
+        return_value={"backup_retention_days": 30, "max_backups_per_day": 10},
+      ),
+      patch(
+        "robosystems.models.core.GraphBackup.count_user_initiated_today",
+        return_value=0,
       ),
       patch(
         "robosystems.middleware.sse.build_graph_job_config",
@@ -395,6 +399,77 @@ class TestCreateBackupExecute:
     assert result["operation_id"] == "op_backup_01"
     # Retention capped at the tier max (30), not the caller's 999
     assert result["retention_days"] == 30
+
+  @pytest.mark.asyncio
+  async def test_daily_limit_is_enforced_on_this_path_too(
+    self, mock_db: MagicMock
+  ) -> None:
+    """The MCP path enqueues the same job, so the limit has to live here too.
+
+    A quota enforced on only one of two entry points is not a quota — the same
+    shape as the retention clamp this path was missing before #1108.
+    """
+    from robosystems.config import env as env_module
+
+    admin = MagicMock()
+    admin.role = "admin"
+    mock_db.query.return_value.filter.return_value.first.return_value = admin
+
+    graph = MagicMock()
+    graph.graph_tier = "ladybug-standard"
+
+    with (
+      patch.object(env_module, "BACKUP_CREATION_ENABLED", True),
+      patch("robosystems.models.core.Graph.get_by_id", return_value=graph),
+      patch(
+        "robosystems.config.graph_tier.GraphTierConfig.get_backup_limits",
+        return_value={"backup_retention_days": 7, "max_backups_per_day": 2},
+      ),
+      patch(
+        "robosystems.models.core.GraphBackup.count_user_initiated_today",
+        return_value=2,
+      ),
+    ):
+      result = await CreateBackupTool(_client()).execute({})
+
+    assert result["error"] == "daily_backup_limit_reached"
+    assert "2/2" in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_unlimited_tier_skips_the_limit(self, mock_db: MagicMock) -> None:
+    """A negative limit means unlimited, not "zero allowed"."""
+    from robosystems.config import env as env_module
+
+    admin = MagicMock()
+    admin.role = "admin"
+    mock_db.query.return_value.filter.return_value.first.return_value = admin
+
+    graph = MagicMock()
+    graph.graph_tier = "ladybug-xlarge"
+
+    with (
+      patch.object(env_module, "BACKUP_CREATION_ENABLED", True),
+      patch("robosystems.models.core.Graph.get_by_id", return_value=graph),
+      patch(
+        "robosystems.config.graph_tier.GraphTierConfig.get_backup_limits",
+        return_value={"backup_retention_days": 90, "max_backups_per_day": -1},
+      ),
+      patch(
+        "robosystems.models.core.GraphBackup.count_user_initiated_today",
+        return_value=500,
+      ),
+      patch(
+        "robosystems.middleware.sse.build_graph_job_config",
+        return_value={"config": {}},
+      ),
+      patch(
+        "robosystems.worker.client.enqueue_task",
+        new=AsyncMock(return_value={"operation_id": "op_backup_02"}),
+      ),
+    ):
+      result = await CreateBackupTool(_client()).execute({})
+
+    assert result["status"] == "accepted"
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -43,7 +43,6 @@ Each storage type owns a top-level prefix, declared once in `GRAPH_STORAGE`:
 | ------------------ | ------ | ------- |
 | `USER_STAGING` | `user-staging/` | Pre-ingestion file uploads |
 | `BACKUPS` | `graph-backups/` | Application-level backups via the API |
-| `DATABASES` | `graph-databases/` | Instance-level backups from writer nodes |
 | `REPORT_BUNDLES` | `report-bundles/` | Per-Report serialization bundles |
 | `SHARED_REPO_DATABASES` | `shared-repositories/databases/` | Published shared-repository snapshots |
 | `SHARED_REPO_BACKUPS` | `shared-repositories/backups/` | Compressed subscriber downloads |
@@ -64,9 +63,6 @@ graph.get_backup_key("kg456", "full", ts)
 # 'graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz'
 graph.get_backup_metadata_key("kg456", ts)
 # 'graph-backups/metadata/kg456/backup-20240115_123045.json'
-
-graph.get_instance_backup_key("prod", "kg456", ts)
-# 'graph-databases/prod/kg456/kg456_20240115_123045.tar.gz'
 
 graph.get_report_bundle_key("kg456", "rpt_01K8", 1)
 # 'report-bundles/kg456/rpt_01K8/g1.jsonld'
@@ -114,9 +110,6 @@ s3://robosystems-user-{env}/
   graph-backups/                 # Application-level backups
     databases/{graph_id}/{full|incremental}/backup-{timestamp}.lbug.gz
     metadata/{graph_id}/backup-{timestamp}.json
-
-  graph-databases/               # Instance-level backups
-    {environment}/{graph_id}/{graph_id}_{timestamp}.tar.gz
 
   report-bundles/                # Per-Report serialization bundles
     {graph_id}/{report_id}/g{generation}.jsonld

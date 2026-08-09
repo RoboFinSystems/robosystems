@@ -1,7 +1,7 @@
 """Graph resource models."""
 
 from .graph import Graph, GraphStatus
-from .graph_backup import BackupStatus, BackupType, GraphBackup
+from .graph_backup import BackupInitiator, BackupStatus, BackupType, GraphBackup
 from .graph_credits import (
   CreditTransactionType,
   GraphCredits,
@@ -15,6 +15,7 @@ from .graph_user import GraphRole, GraphUser
 from .source_file import SourceFile
 
 __all__ = [
+  "BackupInitiator",
   "BackupStatus",
   "BackupType",
   "CreditTransactionType",

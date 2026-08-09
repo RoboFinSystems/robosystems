@@ -35,11 +35,41 @@ class BackupStatus(str, Enum):
 
 
 class BackupType(str, Enum):
-  """Backup type enumeration."""
+  """What shape the backup is.
+
+  ``SYSTEM`` is retained for historical rows only. It used to carry *who*
+  started a backup rather than what it is, which meant the shape axis could not
+  answer "is this a full dump?" for anything the platform produced. That axis
+  now lives on :class:`BackupInitiator`; new rows record shape here and
+  initiator there.
+  """
 
   FULL = "full"
   INCREMENTAL = "incremental"
   SYSTEM = "system"
+
+
+class BackupInitiator(str, Enum):
+  """Who started the backup.
+
+  Separate from :class:`BackupType` because the two answer different questions
+  and were previously conflated. Initiator drives three things: whether the
+  backup counts against the tier's daily quota, whether it appears in the
+  customer-facing listing, and how it is labelled there.
+  """
+
+  USER = "user"
+  """Requested through the API. Counts against ``max_backups_per_day``."""
+
+  SCHEDULED = "scheduled"
+  """Taken by the nightly platform job. Listed, downloadable, quota-exempt."""
+
+  SYSTEM = "system"
+  """Internal artifact — a pre-restore snapshot or a migration export.
+
+  Not listed: it exists to serve an operation the customer did not ask for and
+  cannot act on, so surfacing it would be noise rather than protection.
+  """
 
 
 class GraphBackup(Model):
@@ -57,6 +87,13 @@ class GraphBackup(Model):
 
   # Backup metadata
   backup_type = Column(String, nullable=False, default=BackupType.FULL.value)
+  initiated_by = Column(
+    String,
+    nullable=False,
+    default=BackupInitiator.USER.value,
+    server_default=BackupInitiator.USER.value,
+    index=True,
+  )
   status = Column(
     String, nullable=False, default=BackupStatus.PENDING.value, index=True
   )
@@ -220,6 +257,36 @@ class GraphBackup(Model):
       .filter(cls.status == BackupStatus.PENDING)
       .order_by(cls.created_at.asc())
       .all()
+    )
+
+  @classmethod
+  def count_user_initiated_today(cls, graph_id: str, session: Session) -> int:
+    """User-requested backups for this graph since the start of the UTC day.
+
+    Scoped to ``initiated_by = 'user'`` so the nightly platform backup never
+    consumes the customer's allowance — on the entry tier that allowance is two
+    per day, and a scheduled backup would otherwise take half of it for
+    something they did not ask for.
+
+    Failed attempts are excluded. The quota bounds sustained usage, and burning
+    a customer's daily allowance on a backup that errored — quite possibly on
+    our side — would turn our fault into their limit. Burst abuse is already
+    bounded separately by the endpoint's rate-limit category.
+    """
+    from sqlalchemy import func
+
+    start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return (
+      session.query(func.count(cls.id))
+      .filter(
+        cls.graph_id == graph_id,
+        cls.initiated_by == BackupInitiator.USER.value,
+        cls.status != BackupStatus.FAILED.value,
+        cls.created_at >= start_of_day,
+      )
+      .scalar()
+      or 0
     )
 
   @classmethod
@@ -391,6 +458,7 @@ class GraphBackup(Model):
       "graph_id": self.graph_id,
       "database_name": self.database_name,
       "backup_type": self.backup_type,
+      "initiated_by": self.initiated_by,
       "status": self.status,
       "s3_bucket": self.s3_bucket,
       "s3_key": self.s3_key,

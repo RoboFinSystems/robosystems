@@ -1,8 +1,9 @@
 """Dagster backup cleanup job.
 
-Daily job to enforce backup retention policies:
-- Op 1: Clean up tracked backups (GraphBackup records past their expires_at)
-- Op 2: Clean up instance-level daemon backups older than 90 days
+Daily job to enforce backup retention and verify creation kept up:
+- Op 1: Expire tracked backups (GraphBackup records past their expires_at)
+- Op 2: Sweep orphaned objects no row references
+- Op 3: Assert every graph that should have a backup has a recent one
 
 S3 lifecycle rules (cloudformation/s3.yaml) provide a 90-day safety net.
 This job handles tier-specific shorter retention via the GraphBackup model.
@@ -89,67 +90,6 @@ def cleanup_tracked_backups(
   return {
     "expired_count": expired_count,
     "deferred_count": deferred_count,
-    "timestamp": datetime.now(UTC).isoformat(),
-  }
-
-
-@op
-def cleanup_instance_backups(
-  context: OpExecutionContext,
-  s3: S3Resource,
-) -> dict[str, Any]:
-  """Clean up old instance-level daemon backups from S3.
-
-  These backups under graph-databases/{env}/ are created by the daemon
-  on writer instances and aren't tracked in PostgreSQL.
-  """
-  from robosystems.config.storage.graph import get_instance_backup_prefix
-
-  environment = env.ENVIRONMENT
-  prefix = get_instance_backup_prefix(environment)
-  cutoff = datetime.now(UTC) - timedelta(days=MAX_RETENTION_DAYS)
-
-  context.log.info(
-    f"Scanning instance backups under {prefix} older than {MAX_RETENTION_DAYS} days"
-  )
-
-  deleted_count = 0
-  objects_to_delete: list[dict[str, str]] = []
-
-  try:
-    paginator = s3.client.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=s3.bucket, Prefix=prefix)
-
-    for page in pages:
-      if "Contents" not in page:
-        continue
-
-      for obj in page["Contents"]:
-        if obj["LastModified"].replace(tzinfo=UTC) < cutoff:
-          objects_to_delete.append({"Key": obj["Key"]})
-
-          # Batch delete in groups of 1000 (S3 API limit)
-          if len(objects_to_delete) >= 1000:
-            s3.client.delete_objects(
-              Bucket=s3.bucket, Delete={"Objects": objects_to_delete}
-            )
-            deleted_count += len(objects_to_delete)
-            objects_to_delete = []
-
-    # Delete remaining
-    if objects_to_delete:
-      s3.client.delete_objects(Bucket=s3.bucket, Delete={"Objects": objects_to_delete})
-      deleted_count += len(objects_to_delete)
-
-  except Exception as e:
-    context.log.error(f"Failed to clean up instance backups: {e}")
-
-  context.log.info(f"Instance backup cleanup: {deleted_count} objects deleted")
-
-  return {
-    "deleted_count": deleted_count,
-    "prefix": prefix,
-    "cutoff_date": cutoff.isoformat(),
     "timestamp": datetime.now(UTC).isoformat(),
   }
 
@@ -267,12 +207,105 @@ def cleanup_orphaned_backups(
   }
 
 
+def find_uncovered_graphs(session, staleness_cutoff: datetime) -> tuple[int, list[str]]:
+  """Graphs that should have a recent scheduled backup and don't.
+
+  Returns ``(checked, uncovered)``. Scope mirrors the nightly schedule exactly —
+  customer entity and generic graphs, subgraphs included, shared repositories
+  excluded — because a coverage check against a different population than the
+  producer would either cry wolf or stay quiet about real gaps.
+  """
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.models.core import BackupInitiator, BackupStatus, Graph, GraphBackup
+
+  graphs = (
+    session.query(Graph.graph_id)
+    .filter(
+      Graph.graph_type.in_(("entity", "generic")),
+      Graph.status == "active",
+    )
+    .all()
+  )
+
+  uncovered: list[str] = []
+  checked = 0
+
+  for (graph_id,) in graphs:
+    if is_shared_repository_or_subgraph(graph_id):
+      continue
+
+    checked += 1
+    recent = (
+      session.query(GraphBackup.id)
+      .filter(
+        GraphBackup.graph_id == graph_id,
+        GraphBackup.initiated_by == BackupInitiator.SCHEDULED.value,
+        GraphBackup.status == BackupStatus.COMPLETED.value,
+        GraphBackup.created_at >= staleness_cutoff,
+      )
+      .first()
+    )
+    if recent is None:
+      uncovered.append(graph_id)
+
+  return checked, uncovered
+
+
+@op
+def assert_backup_coverage(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+) -> dict[str, Any]:
+  """Fail loudly when a graph that should have a recent backup doesn't.
+
+  This checks the *outcome*, not the mechanism, and that distinction is the
+  reason it exists. Dagster records a failed run, so a backup job that errors is
+  visible in the run list — but a schedule that stops evaluating produces no run
+  at all, and an absent run is precisely what a list of runs cannot show you.
+  The defect that produced this whole surface was of exactly that shape:
+  retention ran daily for months against a population nothing was replenishing,
+  and no job was failing the entire time.
+
+  So the question asked here is "does every graph that should have a backup have
+  one", which is answerable from the rows regardless of why it might not.
+
+  Deliberately a CRITICAL log rather than a raised failure: this op runs after
+  the three cleanup ops, and aborting the run would make a coverage gap look
+  like a retention malfunction. The signal belongs in the logs where a metric
+  filter can find it, not in this job's exit status.
+  """
+  # Two nightly cycles. One missed night is a transient; two is a pattern, and
+  # waiting for the second keeps a single slow evening off the alert path.
+  staleness_cutoff = datetime.now(UTC) - timedelta(days=2)
+
+  try:
+    with db.get_session() as session:
+      checked, uncovered = find_uncovered_graphs(session, staleness_cutoff)
+  except Exception as e:
+    context.log.error(f"Backup coverage check failed to run: {e}")
+    return {"checked": 0, "uncovered": [], "error": str(e)}
+
+  if uncovered:
+    context.log.critical(
+      f"BACKUP COVERAGE GAP: {len(uncovered)} of {checked} graphs have no "
+      f"completed scheduled backup in the last 2 days: {', '.join(sorted(uncovered))}"
+    )
+  else:
+    context.log.info(f"Backup coverage OK: {checked} graphs covered")
+
+  return {
+    "checked": checked,
+    "uncovered": sorted(uncovered),
+    "cutoff": staleness_cutoff.isoformat(),
+  }
+
+
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def daily_backup_cleanup_job():
-  """Daily cleanup of expired backups across all storage layers."""
+  """Daily cleanup of expired backups, plus a check that creation kept up."""
   cleanup_tracked_backups()
-  cleanup_instance_backups()
   cleanup_orphaned_backups()
+  assert_backup_coverage()
 
 
 daily_backup_cleanup_schedule = ScheduleDefinition(

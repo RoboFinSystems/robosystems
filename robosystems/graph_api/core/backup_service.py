@@ -93,6 +93,20 @@ class OnInstanceBackupService:
         self._duckdb_vacuum(graph_id)
         logger.info(f"[Task {task_id}] VACUUM completed")
 
+      # Existence is checked BEFORE the checkpoint, and the order is the whole
+      # point. `_checkpoint` opens a pooled connection with read_only=False, and
+      # LadybugDB creates a database when the path is absent — so checkpointing
+      # first would mint an empty 16 KB file for a graph that is not resident on
+      # this instance, satisfy the guard below that should have failed, and
+      # upload it as a successful backup. Same species as the dropped-WAL bug:
+      # the operation reports success over an artifact that holds nothing.
+      if is_duckdb:
+        db_path = self._resolve_duckdb_path(graph_id)
+      else:
+        db_path = self._resolve_db_path(graph_id)
+      if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
       if checkpoint:
         logger.info(f"[Task {task_id}] Running CHECKPOINT on {graph_id}")
         await self.task_manager.update_task(
@@ -103,13 +117,6 @@ class OnInstanceBackupService:
         else:
           self._checkpoint(graph_id)
         logger.info(f"[Task {task_id}] CHECKPOINT completed")
-
-      if is_duckdb:
-        db_path = self._resolve_duckdb_path(graph_id)
-      else:
-        db_path = self._resolve_db_path(graph_id)
-      if not db_path.exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
 
       db_size = db_path.stat().st_size
       logger.info(f"[Task {task_id}] Database size: {db_size / (1024**3):.2f} GB")
