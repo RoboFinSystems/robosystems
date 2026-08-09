@@ -262,7 +262,10 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'disclosures', 'checklist', 'styles', 'rs-metric', 'rs-driver', "
     # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
     # tenant-copied with the default pin.
-    "'cm'"
+    "'cm', "
+    # linked — concepts that arrived with a report shared from another
+    # graph (see Element.source). Not a CoA source.
+    "'linked'"
     ")"
   )
   widened_taxonomy_type = (

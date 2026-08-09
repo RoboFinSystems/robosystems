@@ -1128,12 +1128,23 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND fs.scenario_id IS NULL
   """
 
+  # Inner-joined to `elements` on purpose. `facts.element_id` has no
+  # foreign key, so an unresolvable concept reaches this point without
+  # complaint — and LadybugDB then rejects the edge, which blue/green
+  # scores as a partial run and answers by abandoning the entire WIP
+  # database. One dangling id would otherwise cost the graph everything,
+  # including rows with no relationship to whatever wrote the bad
+  # reference. Dropping the single edge is the proportionate response; the
+  # write paths are responsible for not creating the dangle in the first
+  # place (see `_ensure_shared_elements` for the cross-graph case).
   tables["FACT_HAS_ELEMENT"] = f"""
     CREATE OR REPLACE TABLE FACT_HAS_ELEMENT AS
     SELECT
-      id                              AS src,
-      element_id                      AS dst
+      f.id                            AS src,
+      f.element_id                    AS dst
     FROM {actual_facts} f
+    JOIN postgres_scan('{c}', '{s}', 'elements') e
+      ON e.id = f.element_id
   """
 
   tables["FACT_HAS_PERIOD"] = f"""
