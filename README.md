@@ -1,6 +1,8 @@
 # RoboSystems
 
-RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It models your financial data as a **knowledge graph** — transactions, facts, reporting elements, and the calculation structures that relate them are all nodes and edges, with the semantics preserved rather than flattened into rows you query around. On top of that graph it gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+
+**Every tenant gets their own graph.** Not a row-level slice of a shared table — a dedicated graph database on its own instance, with a dedicated OLTP schema behind it. Your ontology, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
 
 Open source top to bottom — the accounting ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform: [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
 
@@ -171,7 +173,22 @@ See the **[Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/B
 
 ## Architecture
 
-Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in. The components:
+Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in.
+
+### Multi-Tenancy & Isolation
+
+The tenancy model is one rule: **every isolation primitive keys on `graph_id` — never on an organization.** Session `search_path`, cache keys, idempotency keys, rate-limit buckets, and credit accounting all namespace on the graph, or on the user where the thing genuinely belongs to a person. No shared state is ever org-keyed. The consequence worth understanding is that two graphs inside the *same* organization are isolated by the identical mechanism that separates two unrelated customers, rather than by a weaker variant of it — there is no "internal" path that skips the boundary.
+
+- **A dedicated graph database per tenant.** Every tier allocates one LadybugDB database per instance (`databases_per_instance: 1`) — no shared writer, no query contention from a neighbor, and a blast radius of one tenant. Tiers differ by instance size, not by how many tenants share it.
+- **Schema-per-graph OLTP.** The extensions PostgreSQL database gives each graph its own schema, and `SET search_path` is re-stamped on entry to every request rather than assumed from a pooled connection. A CI structural test pins that contract so it can't quietly regress.
+- **Two databases, two migration histories.** Platform state (identity, orgs, billing, graph metadata) is a separate database from extensions OLTP, with independent Alembic histories. A migration to one never touches the other.
+- **The graph is a derived projection.** OLTP rows are the system of record; the analytical graph is rebuilt from them blue-green — built alongside the live graph and swapped only when the build is clean. Nothing in the graph is authoritative, which is what makes a rebuild routine instead of risky.
+- **Subgraphs** are isolated data environments within a tenant — separate databases sharing the parent's credits and permissions — used for AI memory, development, and team workspaces.
+- **Shared repositories** (SEC XBRL) are the one multi-reader surface: a separate read-only tier with its own replicas, queryable *alongside* your own graph, and never writable through it.
+
+Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a single-tenant dedicated deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy).
+
+### Components
 
 **Application Layer:**
 
