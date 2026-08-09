@@ -723,6 +723,28 @@ class TestPublishMetrics:
     manager.cloudwatch.put_metric_data.assert_called_once()
 
   @pytest.mark.asyncio
+  async def test_publish_failure_metric_emits_both_dimension_sets(self):
+    """The alarm matches on `Environment`; triage wants `FailureReason`.
+
+    CloudWatch matches an alarm to a metric on the exact dimension set, so
+    emitting only `FailureReason` leaves `AllocationFailureAlarm` watching a
+    stream nothing publishes to — it sat `OK` for six months on exactly that.
+    Asserting the call happened is what let it through; assert the payload.
+    """
+    manager = _create_manager(environment="prod")
+    await manager._publish_failure_metric("no_capacity", "entity1", "user1")
+
+    metric_data = manager.cloudwatch.put_metric_data.call_args.kwargs["MetricData"]
+    dimension_sets = [
+      {d["Name"]: d["Value"] for d in datum["Dimensions"]} for datum in metric_data
+    ]
+
+    assert {"FailureReason": "no_capacity"} in dimension_sets
+    assert {"Environment": "prod"} in dimension_sets
+    assert all(d["MetricName"] == "AllocationFailures" for d in metric_data)
+    assert all(d["Value"] == 1 for d in metric_data)
+
+  @pytest.mark.asyncio
   async def test_publish_allocation_metrics_handles_error(self):
     manager = _create_manager(environment="prod")
     manager.instance_table.scan.side_effect = _make_client_error()

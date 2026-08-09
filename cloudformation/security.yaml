@@ -55,6 +55,16 @@ Parameters:
     Type: String
     Default: ""
 
+  # Sustained 5xx from the application over a 5-minute window. Deliberately a
+  # parameter, not a literal: there is no traffic baseline to tune against yet,
+  # so this will move — and a threshold that needs a code change to adjust ends
+  # up never adjusted. Sourced from the API_TARGET_ERROR_THRESHOLD GitHub
+  # variable so it can be retuned without a PR.
+  ApiTargetErrorThreshold:
+    Type: Number
+    Default: 5
+    MinValue: 0
+
   EnableSecurityHub:
     Type: String
     Default: "true"
@@ -628,6 +638,36 @@ Resources:
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
+  # The 5xx alarm above watches HTTPCode_ELB_5XX_Count — errors the *load
+  # balancer* generates. A healthy process returning 500 on every business
+  # endpoint produces none of those: its targets stay healthy, the liveness
+  # probe keeps passing, and the outage is invisible end to end. Target_5XX is
+  # the application's own errors, and is the one an outage actually rides
+  # through.
+  ApiTarget5xxAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbProd
+    Properties:
+      AlarmName: robosystems-prod-api-target-5xx
+      AlarmDescription: The API is returning 5xx responses to clients
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref ApiTargetErrorThreshold
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ApiAlbFullNameProd
+        - Name: TargetGroup
+          Value: !Ref ApiTgFullNameProd
+      # No traffic is the normal state at this scale, and no traffic cannot be
+      # an outage — a request has to reach the app for it to 5xx.
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
   ApiAlbUnhealthyHostsAlarmStaging:
     Type: AWS::CloudWatch::Alarm
     Condition: HasApiAlbStaging
@@ -689,6 +729,66 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  ApiTarget5xxAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbStaging
+    Properties:
+      AlarmName: robosystems-staging-api-target-5xx
+      AlarmDescription: The API is returning 5xx responses to clients
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref ApiTargetErrorThreshold
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ApiAlbFullNameStaging
+        - Name: TargetGroup
+          Value: !Ref ApiTgFullNameStaging
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  # Delivery assurance for the alert channel itself. Every alarm in this account
+  # reaches a human through SNS email, and AWS silently drops an unconfirmed
+  # email subscription after three days — after which nothing arrives, and
+  # nothing arriving is indistinguishable from nothing happening. This is the
+  # only control that tells those apart.
+  #
+  # Aggregated across every topic with SEARCH rather than one alarm per topic:
+  # there are sixteen alert topics across ten stacks, and SEARCH also picks up
+  # topics added later without anyone remembering to add an alarm.
+  #
+  # **One alarm, not one per environment.** SEARCH matches every topic in the
+  # account and region, so prod and staging copies would watch identical data
+  # and both fire on the same failure. It routes to the prod alert topic because
+  # that is the destination that gets read, not because it is prod-scoped.
+  #
+  # Yes, it is circular — a delivery-failure alarm delivered by the channel that
+  # is failing. Accepted deliberately: the realistic failure is *one*
+  # subscription being dropped, not SNS itself being down. A second channel is
+  # scope this does not need.
+  SnsDeliveryFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-sns-delivery-failures
+      AlarmDescription: An SNS topic failed to deliver a notification
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      TreatMissingData: notBreaching
+      Metrics:
+        - Id: failed
+          Label: NumberOfNotificationsFailed across all topics
+          ReturnData: true
+          Expression: >-
+            SUM(SEARCH('{AWS/SNS,TopicName} MetricName="NumberOfNotificationsFailed"',
+            'Sum', 300))
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
   # Admin-key-rotation Lambdas are defined in api.yaml (same ceiling constraint);
   # function names are deterministic stack-name prefixes.

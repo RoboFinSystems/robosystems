@@ -447,7 +447,8 @@ jobs:
                       ParameterKey=ApiAlbFullNameProd,ParameterValue=${ALB_PROD:-} \
                       ParameterKey=ApiTgFullNameProd,ParameterValue=${TG_PROD:-} \
                       ParameterKey=ApiAlbFullNameStaging,ParameterValue=${ALB_STAGING:-} \
-                      ParameterKey=ApiTgFullNameStaging,ParameterValue=${TG_STAGING:-}"
+                      ParameterKey=ApiTgFullNameStaging,ParameterValue=${TG_STAGING:-} \
+                      ParameterKey=ApiTargetErrorThreshold,ParameterValue=${{ vars.API_TARGET_ERROR_THRESHOLD || '5' }}"
 
           echo "AWS Config recorder enabled: ${{ inputs.security_config_enabled }}"
 
