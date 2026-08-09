@@ -1243,7 +1243,15 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       sec.is_active,
       NULL::VARCHAR                   AS ticker,
       NULL::VARCHAR                   AS figi,
-      e.metadata->>'source_graph_id'  AS source_graph_id
+      -- The security's own column first: it carries the investor's declared
+      -- cross-graph intent from the moment the security is created, whereas the
+      -- entity join only resolves once `_ensure_linked_entity` has run. Reading
+      -- the join alone materialized NULL for every security still awaiting its
+      -- handshake — exactly the pre-association state the design turns on.
+      COALESCE(
+        sec.source_graph_id,
+        e.metadata->>'source_graph_id'
+      )                               AS source_graph_id
     FROM postgres_scan('{c}', '{s}', 'securities') sec
     LEFT JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON sec.entity_id = e.id

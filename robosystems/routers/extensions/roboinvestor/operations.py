@@ -159,6 +159,7 @@ create_portfolio_block_op = _registrar.register(
       SecurityNotFoundError: (404, lambda e: f"Security not found: {e}"),
       DuplicateActivePositionError: (409, str),
     },
+    mark_stale_reason="portfolio_block_created",
   )
 )
 
@@ -180,6 +181,7 @@ update_portfolio_block_op = _registrar.register(
       SecurityNotFoundError: (404, lambda e: f"Security not found: {e}"),
       DuplicateActivePositionError: (409, str),
     },
+    mark_stale_reason="portfolio_block_updated",
   )
 )
 
@@ -208,6 +210,7 @@ delete_portfolio_block_op = _registrar.register(
         ),
       ),
     },
+    mark_stale_reason="portfolio_block_deleted",
     requires_created_by=False,
   )
 )
@@ -229,6 +232,7 @@ create_security_op = _registrar.register(
     request_model=CreateSecurityRequest,
     result_type=SecurityResponse,
     error_map={EntityNotFoundError: (404, lambda _e: "Entity not found.")},
+    mark_stale_reason="security_created",
   )
 )
 
@@ -244,6 +248,7 @@ update_security_op = _registrar.register(
     request_model=UpdateSecurityOperation,
     result_type=SecurityResponse,
     error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
+    mark_stale_reason="security_updated",
     requires_created_by=False,
   )
 )
@@ -260,6 +265,7 @@ delete_security_op = _registrar.register(
     request_model=DeleteSecurityOperation,
     result_type=DeleteResult,
     error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
+    mark_stale_reason="security_deleted",
     requires_created_by=False,
   )
 )
