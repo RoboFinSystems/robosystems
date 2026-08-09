@@ -734,11 +734,17 @@ class TestPublishMetrics:
     manager = _create_manager(environment="prod")
     await manager._publish_failure_metric("no_capacity", "entity1", "user1")
 
-    metric_data = manager.cloudwatch.put_metric_data.call_args.kwargs["MetricData"]
+    call = manager.cloudwatch.put_metric_data.call_args
+    metric_data = call.kwargs["MetricData"]
     dimension_sets = [
       {d["Name"]: d["Value"] for d in datum["Dimensions"]} for datum in metric_data
     ]
 
+    # An alarm matches on namespace *and* dimension set. Namespace arrives as a
+    # separate kwarg, so asserting only the dimensions would let a dropped
+    # `/{environment}` suffix re-break the alarm in the identical way with this
+    # test still green.
+    assert call.kwargs["Namespace"] == "RoboSystems/Graph/prod"
     assert {"FailureReason": "no_capacity"} in dimension_sets
     assert {"Environment": "prod"} in dimension_sets
     assert all(d["MetricName"] == "AllocationFailures" for d in metric_data)
