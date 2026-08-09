@@ -2,8 +2,8 @@
 Backup management routers.
 
 Read endpoints: list, download, stats.
-Write operations (create, restore) live at
-``POST /v1/graphs/{graph_id}/operations/{create-backup,restore-backup}``.
+Backup creation lives at ``POST /v1/graphs/{graph_id}/operations/create-backup``.
+Restore is not exposed to customers — see ``backup.py`` for why.
 """
 
 from fastapi import APIRouter

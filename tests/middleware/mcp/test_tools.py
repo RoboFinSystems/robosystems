@@ -1,8 +1,8 @@
 """Tests for standalone MCP tools (BuildFactGridTool).
 
 Graph lifecycle tools (`create-subgraph`, `delete-subgraph`,
-`list-subgraphs`, `create-backup`, `restore-backup`,
-`materialize`, `get-graph-sync-status`) have dedicated coverage in
+`list-subgraphs`, `create-backup`, `materialize`,
+`get-graph-sync-status`) have dedicated coverage in
 `tests/middleware/mcp/tools/test_graph_tools.py`.
 
 The Cypher construction + dedup live in the ops layer

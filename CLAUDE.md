@@ -58,7 +58,6 @@ exposes only ledger fields (no `INVESTOR_NOT_INITIALIZED` runtime errors).
 | Create subgraph | `POST /v1/graphs/{g}/operations/create-subgraph` |
 | Delete subgraph | `POST /v1/graphs/{g}/operations/delete-subgraph` |
 | Create backup | `POST /v1/graphs/{g}/operations/create-backup` |
-| Restore backup | `POST /v1/graphs/{g}/operations/restore-backup` |
 |  Change tier | `POST /v1/graphs/{g}/operations/change-tier` |
 | Materialize | `POST /v1/graphs/{g}/operations/materialize` |
 | Update metadata | `POST /v1/graphs/{g}/operations/update-graph-metadata` |

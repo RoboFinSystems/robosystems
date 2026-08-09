@@ -218,12 +218,12 @@ class GraphMCPTools:
     # Writes are gated by `read_only`; `list-subgraphs` is a pure read, so it
     # stays available whenever the navigation flag is set.
     #
-    # Deliberately **not exposed on MCP** — both still live on REST for
-    # humans:
-    # - `change-tier`: 3-5 minute destructive EBS migration with billing
-    #   implications and fail-on-downgrade semantics.
-    # - `restore-backup`: overwrites live graph data with a historical
-    #   snapshot; recovery from a mis-fired restore is very expensive.
+    # Deliberately **not exposed on MCP** — `change-tier` is a 3-5 minute
+    # destructive EBS migration with billing implications and
+    # fail-on-downgrade semantics, so it stays on REST for humans.
+    #
+    # Restore is absent for a different reason: it has no customer-facing
+    # surface at all. Backups are for download; restore is operator-run.
     self.create_subgraph_tool = None
     self.delete_subgraph_tool = None
     self.list_subgraphs_tool = None

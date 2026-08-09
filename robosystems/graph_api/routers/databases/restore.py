@@ -5,7 +5,9 @@ Restores run as background tasks; progress is monitored through the generic
 ``robosystems/graph_api/routers/tasks.py``.
 """
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path as FilePath
 
 from fastapi import (
   APIRouter,
@@ -28,8 +30,47 @@ from robosystems.operations.graph.engine.backup_manager import (
   RestoreJob,
   create_backup_manager,
 )
+from robosystems.utils.path_validation import get_lance_index_path
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
+
+# Name of the manifest inside a full-dump archive. Its *presence* is load-bearing:
+# an archive without it predates memory support and therefore makes no claim
+# about the memory store, which is a different thing from claiming there is none.
+BACKUP_MANIFEST_NAME = "backup-manifest.json"
+
+
+def _count_copied_database(db_path: FilePath) -> tuple[int, int]:
+  """Node and relationship counts read from a copied database file.
+
+  Opened read-only and separately from the connection pool: the point is to
+  measure the artifact that is about to be uploaded, so reusing the live
+  connection would defeat the check by answering from the source instead.
+
+  A database with no schema at all — the shape the dropped-WAL bug produced —
+  raises rather than returning zero, so the failure is folded into ``(0, 0)``.
+  That mismatches any non-empty source and fails the backup upstream, which is
+  the intended outcome.
+  """
+  import ladybug as lbug
+
+  def _scalar(conn, cypher: str) -> int:
+    result = conn.execute(cypher)
+    return int(result.get_next()[0]) if result.has_next() else 0
+
+  try:
+    db = lbug.Database(str(db_path), read_only=True)
+    try:
+      conn = lbug.Connection(db)
+      return (
+        _scalar(conn, "MATCH (n) RETURN count(n) as count"),
+        _scalar(conn, "MATCH ()-[r]->() RETURN count(r) as count"),
+      )
+    finally:
+      db.close()
+  except Exception as e:
+    logger.warning(f"Could not count copied database at {db_path}: {e}")
+    return 0, 0
 
 
 async def perform_restore(
@@ -284,26 +325,66 @@ async def download_backup(
       temp_path = Path(temp_dir)
 
       if os.path.isfile(db_path):
-        shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
+        copied_db = temp_path / f"{graph_id}.lbug"
+        shutil.copy2(db_path, copied_db)
       else:
-        shutil.copytree(db_path, temp_path / graph_id)
+        copied_db = temp_path / graph_id
+        shutil.copytree(db_path, copied_db)
+
+      # Count what actually landed in the copy, not what the live database
+      # holds. The caller compares this against its own live-query stats and
+      # refuses to record `completed` on a mismatch — which is the check that
+      # would have caught the dropped-WAL bug, where the record described the
+      # graph and the payload described a stale file with nothing in it.
+      payload_nodes, payload_rels = _count_copied_database(copied_db)
+
+      # The memory store is lazily created — most graphs never write one — so
+      # absence is an ordinary outcome, not an error. Resolve the path rather
+      # than constructing a LanceMemoryStore, whose __init__ mkdirs its base
+      # path: a backup that materializes the directory it is testing for would
+      # make every later absence check ambiguous.
+      lance_dir = get_lance_index_path(graph_id)
+      memory_included = lance_dir.is_dir() and any(lance_dir.rglob("*"))
+
+      manifest = {
+        "manifest_version": 1,
+        "graph_id": graph_id,
+        "database_form": "file" if os.path.isfile(db_path) else "directory",
+        "node_count": payload_nodes,
+        "relationship_count": payload_rels,
+        # Tri-state. "included"/"absent" distinguish a graph that has memory
+        # from one that never wrote any; a backup with no manifest at all is
+        # the third case — it predates memory support and makes no claim
+        # either way. The manifest's presence is what carries that distinction,
+        # so absence of the file must never be read as "no memory".
+        "memory": "included" if memory_included else "absent",
+      }
 
       zip_file = temp_path / f"{graph_id}_backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         if os.path.isfile(db_path):
-          zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
+          zf.write(copied_db, f"{graph_id}.lbug")
         else:
-          for root, dirs, files in os.walk(temp_path / graph_id):
+          for root, dirs, files in os.walk(copied_db):
             for file in files:
               file_path = Path(root) / file
               arc_path = file_path.relative_to(temp_path)
               zf.write(file_path, arc_path)
 
+        if memory_included:
+          for file_path in sorted(lance_dir.rglob("*")):
+            if file_path.is_file():
+              zf.write(file_path, Path("memory") / file_path.relative_to(lance_dir))
+
+        zf.writestr(BACKUP_MANIFEST_NAME, json.dumps(manifest, indent=2))
+
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 
     logger.info(
-      f"Created backup for database {graph_id}, size: {len(backup_data)} bytes"
+      f"Created backup for database {graph_id}, size: {len(backup_data)} bytes, "
+      f"payload: {payload_nodes} nodes / {payload_rels} rels, "
+      f"memory: {manifest['memory']}"
     )
 
     return Response(
@@ -314,6 +395,9 @@ async def download_backup(
         "X-Database": graph_id,
         "X-Backup-Format": "full_dump",
         "X-Backup-Size": str(len(backup_data)),
+        "X-Backup-Node-Count": str(payload_nodes),
+        "X-Backup-Relationship-Count": str(payload_rels),
+        "X-Backup-Memory": manifest["memory"],
       },
     )
 

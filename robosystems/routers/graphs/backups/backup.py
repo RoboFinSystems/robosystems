@@ -1,8 +1,16 @@
 """
 Backup read routes (list).
 
-Write operations (create, restore) live at
-``POST /v1/graphs/{graph_id}/operations/{create-backup,restore-backup}``.
+Backup creation lives at ``POST /v1/graphs/{graph_id}/operations/create-backup``.
+
+There is no customer-facing restore. Backups are a *download* capability: every
+graph type with an upstream rebuilds from it rather than from a snapshot
+(entity graphs re-materialize from the extensions database, generic graphs from
+their staged source files, shared repositories re-ingest), and the classes with
+no upstream — entity subgraphs and the semantic memory store — are recovered by
+downloading the payload and rebuilding, or by an operator-run restore. The
+restore machinery is retained for that internal path only; see
+``dagster/jobs/graph.py::restore_backup``.
 """
 
 from datetime import UTC, datetime
@@ -39,7 +47,6 @@ from robosystems.models.api.graphs.backups import (
   DownloadQuota,
 )
 from robosystems.models.core import User, UserRepository
-from robosystems.routers.graphs.backups.utils import restore_unsupported_reason
 
 # Create router
 router = APIRouter()
@@ -206,7 +213,6 @@ async def list_backups(
       total_count=total_count,
       graph_id=graph_id,
       is_shared_repository=is_shared_repo,
-      restore_supported=restore_unsupported_reason(graph_id, db) is None,
       download_quota=download_quota,
     )
 

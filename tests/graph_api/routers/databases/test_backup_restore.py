@@ -1,6 +1,7 @@
 """Tests for database backup and restore routes."""
 
 import io
+import json
 import zipfile
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -253,11 +254,19 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   assert isinstance(backup_bytes, bytes)
 
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
-    # Should contain the single .lbug file with matching contents
+    # The .lbug plus the manifest. No memory entries: this graph has no lance
+    # directory, which is the ordinary case rather than an error.
     namelist = zf.namelist()
-    assert namelist == ["graph1.lbug"]
+    assert sorted(namelist) == ["backup-manifest.json", "graph1.lbug"]
     extracted = zf.read("graph1.lbug")
     assert extracted == b"lbug-data"
+
+    manifest = json.loads(zf.read("backup-manifest.json"))
+    assert manifest["graph_id"] == "graph1"
+    assert manifest["database_form"] == "file"
+    assert manifest["memory"] == "absent"
+
+  assert response.headers["X-Backup-Memory"] == "absent"
 
   # The WAL must be folded into the main file before it is copied — without
   # this the backup captures the database as of its last pool eviction, which
@@ -289,6 +298,76 @@ async def test_download_backup_aborts_when_checkpoint_fails(monkeypatch, tmp_pat
 
   assert exc.value.status_code == 500
   assert "checkpoint" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_download_backup_includes_memory_store(monkeypatch, tmp_path):
+  """The semantic memory store has no upstream, so it must ride in the archive.
+
+  It is a sibling directory of the .lbug rather than part of it, so copying the
+  database alone silently omits the one thing on the volume that cannot be
+  rebuilt from anywhere.
+  """
+  cluster = FakeClusterService(read_only=False, databases=["graph1"])
+  db_file = tmp_path / "graph1.lbug"
+  db_file.write_bytes(b"lbug-data")
+
+  lance_root = tmp_path / "lance"
+  memory_dir = lance_root / "graph1" / "memory" / "memory.lance"
+  memory_dir.mkdir(parents=True)
+  (memory_dir / "data.bin").write_bytes(b"vectors")
+
+  monkeypatch.setattr(
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
+    lambda graph_id: str(db_file),
+  )
+  monkeypatch.setattr(
+    restore_module,
+    "get_lance_index_path",
+    lambda graph_id: lance_root / graph_id,
+  )
+
+  response = await restore_module.download_backup(
+    graph_id="graph1", ladybug_service=cluster
+  )
+
+  with zipfile.ZipFile(io.BytesIO(response.body), "r") as zf:
+    assert "memory/memory/memory.lance/data.bin" in zf.namelist()
+    assert zf.read("memory/memory/memory.lance/data.bin") == b"vectors"
+    assert json.loads(zf.read("backup-manifest.json"))["memory"] == "included"
+
+  assert response.headers["X-Backup-Memory"] == "included"
+
+
+@pytest.mark.asyncio
+async def test_download_backup_does_not_create_the_memory_directory(
+  monkeypatch, tmp_path
+):
+  """Probing for memory must never bring it into existence.
+
+  The store is created lazily on first write. A backup that materialized the
+  directory while checking for it would make every later absence check
+  ambiguous — "empty" and "never used" would look identical from then on.
+  """
+  cluster = FakeClusterService(read_only=False, databases=["graph1"])
+  db_file = tmp_path / "graph1.lbug"
+  db_file.write_bytes(b"lbug-data")
+
+  lance_root = tmp_path / "lance"
+
+  monkeypatch.setattr(
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
+    lambda graph_id: str(db_file),
+  )
+  monkeypatch.setattr(
+    restore_module,
+    "get_lance_index_path",
+    lambda graph_id: lance_root / graph_id,
+  )
+
+  await restore_module.download_backup(graph_id="graph1", ladybug_service=cluster)
+
+  assert not lance_root.exists()
 
 
 @pytest.mark.asyncio
@@ -365,6 +444,11 @@ async def test_download_backup_directory_database(monkeypatch, tmp_path):
   backup_bytes = response.body
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
     names = sorted(zf.namelist())
-    assert names == ["graph1/logs/metrics.log", "graph1/nodes"]
+    assert names == [
+      "backup-manifest.json",
+      "graph1/logs/metrics.log",
+      "graph1/nodes",
+    ]
     assert zf.read("graph1/nodes") == b"node-data"
     assert zf.read("graph1/logs/metrics.log") == b"metrics"
+    assert json.loads(zf.read("backup-manifest.json"))["database_form"] == "directory"

@@ -19,8 +19,10 @@ from robosystems.operations.graph.engine.backup_manager import (
   BackupFormat,
   BackupJob,
   BackupManager,
+  BackupPayloadMismatch,
   BackupType,
   RestoreJob,
+  _reconcile_payload_against_stats,
 )
 
 # ---------------------------------------------------------------------------
@@ -468,7 +470,7 @@ class TestCreateBackup:
       patch.object(manager, "_export_database", new_callable=AsyncMock) as mock_export,
     ):
       mock_stats.return_value = {"node_count": 200, "relationship_count": 100}
-      mock_export.return_value = (b"exported_data", ".lbug.zip")
+      mock_export.return_value = (b"exported_data", ".lbug.zip", None)
 
       job = BackupJob(
         graph_id="test_graph",
@@ -538,7 +540,7 @@ class TestCreateBackup:
       patch.object(manager, "_export_database", new_callable=AsyncMock) as mock_export,
     ):
       mock_stats.return_value = {"node_count": 10, "relationship_count": 5}
-      mock_export.return_value = (b"data", ".csv.zip")
+      mock_export.return_value = (b"data", ".csv.zip", None)
 
       job = BackupJob(
         graph_id="test_graph",
@@ -569,7 +571,7 @@ class TestCreateBackup:
       patch.object(manager, "_export_database", new_callable=AsyncMock) as mock_export,
     ):
       mock_stats.return_value = {"node_count": 1, "relationship_count": 0}
-      mock_export.return_value = (b"inc_data", ".json.zip")
+      mock_export.return_value = (b"inc_data", ".json.zip", None)
 
       job = BackupJob(
         graph_id="test_graph",
@@ -994,7 +996,7 @@ class TestExportDatabase:
       result = await manager._export_database("g1", BackupFormat.CSV, BackupType.FULL)
 
       mock_exp.assert_called_once_with("g1", BackupType.FULL)
-      assert result == (b"csv_data", ".csv.zip")
+      assert result == (b"csv_data", ".csv.zip", None)
 
   @pytest.mark.asyncio
   async def test_routes_to_json_export(self, manager):
@@ -1004,7 +1006,7 @@ class TestExportDatabase:
       result = await manager._export_database("g1", BackupFormat.JSON, BackupType.FULL)
 
       mock_exp.assert_called_once_with("g1", BackupType.FULL)
-      assert result == (b"json_data", ".json.zip")
+      assert result == (b"json_data", ".json.zip", None)
 
   @pytest.mark.asyncio
   async def test_routes_to_parquet_export(self, manager):
@@ -1018,19 +1020,27 @@ class TestExportDatabase:
       )
 
       mock_exp.assert_called_once_with("g1", BackupType.FULL)
-      assert result == (b"pq_data", ".parquet.zip")
+      assert result == (b"pq_data", ".parquet.zip", None)
 
   @pytest.mark.asyncio
   async def test_routes_to_full_dump_export(self, manager):
     with patch.object(manager, "_export_full_dump", new_callable=AsyncMock) as mock_exp:
-      mock_exp.return_value = (b"dump_data", ".lbug.zip")
+      mock_exp.return_value = (
+        b"dump_data",
+        ".lbug.zip",
+        {"node_count": 1, "relationship_count": 0, "memory": "absent"},
+      )
 
       result = await manager._export_database(
         "g1", BackupFormat.FULL_DUMP, BackupType.FULL
       )
 
       mock_exp.assert_called_once_with("g1", BackupType.FULL)
-      assert result == (b"dump_data", ".lbug.zip")
+      assert result == (
+        b"dump_data",
+        ".lbug.zip",
+        {"node_count": 1, "relationship_count": 0, "memory": "absent"},
+      )
 
   @pytest.mark.asyncio
   async def test_raises_for_unsupported_format(self, manager):
@@ -1472,6 +1482,38 @@ class TestExportFullDump:
   async def test_successful_export(self, manager):
     mock_graph_client = MagicMock()
     mock_graph_client.download_backup = AsyncMock(
+      return_value={
+        "backup_data": b"binary_dump",
+        "size_bytes": 11,
+        "payload_node_count": 5,
+        "payload_relationship_count": 3,
+        "memory": "included",
+      }
+    )
+
+    mock_router = MagicMock()
+    mock_router.get_repository = AsyncMock(return_value=mock_graph_client)
+    manager._graph_router = mock_router
+
+    data, ext, payload = await manager._export_full_dump("test_graph", BackupType.FULL)
+
+    assert data == b"binary_dump"
+    assert ext == ".lbug.zip"
+    assert payload == {
+      "node_count": 5,
+      "relationship_count": 3,
+      "memory": "included",
+    }
+
+  @pytest.mark.asyncio
+  async def test_export_reports_unmeasured_payload_as_none(self, manager):
+    """A graph node predating the measurement sends no counts.
+
+    That must read as "no claim" rather than as a measured zero, or every
+    backup taken against an older node would look like an empty archive.
+    """
+    mock_graph_client = MagicMock()
+    mock_graph_client.download_backup = AsyncMock(
       return_value={"backup_data": b"binary_dump", "size_bytes": 11}
     )
 
@@ -1479,10 +1521,13 @@ class TestExportFullDump:
     mock_router.get_repository = AsyncMock(return_value=mock_graph_client)
     manager._graph_router = mock_router
 
-    data, ext = await manager._export_full_dump("test_graph", BackupType.FULL)
+    _, _, payload = await manager._export_full_dump("test_graph", BackupType.FULL)
 
-    assert data == b"binary_dump"
-    assert ext == ".lbug.zip"
+    assert payload == {
+      "node_count": None,
+      "relationship_count": None,
+      "memory": None,
+    }
 
   @pytest.mark.asyncio
   async def test_missing_backup_data_raises(self, manager):
@@ -1747,3 +1792,86 @@ class TestImportFullDumpRemovesTarget:
         )
 
     assert target.read_bytes() == b"outgoing database"
+
+
+# ===========================================================================
+# Payload reconciliation
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestReconcilePayloadAgainstStats:
+  """The check that would have caught the dropped-WAL backup.
+
+  A backup used to report `completed, node_count: 23` over an archive holding
+  nothing, because the count came from a live query and the archive was
+  produced separately with nothing comparing the two.
+  """
+
+  def test_empty_archive_over_populated_database_raises(self):
+    with pytest.raises(BackupPayloadMismatch, match="is empty while the database"):
+      _reconcile_payload_against_stats(
+        "g1",
+        {"node_count": 23, "relationship_count": 27},
+        {"node_count": 0, "relationship_count": 0, "memory": "absent"},
+      )
+
+  def test_matching_counts_report_no_delta(self):
+    assert (
+      _reconcile_payload_against_stats(
+        "g1",
+        {"node_count": 23, "relationship_count": 27},
+        {"node_count": 23, "relationship_count": 27, "memory": "absent"},
+      )
+      is None
+    )
+
+  def test_genuinely_empty_graph_is_not_a_mismatch(self):
+    """An empty archive of an empty database is correct, not a failure."""
+    assert (
+      _reconcile_payload_against_stats(
+        "g1",
+        {"node_count": 0, "relationship_count": 0},
+        {"node_count": 0, "relationship_count": 0, "memory": "absent"},
+      )
+      is None
+    )
+
+  def test_drift_is_recorded_rather_than_raised(self):
+    """Writes land between the live read and the copy; that must not fail.
+
+    Strict equality would make a nightly backup flap red on any active graph,
+    and a job that cries wolf is one nobody reads.
+    """
+    delta = _reconcile_payload_against_stats(
+      "g1",
+      {"node_count": 100, "relationship_count": 50},
+      {"node_count": 98, "relationship_count": 49, "memory": "absent"},
+    )
+
+    assert delta == {
+      "payload_node_count": 98,
+      "payload_relationship_count": 49,
+      "live_node_count": 100,
+      "live_relationship_count": 50,
+    }
+
+  def test_unmeasured_payload_is_skipped(self):
+    """None means "no claim" — an export format, or an older graph node.
+
+    Reading it as zero would fail every backup those paths produce.
+    """
+    assert (
+      _reconcile_payload_against_stats(
+        "g1", {"node_count": 23, "relationship_count": 27}, None
+      )
+      is None
+    )
+    assert (
+      _reconcile_payload_against_stats(
+        "g1",
+        {"node_count": 23, "relationship_count": 27},
+        {"node_count": None, "relationship_count": None, "memory": None},
+      )
+      is None
+    )

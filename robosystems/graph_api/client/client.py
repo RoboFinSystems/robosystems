@@ -1327,11 +1327,23 @@ class GraphClient(BaseGraphClient):
     )
     response.raise_for_status()
 
+    # `payload_*` are counted from the copied file, not from the live database,
+    # so the caller can reconcile the artifact against its own stats. A server
+    # predating that measurement sends no such headers, which reads as None —
+    # "not measured" — and must not be confused with a measured zero.
+    payload_nodes = response.headers.get("X-Backup-Node-Count")
+    payload_rels = response.headers.get("X-Backup-Relationship-Count")
+
     return {
       "backup_data": response.content,
       "size_bytes": int(response.headers.get("X-Backup-Size", len(response.content))),
       "database": response.headers.get("X-Database", graph_id),
       "format": response.headers.get("X-Backup-Format", "full_dump"),
+      "payload_node_count": int(payload_nodes) if payload_nodes is not None else None,
+      "payload_relationship_count": (
+        int(payload_rels) if payload_rels is not None else None
+      ),
+      "memory": response.headers.get("X-Backup-Memory"),
     }
 
   async def restore_backup(
