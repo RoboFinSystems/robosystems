@@ -31,22 +31,6 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["Org Usage"])
 
-# Event types that represent a caller-initiated API operation. Deliberately
-# excludes storage snapshots (written by a background sensor) and credit events
-# (reported separately as credits/AI operations).
-_API_EVENT_TYPES = frozenset(
-  {
-    UsageEventType.API_CALL.value,
-    UsageEventType.QUERY_EXECUTION.value,
-    UsageEventType.MCP_CALL.value,
-    UsageEventType.AGENT_CALL.value,
-    UsageEventType.IMPORT_OPERATION.value,
-    UsageEventType.BACKUP_OPERATION.value,
-    UsageEventType.SYNC_OPERATION.value,
-    UsageEventType.ANALYTICS_QUERY.value,
-  }
-)
-
 
 @router.get(
   "/orgs/{org_id}/limits",
@@ -155,7 +139,6 @@ async def get_org_usage(
     total_credits_used = Decimal(0)
     total_ai_operations = 0
     total_storage_gb = 0.0
-    total_api_calls = 0
 
     graph_usage_details = []
 
@@ -185,14 +168,6 @@ async def get_org_usage(
         for r in usage_records
         if r.event_type == UsageEventType.CREDIT_CONSUMPTION.value
       )
-      # Count API-shaped events, not every row in the table: `graph_usage`
-      # also holds the 6-hourly storage snapshots the usage sensor writes and
-      # the credit-consumption rows counted just above, neither of which is
-      # customer API traffic.
-      graph_api_calls = sum(
-        1 for r in usage_records if r.event_type in _API_EVENT_TYPES
-      )
-
       # Get latest storage snapshot
       latest_storage = (
         db.query(GraphUsage)
@@ -215,7 +190,6 @@ async def get_org_usage(
           "credits_used": float(graph_credits_used),
           "ai_operations": graph_ai_ops,
           "storage_gb": graph_storage,
-          "api_calls": graph_api_calls,
           "credits_available": float(credits.current_balance) if credits else 0,
           "credits_allocated": float(credits.monthly_allocation) if credits else 0,
         }
@@ -224,27 +198,20 @@ async def get_org_usage(
       total_credits_used += graph_credits_used
       total_ai_operations += graph_ai_ops
       total_storage_gb += graph_storage
-      total_api_calls += graph_api_calls
 
     # Calculate daily averages
     daily_avg_credits = float(total_credits_used) / max(days, 1)
-    daily_avg_api_calls = total_api_calls / max(days, 1)
 
     # Project monthly usage
     projected_monthly_credits = daily_avg_credits * 30
-    projected_monthly_api_calls = daily_avg_api_calls * 30
 
     summary = OrgUsageSummary(
       total_credits_used=float(total_credits_used),
       total_ai_operations=total_ai_operations,
       total_storage_gb=float(total_storage_gb),
-      total_api_calls=total_api_calls,
       daily_avg_credits=daily_avg_credits,
-      daily_avg_api_calls=daily_avg_api_calls,
       projected_monthly_credits=projected_monthly_credits,
-      projected_monthly_api_calls=int(projected_monthly_api_calls),
       credits_limit=None,  # We'll expand this later
-      api_calls_limit=None,  # We'll expand this later
       storage_limit_gb=None,  # We'll expand this later
     )
 
@@ -254,16 +221,11 @@ async def get_org_usage(
       day_start = start_date + timedelta(days=i)
       day_end = day_start + timedelta(days=1)
 
-      # Same definitions as the summary above, so the two agree within one
-      # payload: `api_calls` counts only API-shaped events, excluding the
-      # 6-hourly storage snapshots and the credit-consumption rows, while
-      # credits sum across whatever rows carry them.
+      # Same definition as the summary above, so the two agree within one
+      # payload: credits sum across whatever rows carry them.
       day_records = (
         db.query(
           func.sum(GraphUsage.credits_consumed).label("credits"),
-          func.count(GraphUsage.id)
-          .filter(GraphUsage.event_type.in_(_API_EVENT_TYPES))
-          .label("api_calls"),
         )
         .filter(
           GraphUsage.graph_id.in_(graph_ids) if graph_ids else False,
@@ -277,7 +239,6 @@ async def get_org_usage(
         {
           "date": day_start.date().isoformat(),
           "credits_used": float(day_records.credits or 0) if day_records else 0,
-          "api_calls": day_records.api_calls if day_records else 0,
         }
       )
 
