@@ -1012,6 +1012,7 @@ link_entity_taxonomy_op = _registrar.register(
       EntityNotFoundError: 404,
       TaxonomyMissingError: 404,
     },
+    mark_stale_reason="entity_taxonomy_linked",
     requires_created_by=False,
   )
 )
@@ -1045,6 +1046,7 @@ create_mapping_association_op = _registrar.register(
         lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]
       ),
     },
+    mark_stale_reason="mapping_association_created",
   )
 )
 
@@ -1069,6 +1071,7 @@ delete_mapping_association_op = _registrar.register(
       AssociationNotFoundError: (404, lambda _e: "Association not found"),
       LibraryImmutableError: 403,
     },
+    mark_stale_reason="mapping_association_deleted",
   )
 )
 
@@ -1435,6 +1438,7 @@ create_agent_op = _registrar.register(
     request_model=CreateAgentRequest,
     result_type=LedgerAgentResponse,
     error_map={DuplicateExternalIdError: 409, ValueError: 422},
+    mark_stale_reason="agent_created",
   )
 )
 
@@ -1451,6 +1455,7 @@ update_agent_op = _registrar.register(
     request_model=UpdateAgentRequest,
     result_type=LedgerAgentResponse,
     error_map={AgentNotFoundError: 404, ValueError: 422},
+    mark_stale_reason="agent_updated",
   )
 )
 

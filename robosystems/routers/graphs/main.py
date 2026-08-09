@@ -53,6 +53,23 @@ from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUse
 
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
+# Surfaced to prospects at graph-creation time, so these describe only what is
+# built. Both are read twice below — the schema-loading path and its fallback —
+# and single-sourcing them here is what keeps the two copies from diverging.
+_ROBOLEDGER_DESCRIPTION = (
+  "Complete accounting system with XBRL reporting and GL transactions. "
+  "Context-aware: SEC repositories get reporting-only tables, "
+  "entity graphs get full accounting capabilities."
+)
+
+_ROBOINVESTOR_DESCRIPTION = (
+  "Private-market portfolio tracking — positions with cost basis, holdings grouped "
+  "by company, and a securities registry covering preferred and common stock, LLC "
+  "units, LP interests, SAFEs, notes, warrants and options with their terms. Link a "
+  "holding to its issuer's graph and that company's reports publish straight into "
+  "yours, alongside public SEC filings."
+)
+
 
 def _create_error_response(
   error_code: str,
@@ -481,18 +498,10 @@ async def get_available_extensions(
             # which represents what entity graphs will get
             loader = get_contextual_schema_loader("application", "roboledger")
             # Override description with context-aware information
-            description = (
-              "Complete accounting system with XBRL reporting and GL transactions. "
-              "Context-aware: SEC repositories get reporting-only tables, "
-              "entity graphs get full accounting capabilities."
-            )
+            description = _ROBOLEDGER_DESCRIPTION
           elif ext_info["name"] == "roboinvestor":
             loader = get_schema_loader([ext_info["name"]])
-            description = (
-              "Investment portfolio management with securities tracking, trade execution, "
-              "and risk analysis. Includes market data, dividends, benchmarks, and "
-              "position-level performance monitoring."
-            )
+            description = _ROBOINVESTOR_DESCRIPTION
           else:
             loader = get_schema_loader([ext_info["name"]])
             description = ext_info["description"]  # Use original description
@@ -537,20 +546,12 @@ async def get_available_extensions(
       extensions=[
         AvailableExtension(
           name="roboledger",
-          description=(
-            "Complete accounting system with XBRL reporting and GL transactions. "
-            "Context-aware: SEC repositories get reporting-only tables, "
-            "entity graphs get full accounting capabilities."
-          ),
+          description=_ROBOLEDGER_DESCRIPTION,
           enabled=False,
         ),
         AvailableExtension(
           name="roboinvestor",
-          description=(
-            "Investment portfolio management with securities tracking, trade execution, "
-            "and risk analysis. Includes market data, dividends, benchmarks, and "
-            "position-level performance monitoring."
-          ),
+          description=_ROBOINVESTOR_DESCRIPTION,
           enabled=False,
         ),
       ],
