@@ -176,19 +176,22 @@ jobs:
         run: |
           uv lock --locked
 
-      - name: Create the extensions database
+      - name: Create and migrate the extensions database
         run: |
           # The platform DB (robosystems_test) comes from the service
           # container's POSTGRES_DB; the extensions DB is the second of the two
-          # databases this repo runs and has to be created by hand. DB-backed
-          # extensions tests provision their own tenant schemas from the model
-          # metadata, so an empty database is all they need — no migrations.
+          # databases this repo runs, and CI never made it — so every DB-backed
+          # extensions test skipped itself, silently, forever.
+          #
+          # Migrating is what makes them worth running: 0002 seeds the taxonomy
+          # library from the JSON-LD frameworks, which is exactly what the
+          # library-backed suites assert against. ~25s on a cold database.
           echo "🗄️  Creating the extensions database..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
             -c "CREATE DATABASE extensions" \
             || echo "extensions database already exists"
-          PGPASSWORD=postgres psql -h localhost -U postgres -d extensions \
-            -c "SELECT 1" > /dev/null
+          echo "🚀 Applying extensions migrations..."
+          uv run alembic -c migrations/extensions.ini upgrade head
           echo "✅ extensions database ready"
 
       - name: Configure Valkey authentication
