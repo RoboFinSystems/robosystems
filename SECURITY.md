@@ -158,8 +158,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 **Implementation:** `robosystems/middleware/rate_limits/rate_limiting.py`
 
 - Distributed rate limiting using Valkey with sliding window algorithm
-- Subscription-aware: tier-based multipliers (1.0x, 2.5x, 5.0x)
-- Per-endpoint category limits (18 categories: auth, graph_read, graph_write, etc.)
+- Subscription-aware: dedicated-resource categories scale with instance vCPU, using Standard as the
+  anchor (Large 2x, XLarge 4x). Shared categories — auth, status, billing, SSE — are identical on
+  every tier
+- Per-endpoint category limits (22 categories: auth, graph_read, graph_write, etc.)
 - User identification: API key (SHA256 hash) > JWT (user_id) > IP (fallback)
 - Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
 - Sensitive auth endpoints: login (5/5min), register (3/hour), JWT refresh (20/min)

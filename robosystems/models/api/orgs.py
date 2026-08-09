@@ -154,13 +154,9 @@ class OrgUsageSummary(BaseModel):
   total_credits_used: float
   total_ai_operations: int
   total_storage_gb: float
-  total_api_calls: int
   daily_avg_credits: float
-  daily_avg_api_calls: float
   projected_monthly_credits: float
-  projected_monthly_api_calls: int
   credits_limit: int | None
-  api_calls_limit: int | None
   storage_limit_gb: int | None
 
 

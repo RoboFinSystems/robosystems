@@ -187,19 +187,6 @@ class TestOrgUsageEndpoints:
         billing_day=now.day,
         billing_hour=now.hour,
       ),
-      # A genuine caller-initiated call, so `total_api_calls` has something to
-      # count that is neither the credit event nor the background snapshot.
-      GraphUsage(
-        user_id=test_user.id,
-        graph_id=graph.graph_id,
-        event_type=UsageEventType.QUERY_EXECUTION.value,
-        graph_tier=graph.graph_tier,
-        recorded_at=now,
-        billing_year=now.year,
-        billing_month=now.month,
-        billing_day=now.day,
-        billing_hour=now.hour,
-      ),
     ]
     test_db.add_all(usage_records)
     test_db.flush()
@@ -223,10 +210,6 @@ class TestOrgUsageEndpoints:
     summary = body["summary"]
     assert summary["total_credits_used"] == pytest.approx(10.0)
     assert summary["total_ai_operations"] == 1
-    # One query execution — not three. This counted every row in the table,
-    # so the background storage snapshot and the credit event were both
-    # reported to org admins as customer API traffic.
-    assert summary["total_api_calls"] == 1
     assert summary["total_storage_gb"] == pytest.approx(7.5, rel=1e-2)
 
     assert len(body["graph_details"]) == 1
@@ -239,18 +222,12 @@ class TestOrgUsageEndpoints:
 
     assert len(body["daily_trend"]) == 2
     assert all(
-      {"date", "credits_used", "api_calls"} <= set(entry.keys())
-      for entry in body["daily_trend"]
+      {"date", "credits_used"} <= set(entry.keys()) for entry in body["daily_trend"]
     )
 
-    # The trend uses the same definitions as the summary. A bare row count
-    # here reported the storage snapshot and the credit event as API calls,
-    # so the same payload said "1 call" in summary and "2 calls" in trend.
     yesterday, today = body["daily_trend"]
     assert yesterday["credits_used"] == pytest.approx(10.0)
-    assert yesterday["api_calls"] == 0
     assert today["credits_used"] == 0
-    assert today["api_calls"] == 1
 
   async def test_get_org_usage_handles_org_with_no_graphs(
     self, async_client, test_db, test_user
