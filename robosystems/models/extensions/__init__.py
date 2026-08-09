@@ -40,6 +40,7 @@ from .roboinvestor import (
 # RoboLedger extension (imports COA_SOURCES + ledger-specific models)
 from .roboledger import (
   COA_SOURCES,
+  BlockedSourceGraph,
   Entry,
   Fact,
   FactSet,
@@ -70,6 +71,7 @@ __all__ = [
   "Account",
   "Association",
   "AssociationClassification",
+  "BlockedSourceGraph",
   "Bridge",
   "Classification",
   "Dimension",

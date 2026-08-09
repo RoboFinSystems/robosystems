@@ -482,6 +482,10 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
     patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
     patch.object(reports_mod, "create_fact_set", side_effect=_capture),
     patch.object(reports_mod, "_ensure_linked_entity"),
+    # The recipient's block list is consulted before the copy. This test is
+    # about provenance stamping, so put the target on the permissive side —
+    # a bare MagicMock session would otherwise read as "blocked".
+    patch.object(reports_mod, "is_source_blocked", return_value=False),
   ):
     result = _share_to_target(
       source_graph_id="kg_src",
@@ -553,6 +557,8 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
     patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
     patch.object(reports_mod, "create_fact_set", side_effect=_fs),
     patch.object(reports_mod, "_ensure_linked_entity"),
+    # See the note on the provenance test above — the block check runs first.
+    patch.object(reports_mod, "is_source_blocked", return_value=False),
   ):
     result = _share_to_target(
       source_graph_id="kg_src",

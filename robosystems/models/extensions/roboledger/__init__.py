@@ -24,6 +24,7 @@ from ..taxonomy import Taxonomy
 
 # RoboLedger-specific concepts
 from .agent import Agent
+from .blocked_source_graph import BlockedSourceGraph
 from .dimension_junctions import (
   entry_dimensions,
   event_dimensions,
@@ -52,6 +53,7 @@ __all__ = [
   "Account",
   "Agent",
   "Association",
+  "BlockedSourceGraph",
   "Dimension",
   "Element",
   "Entry",

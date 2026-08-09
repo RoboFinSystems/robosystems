@@ -65,6 +65,7 @@ from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import (
   get_current_user_with_graph,
   require_graph_write_role,
+  user_is_graph_admin,
 )
 from robosystems.middleware.extensions import (
   GraphExtensionContext,
@@ -106,6 +107,12 @@ from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse,
   UpdateAgentRequest,
 )
+from robosystems.models.api.extensions.blocked_source_graphs import (
+  BlockedSourceGraphResponse,
+  BlockSourceGraphRequest,
+  BlockSourceGraphResult,
+  UnblockSourceGraphRequest,
+)
 from robosystems.models.api.extensions.entity import (
   ChangeReportingStyleRequest,
   ChangeReportingStyleResponse,
@@ -144,6 +151,8 @@ from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
   ReportResponse,
+  RevokeReportShareRequest,
+  RevokeReportShareResponse,
   ShareReportRequest,
   ShareReportResponse,
 )
@@ -256,6 +265,16 @@ from robosystems.operations.roboledger.commands.agent import (
 from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
+from robosystems.operations.roboledger.commands.blocked_source_graphs import (
+  SelfBlockError,
+  SourceGraphNotBlockedError,
+)
+from robosystems.operations.roboledger.commands.blocked_source_graphs import (
+  block_source_graph as cmd_block_source_graph,
+)
+from robosystems.operations.roboledger.commands.blocked_source_graphs import (
+  unblock_source_graph as cmd_unblock_source_graph,
+)
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
@@ -339,6 +358,7 @@ from robosystems.operations.roboledger.commands.reports import (
   ReportNotFiledError,
   ReportNotFoundError,
   ReportNotPublishedError,
+  ReportShareNotFoundError,
   TaxonomyNotFoundError,
 )
 from robosystems.operations.roboledger.commands.reports import (
@@ -355,6 +375,9 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 from robosystems.operations.roboledger.commands.reports import (
   regenerate_report as cmd_regenerate_report,
+)
+from robosystems.operations.roboledger.commands.reports import (
+  revoke_report_share as cmd_revoke_report_share,
 )
 from robosystems.operations.roboledger.commands.reports import (
   share_report as cmd_share_report,
@@ -656,6 +679,23 @@ class ShareReportOperation(ShareReportRequest):
   )
 
 
+class RevokeReportShareOperation(RevokeReportShareRequest):
+  """Withdraw a shared Report from one recipient graph."""
+
+  report_id: str = Field(..., description="The Report whose share to withdraw.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "target_graph_id": "kg1a2b3c4d5e6f7a8b9c",
+        },
+      ]
+    },
+  )
+
+
 class UpdatePublishListOperation(UpdatePublishListRequest):
   """Update a publish list's metadata. Carries `list_id`."""
 
@@ -720,6 +760,14 @@ class RemovePublishListMemberOperation(BaseModel):
       ]
     },
   )
+
+
+class BlockSourceGraphOperation(BlockSourceGraphRequest):
+  """Bar a graph from sharing reports into this one."""
+
+
+class UnblockSourceGraphOperation(UnblockSourceGraphRequest):
+  """Lift a block on a source graph."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2220,7 +2268,14 @@ async def regenerate_report_op(
   response_model=OperationEnvelope[DeleteResult],
   operation_id="deleteReport",
   summary="Delete Report",
-  description="Deletes the report definition and all generated facts.",
+  description=(
+    "Deletes the report definition and all generated facts. Normally "
+    "restricted to the report's creator. A report shared in from another "
+    "graph carries the sender's user id in `created_by`, so those may be "
+    "deleted by any admin of the receiving graph — the recipient's exit "
+    "from an unsolicited share. Deleting a shared copy does not affect the "
+    "sender's record that they sent it."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -2249,7 +2304,12 @@ async def delete_report_op(
     try:
       with extensions_session(graph_id) as session:
         try:
-          deleted = cmd_delete_report(session, body.report_id, str(user.id))
+          deleted = cmd_delete_report(
+            session,
+            body.report_id,
+            str(user.id),
+            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
+          )
         except NotAuthorizedError:
           raise HTTPException(
             status_code=403, detail="Not authorized to delete this report."
@@ -2264,7 +2324,15 @@ async def delete_report_op(
       )
     return DeleteResult(deleted=True)
 
-  return await _dispatch(ctx, _runner, cache)
+  # The OLAP projection is a full rebuild from OLTP, so a deleted report leaves
+  # the graph only once the graph is marked stale. Without this the recipient's
+  # delete is cosmetic — the report stays queryable by their AI operators.
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_deleted"),
+  )
 
 
 @router.post(
@@ -2278,7 +2346,9 @@ async def delete_report_op(
     "facts are cloned into the recipient's tenant schema with "
     "`source_graph_id` / `source_report_id` provenance fields populated. "
     "Per-target outcomes (success or error) surface in the response — "
-    "share does not fail-fast across targets."
+    "share does not fail-fast across targets. Recipients that have blocked "
+    "this graph come back as an error for that target; withdraw a delivered "
+    "copy with `revoke-report-share`."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -2328,7 +2398,84 @@ async def share_report_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  return await _dispatch(ctx, _runner, cache)
+  def _mark_recipients_stale(envelope) -> None:
+    # A share writes rows into each recipient's OLTP schema, but their
+    # LadybugDB projection only picks the report up on a rebuild — so without
+    # this, delivery depends on the recipient happening to have unrelated
+    # ledger activity of their own. Mark each recipient that actually
+    # received a copy. (`roboinvestor-maturity.md` D1, delivery half.)
+    result = getattr(envelope, "result", None)
+    for item in getattr(result, "results", []) or []:
+      if getattr(item, "status", None) == "shared":
+        mark_graph_stale(item.target_graph_id, "report_shared_in")
+
+  return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_recipients_stale)
+
+
+@router.post(
+  "/revoke-report-share",
+  response_model=OperationEnvelope[RevokeReportShareResponse],
+  operation_id="revokeReportShare",
+  summary="Revoke Report Share",
+  description=(
+    "Withdraws a report previously shared to one recipient graph: deletes "
+    "the copy from that recipient's schema and stamps the share record "
+    "revoked. Scoped to a single recipient — withdrawing a distribution to a "
+    "whole publish list is one call per member. A recipient who already "
+    "deleted the copy is not an error; the share is still marked revoked and "
+    "`copy_deleted` returns false. The linked entity in the recipient's graph "
+    "is left in place, so an investor's declared holding survives."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/revoke-report-share",
+  method="POST",
+  business_event_type="ledger_revoke_report_share",
+)
+async def revoke_report_share_op(
+  body: RevokeReportShareOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(_require_roboledger_write),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="revoke-report-share",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      return cmd_revoke_report_share(
+        graph_id, body.report_id, body, acting_user_id=str(user.id)
+      )
+    except ReportNotFoundError:
+      raise HTTPException(
+        status_code=404, detail=f"Report '{body.report_id}' not found."
+      )
+    except ReportShareNotFoundError as e:
+      raise HTTPException(status_code=404, detail=str(e))
+    except NotAuthorizedError:
+      raise HTTPException(
+        status_code=403, detail="Not authorized to revoke shares of this report."
+      )
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+
+  def _mark_recipient_stale(envelope) -> None:
+    # Same reasoning as the share path: the copy leaves the recipient's graph
+    # only when their projection is rebuilt. Skip when nothing was deleted.
+    result = getattr(envelope, "result", None)
+    if getattr(result, "copy_deleted", False):
+      mark_graph_stale(body.target_graph_id, "report_share_revoked")
+
+  return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_recipient_stale)
 
 
 @router.post(
@@ -2688,6 +2835,95 @@ async def remove_publish_list_member_op(
     return DeleteResult(deleted=True)
 
   return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Blocked source graphs — the recipient's exit from cross-graph sharing
+#
+# Sharing is authorized capability-style: whoever holds this graph's id can
+# copy a published report in. These two operations are how a recipient
+# declines. Read the current list via the `blockedSourceGraphs` GraphQL field.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/block-source-graph",
+  response_model=OperationEnvelope[BlockSourceGraphResult],
+  operation_id="blockSourceGraph",
+  summary="Block Source Graph",
+  description=(
+    "Bars a graph from sharing reports into this one. Subsequent "
+    "`share-report` calls naming this graph fail for this target with an "
+    "explicit error — blocked senders are told, not silently dropped. "
+    "Idempotent: re-blocking preserves the original `blocked_at`. Set "
+    "`purge` to also delete every report already shared in from that "
+    "source, along with its fact sets and facts; reports this graph "
+    "authored are never touched."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/block-source-graph",
+  method="POST",
+  business_event_type="ledger_block_source_graph",
+)
+async def block_source_graph_op(
+  body: BlockSourceGraphOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(_require_roboledger_write),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="block-source-graph",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        try:
+          return cmd_block_source_graph(
+            session, body, created_by=str(user.id), graph_id=graph_id
+          )
+        except SelfBlockError as e:
+          raise HTTPException(status_code=422, detail=str(e))
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+
+  def _mark_stale_if_purged(envelope) -> None:
+    # Only a purge changes queryable content, and the OLAP projection is a
+    # full rebuild from OLTP — a block on its own has nothing to re-project,
+    # so it must not trigger one.
+    result = getattr(envelope, "result", None)
+    if getattr(result, "purged_report_count", 0):
+      mark_graph_stale(graph_id, "shared_reports_purged")
+
+  return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_stale_if_purged)
+
+
+unblock_source_graph_op = _registrar.register(
+  OperationSpec(
+    name="unblock-source-graph",
+    summary="Unblock Source Graph",
+    description=(
+      "Lifts a block, allowing that graph to share reports into this one "
+      "again. Reports removed by an earlier purge are not restored — "
+      "unblocking reopens the channel, it does not undo. Returns 404 when "
+      "the source was not blocked."
+    ),
+    command=cmd_unblock_source_graph,
+    request_model=UnblockSourceGraphOperation,
+    result_type=BlockedSourceGraphResponse,
+    error_map={SourceGraphNotBlockedError: 404},
+    requires_created_by=False,
+  )
+)
 
 
 # NOTE: `build-fact-grid` lives in the sibling `views.py` router.
