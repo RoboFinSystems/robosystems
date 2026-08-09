@@ -442,6 +442,10 @@ class BackupMetadata:
   database_version: str | None = None
   backup_format: str = "cypher"
   s3_key: str | None = None
+  # Key of the sidecar JSON written alongside the payload. Carried so the
+  # caller can record it: retention deletes the sidecar only when the row knows
+  # where it is, and nothing used to tell the row.
+  s3_metadata_key: str | None = None
   # Whether the archive carries the graph's semantic memory store: "included",
   # "absent", or None for a backup taken before memory was captured at all.
   # None is a third state, not a synonym for "absent" — see the manifest
@@ -834,6 +838,7 @@ class S3BackupAdapter:
         or metadata.get("lbug_version"),
         backup_format="full_dump",
         s3_key=backup_path,
+        s3_metadata_key=metadata_path,
         memory=metadata.get("memory"),
         payload_delta=metadata.get("payload_delta"),
       )

@@ -11,6 +11,11 @@ Parameters:
     Description: Environment name (prod or staging)
     ConstraintDescription: Must be prod or staging
 
+  SNSAlertEmail:
+    Type: String
+    Default: ""
+    Description: Email for Dagster alerts (e.g. backup coverage gaps); empty disables alarm notifications
+
   # Infrastructure & Networking
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -225,6 +230,7 @@ Parameters:
     Default: "https://roboinvestor.ai"
 
 Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
   HasApiAccess: !Not [!Equals [!Ref ApiSecurityGroupId, ""]]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
@@ -1012,6 +1018,57 @@ Resources:
           Value: !Ref ComponentTag
         - Key: CreatedBy
           Value: CloudFormation
+
+
+  # ========================================
+  # BACKUP COVERAGE ALERTING
+  # ========================================
+  # The nightly backup schedule can stop without failing: a daemon problem, a
+  # disabled schedule, or an exception before any RunRequest is returned all
+  # produce NO run at all, and an absent run is exactly what a run list cannot
+  # surface. `assert_backup_coverage` answers the outcome question instead —
+  # does every graph that should have a backup have one — and logs CRITICAL on
+  # a gap. This turns that log into a notification; without it the check
+  # detects the condition and tells nobody.
+
+  DagsterAlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      TopicName: !Sub robosystems-dagster-${Environment}-alerts
+      DisplayName: !Sub RoboSystems Dagster ${Environment} Alerts
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+
+  BackupCoverageGapMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref DagsterLogGroup
+      FilterPattern: '"BACKUP COVERAGE GAP"'
+      MetricTransformations:
+        - MetricName: BackupCoverageGap
+          MetricNamespace: !Sub RoboSystems/Dagster/${Environment}
+          MetricValue: "1"
+          Unit: Count
+
+  BackupCoverageGapAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmName: !Sub robosystems-dagster-${Environment}-backup-coverage-gap
+      AlarmDescription: A graph that should have a nightly backup has none in the last two cycles
+      MetricName: BackupCoverageGap
+      Namespace: !Sub RoboSystems/Dagster/${Environment}
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref DagsterAlertTopic
+      TreatMissingData: notBreaching
+
 
 Outputs:
   ClusterName:

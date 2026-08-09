@@ -115,10 +115,14 @@ def cleanup_orphaned_backups(
   early — this op removes data, so every ambiguity resolves toward keeping it.
   """
   from robosystems.config.graph_tier import GraphTierConfig
-  from robosystems.config.storage.graph import get_backup_prefix
+  from robosystems.config.storage.graph import (
+    get_backup_metadata_prefix,
+    get_backup_prefix,
+  )
   from robosystems.models.core import Graph, GraphBackup
 
-  prefix = get_backup_prefix()
+  payload_prefix = get_backup_prefix()
+  metadata_prefix = get_backup_metadata_prefix()
   now = datetime.now(UTC)
 
   deleted_count = 0
@@ -162,31 +166,40 @@ def cleanup_orphaned_backups(
         return retention_by_graph[graph_id]
 
       paginator = s3.client.get_paginator("list_objects_v2")
-      for page in paginator.paginate(Bucket=s3.bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-          key = obj["Key"]
+      # Both halves of a backup, not just the payload. The metadata sidecar
+      # lives under a sibling prefix and was reachable only through the tracked
+      # sweep, whose delete is guarded on the row knowing the key — which
+      # nothing set until now. Untracked sidecars therefore outlived tier
+      # retention entirely and rode the 90-day bucket lifecycle, including for
+      # 7-day tiers. Both prefixes key on {graph_id} as their first segment, so
+      # the same parse and the same retention clock apply to each.
+      for prefix in (payload_prefix, metadata_prefix):
+        for page in paginator.paginate(Bucket=s3.bucket, Prefix=prefix):
+          for obj in page.get("Contents", []):
+            key = obj["Key"]
 
-          if key in tracked_keys:
-            skipped_tracked += 1
-            continue
+            if key in tracked_keys:
+              skipped_tracked += 1
+              continue
 
-          # graph-backups/databases/{graph_id}/{backup_type}/backup-{ts}{ext}
-          parts = key[len(prefix) :].split("/")
-          if len(parts) < 2 or not parts[0]:
-            context.log.warning(f"Unparseable backup key, leaving in place: {key}")
-            continue
+            # graph-backups/databases/{graph_id}/{backup_type}/backup-{ts}{ext}
+            # graph-backups/metadata/{graph_id}/backup-{ts}.json
+            parts = key[len(prefix) :].split("/")
+            if len(parts) < 2 or not parts[0]:
+              context.log.warning(f"Unparseable backup key, leaving in place: {key}")
+              continue
 
-          cutoff = now - timedelta(days=_retention_days(parts[0]))
-          if obj["LastModified"].replace(tzinfo=UTC) >= cutoff:
-            continue
+            cutoff = now - timedelta(days=_retention_days(parts[0]))
+            if obj["LastModified"].replace(tzinfo=UTC) >= cutoff:
+              continue
 
-          objects_to_delete.append({"Key": key})
-          if len(objects_to_delete) >= 1000:
-            s3.client.delete_objects(
-              Bucket=s3.bucket, Delete={"Objects": objects_to_delete}
-            )
-            deleted_count += len(objects_to_delete)
-            objects_to_delete = []
+            objects_to_delete.append({"Key": key})
+            if len(objects_to_delete) >= 1000:
+              s3.client.delete_objects(
+                Bucket=s3.bucket, Delete={"Objects": objects_to_delete}
+              )
+              deleted_count += len(objects_to_delete)
+              objects_to_delete = []
 
     if objects_to_delete:
       s3.client.delete_objects(Bucket=s3.bucket, Delete={"Objects": objects_to_delete})
@@ -202,7 +215,7 @@ def cleanup_orphaned_backups(
   return {
     "deleted_count": deleted_count,
     "skipped_tracked": skipped_tracked,
-    "prefix": prefix,
+    "prefixes": [payload_prefix, metadata_prefix],
     "timestamp": now.isoformat(),
   }
 

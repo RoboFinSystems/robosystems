@@ -183,6 +183,22 @@ def get_backup_metadata_key(graph_id: str, timestamp: datetime) -> str:
   return f"{config.prefix}metadata/{graph_id}/backup-{timestamp_str}.json"
 
 
+def get_backup_metadata_prefix(graph_id: str | None = None) -> str:
+  """Build S3 prefix for listing backup metadata sidecars.
+
+  Example:
+      >>> get_backup_metadata_prefix("kg456")
+      'graph-backups/metadata/kg456/'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.BACKUPS]
+  prefix = f"{config.prefix}metadata/"
+
+  if graph_id:
+    prefix += f"{graph_id}/"
+
+  return prefix
+
+
 def get_backup_prefix(
   graph_id: str | None = None, backup_type: str | None = None
 ) -> str:

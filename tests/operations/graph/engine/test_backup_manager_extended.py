@@ -1875,3 +1875,197 @@ class TestReconcilePayloadAgainstStats:
       )
       is None
     )
+
+
+# ===========================================================================
+# Memory store restore (the manifest tri-state, applied on the read side)
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestRestoreMemoryStore:
+  """The archive carries memory; the importer has to act on the claim.
+
+  Backing memory up without restoring it leaves a restore reporting success
+  while the one class of data with no upstream is silently untouched.
+  """
+
+  def _archive(self, tmp_path, claim, with_dir=True):
+    from robosystems.operations.graph.engine.backup_manager import (
+      BACKUP_MANIFEST_NAME,
+    )
+
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    if claim is not None:
+      (extracted / BACKUP_MANIFEST_NAME).write_text(json.dumps({"memory": claim}))
+    if with_dir:
+      mem = extracted / "memory" / "memory.lance"
+      mem.mkdir(parents=True)
+      (mem / "data.bin").write_bytes(b"restored-vectors")
+    return extracted
+
+  def _live(self, tmp_path, contents=b"existing-vectors"):
+    live = tmp_path / "lance" / "kg1"
+    (live / "memory").mkdir(parents=True)
+    (live / "memory" / "data.bin").write_bytes(contents)
+    return live
+
+  def test_included_replaces_the_live_store(self, tmp_path):
+    from robosystems.operations.graph.engine import backup_manager
+
+    extracted = self._archive(tmp_path, "included")
+    live = self._live(tmp_path)
+
+    with patch(
+      "robosystems.utils.path_validation.get_lance_index_path", return_value=live
+    ):
+      outcome = backup_manager._restore_memory_store("kg1", extracted)
+
+    assert outcome == "replaced"
+    assert (live / "memory.lance" / "data.bin").read_bytes() == b"restored-vectors"
+
+  def test_absent_leaves_the_live_store_alone(self, tmp_path):
+    """A graph that had no memory at backup time must not erase today's.
+
+    Memory has no upstream, so the asymmetry favours keeping data over
+    matching the snapshot exactly.
+    """
+    from robosystems.operations.graph.engine import backup_manager
+
+    extracted = self._archive(tmp_path, "absent", with_dir=False)
+    live = self._live(tmp_path)
+
+    with patch(
+      "robosystems.utils.path_validation.get_lance_index_path", return_value=live
+    ):
+      outcome = backup_manager._restore_memory_store("kg1", extracted)
+
+    assert outcome == "unchanged (absent)"
+    assert (live / "memory" / "data.bin").read_bytes() == b"existing-vectors"
+
+  def test_no_manifest_leaves_the_live_store_alone(self, tmp_path):
+    """A pre-memory archive makes no claim; deleting on that basis is worst."""
+    from robosystems.operations.graph.engine import backup_manager
+
+    extracted = self._archive(tmp_path, None, with_dir=False)
+    live = self._live(tmp_path)
+
+    with patch(
+      "robosystems.utils.path_validation.get_lance_index_path", return_value=live
+    ):
+      outcome = backup_manager._restore_memory_store("kg1", extracted)
+
+    assert outcome == "unchanged (no claim)"
+    assert (live / "memory" / "data.bin").read_bytes() == b"existing-vectors"
+
+  def test_included_but_missing_directory_raises(self, tmp_path):
+    """Honour the claim or fail; never report success over an unmet one."""
+    from robosystems.operations.graph.engine import backup_manager
+    from robosystems.operations.graph.engine.backup_manager import (
+      BackupPayloadMismatch,
+    )
+
+    extracted = self._archive(tmp_path, "included", with_dir=False)
+    live = self._live(tmp_path)
+
+    with (
+      patch(
+        "robosystems.utils.path_validation.get_lance_index_path", return_value=live
+      ),
+      pytest.raises(BackupPayloadMismatch, match="no memory directory"),
+    ):
+      backup_manager._restore_memory_store("kg1", extracted)
+
+
+@pytest.mark.unit
+class TestRecordDescribesTheArchive:
+  """The record's counts must describe the archive, not the live database.
+
+  Reconciliation deliberately tolerates drift, and `_verify_restore` compares a
+  restored database against these numbers — so recording the live count made
+  every drifted backup fail verification AFTER the target was overwritten.
+  """
+
+  @pytest.mark.asyncio
+  async def test_measured_payload_counts_win_over_live_counts(self, manager):
+    manager.s3_adapter.upload_backup = AsyncMock(
+      return_value=BackupMetadata(
+        graph_id="kg1",
+        backup_type="full",
+        timestamp=datetime.now(UTC),
+        original_size=1,
+        compressed_size=1,
+        checksum="abc",
+        compression_ratio=0.0,
+        node_count=98,
+        relationship_count=49,
+        backup_duration_seconds=0.1,
+      )
+    )
+
+    with (
+      patch.object(manager, "_get_database_stats", new_callable=AsyncMock) as stats,
+      patch.object(manager, "_export_database", new_callable=AsyncMock) as export,
+    ):
+      stats.return_value = {"node_count": 100, "relationship_count": 50}
+      export.return_value = (
+        b"dump",
+        ".lbug.zip",
+        {"node_count": 98, "relationship_count": 49, "memory": "absent"},
+      )
+
+      await manager.create_backup(
+        BackupJob(
+          graph_id="kg1",
+          backup_type=BackupType.FULL,
+          backup_format=BackupFormat.FULL_DUMP,
+        )
+      )
+
+    recorded = manager.s3_adapter.upload_backup.call_args.kwargs["metadata"]
+    assert recorded["node_count"] == 98
+    assert recorded["relationship_count"] == 49
+    # The live numbers survive as the drift record rather than being lost.
+    assert recorded["payload_delta"]["live_node_count"] == 100
+
+  @pytest.mark.asyncio
+  async def test_unmeasured_payload_falls_back_to_live_counts(self, manager):
+    """An older graph node sends no counts; the record still has to say something."""
+    manager.s3_adapter.upload_backup = AsyncMock(
+      return_value=BackupMetadata(
+        graph_id="kg1",
+        backup_type="full",
+        timestamp=datetime.now(UTC),
+        original_size=1,
+        compressed_size=1,
+        checksum="abc",
+        compression_ratio=0.0,
+        node_count=100,
+        relationship_count=50,
+        backup_duration_seconds=0.1,
+      )
+    )
+
+    with (
+      patch.object(manager, "_get_database_stats", new_callable=AsyncMock) as stats,
+      patch.object(manager, "_export_database", new_callable=AsyncMock) as export,
+    ):
+      stats.return_value = {"node_count": 100, "relationship_count": 50}
+      export.return_value = (
+        b"dump",
+        ".lbug.zip",
+        {"node_count": None, "relationship_count": None, "memory": None},
+      )
+
+      await manager.create_backup(
+        BackupJob(
+          graph_id="kg1",
+          backup_type=BackupType.FULL,
+          backup_format=BackupFormat.FULL_DUMP,
+        )
+      )
+
+    recorded = manager.s3_adapter.upload_backup.call_args.kwargs["metadata"]
+    assert recorded["node_count"] == 100
+    assert "payload_delta" not in recorded

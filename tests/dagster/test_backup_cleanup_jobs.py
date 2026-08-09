@@ -77,7 +77,7 @@ class TestOrphanedBackupCleanup:
   ambiguity toward keeping data."""
 
   @staticmethod
-  def _run(objects, tracked, tier="ladybug-standard", graph_exists=True):
+  def _run(objects, tracked, tier="ladybug-standard", graph_exists=True, metadata=None):
     from unittest.mock import MagicMock, patch
 
     from dagster import build_op_context
@@ -98,7 +98,16 @@ class TestOrphanedBackupCleanup:
 
     s3 = MagicMock()
     s3.bucket = "test-bucket"
-    s3.client.get_paginator.return_value.paginate.return_value = [{"Contents": objects}]
+
+    # The sweep walks two disjoint prefixes — payloads and metadata sidecars —
+    # so the paginator has to answer per-prefix. A single canned return value
+    # would hand the same objects to both passes and double-count them.
+    def _paginate(Bucket, Prefix):
+      if Prefix.endswith("/metadata/"):
+        return [{"Contents": metadata or []}]
+      return [{"Contents": objects}]
+
+    s3.client.get_paginator.return_value.paginate.side_effect = _paginate
 
     graph = MagicMock()
     graph.graph_tier = tier
@@ -379,3 +388,48 @@ class TestBackupCoverageAssertion:
     assert result["checked"] == 0
     assert result["uncovered"] == []
     assert "error" in result
+
+
+class TestMetadataSidecarCleanup:
+  """Sidecars have to expire on the same clock as the payloads they describe.
+
+  `cleanup_tracked_backups` deletes a sidecar only when the row knows its key,
+  and nothing populated `s3_metadata_key` until now — so untracked sidecars
+  were reachable by neither sweep and rode the 90-day bucket lifecycle even for
+  a 7-day tier.
+  """
+
+  @pytest.mark.unit
+  def test_sweeps_orphaned_sidecars_on_tier_retention(self):
+    payload = "graph-backups/databases/kg1/full/backup-20260101_000000.lbug.zip"
+    sidecar = "graph-backups/metadata/kg1/backup-20260101_000000.json"
+
+    _, deleted = TestOrphanedBackupCleanup._run(
+      [TestOrphanedBackupCleanup._obj(payload, 30)],
+      tracked=set(),
+      metadata=[TestOrphanedBackupCleanup._obj(sidecar, 30)],
+    )
+
+    assert sorted(deleted) == sorted([payload, sidecar])
+
+  @pytest.mark.unit
+  def test_keeps_a_sidecar_inside_tier_retention(self):
+    sidecar = "graph-backups/metadata/kg1/backup-20260101_000000.json"
+
+    _, deleted = TestOrphanedBackupCleanup._run(
+      [], tracked=set(), metadata=[TestOrphanedBackupCleanup._obj(sidecar, 3)]
+    )
+
+    assert deleted == []
+
+  @pytest.mark.unit
+  def test_never_touches_a_tracked_sidecar(self):
+    """Once the row records the key, the sidecar belongs to the tracked sweep."""
+    sidecar = "graph-backups/metadata/kg1/backup-20260101_000000.json"
+
+    result, deleted = TestOrphanedBackupCleanup._run(
+      [], tracked={sidecar}, metadata=[TestOrphanedBackupCleanup._obj(sidecar, 3650)]
+    )
+
+    assert deleted == []
+    assert result["skipped_tracked"] == 1

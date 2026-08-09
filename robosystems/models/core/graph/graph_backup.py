@@ -106,7 +106,6 @@ class GraphBackup(Model):
   # Size and compression metrics
   original_size_bytes = Column(BigInteger, nullable=False, default=0)
   compressed_size_bytes = Column(BigInteger, nullable=False, default=0)
-  encrypted_size_bytes = Column(BigInteger, nullable=False, default=0)
   compression_ratio = Column(Float, nullable=False, default=0.0)
 
   # Database statistics at backup time
@@ -387,7 +386,6 @@ class GraphBackup(Model):
     session: Session,
     original_size: int,
     compressed_size: int,
-    encrypted_size: int,
     checksum: str,
     node_count: int = 0,
     relationship_count: int = 0,
@@ -399,7 +397,6 @@ class GraphBackup(Model):
     self.completed_at = datetime.now(UTC)
     self.original_size_bytes = original_size
     self.compressed_size_bytes = compressed_size
-    self.encrypted_size_bytes = encrypted_size
     self.compression_ratio = (
       (original_size - compressed_size) / original_size if original_size > 0 else 0
     )
@@ -465,7 +462,6 @@ class GraphBackup(Model):
       "s3_metadata_key": self.s3_metadata_key,
       "original_size_bytes": self.original_size_bytes,
       "compressed_size_bytes": self.compressed_size_bytes,
-      "encrypted_size_bytes": self.encrypted_size_bytes,
       "compression_ratio": self.compression_ratio,
       "node_count": self.node_count,
       "relationship_count": self.relationship_count,
@@ -512,7 +508,7 @@ class GraphBackup(Model):
 
   @property
   def storage_efficiency(self) -> float:
-    """Calculate storage efficiency (stored size over original size)."""
+    """Stored size over original size."""
     if self.original_size_bytes == 0 or self.original_size_bytes is None:
       return 0.0
-    return self.encrypted_size_bytes / self.original_size_bytes
+    return self.compressed_size_bytes / self.original_size_bytes

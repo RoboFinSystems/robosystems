@@ -98,7 +98,6 @@ class TestGraphBackupModel:
       s3_metadata_key="backups/2024/01/backup.meta.json",
       original_size_bytes=1000000,
       compressed_size_bytes=250000,
-      encrypted_size_bytes=260000,
       compression_ratio=0.75,
       node_count=5000,
       relationship_count=10000,
@@ -122,7 +121,6 @@ class TestGraphBackupModel:
     assert backup.s3_metadata_key == "backups/2024/01/backup.meta.json"
     assert backup.original_size_bytes == 1000000
     assert backup.compressed_size_bytes == 250000
-    assert backup.encrypted_size_bytes == 260000
     assert backup.compression_ratio == 0.75
     assert backup.node_count == 5000
     assert backup.relationship_count == 10000
@@ -244,7 +242,6 @@ class TestGraphBackupModel:
         session=db_session,
         original_size=1000000,
         compressed_size=250000,
-        encrypted_size=260000,
         checksum=f"checksum_{i}",
       )
       # Manually adjust completed_at for testing
@@ -406,7 +403,6 @@ class TestGraphBackupModel:
         session=db_session,
         original_size=1000000 * (i + 1),
         compressed_size=250000 * (i + 1),
-        encrypted_size=260000 * (i + 1),
         checksum=f"checksum_{i}",
       )
 
@@ -489,7 +485,6 @@ class TestGraphBackupModel:
       session=db_session,
       original_size=5000000,
       compressed_size=1000000,
-      encrypted_size=1050000,
       checksum="sha256_test_checksum",
       node_count=10000,
       relationship_count=25000,
@@ -501,7 +496,6 @@ class TestGraphBackupModel:
     assert backup.completed_at is not None
     assert backup.original_size_bytes == 5000000
     assert backup.compressed_size_bytes == 1000000
-    assert backup.encrypted_size_bytes == 1050000
     assert backup.compression_ratio == 0.8  # (5M - 1M) / 5M
     assert backup.checksum == "sha256_test_checksum"
     assert backup.node_count == 10000
@@ -627,7 +621,6 @@ class TestGraphBackupModel:
       session=db_session,
       original_size=1000000,
       compressed_size=250000,
-      encrypted_size=260000,
       checksum="b" * 64,
     )
 
@@ -714,7 +707,7 @@ class TestGraphBackupModel:
 
     # With sizes
     backup.original_size_bytes = 1000000
-    backup.encrypted_size_bytes = 300000
+    backup.compressed_size_bytes = 300000
     assert backup.storage_efficiency == 0.3  # 300K / 1M
 
     # Zero original size
@@ -739,7 +732,6 @@ class TestGraphBackupModel:
       session=mock_session,
       original_size=1000000,
       compressed_size=300000,
-      encrypted_size=310000,
       checksum="test",
     )
     assert backup.compression_ratio == 0.7  # (1M - 300K) / 1M
@@ -757,7 +749,6 @@ class TestGraphBackupModel:
       session=mock_session,
       original_size=0,
       compressed_size=0,
-      encrypted_size=0,
       checksum="test",
     )
     assert backup2.compression_ratio == 0.0
