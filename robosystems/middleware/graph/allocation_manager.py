@@ -1154,7 +1154,20 @@ class LadybugAllocationManager:
   async def _publish_failure_metric(
     self, failure_reason: str, entity_id: str, user_id: str | None = None
   ):
-    """Publish allocation failure metric to CloudWatch (only in prod/staging)."""
+    """Publish allocation failure metric to CloudWatch (only in prod/staging).
+
+    Emitted under **two** dimension sets, and the duplication is deliberate.
+    CloudWatch matches an alarm to a metric on the exact dimension set, so a
+    datum carrying only ``FailureReason`` is invisible to an alarm watching
+    ``Environment`` — which is what
+    ``graph-ladybug.yaml``'s ``AllocationFailureAlarm`` does. That alarm sat
+    ``OK`` for six months not because provisioning never failed but because
+    nothing had ever published to the stream it watches, and
+    ``TreatMissingData: notBreaching`` renders permanent silence as health.
+
+    Fixing the emitter rather than the alarm keeps ``FailureReason``, which is
+    the dimension worth having during triage, and needs no stack deploy.
+    """
     if self.environment in ["dev", "test"]:
       return
 
@@ -1168,7 +1181,15 @@ class LadybugAllocationManager:
           "Dimensions": [
             {"Name": "FailureReason", "Value": failure_reason},
           ],
-        }
+        },
+        {
+          "MetricName": "AllocationFailures",
+          "Value": 1,
+          "Unit": "Count",
+          "Dimensions": [
+            {"Name": "Environment", "Value": self.environment},
+          ],
+        },
       ]
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
       logger.warning(

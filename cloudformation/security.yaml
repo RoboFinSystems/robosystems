@@ -55,6 +55,21 @@ Parameters:
     Type: String
     Default: ""
 
+  # Sustained 5xx from the application over a 5-minute window. Deliberately a
+  # parameter, not a literal: there is no traffic baseline to tune against yet,
+  # so this will move — and a threshold that needs a code change to adjust ends
+  # up never adjusted. Sourced from the API_TARGET_ERROR_THRESHOLD GitHub
+  # variable so it can be retuned without a PR.
+  #
+  # Comparison is GreaterThanThreshold, matching the sibling ALB alarms, so the
+  # alarm fires *above* this count — 5 means the sixth 5xx in five minutes. Worth
+  # knowing where the floor sits: at current traffic, five 5xx in five minutes is
+  # already a lot of broken. Lower it rather than reaching for the operator.
+  ApiTargetErrorThreshold:
+    Type: Number
+    Default: 5
+    MinValue: 0
+
   EnableSecurityHub:
     Type: String
     Default: "true"
@@ -628,6 +643,36 @@ Resources:
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
+  # The 5xx alarm above watches HTTPCode_ELB_5XX_Count — errors the *load
+  # balancer* generates. A healthy process returning 500 on every business
+  # endpoint produces none of those: its targets stay healthy, the liveness
+  # probe keeps passing, and the outage is invisible end to end. Target_5XX is
+  # the application's own errors, and is the one an outage actually rides
+  # through.
+  ApiTarget5xxAlarmProd:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbProd
+    Properties:
+      AlarmName: robosystems-prod-api-target-5xx
+      AlarmDescription: The API is returning 5xx responses to clients
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref ApiTargetErrorThreshold
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ApiAlbFullNameProd
+        - Name: TargetGroup
+          Value: !Ref ApiTgFullNameProd
+      # No traffic is the normal state at this scale, and no traffic cannot be
+      # an outage — a request has to reach the app for it to 5xx.
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
+
   ApiAlbUnhealthyHostsAlarmStaging:
     Type: AWS::CloudWatch::Alarm
     Condition: HasApiAlbStaging
@@ -689,6 +734,82 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  ApiTarget5xxAlarmStaging:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasApiAlbStaging
+    Properties:
+      AlarmName: robosystems-staging-api-target-5xx
+      AlarmDescription: The API is returning 5xx responses to clients
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref ApiTargetErrorThreshold
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ApiAlbFullNameStaging
+        - Name: TargetGroup
+          Value: !Ref ApiTgFullNameStaging
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
+
+  # Delivery assurance for the alert channel itself: every alarm in this account
+  # reaches a human through SNS email.
+  #
+  # **Be precise about what this catches, because the obvious reading is wrong.**
+  # It fires when SNS *attempts* a delivery and the attempt fails — the bounce
+  # window that precedes AWS disabling a confirmed subscriber. It does NOT
+  # detect a subscription sitting in `PendingConfirmation`, nor one AWS has
+  # already dropped: neither receives delivery attempts, so neither produces a
+  # failed-notification datapoint, and the alarm is silent straight through the
+  # scenario people assume it covers. **The check for that state is the
+  # subscription list itself** — `aws sns list-subscriptions-by-topic` for a
+  # `PendingConfirmation` ARN or a missing subscriber. See the periodic
+  # verification in `runbooks/incident-triage.md`.
+  #
+  # **This alarm cannot report its own brokenness.** SNS publishes
+  # `NumberOfNotificationsFailed` only on failure — healthy is *no data*, which
+  # `notBreaching` renders as OK. A SEARCH expression that matches nothing (typo,
+  # rejected syntax, changed schema) produces the same no-data and the same OK.
+  # `notBreaching` is still the right setting — the alternative is an alarm that
+  # lives permanently in INSUFFICIENT_DATA — but it means the staging exercise is
+  # the *only* validation this alarm will ever get. **Re-run it whenever this
+  # expression changes.**
+  #
+  # Aggregated across every topic with SEARCH rather than one alarm per topic:
+  # sixteen alert topics across ten stacks, and SEARCH also picks up topics added
+  # later without anyone remembering.
+  #
+  # **One alarm, not one per environment.** SEARCH matches every topic in the
+  # account and region, so prod and staging copies would watch identical data and
+  # both fire on the same failure. It routes to the prod alert topic because that
+  # is the destination that gets read, not because it is prod-scoped.
+  #
+  # Circular by design — a delivery-failure alarm delivered by the channel that
+  # is failing. Accepted: the realistic failure is one subscriber bouncing, not
+  # SNS itself being down.
+  SnsDeliveryFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: robosystems-sns-delivery-failures
+      AlarmDescription: An SNS topic failed to deliver a notification
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 0
+      TreatMissingData: notBreaching
+      Metrics:
+        - Id: failed
+          Label: NumberOfNotificationsFailed across all topics
+          ReturnData: true
+          Expression: >-
+            SUM(SEARCH('{AWS/SNS,TopicName} MetricName="NumberOfNotificationsFailed"',
+            'Sum', 300))
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
   # Admin-key-rotation Lambdas are defined in api.yaml (same ceiling constraint);
   # function names are deterministic stack-name prefixes.

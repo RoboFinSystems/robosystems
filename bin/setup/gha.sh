@@ -504,6 +504,14 @@ function setup_full_config() {
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
+    # Sustained application 5xx over 5 minutes before the API error alarm
+    # fires (security stack, both environments). Starts deliberately low —
+    # there is no traffic baseline to tune against, and a noisy alarm in a
+    # folder checked several times a day is recoverable where a missing one
+    # is not. Retune with `just gha-set API_TARGET_ERROR_THRESHOLD <n>` and
+    # redeploy the security stack; no code change needed.
+    gh variable set API_TARGET_ERROR_THRESHOLD --body "5"
+
     # Features Configuration
     gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
     if $setup_staging; then
