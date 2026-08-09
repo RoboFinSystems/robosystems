@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.config import env
@@ -104,12 +105,26 @@ def _tenant_tables():
 
 @pytest.fixture(scope="module")
 def two_tenants():
-  """Two real tenant schemas, dropped on the way out."""
+  """Two real tenant schemas, dropped on the way out.
+
+  ``EXTENSIONS_DATABASE_URL`` always resolves to *something* — it falls back to
+  a localhost default — so its presence proves nothing. Connect before deciding:
+  a developer without the extensions database gets a skip, not a fixture error.
+  CI creates the database explicitly, so a skip there would be a regression and
+  is deliberately not something this fixture can hide.
+  """
   url = env.EXTENSIONS_DATABASE_URL
   if not url:
     pytest.skip("EXTENSIONS_DATABASE_URL not configured")
 
   engine = create_engine(url)
+  try:
+    with engine.connect() as probe:
+      probe.execute(text("SELECT 1"))
+  except OperationalError as exc:
+    engine.dispose()
+    pytest.skip(f"extensions database unreachable: {exc.orig}")
+
   tables = _tenant_tables()
   try:
     with engine.begin() as conn:
