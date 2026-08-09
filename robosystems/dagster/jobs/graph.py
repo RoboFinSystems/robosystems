@@ -118,6 +118,10 @@ class BackupGraphConfig(Config):
   retention_days: int = 30
   compression: bool = True
   initiated_by: str = "user"
+  # Set when the caller already reserved a row against the daily quota. The
+  # job adopts it rather than inserting a second one — see the reservation
+  # comment in the create-backup route.
+  backup_id: str | None = None
 
 
 class RestoreGraphConfig(Config):
@@ -209,18 +213,35 @@ def create_backup(
   with db.get_session() as session:
     s3_adapter = S3BackupAdapter(enable_compression=config.compression)
 
-    backup_record = GraphBackup.create(
-      graph_id=config.graph_id,
-      database_name=database_name,
-      backup_type=config.backup_type,
-      initiated_by=config.initiated_by,
-      s3_bucket=s3_adapter.bucket_name,
-      s3_key=s3_key,
-      session=session,
-      created_by_user_id=config.user_id,
-      compression_enabled=config.compression,
-      expires_at=datetime.now(UTC) + timedelta(days=config.retention_days),
+    # Adopt the caller's reservation when there is one. Quota is counted from
+    # these rows, so a caller that checked the count and then let the job
+    # insert would leave a window where concurrent requests all pass the same
+    # check. Callers that don't enforce quota — the nightly schedule — insert
+    # here as before.
+    backup_record = (
+      GraphBackup.get_by_id(config.backup_id, session) if config.backup_id else None
     )
+
+    if backup_record is None:
+      backup_record = GraphBackup.create(
+        graph_id=config.graph_id,
+        database_name=database_name,
+        backup_type=config.backup_type,
+        initiated_by=config.initiated_by,
+        s3_bucket=s3_adapter.bucket_name,
+        s3_key=s3_key,
+        session=session,
+        created_by_user_id=config.user_id,
+        compression_enabled=config.compression,
+        expires_at=datetime.now(UTC) + timedelta(days=config.retention_days),
+      )
+    else:
+      backup_record.database_name = database_name
+      backup_record.s3_bucket = s3_adapter.bucket_name
+      backup_record.s3_key = s3_key
+      backup_record.expires_at = datetime.now(UTC) + timedelta(
+        days=config.retention_days
+      )
 
     backup_record.start_backup(session)
     backup_id = str(backup_record.id)
@@ -247,6 +268,10 @@ def create_backup(
     backup_record = GraphBackup.get_by_id(backup_id, session)
     if backup_record:
       backup_record.s3_key = backup_info.s3_key
+      # Without this the retention sweep skips the sidecar entirely — its
+      # delete is guarded on the row knowing the key — so metadata objects
+      # outlived tier retention and rode the 90-day bucket lifecycle instead.
+      backup_record.s3_metadata_key = backup_info.s3_metadata_key
       backup_record.complete_backup(
         session=session,
         original_size=backup_info.original_size,

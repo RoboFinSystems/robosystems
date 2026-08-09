@@ -38,6 +38,75 @@ class BackupPayloadMismatch(RuntimeError):
   """The archive's contents disagree with the database it claims to back up."""
 
 
+# Name of the manifest inside a full-dump archive, mirroring the producer in
+# ``graph_api/routers/databases/restore.py``.
+BACKUP_MANIFEST_NAME = "backup-manifest.json"
+
+
+def _restore_memory_store(graph_id: str, extracted: Path) -> str:
+  """Apply the archive's memory claim to the graph's live memory store.
+
+  The manifest is a **tri-state**, and the third state is carried by the
+  manifest's *absence*:
+
+  - ``included`` — the archive holds a memory store; replace the live one.
+  - ``absent``   — a memory-aware backup of a graph that had none. **Leave the
+    live store alone.** Memory has no upstream, so the asymmetry favours
+    keeping data over matching the snapshot exactly; the same fail-closed
+    instinct that made restore abort on a failed safety backup.
+  - *no manifest* — the archive predates memory capture and makes **no claim
+    either way**. Also leave the live store alone: deleting data on the
+    strength of a format gap is the worst available reading.
+
+  Only ``included`` writes. Returns what happened, for the operation log —
+  a restore that silently did nothing to memory is exactly what this contract
+  exists to prevent.
+  """
+  from robosystems.utils.path_validation import get_lance_index_path
+
+  manifest_path = extracted / BACKUP_MANIFEST_NAME
+  if not manifest_path.exists():
+    logger.info(
+      f"Backup for '{graph_id}' carries no manifest; leaving existing memory "
+      f"store untouched (archive makes no claim)"
+    )
+    return "unchanged (no claim)"
+
+  try:
+    manifest = json.loads(manifest_path.read_text())
+  except Exception as e:
+    logger.warning(f"Unreadable backup manifest for '{graph_id}': {e}")
+    return "unchanged (unreadable manifest)"
+
+  claim = manifest.get("memory")
+  if claim != "included":
+    logger.info(
+      f"Backup for '{graph_id}' records memory as '{claim}'; leaving existing "
+      f"memory store untouched"
+    )
+    return f"unchanged ({claim})"
+
+  source = extracted / "memory"
+  if not source.is_dir():
+    # The manifest says included but the payload has no memory directory.
+    # Refuse rather than guess: replacing with nothing would delete a store the
+    # archive claims to contain, and skipping silently would leave a restore
+    # reporting success over a claim it did not honour.
+    raise BackupPayloadMismatch(
+      f"Backup for '{graph_id}' records memory as included but the archive "
+      f"contains no memory directory."
+    )
+
+  destination = get_lance_index_path(graph_id)
+  if destination.exists():
+    shutil.rmtree(destination)
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  shutil.copytree(source, destination)
+
+  logger.info(f"Restored semantic memory store for graph '{graph_id}'")
+  return "replaced"
+
+
 def _reconcile_payload_against_stats(
   graph_id: str,
   stats: dict[str, Any],
@@ -489,9 +558,23 @@ class BackupManager:
 
       backup_duration = asyncio.get_event_loop().time() - start_time
 
+      # The record describes the ARCHIVE, not the live database, whenever the
+      # archive was measured. This matters because reconciliation deliberately
+      # tolerates drift: a backup taken while writes land records live=100 over
+      # an archive holding 98, and `_verify_restore` compares a restored
+      # database against these numbers. Recording the live count would make
+      # every drifted backup fail verification *after* overwriting the target.
+      # The live counts are not lost — they ride in `payload_delta` below.
+      measured_nodes = (payload or {}).get("node_count")
+      measured_rels = (payload or {}).get("relationship_count")
+
       metadata = {
-        "node_count": stats["node_count"],
-        "relationship_count": stats["relationship_count"],
+        "node_count": (
+          measured_nodes if measured_nodes is not None else stats["node_count"]
+        ),
+        "relationship_count": (
+          measured_rels if measured_rels is not None else stats["relationship_count"]
+        ),
         "backup_duration_seconds": backup_duration,
         "backup_format": backup_job.backup_format.value,
         "database_engine": "graph",
@@ -1366,8 +1449,12 @@ class BackupManager:
       else:
         shutil.copytree(temp_path / graph_id, target_path)
 
+      memory_outcome = _restore_memory_store(graph_id, temp_path)
+
       if progress_tracker:
-        progress_tracker.update_import_progress(message="Restored full database dump")
+        progress_tracker.update_import_progress(
+          message=f"Restored full database dump (memory: {memory_outcome})"
+        )
 
   async def _ensure_database_exists(self, graph_id: str) -> None:
     """Touch the database so the repository creates it if absent.

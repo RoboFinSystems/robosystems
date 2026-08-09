@@ -644,20 +644,32 @@ class CreateBackupTool:
       # above mirrors it: this path enqueues the same job, so a check that
       # lives on only one of them is not a limit. A negative value means
       # unlimited; an unresolvable tier gets the smallest allowance.
-      max_per_day = backup_limits.get("max_backups_per_day", 2)
-      if max_per_day is not None and max_per_day >= 0:
-        from robosystems.models.core import GraphBackup
+      # Reserve the slot the same way the REST route does. Counting rows and
+      # letting the async job insert one leaves a window where concurrent
+      # requests all pass the same check, and a limit enforced on one of two
+      # entry points is not a limit.
+      from fastapi import HTTPException
 
-        taken_today = GraphBackup.count_user_initiated_today(graph_id, session)
-        if taken_today >= max_per_day:
-          return {
-            "error": "daily_backup_limit_reached",
-            "message": (
-              f"Daily backup limit reached for this graph "
-              f"({taken_today}/{max_per_day} on the {backup_tier} tier). "
-              f"Scheduled backups do not count against this limit."
-            ),
-          }
+      from robosystems.routers.graphs.operations import (
+        _release_backup_slot,
+        _reserve_backup_slot,
+      )
+
+      max_per_day = backup_limits.get("max_backups_per_day", 2)
+      try:
+        reservation_id = _reserve_backup_slot(
+          graph_id=graph_id,
+          user_id=str(user.id),
+          max_per_day=max_per_day,
+          backup_tier=backup_tier,
+          retention_days=retention_days,
+          db=session,
+        )
+      except HTTPException as limit_error:
+        return {
+          "error": "daily_backup_limit_reached",
+          "message": limit_error.detail,
+        }
 
       run_config = build_graph_job_config(
         "backup_graph_job",
@@ -668,13 +680,18 @@ class CreateBackupTool:
         retention_days=retention_days,
         compression=True,
         initiated_by="user",
+        backup_id=reservation_id,
       )
-      response = await enqueue_task(
-        task_type="dagster_job_monitor",
-        graph_id=graph_id,
-        user_id=str(user.id),
-        params={"job_name": "backup_graph_job", "run_config": run_config},
-      )
+      try:
+        response = await enqueue_task(
+          task_type="dagster_job_monitor",
+          graph_id=graph_id,
+          user_id=str(user.id),
+          params={"job_name": "backup_graph_job", "run_config": run_config},
+        )
+      except Exception:
+        _release_backup_slot(reservation_id, session)
+        raise
       operation_id = response["operation_id"]
       return {
         "status": "accepted",

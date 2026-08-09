@@ -547,6 +547,77 @@ async def delete_graph_op(
   return await _dispatch(ctx, _runner, cache)
 
 
+def _reserve_backup_slot(
+  *,
+  graph_id: str,
+  user_id: str,
+  max_per_day: int | None,
+  backup_tier: str,
+  retention_days: int,
+  db: Session,
+) -> str:
+  """Take a slot against the graph's daily backup quota, returning its row id.
+
+  Counting rows and then letting the async job insert one leaves a window where
+  concurrent requests all observe the same count and all pass. The row is
+  therefore inserted here, and the job adopts it.
+
+  The count and the insert are serialized per graph by locking the graph row
+  first. That is enough because the quota is per-graph: two requests for the
+  same graph queue behind each other, and unrelated graphs never wait on one
+  another. Placeholder storage fields are overwritten by the job once it knows
+  the real key.
+
+  Raises 429 when the tier's allowance is spent. A negative limit means
+  unlimited, and an unresolvable tier already fell back to the smallest
+  allowance upstream.
+  """
+  from datetime import UTC, datetime, timedelta
+
+  from sqlalchemy import select
+
+  from robosystems.models.core import BackupInitiator, Graph, GraphBackup
+
+  if max_per_day is not None and max_per_day >= 0:
+    db.execute(select(Graph).where(Graph.graph_id == graph_id).with_for_update())
+
+    taken_today = GraphBackup.count_user_initiated_today(graph_id, db)
+    if taken_today >= max_per_day:
+      raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=(
+          f"Daily backup limit reached for this graph "
+          f"({taken_today}/{max_per_day} on the {backup_tier} tier). "
+          f"Scheduled backups do not count against this limit."
+        ),
+      )
+
+  reservation = GraphBackup.create(
+    graph_id=graph_id,
+    database_name=graph_id,
+    backup_type="full",
+    initiated_by=BackupInitiator.USER.value,
+    s3_bucket="",
+    s3_key="",
+    session=db,
+    created_by_user_id=user_id,
+    expires_at=datetime.now(UTC) + timedelta(days=retention_days),
+  )
+  return str(reservation.id)
+
+
+def _release_backup_slot(backup_id: str, db: Session) -> None:
+  """Fail a reservation whose job never got enqueued, freeing the slot."""
+  from robosystems.models.core import GraphBackup
+
+  try:
+    reservation = GraphBackup.get_by_id(backup_id, db)
+    if reservation is not None:
+      reservation.fail_backup(db, "Backup job could not be enqueued")
+  except Exception as e:
+    logger.error(f"Could not release backup reservation {backup_id}: {e}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # create-backup
 # ═══════════════════════════════════════════════════════════════════════════
@@ -634,19 +705,14 @@ async def create_backup_op(
   # unresolvable tier gets the smallest allowance rather than an exemption.
   # A negative limit means unlimited (the xlarge tier).
   max_per_day = backup_limits.get("max_backups_per_day", 2)
-  if max_per_day is not None and max_per_day >= 0:
-    from robosystems.models.core import GraphBackup as _GraphBackup
-
-    taken_today = _GraphBackup.count_user_initiated_today(graph_id, db)
-    if taken_today >= max_per_day:
-      raise HTTPException(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail=(
-          f"Daily backup limit reached for this graph "
-          f"({taken_today}/{max_per_day} on the {backup_tier} tier). "
-          f"Scheduled backups do not count against this limit."
-        ),
-      )
+  reservation_id = _reserve_backup_slot(
+    graph_id=graph_id,
+    user_id=user_id,
+    max_per_day=max_per_day,
+    backup_tier=backup_tier,
+    retention_days=effective_retention_days,
+    db=db,
+  )
 
   run_config = build_graph_job_config(
     "backup_graph_job",
@@ -657,14 +723,21 @@ async def create_backup_op(
     retention_days=effective_retention_days,
     compression=True,
     initiated_by="user",
+    backup_id=reservation_id,
   )
 
-  response = await enqueue_task(
-    task_type="dagster_job_monitor",
-    graph_id=graph_id,
-    user_id=user_id,
-    params={"job_name": "backup_graph_job", "run_config": run_config},
-  )
+  try:
+    response = await enqueue_task(
+      task_type="dagster_job_monitor",
+      graph_id=graph_id,
+      user_id=user_id,
+      params={"job_name": "backup_graph_job", "run_config": run_config},
+    )
+  except Exception:
+    # Release the slot rather than leaving a PENDING row holding quota for a
+    # job that will never run. FAILED rows are excluded from the count.
+    _release_backup_slot(reservation_id, db)
+    raise
   operation_id = response["operation_id"]
 
   envelope = wrap_pending(
