@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.blocked_source_graphs import (
 )
 from robosystems.models.api.extensions.reports import RevokeReportShareRequest
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
+  AdminRoleRequiredError,
   SelfBlockError,
   SourceGraphNotBlockedError,
   block_source_graph,
@@ -28,6 +29,7 @@ from robosystems.operations.roboledger.commands.blocked_source_graphs import (
 )
 from robosystems.operations.roboledger.commands.reports import (
   NotAuthorizedError,
+  ReportHasActiveSharesError,
   ReportNotFoundError,
   ReportShareNotFoundError,
   _share_to_target,
@@ -121,6 +123,24 @@ def test_graph_admin_cannot_delete_a_native_report_they_do_not_own() -> None:
     )
 
 
+def test_a_report_with_live_shares_cannot_be_deleted() -> None:
+  """Deleting the source first would strand every delivered copy: revoke reads
+  the report to authorize the withdrawal, so once it is gone the recipients'
+  copies can never be pulled. Revoke each recipient first."""
+  session = MagicMock()
+  session.get.return_value = _make_report(created_by="user_owner")
+  session.execute.return_value.scalars.return_value.all.return_value = [
+    _TARGET_GRAPH,
+    "kg3333333333333333",
+  ]
+
+  with pytest.raises(ReportHasActiveSharesError) as exc:
+    delete_report(session, "rpt_01", acting_user_id="user_owner")
+
+  assert exc.value.target_graph_ids == [_TARGET_GRAPH, "kg3333333333333333"]
+  session.delete.assert_not_called()
+
+
 # ─── G2: recipient block ────────────────────────────────────────────────────
 
 
@@ -202,10 +222,51 @@ def test_block_with_purge_reports_the_number_of_reports_removed() -> None:
   with patch(f"{_BLOCK_CMD}.enrich_blocks") as enrich:
     enrich.return_value = [_block_response()]
     result = block_source_graph(
-      session, body, created_by="user_recipient", graph_id=_TARGET_GRAPH
+      session,
+      body,
+      created_by="user_recipient",
+      graph_id=_TARGET_GRAPH,
+      acting_user_is_graph_admin=True,
     )
 
   assert result.purged_report_count == 2
+
+
+def test_a_writer_can_block_without_admin() -> None:
+  """Stopping a sender is the easy half — a member should not have to find an
+  admin to make an unwanted share stop."""
+  session = _block_session(existing=None)
+
+  with patch(f"{_BLOCK_CMD}.enrich_blocks") as enrich:
+    enrich.return_value = [_block_response()]
+    result = block_source_graph(
+      session,
+      BlockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH),
+      created_by="user_member",
+      graph_id=_TARGET_GRAPH,
+      acting_user_is_graph_admin=False,
+    )
+
+  assert result.already_blocked is False
+
+
+def test_purge_requires_admin_and_writes_nothing_without_it() -> None:
+  """Deleting one shared report takes an admin; deleting all of them through
+  the block door must not be the cheaper path."""
+  session = MagicMock()
+  session.execute.return_value.scalar_one_or_none.return_value = None
+
+  with pytest.raises(AdminRoleRequiredError):
+    block_source_graph(
+      session,
+      BlockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH, purge=True),
+      created_by="user_member",
+      graph_id=_TARGET_GRAPH,
+      acting_user_is_graph_admin=False,
+    )
+
+  session.add.assert_not_called()
+  session.execute.assert_not_called()
 
 
 def test_unblock_raises_when_the_source_was_not_blocked() -> None:
@@ -213,8 +274,24 @@ def test_unblock_raises_when_the_source_was_not_blocked() -> None:
 
   with pytest.raises(SourceGraphNotBlockedError):
     unblock_source_graph(
-      session, UnblockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH)
+      session,
+      UnblockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH),
+      acting_user_is_graph_admin=True,
     )
+
+
+def test_a_member_cannot_lift_an_admins_block() -> None:
+  """A block is a standing decision about who may write into this graph."""
+  session = _block_session(existing=MagicMock())
+
+  with pytest.raises(AdminRoleRequiredError):
+    unblock_source_graph(
+      session,
+      UnblockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH),
+      acting_user_is_graph_admin=False,
+    )
+
+  session.delete.assert_not_called()
 
 
 def test_unblock_deletes_the_row() -> None:
@@ -227,7 +304,9 @@ def test_unblock_deletes_the_row() -> None:
   session = _block_session(existing=row)
 
   response = unblock_source_graph(
-    session, UnblockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH)
+    session,
+    UnblockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH),
+    acting_user_is_graph_admin=True,
   )
 
   session.delete.assert_called_once_with(row)
@@ -321,11 +400,18 @@ def test_share_to_an_unblocking_recipient_proceeds_to_the_copy() -> None:
 # ─── G3: sender revoke ──────────────────────────────────────────────────────
 
 
-def _revoke_sessions(*, report, share) -> MagicMock:
-  """extensions_session stand-in for the source graph."""
+def _revoke_sessions(*, report, shares: list | None = None) -> MagicMock:
+  """extensions_session stand-in for the source graph.
+
+  `revoke_report_share` probes for any active share with `.first()`, then
+  loads them all to stamp — plural on both, because a report can legitimately
+  have been shared to one recipient more than once.
+  """
+  shares = shares or []
   source_session = MagicMock()
   source_session.get.return_value = report
-  source_session.execute.return_value.scalar_one_or_none.return_value = share
+  source_session.execute.return_value.first.return_value = shares[0] if shares else None
+  source_session.execute.return_value.scalars.return_value.all.return_value = shares
 
   factory = MagicMock()
   factory.return_value.__enter__.return_value = source_session
@@ -333,7 +419,7 @@ def _revoke_sessions(*, report, share) -> MagicMock:
 
 
 def test_revoke_requires_the_report_to_exist() -> None:
-  factory, _ = _revoke_sessions(report=None, share=None)
+  factory, _ = _revoke_sessions(report=None)
 
   with patch("robosystems.db.extensions.extensions_session", factory):
     with pytest.raises(ReportNotFoundError):
@@ -346,9 +432,7 @@ def test_revoke_requires_the_report_to_exist() -> None:
 
 
 def test_only_the_reports_owner_may_revoke_its_shares() -> None:
-  factory, _ = _revoke_sessions(
-    report=_make_report(created_by="user_owner"), share=None
-  )
+  factory, _ = _revoke_sessions(report=_make_report(created_by="user_owner"))
 
   with patch("robosystems.db.extensions.extensions_session", factory):
     with pytest.raises(NotAuthorizedError):
@@ -361,9 +445,7 @@ def test_only_the_reports_owner_may_revoke_its_shares() -> None:
 
 
 def test_revoking_a_share_that_does_not_exist_raises() -> None:
-  factory, _ = _revoke_sessions(
-    report=_make_report(created_by="user_owner"), share=None
-  )
+  factory, _ = _revoke_sessions(report=_make_report(created_by="user_owner"))
 
   with patch("robosystems.db.extensions.extensions_session", factory):
     with pytest.raises(ReportShareNotFoundError):
@@ -379,7 +461,7 @@ def test_revoke_stamps_revoked_at_and_reports_the_copy_deleted() -> None:
   share = MagicMock()
   share.revoked_at = None
   factory, _ = _revoke_sessions(
-    report=_make_report(created_by="user_owner"), share=share
+    report=_make_report(created_by="user_owner"), shares=[share]
   )
 
   with (
@@ -404,13 +486,65 @@ def test_revoke_stamps_revoked_at_and_reports_the_copy_deleted() -> None:
   )
 
 
+def test_revoke_stamps_every_active_share_to_the_same_recipient() -> None:
+  """One report can legitimately reach one recipient more than once — two
+  overlapping publish lists, or a resend after a correction. `_delete_shared_copy`
+  removes every copy carrying the provenance pair, so every share row has to be
+  stamped to match; leaving one active would claim a delivery that is gone.
+  """
+  first, second = MagicMock(), MagicMock()
+  first.revoked_at = second.revoked_at = None
+  factory, _ = _revoke_sessions(
+    report=_make_report(created_by="user_owner"), shares=[first, second]
+  )
+
+  with (
+    patch("robosystems.db.extensions.extensions_session", factory),
+    patch(f"{_REPORTS_CMD}._delete_shared_copy", return_value=True),
+  ):
+    response = revoke_report_share(
+      _SOURCE_GRAPH,
+      "rpt_01",
+      RevokeReportShareRequest(target_graph_id=_TARGET_GRAPH),
+      acting_user_id="user_owner",
+    )
+
+  assert first.revoked_at is not None
+  assert second.revoked_at == first.revoked_at == response.revoked_at
+
+
+def test_a_graph_admin_may_revoke_a_departed_authors_shares() -> None:
+  """Without this an author's departure strands their delivered copies in
+  recipients' schemas with nobody able to withdraw them."""
+  share = MagicMock()
+  share.revoked_at = None
+  factory, _ = _revoke_sessions(
+    report=_make_report(created_by="user_departed"), shares=[share]
+  )
+
+  with (
+    patch("robosystems.db.extensions.extensions_session", factory),
+    patch(f"{_REPORTS_CMD}._delete_shared_copy", return_value=True),
+  ):
+    response = revoke_report_share(
+      _SOURCE_GRAPH,
+      "rpt_01",
+      RevokeReportShareRequest(target_graph_id=_TARGET_GRAPH),
+      acting_user_id="user_admin",
+      acting_user_is_graph_admin=True,
+    )
+
+  assert response.copy_deleted is True
+  assert share.revoked_at is not None
+
+
 def test_revoke_succeeds_when_the_recipient_already_deleted_the_copy() -> None:
   """Not an error: the recipient exercising their own exit first still leaves
   the sender's record honest."""
   share = MagicMock()
   share.revoked_at = None
   factory, _ = _revoke_sessions(
-    report=_make_report(created_by="user_owner"), share=share
+    report=_make_report(created_by="user_owner"), shares=[share]
   )
 
   with (

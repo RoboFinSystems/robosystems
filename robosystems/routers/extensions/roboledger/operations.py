@@ -266,6 +266,7 @@ from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
+  AdminRoleRequiredError,
   SelfBlockError,
   SourceGraphNotBlockedError,
 )
@@ -355,6 +356,7 @@ from robosystems.operations.roboledger.commands.reports import (
   NoEntityError,
   NotAuthorizedError,
   PublishListEmptyError,
+  ReportHasActiveSharesError,
   ReportNotFiledError,
   ReportNotFoundError,
   ReportNotPublishedError,
@@ -2314,6 +2316,8 @@ async def delete_report_op(
           raise HTTPException(
             status_code=403, detail="Not authorized to delete this report."
           )
+        except ReportHasActiveSharesError as e:
+          raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFiledError as e:
           raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):
@@ -2453,7 +2457,11 @@ async def revoke_report_share_op(
   def _runner():
     try:
       return cmd_revoke_report_share(
-        graph_id, body.report_id, body, acting_user_id=str(user.id)
+        graph_id,
+        body.report_id,
+        body,
+        acting_user_id=str(user.id),
+        acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
       )
     except ReportNotFoundError:
       raise HTTPException(
@@ -2889,10 +2897,16 @@ async def block_source_graph_op(
       with extensions_session(graph_id) as session:
         try:
           return cmd_block_source_graph(
-            session, body, created_by=str(user.id), graph_id=graph_id
+            session,
+            body,
+            created_by=str(user.id),
+            graph_id=graph_id,
+            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
           )
         except SelfBlockError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except AdminRoleRequiredError as e:
+          raise HTTPException(status_code=403, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
@@ -2907,23 +2921,68 @@ async def block_source_graph_op(
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_stale_if_purged)
 
 
-unblock_source_graph_op = _registrar.register(
-  OperationSpec(
-    name="unblock-source-graph",
-    summary="Unblock Source Graph",
-    description=(
-      "Lifts a block, allowing that graph to share reports into this one "
-      "again. Reports removed by an earlier purge are not restored — "
-      "unblocking reopens the channel, it does not undo. Returns 404 when "
-      "the source was not blocked."
-    ),
-    command=cmd_unblock_source_graph,
-    request_model=UnblockSourceGraphOperation,
-    result_type=BlockedSourceGraphResponse,
-    error_map={SourceGraphNotBlockedError: 404},
-    requires_created_by=False,
-  )
+# Hand-mounted rather than declared through `_registrar`, deliberately. Every
+# registrar spec is also published as an MCP tool
+# (`middleware/mcp/tools/registrar.py`), and shared reports land in the
+# recipient's schema where their own AI operators read them as ordinary data.
+# An operator that could lift a block — acting on text a blocked sender wrote —
+# would hand that sender the undo button for their own exclusion. `block` is
+# hand-written for the same reason; keeping both halves off the tool surface is
+# the point, not an accident of style.
+@router.post(
+  "/unblock-source-graph",
+  response_model=OperationEnvelope[BlockedSourceGraphResponse],
+  operation_id="unblockSourceGraph",
+  summary="Unblock Source Graph",
+  description=(
+    "Lifts a block, allowing that graph to share reports into this one "
+    "again. Reports removed by an earlier purge are not restored — "
+    "unblocking reopens the channel, it does not undo. Requires the graph "
+    "admin role: a block is a standing decision about who may write into "
+    "this graph, so a member cannot reverse it over an admin's head. "
+    "Returns 404 when the source was not blocked."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
 )
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/unblock-source-graph",
+  method="POST",
+  business_event_type="ledger_unblock_source_graph",
+)
+async def unblock_source_graph_op(
+  body: UnblockSourceGraphOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(_require_roboledger_write),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="unblock-source-graph",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        try:
+          return cmd_unblock_source_graph(
+            session,
+            body,
+            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
+          )
+        except AdminRoleRequiredError as e:
+          raise HTTPException(status_code=403, detail=str(e))
+        except SourceGraphNotBlockedError as e:
+          raise HTTPException(status_code=404, detail=str(e))
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+
+  return await _dispatch(ctx, _runner, cache)
 
 
 # NOTE: `build-fact-grid` lives in the sibling `views.py` router.
