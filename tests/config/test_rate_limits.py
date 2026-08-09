@@ -63,11 +63,6 @@ def test_unknown_tier_falls_back_to_base_limits():
       "POST",
       EndpointCategory.GRAPH_BACKUP,
     ),
-    (
-      "/v1/graphs/abc/operations/restore-backup",
-      "POST",
-      EndpointCategory.GRAPH_BACKUP,
-    ),
     ("/v1/graphs/abc/operations/materialize", "POST", EndpointCategory.GRAPH_IMPORT),
     (
       "/v1/graphs/abc/operations/create-subgraph",

@@ -330,11 +330,21 @@ def restore_backup(
     BackupJob,
     BackupType,
     create_backup_manager,
+    restore_unsupported_reason,
   )
 
   context.log.info(f"Restoring graph {config.graph_id} from backup {config.backup_id}")
 
   with db.get_session() as session:
+    # Graph-type gate. This used to live on the REST operation; that surface was
+    # removed (restore is operator-run, not customer-facing), so the check moved
+    # here rather than leaving the only remaining path ungated. It fails closed
+    # on an unresolvable graph — a restore is destructive, so an unknown type is
+    # a refusal, not a default-allow.
+    unsupported = restore_unsupported_reason(config.graph_id, session)
+    if unsupported:
+      raise Failure(f"Restore refused for {config.graph_id}: {unsupported[1]}")
+
     backup_record = GraphBackup.get_by_id(config.backup_id, session)
     if not backup_record:
       raise Failure(f"Backup not found: {config.backup_id}")

@@ -419,7 +419,7 @@ class RateLimitConfig:
       # than the whole path, so a graph_id can't accidentally route the bucket.
       elif endpoint_type == "operations":
         op_name = path_parts[3] if len(path_parts) > 3 else ""
-        if "backup" in op_name:  # create-backup, restore-backup
+        if "backup" in op_name:  # create-backup
           return EndpointCategory.GRAPH_BACKUP
         elif "materialize" in op_name:  # heavy OLAP rebuild
           return EndpointCategory.GRAPH_IMPORT

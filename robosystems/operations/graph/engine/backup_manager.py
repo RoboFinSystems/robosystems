@@ -34,6 +34,55 @@ from ....middleware.graph import get_universal_repository
 from ....middleware.graph.utils import MultiTenantUtils
 
 
+def restore_unsupported_reason(graph_id: str, db) -> tuple[int, str] | None:
+  """Why this graph can't be restored to as ``(status_code, detail)``, or None.
+
+  Restore is a graph-type property, not a property of an individual backup.
+  Shared repositories are platform-managed and download-only; entity graphs are
+  a projection of the extensions OLTP database, so overwriting one with a
+  snapshot desynchronizes it from its source of truth.
+
+  Subgraphs are the exception to the entity rule, and they inherit
+  ``graph_type`` from their parent. Only the parent is materialized —
+  ``materialize`` refuses subgraphs outright — so a subgraph is a separate
+  database written directly via Cypher with no upstream to rebuild from.
+  Refusing restore there would leave it with no recovery path at all.
+
+  Fails closed on an unresolvable graph: a restore is destructive, so an
+  unknown graph type is a refusal rather than a default-allow.
+
+  The status code is vestigial — this is no longer reachable from HTTP, since
+  restore is operator-run rather than customer-facing. It is retained so the
+  reason reads identically wherever the guard is surfaced.
+  """
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.models.core import Graph
+
+  if is_shared_repository_or_subgraph(graph_id):
+    return (
+      403,
+      f"Restore operations are not allowed on shared repository '{graph_id}'. "
+      "Shared repositories are platform-managed and download-only.",
+    )
+
+  graph_record = Graph.get_by_id(graph_id, db)
+  if graph_record is None:
+    return (
+      400,
+      f"Graph '{graph_id}' was not found in the registry, so its type cannot be "
+      "confirmed. Restore is refused rather than attempted.",
+    )
+
+  if graph_record.graph_type == "entity" and not graph_record.is_subgraph:
+    return (
+      400,
+      "Cannot restore backups for entity graphs. The graph is automatically "
+      "materialized from the extensions database.",
+    )
+
+  return None
+
+
 class BackupFormat(str, Enum):
   """Supported backup formats."""
 

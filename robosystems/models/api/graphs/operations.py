@@ -25,24 +25,6 @@ class DeleteSubgraphOp(BaseModel):
   )
 
 
-class RestoreBackupOp(BaseModel):
-  """Body for the restore-backup operation."""
-
-  backup_id: str = Field(
-    ...,
-    min_length=1,
-    description="Backup identifier to restore from",
-  )
-  create_system_backup: bool = Field(
-    default=True,
-    description="Create a system backup of existing database before restore",
-  )
-  verify_after_restore: bool = Field(
-    default=True,
-    description="Verify database integrity after restore",
-  )
-
-
 class ChangeTierOp(BaseModel):
   """Body for the change-tier operation (supports upgrades and downgrades)."""
 

@@ -93,17 +93,6 @@ class BackupListResponse(BaseModel):
   is_shared_repository: bool = Field(
     False, description="Whether this is a shared repository (limits apply)"
   )
-  restore_supported: bool = Field(
-    True,
-    description=(
-      "Whether backups on this graph can be restored. False for entity graphs, "
-      "which are materialized from the extensions database (use the materialize "
-      "operation instead), and for shared repositories, which are "
-      "platform-managed and download-only. True for subgraphs of an entity "
-      "graph: only the parent is materialized, so a subgraph has no other "
-      "recovery path."
-    ),
-  )
   download_quota: DownloadQuota | None = Field(
     None, description="Download quota for shared repositories"
   )

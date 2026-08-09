@@ -20,11 +20,14 @@ rationale (platform DB, graph-scoped auth, no extensions registrar):
 **Deliberately NOT exposed on MCP:**
 
 - `change-tier` — destructive 3-5 minute EBS migration with billing
-  implications and fail-on-downgrade semantics. Humans execute.
-- `restore-backup` — overwrites live graph data with a historical
-  snapshot; mistakes are very expensive to recover from. Humans execute.
+  implications and fail-on-downgrade semantics. Humans execute it on the
+  REST surface.
 
-Both still live on the REST surface for human-driven operations.
+Restore is not on MCP either, but for a different reason: it is not exposed
+anywhere customer-facing. Backups are a download capability — every graph type
+with an upstream rebuilds from that upstream, and the classes without one are
+recovered by downloading the payload and rebuilding, or by an operator-run
+restore job.
 
 Tools stay hand-written rather than registrar-generated because:
 - Each targets the **platform DB** (not extensions), different session

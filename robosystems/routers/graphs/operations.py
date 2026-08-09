@@ -51,7 +51,6 @@ from robosystems.models.api.graphs.operations import (
   DeleteSubgraphOp,
   GraphMetadataResult,
   MaterializeOp,
-  RestoreBackupOp,
   UpdateGraphMetadataOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
@@ -666,119 +665,6 @@ async def create_backup_op(
       "monitoring": {
         "sse_endpoint": f"/v1/operations/{operation_id}/stream",
       },
-    },
-    created_by=user_id,
-  )
-
-  if idempotency_key is not None:
-    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
-
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status="pending",
-    idempotency_key=idempotency_key,
-    event=_AUDIT_EVENT,
-  )
-  return envelope
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# restore-backup
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/restore-backup",
-  response_model=OperationEnvelope,
-  status_code=status.HTTP_202_ACCEPTED,
-  operation_id="restoreBackup",
-  summary="Restore Backup",
-  description="Not allowed on entity graphs (use `materialize` instead) or shared repositories. Entity *subgraphs* are restorable — they are written directly and have no materialization path. Destructive: the existing database is snapshotted, then overwritten. Monitor progress via SSE at `/v1/operations/{operation_id}/stream`.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  f"{_GRAPH_OPS_PATH}/restore-backup",
-  method="POST",
-  business_event_type="graph_restore_backup",
-)
-async def restore_backup_op(
-  body: RestoreBackupOp,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-  db: Session = Depends(get_async_db_session),
-) -> OperationEnvelope:
-  from robosystems.middleware.sse import build_graph_job_config
-  from robosystems.models.core import GraphBackup
-  from robosystems.routers.graphs.backups.utils import (
-    restore_unsupported_reason,
-    verify_admin_access,
-  )
-  from robosystems.worker.client import enqueue_task
-
-  op_name = "restore-backup"
-  user_id = str(user.id)
-  body_fp = fingerprint_body(body)
-
-  replay = await check_idempotency(
-    cache, user_id, graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
-
-  verify_admin_access(user, graph_id, db)
-
-  # Restore availability is a property of the graph, not of the backup.
-  unsupported = restore_unsupported_reason(graph_id, db)
-  if unsupported:
-    unsupported_status, unsupported_detail = unsupported
-    raise HTTPException(
-      status_code=unsupported_status,
-      detail=unsupported_detail,
-    )
-
-  # Verify the backup exists and belongs to this graph
-  backup_record = GraphBackup.get_by_id(body.backup_id, db)
-  if not backup_record:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found"
-    )
-  if backup_record.graph_id != graph_id:
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Backup does not belong to this graph",
-    )
-
-  run_config = build_graph_job_config(
-    "restore_graph_job",
-    graph_id=graph_id,
-    backup_id=body.backup_id,
-    user_id=user_id,
-    create_system_backup=body.create_system_backup,
-    verify_after_restore=body.verify_after_restore,
-  )
-
-  response = await enqueue_task(
-    task_type="dagster_job_monitor",
-    graph_id=graph_id,
-    user_id=user_id,
-    params={"job_name": "restore_graph_job", "run_config": run_config},
-  )
-  operation_id = response["operation_id"]
-
-  envelope = wrap_pending(
-    op_name,
-    operation_id=operation_id,
-    partial_result={
-      "status": "pending",
-      "message": "Graph database restore scheduled",
     },
     created_by=user_id,
   )
