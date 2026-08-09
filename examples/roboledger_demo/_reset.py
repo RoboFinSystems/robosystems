@@ -69,6 +69,10 @@ def reset_demo_state(graph_id: str) -> None:
     session.execute(text("DELETE FROM event_dimensions"))
     session.execute(text("DELETE FROM events"))
     session.execute(text("DELETE FROM agents"))
+    # fact_dimensions.dimension_id is ON DELETE RESTRICT, and facts are not
+    # wiped until further down — so the dimensions delete below fails on any
+    # graph whose forecast ran (scenario facts carry a `scenario` Dimension).
+    session.execute(text("DELETE FROM fact_dimensions"))
     session.execute(text("DELETE FROM dimensions"))
 
     # 4. Tenant-origin associations. The library's immutability triggers

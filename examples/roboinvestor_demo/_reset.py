@@ -65,6 +65,16 @@ def reset_investor_state(graph_id: str) -> None:
     )
     session.execute(text("DELETE FROM reports WHERE source_graph_id IS NOT NULL"))
 
+    # The concepts the share carried in. These have to go for the re-run to
+    # exercise the copy at all — left in place, `_ensure_shared_elements`
+    # finds them present and returns, and the run silently stops testing
+    # the path it exists to test. Elements before taxonomies (FK), and both
+    # only after the facts citing them are gone (above).
+    session.execute(text("DELETE FROM elements WHERE source = 'linked'"))
+    session.execute(
+      text("DELETE FROM taxonomies WHERE metadata->>'source_graph_id' IS NOT NULL")
+    )
+
     # Linked entities are the handshake's other product. Deleting them is
     # safe only because the securities that pointed at them are already
     # gone (above). The parent entity has source != 'linked' and stays.

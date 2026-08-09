@@ -44,7 +44,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import and_, not_, select
 
 from robosystems.models.api.fact_provenance import ForecastProvenance
 from robosystems.models.api.information_block import (
@@ -1238,8 +1238,17 @@ def _invalidate_stale_tail(
   of them was chained off a month that has since been replaced, so they
   describe a forecast that no longer exists while reading as current.
 
-  Safe to scope by ``scenario_id`` alone: it points at the owning forecast
-  block, and every set carrying it is produced here.
+  Scoping by ``scenario_id`` alone would be wrong, because not every set
+  carrying it is produced here: the **lever set** is authored by
+  ``_write_lever_fact_set`` at create time and carries the same
+  ``scenario_id``. Its envelope spans the full horizon, so any run asked
+  for fewer months than the horizon — the ``months=horizon-1`` probe, or
+  simply a shorter re-run — would sweep away the very assertions the next
+  ``compute-forecast`` reads, and the block would answer every later
+  request with "has no lever FactSet — the block is corrupt". It is
+  excluded by the pair that identifies it in ``_load_lever_fact_set``:
+  ``structure_id`` equal to the scenario, ``factset_type='custom'``.
+  Computed month sets point at statement structures instead.
 
   Facts cascade with their FactSet at the DB level;
   ``VerificationResult.fact_set_id`` carries no FK, so those rows go
@@ -1251,6 +1260,12 @@ def _invalidate_stale_tail(
         FactSet.scenario_id == scenario_id,
         FactSet.entity_id == entity_id,
         FactSet.period_end > through_period_end,
+        not_(
+          and_(
+            FactSet.structure_id == scenario_id,
+            FactSet.factset_type == "custom",
+          )
+        ),
       )
     )
     .scalars()
