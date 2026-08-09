@@ -6,10 +6,12 @@ Pydantic request and response models for the REST and GraphQL surfaces. Every mo
 
 The models in this directory generate the OpenAPI spec served at `/openapi.json`, which in turn generates the published **`robosystems-python-client`** and **`robosystems-typescript-client`** SDKs. They also back the Strawberry GraphQL types (see below).
 
-That makes any change to a field name, type, or nullability a client-facing change:
+That makes any change to a field name, type, or nullability a client-facing change. What it costs depends on which SDK tier it reaches:
 
 - **Additive changes are cheap.** New optional fields and new models ride a client minor.
-- **Renames, removals, and semantic changes are breaking.** They propagate as an SDK major and need a deprecation cycle. Call them out explicitly in the PR so the SDK regeneration lands as a coordinated release rather than silent drift.
+- **Renames, removals, and semantic changes reaching the SDK's stable tier are breaking.** That tier is the SDK facades plus the symbols `robosystems-integration-template` imports for its emit path. Those propagate as an SDK major and need a deprecation cycle — call them out explicitly in the PR so the regeneration lands as a coordinated release rather than silent drift.
+- **The same edits elsewhere ride a minor.** Most models here back the generated SDK tier, which tracks this surface and moves with it. Removing a field or model that no facade and no template emitter consumes is a client minor with the removal named in the release notes, not a major.
+- **Dead surface skips the deprecation cycle.** A field or model that never functioned, has no consumer, and whose removal changes only symbol resolution can go in a minor. Record those three facts in the PR.
 
 Prefer widening a model over replacing it.
 
