@@ -28,6 +28,7 @@ from robosystems.middleware.database import DatabaseSessionMiddleware
 from robosystems.middleware.logging import (
   SecurityLoggingMiddleware,
   StructuredLoggingMiddleware,
+  install_uvicorn_log_redaction,
 )
 from robosystems.middleware.otel import setup_telemetry
 from robosystems.middleware.otel.metrics import (
@@ -161,6 +162,11 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
   """Build the configured FastAPI application."""
+  # Before anything can serve a request: Uvicorn's own access log writes the
+  # raw query string, which the application's redaction never reaches, and the
+  # MCP connector auth deliberately carries a graph-scoped key there.
+  install_uvicorn_log_redaction()
+
   # Load description from markdown file in static folder
   description_file = Path(__file__).parent / "static" / "description.md"
   api_description = (

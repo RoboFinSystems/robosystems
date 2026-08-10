@@ -4,6 +4,7 @@ This middleware captures all API requests and responses with structured
 logging that's optimized for CloudWatch searching and cost management.
 """
 
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -56,6 +57,58 @@ def redact_sensitive_query_params(query_string: str) -> str:
   except Exception:
     # If parsing fails, return empty string to avoid exposing raw query
     return ""
+
+
+class UvicornAccessRedactionFilter(logging.Filter):
+  """Redact sensitive query parameters from Uvicorn's own access log.
+
+  Everything else in this module redacts *application* logging, which is not
+  the whole surface: the API runs with ``--access-log``, and Uvicorn writes
+  its own line straight from the ASGI scope —
+
+      '%s - "%s %s HTTP/%s" %d' % (client, method, path_with_query, ver, code)
+
+  — where ``path_with_query`` is the raw query string. Nothing in the app can
+  reach that record, so a secret in a URL lands in the access log intact no
+  matter how carefully the app logs.
+
+  That matters because the MCP connector auth deliberately accepts a
+  graph-scoped key as a ``token`` query parameter: claude.ai and Claude
+  Desktop custom connectors cannot send custom headers, so the URL is the only
+  place the credential can ride. Redacting it here keeps the access log — the
+  alternative was turning ``--access-log`` off and losing it.
+
+  Installed on the ``uvicorn.access`` logger by ``install_uvicorn_log_redaction``.
+  """
+
+  def filter(self, record: logging.LogRecord) -> bool:
+    args = record.args
+    # Uvicorn's access record: the third arg is the path (+ query string).
+    if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+      path = args[2]
+      if "?" in path:
+        base, _, query = path.partition("?")
+        safe_query = redact_sensitive_query_params(query)
+        record.args = (
+          *args[:2],
+          f"{base}?{safe_query}" if safe_query else base,
+          *args[3:],
+        )
+    return True
+
+
+def install_uvicorn_log_redaction() -> None:
+  """Attach the access-log redaction filter, idempotently.
+
+  Called from application startup rather than the entrypoint so it holds for
+  every way the app is served — the container's `uvicorn` invocation, a local
+  `uv run uvicorn`, and the test client alike.
+  """
+  access_logger = logging.getLogger("uvicorn.access")
+  if not any(
+    isinstance(f, UvicornAccessRedactionFilter) for f in access_logger.filters
+  ):
+    access_logger.addFilter(UvicornAccessRedactionFilter())
 
 
 def get_safe_url_for_logging(request: Request) -> str:
