@@ -522,18 +522,29 @@ Resources:
   #
   # **This alarm cannot report its own brokenness.** SNS publishes
   # `NumberOfNotificationsFailed` only on failure — healthy is *no data*, which
-  # `notBreaching` renders as OK. A SEARCH expression that matches nothing (typo,
-  # rejected syntax, changed schema) produces the same no-data and the same OK.
-  # `notBreaching` is still the right setting — the alternative is an alarm that
-  # lives permanently in INSUFFICIENT_DATA — but it means the staging exercise is
-  # the *only* validation this alarm will ever get. **Re-run it whenever this
-  # expression changes.**
+  # `notBreaching` renders as OK. A query that matches nothing (typo, changed
+  # schema) produces the same no-data and the same OK. `notBreaching` is still
+  # the right setting — the alternative is an alarm that lives permanently in
+  # INSUFFICIENT_DATA — but it means a real deploy is the *only* validation this
+  # alarm will ever get. **Re-validate whenever this expression changes**, with
+  # `aws cloudwatch get-metric-data` on the expression before deploying it.
   #
-  # Aggregated across every topic with SEARCH rather than one alarm per topic:
-  # sixteen alert topics across ten stacks, and SEARCH also picks up topics added
-  # later without anyone remembering.
+  # Aggregated across every topic rather than one alarm per topic: sixteen alert
+  # topics across ten stacks, and the query also picks up topics added later
+  # without anyone remembering.
   #
-  # **One alarm, not one per environment.** SEARCH matches every topic in the
+  # **This is a Metrics Insights query, and it must not be rewritten as SEARCH.**
+  # `SUM(SEARCH(...))` is the obvious way to express this and it is rejected at
+  # deploy time — `PutMetricAlarm` answers "SEARCH is not supported on Metric
+  # Alarms". SEARCH works in dashboards and GetMetricData but never in an alarm.
+  # Metrics Insights is the supported route to the same fleet-wide aggregate, and
+  # it keeps the property this alarm exists for: the query picks up new topics on
+  # its own. No GROUP BY — that would make it a multi-time-series alarm, which
+  # additionally requires ORDER BY; a bare aggregate returns the single series an
+  # alarm wants. Period is required here, exactly as it was for the metric-math
+  # form: with no MetricStat there is nothing to inherit a period from.
+  #
+  # **One alarm, not one per environment.** The query matches every topic in the
   # account and region, so prod and staging copies would watch identical data and
   # both fire on the same failure. It routes to the prod alert topic because that
   # is the destination that gets read, not because it is prod-scoped.
@@ -554,15 +565,10 @@ Resources:
         - Id: failed
           Label: NumberOfNotificationsFailed across all topics
           ReturnData: true
-          # Period is schema-optional but the service rejects the alarm without
-          # it here: an alarm normally inherits its period from a MetricStat,
-          # and a SEARCH-only expression has none to inherit from. Omitting it
-          # fails the stack with "Period must not be null". Keep it equal to the
-          # SEARCH period below.
           Period: 300
           Expression: >-
-            SUM(SEARCH('{AWS/SNS,TopicName} MetricName="NumberOfNotificationsFailed"',
-            'Sum', 300))
+            SELECT SUM(NumberOfNotificationsFailed)
+            FROM SCHEMA("AWS/SNS", TopicName)
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
 
