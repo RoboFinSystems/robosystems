@@ -173,6 +173,12 @@ function setup_full_config() {
     REPO_NAME=${REPO_NAME:-"robosystems"}
     read -p "Enter AWS Account ID: " AWS_ACCOUNT_ID
 
+    # Default to the region bootstrap.sh exported (or .envrc set), not a literal
+    # — otherwise a non-us-east-1 deployment silently loses its region here
+    AWS_REGION_DEFAULT="${AWS_REGION:-us-east-1}"
+    read -p "Enter AWS Region [${AWS_REGION_DEFAULT}]: " AWS_REGION_INPUT
+    AWS_REGION="${AWS_REGION_INPUT:-$AWS_REGION_DEFAULT}"
+
     # Check if alert email is already available (from bootstrap or GitHub)
     if [ -n "${ALERT_EMAIL:-}" ]; then
         # Passed from bootstrap.sh
@@ -199,7 +205,7 @@ function setup_full_config() {
 
     # AWS Configuration (typically org-level, set at repo level for forks)
     gh variable set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID"
-    gh variable set AWS_REGION --body "us-east-1"
+    gh variable set AWS_REGION --body "$AWS_REGION"
     gh variable set ENVIRONMENT_PROD --body "prod"
     if $setup_staging; then
         gh variable set ENVIRONMENT_STAGING --body "staging"
