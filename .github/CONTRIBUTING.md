@@ -87,14 +87,20 @@ Issues labeled `good first issue` or `help wanted` are good starting points.
 
 ## Branching
 
-Create branches with the project tooling, which branches from `origin/<base>` and sets the upstream correctly:
+**Contributing from a fork.** External contributors work from a fork and open a pull request against this repository. You do not need push access here, and we do not grant it — a fork gives you everything required to contribute, and your commits keep your authorship when they merge. Branch in your own fork:
+
+```bash
+git switch -c feature/add-user-auth
+```
+
+**With push access.** Maintainers create branches with the project tooling, which branches from `origin/<base>` and sets the upstream correctly:
 
 ```bash
 just create-feature feature add-user-auth main
 just create-feature bugfix fix-connection-timeout main
 ```
 
-The first argument is the branch type: `feature` (new capability), `bugfix` (fix to existing behavior), `hotfix` (urgent fix), `chore` (dependencies, config), or `refactor` (no functional change). All pull requests target `main`.
+Either way, the first path segment is the branch type: `feature` (new capability), `bugfix` (fix to existing behavior), `hotfix` (urgent fix), `chore` (dependencies, config), or `refactor` (no functional change). All pull requests target `main`.
 
 ## Coding Standards
 
@@ -170,7 +176,19 @@ git push origin your-branch-name
 gh pr create --base main --title "Your PR title" --body "Your PR description"
 ```
 
+From a fork, push the branch to your own remote first and target this repository as the base:
+
+```bash
+git push origin your-branch-name
+gh pr create --repo RoboFinSystems/robosystems --base main \
+  --title "Your PR title" --body "Your PR description"
+```
+
 From a Claude Code session, the `/create-pr` slash command does the same thing, writing the description from the work in the session and cross-checking each claim against `git diff <target>...<branch>`.
+
+### CI on fork pull requests
+
+A first-time contributor's workflow runs need maintainer approval before they start, so expect CI to sit idle until someone approves it. Fork pull requests always run on GitHub-hosted runners and receive no repository secrets, so any job that depends on credentials will not run for them.
 
 ### Requirements
 
@@ -178,7 +196,7 @@ From a Claude Code session, the `/create-pr` slash command does the same thing, 
 - Coverage does not regress meaningfully
 - Documentation is updated alongside behavior changes
 - One feature or fix per PR
-- At least one maintainer approval before merge
+- At least one maintainer approval before merge, and a maintainer performs the merge
 
 Address review feedback with new commits rather than force-pushing, so reviewers can follow what changed.
 
