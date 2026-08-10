@@ -143,8 +143,14 @@ def create(
   )
   session.add(structure)
   session.flush()
+  # Read the id off the flush, before the commit expires the instance. A
+  # post-commit attribute access issues a refresh SELECT on a connection the
+  # commit already returned to the pool, whose search_path may have been reset
+  # to `public` — so the row resolves to the wrong schema and the write comes
+  # back as a 500 despite having committed.
+  structure_id = structure.id
   session.commit()
-  return structure.id
+  return structure_id
 
 
 def _load_rollforward_or_404(session: Session, structure_id: str) -> Structure:
@@ -207,8 +213,9 @@ def update(
   structure.artifact_mechanics = next_mechanics.model_dump(mode="json")
   structure.updated_by = updated_by
   session.flush()
+  structure_id = structure.id
   session.commit()
-  return structure.id
+  return structure_id
 
 
 def delete(
