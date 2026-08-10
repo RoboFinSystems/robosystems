@@ -341,7 +341,7 @@
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/rollup-rules/",
   "default_block_type": "validation_rules",
   "origin": "native",
-  "description": "L2 calc-arc RollUp verification rules \u2014 one rule per subtotal parent in rs-gaap-calculations/v1 ($Parent = \u03a3 weighted children). RoboSystems-native (info-block \u00a76.1 Package II.a). Element-scoped to the parent concept so the rule fires against any rendered statement that presents that subtotal, across all equity-form variants. The RollUp evaluator treats a missing RHS child as 0 (matching the renderer); a missing parent subtotal skips.",
+  "description": "L2 calc-arc RollUp verification rules — one rule per subtotal parent in rs-gaap-calculations/v1 ($Parent = Σ weighted children). RoboSystems-native (info-block §6.1 Package II.a). Element-scoped to the parent concept so the rule fires against any rendered statement that presents that subtotal, across all equity-form variants. The RollUp evaluator treats a missing RHS child as 0 (matching the renderer); a missing parent subtotal skips.",
   "@graph": [
     {
       "@id": "_:rs-gaap-rollup-bs-assets",
@@ -413,7 +413,7 @@
           "variableQname": "rs-gaap:OtherAssetsCurrent"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:AssetsCurrent = \u03a3 rs-gaap current-asset leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:AssetsCurrent = Σ rs-gaap current-asset leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -460,7 +460,7 @@
           "variableQname": "rs-gaap:OtherLiabilitiesCurrent"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesCurrent = \u03a3 rs-gaap current-liability leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesCurrent = Σ rs-gaap current-liability leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -511,7 +511,7 @@
           "variableQname": "rs-gaap:MembersEquity"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:StockholdersEquity = \u03a3 rs-gaap equity leaves (Treasury weight=-1)",
+      "ruleMessage": "Calculation rollup: rs-gaap:StockholdersEquity = Σ rs-gaap equity leaves (Treasury weight=-1)",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -612,7 +612,7 @@
           "variableQname": "rs-gaap:OtherAssetsNoncurrent"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:AssetsNoncurrent = \u03a3 rs-gaap noncurrent-asset leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:AssetsNoncurrent = Σ rs-gaap noncurrent-asset leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -651,7 +651,7 @@
           "variableQname": "rs-gaap:OtherLiabilitiesNoncurrent"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesNoncurrent = \u03a3 rs-gaap noncurrent-liability leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesNoncurrent = Σ rs-gaap noncurrent-liability leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -686,7 +686,7 @@
           "variableQname": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInFinancingActivities = \u03a3 proceeds \u2212 \u03a3 payments",
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInFinancingActivities = Σ proceeds − Σ payments",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -729,7 +729,7 @@
           "variableQname": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = \u03a3 Investing leaves (each pre-signed: outflows negative, proceeds positive)",
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = Σ Investing leaves (each pre-signed: outflows negative, proceeds positive)",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -819,7 +819,7 @@
           "variableQname": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + \u03a3 working-capital deltas (indirect method)",
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + Σ working-capital deltas (indirect method)",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -846,7 +846,7 @@
           "variableQname": "rs-gaap:IncomeTaxExpenseBenefit"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperations = PreTax \u2212 IncomeTaxExpenseBenefit",
+      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperations = PreTax − IncomeTaxExpenseBenefit",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -873,7 +873,7 @@
           "variableQname": "rs-gaap:OtherCostOfOperatingRevenue"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:CostOfRevenue = \u03a3 rs-gaap COGS leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:CostOfRevenue = Σ rs-gaap COGS leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -900,7 +900,7 @@
           "variableQname": "rs-gaap:CostOfRevenue"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:GrossProfit = rs-gaap:Revenues \u2212 rs-gaap:CostOfRevenue",
+      "ruleMessage": "Calculation rollup: rs-gaap:GrossProfit = rs-gaap:Revenues − rs-gaap:CostOfRevenue",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -970,7 +970,7 @@
           "variableQname": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:NonoperatingIncomeExpense = \u03a3 rs-gaap nonoperating leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:NonoperatingIncomeExpense = Σ rs-gaap nonoperating leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -997,7 +997,7 @@
           "variableQname": "rs-gaap:OperatingExpenses"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:OperatingIncomeLoss = rs-gaap:GrossProfit \u2212 rs-gaap:OperatingExpenses",
+      "ruleMessage": "Calculation rollup: rs-gaap:OperatingIncomeLoss = rs-gaap:GrossProfit − rs-gaap:OperatingExpenses",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -1044,7 +1044,7 @@
           "variableQname": "rs-gaap:AssetImpairmentCharges"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:OperatingExpenses = \u03a3 rs-gaap operating expense leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:OperatingExpenses = Σ rs-gaap operating expense leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -1071,7 +1071,7 @@
           "variableQname": "rs-gaap:NonoperatingIncomeExpense"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes... = OperatingIncomeLoss + NonoperatingIncomeExpense \u2212 InterestExpense",
+      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes... = OperatingIncomeLoss + NonoperatingIncomeExpense − InterestExpense",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     },
@@ -1094,7 +1094,7 @@
           "variableQname": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
         }
       ],
-      "ruleMessage": "Calculation rollup: rs-gaap:Revenues = \u03a3 rs-gaap revenue leaves",
+      "ruleMessage": "Calculation rollup: rs-gaap:Revenues = Σ rs-gaap revenue leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
     }

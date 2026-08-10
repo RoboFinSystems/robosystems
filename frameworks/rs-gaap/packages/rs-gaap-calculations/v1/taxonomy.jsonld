@@ -346,21 +346,21 @@
     {
       "@id": "_:rs-gaap-calc-bs",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
-      "structureName": "rs-gaap \u2014 Balance Sheet calculation",
+      "structureName": "rs-gaap — Balance Sheet calculation",
       "blockType": "balance_sheet",
       "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
-      "structureName": "rs-gaap \u2014 Income Statement calculation",
+      "structureName": "rs-gaap — Income Statement calculation",
       "blockType": "income_statement",
       "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-cf",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "structureName": "rs-gaap \u2014 Cash Flow Statement calculation",
+      "structureName": "rs-gaap — Cash Flow Statement calculation",
       "blockType": "cash_flow_statement",
       "conceptArrangementPattern": "arithmetic"
     },
