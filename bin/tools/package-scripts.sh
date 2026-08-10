@@ -1,7 +1,10 @@
 #!/bin/bash
 # Package and upload UserData scripts to S3 for deployment
 # Note: Lambda functions are now deployed via container images (see Dockerfile.lambda and build.yml)
-# Note: CloudFormation templates are deployed inline (all under 40KB limit)
+# Note: CloudFormation templates are not uploaded here. Most deploy inline via
+#       --template-body (51,200-byte limit). api.yaml exceeds that and is
+#       uploaded to this same bucket by the deploy-api job itself, keyed by
+#       commit SHA — deploy-api depends on deploy-s3 but not on this job.
 
 set -e
 

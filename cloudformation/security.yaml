@@ -38,38 +38,6 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Enable Amazon GuardDuty threat detection
 
-  # API ALB alarm dimensions, resolved live from ELB APIs by the deploy job
-  # (never CFN imports: a cross-stack import would deadlock the pipeline —
-  # security failing skips deploy-api, which is what publishes the exports).
-  # Empty values skip the ALB alarms via conditions.
-  ApiAlbFullNameProd:
-    Type: String
-    Default: ""
-  ApiTgFullNameProd:
-    Type: String
-    Default: ""
-  ApiAlbFullNameStaging:
-    Type: String
-    Default: ""
-  ApiTgFullNameStaging:
-    Type: String
-    Default: ""
-
-  # Sustained 5xx from the application over a 5-minute window. Deliberately a
-  # parameter, not a literal: there is no traffic baseline to tune against yet,
-  # so this will move — and a threshold that needs a code change to adjust ends
-  # up never adjusted. Sourced from the API_TARGET_ERROR_THRESHOLD GitHub
-  # variable so it can be retuned without a PR.
-  #
-  # Comparison is GreaterThanThreshold, matching the sibling ALB alarms, so the
-  # alarm fires *above* this count — 5 means the sixth 5xx in five minutes. Worth
-  # knowing where the floor sits: at current traffic, five 5xx in five minutes is
-  # already a lot of broken. Lower it rather than reaching for the operator.
-  ApiTargetErrorThreshold:
-    Type: Number
-    Default: 5
-    MinValue: 0
-
   EnableSecurityHub:
     Type: String
     Default: "true"
@@ -127,12 +95,6 @@ Conditions:
     - !Equals [!Ref EnableCISStandard, "true"]
   AccessAnalyzerOn: !Equals [!Ref EnableAccessAnalyzer, "true"]
   ConfigOn: !Equals [!Ref EnableConfig, "true"]
-  HasApiAlbProd: !And
-    - !Not [!Equals [!Ref ApiAlbFullNameProd, ""]]
-    - !Not [!Equals [!Ref ApiTgFullNameProd, ""]]
-  HasApiAlbStaging: !And
-    - !Not [!Equals [!Ref ApiAlbFullNameStaging, ""]]
-    - !Not [!Equals [!Ref ApiTgFullNameStaging, ""]]
 
 Resources:
   # --- GuardDuty: continuous threat detection over CloudTrail/VPC/DNS telemetry.
@@ -337,10 +299,15 @@ Resources:
   # per-env security-alerts SNS topics (owned by api.yaml as
   # robosystems-<env>-security-alerts, email-subscribed). Account-global
   # signals (GuardDuty findings, root-credential use) notify the prod topic —
-  # ${Environment} normalizes to prod in the deploy job. The per-env
-  # AuthorizationDenied alarms also live here rather than beside their four
-  # siblings in api.yaml because that template sits at the 51,200-byte
-  # inline-template ceiling and cannot grow.
+  # ${Environment} normalizes to prod in the deploy job.
+  #
+  # What belongs in this stack is the account-global detective baseline only.
+  # Alarms on API-stack resources (ALB health, the security metric namespace,
+  # the rotation Lambda) used to live here because api.yaml had run out of
+  # inline-template room; api.yaml now deploys from S3, so they sit beside the
+  # resources they watch and reference them directly. Resist adding per-env
+  # application alarms back here — the size pressure that justified it is gone.
+  #
   # Precondition: the topic must already exist (api stack deployed with
   # SNSAlertEmail set), or the topic-policy attachment fails this stack.
   SecurityAlertsTopicPolicy:
@@ -539,224 +506,6 @@ Resources:
               from <sourceIP> at <eventTime>. If this was not a deliberate
               deploy or teardown, investigate immediately."
 
-  # Authenticated counterpart of api.yaml's AuthFailureSpikeAlarm: a valid
-  # credential accumulating 403s fast, i.e. cross-tenant probing with a leaked
-  # or over-curious key. Baseline is ~zero, so a modest threshold stays quiet
-  # in normal use. One alarm per environment (see section comment for why they
-  # are here).
-  AuthorizationDeniedAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: robosystems-prod-api-authorization-denied-spike
-      AlarmDescription: Spike in authorization denials (possible cross-tenant probing with a valid credential)
-      MetricName: AuthorizationDenied
-      Namespace: RoboSystems/Security/prod
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 20
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  AuthorizationDeniedAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: robosystems-staging-api-authorization-denied-spike
-      AlarmDescription: Spike in authorization denials (possible cross-tenant probing with a valid credential)
-      MetricName: AuthorizationDenied
-      Namespace: RoboSystems/Security/staging
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 20
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
-
-  # ── API ALB + operational Lambda alarms ────────────────────────────────────
-  # Placed here (not api.yaml) because api.yaml sits at the 51,200-byte inline
-  # ceiling. ALB dimensions come from exports the API stacks publish, so BOTH
-  # API stacks must be deployed (creating the exports) before the first
-  # security-stack update that includes these alarms.
-  ApiAlbUnhealthyHostsAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbProd
-    Properties:
-      AlarmName: robosystems-prod-api-alb-unhealthy-hosts
-      AlarmDescription: API ALB target reporting unhealthy
-      MetricName: UnHealthyHostCount
-      Namespace: AWS/ApplicationELB
-      Statistic: Maximum
-      Period: 60
-      EvaluationPeriods: 5
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameProd
-        - Name: TargetGroup
-          Value: !Ref ApiTgFullNameProd
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  ApiAlbHighLatencyAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbProd
-    Properties:
-      AlarmName: robosystems-prod-api-alb-high-latency
-      AlarmDescription: API ALB target response time is high
-      MetricName: TargetResponseTime
-      Namespace: AWS/ApplicationELB
-      Statistic: Average
-      Period: 60
-      EvaluationPeriods: 5
-      Threshold: 2
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameProd
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  ApiAlb5xxAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbProd
-    Properties:
-      AlarmName: robosystems-prod-api-alb-5xx-spike
-      AlarmDescription: Elevated 5xx responses from the API ALB
-      MetricName: HTTPCode_ELB_5XX_Count
-      Namespace: AWS/ApplicationELB
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 25
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameProd
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  # The 5xx alarm above watches HTTPCode_ELB_5XX_Count — errors the *load
-  # balancer* generates. A healthy process returning 500 on every business
-  # endpoint produces none of those: its targets stay healthy, the liveness
-  # probe keeps passing, and the outage is invisible end to end. Target_5XX is
-  # the application's own errors, and is the one an outage actually rides
-  # through.
-  ApiTarget5xxAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbProd
-    Properties:
-      AlarmName: robosystems-prod-api-target-5xx
-      AlarmDescription: The API is returning 5xx responses to clients
-      MetricName: HTTPCode_Target_5XX_Count
-      Namespace: AWS/ApplicationELB
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: !Ref ApiTargetErrorThreshold
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameProd
-        - Name: TargetGroup
-          Value: !Ref ApiTgFullNameProd
-      # No traffic is the normal state at this scale, and no traffic cannot be
-      # an outage — a request has to reach the app for it to 5xx.
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  ApiAlbUnhealthyHostsAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbStaging
-    Properties:
-      AlarmName: robosystems-staging-api-alb-unhealthy-hosts
-      AlarmDescription: API ALB target reporting unhealthy
-      MetricName: UnHealthyHostCount
-      Namespace: AWS/ApplicationELB
-      Statistic: Maximum
-      Period: 60
-      EvaluationPeriods: 5
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameStaging
-        - Name: TargetGroup
-          Value: !Ref ApiTgFullNameStaging
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
-
-  ApiAlbHighLatencyAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbStaging
-    Properties:
-      AlarmName: robosystems-staging-api-alb-high-latency
-      AlarmDescription: API ALB target response time is high
-      MetricName: TargetResponseTime
-      Namespace: AWS/ApplicationELB
-      Statistic: Average
-      Period: 60
-      EvaluationPeriods: 5
-      Threshold: 2
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameStaging
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
-
-  ApiAlb5xxAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbStaging
-    Properties:
-      AlarmName: robosystems-staging-api-alb-5xx-spike
-      AlarmDescription: Elevated 5xx responses from the API ALB
-      MetricName: HTTPCode_ELB_5XX_Count
-      Namespace: AWS/ApplicationELB
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 25
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameStaging
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
-
-  ApiTarget5xxAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Condition: HasApiAlbStaging
-    Properties:
-      AlarmName: robosystems-staging-api-target-5xx
-      AlarmDescription: The API is returning 5xx responses to clients
-      MetricName: HTTPCode_Target_5XX_Count
-      Namespace: AWS/ApplicationELB
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: !Ref ApiTargetErrorThreshold
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !Ref ApiAlbFullNameStaging
-        - Name: TargetGroup
-          Value: !Ref ApiTgFullNameStaging
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
-
   # Delivery assurance for the alert channel itself: every alarm in this account
   # reaches a human through SNS email.
   #
@@ -816,46 +565,6 @@ Resources:
             'Sum', 300))
       AlarmActions:
         - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  # Admin-key-rotation Lambdas are defined in api.yaml (same ceiling constraint);
-  # function names are deterministic stack-name prefixes.
-  AdminKeyRotationErrorsAlarmProd:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: robosystems-prod-admin-key-rotation-errors
-      AlarmDescription: Admin key rotation Lambda reported errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Dimensions:
-        - Name: FunctionName
-          Value: RoboSystemsAPIProd-admin-key-rotation
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-prod-security-alerts
-
-  AdminKeyRotationErrorsAlarmStaging:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: robosystems-staging-admin-key-rotation-errors
-      AlarmDescription: Admin key rotation Lambda reported errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Dimensions:
-        - Name: FunctionName
-          Value: RoboSystemsAPIStaging-admin-key-rotation
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 0
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:robosystems-staging-security-alerts
 
   # CUR pipeline Lambdas live in the AWS-provided RoboSystemsCUR stack (not in
   # this repo), so their generated names are literals here. They are stable

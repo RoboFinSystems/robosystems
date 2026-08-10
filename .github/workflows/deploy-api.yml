@@ -273,6 +273,37 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
 
+      # api.yaml is deployed from S3 rather than inline. The inline --template-body
+      # ceiling is 51,200 bytes and api.yaml had grown to ~98% of it, which is what
+      # pushed the API's own alarms out into the security stack. From S3 the limit
+      # is 1 MB, so the template can hold the resources that belong to it.
+      #
+      # Keyed by commit SHA, not a fixed path: concurrent deploys cannot overwrite
+      # each other's object, re-running an old workflow run deploys that run's
+      # template rather than whatever is at HEAD, and the object is a durable
+      # record of what each build actually deployed. (Stack rollback is unaffected
+      # either way — CloudFormation rolls back to the template stored in the
+      # stack, not to this object.)
+      #
+      # Uploaded here rather than in package-scripts.sh because deploy-api does
+      # not depend on that job — only on deploy-s3, which is what creates the
+      # bucket.
+      - name: Upload API template to S3
+        id: upload-template
+        run: |
+          # arn:aws:s3:::robosystems-deployment-<env> -> robosystems-deployment-<env>
+          BUCKET_ARN="${{ inputs.deployment_bucket_arn }}"
+          BUCKET="${BUCKET_ARN##*:}"
+          if [ -z "$BUCKET" ]; then
+            echo "ERROR: could not derive a bucket name from deployment_bucket_arn='${BUCKET_ARN}'"
+            exit 1
+          fi
+          KEY="cloudformation/${{ github.sha }}/api.yaml"
+          aws s3 cp cloudformation/api.yaml "s3://${BUCKET}/${KEY}" \
+            --region "${{ inputs.aws_region }}"
+          echo "template_url=https://${BUCKET}.s3.${{ inputs.aws_region }}.amazonaws.com/${KEY}" >> $GITHUB_OUTPUT
+          echo "Template uploaded: s3://${BUCKET}/${KEY}"
+
       - name: Deploy API CloudFormation Stack
         id: deploy-stack
         run: |
@@ -351,6 +382,7 @@ jobs:
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
                 ParameterKey=EmailFromAddress,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SNSAlertEmail,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
+                ParameterKey=ApiTargetErrorThreshold,ParameterValue=${{ vars.API_TARGET_ERROR_THRESHOLD || '5' }} \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
                 ParameterKey=UserDataBucketArn,ParameterValue=\"${{ inputs.user_data_bucket_arn }}\" \
@@ -366,7 +398,7 @@ jobs:
             # Create new stack
             aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/api.yaml \
+              --template-url ${{ steps.upload-template.outputs.template_url }} \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $API_STACK_PARAMS \
               --tags \
@@ -379,7 +411,7 @@ jobs:
             # Update existing stack, handling "No updates" error
             UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/api.yaml \
+              --template-url ${{ steps.upload-template.outputs.template_url }} \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $API_STACK_PARAMS \
               --tags \
