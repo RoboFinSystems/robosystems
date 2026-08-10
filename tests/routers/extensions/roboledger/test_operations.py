@@ -10,12 +10,16 @@ envelope shape.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from fastapi import HTTPException
 
 from robosystems.middleware.operations import OperationEnvelope
+from robosystems.models.api.extensions.blocked_source_graphs import (
+  BlockedSourceGraphResponse,
+  BlockSourceGraphResult,
+)
 from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse,
   UpdateEntityRequest,
@@ -34,15 +38,24 @@ from robosystems.models.api.extensions.report_package import (
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   ReportResponse,
+  RevokeReportShareResponse,
+  ShareReportResponse,
+  ShareResultItem,
 )
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
+  BlockSourceGraphOperation,
   RegenerateReportOperation,
+  RevokeReportShareOperation,
+  ShareReportOperation,
   auto_map_elements_op,
+  block_source_graph_op,
   create_report_op,
   delete_journal_entry_op,
   file_report_op,
   regenerate_report_op,
+  revoke_report_share_op,
+  share_report_op,
   transition_filing_status_op,
   update_entity_op,
   update_event_block_op,
@@ -143,6 +156,9 @@ class TestUpdateEntityOp:
       patch(
         "robosystems.routers.extensions.roboledger.operations.extensions_session"
       ) as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -163,6 +179,40 @@ class TestUpdateEntityOp:
     assert envelope.result is not None
     assert envelope.result["id"] == "ent_kg01234567890abcdef"
     assert envelope.result["name"] == "Acme Corp"
+    # `name`, `legal_name`, `ticker`, `cik` … are all columns of the
+    # materialized Entity node, so the edit has to reach LadybugDB.
+    mark.assert_called_once_with(GRAPH_ID, "entity_updated")
+
+  @pytest.mark.asyncio
+  async def test_failed_update_does_not_mark_the_graph(self) -> None:
+    """The hook is `on_fresh_success` — a 404 must not schedule a rebuild."""
+    body = UpdateEntityRequest(name="New Name")
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException):
+        await update_entity_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    mark.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_rejects_empty_update_with_400(self) -> None:
@@ -1287,3 +1337,209 @@ class TestHandWrittenWriteRoleGate:
 
     assert resolved is user
     gate.assert_called_once_with(str(user.id), GRAPH_ID)
+
+
+class TestCrossGraphStalenessCallbacks:
+  """The `on_fresh_success` hooks on share / revoke / block-with-purge.
+
+  These are driven through the real handler rather than by calling the hook
+  with a hand-made object, because the defect they regress lives *between*
+  the two: `wrap_completed` runs the command's Pydantic result through
+  `model_dump(mode="json")`, so the hook receives a dict. All three hooks
+  shipped reading it with `getattr`, which does not raise — it reports every
+  field absent, and each hook quietly marked nothing. A test that passed the
+  hook a Pydantic model would have passed against the broken code.
+
+  The demo cannot catch this either: it forces a rebuild after sharing.
+  """
+
+  @pytest.mark.asyncio
+  async def test_share_marks_every_recipient_that_received_a_copy(self) -> None:
+    body = ShareReportOperation(report_id="rpt_1", publish_list_id="pl_1")
+    result = ShareReportResponse(
+      report_id="rpt_1",
+      results=[
+        ShareResultItem(target_graph_id="kg0000000000000001", status="shared"),
+        ShareResultItem(
+          target_graph_id="kg0000000000000002",
+          status="error",
+          error="Recipient has blocked shares from this graph.",
+        ),
+        ShareResultItem(target_graph_id="kg0000000000000003", status="shared"),
+      ],
+    )
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_share_report",
+        return_value=result,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      envelope = await share_report_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "completed"
+    # The failed recipient is not marked: nothing landed in their schema.
+    assert mark.call_args_list == [
+      call("kg0000000000000001", "report_shared_in"),
+      call("kg0000000000000003", "report_shared_in"),
+    ]
+
+  @pytest.mark.asyncio
+  async def test_revoke_marks_the_recipient_when_a_copy_was_deleted(self) -> None:
+    body = RevokeReportShareOperation(
+      report_id="rpt_1", target_graph_id="kg0000000000000001"
+    )
+    result = RevokeReportShareResponse(
+      report_id="rpt_1",
+      target_graph_id="kg0000000000000001",
+      revoked_at=datetime(2026, 3, 1, tzinfo=UTC),
+      copy_deleted=True,
+    )
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_revoke_report_share",
+        return_value=result,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      await revoke_report_share_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    mark.assert_called_once_with("kg0000000000000001", "report_share_revoked")
+
+  @pytest.mark.asyncio
+  async def test_revoke_does_not_mark_when_no_copy_was_found(self) -> None:
+    """A recipient who already deleted the copy has nothing to re-project."""
+    body = RevokeReportShareOperation(
+      report_id="rpt_1", target_graph_id="kg0000000000000001"
+    )
+    result = RevokeReportShareResponse(
+      report_id="rpt_1",
+      target_graph_id="kg0000000000000001",
+      revoked_at=datetime(2026, 3, 1, tzinfo=UTC),
+      copy_deleted=False,
+    )
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_revoke_report_share",
+        return_value=result,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      await revoke_report_share_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    mark.assert_not_called()
+
+  @staticmethod
+  def _block_result(purged: int) -> BlockSourceGraphResult:
+    return BlockSourceGraphResult(
+      block=BlockedSourceGraphResponse(
+        id="blk_1",
+        source_graph_id="kg0000000000000009",
+        blocked_by="usr_test123",
+        blocked_at=datetime(2026, 3, 1, tzinfo=UTC),
+      ),
+      already_blocked=False,
+      purged_report_count=purged,
+    )
+
+  @pytest.mark.asyncio
+  async def test_block_marks_this_graph_when_the_purge_removed_reports(self) -> None:
+    body = BlockSourceGraphOperation(source_graph_id="kg0000000000000009", purge=True)
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        return_value=self._block_result(3),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      await block_source_graph_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    mark.assert_called_once_with(GRAPH_ID, "shared_reports_purged")
+
+  @pytest.mark.asyncio
+  async def test_block_without_a_purge_does_not_rebuild(self) -> None:
+    """A block on its own removes nothing, so it must not trigger a rebuild."""
+    body = BlockSourceGraphOperation(source_graph_id="kg0000000000000009")
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        return_value=self._block_result(0),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
+      ) as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      await block_source_graph_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    mark.assert_not_called()

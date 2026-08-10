@@ -850,9 +850,9 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
     return 0
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_extension")
-  by_name = {t.get("name"): t for t in taxonomies}
+  by_name = {t.name: t for t in taxonomies}
   structures = client.list_structures(graph_id, block_type="regulatory_disclosure")
-  structure_by_name = {s.get("name"): s for s in structures}
+  structure_by_name = {s.name: s for s in structures}
 
   added = 0
   for note in updates:
@@ -904,14 +904,16 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
     rollups = [
       r for r in (block.rules if block else []) if r.rule_pattern == "RollUp"
     ]
+    # `rule_variables` is typed `list[RuleVariableLite] | Unset`, and `Unset`
+    # defines neither `__iter__` nor `__len__` — iterating or measuring it
+    # raises TypeError rather than reading as empty. Its `__bool__` is False,
+    # so `or []` restores the guard the dict-era `.get(...) or []` provided.
+    rule_vars = [(r.rule_variables or []) for r in rollups]
     refreshed = any(
-      member["qname"]
-      in {v.get("variable_qname") for v in (r.get("rule_variables") or [])}
-      for r in rollups
+      member["qname"] in {v.variable_qname for v in variables}
+      for variables in rule_vars
     )
-    child_count = max(
-      (len(r.get("rule_variables") or []) - 1 for r in rollups), default=0
-    )
+    child_count = max((len(variables) - 1 for variables in rule_vars), default=0)
     if not refreshed:
       print(
         f"  ERROR: footing rule for {note['name']!r} was NOT refreshed "

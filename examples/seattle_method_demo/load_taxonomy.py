@@ -420,9 +420,9 @@ def upload_taxonomy(graph_id: str, elements: list[dict]) -> str:
 
   existing_taxonomies = client.list_taxonomies(graph_id) or []
   for tax in existing_taxonomies:
-    if (tax.get("name") or "").lower().startswith("seattle method"):
-      print(f"  Reusing existing mini CoA taxonomy: {tax.get('id')}")
-      return tax.get("id")
+    if (tax.name or "").lower().startswith("seattle method"):
+      print(f"  Reusing existing mini CoA taxonomy: {tax.id}")
+      return tax.id
 
   envelope = client.create_taxonomy_block(
     graph_id,

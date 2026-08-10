@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.config import env
+from robosystems.config.defaults import SSEDefaults
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (
@@ -350,7 +351,9 @@ async def create_sse_stream_starlette(
         break
 
       try:
-        event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+        event = await asyncio.wait_for(
+          event_queue.get(), timeout=SSEDefaults.KEEPALIVE_INTERVAL
+        )
 
         yield {
           "event": str(event.event_type),

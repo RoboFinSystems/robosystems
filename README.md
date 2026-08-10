@@ -1,10 +1,8 @@
 # RoboSystems
 
-RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It models your financial data as a **knowledge graph** — transactions, facts, reporting elements, and the calculation structures that relate them are all nodes and edges, with the semantics preserved rather than flattened into rows you query around. On top of that graph it gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It models your financial data as a **knowledge graph** — transactions, facts, reporting elements, and the calculation structures that relate them are all nodes and edges, with the semantics preserved rather than flattened into rows you query around. On top of that graph it gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across your own ledger, your holdings, and SEC public filings queryable alongside them. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
 **Every tenant gets their own graph.** Not a row-level slice of a shared table — a dedicated graph database on its own instance, with a dedicated OLTP schema behind it. Your ontology, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
-
-Open source top to bottom — the accounting ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform: [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
 
 ## Platform
 
@@ -174,6 +172,8 @@ See the **[Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/B
 ## Architecture
 
 Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in.
+
+That openness runs up the stack as well as down: the accounting ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform — [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
 
 ### Multi-Tenancy & Isolation
 

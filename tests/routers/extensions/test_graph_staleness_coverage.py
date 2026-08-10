@@ -18,9 +18,21 @@ happens to have unrelated activity.
 
 Asserted over the registrars' real specs rather than a fixed list, so an
 operation added later is covered on the day it is written.
+
+**And over the hand-written routes too.** Enumerating only `OperationSpec`s
+covers 26 of roboledger's 48 operations; the other 22 are hand-written
+`@router.post` handlers the registrar never sees, which is how `update-entity`
+kept writing materialized Entity columns without ever marking its graph while
+this file read as though it held the whole surface. Every hand-written route
+must be classified below — marking stale in its handler, marking stale in the
+command or tool it delegates to, or exempt with the reason — so a new one
+cannot land undeclared.
 """
 
 from __future__ import annotations
+
+import importlib
+import inspect
 
 import pytest
 
@@ -65,6 +77,103 @@ _EXEMPT: dict[str, str] = {
 
 _EXTENSIONS = ("roboledger", "roboinvestor")
 
+_OPERATION_ROUTERS = {
+  "roboledger": _roboledger_ops,
+  "roboinvestor": _roboinvestor_ops,
+}
+
+# ── Hand-written routes ────────────────────────────────────────────────────
+# Three ways a hand-written operation can be correct, and every one of them
+# has to be stated. `_EXEMPT` above covers registrar specs only.
+
+# The handler itself calls `mark_graph_stale` (directly or via the
+# `on_fresh_success` hook it passes to `_dispatch`).
+_STALE_IN_HANDLER = {
+  "bind-text-block",
+  "block-source-graph",
+  "create-report",
+  "delete-report",
+  "regenerate-report",
+  "revoke-report-share",
+  "share-report",
+  "update-entity",
+}
+
+# The handler delegates, and the mark lives in the callee. Recorded as a
+# dotted path so the assertion reads the callee's real source rather than
+# trusting the label — `close_period` marking its own graph is what lets
+# `backfill-plan-history` mark nothing of its own.
+_STALE_IN_CALLEE = {
+  "close-period": "robosystems.operations.roboledger.commands.fiscal_calendar.close_period",
+  "reopen-period": "robosystems.operations.roboledger.commands.fiscal_calendar.reopen_period",
+  # Backfill drives reopen/close per period; both mark.
+  "backfill-plan-history": "robosystems.operations.roboledger.commands.fiscal_calendar.close_period",
+  # Async: enqueues the mapping operator, whose writes all land through this
+  # direct MCP tool. The registrar-published tools inherit the mark from
+  # their `OperationSpec`; this one is hand-written and marks for itself.
+  "auto-map-elements": "robosystems.middleware.mcp.tools.taxonomy_tools.CreateMappingAssociationTool.execute",
+}
+
+# Same bar as `_EXEMPT`: name the table written and why the graph never
+# reads it. Verified against the `postgres_scan` sources in
+# `operations/extensions/materialize.py`.
+_HAND_WRITTEN_EXEMPT: dict[str, str] = {
+  "initialize": (
+    "Writes fiscal_calendars + fiscal_periods. Neither table is scanned by "
+    "materialize.py — the fiscal calendar has no graph node."
+  ),
+  "set-close-target": (
+    "Writes fiscal_calendars.close_target — a scheduling intent, not ledger "
+    "content, and the table is not scanned by materialize.py."
+  ),
+  "file-report": (
+    "Writes reports.filing_status. The Report SELECT does not carry that "
+    "column and filters on generation_status, so filing a report changes no "
+    "materialized value."
+  ),
+  "transition-filing-status": (
+    "Same column and same reasoning as file-report: filing_status is not materialized."
+  ),
+  "create-publish-list": "publish_lists is not scanned by materialize.py.",
+  "update-publish-list": "publish_lists is not scanned by materialize.py.",
+  "delete-publish-list": "publish_lists is not scanned by materialize.py.",
+  "add-publish-list-members": "publish_lists is not scanned by materialize.py.",
+  "remove-publish-list-member": "publish_lists is not scanned by materialize.py.",
+  "unblock-source-graph": (
+    "Writes blocked_source_graphs, which is not scanned by materialize.py. "
+    "Unlike block, it never purges — nothing leaves the graph, so there is "
+    "nothing to re-project."
+  ),
+}
+
+
+def _hand_written():
+  """Route name → (extension, endpoint) for every non-registrar operation."""
+  out = {}
+  for extension, module in _OPERATION_ROUTERS.items():
+    spec_names = {
+      spec.name for _reg, spec in OperationRegistrar.specs_for_extension(extension)
+    }
+    for route in module.router.routes:
+      name = getattr(route, "path", "").lstrip("/")
+      if name and name not in spec_names:
+        out[name] = (extension, route.endpoint)
+  return out
+
+
+def _resolve(dotted: str):
+  """Import a `module.attr` or `module.Class.method` path."""
+  parts = dotted.split(".")
+  for split in range(len(parts) - 1, 0, -1):
+    try:
+      obj = importlib.import_module(".".join(parts[:split]))
+    except ImportError:
+      continue
+    for attr in parts[split:]:
+      obj = getattr(obj, attr)
+    return obj
+  raise ImportError(f"Could not resolve {dotted}")
+
 
 def _specs():
   pairs = []
@@ -108,6 +217,55 @@ class TestGraphStalenessCoverage:
     assert not orphaned, (
       f"_EXEMPT names operations that are no longer registered: {orphaned}. "
       "Remove them, or correct the name if the operation was renamed."
+    )
+
+  def test_every_hand_written_route_is_classified(self) -> None:
+    """The gap this file used to have: a hand-written `@router.post` is
+    invisible to the spec enumeration above, so it could write materialized
+    tables and mark nothing while the suite stayed green."""
+    hand_written = _hand_written()
+    assert len(hand_written) >= 20, (
+      f"expected the hand-written operation surface, got {len(hand_written)} "
+      "— route wiring or a feature flag changed"
+    )
+    classified = _STALE_IN_HANDLER | set(_STALE_IN_CALLEE) | set(_HAND_WRITTEN_EXEMPT)
+    unclassified = sorted(set(hand_written) - classified)
+    assert not unclassified, (
+      f"Hand-written operations with no staleness decision on record: "
+      f"{unclassified}. Add each to _STALE_IN_HANDLER, _STALE_IN_CALLEE, or "
+      "_HAND_WRITTEN_EXEMPT with the table it writes and why."
+    )
+    stale_names = sorted(classified - set(hand_written))
+    assert not stale_names, (
+      f"These names are classified but no longer routed: {stale_names}. "
+      "Remove them, or correct the name if the operation was renamed."
+    )
+
+  def test_handlers_that_claim_to_mark_stale_actually_do(self) -> None:
+    """Reading the handler's source keeps the table above honest: deleting a
+    `mark_graph_stale` call fails here instead of silently downgrading the
+    operation to the exempt behavior."""
+    hand_written = _hand_written()
+    silent = sorted(
+      name
+      for name in _STALE_IN_HANDLER
+      if name in hand_written
+      and "mark_graph_stale" not in inspect.getsource(hand_written[name][1])
+    )
+    assert not silent, (
+      f"Handlers listed in _STALE_IN_HANDLER that no longer call "
+      f"mark_graph_stale: {silent}."
+    )
+
+  def test_callees_that_claim_to_mark_stale_actually_do(self) -> None:
+    """Same guard one level down, for handlers that delegate the mark."""
+    missing = sorted(
+      f"{name} -> {dotted}"
+      for name, dotted in _STALE_IN_CALLEE.items()
+      if "mark_graph_stale" not in inspect.getsource(_resolve(dotted))
+    )
+    assert not missing, (
+      f"Delegated staleness marks that are no longer in the callee: {missing}."
     )
 
   def test_exemptions_have_not_been_overtaken(self) -> None:

@@ -28,7 +28,13 @@ from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockSourceGraphRequest,
 )
 from robosystems.models.api.extensions.reports import RevokeReportShareRequest
-from robosystems.models.extensions import BlockedSourceGraph, Report, ReportShare
+from robosystems.models.extensions import (
+  BlockedSourceGraph,
+  Element,
+  Report,
+  ReportShare,
+  Taxonomy,
+)
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
   block_source_graph,
 )
@@ -153,6 +159,9 @@ def _clean_tenants(two_tenants):
       session.execute(text("DELETE FROM reports"))
       session.execute(text("DELETE FROM blocked_source_graphs"))
       session.execute(text("DELETE FROM report_shares"))
+      # Elements before taxonomies: `elements.taxonomy_id` is a real FK.
+      session.execute(text("DELETE FROM elements"))
+      session.execute(text("DELETE FROM taxonomies"))
   yield
 
 
@@ -488,3 +497,164 @@ def test_blocks_are_per_tenant_and_do_not_leak_across_schemas() -> None:
     ).scalar_one()
 
   assert count == 0
+
+
+# ── The report's own taxonomy ──────────────────────────────────────────────
+
+_EXT_TAXONOMY = "tax_acme_reporting_ext"
+
+
+def _seed_taxonomy(graph_id: str, taxonomy_id: str, taxonomy_type: str) -> None:
+  with extensions_session(graph_id) as session:
+    session.add(
+      Taxonomy(
+        id=taxonomy_id,
+        name="Acme Reporting Extension",
+        taxonomy_type=taxonomy_type,
+        created_by=_SENDER,
+      )
+    )
+
+
+def _seed_elements(graph_id: str, taxonomy_id: str) -> None:
+  """Give `graph_id` a row for every concept the shared facts cite."""
+  with extensions_session(graph_id) as session:
+    for fact in _SOURCE_FACTS:
+      session.add(
+        Element(
+          id=fact["element_id"],
+          name=fact["element_id"],
+          qname=f"{graph_id}:{fact['element_id']}",
+          taxonomy_id=taxonomy_id,
+          created_by=_SENDER,
+        )
+      )
+
+
+def _share_with_taxonomy(taxonomy_id: str) -> object:
+  snapshot = {**_REPORT_SNAPSHOT, "taxonomy_id": taxonomy_id}
+  with _patch_platform_graph_lookup():
+    return _share_to_target(
+      source_graph_id=SOURCE_GRAPH,
+      report_snapshot=snapshot,
+      source_facts=_SOURCE_FACTS,
+      target_graph_id=TARGET_GRAPH,
+      shared_by=_SENDER,
+    )
+
+
+def _taxonomy_ids(graph_id: str) -> set[str]:
+  with extensions_session(graph_id) as session:
+    return {
+      row[0] for row in session.execute(text("SELECT id FROM taxonomies")).fetchall()
+    }
+
+
+def test_the_report_taxonomy_travels_even_when_every_fact_resolves() -> None:
+  """The dangling-taxonomy case the element copy could not see.
+
+  A report can be built on the sender's own reporting extension while every
+  fact in it cites a standard concept the recipient already has. The element
+  copy then finds nothing missing and returns immediately — and the copied
+  report keeps a `taxonomy_id` naming a row that exists only in the sender's
+  schema. `reports.taxonomy_id` has no foreign key, so the OLTP insert
+  succeeds and the damage surfaces one step later, when
+  `REPORT_USES_TAXONOMY` points at nothing and takes the recipient's whole
+  rebuild down with it.
+  """
+  _seed_taxonomy(SOURCE_GRAPH, _EXT_TAXONOMY, "reporting_extension")
+  # Both sides already hold every concept the facts cite, so `missing` is
+  # empty — the precondition that used to short-circuit the taxonomy copy.
+  _seed_taxonomy(SOURCE_GRAPH, "tax_std_local", "reporting_standard")
+  _seed_taxonomy(TARGET_GRAPH, "tax_std_local", "reporting_standard")
+  _seed_elements(SOURCE_GRAPH, "tax_std_local")
+  _seed_elements(TARGET_GRAPH, "tax_std_local")
+
+  result = _share_with_taxonomy(_EXT_TAXONOMY)
+
+  assert result.status == "shared"
+  assert _EXT_TAXONOMY in _taxonomy_ids(TARGET_GRAPH), (
+    "the shared report's taxonomy did not travel; REPORT_USES_TAXONOMY would "
+    "dangle in the recipient's next materialization"
+  )
+
+  with extensions_session(TARGET_GRAPH) as session:
+    copied_taxonomy_id = session.execute(
+      text("SELECT taxonomy_id FROM reports WHERE source_graph_id = :src"),
+      {"src": SOURCE_GRAPH},
+    ).scalar_one()
+  assert copied_taxonomy_id == _EXT_TAXONOMY
+
+
+def test_a_library_report_taxonomy_is_not_copied() -> None:
+  """Only reporting extensions travel. A report on a shared framework
+  resolves by deterministic id in every tenant, and a taxonomy that is not a
+  reporting extension must never be dragged across the boundary — the
+  materializer's own join drops the edge instead."""
+  _seed_taxonomy(SOURCE_GRAPH, "tax_library_gaap", "reporting_standard")
+  _seed_elements(SOURCE_GRAPH, "tax_library_gaap")
+  _seed_taxonomy(TARGET_GRAPH, "tax_std_local", "reporting_standard")
+  _seed_elements(TARGET_GRAPH, "tax_std_local")
+
+  result = _share_with_taxonomy("tax_library_gaap")
+
+  assert result.status == "shared"
+  assert "tax_library_gaap" not in _taxonomy_ids(TARGET_GRAPH)
+
+
+# ── Revoking after the recipient is gone ───────────────────────────────────
+
+
+def test_revoke_survives_a_recipient_whose_schema_was_dropped() -> None:
+  """Deprovisioning the recipient must not strand the sender's report.
+
+  The recipient's schema is dropped on deprovision, and revocation has to
+  open it to delete the copy. When that raised, the share could never be
+  stamped revoked — and `delete_report` refuses a report that still has an
+  active share row, so the sender could neither withdraw the report nor
+  delete it, forever, over a graph that no longer exists.
+  """
+  gone_graph = "kgcccccccccccccccc03"  # never provisioned
+
+  with extensions_session(SOURCE_GRAPH) as session:
+    session.add(
+      Report(
+        id=_REPORT_SNAPSHOT["id"],
+        name=_REPORT_SNAPSHOT["name"],
+        taxonomy_id=_REPORT_SNAPSHOT["taxonomy_id"],
+        period_type="quarterly",
+        comparative=False,
+        generation_status="published",
+        filing_status="draft",
+        created_by=_SENDER,
+      )
+    )
+    session.add(
+      ReportShare(
+        id="share_gone_0001",
+        report_id=_REPORT_SNAPSHOT["id"],
+        target_graph_id=gone_graph,
+        shared_by=_SENDER,
+        fact_count=len(_SOURCE_FACTS),
+      )
+    )
+
+  response = revoke_report_share(
+    SOURCE_GRAPH,
+    _REPORT_SNAPSHOT["id"],
+    RevokeReportShareRequest(target_graph_id=gone_graph),
+    acting_user_id=_SENDER,
+  )
+
+  # Nothing was deleted — the schema took the copy with it.
+  assert response.copy_deleted is False
+
+  with extensions_session(SOURCE_GRAPH) as session:
+    revoked_at = session.execute(
+      text("SELECT revoked_at FROM report_shares WHERE id = 'share_gone_0001'")
+    ).scalar_one()
+  assert revoked_at is not None
+
+  # And with no active share left, the sender can delete their own report.
+  with extensions_session(SOURCE_GRAPH) as session:
+    assert delete_report(session, _REPORT_SNAPSHOT["id"], acting_user_id=_SENDER)
