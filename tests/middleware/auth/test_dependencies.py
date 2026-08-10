@@ -37,6 +37,7 @@ class TestCachedUserDataValidation:
       "id": 123,
       "email": "test@example.com",
       "name": "Test User",
+      "email_verified": True,
       "is_active": True,
     }
 
@@ -47,9 +48,26 @@ class TestCachedUserDataValidation:
     minimal_data = {
       "id": "user123",
       "email": "user@test.com",
+      "email_verified": False,
     }
 
     assert _validate_cached_user_data(minimal_data) is True
+
+  def test_validate_cached_user_data_missing_email_verified(self):
+    """A payload predating `email_verified` is stale, not merely incomplete.
+
+    Accepting it would rebuild a User whose `email_verified` is None — which
+    fails `UserResponse` validation as a 500 — or, if defaulted, would report
+    False for a verified user. Rejecting sends the caller to the database.
+    """
+    data = {
+      "id": "user123",
+      "email": "user@test.com",
+      "name": "Test User",
+      "is_active": True,
+    }
+
+    assert _validate_cached_user_data(data) is False
 
   def test_validate_cached_user_data_invalid_type(self):
     """Test validation fails with non-dict input."""
@@ -102,6 +120,7 @@ class TestCachedUserDataValidation:
       "id": 123,
       "email": "test@example.com",
       "name": "Test User",
+      "email_verified": True,
       "is_active": True,
     }
 
@@ -111,6 +130,7 @@ class TestCachedUserDataValidation:
     assert user.id == 123
     assert user.email == "test@example.com"
     assert user.name == "Test User"
+    assert user.email_verified is True
     assert user.is_active is True
 
   def test_create_user_from_cache_minimal_data(self):
@@ -118,6 +138,7 @@ class TestCachedUserDataValidation:
     user_data = {
       "id": "user456",
       "email": "minimal@example.com",
+      "email_verified": False,
     }
 
     user = _create_user_from_cache(user_data)
@@ -126,7 +147,27 @@ class TestCachedUserDataValidation:
     assert user.id == "user456"
     assert user.email == "minimal@example.com"
     assert user.name is None
+    assert user.email_verified is False
     assert user.is_active is True  # Default value
+
+  def test_create_user_from_cache_never_leaves_email_verified_none(self):
+    """`email_verified` must be a bool, never None, on the cache path.
+
+    `User.email_verified` is `nullable=False` with a column default, but column
+    defaults apply on insert and a cache-built User is never flushed — so an
+    omitted field arrives as None and only fails downstream, in `UserResponse`,
+    as a 500 on the warm-cache path alone. This pins the invariant at the source.
+    """
+    user_data = {
+      "id": "user789",
+      "email": "verified@example.com",
+      "email_verified": True,
+    }
+
+    user = _create_user_from_cache(user_data)
+
+    assert user is not None
+    assert isinstance(user.email_verified, bool)
 
   def test_create_user_from_cache_invalid_data(self):
     """Test creating user fails with invalid cached data."""
@@ -147,6 +188,7 @@ class TestCachedUserDataValidation:
       "id": 123,
       "email": "test@example.com",
       "name": "Test User",
+      "email_verified": True,
       "is_active": True,
     }
 
@@ -167,6 +209,7 @@ class TestCachedUserDataValidation:
     user_data = {
       "id": 123,
       "email": "test@example.com",
+      "email_verified": False,
     }
 
     with patch("robosystems.middleware.auth.dependencies.User") as mock_user_class:
@@ -320,6 +363,7 @@ class TestGetUserForVerifiedJWT:
         "id": "user_cache",
         "email": "cache@example.com",
         "name": "Cache User",
+        "email_verified": True,
         "is_active": True,
         "session_version": 5,
       }
@@ -782,7 +826,12 @@ class TestGetCurrentUserWithGraph:
     auth_token = "valid.jwt.token"
     user_id = "user123"
     cached_data = {
-      "user_data": {"id": user_id, "email": "test@example.com", "is_active": True}
+      "user_data": {
+        "id": user_id,
+        "email": "test@example.com",
+        "email_verified": True,
+        "is_active": True,
+      }
     }
 
     mock_verify_jwt.return_value = (user_id, 0)
@@ -1104,6 +1153,7 @@ class TestSecurityScenarios:
     xss_data = {
       "id": 123,
       "email": "test@example.com",
+      "email_verified": True,
       "name": "<script>alert('xss')</script>",
       "is_active": True,
     }
@@ -1121,6 +1171,7 @@ class TestSecurityScenarios:
     sql_injection_data = {
       "id": "1'; DROP TABLE users; --",
       "email": "test@example.com",
+      "email_verified": True,
       "is_active": True,
     }
 
@@ -1162,6 +1213,7 @@ class TestSecurityScenarios:
     large_data = {
       "id": 123,
       "email": "test@example.com",
+      "email_verified": True,
       "name": large_name,
       "is_active": True,
     }
@@ -1206,7 +1258,8 @@ class TestSecurityScenarios:
     ]
 
     for email, expected_valid in edge_case_emails:
-      data = {"id": 123, "email": email}
+      # email_verified present so the email rule is the only thing varying.
+      data = {"id": 123, "email": email, "email_verified": False}
       is_valid = _validate_cached_user_data(data)
       assert is_valid == expected_valid, f"Email '{email}' validation mismatch"
 
