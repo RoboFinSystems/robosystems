@@ -339,6 +339,24 @@ def ingest(
   created = 0
   for je_id, rows in sorted(grouped.items()):
     payload = _build_event_payload(je_id, rows, qname_to_id, warnings)
+
+    # A JE whose every line is zero-amount carries no GL impact, and the API
+    # rejects it (a line item must have a non-zero debit or credit). JE-225 in
+    # the upstream data is one: a PPE write-off closing entry with Amount=0 on
+    # both lines. Recorded as a source data-quality note — the same category
+    # the reconciliation reports — rather than posted and failed, which is what
+    # previously produced a silent loss behind an exit code of 0.
+    if all(
+      not li["debit_amount"] and not li["credit_amount"]
+      for li in payload["metadata"]["line_items"]
+    ):
+      warnings.append(
+        f"{je_id}: every line is zero-amount in the source data — no GL "
+        f"impact, not posted"
+      )
+      print(f"  ⚠️  {je_id}: zero-amount entry in source data — skipped")
+      continue
+
     try:
       response = client.create_event_block(graph_id, payload)
       created += 1
