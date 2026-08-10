@@ -382,11 +382,11 @@ class _Validator:
     # orphan draft in the very period the demo then tells the user to close, so
     # it would post as a spurious extra closing entry. Clean it up here.
     try:
-      drafts = client.list_period_drafts(self.graph_id, close_target) or {}
+      drafts = client.list_period_drafts(self.graph_id, close_target)
       disposal_ids = [
-        d.get("entry_id")
-        for d in drafts.get("drafts", [])
-        if d.get("memo") == "Validation disposal" and d.get("entry_id")
+        d.entry_id
+        for d in (drafts.drafts if drafts else [])
+        if d.memo == "Validation disposal" and d.entry_id
       ]
       for eid in disposal_ids:
         client.delete_journal_entry(self.graph_id, eid)

@@ -201,6 +201,12 @@ class SSEDefaults:
 
   MAX_CONNECTIONS_PER_USER = 5  # Max concurrent SSE connections per user
   QUEUE_SIZE = 100  # Event queue size per connection
+  # Seconds of event silence before the stream emits a keepalive. Must stay
+  # comfortably below the client read timeout (the Python SDK's SSE client
+  # defaults to 30s) — an operation that runs longer than this without
+  # emitting progress otherwise races the client's timeout and the client
+  # drops a job that is still running server-side.
+  KEEPALIVE_INTERVAL = 10
 
 
 class LimitsDefaults:
