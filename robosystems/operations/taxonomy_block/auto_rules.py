@@ -270,10 +270,9 @@ def _add_rollup_rules(
 ) -> None:
   """Emit one structure-scoped RollUp rule per calculation parent.
 
-  Mirrors the seeded ``rs-gaap-rollup-rules`` shape
-  (``generate_rollup_rules.py``: parent-first variables,
-  FundamentalAccountingConceptRelation, pattern ``RollUp``) so the
-  engine's arc-derived evaluator picks it up unchanged. Variables carry
+  Mirrors the seeded ``rs-gaap-rollup-rules`` shape (parent-first
+  variables, FundamentalAccountingConceptRelation, pattern ``RollUp``) so
+  the engine's arc-derived evaluator picks it up unchanged. Variables carry
   ``variable_element_id`` explicitly — authored structures may reference
   tenant elements whose qname resolution shouldn't be load-bearing.
 
