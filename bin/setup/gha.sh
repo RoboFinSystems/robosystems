@@ -276,11 +276,15 @@ function setup_full_config() {
     fi
 
     # Dagster Webserver Configuration
+    # DESIRED_COUNT 0 leaves the UI off; bin/tools/tunnels.sh scales it to 1 on
+    # demand. Set to 1 to keep it always available.
     gh variable set DAGSTER_WEBSERVER_CPU_PROD --body "512"
     gh variable set DAGSTER_WEBSERVER_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_PROD --body "1"
     if $setup_staging; then
         gh variable set DAGSTER_WEBSERVER_CPU_STAGING --body "512"
         gh variable set DAGSTER_WEBSERVER_MEMORY_STAGING --body "1024"
+        gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_STAGING --body "1"
     fi
 
     # Dagster Run Job Configuration (EcsRunLauncher - Fargate)
@@ -331,10 +335,14 @@ function setup_full_config() {
     fi
 
     # Database Configuration
+    # Performance Insights is on in prod only; 7 days is the free retention tier.
     gh variable set DATABASE_INSTANCE_SIZE_PROD --body "db.t4g.small"
     gh variable set DATABASE_ALLOCATED_STORAGE_PROD --body "20"
     gh variable set DATABASE_MAX_ALLOCATED_STORAGE_PROD --body "100"
     gh variable set DATABASE_MULTI_AZ_ENABLED_PROD --body "false"
+    gh variable set DATABASE_POSTGRES_VERSION_PROD --body "16"
+    gh variable set DATABASE_PI_ENABLED_PROD --body "true"
+    gh variable set DATABASE_PI_RETENTION_DAYS_PROD --body "7"
     # RDS Proxy (off by default - flip RDS_PROXY_ENABLED_PROD to "true" to turn on)
     gh variable set RDS_PROXY_ENABLED_PROD --body "false"
     gh variable set RDS_PROXY_MAX_CONNECTIONS_PERCENT_PROD --body "100"
@@ -344,6 +352,9 @@ function setup_full_config() {
         gh variable set DATABASE_ALLOCATED_STORAGE_STAGING --body "20"
         gh variable set DATABASE_MAX_ALLOCATED_STORAGE_STAGING --body "100"
         gh variable set DATABASE_MULTI_AZ_ENABLED_STAGING --body "false"
+        gh variable set DATABASE_POSTGRES_VERSION_STAGING --body "16"
+        gh variable set DATABASE_PI_ENABLED_STAGING --body "false"
+        gh variable set DATABASE_PI_RETENTION_DAYS_STAGING --body "7"
         gh variable set RDS_PROXY_ENABLED_STAGING --body "false"
         gh variable set RDS_PROXY_MAX_CONNECTIONS_PERCENT_STAGING --body "100"
         gh variable set RDS_PROXY_CONNECTION_BORROW_TIMEOUT_STAGING --body "120"
@@ -378,11 +389,13 @@ function setup_full_config() {
     # Valkey Configuration
     gh variable set VALKEY_NODE_TYPE_PROD --body "cache.t4g.micro"
     gh variable set VALKEY_NUM_NODES_PROD --body "1"
+    gh variable set VALKEY_VERSION_PROD --body "8.1"
     gh variable set VALKEY_ENCRYPTION_ENABLED_PROD --body "true"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     if $setup_staging; then
         gh variable set VALKEY_NODE_TYPE_STAGING --body "cache.t4g.micro"
         gh variable set VALKEY_NUM_NODES_STAGING --body "1"
+        gh variable set VALKEY_VERSION_STAGING --body "8.1"
         gh variable set VALKEY_ENCRYPTION_ENABLED_STAGING --body "true"
         gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
     fi
@@ -490,6 +503,12 @@ function setup_full_config() {
     # Graph AMI: Auto-initialized by get-graph-ami action on first deploy
     # Stored in SSM: /robosystems/{env}/graph/ami-id
     # Updated via: graph-maintenance.yml workflow
+    # AUTO_UPDATE: monthly scheduled refresh of the AMI variable (staging 1st, prod 2nd)
+    # AUTO_DEPLOY: whether that scheduled run also triggers an ASG refresh
+    # Both are read without a fallback in graph-maintenance.yml, so an unset
+    # value reads as "not true" and the scheduled work stays off.
+    gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"
+    gh variable set GRAPH_AMI_AUTO_DEPLOY --body "false"
 
     # Graph container refresh is now controlled via workflow_dispatch input
     # (graph_container_refresh parameter, defaults to true)
@@ -620,7 +639,7 @@ function main() {
     echo "Repository: $repo_info"
     echo ""
 
-    echo "This sets ~80 GitHub variables for full control over infrastructure."
+    echo "This sets the full GitHub variable set for control over infrastructure."
     echo "Note: Basic deployments work without this (workflows have sensible defaults)."
     echo ""
     read -p "Continue with full variable setup? (Y/n): " -n 1 -r
