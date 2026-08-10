@@ -33,6 +33,7 @@ from robosystems.models.extensions import (
   Element,
   Report,
   ReportShare,
+  Structure,
   Taxonomy,
 )
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
@@ -46,6 +47,8 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 
 pytestmark = pytest.mark.integration
+
+_REPORTS_CMD = "robosystems.operations.roboledger.commands.reports"
 
 # Valid graph-id shapes (kg + 16+ lowercase hex) so `_sanitize_schema` accepts
 # them as schema names.
@@ -69,9 +72,37 @@ _REPORT_SNAPSHOT = {
   "periods": None,
 }
 
+# A library-seeded Structure id (deterministic UUID5, identical in every
+# tenant on the same taxonomy pin) and a tenant-local one (`struct_*` ULID,
+# meaningful only in the sender's schema). The share must carry the first
+# across and fall back for the second.
+_LIBRARY_STRUCTURE_ID = "b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d"
+_TENANT_LOCAL_STRUCTURE_ID = "struct_0000000000000000000001"
+_STRUCTURE_TAXONOMY = "tax_structures_local"
+
+_SOURCE_FACT_SETS = [
+  {
+    "id": "fs_source_0001",
+    "structure_id": _LIBRARY_STRUCTURE_ID,
+    "factset_type": "report",
+    "period_start": date(2026, 1, 1),
+    "period_end": date(2026, 3, 31),
+    "entity_id": _ENTITY_ID,
+  },
+  {
+    "id": "fs_source_0002",
+    "structure_id": _TENANT_LOCAL_STRUCTURE_ID,
+    "factset_type": "disclosure",
+    "period_start": None,
+    "period_end": date(2026, 3, 31),
+    "entity_id": _ENTITY_ID,
+  },
+]
+
 _SOURCE_FACTS = [
   {
     "id": "fact_0001",
+    "fact_set_id": "fs_source_0001",
     "element_id": "rs-gaap:Revenues",
     "value": 1000,
     "string_value": None,
@@ -88,6 +119,7 @@ _SOURCE_FACTS = [
   },
   {
     "id": "fact_0002",
+    "fact_set_id": "fs_source_0002",
     "element_id": "rs-gaap:Assets",
     "value": 5000,
     "string_value": None,
@@ -159,8 +191,10 @@ def _clean_tenants(two_tenants):
       session.execute(text("DELETE FROM reports"))
       session.execute(text("DELETE FROM blocked_source_graphs"))
       session.execute(text("DELETE FROM report_shares"))
-      # Elements before taxonomies: `elements.taxonomy_id` is a real FK.
+      # Elements and structures before taxonomies: both carry a real FK to
+      # `taxonomies.id`.
       session.execute(text("DELETE FROM elements"))
+      session.execute(text("DELETE FROM structures"))
       session.execute(text("DELETE FROM taxonomies"))
   yield
 
@@ -181,9 +215,30 @@ def _share() -> object:
     return _share_to_target(
       source_graph_id=SOURCE_GRAPH,
       report_snapshot=_REPORT_SNAPSHOT,
+      source_fact_sets=_SOURCE_FACT_SETS,
       source_facts=_SOURCE_FACTS,
       target_graph_id=TARGET_GRAPH,
       shared_by=_SENDER,
+    )
+
+
+def _seed_structure(graph_id: str, structure_id: str, block_type: str) -> None:
+  """Give `graph_id` one Structure row under an explicit id.
+
+  Stands in for the library copy: `provision_tenant_schema` seeds the
+  canonical library into every tenant schema, so in production both sides
+  already hold the same structure under the same deterministic id. These
+  throwaway schemas skip that copy, so the tests seed what they need.
+  """
+  with extensions_session(graph_id) as session:
+    session.add(
+      Structure(
+        id=structure_id,
+        name=f"Test {block_type}",
+        block_type=block_type,
+        taxonomy_id=_STRUCTURE_TAXONOMY,
+        created_by=_SENDER,
+      )
     )
 
 
@@ -205,6 +260,83 @@ def test_share_writes_into_the_target_schema_only() -> None:
 
   assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
   assert _counts(SOURCE_GRAPH) == (0, 0, 0)
+
+
+def _copied_report_id() -> str:
+  with extensions_session(TARGET_GRAPH) as session:
+    return session.execute(
+      text("SELECT id FROM reports WHERE source_graph_id = :src"),
+      {"src": SOURCE_GRAPH},
+    ).scalar_one()
+
+
+def _renderable_fact_sets(report_id: str) -> list[tuple[str, int]]:
+  """The recipient's read path, reduced to the join that decides visibility.
+
+  ``get_report_package`` inner-joins ``structures`` on ``fact_sets.structure_id``
+  and ``get_statement`` filters on ``structures.block_type`` — so a FactSet
+  with no resolvable Structure is invisible to every report read, however many
+  facts hang off it. This is that join.
+  """
+  with extensions_session(TARGET_GRAPH) as session:
+    return [
+      (row[0], row[1])
+      for row in session.execute(
+        text(
+          "SELECT fs.structure_id, count(f.id) "
+          "FROM fact_sets fs "
+          "JOIN structures s ON s.id = fs.structure_id "
+          "LEFT JOIN facts f ON f.fact_set_id = fs.id "
+          "WHERE fs.report_id = :report_id "
+          "GROUP BY fs.structure_id"
+        ),
+        {"report_id": report_id},
+      ).fetchall()
+    ]
+
+
+def test_a_library_structure_survives_the_graph_boundary() -> None:
+  """The regression that made a delivered report render as "No statements
+  available for this report yet."
+
+  Library structures are seeded into every tenant schema under deterministic
+  UUID5 ids, so the sender's balance sheet *is* the recipient's — same id, same
+  presentation arcs. A share that drops ``structure_id`` therefore throws away
+  a reference that was valid on the far side, and the facts land where no read
+  path can join them.
+  """
+  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
+  _seed_taxonomy(TARGET_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
+  _seed_structure(SOURCE_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
+  _seed_structure(TARGET_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
+
+  assert _share().status == "shared"
+
+  renderable = _renderable_fact_sets(_copied_report_id())
+  assert renderable == [(_LIBRARY_STRUCTURE_ID, 1)], (
+    "the shared report's balance sheet did not survive the copy; the "
+    "recipient's report viewer renders nothing"
+  )
+
+
+def test_a_tenant_local_structure_falls_back_without_dropping_facts() -> None:
+  """The other half: an id that is meaningful only in the sender's schema.
+
+  A custom disclosure carries a `struct_*` ULID the recipient has never seen.
+  Its facts still cross — they are queryable, and they materialize into the
+  recipient's graph — but they pool on a structure-less set rather than
+  pointing at a Structure that does not exist. Nothing is silently dropped,
+  which is the property the catch-all exists to hold.
+  """
+  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
+  _seed_structure(SOURCE_GRAPH, _TENANT_LOCAL_STRUCTURE_ID, "regulatory_disclosure")
+
+  assert _share().status == "shared"
+
+  # Neither structure resolves in the recipient, so both facts pool on one
+  # structure-less set — and every fact still arrives.
+  assert _renderable_fact_sets(_copied_report_id()) == []
+  assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
 
 
 def test_the_copy_carries_honest_provenance() -> None:
@@ -335,6 +467,66 @@ def test_resharing_replaces_the_copy_rather_than_duplicating_it() -> None:
   assert rows[0].source_report_id == _REPORT_SNAPSHOT["id"]
   # The replaced copy took its fact sets and facts with it.
   assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
+
+
+def test_revoke_withdraws_the_stored_publication_too() -> None:
+  """Withdrawal has to reach object storage, not just the rows.
+
+  A shared copy now carries the sender's holon in the recipient's bundle
+  prefix. Deleting the rows and leaving that behind means the sender's
+  published report survives the revocation that was supposed to withdraw it —
+  the artifacts were invisible to this suite before they existed, so the
+  regression would have been silent.
+  """
+  _share()
+
+  with extensions_session(SOURCE_GRAPH) as session:
+    session.add(
+      Report(
+        id=_REPORT_SNAPSHOT["id"],
+        name=_REPORT_SNAPSHOT["name"],
+        taxonomy_id=_REPORT_SNAPSHOT["taxonomy_id"],
+        period_type="quarterly",
+        comparative=False,
+        generation_status="published",
+        filing_status="draft",
+        created_by=_SENDER,
+      )
+    )
+    session.add(
+      ReportShare(
+        id="share_0001",
+        report_id=_REPORT_SNAPSHOT["id"],
+        target_graph_id=TARGET_GRAPH,
+        shared_by=_SENDER,
+        fact_count=len(_SOURCE_FACTS),
+      )
+    )
+
+  copy_id = _copied_report_id()
+
+  with patch(f"{_REPORTS_CMD}.S3Client") as s3_cls:
+    s3 = s3_cls.return_value
+    s3.list_objects.return_value = [
+      f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
+      f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+    ]
+    s3.delete_object.return_value = True
+    revoke_report_share(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      RevokeReportShareRequest(target_graph_id=TARGET_GRAPH),
+      acting_user_id=_SENDER,
+    )
+
+  # Scoped to the withdrawn copy's own prefix — never the whole graph's.
+  _, list_kwargs = s3.list_objects.call_args
+  assert list_kwargs["prefix"] == f"report-bundles/{TARGET_GRAPH}/{copy_id}/"
+  deleted = {call.args[1] for call in s3.delete_object.call_args_list}
+  assert deleted == {
+    f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
+    f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+  }
 
 
 def test_revoke_clears_every_active_share_row_for_the_recipient() -> None:
@@ -537,6 +729,7 @@ def _share_with_taxonomy(taxonomy_id: str) -> object:
     return _share_to_target(
       source_graph_id=SOURCE_GRAPH,
       report_snapshot=snapshot,
+      source_fact_sets=_SOURCE_FACT_SETS,
       source_facts=_SOURCE_FACTS,
       target_graph_id=TARGET_GRAPH,
       shared_by=_SENDER,

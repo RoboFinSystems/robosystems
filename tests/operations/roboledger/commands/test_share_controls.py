@@ -349,6 +349,7 @@ def test_share_to_a_blocking_recipient_returns_an_error_and_writes_nothing() -> 
     result = _share_to_target(
       source_graph_id=_SOURCE_GRAPH,
       report_snapshot={"id": "rpt_source", "name": "Q1", "taxonomy_id": "tax_01"},
+      source_fact_sets=[],
       source_facts=[],
       target_graph_id=_TARGET_GRAPH,
       shared_by="user_sender",
@@ -387,6 +388,7 @@ def test_share_to_an_unblocking_recipient_proceeds_to_the_copy() -> None:
         "comparative": False,
         "periods": None,
       },
+      source_fact_sets=[],
       source_facts=[],
       target_graph_id=_TARGET_GRAPH,
       shared_by="user_sender",

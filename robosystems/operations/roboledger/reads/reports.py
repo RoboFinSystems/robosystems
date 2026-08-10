@@ -359,11 +359,6 @@ def get_report_download_url(
   report = session.get(Report, report_id)
   if report is None:
     return None
-  if not report.bundle_url:
-    raise ReportBundleNotAvailableError(
-      f"Report '{report_id}' has no published bundle — publish or "
-      f"regenerate the report to produce one."
-    )
   generation_count = int(report.generation_count or 0)
 
   # HOLON_JSONLD is a *derived* projection — materialized + cached on demand
@@ -371,13 +366,32 @@ def get_report_download_url(
   # in _RDF_FLAVOR_VALUES: this branch MUST stay above the _RDF_FLAVOR_VALUES
   # check below, which presigns the publish-stamped JSON-LD and rejects every
   # other RDF flavor as "reserved for future use".
+  #
+  # It also sits above the ``bundle_url`` gate below, and asks about
+  # publication directly instead. ``bundle_url`` names the *flat* JSON-LD
+  # object, which the holon path never reads — it serves its own cached object
+  # or rebuilds from rows. Gating on it made the holon unreachable for a report
+  # that legitimately has no flat bundle of its own: a cross-graph shared copy,
+  # whose holon is the sender's published artifact copied in alongside the rows.
   if flavor == RdfFlavor.HOLON_JSONLD.value:
+    if report.generation_status != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a holon."
+      )
     return _materialize_and_presign_holon(
       session=session,
       graph_id=graph_id,
       report_id=report_id,
       generation_count=generation_count,
       expires_in=expires_in,
+      source_graph_id=report.source_graph_id,
+    )
+
+  if not report.bundle_url:
+    raise ReportBundleNotAvailableError(
+      f"Report '{report_id}' has no published bundle — publish or "
+      f"regenerate the report to produce one."
     )
   if flavor in _RDF_FLAVOR_VALUES:
     return _presign_stored_rdf_bundle(
@@ -395,6 +409,7 @@ def get_report_download_url(
       flavor=XbrlFlavor(flavor),
       generation_count=generation_count,
       expires_in=expires_in,
+      source_graph_id=report.source_graph_id,
     )
   raise ValueError(
     f"Unsupported download format '{flavor}'. "
@@ -442,6 +457,33 @@ def _presign_stored_rdf_bundle(
   )
 
 
+def _refuse_local_rederivation(
+  report_id: str, source_graph_id: str | None, artifact: str
+) -> None:
+  """Stop a *received* report's artifact being re-derived from local rows.
+
+  The derived flavors are built on demand and cached, which is right for a
+  report this graph authored: the rows are the source of truth and the artifact
+  is a projection of them. It is wrong for a report that arrived from somewhere
+  else. There the artifact *is* the truth — the sender's published document,
+  copied in beside the rows — and the rows are a convenience projection of it,
+  carrying only what the share was able to bring across.
+
+  So a cache miss on a received report is a miss, not a build order. Rebuilding
+  would hand the recipient a document derived from their own copy while
+  presenting it as the sender's publication, and the difference is invisible at
+  the point of use. Better to say the artifact is gone.
+  """
+  if source_graph_id is None:
+    return
+  raise ReportBundleNotAvailableError(
+    f"Report '{report_id}' was shared from another graph and its {artifact} is "
+    f"no longer in storage. A received report is served as the sender's "
+    f"published artifact and is never re-derived locally; ask the sender to "
+    f"share it again."
+  )
+
+
 def _materialize_and_presign_xbrl(
   session: Session,
   graph_id: str,
@@ -449,6 +491,7 @@ def _materialize_and_presign_xbrl(
   flavor: XbrlFlavor,
   generation_count: int,
   expires_in: int,
+  source_graph_id: str | None = None,
 ) -> ReportBundleDownloadResponse:
   """Presign the XBRL zip, materializing + caching it on first download.
 
@@ -464,6 +507,7 @@ def _materialize_and_presign_xbrl(
   s3 = S3Client()
 
   if not s3.object_exists(bucket, key):
+    _refuse_local_rederivation(report_id, source_graph_id, "XBRL bundle")
     from robosystems.operations.serialization import (
       build_report_bundle,
       serialize_to_xbrl,
@@ -513,6 +557,7 @@ def _materialize_and_presign_holon(
   report_id: str,
   generation_count: int,
   expires_in: int,
+  source_graph_id: str | None = None,
 ) -> ReportBundleDownloadResponse:
   """Presign the dataset-form JSON-LD **holon**, materializing + caching it on
   first download.
@@ -532,6 +577,7 @@ def _materialize_and_presign_holon(
   s3 = S3Client()
 
   if not s3.object_exists(bucket, key):
+    _refuse_local_rederivation(report_id, source_graph_id, "holon")
     from robosystems.operations.serialization import (
       build_report_bundle,
       serialize_to_holon_jsonld,

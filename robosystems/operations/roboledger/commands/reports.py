@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from robosystems.config import env
 from robosystems.config.storage.graph import (
   get_report_bundle_key,
+  get_report_bundle_prefix,
   get_report_bundle_uri,
 )
 from robosystems.logger import logger
@@ -75,8 +76,14 @@ from robosystems.operations.serialization import (
   RdfFlavor,
   StatementBundle,
   build_report_bundle,
+  serialize_to_holon_jsonld,
   serialize_to_rdf,
 )
+
+# Extensions that give a graph a tenant schema, and so make it a legitimate
+# recipient of a shared report. Mirrors `_REPORT_EXTENSIONS` on the GraphQL
+# read side — the two ends of the same seam.
+_RECEIVING_EXTENSIONS = ("roboledger", "roboinvestor")
 
 
 class ReportNotFoundError(LookupError):
@@ -854,13 +861,32 @@ def share_report(
       "period_end": report_def.period_end,
       "comparative": report_def.comparative,
       "periods": report_def.periods,
+      "generation_count": int(report_def.generation_count or 0),
     }
+
+    # The FactSets travel as themselves, not as one flat fact list. Every
+    # read path on the recipient's side resolves a FactSet's Structure —
+    # `get_report_package` joins it, `load_fact_set_by_id_for_structure`
+    # pins on it — so a share that collapses N sets into one structure-less
+    # set delivers facts that nothing downstream can render.
+    fact_set_rows = source_session.execute(
+      text("""
+        SELECT fs.id, fs.structure_id, fs.factset_type, fs.period_start,
+               fs.period_end, fs.entity_id
+        FROM fact_sets fs
+        WHERE fs.report_id = :report_id
+        ORDER BY fs.created_at
+      """),
+      {"report_id": report_id},
+    ).fetchall()
+    source_fact_sets = [row._asdict() for row in fact_set_rows]
 
     fact_rows = source_session.execute(
       text("""
-        SELECT f.id, f.element_id, f.value, f.string_value, f.fact_type,
-               f.value_type, f.content_type, f.decimals, f.period_start,
-               f.period_end, f.period_type, f.unit, f.entity_id, f.created_at
+        SELECT f.id, f.fact_set_id, f.element_id, f.value, f.string_value,
+               f.fact_type, f.value_type, f.content_type, f.decimals,
+               f.period_start, f.period_end, f.period_type, f.unit,
+               f.entity_id, f.created_at
         FROM facts f
         JOIN fact_sets fs ON fs.id = f.fact_set_id
         WHERE fs.report_id = :report_id
@@ -869,11 +895,20 @@ def share_report(
     ).fetchall()
     source_facts = [row._asdict() for row in fact_rows]
 
+  # Read once, after the sender's session closes — S3 round-trips have no
+  # business holding a database connection open — and reused for every target,
+  # since each gets the same bytes.
+  publication_artifacts = _load_publication_artifacts(
+    graph_id, report_id, int(report_snapshot["generation_count"])
+  )
+
   for target_graph_id in target_graph_ids:
     result = _share_to_target(
       source_graph_id=graph_id,
       report_snapshot=report_snapshot,
+      source_fact_sets=source_fact_sets,
       source_facts=source_facts,
+      publication_artifacts=publication_artifacts,
       target_graph_id=target_graph_id,
       shared_by=acting_user_id,
     )
@@ -1002,15 +1037,165 @@ def revoke_report_share(
   )
 
 
+def _load_publication_artifacts(
+  graph_id: str, report_id: str, generation_count: int
+) -> dict[str, str]:
+  """Read the sender's published artifacts so a share can carry them across.
+
+  The **holon** — the report as ``#scene`` / ``#boundary`` / ``#projection``
+  named graphs — is the intended cross-tenant wire format: one self-contained
+  serialization that renders outside the system entirely, and whose partition
+  omits the ``#lineage`` graph by construction, so the books never cross with
+  the report. Carrying the sender's *object* rather than re-deriving one from
+  the recipient's copied rows is what makes the recipient's view the
+  publication the sender actually made, byte for byte, instead of a
+  reconstruction that can drift from it.
+
+  Returns the artifacts that resolved, keyed by file extension. A miss is
+  logged and omitted rather than raised: the row copy is the load-bearing half
+  of a share — it is what materializes into the recipient's graph and carries
+  the cross-graph traversal — so an object-store fault degrades the
+  recipient's renderers rather than failing the delivery outright.
+
+  Called after the sender's session closes, so none of this object-store I/O
+  holds a database connection open. The holon build below needs a session and
+  opens its own short-lived one, on the cold path only.
+  """
+  from robosystems.db.extensions import extensions_session
+
+  bucket = env.USER_DATA_BUCKET
+  s3 = S3Client()
+  artifacts: dict[str, str] = {}
+
+  flat = s3.download_string(
+    bucket, get_report_bundle_key(graph_id, report_id, generation_count)
+  )
+  if flat is not None:
+    artifacts[".jsonld"] = flat
+  else:
+    logger.warning(
+      "Report %s has no readable JSON-LD bundle; the recipient's copy will "
+      "carry no downloadable publication.",
+      report_id,
+    )
+
+  # The holon is derived on demand, not stamped at publish, so a report nobody
+  # has downloaded in that flavor yet has no object. Build it once here — the
+  # key is immutable per generation, so this also warms the sender's cache.
+  holon_key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=".holon.jsonld"
+  )
+  holon = s3.download_string(bucket, holon_key)
+  if holon is None:
+    try:
+      with extensions_session(graph_id) as build_session:
+        holon = serialize_to_holon_jsonld(
+          build_report_bundle(build_session, graph_id, report_id)
+        )
+      s3.upload_string(
+        content=holon,
+        bucket=bucket,
+        key=holon_key,
+        content_type="application/ld+json",
+        metadata={"report-id": report_id, "graph-id": graph_id},
+      )
+    except Exception:
+      logger.exception(
+        "Failed to materialize the holon for report %s; the recipient's copy "
+        "will fall back to the package renderer.",
+        report_id,
+      )
+      holon = None
+  if holon is not None:
+    artifacts[".holon.jsonld"] = holon
+
+  return artifacts
+
+
+def _copy_publication_artifacts(
+  artifacts: dict[str, str],
+  target_graph_id: str,
+  shared_report: Report,
+  generation_count: int,
+) -> None:
+  """Write the sender's artifacts under the recipient's own bundle keys.
+
+  Re-keying rather than sharing the sender's object is deliberate: the
+  recipient's copy is a distinct Report with its own id, and presigning is
+  scoped per graph. ``bundle_url`` has to land too — every download flavor is
+  gated on it (``get_report_bundle_download``), so without it the recipient's
+  Holon and download surfaces stay dark even with the objects in place.
+  """
+  if not artifacts:
+    return
+  bucket = env.USER_DATA_BUCKET
+  s3 = S3Client()
+  for extension, content in artifacts.items():
+    key = get_report_bundle_key(
+      target_graph_id, shared_report.id, generation_count, extension=extension
+    )
+    if not s3.upload_string(
+      content=content,
+      bucket=bucket,
+      key=key,
+      content_type="application/ld+json",
+      metadata={"report-id": shared_report.id, "graph-id": target_graph_id},
+    ):
+      logger.warning(
+        "Failed to copy %s artifact for shared report %s into %s.",
+        extension,
+        shared_report.id,
+        target_graph_id,
+      )
+      return
+
+  shared_report.generation_count = generation_count
+  if ".jsonld" in artifacts:
+    shared_report.bundle_url = get_report_bundle_uri(
+      bucket, target_graph_id, shared_report.id, generation_count
+    )
+
+
+def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
+  """Remove the object-store artifacts of reports whose rows are gone.
+
+  Withdrawal has to reach object storage now that a shared copy carries
+  artifacts of its own. Before the holon travelled with the rows, a recipient's
+  copy had none — `bundle_url` was always NULL — so revoke and block-and-purge
+  were complete by construction. They no longer are, and an exit that leaves
+  the sender's published report sitting in the recipient's prefix is not the
+  exit either control advertises.
+
+  Deletes by prefix, so every generation and both flavors go together.
+
+  **Call this after the row deletion commits, never before.** Deleting an
+  artifact for a transaction that then rolls back destroys a live report's
+  publication; an artifact left behind by a crash is an orphan a later sweep
+  can take. The asymmetry decides the ordering.
+  """
+  if not report_ids:
+    return
+  bucket = env.USER_DATA_BUCKET
+  s3 = S3Client()
+  for report_id in report_ids:
+    prefix = get_report_bundle_prefix(graph_id, report_id)
+    for key in s3.list_objects(bucket, prefix=prefix):
+      if not s3.delete_object(bucket, key):
+        logger.warning(
+          "Failed to delete withdrawn report artifact s3://%s/%s.", bucket, key
+        )
+
+
 def _delete_copies_in_session(
   target_session: Session, source_graph_id: str, source_report_id: str
-) -> int:
+) -> list[str]:
   """Delete copies of one shared report from an open target session.
 
-  Returns how many were removed. Matches on the provenance pair, so it can
-  only ever reach a report that arrived from this sender — a report the target
-  authored has a null `source_graph_id` and cannot match. Does not commit; the
-  caller owns the transaction.
+  Returns the ids removed, so the caller can drop their object-store artifacts
+  once the transaction commits (see :func:`delete_report_artifacts`). Matches
+  on the provenance pair, so it can only ever reach a report that arrived from
+  this sender — a report the target authored has a null `source_graph_id` and
+  cannot match. Does not commit; the caller owns the transaction.
   """
   copy_ids = list(
     target_session.execute(
@@ -1023,7 +1208,7 @@ def _delete_copies_in_session(
     .all()
   )
   if not copy_ids:
-    return 0
+    return []
 
   # Facts cascade from their parent fact_sets, so the fact_sets go first.
   target_session.execute(
@@ -1034,7 +1219,7 @@ def _delete_copies_in_session(
     text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
     {"report_ids": copy_ids},
   )
-  return len(copy_ids)
+  return copy_ids
 
 
 def _delete_shared_copy(
@@ -1066,17 +1251,21 @@ def _delete_shared_copy(
       target_session, source_graph_id, source_report_id
     )
     target_session.commit()
-    return deleted > 0
+
+  delete_report_artifacts(target_graph_id, deleted)
+  return bool(deleted)
 
 
 def _share_to_target(
   source_graph_id: str,
   report_snapshot: dict[str, Any],
+  source_fact_sets: list[dict[str, Any]],
   source_facts: list[dict[str, Any]],
   target_graph_id: str,
   shared_by: str,
+  publication_artifacts: dict[str, str] | None = None,
 ) -> ShareResultItem:
-  """Copy report definition + facts to a target graph's tenant schema."""
+  """Copy report definition + FactSets + facts to a target tenant schema."""
   from robosystems.db.extensions import extensions_session
   from robosystems.db.platform import SessionFactory
   from robosystems.models.core import Graph
@@ -1094,12 +1283,22 @@ def _share_to_target(
           error=f"Graph '{target_graph_id}' not found.",
         )
 
+      # Receiving is not authoring. `provision_tenant_schema` creates every
+      # tenant table regardless of the graph's extensions, so an investor-only
+      # tenant can hold a report perfectly well — and requiring `roboledger`
+      # of a recipient would mean a fund had to provision a ledger it will
+      # never post to just to read what its portfolio companies send it. The
+      # gate stays, narrowed to "has an extensions tenant at all", so a share
+      # still cannot land in a graph that never opted into the OLTP surface.
       extensions = target_graph.schema_extensions or []
-      if "roboledger" not in extensions:
+      if not any(ext in extensions for ext in _RECEIVING_EXTENSIONS):
         return ShareResultItem(
           target_graph_id=target_graph_id,
           status="error",
-          error="Target graph does not have 'roboledger' schema extension.",
+          error=(
+            "Target graph has no extensions schema — it must have one of: "
+            f"{', '.join(_RECEIVING_EXTENSIONS)}."
+          ),
         )
   except Exception as e:
     logger.error(f"Failed to validate target graph {target_graph_id}: {e}")
@@ -1132,7 +1331,9 @@ def _share_to_target(
       # into their graph. The provenance pair can only ever match a copy from
       # this sender; a report the recipient authored has a null
       # `source_graph_id`.
-      _delete_copies_in_session(target_session, source_graph_id, report_snapshot["id"])
+      replaced_copy_ids = _delete_copies_in_session(
+        target_session, source_graph_id, report_snapshot["id"]
+      )
 
       shared_report = Report(
         name=report_snapshot["name"],
@@ -1153,37 +1354,111 @@ def _share_to_target(
       target_session.add(shared_report)
       target_session.flush()
 
-      # Cross-graph share: source-graph structure_id references rows in
-      # the source tenant schema and is meaningless in the target.
-      # Target Networks aren't populated per-structure on share; instead
-      # every shared fact is stamped against a single cross-graph FactSet
-      # that back-references the shared report, with a period envelope
-      # spanning all incoming facts.
-      starts = [
-        fd["period_start"] for fd in source_facts if fd.get("period_start") is not None
-      ]
-      ends = [
-        fd["period_end"] for fd in source_facts if fd.get("period_end") is not None
-      ]
+      # The holon crosses with the rows. Needs the flushed id, since the
+      # recipient's bundle keys are scoped by their own report id.
+      _copy_publication_artifacts(
+        publication_artifacts or {},
+        target_graph_id,
+        shared_report,
+        int(report_snapshot.get("generation_count") or 0),
+      )
+
+      # A Structure id crosses the graph boundary only if it resolves on the
+      # far side. Library-seeded structures do: `provision_tenant_schema`
+      # copies the canonical library into every tenant schema, and library
+      # ids are deterministic UUID5 over the taxonomy source — so the
+      # sender's "rs-gaap — Balance Sheet — Classified" *is* the recipient's,
+      # same id, same presentation arcs, no copying required. Tenant-local
+      # structures (`struct_*` ULIDs — a custom disclosure, a bespoke
+      # schedule) do not resolve, and their facts fall back to a single
+      # structure-less set below: delivered and queryable, but not
+      # renderable as a statement until the holon import half can recreate
+      # the structure itself in the recipient.
+      candidate_structure_ids = {
+        fs["structure_id"] for fs in source_fact_sets if fs.get("structure_id")
+      }
+      resolvable_structure_ids: set[str] = set()
+      if candidate_structure_ids:
+        resolvable_structure_ids = {
+          row[0]
+          for row in target_session.execute(
+            text("SELECT id FROM structures WHERE id = ANY(:ids)"),
+            {"ids": list(candidate_structure_ids)},
+          ).fetchall()
+        }
+
+      facts_by_source_set: dict[str, list[dict[str, Any]]] = {}
+      for fact_data in source_facts:
+        facts_by_source_set.setdefault(fact_data["fact_set_id"], []).append(fact_data)
+
       # The originating ledger is not present in the target graph, so the
       # shared facts collapse to `asserted` provenance referencing the
       # source graph/report rather than a re-derivable pivot.
-      shared_fact_set = create_fact_set(
-        target_session,
-        structure_id=None,
-        period_start=min(starts) if starts else None,
-        period_end=max(ends) if ends else None,
-        factset_type="report",
-        entity_id=source_facts[0]["entity_id"] if source_facts else "",
-        report_id=shared_report.id,
-        created_by=shared_by,
-        provenance=AssertedProvenance(
+      def _provenance(source_fact_set_id: str | None) -> AssertedProvenance:
+        basis = f"source_graph={source_graph_id} source_report={report_snapshot['id']}"
+        if source_fact_set_id is not None:
+          basis = f"{basis} source_fact_set={source_fact_set_id}"
+        return AssertedProvenance(
           source_system="cross_graph_share",
           asserted_by=shared_by,
-          basis_note=f"source_graph={source_graph_id} source_report={report_snapshot['id']}",
-        ),
-      )
-      target_session.flush()
+          basis_note=basis,
+        )
+
+      # One target FactSet per source FactSet whose Structure resolves; the
+      # remainder pool into one structure-less set so nothing is dropped.
+      target_set_for_source: dict[str, str] = {}
+      unresolved_facts: list[dict[str, Any]] = []
+      for source_set in source_fact_sets:
+        source_set_id = source_set["id"]
+        set_facts = facts_by_source_set.get(source_set_id, [])
+        if not set_facts:
+          continue
+        structure_id = source_set.get("structure_id")
+        if not structure_id or structure_id not in resolvable_structure_ids:
+          unresolved_facts.extend(set_facts)
+          continue
+        copied_set = create_fact_set(
+          target_session,
+          structure_id=structure_id,
+          period_start=source_set["period_start"],
+          period_end=source_set["period_end"],
+          factset_type=source_set["factset_type"],
+          entity_id=source_set["entity_id"],
+          report_id=shared_report.id,
+          created_by=shared_by,
+          provenance=_provenance(source_set_id),
+        )
+        target_session.flush()
+        target_set_for_source[source_set_id] = str(copied_set.id)
+
+      catch_all_set_id: str | None = None
+      if unresolved_facts:
+        starts = [
+          fd["period_start"]
+          for fd in unresolved_facts
+          if fd.get("period_start") is not None
+        ]
+        ends = [
+          fd["period_end"]
+          for fd in unresolved_facts
+          if fd.get("period_end") is not None
+        ]
+        # `facts.period_end` is NOT NULL on both sides, so `ends` is non-empty
+        # whenever `unresolved_facts` is — no fallback, which would only be
+        # able to supply the NULL that `fact_sets.period_end` rejects.
+        catch_all_set = create_fact_set(
+          target_session,
+          structure_id=None,
+          period_start=min(starts) if starts else None,
+          period_end=max(ends),
+          factset_type="report",
+          entity_id=unresolved_facts[0]["entity_id"],
+          report_id=shared_report.id,
+          created_by=shared_by,
+          provenance=_provenance(None),
+        )
+        target_session.flush()
+        catch_all_set_id = str(catch_all_set.id)
 
       # The concepts have to land before the facts that cite them. A fact
       # whose element_id resolves nowhere is not a partial delivery — it
@@ -1199,6 +1474,11 @@ def _share_to_target(
       )
 
       for fact_data in source_facts:
+        target_set_id = target_set_for_source.get(
+          fact_data["fact_set_id"], catch_all_set_id
+        )
+        if target_set_id is None:
+          continue
         rf = Fact(
           element_id=fact_data["element_id"],
           value=fact_data["value"],
@@ -1212,7 +1492,7 @@ def _share_to_target(
           period_type=fact_data["period_type"],
           unit=fact_data["unit"],
           entity_id=fact_data["entity_id"],
-          fact_set_id=shared_fact_set.id,
+          fact_set_id=target_set_id,
         )
         target_session.add(rf)
 
@@ -1220,11 +1500,16 @@ def _share_to_target(
 
       target_session.commit()
 
-      return ShareResultItem(
-        target_graph_id=target_graph_id,
-        status="shared",
-        fact_count=len(source_facts),
-      )
+    # After the commit, and only for the ids the replace actually removed — the
+    # new copy has a fresh report id, so its own artifacts are under a
+    # different prefix and cannot be caught by this.
+    delete_report_artifacts(target_graph_id, replaced_copy_ids)
+
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="shared",
+      fact_count=len(source_facts),
+    )
 
   except Exception as e:
     # The detail stays in the log, not in the response: this exception was
