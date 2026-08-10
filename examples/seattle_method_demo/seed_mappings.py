@@ -73,12 +73,12 @@ def _build_qname_lookup_by_taxonomy(
     page = client.list_elements(
       graph_id, taxonomy_id=taxonomy_id, limit=page_size, offset=offset
     )
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        out[e["qname"]] = e["id"]
+      if e.qname:
+        out[e.qname] = e.id
     if len(items) < page_size:
       break
     offset += page_size
@@ -99,12 +99,12 @@ def _build_qname_lookup(
     page = client.list_elements(
       graph_id, source=source, limit=page_size, offset=offset
     )
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        out[e["qname"]] = e["id"]
+      if e.qname:
+        out[e.qname] = e.id
     if len(items) < page_size:
       break
     offset += page_size
@@ -125,9 +125,9 @@ def _find_mapping_structure(client, graph_id: str) -> str:
     )
   # Prefer the mini mapping structure when the graph carries several.
   for s in structures:
-    if "mini" in (s.get("name") or "").lower():
-      return s["id"]
-  return structures[0]["id"]
+    if "mini" in (s.name or "").lower():
+      return s.id
+  return structures[0].id
 
 
 def seed_mappings(graph_id: str, dry_run: bool = False) -> tuple[int, list[str]]:

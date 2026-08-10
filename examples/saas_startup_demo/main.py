@@ -74,9 +74,17 @@ FORECAST_LEVERS = {
 }
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+  """Run the episode. ``argv`` defaults to ``sys.argv`` inside ``run_demo``.
+
+  It is a parameter so another demo can provision this company as a
+  dependency — ``examples/roboinvestor_demo`` needs a real issuer with a
+  filed report to share — without that demo's own flags leaking in as
+  scenario flags.
+  """
   run_demo(
     scenario=SCENARIO,
+    argv=argv,
     agents=AGENTS,
     mappings_for=mappings_for,
     documents=DOCUMENTS,

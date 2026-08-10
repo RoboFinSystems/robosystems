@@ -668,12 +668,12 @@ def create_mappings(
   offset = 0
   while True:
     page = client.list_elements(graph_id, source="rs-gaap", limit=1000, offset=offset)
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        rs_gaap_by_qname[e["qname"]] = e["id"]
+      if e.qname:
+        rs_gaap_by_qname[e.qname] = e.id
     if len(items) < 1000:
       break
     offset += 1000
@@ -1026,25 +1026,19 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   # Pull the package to confirm it rehydrates
   package = client.get_report_package(graph_id, report_id)
   if package:
-    items = package.get("items", []) or []
+    items = package.items or []
     # `block_type` lives nested at item.block.block_type on the rehydrated
     # InformationBlockEnvelope; reading item.block_type directly finds nothing
     # and silently renders "?" for every item.
-    block_names = [
-      (i.get("block") or {}).get("name")
-      or (i.get("block") or {}).get("block_type")
-      or "?"
-      for i in items
-    ]
+    block_names = [i.block.name or i.block.block_type or "?" for i in items]
     print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
 
     # Fact provenance — every FactSet records how its facts were
     # constructed (the auditability spine). Surfaced via the SDK on
-    # block.fact_set.provenance; report blocks pivot from the posted ledger.
+    # block.fact_set.provenance; report blocks pivot from the posted
+    # ledger. `provenance` is a JSON scalar, so it stays a dict.
     origins = [
-      (((i.get("block") or {}).get("fact_set") or {}).get("provenance") or {}).get(
-        "origin"
-      )
+      ((i.block.fact_set.provenance or {}).get("origin") if i.block.fact_set else None)
       for i in items
     ]
     if origins and all(origins):

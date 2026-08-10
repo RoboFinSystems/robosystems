@@ -283,12 +283,12 @@ def _build_qname_to_element_id_map(client, graph_id: str) -> dict[str, str]:
     page = client.list_elements(
       graph_id, taxonomy_id=taxonomy_id, limit=page_size, offset=offset
     )
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        out[e["qname"]] = e["id"]
+      if e.qname:
+        out[e.qname] = e.id
     if len(items) < page_size:
       break
     offset += page_size

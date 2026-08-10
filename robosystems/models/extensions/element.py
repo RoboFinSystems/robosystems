@@ -109,7 +109,12 @@ class Element(ExtensionsBase):
       # 'rs-metric' — the metric catalog package (seeded at 0002 on fresh
       # databases, backfilled by 0022 on existing ones).
       # 'rs-driver' — the forecast lever catalog package (seeded at 0024).
-      "'cm', 'rs-metric', 'rs-driver')",
+      # 'linked' — a concept that arrived with a report shared from another
+      # graph. Deliberately NOT in COA_SOURCES: the sender's reporting
+      # extension has to exist here for their facts to mean anything, but
+      # their revenue accounts are not the recipient's chart of accounts.
+      # Mirrors Entity.source='linked' for the same reason.
+      "'cm', 'rs-metric', 'rs-driver', 'linked')",
       name="check_element_source",
     ),
   )

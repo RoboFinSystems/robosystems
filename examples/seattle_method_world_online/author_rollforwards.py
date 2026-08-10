@@ -90,12 +90,12 @@ def _build_known_mini_qname_set(client, graph_id: str) -> set[str]:
     page = client.list_elements(
       graph_id, taxonomy_id=taxonomy_id, limit=page_size, offset=offset
     )
-    items = (page or {}).get("elements", [])
+    items = page.elements if page else []
     if not items:
       break
     for e in items:
-      if e.get("qname"):
-        known.add(e["qname"])
+      if e.qname:
+        known.add(e.qname)
     if len(items) < page_size:
       break
     offset += page_size

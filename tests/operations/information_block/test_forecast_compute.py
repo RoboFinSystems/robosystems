@@ -1182,6 +1182,42 @@ class TestStaleTailInvalidation:
     assert vr[0] in deleted
     assert stale[0] in deleted and stale[1] in deleted
 
+  def test_the_lever_set_is_never_swept(self) -> None:
+    """The authored levers must survive a run shorter than the horizon.
+
+    The lever FactSet carries the same ``scenario_id`` as the computed
+    months but is authored at create time, and its envelope spans the full
+    horizon — so a ``months=horizon-1`` probe (or any shorter re-run) used
+    to delete the very assertions the next ``compute-forecast`` reads,
+    leaving the block answering "has no lever FactSet — the block is
+    corrupt" forever after.
+    """
+    from datetime import date
+
+    session = self._session_with([])
+    fc._invalidate_stale_tail(
+      session,
+      scenario_id="struct_budget",
+      entity_id="ent_1",
+      through_period_end=date(2026, 9, 30),
+    )
+
+    predicate = " ".join(
+      str(
+        session.execute.call_args_list[0]
+        .args[0]
+        .whereclause.compile(compile_kwargs={"literal_binds": True})
+      ).split()
+    )
+    # The lever set is identified in `_load_lever_fact_set` by structure_id
+    # == scenario and factset_type == 'custom'; the sweep has to negate that
+    # same pair, or it deletes it.
+    assert "NOT" in predicate, f"sweep has no exclusion at all: {predicate}"
+    assert "structure_id" in predicate and "'custom'" in predicate, (
+      "the sweep must exclude the authored lever set by the pair that "
+      f"identifies it; predicate was: {predicate}"
+    )
+
   def test_no_tail_is_a_no_op(self) -> None:
     from datetime import date
 
