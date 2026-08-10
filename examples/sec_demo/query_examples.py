@@ -44,7 +44,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples._common.config import get_graph_id
 
-DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
+DEFAULT_CREDENTIALS_FILE = (
+  Path(__file__).resolve().parents[2] / ".local" / "config.json"
+)
 DEMO_NAME = "sec"
 
 
@@ -390,21 +392,29 @@ def run_and_display(
   name: str,
   query: str,
   description: str | None = None,
-) -> None:
+) -> bool:
+  """Run one query and render it. Returns False if the query errored.
+
+  An empty result is not a failure — a preset can legitimately match nothing
+  in a narrow load — but an exception is, and the caller needs it so the run
+  can exit non-zero instead of reporting success over a wall of errors.
+  """
   print_info_section(name, subtitle=description)
 
   try:
     result = execute_query(client, graph_id, query)
     if not result["data"]:
       print_warning("No rows returned.")
-      return
+      return True
     print_table(
       result["data"],
       title=name,
       row_count_label=f"Rows returned (execution {result['execution_time_ms']:.1f} ms)",
     )
+    return True
   except Exception as exc:
     print_error(f"Query failed: {exc}")
+    return False
 
 
 def execute_search(
@@ -431,15 +441,19 @@ def execute_search(
   )
   hits = []
   for hit in getattr(response, "hits", []):
-    hits.append({
-      "score": f"{getattr(hit, 'score', 0):.3f}",
-      "entity": getattr(hit, "entity_ticker", "") or "",
-      "form": getattr(hit, "form_type", "") or "",
-      "section": getattr(hit, "section_label", "") or getattr(hit, "element_qname", "") or "",
-      "source": getattr(hit, "source_type", "") or "",
-      "filing_date": getattr(hit, "filing_date", "") or "",
-      "snippet": (getattr(hit, "snippet", "") or "")[:120],
-    })
+    hits.append(
+      {
+        "score": f"{getattr(hit, 'score', 0):.3f}",
+        "entity": getattr(hit, "entity_ticker", "") or "",
+        "form": getattr(hit, "form_type", "") or "",
+        "section": getattr(hit, "section_label", "")
+        or getattr(hit, "element_qname", "")
+        or "",
+        "source": getattr(hit, "source_type", "") or "",
+        "filing_date": getattr(hit, "filing_date", "") or "",
+        "snippet": (getattr(hit, "snippet", "") or "")[:120],
+      }
+    )
   return {
     "total": getattr(response, "total", 0),
     "hits": hits,
@@ -452,52 +466,57 @@ def run_search_and_display(
   name: str,
   params: dict,
   description: str | None = None,
-) -> None:
-  """Run a document search and display results."""
+) -> bool:
+  """Run a document search and display results. False if the search errored."""
   print_info_section(name, subtitle=description)
 
   try:
     result = execute_search(client, graph_id, **params)
     if not result["hits"]:
       print_warning("No search results.")
-      return
+      return True
     print_table(
       result["hits"],
       title=name,
       row_count_label=f"{result['total']} total matches",
     )
+    return True
   except Exception as exc:
     print_error(f"Search failed: {exc}")
+    return False
 
 
-def run_presets(
-  client: RoboSystemsClients, graph_id: str, presets: list[str]
-) -> None:
+def run_presets(client: RoboSystemsClients, graph_id: str, presets: list[str]) -> int:
+  """Run each preset, returning the number that failed."""
+  failures = 0
   for preset in presets:
     # Check graph query presets first, then search presets
     details = PRESET_QUERIES.get(preset)
     if details:
-      run_and_display(
+      if not run_and_display(
         client,
         graph_id,
         name=f"Preset: {preset}",
         query=details["query"],
         description=details.get("description"),
-      )
+      ):
+        failures += 1
       continue
 
     search_details = SEARCH_PRESETS.get(preset)
     if search_details:
-      run_search_and_display(
+      if not run_search_and_display(
         client,
         graph_id,
         name=f"Search: {preset}",
         params=search_details["params"],
         description=search_details.get("description"),
-      )
+      ):
+        failures += 1
       continue
 
     print_warning(f"Unknown preset: {preset}")
+  return failures
 
 
 def interactive_mode(client: RoboSystemsClients, graph_id: str) -> None:
@@ -644,7 +663,7 @@ def main() -> None:
   client = build_client(api_key, args.base_url)
 
   if args.search:
-    run_search_and_display(
+    ok = run_search_and_display(
       client,
       graph_id,
       name="Search",
@@ -655,22 +674,27 @@ def main() -> None:
         "section": args.section,
       },
     )
-    return
+    sys.exit(0 if ok else 1)
 
   if args.query:
-    run_and_display(client, graph_id, "Custom Query", args.query)
-    return
+    sys.exit(0 if run_and_display(client, graph_id, "Custom Query", args.query) else 1)
 
   if args.preset:
-    run_presets(client, graph_id, [args.preset])
-    return
+    _exit_on_failures(run_presets(client, graph_id, [args.preset]))
 
   if args.all:
-    run_presets(client, graph_id, list(PRESET_QUERIES))
-    run_presets(client, graph_id, list(SEARCH_PRESETS))
-    return
+    failures = run_presets(client, graph_id, list(PRESET_QUERIES))
+    failures += run_presets(client, graph_id, list(SEARCH_PRESETS))
+    _exit_on_failures(failures)
 
   interactive_mode(client, graph_id)
+
+
+def _exit_on_failures(failures: int) -> None:
+  if failures:
+    print_error(f"{failures} query/queries failed.")
+    sys.exit(1)
+  sys.exit(0)
 
 
 if __name__ == "__main__":

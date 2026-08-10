@@ -143,7 +143,16 @@ async def list_operators_endpoint(
   "/operator",
   response_model=OperatorResponse,
   summary="Auto-select Operator for Query",
-  description="Routes to the best operator for your query. Operators: `financial` (SEC, accounting), `research` (deep analysis), `rag` (knowledge base, free). Credit cost by mode: `quick` 5-10, `standard` 15-25, `extended` 30-75. Execution strategy (sync/SSE/async) auto-selected; override with `?mode=sync|async`.",
+  description=(
+    "Routes to the best operator for your query. Operators: `cypher` "
+    "(answers natural-language questions by querying the graph; supports "
+    "`quick`, `standard`, `extended`) and `mapping` (autonomous Chart of "
+    "Accounts → rs-gaap mapping; roboledger graphs only, `extended` only). "
+    "`GET /v1/graphs/{graph_id}/operator` lists what is registered. Credits "
+    "are consumed by actual token usage, not a fixed price per mode. "
+    "Execution strategy (sync/SSE/async) auto-selected; override with "
+    "`?mode=sync|async`."
+  ),
   operation_id="autoSelectOperator",
   responses={
     **RESOURCE_ERROR_RESPONSES,
@@ -304,7 +313,13 @@ async def get_operator_metadata(
   "/operator/{operator_type}",
   response_model=OperatorResponse,
   summary="Execute Specific Operator",
-  description="Available: `financial` (SEC filings, accounting), `research` (deep analysis), `rag` (retrieval, no credits). Execution strategy auto-selected; override with `?mode=sync|async`.",
+  description=(
+    "Available: `cypher` (natural-language questions answered by querying the "
+    "graph; RAG retrieval is one of its capabilities, not a separate operator) "
+    "and `mapping` (Chart of Accounts → rs-gaap mapping, roboledger graphs "
+    "only). `GET /v1/graphs/{graph_id}/operator` lists what is registered. "
+    "Execution strategy auto-selected; override with `?mode=sync|async`."
+  ),
   operation_id="executeSpecificOperator",
   responses={
     **RESOURCE_ERROR_RESPONSES,

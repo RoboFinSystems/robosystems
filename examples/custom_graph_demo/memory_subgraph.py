@@ -3,15 +3,23 @@
 Memory Subgraph Demo
 
 Creates a `knowledge` subgraph within an existing parent graph and exercises
-the two complementary memory modalities that share it:
+the two complementary memory modalities:
 
-  1. Structured knowledge graph — seeds Concept / Observation / Session nodes
-     via Cypher and traverses them with exact graph queries.
-  2. Semantic memory — stores free-text memories with `remember` and retrieves
-     them by meaning (local vector embeddings) with `recall` / `list-memories`.
+  1. Structured knowledge graph (on the subgraph) — seeds Concept /
+     Observation / Session nodes via Cypher and traverses them with exact
+     graph queries.
+  2. Semantic memory (on the parent graph) — stores free-text memories with
+     `remember` and retrieves them by meaning (local vector embeddings) with
+     `recall` / `list-memories`.
 
 Together these show the AI-memory read split: query (exact graph traversal)
-vs. search (ranked semantic recall), both scoped to the same subgraph.
+vs. search (ranked semantic recall).
+
+The two sit at different scopes on purpose. A subgraph exists to be cheap to
+create and throw away and is written to directly, so the API refuses semantic
+memory there (403) rather than maintain a second vector store in step with the
+parent's. Structured knowledge belongs in the subgraph; recall belongs on the
+parent.
 
 The `knowledge` schema extension provides the structured starter schema;
 semantic memory is backed by a per-graph vector store.
@@ -518,12 +526,20 @@ def _envelope_result(parsed) -> dict:
   return result if isinstance(result, dict) else {}
 
 
-def seed_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> None:
+def seed_semantic_memories(client: AuthenticatedClient, graph_id: str) -> int:
   """Store free-text memories via the `remember` content operation.
 
   Unlike the structured Concept/Observation graph above, these are embedded
   locally into a per-graph vector store and retrieved by meaning, not by
   exact key or traversal.
+
+  This runs against the **parent** graph, not the subgraph: semantic memory is
+  per-database storage on the parent's instance, and the API refuses it on a
+  subgraph with a 403 rather than keep a second store in step for no gain.
+  The two modalities therefore live at different scopes — structured knowledge
+  in the subgraph, semantic recall on the parent.
+
+  Returns the number of memories that failed to store.
   """
   print("\n" + "=" * 70)
   print("🧠 Semantic Memory — remember (vector store)")
@@ -552,6 +568,7 @@ def seed_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> Non
     },
   ]
 
+  failures = 0
   for mem in memories:
     body = RememberOp(
       text=mem["text"],
@@ -559,7 +576,7 @@ def seed_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> Non
       memory_type=mem["memory_type"],
       tags=mem["tags"],
     )
-    response = api_remember(graph_id=subgraph_id, client=client, body=body)
+    response = api_remember(graph_id=graph_id, client=client, body=body)
     if response.status_code in (200, 202):
       result = _envelope_result(response.parsed)
       mem_id = result.get("id", "?") if isinstance(result, dict) else "?"
@@ -568,10 +585,17 @@ def seed_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> Non
       print(f"   ❌ remember failed: {response.status_code}")
       if response.content:
         print(f"      {response.content.decode()[:200]}")
+      failures += 1
+  return failures
 
 
-def recall_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> None:
-  """Retrieve memories by meaning (`recall`) and enumerate them (`list-memories`)."""
+def recall_semantic_memories(client: AuthenticatedClient, graph_id: str) -> int:
+  """Retrieve memories by meaning (`recall`) and enumerate them (`list-memories`).
+
+  Runs against the parent graph — see ``seed_semantic_memories``. Returns the
+  number of recall queries that returned no hits or errored, so a silently
+  empty vector store fails the demo instead of printing "(no matches)".
+  """
   print("\n" + "=" * 70)
   print("🔎 Semantic Memory — recall (ranked by meaning)")
   print("=" * 70)
@@ -581,14 +605,16 @@ def recall_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> N
     "How does the user like to write queries?",
   ]
 
+  failures = 0
   for query in queries:
     print(f"\n   🔍 recall: {query!r}")
     body = MemoryRecallRequest(query=query, k=3)
-    response = api_recall_memory(graph_id=subgraph_id, client=client, body=body)
+    response = api_recall_memory(graph_id=graph_id, client=client, body=body)
     if response.status_code != 200:
       print(f"      ❌ recall failed: {response.status_code}")
       if response.content:
         print(f"      {response.content.decode()[:200]}")
+      failures += 1
       continue
 
     parsed = response.parsed
@@ -596,7 +622,8 @@ def recall_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> N
     if hits is None and isinstance(parsed, dict):
       hits = parsed.get("hits", [])
     if not hits:
-      print("      (no matches)")
+      print("      ❌ (no matches — the seeded memories should have ranked here)")
+      failures += 1
       continue
     for hit in hits:
       score = getattr(hit, "score", None)
@@ -607,12 +634,12 @@ def recall_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> N
       score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "?"
       print(f"      [{score_str}] {str(snippet)[:80]}…")
 
-  # Governance view: enumerate every memory stored on the subgraph.
+  # Governance view: enumerate every memory stored on the parent graph.
   print("\n   📋 list-memories (governance enumeration)")
-  response = api_list_memories(graph_id=subgraph_id, client=client, limit=100)
+  response = api_list_memories(graph_id=graph_id, client=client, limit=100)
   if response.status_code != 200:
     print(f"      ⚠️  list-memories failed: {response.status_code}")
-    return
+    return failures + 1
   parsed = response.parsed
   total = getattr(parsed, "total", None)
   records = getattr(parsed, "memories", None)
@@ -627,6 +654,8 @@ def recall_semantic_memories(client: AuthenticatedClient, subgraph_id: str) -> N
       mem_type = rec.get("memory_type", "?")
       text = rec.get("text", "")
     print(f"      • [{mem_type}] {str(text)[:70]}…")
+
+  return failures
 
 
 def main():
@@ -678,19 +707,29 @@ def main():
   verify_memory_graph(client, subgraph_id)
 
   # --- Modality 2: semantic memory (ranked vector recall) ---
-  seed_semantic_memories(client, subgraph_id)
-  recall_semantic_memories(client, subgraph_id)
+  # Scoped to the parent graph: the API refuses semantic memory on subgraphs.
+  failures = seed_semantic_memories(client, graph_id)
+  failures += recall_semantic_memories(client, graph_id)
+
+  if failures:
+    print("\n" + "=" * 70)
+    print(
+      f"❌ Memory Subgraph Demo failed — {failures} semantic-memory step(s) failed."
+    )
+    print("=" * 70 + "\n")
+    sys.exit(1)
 
   print("\n" + "=" * 70)
   print("✅ Memory Subgraph Demo Complete!")
   print("=" * 70)
   print(f"\nParent Graph: {graph_id}")
   print(f"Knowledge Subgraph: {subgraph_id}")
-  print("\n💡 This subgraph now holds both memory modalities:")
+  print("\n💡 The two memory modalities live at different scopes:")
   print(
-    '   • Structured graph  → uv run query_graph.py --query "MATCH (c:Concept) RETURN c.name"'
+    "   • Structured graph (subgraph) → uv run query_graph.py "
+    '--query "MATCH (c:Concept) RETURN c.name"'
   )
-  print(f"   • Semantic recall   → POST /v1/graphs/{subgraph_id}/memory/recall")
+  print(f"   • Semantic recall (parent)    → POST /v1/graphs/{graph_id}/memory/recall")
   print("=" * 70 + "\n")
 
 

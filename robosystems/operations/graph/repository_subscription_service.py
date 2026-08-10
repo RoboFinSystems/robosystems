@@ -52,6 +52,31 @@ def get_available_plans_for_repository(
   return list(manifest.plans.keys())
 
 
+def _invalidate_graph_access_cache(user_id: str, repository_name: str) -> None:
+  """Drop the cached API-key access decision for a repository.
+
+  ``validate_api_key_with_graph`` caches the allow/deny answer per API key and
+  graph, so a denial recorded before the subscription existed outlives the
+  grant for the whole TTL: the subscriber pays and is refused with a 403 until
+  it expires. The grant and revoke paths are the only moments the answer can
+  change, so both clear it here.
+
+  Best-effort by design — the cache repopulates from the database on the next
+  request, so a Redis failure costs a stale entry, not a broken grant, and must
+  not fail the provisioning that already committed.
+  """
+  try:
+    import importlib
+
+    cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+    cache_module.api_key_cache.invalidate_user_graph_access(user_id, repository_name)
+  except Exception as e:
+    logger.warning(
+      f"Failed to invalidate graph access cache for user {user_id}, "
+      f"repository {repository_name}: {e}"
+    )
+
+
 class RepositorySubscriptionService:
   """Service for managing shared repository subscriptions and access."""
 
@@ -381,6 +406,7 @@ class RepositorySubscriptionService:
         existing.updated_at = datetime.now(UTC)
         self.session.commit()
         logger.info(f"Reactivated access for user {user_id}")
+        _invalidate_graph_access_cache(user_id, repository_type.value)
       return True
 
     if repository_plan is None:
@@ -418,6 +444,8 @@ class RepositorySubscriptionService:
       f"plan {repository_plan}"
     )
 
+    _invalidate_graph_access_cache(user_id, repository_type.value)
+
     return True
 
   def revoke_access(
@@ -445,5 +473,7 @@ class RepositorySubscriptionService:
     logger.info(
       f"Revoked access for user {user_id}, repository {repository_type.value}"
     )
+
+    _invalidate_graph_access_cache(user_id, repository_type.value)
 
     return True

@@ -35,6 +35,50 @@ def _key_scope_allows(key_graph_id: str | None, requested_graph_id: str) -> bool
   )
 
 
+def _serialize_user_for_api_key_cache(user: User, key_record: UserAPIKey) -> dict:
+  """Serialize the user fields the API-key cache-hit path rebuilds a `User` from.
+
+  Every field a consumer reads off the reconstructed `User` must be here. A
+  column omitted from this payload comes back as ``None`` rather than its
+  declared default, because SQLAlchemy applies column defaults on insert and a
+  cache-built `User` is never flushed — so a non-optional response field reading
+  it fails validation only on a warm cache. Keep this the single definition so
+  the next field added cannot be dropped from one call site out of four.
+  """
+  return {
+    "id": user.id,
+    "name": user.name,
+    "email": user.email,
+    "email_verified": bool(user.email_verified),
+    "is_active": user.is_active,
+    "key_graph_id": key_record.graph_id,
+  }
+
+
+def _cached_user_payload_is_complete(user_data: dict) -> bool:
+  """Whether a cached payload carries every field the rebuilt `User` needs.
+
+  Entries written before a field joined the payload are treated as stale so the
+  caller falls back to the database and re-caches. Defaulting the missing field
+  instead would be worse than the crash it replaces: `email_verified` would read
+  False for a verified user, silently downgrading an authorization input rather
+  than failing loudly. The fallback costs one DB read per stale entry, once.
+  """
+  return bool(user_data.get("id")) and "email_verified" in user_data
+
+
+def _hydrate_user_from_cache(user: User, user_data: dict) -> None:
+  """Populate a bare `User` from a complete cached payload.
+
+  Callers must gate on ``_cached_user_payload_is_complete`` first.
+  """
+  user.id = user_data["id"]
+  user.name = user_data.get("name")
+  user.email = user_data.get("email")
+  user.email_verified = bool(user_data["email_verified"])
+  user.is_active = user_data.get("is_active", True)
+
+
 def _safe_cache_call(func_name: str, *args, **kwargs):
   """Safely call cache functions, handling None cache gracefully."""
   if api_key_cache is None:
@@ -71,7 +115,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       return None
 
     user_data = cached_data.get("user_data", {})
-    if user_data and user_data.get("id"):
+    if user_data and _cached_user_payload_is_complete(user_data):
       logger.debug(f"API key validation cache hit: {cache_key[:8]}...")
 
       # Graph-scoped keys are never valid without a graph context (least
@@ -83,10 +127,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
         return None
 
       user = User()
-      user.id = user_data["id"]
-      user.name = user_data.get("name")
-      user.email = user_data.get("email")
-      user.is_active = user_data.get("is_active", True)
+      _hydrate_user_from_cache(user, user_data)
 
       # Reject keys owned by a deactivated user, even when the key row and its
       # cache entry are still marked active. Deactivation invalidates the cache
@@ -130,13 +171,7 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       return None
 
     try:
-      user_data = {
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "is_active": user.is_active,
-        "key_graph_id": key_record.graph_id,
-      }
+      user_data = _serialize_user_for_api_key_cache(user, key_record)
       _safe_cache_call(
         "cache_api_key_validation", cache_key, user_data, is_active=key_record.is_active
       )
@@ -207,7 +242,7 @@ def validate_api_key_with_graph(
       return None
 
     user_data = cached_api_key.get("user_data", {})
-    if user_data and user_data.get("id"):
+    if user_data and _cached_user_payload_is_complete(user_data):
       logger.debug(
         f"API key + graph validation cache hit: {api_key_hash[:8]}... -> {graph_id}"
       )
@@ -227,10 +262,7 @@ def validate_api_key_with_graph(
         return None
 
       user = User()
-      user.id = user_data["id"]
-      user.name = user_data.get("name")
-      user.email = user_data.get("email")
-      user.is_active = user_data.get("is_active", True)
+      _hydrate_user_from_cache(user, user_data)
 
       # Reject keys owned by a deactivated user (see validate_api_key).
       if not user.is_active:
@@ -280,13 +312,7 @@ def validate_api_key_with_graph(
         f"API key rejected: scoped to another graph: {api_key_hash[:8]}... -> {graph_id}"
       )
       try:
-        user_data = {
-          "id": user.id,
-          "name": user.name,
-          "email": user.email,
-          "is_active": user.is_active,
-          "key_graph_id": key_record.graph_id,
-        }
+        user_data = _serialize_user_for_api_key_cache(user, key_record)
         _safe_cache_call(
           "cache_api_key_validation",
           api_key_hash,
@@ -325,13 +351,7 @@ def validate_api_key_with_graph(
     if not has_access:
       # Key is valid; only the graph decision is negative. Cache both.
       try:
-        user_data = {
-          "id": user.id,
-          "name": user.name,
-          "email": user.email,
-          "is_active": user.is_active,
-          "key_graph_id": key_record.graph_id,
-        }
+        user_data = _serialize_user_for_api_key_cache(user, key_record)
         _safe_cache_call(
           "cache_api_key_validation",
           api_key_hash,
@@ -346,13 +366,7 @@ def validate_api_key_with_graph(
     key_record.update_last_used(sess)
 
     try:
-      user_data = {
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "is_active": user.is_active,
-        "key_graph_id": key_record.graph_id,
-      }
+      user_data = _serialize_user_for_api_key_cache(user, key_record)
       _safe_cache_call(
         "cache_api_key_validation",
         api_key_hash,

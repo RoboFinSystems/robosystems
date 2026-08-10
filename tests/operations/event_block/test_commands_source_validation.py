@@ -129,6 +129,10 @@ class TestCreateEventBlockSourceGate:
     )
     added: list = []
     session.add.side_effect = lambda obj: added.append(obj)
+    # No prior event with this (source, external_id). A bare MagicMock would
+    # return a truthy row from the duplicate probe and trip the conflict guard,
+    # which this test is not about.
+    session.query.return_value.filter.return_value.first.return_value = None
 
     def fake_flush():
       for obj in added:

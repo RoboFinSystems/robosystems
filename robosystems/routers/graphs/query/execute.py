@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from robosystems.config.graph_tier import GraphTier
 from robosystems.database import get_db_session
+from robosystems.graph_api.client.exceptions import GraphTransientError
 from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
@@ -775,7 +776,14 @@ async def execute_cypher_query(
     )
 
   except HTTPException as exc:
-    if exc.status_code >= 500:
+    # 503 is deliberate backpressure (admission control, rebuilding, full
+    # queue), not a fault of the graph. Counting it as a breaker failure turns
+    # a resource ceiling into an outage: the rejections trip the breaker and
+    # every subsequent query fails even once the pressure clears.
+    if (
+      exc.status_code >= 500
+      and exc.status_code != http_status.HTTP_503_SERVICE_UNAVAILABLE
+    ):
       circuit_breaker.record_failure(graph_id, "cypher_query")
     record_shared_query_outcome(
       graph_id,
@@ -795,6 +803,48 @@ async def execute_cypher_query(
       source="query_cypher",
     )
     raise
+
+  except GraphTransientError as e:
+    # The Graph API rejected the request rather than failing it — admission
+    # control (memory/CPU/connection headroom), a 502/504, or its own client
+    # breaker already being open. Surface the reason as 503 + Retry-After so
+    # the caller can back off, and do not record a breaker failure: the graph
+    # is healthy, just at capacity.
+    retry_after = 30
+    logger.warning(f"Graph API unavailable for {graph_id}: {e}")
+    record_shared_query_outcome(
+      graph_id,
+      current_user.id,
+      status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+      api_key_prefix=key_prefix,
+      endpoint="/v1/graphs/{graph_id}/query/cypher",
+      source="query_cypher",
+    )
+    log_shared_query_end(
+      exec_id,
+      graph_id,
+      current_user.id,
+      outcome="http_503",
+      duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+      api_key_prefix=key_prefix,
+      source="query_cypher",
+    )
+    get_endpoint_metrics().record_business_event(
+      endpoint="/v1/graphs/{graph_id}/query",
+      method="POST",
+      event_type="query_admission_control_rejected",
+      event_data={
+        "graph_id": graph_id,
+        "query_length": len(request.query) if request else 0,
+        "error_message": str(e),
+      },
+      user_id=current_user.id if current_user else None,
+    )
+    raise HTTPException(
+      status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail=str(e),
+      headers={"Retry-After": str(retry_after)},
+    )
 
   except Exception as e:
     circuit_breaker.record_failure(graph_id, "cypher_query", error=e)

@@ -288,11 +288,23 @@ def step_ingest_transactions(graph_id: str, dry_run: bool = False) -> None:
   print("─" * 70)
   print(f"Step 5 — ingest 14 JEs → graph {graph_id}")
   print("─" * 70)
-  created, warnings = ingest_mod.ingest(graph_id, CSV_PATH, dry_run=dry_run)
+  created, warnings, failures = ingest_mod.ingest(graph_id, CSV_PATH, dry_run=dry_run)
   for w in warnings:
     print(f"  ⚠️  {w}")
   action = "Would create" if dry_run else "Created"
   print(f"  {action} {created} event(s)")
+
+  # Every downstream step reads these events, and this demo's whole claim is
+  # that it reconciles to Charlie's published figures to the cent. Reconciling
+  # a ledger that is missing entries would report a mismatch as a modelling
+  # difference when it is really a lost write.
+  if failures:
+    for f in failures:
+      print(f"  ✗ {f}")
+    raise SystemExit(
+      f"  Ingest incomplete — {len(failures)} of {len(failures) + created} "
+      "entr(y/ies) failed to post."
+    )
 
 
 def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:

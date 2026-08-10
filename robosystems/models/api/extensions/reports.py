@@ -537,7 +537,10 @@ class LiveFinancialStatementRequest(BaseModel):
   """Request for live-financial-statement (OLTP, entity graphs only)."""
 
   statement_type: str = Field(
-    ..., description="income_statement | balance_sheet | equity_statement"
+    ...,
+    description=(
+      "income_statement | balance_sheet | cash_flow_statement | equity_statement"
+    ),
   )
   period_start: date | None = Field(
     None, description="Explicit window start. Overrides period_type/fiscal_year."

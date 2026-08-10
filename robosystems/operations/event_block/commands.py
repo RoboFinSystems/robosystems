@@ -65,6 +65,25 @@ class InvalidEventTransitionError(Exception):
   pass
 
 
+class DuplicateEventError(Exception):
+  """Raised when (source, external_id) already names an event on this graph.
+
+  `idx_events_source_external` is the deduplication key for external
+  integrations: it is what makes re-delivering the same upstream record safe.
+  Without this check the insert reached the database and the IntegrityError
+  escaped as an opaque 500, so a connector retrying a delivery — or a demo
+  re-run — could not tell "already ingested" from a real fault, which is the
+  one distinction the index exists to provide.
+  """
+
+  def __init__(self, source: str, external_id: str) -> None:
+    super().__init__(
+      f"Event already exists for source={source} external_id={external_id}"
+    )
+    self.source = source
+    self.external_id = external_id
+
+
 # Valid outbound transitions from each status.
 # Terminal states (fulfilled, voided, superseded) have empty sets — no further
 # transitions allowed. `superseded` is reachable from any non-terminal state
@@ -96,6 +115,23 @@ def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
 # and external sources validate against the graph's registered Connections
 # instead: registering a connection is what opens a source name.
 _STATIC_EVENT_SOURCES = frozenset({"manual", "system", "schedule"})
+
+
+def _assert_not_duplicate(session: Session, body: CreateEventBlockRequest) -> None:
+  """Reject a re-post of an already-ingested (source, external_id) pair.
+
+  Mirrors the partial unique index, which only applies when external_id is
+  not null — events without one are not deduplicated and are skipped here too.
+  """
+  if not body.external_id:
+    return
+  existing = (
+    session.query(Event.id)
+    .filter(Event.source == body.source, Event.external_id == body.external_id)
+    .first()
+  )
+  if existing is not None:
+    raise DuplicateEventError(body.source, body.external_id)
 
 
 def _validate_event_source(source: str, graph_id: str) -> None:
@@ -195,6 +231,7 @@ def create_event_block(
   rolls back.
   """
   _validate_event_source(body.source, graph_id)
+  _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
     # 1. Python registry wins over DSL registry
@@ -220,8 +257,15 @@ def create_event_block(
       # Handler executes; errors roll back the whole unit of work.
       python_handler.dispatch(session, event, typed_metadata, created_by)
 
+      # Read the row into the envelope BEFORE committing. `commit()` expires
+      # every attribute on the instance, so a later `event.id` triggers a
+      # reload — and if that reload comes back empty the ORM raises
+      # ObjectDeletedError, which surfaces as a 500 for a write that already
+      # succeeded. That is the worst failure shape available: the caller is
+      # told the write failed, so a retry duplicates a committed event.
+      envelope = _to_envelope(event, body.dimension_ids)
       session.commit()
-      return _to_envelope(event, body.dimension_ids)
+      return envelope
 
     # 2. Fall through to the DSL registry
     agent_type = _resolve_agent_type(session, body.agent_id)
@@ -248,8 +292,10 @@ def create_event_block(
     # Fire handler — flushes Transaction + Entry + LineItems inside
     apply_handler(session, event, handler, created_by=created_by)
 
+    # Envelope before commit — see the python-handler path above.
+    envelope = _to_envelope(event, body.dimension_ids)
     session.commit()
-    return _to_envelope(event, body.dimension_ids)
+    return envelope
 
   # Capture-only path (apply_handlers=False)
   event = _build_event_row(body, created_by, status="captured")
@@ -262,8 +308,10 @@ def create_event_block(
       [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
     )
 
+  # Envelope before commit — see the python-handler path above.
+  envelope = _to_envelope(event, body.dimension_ids)
   session.commit()
-  return _to_envelope(event, body.dimension_ids)
+  return envelope
 
 
 def fire_handler_on_commit(
@@ -379,8 +427,11 @@ def update_event_block(
     # Errors propagate; the surrounding transaction rolls back.
     fire_handler_on_commit(session, event, created_by)
 
+  # Envelope before commit — see `create_event_block`. The dimension read has
+  # to happen here too: it reads `event.id`, which is expired by the commit.
+  envelope = _to_envelope(event, _load_dimension_ids(session, event.id))
   session.commit()
-  return _to_envelope(event, _load_dimension_ids(session, event.id))
+  return envelope
 
 
 def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
