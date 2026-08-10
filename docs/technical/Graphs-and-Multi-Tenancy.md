@@ -1,23 +1,57 @@
 # Graphs & Multi-Tenancy
 
-RoboSystems is multi-tenant at the graph layer: every customer dataset lives in its own isolated graph database keyed by a `graph_id`. This page explains the `graph_id` model, the available graph tiers, subgraphs, and the day-to-day tasks of creating, listing, and querying graphs.
+RoboSystems is multi-tenant at the graph layer: every customer dataset lives in its own isolated graph database keyed by a `graph_id`. This page explains the `graph_id` model, the three stores a tenant spans, the available graph tiers, subgraphs, and the day-to-day tasks of creating, listing, and querying graphs.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [The Three Stores](#the-three-stores)
+- [Prerequisites](#prerequisites)
+- [The `graph_id` Model and Per-Graph Isolation](#the-graph_id-model-and-per-graph-isolation)
+- [Who Can Reach a Graph: Orgs, Roles, and Subscriptions](#who-can-reach-a-graph-orgs-roles-and-subscriptions)
+- [Graph Tiers](#graph-tiers)
+- [Creating a Graph](#creating-a-graph)
+- [Schema Extensions and the Extensions Surface](#schema-extensions-and-the-extensions-surface)
+- [Listing and Inspecting Graphs](#listing-and-inspecting-graphs)
+- [Subgraphs](#subgraphs)
+- [Querying a Graph](#querying-a-graph)
+- [Crossing the Tenant Boundary](#crossing-the-tenant-boundary)
+- [Troubleshooting](#troubleshooting)
+- [Related Documentation](#related-documentation)
 
 ## Overview
 
-A **graph** in RoboSystems is a single, isolated LadybugDB database. Each graph has a unique identifier, `graph_id`, that scopes every request to exactly one tenant's data. There is no shared table space across tenants and no cross-tenant data access at the storage layer.
-
-Two stores work together:
-
-- **Platform metadata** (users, organizations, billing, the graph registry) lives in PostgreSQL.
-- **Business data** (entities, transactions, facts, custom nodes and relationships) lives in the LadybugDB graph itself.
+A **graph** in RoboSystems is a single, isolated LadybugDB database. Each graph has a unique identifier, `graph_id`, that scopes every request to exactly one tenant's data. There is no shared table space across tenants and no cross-tenant read access at the storage layer.
 
 The multi-tenancy model has a few load-bearing properties:
 
 1. **One graph = one isolated database.** Each graph is its own embedded LadybugDB database. No shared tables, no cross-tenant leakage at the data layer.
-2. **The `graph_id` is the tenant boundary.** Authentication and per-graph access are validated by FastAPI dependencies before any handler runs. The `graph_id` is always a URL path parameter, never a query argument.
-3. **Two kinds of graphs.** Customer/entity graphs hold your own data; **shared repositories** (such as `sec`) are platform-managed and read-only for everyone.
-4. **Tiers are dedicated instances.** A graph runs on a dedicated EC2 instance sized by tier. Subgraphs share that same instance and its resource budget.
-5. **Only AI operations consume credits.** Database operations (queries, ingestion, backups) are free. Subgraphs draw from their parent graph's credit pool.
+2. **The `graph_id` is the tenant boundary — in two stores, not one.** It names a LadybugDB database *and* a PostgreSQL schema in the extensions OLTP database. See [The Three Stores](#the-three-stores).
+3. **The `graph_id` is always a URL path parameter**, never a query argument or body field. Authentication and per-graph access are validated by FastAPI dependencies before any handler runs.
+4. **Two kinds of graphs.** Customer/entity graphs hold your own data; **shared repositories** (such as `sec`) are platform-managed and read-only for everyone.
+5. **Tiers are dedicated instances.** A graph runs on a dedicated EC2 instance sized by tier. Subgraphs share that same instance and its resource budget.
+6. **Only AI operations consume credits.** Database operations (queries, ingestion, backups) are free. Subgraphs draw from their parent graph's credit pool.
+7. **Every isolation primitive keys on `graph_id`** — caches, idempotency keys, rate-limit buckets, and credit pools all namespace on the graph (or the user), never on the organization.
+
+## The Three Stores
+
+A single tenant spans three stores, and knowing which one you are addressing determines both the transport you use and whether you may write. This is the most common source of confusion on the platform, so it is worth pinning down before anything else.
+
+| Store | Holds | Tenancy mechanism | You reach it through |
+| --- | --- | --- | --- |
+| **Platform PostgreSQL** (`robosystems`) | Users, organizations, billing, the graph registry, connections, documents | Row-level, by `org_id` / `graph_id` foreign keys | `/v1/*` |
+| **Extensions PostgreSQL** (`extensions`) | Per-graph OLTP product data — the chart of accounts, transactions, entries, reports, portfolios, positions | **Schema-per-graph**: one PostgreSQL schema named for the `graph_id` | `/extensions/*` |
+| **LadybugDB** | The analytical graph — the queryable, materialized projection used for reporting, Cypher traversal, and AI retrieval | **Database-per-graph**: one embedded database per `graph_id` | `/v1/graphs/{graph_id}/query/*`, MCP |
+
+Three consequences fall out of this, and each answers a question the rest of this page would otherwise leave hanging:
+
+**The extensions database is the system of record for an entity graph; the LadybugDB graph is a projection of it.** Products write to PostgreSQL, and a Dagster sensor rebuilds the graph from those rows. That is why the main graph is read-only over Cypher (see [Querying a Graph](#querying-a-graph)) — you are not permitted to hand-edit a derived artifact. It is also why the recovery path for an entity graph is `materialize`, not a graph restore.
+
+**A write reaches the graph only if it marks the graph stale.** There is no incremental sync and no change-data-capture — the projection is rebuilt wholesale. A row that lands in OLTP without a stale mark is invisible to every Cypher query and every MCP traversal until some *other* write happens to mark the graph. The platform's own operations handle this for you; it matters here because it explains the lag between an extensions write and its appearance in a query result.
+
+**Tenancy in the extensions database is `search_path`, not a `WHERE` clause.** Each graph gets a PostgreSQL schema named for its `graph_id`, and every session opens by binding `search_path` to that schema with `public` as the fallback. The schema name is validated against a strict pattern before it is ever used, and the binding is cleared before the connection returns to the pool. One `search_path` expresses both halves of the model: tenant tables shadow `public`, so your rows are yours alone, while the shared taxonomy library resolves *through* `public` and is common to every tenant. The alternative — one shared table set with a tenant discriminator column — was deliberately not adopted: schema-per-graph costs more DDL and gives isolation that a forgotten `WHERE` clause cannot breach.
+
+The two PostgreSQL databases have **independent migration histories** and live on the same RDS instance in deployed environments. The split is about blast radius: a product migration cannot lock the table that authorizes requests, and an extensions outage degrades the products without taking down authentication or billing. The cost is that anything needing both stores is two sessions and cannot be one transaction.
 
 ## Prerequisites
 
@@ -32,17 +66,23 @@ All authenticated examples below read the API key from `.local/config.json` and 
 
 ## The `graph_id` Model and Per-Graph Isolation
 
-The `graph_id` is the primary multi-tenant identifier. It appears as a URL path parameter on every graph-scoped route, and the platform resolves it to a specific LadybugDB database before the handler executes.
+The `graph_id` is the primary multi-tenant identifier. It appears as a URL path parameter on every graph-scoped route, and the platform resolves it — to a LadybugDB database, an extensions PostgreSQL schema, or both, depending on the route — before the handler executes.
 
 ### ID Formats
 
-| Kind | Format | Example |
-| --- | --- | --- |
-| **Parent graph** | `kg` + 16 or more hex characters | `kg1234567890abcdef` |
-| **Subgraph** | `{parent_id}_{subgraph_name}` | `kg1234567890abcdef_dev` |
-| **Shared repository** | Fixed reserved name | `sec` |
+| Kind | Format | Example | Extensions tenant? |
+| --- | --- | --- | --- |
+| **Parent graph** | `kg` + 16 or more hex characters | `kg1234567890abcdef` | Yes |
+| **Subgraph** | `{parent_id}_{subgraph_name}` | `kg1234567890abcdef_dev` | **No** |
+| **Shared repository** | Fixed reserved name | `sec` | No |
+| **Shared-repo subgraph** | `{repo_id}_{subgraph_name}`, platform-created only | `sec_historical` | No |
+| **Taxonomy library sentinel** | The literal `library` | `library` | Reads the shared library |
 
 The parent graph identifier follows the regex `kg[a-f0-9]{16,}`. A subgraph appends an underscore and an alphanumeric name (`[a-zA-Z0-9]{1,20}`) to its parent's ID, so the parent is always recoverable from the subgraph ID.
+
+**Only a parent graph is an extensions tenant.** The rightmost column above is not a policy choice made per route — it falls out of the schema-name validator, which accepts `kg` plus hex and nothing else. A subgraph ID contains an underscore and therefore cannot name a schema, so no extensions session can ever open against one. See [A Subgraph Is Not an Extensions Tenant](#a-subgraph-is-not-an-extensions-tenant).
+
+**`library` is a reserved sentinel, not a graph.** It occupies the `graph_id` position on extensions routes and resolves to the shared, read-only taxonomy library rather than to any tenant. Any authenticated user may read it.
 
 ### Why URL-Scoped Tenancy
 
@@ -51,6 +91,29 @@ Because the `graph_id` lives in the URL path, the tenant scope is unambiguous an
 - **REST**: `POST /v1/graphs/{graph_id}/query/cypher`
 - **GraphQL**: `POST /extensions/{graph_id}/graphql` — the `graph_id` comes from the URL, so queries do **not** take a `graphId` argument. Write `{ entity { … } }`, not `{ entity(graphId: "kg_x") { … } }`.
 - **MCP**: tools read the `graph_id` from connection context rather than as a tool argument.
+
+Accepting a graph identifier in a query argument or request body would create a second, competing source of truth for which tenant a request addresses, and the two would eventually disagree. One anchor, checked once, before the handler.
+
+## Who Can Reach a Graph: Orgs, Roles, and Subscriptions
+
+Isolation answers *which data*; this answers *which people*. Access is resolved differently for the two kinds of graph.
+
+**User graphs** are owned by exactly one **organization**. The org is the billing party and the only pool of users who can be granted access to graphs it owns — there are no cross-org access grants. Within that, access is role-based:
+
+| Role on the graph | Can |
+| --- | --- |
+| `viewer` | Read only. Cypher writes on a subgraph are rejected with `403`. |
+| `member` | Read and write |
+| `admin` | Read, write, and manage the graph (including subgraph lifecycle) |
+
+Two rules make the effective role non-obvious, and both are worth knowing before you debug a permissions surprise:
+
+- **Org owners and admins hold implicit graph admin** on every graph their org owns — paying for a graph carries the right to manage it. The effective role is the stronger of the explicit grant and that implicit one, so a user with an explicit `viewer` row on a graph their org owns and administers is still an admin there.
+- **Subgraphs have no permissions of their own.** An access check on `kg…_dev` resolves to `kg…` and is answered by the parent's membership. Granting access to a parent grants it to every subgraph beneath it.
+
+**Shared repositories** do not use this model at all. They have no owning org and no member rows; access is **subscription-based** through a repository plan. See [Shared Repositories](Shared-Repositories).
+
+`GET /v1/graphs/{graph_id}/members` reports who can reach a graph and at what role.
 
 ## Graph Tiers
 
@@ -77,6 +140,7 @@ Notes:
 - **The API rate multiplier applies to dedicated-resource categories only**, and scales with the tier's instance vCPU using Standard as the anchor. **Shared categories are the same on every tier**: auth, status, billing, and SSE do not scale, because they consume platform resources rather than your instance. The multiplier in `/v1/offering` is derived from the limit table the rate limiter actually enforces, so what is advertised cannot drift from what a caller receives.
 - **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
+- **The tier sizes the graph, not the OLTP store.** Everything above describes the dedicated EC2 instance running your LadybugDB database. The extensions PostgreSQL schema (see [The Three Stores](#the-three-stores)) is per-graph regardless of tier and lives on shared managed infrastructure — tier does not change its isolation, which is the same schema-per-graph binding for every customer.
 
 ## Creating a Graph
 
@@ -133,6 +197,42 @@ curl -X POST "http://localhost:8000/v1/graphs" \
 
 For the full request and response schema — every field, type, and validation rule — see the live OpenAPI docs rather than re-deriving it here: [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
 
+## Schema Extensions and the Extensions Surface
+
+The `schema_extensions` field in the creation request above is the switch that decides what kind of tenant a graph is. `GET /v1/graphs/extensions` lists what is available; today that is `roboledger` (accounting) and `roboinvestor` (investment management).
+
+### What `schema_extensions` Actually Controls
+
+Declaring an extension on a graph does three things:
+
+1. **Which API surfaces answer for it.** A `roboledger` graph responds on `/extensions/roboledger/{graph_id}/operations/*`; a graph without it does not.
+2. **Which MCP tools appear.** The tool list is assembled from the graph's extensions, so a plain custom graph and a RoboLedger graph advertise very different sets.
+3. **Which node types the analytical projection is built with** when the graph is materialized.
+
+And — this is the part that surprises people — it does **not** control which tables exist. Tenant provisioning creates *every* extension table regardless of what the column says, and the graph's DDL is resolved from the column at rebuild time rather than at creation time.
+
+That has a practical upside worth stating plainly: **`schema_extensions` is an access restriction plus a materialization scope, not a data-model switch.** Adding an extension to a live graph is a safe, in-place operation, and removing one withdraws surfaces rather than dropping rows.
+
+### When the Tenant Schema Is Created
+
+The extensions PostgreSQL schema for a graph is provisioned when an **entity graph** is created with `create_entity: true`, and lazily on first extensions access otherwise. Provisioning creates the schema, builds the tenant tables, copies the canonical taxonomy library into it per the graph's pin, and installs triggers so library-seeded rows cannot be mutated from tenant scope.
+
+A **custom graph** with no extensions never gets one. That is the correct outcome, not a gap — it has no OLTP product data to hold, so `/extensions/*` routes are not part of its surface.
+
+### The Three Extensions Sub-Surfaces
+
+Everything under `/extensions/*` is graph-scoped at the URL and falls into one of three shapes:
+
+| Sub-surface | Path | Read/Write | Reads or writes |
+| --- | --- | --- | --- |
+| **GraphQL typed reads** | `POST /extensions/{graph_id}/graphql` | Read | Extensions PostgreSQL |
+| **Command writes** | `POST /extensions/{domain}/{graph_id}/operations/{op_name}` | Write | Extensions PostgreSQL |
+| **Analytical view operations** | `POST /extensions/{domain}/{graph_id}/operations/{view_name}` | Read | LadybugDB (the projection) |
+
+**For an entity graph, the command-write surface — not the Cypher endpoint — is how data enters the system.** This is the point that ties the whole page together: `/v1/graphs/{graph_id}/query/cypher` is read-only on the main graph *because* the write path is `/extensions/{domain}/{graph_id}/operations/*`, and the graph is rebuilt from what those operations write.
+
+Both surfaces are gated per deployment by `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`, and the GraphQL schema is composed at construction time — a ledger-only deployment has literally no investor fields to introspect, rather than fields that fail at runtime. Full detail, including the operation envelope and idempotency semantics, is in **[Extensions Surface Overview](Extensions-Surface-Overview)**.
+
 ## Listing and Inspecting Graphs
 
 ### List Your Graphs
@@ -173,24 +273,40 @@ And three that are about the platform rather than one graph: `GET /v1/graphs/tie
 
 ## Subgraphs
 
-A **subgraph** is an isolated child database that lives on the same instance as its parent. Subgraphs are useful for separating environments (dev / staging / prod) or for forking a copy of a parent's data.
+A **subgraph** is an isolated child database that lives on the same instance as its parent. Subgraphs are useful for separating environments (dev / staging / prod), for holding agent scratch space and semantic memory, or for forking a copy of a parent's data.
 
 ### What a Subgraph Shares (and Doesn't)
 
 | Property | Behavior |
 | --- | --- |
 | **Data** | Fully isolated from the parent and from sibling subgraphs |
-| **Credit pool** | Shared with the parent graph |
-| **Permissions** | Inherited from the parent graph |
+| **Credit pool** | Shared with the parent graph — spending resolves to the parent before any lookup |
+| **Permissions** | Inherited from the parent graph; a subgraph has no membership of its own |
 | **Instance / RAM / storage** | Shared with the parent (same EC2 instance) |
-| **Schema** | Inherits the parent's `schema_extensions` by default |
+| **LadybugDB database** | Its own, and **writable** — unlike the parent's |
+| **Extensions OLTP schema** | **None.** A subgraph is not an extensions tenant (see below) |
+
+### A Subgraph Is Not an Extensions Tenant
+
+This is the single most important thing to know about subgraphs, and the relationship is the inverse of what most people assume:
+
+> **The main graph is read-only over Cypher and has an extensions surface. A subgraph is writable over Cypher and has none.**
+
+A subgraph is a **modality container** — a live, writable graph database for scratch work, knowledge, and agent memory. It is not a second copy of the product. Concretely:
+
+- **`POST /extensions/{parent}_{name}/graphql` returns `403`.** The request is refused outright rather than quietly resolved to the parent, so a query cannot silently read the wrong tenant's books. The check runs after authentication, so the denial stays attributable to a user.
+- **No extensions session can open against it.** The schema-name validator accepts `kg` plus hex only, and a subgraph ID contains an underscore — the exclusion is structural, not a rule someone has to remember to apply.
+- **Its MCP tool list is trimmed to an allowlist.** A subgraph inherits its parent's `schema_extensions` column (the subgraph service copies it), so without a cut it would advertise the parent's entire RoboLedger tool surface. Instead it advertises a short set: schema DDL, Cypher in both directions, per-graph memory, and navigation back out. Trimming happens over the assembled list rather than at each registration site, so a newly added OLTP tool is excluded by default.
+
+The inherited `schema_extensions` column is therefore best read as vestigial on a subgraph: it is copied for bookkeeping, and every surface that would act on it declines to.
 
 ### Naming and ID Rules
 
 - **Name**: alphanumeric only, 1–20 characters, no hyphens or underscores. The name is normalized to lowercase. `dev`, `staging`, and `prod1` are valid; `dev-1` and `my_env` are rejected.
 - **ID format**: `{parent_id}_{subgraph_name}`. A subgraph named `dev` under `kg1234567890abcdef` becomes `kg1234567890abcdef_dev`.
-- **Single-level only**: you cannot create a subgraph of a subgraph, and shared repositories cannot have subgraphs.
-- **Capacity**: enforced per tier (3 / 10 / 25 for Standard / Large / XLarge). Exceeding the cap returns `403`.
+- **Single-level only**: you cannot create a subgraph of a subgraph.
+- **Shared repositories are platform-managed.** They *do* have subgraphs — `sec_historical` holds deeper SEC filing history — but you cannot create or delete them; both operations return `403`. You query them exactly like the parent repository.
+- **Capacity**: capped per tier. Exceeding the cap returns `403`. Call `GET /v1/graphs/tiers` or `GET /v1/graphs/{graph_id}/limits` for the cap your tier enforces.
 
 ### Create a Subgraph
 
@@ -227,7 +343,7 @@ Subgraph lifecycle writes (create, delete) follow the same operation pattern as 
 
 ## Querying a Graph
 
-Graphs are queried with Cypher over `POST /v1/graphs/{graph_id}/query/cypher`. The sibling route `POST /v1/graphs/{graph_id}/query/sql` runs DuckDB SQL against the graph's staging tables — the columnar side of the same graph, used during ingestion and materialization rather than for graph traversal.
+Graphs are queried with Cypher over `POST /v1/graphs/{graph_id}/query/cypher`. The sibling route `POST /v1/graphs/{graph_id}/query/sql` reads the graph's DuckDB staging tables — the columnar side of the same graph, used during ingestion and materialization rather than for graph traversal. **SQL is read-only**, and it is **blocked entirely on shared repositories**, which have no user columnar tables; use `/query/cypher` for those.
 
 ```bash
 curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query/cypher" \
@@ -246,7 +362,22 @@ just graph-query kg1234567890abcdef "MATCH (n) RETURN count(n)"
 just lbug-query kg1234567890abcdef "MATCH (n) RETURN count(n)"
 ```
 
-**Important:** The **main graph is read-only over Cypher** — its data arrives through the staging and materialization pipeline, not through write queries. **Subgraphs support full writes.**
+### Where Writes Go
+
+The Cypher endpoint enforces a three-tier write policy, and knowing which tier you are in explains every `403` you are likely to see:
+
+| Target | Cypher writes | Because |
+| --- | --- | --- |
+| **Main graph** (`kg…`) | Rejected | It is a **projection**, rebuilt from an upstream source of truth. Hand-editing a derived artifact would be silently undone at the next rebuild. |
+| **Subgraph** (`kg…_dev`) | Allowed, for `member` and `admin` | It is a first-class writable database with no upstream — the only such surface on the platform. `viewer` is read-only and gets a `403`. |
+| **Shared repository** (`sec`, `sec_historical`) | Rejected for everyone | Platform-managed public data. |
+
+So how does data reach a main graph? It depends on what kind of graph it is — and this is exactly the distinction [The Three Stores](#the-three-stores) sets up:
+
+- **Entity graphs (RoboLedger / RoboInvestor)** — write through the extensions command surface, `POST /extensions/{domain}/{graph_id}/operations/{op_name}`. Those writes land in the extensions PostgreSQL tenant schema, mark the graph stale, and are swept into the graph by the next materialization. The graph catches up; you never write to it directly.
+- **Custom graphs** — write through the staging and materialization pipeline: upload a file, ingest it to a staging table, materialize. See [Custom Graph Schema](Custom-Graph-Schema) and [File Uploads](File-Uploads).
+
+Regardless of tier, three classes of statement are refused on the query endpoint entirely: bulk operations (`COPY`, `LOAD`, `IMPORT`), administrative operations (`EXPORT`, `INSTALL`, `ATTACH`), and schema DDL (`CREATE`/`DROP`/`ALTER TABLE`). Graph schemas are immutable after creation so they stay consistent with their staging tables.
 
 ### Querying with MCP
 
@@ -265,19 +396,54 @@ The tool set is not fixed — it is assembled from the graph's schema extensions
 
 `read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, and only where the main-graph read-only rule above allows them. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
 
+**Connecting MCP to a subgraph gives you a deliberately smaller list.** Because a subgraph is not an extensions tenant, its tool list is trimmed to what is genuinely meaningful there: schema DDL, Cypher in both directions, per-graph memory, `get-graph-info`, and `list-subgraphs`. Tools that would need an OLTP schema or a materialization relationship are withheld rather than allowed to fail — the platform-lifecycle ones are the reason the cut exists, because they would otherwise fail *quietly by succeeding*, returning a confident sync status about a relationship the subgraph does not have.
+
+## Crossing the Tenant Boundary
+
+Isolation is the default everywhere on this page, with exactly one deliberate exception, and it is worth stating plainly so the model in your head is right.
+
+**Report sharing** lets a graph distribute a published report to named subscriber graphs — typically in *other organizations*. The motivating case is investor relations: a company sends its quarterly statements to its cap table, and the investors are by definition outside the company's org.
+
+What makes this consistent with everything above rather than a hole in it:
+
+- **A subscriber receives a copy, never access.** No grant is created on the source graph; rows are written into the recipient's own tenant schema. The "no cross-org access grants" rule and this feature govern different things and do not conflict.
+- **The surface is the report, never the ledger.** What crosses is the published report, its facts, the entity, and the concepts needed to read those facts. Transaction data does not leave. Shareholders get statements, not the general ledger.
+- **Provenance is explicit at the destination.** Shared content lands under a provenance record naming the source graph and report, so a recipient's data is never silently commingled with their own.
+- **Authorization is capability-style, and the recipient holds the exit.** A `graph_id` is unguessable, so the only way a sender holds yours is that you handed it over — the handover is the handshake, with no invite dance. Because a `graph_id` cannot be rotated, recipients get real controls rather than only an entry gate: an admin of the receiving graph can delete a shared report, and a per-graph block list (with optional purge) refuses future deliveries from a sender. Senders can also revoke a delivered copy.
+
+This works within a single deployment. Cross-deployment distribution is the holon JSON-LD export path — see [Serialization and Export](Serialization-and-Export).
+
 ## Troubleshooting
 
 ### Subgraph Creation Fails: "Maximum subgraphs limit reached"
 
-You have hit the tier's subgraph cap (3 / 10 / 25 for Standard / Large / XLarge).
+You have hit the tier's subgraph cap.
 
-**Solution:** Delete an unused subgraph, or change the parent graph to a higher tier with a `change-tier` operation. See [Graph Operations](Graph-Operations).
+**Solution:** Delete an unused subgraph, or change the parent graph to a higher tier with a `change-tier` operation. Check the cap for your tier with `GET /v1/graphs/{graph_id}/limits`. See [Graph Operations](Graph-Operations).
 
 ### Subgraph Creation Fails: "Subgraphs are not available"
 
 The graph's tier reports no subgraph capacity, or you are attempting to add a subgraph to a shared repository or to another subgraph.
 
-**Solution:** Subgraphs are single-level and live only under creatable tiers. Confirm you are operating on a parent graph (`kg…`, no underscore) on a tier that allows subgraphs.
+**Solution:** Subgraphs are single-level and live only under creatable tiers. Confirm you are operating on a parent graph (`kg…`, no underscore) on a tier that allows subgraphs. Shared repositories do have subgraphs, but only the platform creates them.
+
+### GraphQL Returns `403` on a Subgraph
+
+`POST /extensions/{parent}_{name}/graphql` is refused. A subgraph is a modality container, not an extensions tenant — it has no OLTP schema for the resolvers to read.
+
+**Solution:** Target the parent graph. See [A Subgraph Is Not an Extensions Tenant](#a-subgraph-is-not-an-extensions-tenant).
+
+### An Extensions Write Succeeded But Cypher Doesn't See It
+
+The extensions PostgreSQL database and the LadybugDB graph are two stores. A command write lands in OLTP immediately and reaches the graph only when the projection is rebuilt.
+
+**Solution:** Wait for the materialization sensor, or force it with `POST /v1/graphs/{graph_id}/operations/materialize`. Confirm you are querying the right store: OLTP state reads through GraphQL, projected state through Cypher.
+
+### SQL Query Rejected on a Shared Repository
+
+`/query/sql` reads DuckDB staging tables, and shared repositories have none.
+
+**Solution:** Use `POST /v1/graphs/{graph_id}/query/cypher` instead.
 
 ### Create Returns `202` But the Graph Isn't Ready
 
@@ -293,24 +459,37 @@ Names must be alphanumeric, 1–20 characters, with no hyphens or underscores.
 
 ### Cypher Write Rejected on the Main Graph
 
-The main graph is read-only over Cypher.
+The main graph is read-only over Cypher because it is a projection, not a source of truth.
 
-**Solution:** Write to a subgraph (which supports full writes), or load data into the main graph through the staging and materialization pipeline.
+**Solution:** Pick the write path that matches your graph. For an **entity graph**, write through `POST /extensions/{domain}/{graph_id}/operations/{op_name}` and let materialization carry it into the graph. For a **custom graph**, load through the staging and materialization pipeline. For scratch or agent-memory work, write to a **subgraph**, which supports full Cypher writes. See [Where Writes Go](#where-writes-go).
+
+### Cypher Write Rejected on a Subgraph
+
+Subgraphs allow writes, but only for `member` and `admin`. A `viewer` gets `403`.
+
+**Solution:** Check your effective role with `GET /v1/graphs/{graph_id}/members`. Note that org owners and admins hold implicit graph admin, so the effective role may be stronger than the explicit grant — and never weaker.
 
 ## Related Documentation
 
 **Wiki Guides:**
 
+- **[Core Concepts](Core-Concepts)** - Orientation glossary: `graph_id`, OLTP vs OLAP, blocks, and the other recurring terms
+- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The `/extensions/*` surface in full: three sub-surfaces, feature flags, and the operation envelope
 - **[Graph Operations](Graph-Operations)** - Lifecycle operations (create-subgraph, delete-subgraph, change-tier, backups, materialize) and the CQRS operation envelope
+- **[GraphQL Reads](GraphQL-Reads)** - The typed read surface over the extensions OLTP database and its field catalog
 - **[Shared Repositories](Shared-Repositories)** - The `ladybug-shared` tier, repository plans, and how to subscribe to and query public datasets
 - **[Authentication and API Keys](Authentication-and-API-Keys)** - API key creation, the `X-API-Key` header, and per-graph access control
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Designing node and relationship schemas and querying a custom graph
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Cypher patterns against the materialized projection
+- **[Credits and Billing](Credits-and-Billing)** - Credit pools, what consumes them, and how subgraphs draw from the parent
 
 **Codebase Documentation:**
 
 - **[Graph Routing](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/graph/README.md)** - Graph ID parsing, subgraph resolution, and multi-tenant routing
 - **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - Authentication system internals
 - **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - LadybugDB backend and query execution
+- **[Extensions Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - Extensions OLTP models and schema-per-graph tenancy
+- **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface and resolver patterns
 
 **API Reference:**
 

@@ -1,6 +1,6 @@
 # Core Concepts
 
-RoboSystems is a multi-tenant financial knowledge graph platform, and a handful of recurring terms run through every endpoint, SDK call, and README. This page is an orientation glossary: short, plain-language definitions that build on one another, each linking to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
+RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph — and a handful of recurring terms run through every endpoint, SDK call, and README. This page is an orientation glossary: short, plain-language definitions that build on one another, each linking to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
 
 ## Table of Contents
 

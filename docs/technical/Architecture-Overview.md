@@ -1,6 +1,6 @@
 # Architecture Overview
 
-RoboSystems is built on a modern, scalable architecture designed for enterprise financial data processing and knowledge graph management.
+RoboSystems is an AI-native financial intelligence platform for accounting, financial reporting, and investment management. This page covers the architecture that carries it: the knowledge graph at the center, the operational and analytical planes either side of it, and the AWS infrastructure a fork deploys into its own account.
 
 ## Documentation Map
 

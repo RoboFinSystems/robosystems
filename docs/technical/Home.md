@@ -1,6 +1,10 @@
 # Welcome to the RoboSystems Wiki!
 
-RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial and operational data into actionable intelligence through graph-based analytics and AI-powered insights.
+RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It unifies structured data, document search, and AI memory over a **knowledge graph** — transactions, facts, reporting elements, and the calculation structures that relate them are all nodes and edges, with the semantics preserved rather than flattened into rows you query around. On top of that graph it gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across your own ledger, your holdings, and SEC public filings queryable alongside them. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+
+**Every tenant gets their own graph** — not a row-level slice of a shared table, but a dedicated graph database on its own instance with a dedicated OLTP schema behind it. Your ontology, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
+
+**The platform is fork-ready.** The [repository](https://github.com/RoboFinSystems/robosystems) ships full GitHub Actions CI/CD that deploys the CloudFormation infrastructure into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide) to stand up a deployment of your own.
 
 This wiki is the technical documentation for using, operating, and building on the platform. It is organized into six areas — orientation and self-hosting, hands-on demos, the operational API, the RoboLedger and RoboInvestor extensions, the financial-content fabric, and the document and search layer.
 
