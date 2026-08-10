@@ -27,12 +27,14 @@ def _report(
   *,
   generation_count: int = 3,
   generation_status: str = "published",
+  source_graph_id: str | None = None,
 ):
   """A minimal stand-in for a Report ORM row."""
   return SimpleNamespace(
     bundle_url=bundle_url,
     generation_count=generation_count,
     generation_status=generation_status,
+    source_graph_id=source_graph_id,
   )
 
 
@@ -84,6 +86,72 @@ class TestNotFoundAndNotAvailable:
     session = _session(_report(bundle_url=None, generation_status="draft"))
     with pytest.raises(ReportBundleNotAvailableError, match="not published"):
       get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
+
+
+class TestReceivedReportsAreNeverRederived:
+  """A report that arrived from another graph is served as the sender's
+  published artifact or not at all.
+
+  For an authored report the rows are the truth and the artifact is a
+  projection, so rebuilding a lost cache entry is free and correct. For a
+  received report the relationship inverts: the artifact is the sender's
+  document and the rows are what the share managed to bring across. Rebuilding
+  would present a locally-derived document as the sender's publication, and
+  nothing at the point of use would show the difference.
+  """
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("flavor", "artifact"),
+    [("holon-jsonld", "holon"), ("xbrl-2.1", "XBRL bundle")],
+  )
+  def test_a_cache_miss_on_a_received_report_is_a_miss(self, flavor, artifact):
+    session = _session(_report(source_graph_id="kg_sender"))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3_cls.return_value.object_exists.return_value = False
+      with pytest.raises(ReportBundleNotAvailableError, match=artifact):
+        get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
+
+    build.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1"])
+  def test_a_cached_received_artifact_is_still_served(self, flavor):
+    """The refusal is about re-deriving, not about received reports — the
+    sender's own artifact serves normally."""
+    session = _session(_report(source_graph_id="kg_sender"))
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/artifact"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
+
+    assert resp is not None
+    assert resp.download_url == "https://signed.example/artifact"
+
+  @pytest.mark.unit
+  def test_an_authored_report_still_rebuilds_on_a_miss(self):
+    """The negative control: the guard must not disable caching for the
+    reports this graph actually owns."""
+    session = _session(_report(source_graph_id=None))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.serialize_to_holon_jsonld",
+        return_value="{}",
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/holon"
+      get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
+
+    build.assert_called_once()
 
 
 class TestJsonLd:
