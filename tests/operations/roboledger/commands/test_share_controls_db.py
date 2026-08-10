@@ -48,6 +48,8 @@ from robosystems.operations.roboledger.commands.reports import (
 
 pytestmark = pytest.mark.integration
 
+_REPORTS_CMD = "robosystems.operations.roboledger.commands.reports"
+
 # Valid graph-id shapes (kg + 16+ lowercase hex) so `_sanitize_schema` accepts
 # them as schema names.
 SOURCE_GRAPH = "kgaaaaaaaaaaaaaaaa01"
@@ -465,6 +467,66 @@ def test_resharing_replaces_the_copy_rather_than_duplicating_it() -> None:
   assert rows[0].source_report_id == _REPORT_SNAPSHOT["id"]
   # The replaced copy took its fact sets and facts with it.
   assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
+
+
+def test_revoke_withdraws_the_stored_publication_too() -> None:
+  """Withdrawal has to reach object storage, not just the rows.
+
+  A shared copy now carries the sender's holon in the recipient's bundle
+  prefix. Deleting the rows and leaving that behind means the sender's
+  published report survives the revocation that was supposed to withdraw it —
+  the artifacts were invisible to this suite before they existed, so the
+  regression would have been silent.
+  """
+  _share()
+
+  with extensions_session(SOURCE_GRAPH) as session:
+    session.add(
+      Report(
+        id=_REPORT_SNAPSHOT["id"],
+        name=_REPORT_SNAPSHOT["name"],
+        taxonomy_id=_REPORT_SNAPSHOT["taxonomy_id"],
+        period_type="quarterly",
+        comparative=False,
+        generation_status="published",
+        filing_status="draft",
+        created_by=_SENDER,
+      )
+    )
+    session.add(
+      ReportShare(
+        id="share_0001",
+        report_id=_REPORT_SNAPSHOT["id"],
+        target_graph_id=TARGET_GRAPH,
+        shared_by=_SENDER,
+        fact_count=len(_SOURCE_FACTS),
+      )
+    )
+
+  copy_id = _copied_report_id()
+
+  with patch(f"{_REPORTS_CMD}.S3Client") as s3_cls:
+    s3 = s3_cls.return_value
+    s3.list_objects.return_value = [
+      f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
+      f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+    ]
+    s3.delete_object.return_value = True
+    revoke_report_share(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      RevokeReportShareRequest(target_graph_id=TARGET_GRAPH),
+      acting_user_id=_SENDER,
+    )
+
+  # Scoped to the withdrawn copy's own prefix — never the whole graph's.
+  _, list_kwargs = s3.list_objects.call_args
+  assert list_kwargs["prefix"] == f"report-bundles/{TARGET_GRAPH}/{copy_id}/"
+  deleted = {call.args[1] for call in s3.delete_object.call_args_list}
+  assert deleted == {
+    f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
+    f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+  }
 
 
 def test_revoke_clears_every_active_share_row_for_the_recipient() -> None:

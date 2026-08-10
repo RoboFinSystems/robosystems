@@ -1466,6 +1466,7 @@ class TestCrossGraphStalenessCallbacks:
 
   @staticmethod
   def _block_result(purged: int) -> BlockSourceGraphResult:
+    purged_ids = [f"rpt_purged_{n}" for n in range(purged)]
     return BlockSourceGraphResult(
       block=BlockedSourceGraphResponse(
         id="blk_1",
@@ -1475,6 +1476,7 @@ class TestCrossGraphStalenessCallbacks:
       ),
       already_blocked=False,
       purged_report_count=purged,
+      purged_report_ids=purged_ids,
     )
 
   @pytest.mark.asyncio
@@ -1509,6 +1511,45 @@ class TestCrossGraphStalenessCallbacks:
       )
 
     mark.assert_called_once_with(GRAPH_ID, "shared_reports_purged")
+
+  @pytest.mark.asyncio
+  async def test_purge_withdraws_the_stored_publications_after_the_rows(self) -> None:
+    """A purge that deletes rows and leaves the senders' holons in this
+    graph's bundle prefix has not withdrawn anything. The cleanup runs from
+    the after-success hook so it can only follow a committed deletion."""
+    body = BlockSourceGraphOperation(source_graph_id="kg0000000000000009", purge=True)
+
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_block_source_graph",
+        return_value=self._block_result(3),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.user_is_graph_admin",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+      patch("robosystems.routers.extensions.roboledger.operations.mark_graph_stale"),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.delete_report_artifacts"
+      ) as drop,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      await block_source_graph_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    drop.assert_called_once_with(
+      GRAPH_ID, ["rpt_purged_0", "rpt_purged_1", "rpt_purged_2"]
+    )
 
   @pytest.mark.asyncio
   async def test_block_without_a_purge_does_not_rebuild(self) -> None:

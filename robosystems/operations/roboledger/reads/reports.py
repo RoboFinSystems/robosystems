@@ -374,7 +374,7 @@ def get_report_download_url(
   # that legitimately has no flat bundle of its own: a cross-graph shared copy,
   # whose holon is the sender's published artifact copied in alongside the rows.
   if flavor == RdfFlavor.HOLON_JSONLD.value:
-    if str(report.generation_status) != "published":
+    if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
         f"Report '{report_id}' is not published — publish or regenerate the "
         f"report to produce a holon."

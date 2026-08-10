@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from robosystems.config import env
 from robosystems.config.storage.graph import (
   get_report_bundle_key,
+  get_report_bundle_prefix,
   get_report_bundle_uri,
 )
 from robosystems.logger import logger
@@ -863,12 +864,6 @@ def share_report(
       "generation_count": int(report_def.generation_count or 0),
     }
 
-    # Read once, in the sender's session: the holon build needs the source
-    # rows, and every target gets the same bytes.
-    publication_artifacts = _load_publication_artifacts(
-      source_session, graph_id, report_def
-    )
-
     # The FactSets travel as themselves, not as one flat fact list. Every
     # read path on the recipient's side resolves a FactSet's Structure —
     # `get_report_package` joins it, `load_fact_set_by_id_for_structure`
@@ -899,6 +894,13 @@ def share_report(
       {"report_id": report_id},
     ).fetchall()
     source_facts = [row._asdict() for row in fact_rows]
+
+  # Read once, after the sender's session closes — S3 round-trips have no
+  # business holding a database connection open — and reused for every target,
+  # since each gets the same bytes.
+  publication_artifacts = _load_publication_artifacts(
+    graph_id, report_id, int(report_snapshot["generation_count"])
+  )
 
   for target_graph_id in target_graph_ids:
     result = _share_to_target(
@@ -1036,7 +1038,7 @@ def revoke_report_share(
 
 
 def _load_publication_artifacts(
-  session: Session, graph_id: str, report_def: Report
+  graph_id: str, report_id: str, generation_count: int
 ) -> dict[str, str]:
   """Read the sender's published artifacts so a share can carry them across.
 
@@ -1054,14 +1056,19 @@ def _load_publication_artifacts(
   of a share — it is what materializes into the recipient's graph and carries
   the cross-graph traversal — so an object-store fault degrades the
   recipient's renderers rather than failing the delivery outright.
+
+  Called after the sender's session closes, so none of this object-store I/O
+  holds a database connection open. The holon build below needs a session and
+  opens its own short-lived one, on the cold path only.
   """
+  from robosystems.db.extensions import extensions_session
+
   bucket = env.USER_DATA_BUCKET
-  generation_count = int(report_def.generation_count or 0)
   s3 = S3Client()
   artifacts: dict[str, str] = {}
 
   flat = s3.download_string(
-    bucket, get_report_bundle_key(graph_id, report_def.id, generation_count)
+    bucket, get_report_bundle_key(graph_id, report_id, generation_count)
   )
   if flat is not None:
     artifacts[".jsonld"] = flat
@@ -1069,33 +1076,34 @@ def _load_publication_artifacts(
     logger.warning(
       "Report %s has no readable JSON-LD bundle; the recipient's copy will "
       "carry no downloadable publication.",
-      report_def.id,
+      report_id,
     )
 
   # The holon is derived on demand, not stamped at publish, so a report nobody
   # has downloaded in that flavor yet has no object. Build it once here — the
   # key is immutable per generation, so this also warms the sender's cache.
   holon_key = get_report_bundle_key(
-    graph_id, report_def.id, generation_count, extension=".holon.jsonld"
+    graph_id, report_id, generation_count, extension=".holon.jsonld"
   )
   holon = s3.download_string(bucket, holon_key)
   if holon is None:
     try:
-      holon = serialize_to_holon_jsonld(
-        build_report_bundle(session, graph_id, report_def.id)
-      )
+      with extensions_session(graph_id) as build_session:
+        holon = serialize_to_holon_jsonld(
+          build_report_bundle(build_session, graph_id, report_id)
+        )
       s3.upload_string(
         content=holon,
         bucket=bucket,
         key=holon_key,
         content_type="application/ld+json",
-        metadata={"report-id": report_def.id, "graph-id": graph_id},
+        metadata={"report-id": report_id, "graph-id": graph_id},
       )
     except Exception:
       logger.exception(
         "Failed to materialize the holon for report %s; the recipient's copy "
         "will fall back to the package renderer.",
-        report_def.id,
+        report_id,
       )
       holon = None
   if holon is not None:
@@ -1148,15 +1156,46 @@ def _copy_publication_artifacts(
     )
 
 
+def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
+  """Remove the object-store artifacts of reports whose rows are gone.
+
+  Withdrawal has to reach object storage now that a shared copy carries
+  artifacts of its own. Before the holon travelled with the rows, a recipient's
+  copy had none — `bundle_url` was always NULL — so revoke and block-and-purge
+  were complete by construction. They no longer are, and an exit that leaves
+  the sender's published report sitting in the recipient's prefix is not the
+  exit either control advertises.
+
+  Deletes by prefix, so every generation and both flavors go together.
+
+  **Call this after the row deletion commits, never before.** Deleting an
+  artifact for a transaction that then rolls back destroys a live report's
+  publication; an artifact left behind by a crash is an orphan a later sweep
+  can take. The asymmetry decides the ordering.
+  """
+  if not report_ids:
+    return
+  bucket = env.USER_DATA_BUCKET
+  s3 = S3Client()
+  for report_id in report_ids:
+    prefix = get_report_bundle_prefix(graph_id, report_id)
+    for key in s3.list_objects(bucket, prefix=prefix):
+      if not s3.delete_object(bucket, key):
+        logger.warning(
+          "Failed to delete withdrawn report artifact s3://%s/%s.", bucket, key
+        )
+
+
 def _delete_copies_in_session(
   target_session: Session, source_graph_id: str, source_report_id: str
-) -> int:
+) -> list[str]:
   """Delete copies of one shared report from an open target session.
 
-  Returns how many were removed. Matches on the provenance pair, so it can
-  only ever reach a report that arrived from this sender — a report the target
-  authored has a null `source_graph_id` and cannot match. Does not commit; the
-  caller owns the transaction.
+  Returns the ids removed, so the caller can drop their object-store artifacts
+  once the transaction commits (see :func:`delete_report_artifacts`). Matches
+  on the provenance pair, so it can only ever reach a report that arrived from
+  this sender — a report the target authored has a null `source_graph_id` and
+  cannot match. Does not commit; the caller owns the transaction.
   """
   copy_ids = list(
     target_session.execute(
@@ -1169,7 +1208,7 @@ def _delete_copies_in_session(
     .all()
   )
   if not copy_ids:
-    return 0
+    return []
 
   # Facts cascade from their parent fact_sets, so the fact_sets go first.
   target_session.execute(
@@ -1180,7 +1219,7 @@ def _delete_copies_in_session(
     text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
     {"report_ids": copy_ids},
   )
-  return len(copy_ids)
+  return copy_ids
 
 
 def _delete_shared_copy(
@@ -1212,7 +1251,9 @@ def _delete_shared_copy(
       target_session, source_graph_id, source_report_id
     )
     target_session.commit()
-    return deleted > 0
+
+  delete_report_artifacts(target_graph_id, deleted)
+  return bool(deleted)
 
 
 def _share_to_target(
@@ -1290,7 +1331,9 @@ def _share_to_target(
       # into their graph. The provenance pair can only ever match a copy from
       # this sender; a report the recipient authored has a null
       # `source_graph_id`.
-      _delete_copies_in_session(target_session, source_graph_id, report_snapshot["id"])
+      replaced_copy_ids = _delete_copies_in_session(
+        target_session, source_graph_id, report_snapshot["id"]
+      )
 
       shared_report = Report(
         name=report_snapshot["name"],
@@ -1400,13 +1443,14 @@ def _share_to_target(
           for fd in unresolved_facts
           if fd.get("period_end") is not None
         ]
-        # `period_end` is NOT NULL, so an all-instant remainder falls back to
-        # the report's own period end rather than failing the whole share.
+        # `facts.period_end` is NOT NULL on both sides, so `ends` is non-empty
+        # whenever `unresolved_facts` is — no fallback, which would only be
+        # able to supply the NULL that `fact_sets.period_end` rejects.
         catch_all_set = create_fact_set(
           target_session,
           structure_id=None,
           period_start=min(starts) if starts else None,
-          period_end=max(ends) if ends else report_snapshot.get("period_end"),
+          period_end=max(ends),
           factset_type="report",
           entity_id=unresolved_facts[0]["entity_id"],
           report_id=shared_report.id,
@@ -1456,11 +1500,16 @@ def _share_to_target(
 
       target_session.commit()
 
-      return ShareResultItem(
-        target_graph_id=target_graph_id,
-        status="shared",
-        fact_count=len(source_facts),
-      )
+    # After the commit, and only for the ids the replace actually removed — the
+    # new copy has a fresh report id, so its own artifacts are under a
+    # different prefix and cannot be caught by this.
+    delete_report_artifacts(target_graph_id, replaced_copy_ids)
+
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="shared",
+      fact_count=len(source_facts),
+    )
 
   except Exception as e:
     # The detail stays in the log, not in the response: this exception was

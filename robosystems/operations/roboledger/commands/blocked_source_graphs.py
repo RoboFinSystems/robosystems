@@ -95,14 +95,15 @@ def block_source_graph(
     session.add(existing)
     session.flush()
 
-  purged = 0
+  purged_ids: list[str] = []
   if body.purge:
-    purged = _purge_shared_reports(session, body.source_graph_id)
+    purged_ids = _purge_shared_reports(session, body.source_graph_id)
 
   return BlockSourceGraphResult(
     block=enrich_blocks([existing])[0],
     already_blocked=already_blocked,
-    purged_report_count=purged,
+    purged_report_count=len(purged_ids),
+    purged_report_ids=purged_ids,
   )
 
 
@@ -145,11 +146,19 @@ def unblock_source_graph(
   return response
 
 
-def _purge_shared_reports(session: Session, source_graph_id: str) -> int:
-  """Delete every report shared in from ``source_graph_id``. Returns the count.
+def _purge_shared_reports(session: Session, source_graph_id: str) -> list[str]:
+  """Delete every report shared in from ``source_graph_id``. Returns their ids.
 
   Facts cascade from their parent fact_sets, so the fact_sets go first — the
   same two-step ``delete_report`` uses.
+
+  The ids are returned rather than the count because a purged copy's stored
+  publication has to go too — otherwise the sender's report survives the purge
+  in the recipient's bundle prefix. That deletion runs from the router's
+  after-success hook, not here: this function does not own the transaction, and
+  removing an artifact for a purge that then rolls back would destroy a live
+  report's publication. An orphan object after a crash is the recoverable
+  direction; a missing one is not.
   """
   report_ids = list(
     session.execute(select(Report.id).where(Report.source_graph_id == source_graph_id))
@@ -157,7 +166,7 @@ def _purge_shared_reports(session: Session, source_graph_id: str) -> int:
     .all()
   )
   if not report_ids:
-    return 0
+    return []
 
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
@@ -168,4 +177,4 @@ def _purge_shared_reports(session: Session, source_graph_id: str) -> int:
     {"report_ids": report_ids},
   )
   session.flush()
-  return len(report_ids)
+  return report_ids

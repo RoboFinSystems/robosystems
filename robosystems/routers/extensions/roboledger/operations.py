@@ -365,6 +365,7 @@ from robosystems.operations.roboledger.commands.reports import (
   ReportNotPublishedError,
   ReportShareNotFoundError,
   TaxonomyNotFoundError,
+  delete_report_artifacts,
 )
 from robosystems.operations.roboledger.commands.reports import (
   PublishListNotFoundError as ReportPublishListNotFoundError,
@@ -2954,14 +2955,22 @@ async def block_source_graph_op(
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
-  def _mark_stale_if_purged(envelope) -> None:
+  def _finish_purge(envelope) -> None:
     # Only a purge changes queryable content, and the OLAP projection is a
     # full rebuild from OLTP — a block on its own has nothing to re-project,
     # so it must not trigger one.
-    if _result_payload(envelope).get("purged_report_count"):
-      mark_graph_stale(graph_id, "shared_reports_purged")
+    payload = _result_payload(envelope)
+    if not payload.get("purged_report_count"):
+      return
+    mark_graph_stale(graph_id, "shared_reports_purged")
+    # The purge deleted rows; the senders' stored publications are still in
+    # this graph's bundle prefix until this runs. It belongs here rather than
+    # in the command because the rows must be committed first — deleting an
+    # artifact for a purge that rolled back would destroy a live report's
+    # publication, while an orphan object is recoverable.
+    delete_report_artifacts(graph_id, list(payload.get("purged_report_ids") or []))
 
-  return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_stale_if_purged)
+  return await _dispatch(ctx, _runner, cache, on_fresh_success=_finish_purge)
 
 
 # Hand-mounted rather than declared through `_registrar`, deliberately. Every
