@@ -96,8 +96,15 @@ class TableQueryRequest(BaseModel):
 
   graph_id: str = Field(..., description="Graph database identifier")
   sql: str = Field(..., description="SQL query to execute")
-  parameters: list[Any] | None = Field(
-    default=None, description="Query parameters for safe value substitution"
+  parameters: list[Any] | dict[str, Any] | None = Field(
+    default=None,
+    description=(
+      "Query parameters for safe value substitution. A list binds positional "
+      "placeholders (`?`, `$1`); a dict binds named ones (`$name`). DuckDB "
+      "requires the dict form for named parameters — binding them from a list "
+      "fails with 'Values were not provided for the following prepared "
+      "statement parameters'."
+    ),
   )
 
   class Config:

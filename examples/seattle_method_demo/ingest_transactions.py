@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -147,8 +148,9 @@ def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   """Find the mini CoA taxonomy_id on the graph by name."""
   taxonomies = client.list_taxonomies(graph_id) or []
   for tax in taxonomies:
-    if "mini" in (tax.get("name") or "").lower():
-      return tax.get("id")
+    # ariadne-generated GraphQL models: attribute access, not mapping `.get()`.
+    if "mini" in (tax.name or "").lower():
+      return tax.id
   return None
 
 
@@ -296,10 +298,12 @@ def _pick_entry_type(description: str) -> str:
 
 def ingest(
   graph_id: str, csv_path: Path = CSV_PATH, dry_run: bool = False
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], list[str]]:
   """Walk the CSV's JEs and post each one via create-event-block.
 
-  Returns ``(events_created, warnings)``.
+  Returns ``(events_created, warnings, failures)``. A warning is a data-shape
+  note raised while building a payload — the entry still posts. A failure means
+  the entry is missing from the ledger, so the two are counted apart.
   """
   if not csv_path.exists():
     raise SystemExit(f"Transactions CSV not found at {csv_path}")
@@ -308,6 +312,8 @@ def ingest(
   print(f"Found {len(grouped)} JournalEntry(ies) in {csv_path.name}")
 
   warnings: list[str] = []
+  failures: list[str] = []
+  skipped = 0
   if dry_run:
     # Stand-in element ids so the payload shape can be validated offline.
     fake_map = {
@@ -323,7 +329,7 @@ def ingest(
         f"category={payload['event_category']}, "
         f"type={payload['metadata']['type']}"
       )
-    return len(grouped), warnings
+    return len(grouped), warnings, failures
 
   client = _get_ledger_client()
   print("Resolving mini qnames to element_ids on the graph…")
@@ -333,15 +339,42 @@ def ingest(
   created = 0
   for je_id, rows in sorted(grouped.items()):
     payload = _build_event_payload(je_id, rows, qname_to_id, warnings)
+
+    # A JE whose every line is zero-amount carries no GL impact, and the API
+    # rejects it (a line item must have a non-zero debit or credit). JE-225 in
+    # the upstream data is one: a PPE write-off closing entry with Amount=0 on
+    # both lines. Recorded as a source data-quality note — the same category
+    # the reconciliation reports — rather than posted and failed, which is what
+    # previously produced a silent loss behind an exit code of 0.
+    if all(
+      not li["debit_amount"] and not li["credit_amount"]
+      for li in payload["metadata"]["line_items"]
+    ):
+      warnings.append(
+        f"{je_id}: every line is zero-amount in the source data — no GL "
+        f"impact, not posted"
+      )
+      print(f"  ⚠️  {je_id}: zero-amount entry in source data — skipped")
+      continue
+
     try:
       response = client.create_event_block(graph_id, payload)
       created += 1
       print(f"  ✓ {je_id} → event {response.id} status={response.status}")
     except Exception as exc:  # noqa: BLE001 — surface every failure for diagnosis
-      warnings.append(f"{je_id}: {exc}")
+      # 409 means this entry was already ingested on a previous run. The demo
+      # is documented as re-runnable against an existing graph, so a repeat is
+      # the expected path, not a lost write.
+      if "409" in str(exc):
+        skipped += 1
+        continue
+      failures.append(f"{je_id}: {exc}")
       print(f"  ✗ {je_id}: {exc}")
 
-  return created, warnings
+  if skipped:
+    print(f"  {skipped} entr(y/ies) already ingested — skipped")
+
+  return created, warnings, failures
 
 
 def main() -> None:
@@ -362,15 +395,22 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  created, warnings = ingest(args.graph_id, args.csv, dry_run=args.dry_run)
+  created, warnings, failures = ingest(args.graph_id, args.csv, dry_run=args.dry_run)
 
   if warnings:
-    print(f"\n{len(warnings)} JE(s) failed:")
+    print(f"\n{len(warnings)} warning(s):")
     for w in warnings:
       print(f"  ⚠️  {w}")
 
   action = "Would create" if args.dry_run else "Created"
   print(f"\n{action} {created} event(s).")
+
+  if failures:
+    print(f"\n❌ {len(failures)} JE(s) failed to post:")
+    for f in failures:
+      print(f"  ✗ {f}")
+    print("   The ledger is incomplete — these entries are missing.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -70,7 +70,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          # ladybug-standard budgets 1GB per parent database and admission
+          # control needs 1GB of headroom on top, but LBUG_DATABASES_PER_INSTANCE
+          # lets this one container hold every local graph — where prod gives
+          # each its own instance. 2g fit exactly one database and then rejected
+          # every query; 6g holds the handful the demos create concurrently.
+          memory: 6g
           cpus: "1.5"
         reservations:
           memory: 1g

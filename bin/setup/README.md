@@ -8,7 +8,7 @@ Scripts for bootstrapping and configuring RoboSystems deployments. These handle 
 | -------------------- | ------------------------------ | ------------------- | --------- |
 | `bootstrap.sh`       | Complete first-time setup      | AWS SSO, GitHub CLI | 5-10 min  |
 | `aws.sh`             | Secrets + SSM parameters       | AWS credentials     | 1-2 min   |
-| `gha.sh`             | Configure ~80 GitHub variables | GitHub CLI          | 2-3 min   |
+| `gha.sh`             | Configure GitHub variables     | GitHub CLI          | 2-3 min   |
 | `bedrock.sh`         | Local AI development setup     | AWS credentials     | 1 min     |
 | `localstack-init.sh` | Local AWS emulation            | Docker (automatic)  | N/A       |
 | `postgres-init.sh`   | PostgreSQL databases           | Docker (automatic)  | N/A       |
@@ -263,7 +263,7 @@ just setup-gha
 7. ECR repository name
 8. Optional: RoboLedger/RoboInvestor app URLs
 
-**Variables Set** (~80 total):
+**Variables Set** — run `just gha-list` for the live set.
 
 #### Core Configuration
 

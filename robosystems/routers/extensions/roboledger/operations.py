@@ -199,6 +199,7 @@ from robosystems.models.api.taxonomy_block import (
 )
 from robosystems.models.core import User
 from robosystems.operations.event_block import (
+  DuplicateEventError,
   EventNotFoundError,
   InvalidEventTransitionError,
 )
@@ -402,6 +403,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
   ElementNotFoundError,
   EntityNotFoundError,
+  MappingAssociationExistsError,
   MappingStructureNotFoundError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
@@ -1068,6 +1070,10 @@ create_mapping_association_op = _registrar.register(
         400,
         lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]
       ),
+      MappingAssociationExistsError: (
+        409,
+        lambda _e: "Mapping association already exists",
+      ),
     },
     mark_stale_reason="mapping_association_created",
   )
@@ -1507,6 +1513,12 @@ create_event_block_op = _registrar.register(
     request_model=CreateEventBlockRequest,
     result_type=EventBlockEnvelope,
     error_map={
+      # Ahead of the broad `ValueError: 422` below so a repeat delivery is
+      # reported as a conflict rather than a validation failure.
+      DuplicateEventError: (
+        409,
+        lambda _e: "Event already ingested for this source and external_id",
+      ),
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
       TemplateInterpolationError: 422,

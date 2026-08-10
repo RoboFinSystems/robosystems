@@ -50,15 +50,22 @@ class SqlStatementRequest(BaseModel):
     examples=[
       "SELECT * FROM Entity WHERE entity_type = ? LIMIT ?",
       "SELECT COUNT(*) FROM Transaction WHERE amount > ? AND date >= ?",
+      "SELECT * FROM Entity WHERE industry = $industry LIMIT $limit",
       "SELECT * FROM Entity LIMIT 10",
     ],
   )
-  parameters: list[Any] | None = Field(
+  parameters: list[Any] | dict[str, Any] | None = Field(
     default=None,
-    description="Query parameters for safe value substitution. ALWAYS use parameters instead of string concatenation.",
+    description=(
+      "Query parameters for safe value substitution. ALWAYS use parameters "
+      "instead of string concatenation. Pass a list for positional "
+      "placeholders (`?` or `$1`) and an object for named ones "
+      "(`$param_name`) — the two forms cannot be mixed in one statement."
+    ),
     examples=[
       ["Company", 100],
       [1000, "2024-01-01"],
+      {"industry": "Technology", "limit": 10},
       None,
     ],
   )

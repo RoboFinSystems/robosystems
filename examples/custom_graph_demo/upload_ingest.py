@@ -35,7 +35,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from examples._common.config import get_graph_id
 
 DEMO_DIR = Path(__file__).parent
-DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
+DEFAULT_CREDENTIALS_FILE = (
+  Path(__file__).resolve().parents[2] / ".local" / "config.json"
+)
 DATA_DIR = DEMO_DIR / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
@@ -203,11 +205,18 @@ def materialize_graph_data(clients: RoboSystemsClients, graph_id: str) -> None:
     raise
 
 
-def run_post_ingest_checks(clients: RoboSystemsClients, graph_id: str) -> None:
-  """Run a small set of sanity-check queries after materialization."""
+def run_post_ingest_checks(clients: RoboSystemsClients, graph_id: str) -> int:
+  """Run a small set of sanity-check queries after materialization.
+
+  Returns the number of checks that failed, so the caller can fail the run.
+  A verification step that prints errors and still reports success is worse
+  than no verification at all — it makes a broken graph look loaded.
+  """
   print(f"\n{'=' * 70}")
   print("🔍 Verification queries")
   print("=" * 70)
+
+  failures = 0
 
   print("\n📊 Node counts")
   for label in EXPECTED_NODE_TABLES:
@@ -219,8 +228,12 @@ def run_post_ingest_checks(clients: RoboSystemsClients, graph_id: str) -> None:
         first_row = result.data[0]
         count = first_row.get("count") or next(iter(first_row.values()), 0)
       print(f"   • {{'label': '{label}', 'count': {count}}}")
+      if not count:
+        print(f"   ❌ Expected rows for label '{label}', got {count}")
+        failures += 1
     except Exception as exc:  # noqa: BLE001
       print(f"   ❌ Query failed for label '{label}': {exc}")
+      failures += 1
 
   print("\n📊 Relationship counts")
   for rel in EXPECTED_REL_TABLES:
@@ -232,8 +245,14 @@ def run_post_ingest_checks(clients: RoboSystemsClients, graph_id: str) -> None:
         first_row = result.data[0]
         count = first_row.get("count") or next(iter(first_row.values()), 0)
       print(f"   • {{'type': '{rel}', 'count': {count}}}")
+      if not count:
+        print(f"   ❌ Expected rows for relationship '{rel}', got {count}")
+        failures += 1
     except Exception as exc:  # noqa: BLE001
       print(f"   ❌ Query failed for relationship '{rel}': {exc}")
+      failures += 1
+
+  return failures
 
 
 def main() -> None:
@@ -298,17 +317,22 @@ def main() -> None:
 
   try:
     upload_tables(clients, graph_id, node_files, "Pass 1 - Node Tables")
-    upload_tables(
-      clients, graph_id, relationship_files, "Pass 2 - Relationship Tables"
-    )
+    upload_tables(clients, graph_id, relationship_files, "Pass 2 - Relationship Tables")
     # Wait for DuckDB staging to complete before materializing
     staging_ok = wait_for_staging(clients, graph_id, timeout_seconds=600)
     if not staging_ok:
       print("\n⚠️  Continuing with materialization despite staging issues...")
     materialize_graph_data(clients, graph_id)
-    run_post_ingest_checks(clients, graph_id)
+    check_failures = run_post_ingest_checks(clients, graph_id)
   except Exception:
     print("\n❌ Upload & ingest process failed.")
+    sys.exit(1)
+
+  if check_failures:
+    print(
+      f"\n❌ Upload & ingest complete but {check_failures} verification "
+      "check(s) failed — the graph is not queryable as loaded."
+    )
     sys.exit(1)
 
   print("\n✅ Upload & ingest complete!")

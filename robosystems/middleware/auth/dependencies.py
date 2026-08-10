@@ -52,6 +52,13 @@ def _validate_cached_user_data(user_data: dict) -> bool:
   if name is not None and not isinstance(name, str):
     return False
 
+  # Entries written before a field joined the payload are stale, not merely
+  # incomplete: defaulting `email_verified` here would report False for a
+  # verified user, silently downgrading an authorization input. Rejecting sends
+  # the caller to the database, which re-caches the entry in full.
+  if "email_verified" not in user_data:
+    return False
+
   is_active = user_data.get("is_active")
   return not (is_active is not None and not isinstance(is_active, bool))
 
@@ -67,6 +74,7 @@ def _create_user_from_cache(user_data: dict) -> User | None:
       id=user_data.get("id"),
       email=user_data.get("email"),
       name=user_data.get("name"),
+      email_verified=bool(user_data["email_verified"]),
       is_active=user_data.get("is_active", True),
       session_version=user_data.get("session_version", 0),
     )
@@ -118,11 +126,17 @@ def _db_check_graph_access(user_id: str, graph_id: str) -> bool:
 
 
 def _serialize_user_for_jwt_cache(user: User) -> dict[str, Any]:
-  """Serialize the stable user fields needed by JWT auth dependencies."""
+  """Serialize the stable user fields needed by JWT auth dependencies.
+
+  Every field a consumer reads off the reconstructed `User` must be here — a
+  column omitted comes back as ``None`` rather than its declared default, since
+  column defaults apply on insert and a cache-built `User` is never flushed.
+  """
   return {
     "id": str(user.id),
     "email": user.email,
     "name": user.name,
+    "email_verified": bool(user.email_verified),
     "is_active": bool(user.is_active),
     "session_version": _safe_user_session_version(user),
   }

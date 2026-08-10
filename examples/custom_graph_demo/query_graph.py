@@ -37,7 +37,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples._common.config import get_graph_id
 
-DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
+DEFAULT_CREDENTIALS_FILE = (
+  Path(__file__).resolve().parents[2] / ".local" / "config.json"
+)
 DEMO_NAME = "custom_graph_demo"
 
 
@@ -140,8 +142,7 @@ LIMIT 40
 def load_credentials(credentials_path: Path) -> dict:
   if not credentials_path.exists():
     raise FileNotFoundError(
-      f"No credentials found at {credentials_path}. "
-      "Run setup_credentials.py first."
+      f"No credentials found at {credentials_path}. Run setup_credentials.py first."
     )
   with credentials_path.open() as fh:
     return json.load(fh)
@@ -171,38 +172,48 @@ def run_and_display(
   name: str,
   query: str,
   description: str | None = None,
-) -> None:
+) -> bool:
+  """Run one query and render it. Returns False if the query errored.
+
+  An empty result is not a failure — some presets legitimately match nothing
+  — but an exception is, and the caller needs to know so the run can exit
+  non-zero rather than reporting success over a wall of errors.
+  """
   print_info_section(name, subtitle=description)
 
   try:
     result = execute_query(client, graph_id, query)
     if not result["data"]:
       print_warning("No rows returned.")
-      return
+      return True
     print_table(
       result["data"],
       title=name,
       row_count_label=f"Rows returned (execution {result['execution_time_ms']:.1f} ms)",
     )
+    return True
   except Exception as exc:  # noqa: BLE001
     print_error(f"Query failed: {exc}")
+    return False
 
 
-def run_presets(
-  client: RoboSystemsClients, graph_id: str, presets: list[str]
-) -> None:
+def run_presets(client: RoboSystemsClients, graph_id: str, presets: list[str]) -> int:
+  """Run each preset, returning the number that failed."""
+  failures = 0
   for preset in presets:
     details = PRESET_QUERIES.get(preset)
     if not details:
       print_warning(f"Unknown preset: {preset}")
       continue
-    run_and_display(
+    if not run_and_display(
       client,
       graph_id,
       name=f"Preset: {preset}",
       query=details["query"],
       description=details.get("description"),
-    )
+    ):
+      failures += 1
+  return failures
 
 
 def interactive_mode(client: RoboSystemsClients, graph_id: str) -> None:
@@ -305,18 +316,22 @@ def main() -> None:
   client = build_client(api_key, args.base_url)
 
   if args.query:
-    run_and_display(client, graph_id, "Custom Query", args.query)
-    return
+    sys.exit(0 if run_and_display(client, graph_id, "Custom Query", args.query) else 1)
 
   if args.preset:
-    run_presets(client, graph_id, [args.preset])
-    return
+    _exit_on_failures(run_presets(client, graph_id, [args.preset]))
 
   if args.all:
-    run_presets(client, graph_id, list(PRESET_QUERIES))
-    return
+    _exit_on_failures(run_presets(client, graph_id, list(PRESET_QUERIES)))
 
   interactive_mode(client, graph_id)
+
+
+def _exit_on_failures(failures: int) -> None:
+  if failures:
+    print_error(f"{failures} query/queries failed.")
+    sys.exit(1)
+  sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -878,7 +878,7 @@ setup_secrets_and_variables() {
     echo "  AWS Secrets Manager - Application secrets & feature flags"
     echo "                        (required for deployment, safe to re-run)"
     echo ""
-    echo "  GitHub Variables    - ~80 variables for custom domains, scaling,"
+    echo "  GitHub Variables    - ~185 variables for custom domains, scaling,"
     echo "                        instance sizes, etc. (optional, has defaults)"
     echo ""
 

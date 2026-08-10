@@ -112,9 +112,7 @@ def update_credentials(data: dict):
     sys.exit(1)
 
 
-def create_sec_subscription(
-  api_key: str, base_url: str, plan_name: str = "starter"
-):
+def create_sec_subscription(api_key: str, base_url: str, plan_name: str = "starter"):
   """Create SEC repository subscription via API."""
   try:
     client = AuthenticatedClient(
@@ -278,12 +276,14 @@ def main():
       cwd=PROJECT_ROOT,
     )
     if result.returncode != 0:
-      print(f"\n⚠️  Example queries failed with exit code {result.returncode}")
-      print("   You can still query the SEC data manually using the commands above")
-    else:
-      print("\n" + "=" * 70)
-      print("✅ Example Queries Complete!")
-      print("=" * 70 + "\n")
+      print(f"\n❌ Example queries failed with exit code {result.returncode}")
+      print("   The data load succeeded — you can still query the SEC data")
+      print("   manually using the commands above — but the demo did not pass.")
+      sys.exit(result.returncode)
+
+    print("\n" + "=" * 70)
+    print("✅ Example Queries Complete!")
+    print("=" * 70 + "\n")
 
 
 if __name__ == "__main__":

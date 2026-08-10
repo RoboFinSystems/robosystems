@@ -31,6 +31,7 @@ class TestValidateAPIKey:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": True,
       },
     }
@@ -118,6 +119,7 @@ class TestValidateAPIKey:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": False,  # but the owning user is deactivated
       },
     }
@@ -439,6 +441,7 @@ class TestGraphScopedKeys:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": True,
         "key_graph_id": "kg123",
       },
@@ -554,6 +557,7 @@ class TestGraphScopedKeys:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": True,
         "key_graph_id": None,
       },
@@ -575,6 +579,7 @@ class TestGraphScopedKeys:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": True,
         "key_graph_id": "kg123",
       },
@@ -600,6 +605,7 @@ class TestGraphScopedKeys:
         "id": "user123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
         "is_active": True,
         "key_graph_id": "kg123",
       },

@@ -201,12 +201,21 @@ function create_ssm_feature_flags() {
         "DIRECT_GRAPH_MATERIALIZATION_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
-        "EXTENSIONS_ENABLED=false"
+        # Extensions surfaces are gated per product domain. There is no
+        # settable EXTENSIONS_ENABLED: it is a *derived* property in
+        # config/env.py (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED), so
+        # seeding that name — or the retired LEDGER_ENABLED / INVESTOR_ENABLED
+        # — produces a parameter nothing reads, and an operator who sets it to
+        # false gets no effect while extensions stay on. Seed the three names
+        # the code actually reads. Code defaults are true; these start false so
+        # a fresh environment opts in per domain.
+        "ROBOLEDGER_ENABLED=false"
+        "ROBOINVESTOR_ENABLED=false"
+        "EXTENSIONS_GRAPHQL_ENABLED=false"
         # Kill switch for graph_usage_monitor_sensor's 80%/100% storage emails.
         # Seeded at its code default purely so it is discoverable in
         # `just ssm-list <env> features` — a kill switch you cannot find is not one.
         "GRAPH_USAGE_ALERTS_ENABLED=true"
-        "LEDGER_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"
         "MCP_SEMANTIC_MEMORY_ENABLED=false"
