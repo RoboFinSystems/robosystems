@@ -77,8 +77,6 @@ Notes:
 - **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
 
-Do not use marketing names such as Professional, Enterprise, or Premium — the canonical names are the technical tier identifiers above.
-
 ## Creating a Graph
 
 Graphs are created with `POST /v1/graphs`. Creation is **asynchronous**: the call returns `202 Accepted` with an `OperationEnvelope` carrying an `operation_id`, and the graph is provisioned in the background.
