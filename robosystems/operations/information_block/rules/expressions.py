@@ -371,10 +371,11 @@ def build_rollup_expression(parent_name: str, children: list[tuple[str, float]])
 
   Weight +1 -> ``+``, -1 -> ``-``, otherwise an explicit ``* weight``
   term (``($child * 0.5)``) so non-unit calc weights survive into the
-  frozen expression. Shared by the seed rollup-rule generator
-  (``taxonomy/scripts/generate_rollup_rules.py``) and tenant auto-rule
-  emission (``operations/taxonomy_block/auto_rules.py``); callers pass
-  final variable names — any qname-to-name mapping happens upstream.
+  frozen expression. Used by tenant auto-rule emission
+  (``operations/taxonomy_block/auto_rules.py``) and by the hand-maintained
+  ``rs-gaap-rollup-rules/v1`` seed package, whose expressions must stay
+  byte-identical to what this produces; callers pass final variable names —
+  any qname-to-name mapping happens upstream.
   """
   parts: list[str] = []
   for idx, (child_name, weight) in enumerate(children):

@@ -6,10 +6,17 @@ read-only validation tool:
 
 - ``generate_tenant_exclude`` — rewrites ``frameworks/rs-gaap/tenant-exclude/v1.json``
   from the seeded public library; re-run when the catalog or Reporting Styles change.
-- ``generate_rollup_rules`` — rewrites the ``rs-gaap-rollup-rules`` package from the
-  calc DAG.
 - ``print_library_hierarchy`` — renders the rollup trees + a coherence scan for any
   graph_id (curation validation).
+
+``generate_rollup_rules`` was retired 2026-08-10 (issue #898). Its grouping key
+was the per-subtotal calc role URI, which ``rs-gaap-calculations/v1`` collapsed
+into three statement-level Networks — so the generator raised rather than
+regenerating, and the ``@id`` slugs it produced (``bs-assets``, ``is-cor``,
+``cf-netchange``) are hand-abbreviated and not derivable from the parent qname.
+``rs-gaap-rollup-rules/v1`` is now hand-maintained: one ``RollUp`` rule per calc
+subtotal parent, and ``tests/taxonomy/test_rollup_rules_seed.py`` fails when the
+calc DAG gains or loses a parent the package doesn't cover.
 
 The committed artifact is the JSON-LD under ``frameworks/``, not the script run.
 **Spent one-shot transforms** that reshaped the hand-authored source once (the

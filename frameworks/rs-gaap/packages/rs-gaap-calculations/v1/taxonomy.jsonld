@@ -1352,20 +1352,6 @@
       "@type": "rs:Association"
     },
     {
-      "@id": "_:rs-gaap-deriv-cf-ap-arc-1",
-      "from": {
-        "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
-      },
-      "to": {
-        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
-      },
-      "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
-      "order": 100.0,
-      "@type": "rs:Association"
-    },
-    {
       "@id": "_:rs-gaap-deriv-cf-ap-arc-2",
       "from": {
         "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
@@ -1616,7 +1602,7 @@
         "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
       },
       "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
@@ -1630,7 +1616,7 @@
         "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
       },
       "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
@@ -1644,7 +1630,7 @@
         "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
       },
       "to": {
-        "@id": "rs-gaap:LongTermDebtNoncurrent"
+        "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
@@ -1658,7 +1644,7 @@
         "@id": "rs-gaap:RepaymentsOfLongTermDebt"
       },
       "to": {
-        "@id": "rs-gaap:LongTermDebtNoncurrent"
+        "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",

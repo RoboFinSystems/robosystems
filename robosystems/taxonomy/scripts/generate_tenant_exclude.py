@@ -30,7 +30,7 @@ aggregates) but the gate is simply non-membership in keep-critical, so the
 subtraction can never drop a concept the render ancestor-rollup
 (``_resolve_renderable_ancestor``) or a rule could need.
 
-Run against a seeded library DB (mirrors ``generate_rollup_rules.py``):
+Run against a seeded library DB:
 
     uv run python -m robosystems.taxonomy.scripts.generate_tenant_exclude
 

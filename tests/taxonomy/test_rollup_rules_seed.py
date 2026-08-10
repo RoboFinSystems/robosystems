@@ -1,15 +1,24 @@
-"""Tests for the rs-gaap-rollup-rules/v1 L2 package + its generator.
+"""Tests for the rs-gaap-rollup-rules/v1 L2 package.
 
-The package is generated from rs-gaap-calculations/v1 by
-``robosystems.taxonomy.scripts.generate_rollup_rules`` — one ``RollUp``
-rule per calc-arc subtotal parent. These tests pin the committed
-artifact's shape and the pure builder's transform.
+One ``RollUp`` rule per calc-arc subtotal parent in rs-gaap-calculations/v1.
+The package is **hand-maintained** — its generator was retired in #898 (the
+calc source collapsed per-subtotal role URIs into three statement-level
+Networks, and the rule ``@id`` slugs are hand-abbreviated). These tests pin
+the committed artifact's shape and hold it honest against the live calc
+source: :class:`TestCalcSourceCoverage` is the drift gate that fails when the
+calc DAG gains or loses a subtotal parent the package doesn't cover.
 """
 
 from __future__ import annotations
 
+import json
+from collections import defaultdict
+
 import pytest
 
+from robosystems.operations.information_block.rules.expressions import (
+  build_rollup_expression,
+)
 from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.loader import (
   RULE_CATEGORY_VALUES,
@@ -17,7 +26,6 @@ from robosystems.taxonomy.loader import (
   load_taxonomy_package,
 )
 from robosystems.taxonomy.model import RuleSpec, TaxonomyPackage
-from robosystems.taxonomy.scripts.generate_rollup_rules import build_rollup_rules
 
 SEED_PATH = (
   framework_root("rs-gaap")
@@ -26,6 +34,44 @@ SEED_PATH = (
   / "v1"
   / "taxonomy.jsonld"
 )
+
+CALC_PATH = (
+  framework_root("rs-gaap")
+  / "packages"
+  / "rs-gaap-calculations"
+  / "v1"
+  / "taxonomy.jsonld"
+)
+
+
+def _local(qname: str) -> str:
+  return qname.split(":", 1)[1] if ":" in qname else qname
+
+
+@pytest.fixture(scope="module")
+def calc_children() -> dict[str, list[tuple[str, float]]]:
+  """Live calc source: subtotal parent -> its children in arc order.
+
+  Reads the current ``from`` / ``to`` / ``associationType`` / ``weight`` /
+  ``order`` keys. ``derivation`` arcs are excluded — only ``calculation``
+  arcs foot a subtotal.
+  """
+  graph = json.loads(CALC_PATH.read_text())["@graph"]
+  ordered: dict[str, list[tuple[str, float, float]]] = defaultdict(list)
+  for node in graph:
+    if "from" not in node or node.get("associationType") != "calculation":
+      continue
+    ordered[node["from"]["@id"]].append(
+      (
+        node["to"]["@id"],
+        float(node.get("weight", 1.0)),
+        float(node.get("order", 0.0)),
+      )
+    )
+  return {
+    parent: [(child, weight) for child, weight, _ in sorted(arcs, key=lambda t: t[2])]
+    for parent, arcs in ordered.items()
+  }
 
 
 @pytest.fixture(scope="module")
@@ -43,10 +89,6 @@ class TestPackageShape:
     assert package.standard == "rs-gaap-rollup-rules"
     assert package.version == "v1"
     assert package.taxonomy_type == "rules"
-
-  def test_one_rule_per_calc_parent(self, rules: list[RuleSpec]) -> None:
-    """rs-gaap-calculations/v1 has 21 distinct subtotal parents."""
-    assert len(rules) == 21
 
   def test_all_rollup_native_fac_relation(self, rules: list[RuleSpec]) -> None:
     for rule in rules:
@@ -77,124 +119,54 @@ class TestPackageShape:
     assert assets.rule_expression == "$Assets = ($AssetsCurrent + $AssetsNoncurrent)"
 
 
-class TestBuilder:
-  def test_groups_arcs_into_one_rule_per_parent(self) -> None:
-    graph = [
-      {
-        "@id": "_:net",
-        "roleUri": "https://x/roles/calc/IS-GrossProfit",
-        "structureName": "calc — rs-gaap:GrossProfit = rs-gaap:Revenues - rs-gaap:CostOfRevenue",
-      },
-      {
-        "@id": "_:a1",
-        "arcFrom": {"@id": "rs-gaap:GrossProfit"},
-        "arcTo": {"@id": "rs-gaap:Revenues"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/roles/calc/IS-GrossProfit",
-        "arcWeight": 1.0,
-        "arcOrder": 100.0,
-      },
-      {
-        "@id": "_:a2",
-        "arcFrom": {"@id": "rs-gaap:GrossProfit"},
-        "arcTo": {"@id": "rs-gaap:CostOfRevenue"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/roles/calc/IS-GrossProfit",
-        "arcWeight": -1.0,
-        "arcOrder": 200.0,
-      },
-    ]
-    rules = build_rollup_rules(graph)
-    assert len(rules) == 1
-    rule = rules[0]
-    assert rule["@id"] == "_:rs-gaap-rollup-is-grossprofit"
-    assert rule["rulePattern"] == "RollUp"
-    assert rule["ruleExpression"] == "$GrossProfit = ($Revenues - $CostOfRevenue)"
-    assert rule["ruleTarget"] == {
-      "targetKind": "element",
-      "targetRef": "rs-gaap:GrossProfit",
-    }
-    # parent first, then children in arcOrder
-    assert [v["variableQname"] for v in rule["ruleVariables"]] == [
-      "rs-gaap:GrossProfit",
-      "rs-gaap:Revenues",
-      "rs-gaap:CostOfRevenue",
-    ]
+class TestCalcSourceCoverage:
+  """Drift gate: the package must cover exactly the live calc DAG's parents.
 
-  def test_children_sorted_by_arc_order(self) -> None:
-    graph = [
-      {
-        "@id": "_:b2",
-        "arcFrom": {"@id": "rs-gaap:P"},
-        "arcTo": {"@id": "rs-gaap:Second"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/r/N",
-        "arcWeight": 1.0,
-        "arcOrder": 200.0,
-      },
-      {
-        "@id": "_:b1",
-        "arcFrom": {"@id": "rs-gaap:P"},
-        "arcTo": {"@id": "rs-gaap:First"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/r/N",
-        "arcWeight": 1.0,
-        "arcOrder": 100.0,
-      },
-    ]
-    rule = build_rollup_rules(graph)[0]
-    assert rule["ruleExpression"] == "$P = ($First + $Second)"
+  This is what the retired generator used to guarantee by construction.
+  Adding a subtotal to ``rs-gaap-calculations/v1`` without adding its rule
+  here leaves that subtotal unverified in every tenant; removing one leaves
+  a rule whose parent no longer foots.
+  """
 
-  def test_rejects_multiple_parents_in_one_network(self) -> None:
-    graph = [
-      {
-        "@id": "_:c1",
-        "arcFrom": {"@id": "rs-gaap:P1"},
-        "arcTo": {"@id": "rs-gaap:X"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/r/N",
-        "arcWeight": 1.0,
-        "arcOrder": 100.0,
-      },
-      {
-        "@id": "_:c2",
-        "arcFrom": {"@id": "rs-gaap:P2"},
-        "arcTo": {"@id": "rs-gaap:Y"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/r/N",
-        "arcWeight": 1.0,
-        "arcOrder": 200.0,
-      },
-    ]
-    with pytest.raises(ValueError, match="multiple parents"):
-      build_rollup_rules(graph)
+  def test_covers_exactly_the_calc_parents(
+    self, rules: list[RuleSpec], calc_children: dict[str, list[tuple[str, float]]]
+  ) -> None:
+    covered = {r.rule_target.target_ref for r in rules if r.rule_target is not None}
+    expected = set(calc_children)
+    assert covered == expected, (
+      f"rollup-rule drift — parents in calc source with no rule: "
+      f"{sorted(expected - covered)}; rules with no calc parent: "
+      f"{sorted(covered - expected)}"
+    )
 
+  def test_children_match_the_calc_arcs(
+    self, rules: list[RuleSpec], calc_children: dict[str, list[tuple[str, float]]]
+  ) -> None:
+    """Each rule's frozen child enumeration matches the live arcs.
 
-class TestBuilderNonUnitWeights:
-  def test_non_unit_weight_renders_explicit_coefficient(self) -> None:
-    """Locks the shared-builder delegation: a 0.5-weighted arc keeps its
-    coefficient as ``($var * 0.5)`` (byte-identical to the historical
-    inline builder)."""
-    graph = [
-      {
-        "@id": "_:a1",
-        "arcFrom": {"@id": "rs-gaap:Total"},
-        "arcTo": {"@id": "rs-gaap:HalfShare"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/roles/calc/BS-Total",
-        "arcWeight": 0.5,
-        "arcOrder": 100.0,
-      },
-      {
-        "@id": "_:a2",
-        "arcFrom": {"@id": "rs-gaap:Total"},
-        "arcTo": {"@id": "rs-gaap:Plain"},
-        "arcAssociationType": "calculation",
-        "arcRoleUri": "https://x/roles/calc/BS-Total",
-        "arcWeight": 1.0,
-        "arcOrder": 200.0,
-      },
-    ]
-    rules = build_rollup_rules(graph)
-    assert len(rules) == 1
-    assert rules[0]["ruleExpression"] == "$Total = (($HalfShare * 0.5) + $Plain)"
+    The engine derives RollUp children from live calc arcs on the normal
+    path, but falls back to this enumeration when the parent has no calc
+    children in the merged DAG — where a stale list binds nothing, scores
+    the missing children as 0, and reports a false failure.
+    """
+    for rule in rules:
+      assert rule.rule_target is not None
+      parent = rule.rule_target.target_ref
+      expected = [child for child, _weight in calc_children[parent]]
+      actual = [v.variable_qname for v in rule.rule_variables[1:]]
+      assert actual == expected, f"{rule.id}: children drifted from the calc source"
+
+  def test_expressions_match_the_shared_builder(
+    self, rules: list[RuleSpec], calc_children: dict[str, list[tuple[str, float]]]
+  ) -> None:
+    """Hand-maintained expressions stay byte-identical to what tenant
+    auto-rule emission produces for the same arcs, so a seeded rule and an
+    authored one evaluate identically."""
+    for rule in rules:
+      assert rule.rule_target is not None
+      parent = rule.rule_target.target_ref
+      expected = build_rollup_expression(
+        _local(parent),
+        [(_local(child), weight) for child, weight in calc_children[parent]],
+      )
+      assert rule.rule_expression == expected, f"{rule.id}: expression drifted"
