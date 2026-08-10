@@ -55,10 +55,12 @@ _PINS = {
   "rs-gaap-calculations": "v1",
 }
 
-# Association rows orphaned by the split. Ids are the deterministic UUID5s
-# of (structure, from, to, type) as they existed pre-repair; recomputed from
-# library_creator._association_id and pinned here so the delete is exact and
-# cannot match a tenant-authored arc.
+# Association rows orphaned by the split. Ids are the deterministic UUID5s of
+# (structure, from, to, type) as they existed pre-repair. Pinned as literals
+# deliberately: they must keep identifying the *old* rows, so recomputing them
+# from the current framework source at run time would resolve to the repaired
+# arcs and delete the fix instead of the defect. Literals also make the delete
+# exact, so it cannot match a tenant-authored arc.
 _STALE_ASSOCIATION_IDS = (
   # ProceedsFromIssuanceOfLongTermDebt -> LongTermDebtNoncurrent
   "46c82ecf-b249-5e62-a7b4-c12c1ed33930",
@@ -181,10 +183,13 @@ def upgrade() -> None:
   conn.execute(text(SET_LIBRARY_RESYNC))
 
   # 1. Public library — insert the repointed arcs, update the corrected
-  #    rules, then drop the rows the split orphaned.
+  #    rules, then drop the rows the split orphaned. Both passes run for
+  #    every pinned package rather than naming the one that happens to
+  #    carry rules today, so adding a package to _PINS can't silently skip
+  #    its rule updates.
   for standard, version in _PINS.items():
     _refresh_public_package(conn, standard, version)
-  _update_public_rules(conn, "rs-gaap-rollup-rules", "v1")
+    _update_public_rules(conn, standard, version)
   _delete_stale_associations(conn, "public")
 
   # 2. Fan both packages into every provisioned tenant. Rules update in
