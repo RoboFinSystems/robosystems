@@ -1545,7 +1545,7 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     sql: str,
-    parameters: list[Any] | None = None,
+    parameters: list[Any] | dict[str, Any] | None = None,
     timeout: float | None = None,
   ) -> dict[str, Any]:
     """Run a read-only SQL query against DuckDB staging.
