@@ -836,7 +836,11 @@ class S3BackupAdapter:
         backup_duration_seconds=metadata.get("backup_duration_seconds", 0.0),
         database_version=metadata.get("database_version")
         or metadata.get("lbug_version"),
-        backup_format="full_dump",
+        # The caller already puts the requested format in `metadata`; reading
+        # it here rather than hardcoding keeps the stored record honest the
+        # first time a format other than a full dump is offered. Latent today
+        # — the public create route accepts full dumps only.
+        backup_format=metadata.get("backup_format", "full_dump"),
         s3_key=backup_path,
         s3_metadata_key=metadata_path,
         memory=metadata.get("memory"),

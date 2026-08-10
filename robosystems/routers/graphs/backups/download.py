@@ -101,6 +101,12 @@ async def get_backup_download_url(
     # Access validated by get_current_user_with_graph dependency
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
+    # The single id the monthly counter is keyed on. Both the check and the
+    # increment must use it: the shared path resolves a subgraph to its parent
+    # for the *check* (`sec_historical` → `sec`), so incrementing under the
+    # requested id instead left the checked counter permanently at zero and the
+    # quota unenforced for every subgraph download.
+    quota_resource_id = graph_id
 
     # Check download rate limits based on graph type
     if is_shared:
@@ -111,6 +117,7 @@ async def get_backup_download_url(
       )
 
       parent_repo_id = resolve_shared_repository_parent(graph_id)
+      quota_resource_id = parent_repo_id
       user_repo = UserRepository.get_by_user_and_repository(
         str(current_user.id), parent_repo_id, session
       )
@@ -204,7 +211,7 @@ async def get_backup_download_url(
     if is_shared or has_tier_limit:
       await DownloadRateLimiter.increment_download_count(
         user_id=str(current_user.id),
-        resource_id=graph_id,
+        resource_id=quota_resource_id,
       )
 
     # Record business event

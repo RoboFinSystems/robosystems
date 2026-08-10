@@ -619,3 +619,92 @@ class TestBackupDownloadEndpoint:
         del app.dependency_overrides[get_current_user_with_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
+
+  @patch("robosystems.routers.graphs.backups.download.get_backup_manager")
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.increment_download_count",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.check_download_limit",
+    new_callable=AsyncMock,
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.DownloadRateLimiter.get_shared_repo_monthly_limit"
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.UserRepository.get_by_user_and_repository"
+  )
+  @patch(
+    "robosystems.routers.graphs.backups.download.MultiTenantUtils.is_shared_repository_or_subgraph"
+  )
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  def test_subgraph_download_counts_against_the_parent_repository_quota(
+    self,
+    mock_get_by_user_id,
+    mock_is_shared,
+    mock_get_user_repo,
+    mock_get_monthly_limit,
+    mock_check_limit,
+    mock_increment,
+    mock_get_backup_manager,
+    client,
+    mock_auth_user,
+  ):
+    """The quota is checked on one key and incremented on another.
+
+    Shared-repository downloads resolve a subgraph to its parent for the
+    *check* (`sec_historical` → `sec`), because the subscription and its
+    monthly allowance belong to the parent. The increment used the requested
+    id instead, and the Redis key is built from whichever id it is given —
+    so the counter the check reads never moved and the monthly limit was
+    unenforced for every subgraph download. Both calls must name the same
+    resource.
+    """
+    from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+
+    mock_session = MagicMock()
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_db_session] = lambda: mock_session
+
+    try:
+      mock_is_shared.return_value = True
+
+      mock_user_graph = MagicMock()
+      mock_user_graph.graph_id = "sec_historical"
+      mock_user_graph.role = "viewer"
+      mock_get_by_user_id.return_value = [mock_user_graph]
+
+      mock_user_repo = MagicMock()
+      mock_user_repo.repository_plan = "advanced"
+      mock_get_user_repo.return_value = mock_user_repo
+      mock_get_monthly_limit.return_value = 1
+
+      reset_time = datetime.now(UTC) + timedelta(hours=5)
+      mock_check_limit.return_value = (True, 4, reset_time)
+
+      mock_backup_mgr = MagicMock()
+      mock_backup_mgr.get_backup_download_url = AsyncMock(
+        return_value="https://s3.amazonaws.com/bucket/backup.lbug?signature=xyz"
+      )
+      mock_get_backup_manager.return_value = mock_backup_mgr
+
+      mock_auth_user.id = "test-user-123"
+
+      response = client.get("/v1/graphs/sec_historical/backups/backup123/download")
+
+      assert response.status_code == 200
+
+      # The check resolves to the parent...
+      assert mock_check_limit.call_args.kwargs["repository"] == "sec"
+      # ...so the increment has to move that same counter, not the subgraph's.
+      mock_increment.assert_called_once_with(
+        user_id="test-user-123",
+        resource_id="sec",
+      )
+    finally:
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
+      if get_db_session in app.dependency_overrides:
+        del app.dependency_overrides[get_db_session]
