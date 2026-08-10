@@ -170,9 +170,18 @@ typecheck module="":
     @uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
 
 # CloudFormation linting and validation
+# validate-template only accepts a template body up to 51,200 bytes. Templates
+# that deploy from S3 (api.yaml) are allowed to exceed that, so validate is
+# skipped for them rather than failing — cfn-lint above has no size limit and
+# does the static analysis that matters here.
 cf-lint template:
     @uv run cfn-lint -t cloudformation/{{template}}.yaml
-    @uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml > /dev/null
+    @size=$(wc -c < cloudformation/{{template}}.yaml | tr -d ' '); \
+    if [ "$size" -gt 51200 ]; then \
+      echo "{{template}}.yaml is $size bytes (over the 51,200-byte --template-body limit); deploys from S3, skipping validate-template"; \
+    else \
+      uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml > /dev/null; \
+    fi
 
 # Lint all CloudFormation templates
 cf-lint-all:

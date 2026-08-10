@@ -263,7 +263,7 @@ jobs:
 
       - name: Package and upload scripts
         run: |
-          echo "📦 Packaging UserData scripts and CloudFormation templates..."
+          echo "📦 Packaging UserData scripts..."
           ./bin/tools/package-scripts.sh ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
           echo "✅ Scripts packaged and uploaded successfully"
 
