@@ -107,13 +107,15 @@ class BlockSourceGraphResult(BaseModel):
       "unless `purge` was set."
     ),
   )
+  # Also consumed server-side: the router's after-success hook uses these ids
+  # to delete each purged copy's stored publication once the row deletion has
+  # committed. That is an implementation detail and stays out of the
+  # description, which is published verbatim into both client SDKs.
   purged_report_ids: list[str] = Field(
     default_factory=list,
     description=(
       "Ids of the previously-shared reports deleted from this graph. Empty "
-      "unless `purge` was set. Reported so the caller can see exactly what "
-      "was removed, and so the purge can finish withdrawing each report's "
-      "stored publication once the deletion has committed."
+      "unless `purge` was set."
     ),
   )
 
