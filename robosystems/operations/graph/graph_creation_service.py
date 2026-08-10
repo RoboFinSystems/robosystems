@@ -7,6 +7,7 @@ OLTP provisioning plus the entity node — runs only when
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,6 +22,13 @@ from robosystems.middleware.graph.allocation_manager import (
 )
 
 logger = get_logger(__name__)
+
+# Budget for the rollback itself, not for the pipeline it rolls back. Sized
+# above the one Graph API call teardown makes (``delete_database``, which
+# carries the client's own 30s timeout and three retries with backoff — ~127s
+# worst case) plus the registry deallocation and PostgreSQL cleanup after it.
+# The worker's per-task budget must exceed the pipeline's waits *and* this.
+CLEANUP_TIMEOUT_SECONDS = 180
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +174,17 @@ class GraphCreationService:
       logger.info(f"Graph creation completed: {graph_id}")
       return result
 
-    except Exception as e:
+    except BaseException as e:
+      # BaseException, not Exception: the worker runs this handler under
+      # ``asyncio.wait_for``, and an expired budget delivers ``CancelledError``,
+      # which is a BaseException in 3.13. Catching only Exception let a timeout
+      # skip the rollback entirely and strand the allocation on a
+      # one-graph-per-instance writer.
       logger.error(f"Graph creation failed: {type(e).__name__}: {e}")
-      await self._cleanup(graph_id, location, graph_client)
+      await self._cleanup_within_budget(graph_id, location, graph_client)
+      # Re-raise the original, untranslated: ``wait_for`` turns a propagating
+      # CancelledError into TimeoutError, which is what the consumer's timeout
+      # branch records the operation from.
       raise
 
     finally:
@@ -513,26 +529,89 @@ class GraphCreationService:
     except Exception as e:
       logger.error(f"Failed to create credit pool for {graph_id}: {e}")
 
+  async def _cleanup_within_budget(
+    self,
+    graph_id: str,
+    location: DatabaseLocation | None,
+    graph_client=None,
+  ) -> None:
+    """Run the rollback under its own timeout.
+
+    The bound is what makes the cancellation path safe. ``asyncio.wait_for``
+    cancels the handler exactly once, so once that cancellation has been caught
+    an unbounded rollback is never interrupted again and holds the worker for
+    however long teardown takes. Overrunning the budget is logged and
+    abandoned — the caller is already failing, and delaying its failure further
+    helps nobody.
+    """
+    try:
+      await asyncio.wait_for(
+        self._cleanup(graph_id, location, graph_client),
+        timeout=CLEANUP_TIMEOUT_SECONDS,
+      )
+    except (TimeoutError, asyncio.CancelledError):
+      logger.error(
+        f"Rollback for {graph_id} did not finish within {CLEANUP_TIMEOUT_SECONDS}s; "
+        "resources may be left allocated"
+      )
+    except Exception as e:
+      logger.error(f"Rollback for {graph_id} failed: {e}", exc_info=True)
+
   async def _cleanup(
     self,
     graph_id: str,
     location: DatabaseLocation | None,
     graph_client=None,
   ) -> None:
-    """Deallocate database and close client on failure."""
-    try:
-      if location:
-        manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
-        await manager.deallocate_database(graph_id)
-        logger.info(f"Deallocated {graph_id}")
-    except Exception as e:
-      logger.error(f"Cleanup deallocate failed for {graph_id}: {e}")
+    """Undo a partially built graph.
 
+    Which resources exist depends on how far the pipeline got, and the two
+    cases need different treatment. ``_persist_metadata`` **commits**, so a
+    failure after it leaves a `Graph` row, its `GraphUser` / `GraphSchema` /
+    staging rows, and possibly an extensions tenant schema — teardown for all
+    of that already exists in ``GraphDeprovisionService`` and is what runs.
+    A failure before it leaves only the allocation, which that service would
+    decline to touch (no row to find, so it returns ``not_found``), so the
+    allocation is released directly instead.
+
+    Best-effort throughout: a failure here must not replace the exception that
+    caused the rollback.
+    """
     try:
       if graph_client:
         await graph_client.close()
     except Exception as e:
       logger.error(f"Cleanup close failed for {graph_id}: {e}")
+
+    try:
+      from robosystems.db.platform import platform_session
+      from robosystems.models.core.graph import Graph
+
+      with platform_session() as db:
+        row = db.query(Graph).filter(Graph.graph_id == graph_id).first()
+
+        if row is not None:
+          from .deprovision_service import GraphDeprovisionService
+
+          service = GraphDeprovisionService(environment=env.ENVIRONMENT)
+          result = await service.deprovision_graph(
+            graph_id=graph_id,
+            session=db,
+            create_backup=False,
+            skip_backup_check=True,
+          )
+          logger.info(
+            f"Rolled back partially created graph {graph_id}: {result.status}",
+            extra={"graph_id": graph_id, "errors": result.errors},
+          )
+          return
+
+      if location:
+        manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+        await manager.deallocate_database(graph_id)
+        logger.info(f"Deallocated {graph_id}")
+    except Exception as e:
+      logger.error(f"Cleanup failed for {graph_id}: {e}", exc_info=True)
 
   # ---- Helpers -----------------------------------------------------------
 
