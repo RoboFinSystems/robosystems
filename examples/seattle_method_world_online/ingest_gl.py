@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 import time
 from collections import OrderedDict
 from datetime import date, datetime
@@ -303,11 +304,18 @@ def ingest(
   dry_run: bool = False,
   limit: int | None = None,
   start: int = 0,
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], list[str]]:
   """Walk the GL's journal ids and post each as one event.
 
-  Returns ``(events_created, warnings)``. ``limit`` caps how many entries are
-  posted, and ``start`` skips the first N so a partial run can be resumed.
+  Returns ``(events_created, warnings, failures)``. ``limit`` caps how many
+  entries are posted, and ``start`` skips the first N so a partial run can be
+  resumed.
+
+  Warnings and failures are deliberately separate. A warning is a data-shape
+  note raised while building a payload — the entry still posts. A failure is a
+  create-event-block call that errored, meaning that entry is *missing from the
+  ledger*. Counting the two together is how a lost entry hid behind a benign
+  note and still exited 0.
   """
   if not gl_path.exists():
     raise SystemExit(f"GeneralLedger.csv not found at {gl_path} — run the pull step.")
@@ -347,7 +355,7 @@ def ingest(
         f"category={payload['event_category']}, type={payload['metadata']['type']}"
       )
     print(f"  … (dry-run — showed {len(sample)} of {len(journal_ids)} entries)")
-    return len(journal_ids), warnings
+    return len(journal_ids), warnings, []
 
   client = _get_ledger_client()
   print("Resolving mini qnames to element_ids on the graph…")
@@ -362,6 +370,8 @@ def ingest(
     print(f"  ⚠️  {warnings[-1]}")
 
   created = 0
+  failures: list[str] = []
+  skipped = 0
   t0 = time.time()
   for idx, jid in enumerate(journal_ids, 1):
     payload = _build_event_payload(jid, grouped[jid], qname_to_id, coa_map, warnings)
@@ -370,17 +380,26 @@ def ingest(
       created += 1
       _ = response  # response.id is available but too noisy to print per entry
     except Exception as exc:
-      warnings.append(f"journalId {jid}: {exc}")
+      # 409 means this entry was already ingested on a previous run — the demo
+      # supports re-running against an existing graph, so that is not a loss.
+      if "409" in str(exc):
+        skipped += 1
+        continue
+      failures.append(f"journalId {jid}: {exc}")
       print(f"  ✗ journalId {jid}: {exc}")
 
     if idx % 250 == 0 or idx == len(journal_ids):
       rate = idx / max(time.time() - t0, 1e-6)
       print(
         f"  … {idx}/{len(journal_ids)} entries "
-        f"({created} ok, {len(warnings)} warning(s), {rate:.1f}/s)"
+        f"({created} ok, {skipped} already ingested, "
+        f"{len(failures)} failed, {len(warnings)} warning(s), {rate:.1f}/s)"
       )
 
-  return created, warnings
+  if skipped:
+    print(f"  {skipped} entr(y/ies) already ingested — skipped")
+
+  return created, warnings, failures
 
 
 def main() -> None:
@@ -407,7 +426,7 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  created, warnings = ingest(
+  created, warnings, failures = ingest(
     args.graph_id,
     args.gl,
     args.coa,
@@ -424,6 +443,17 @@ def main() -> None:
 
   action = "Would create" if args.dry_run else "Created"
   print(f"\n{action} {created} event(s).")
+
+  if failures:
+    shown = failures[:25]
+    print(
+      f"\n❌ {len(failures)} entr(y/ies) failed to post"
+      f"{' (first 25)' if len(failures) > 25 else ''}:"
+    )
+    for f in shown:
+      print(f"  ✗ {f}")
+    print("   The ledger is incomplete — these entries are missing.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

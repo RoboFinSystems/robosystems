@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -297,10 +298,12 @@ def _pick_entry_type(description: str) -> str:
 
 def ingest(
   graph_id: str, csv_path: Path = CSV_PATH, dry_run: bool = False
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], list[str]]:
   """Walk the CSV's JEs and post each one via create-event-block.
 
-  Returns ``(events_created, warnings)``.
+  Returns ``(events_created, warnings, failures)``. A warning is a data-shape
+  note raised while building a payload — the entry still posts. A failure means
+  the entry is missing from the ledger, so the two are counted apart.
   """
   if not csv_path.exists():
     raise SystemExit(f"Transactions CSV not found at {csv_path}")
@@ -309,6 +312,8 @@ def ingest(
   print(f"Found {len(grouped)} JournalEntry(ies) in {csv_path.name}")
 
   warnings: list[str] = []
+  failures: list[str] = []
+  skipped = 0
   if dry_run:
     # Stand-in element ids so the payload shape can be validated offline.
     fake_map = {
@@ -324,7 +329,7 @@ def ingest(
         f"category={payload['event_category']}, "
         f"type={payload['metadata']['type']}"
       )
-    return len(grouped), warnings
+    return len(grouped), warnings, failures
 
   client = _get_ledger_client()
   print("Resolving mini qnames to element_ids on the graph…")
@@ -339,10 +344,19 @@ def ingest(
       created += 1
       print(f"  ✓ {je_id} → event {response.id} status={response.status}")
     except Exception as exc:  # noqa: BLE001 — surface every failure for diagnosis
-      warnings.append(f"{je_id}: {exc}")
+      # 409 means this entry was already ingested on a previous run. The demo
+      # is documented as re-runnable against an existing graph, so a repeat is
+      # the expected path, not a lost write.
+      if "409" in str(exc):
+        skipped += 1
+        continue
+      failures.append(f"{je_id}: {exc}")
       print(f"  ✗ {je_id}: {exc}")
 
-  return created, warnings
+  if skipped:
+    print(f"  {skipped} entr(y/ies) already ingested — skipped")
+
+  return created, warnings, failures
 
 
 def main() -> None:
@@ -363,15 +377,22 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  created, warnings = ingest(args.graph_id, args.csv, dry_run=args.dry_run)
+  created, warnings, failures = ingest(args.graph_id, args.csv, dry_run=args.dry_run)
 
   if warnings:
-    print(f"\n{len(warnings)} JE(s) failed:")
+    print(f"\n{len(warnings)} warning(s):")
     for w in warnings:
       print(f"  ⚠️  {w}")
 
   action = "Would create" if args.dry_run else "Created"
   print(f"\n{action} {created} event(s).")
+
+  if failures:
+    print(f"\n❌ {len(failures)} JE(s) failed to post:")
+    for f in failures:
+      print(f"  ✗ {f}")
+    print("   The ledger is incomplete — these entries are missing.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

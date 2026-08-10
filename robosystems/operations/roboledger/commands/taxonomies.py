@@ -55,6 +55,7 @@ __all__ = [
   "AssociationNotFoundError",
   "ElementNotFoundError",
   "LibraryImmutableError",
+  "MappingAssociationExistsError",
   "MappingStructureNotFoundError",
   "StructureNotFoundError",
   "TaxonomyNotFoundError",
@@ -111,6 +112,26 @@ class ElementNotFoundError(LookupError):
     super().__init__(f"{side} element not found: {element_id}")
     self.side = side  # "source" or "target"
     self.element_id = element_id
+
+
+class MappingAssociationExistsError(ValueError):
+  """Raised when the association already exists on the mapping structure.
+
+  `uq_association_structure_elements_type` makes the pair unique per structure
+  and type. Without this check the insert reached the database and surfaced the
+  IntegrityError as an opaque 500, which a caller cannot tell apart from a real
+  fault — so re-running a seeding script had no safe way to skip what it had
+  already created.
+  """
+
+  def __init__(self, mapping_id: str, from_element_id: str, to_element_id: str) -> None:
+    super().__init__(
+      f"Mapping association already exists on {mapping_id}: "
+      f"{from_element_id} → {to_element_id}"
+    )
+    self.mapping_id = mapping_id
+    self.from_element_id = from_element_id
+    self.to_element_id = to_element_id
 
 
 def _taxonomy_to_response(row: Taxonomy) -> TaxonomyResponse:
@@ -197,9 +218,9 @@ def create_mapping_association(
   """Add a mapping association (CoA element → reporting concept).
 
   Raises `MappingStructureNotFoundError` if the mapping structure is
-  missing, or `ElementNotFoundError` with `side="source"` / `"target"`
-  if either element is missing. The caller translates these to HTTP
-  status codes.
+  missing, `ElementNotFoundError` with `side="source"` / `"target"` if
+  either element is missing, or `MappingAssociationExistsError` if the pair
+  is already mapped. The caller translates these to HTTP status codes.
   """
   structure = session.execute(
     select(Structure).where(Structure.id == body.mapping_id)
@@ -226,6 +247,21 @@ def create_mapping_association(
   ).scalar_one_or_none()
   if to_elem is None:
     raise ElementNotFoundError("target", body.to_element_id)
+
+  # Pre-check the uniqueness the DB enforces, so a repeat gets a clean 409
+  # instead of an IntegrityError escaping as a 500.
+  existing = session.execute(
+    select(Association).where(
+      Association.structure_id == body.mapping_id,
+      Association.from_element_id == body.from_element_id,
+      Association.to_element_id == body.to_element_id,
+      Association.association_type == body.association_type,
+    )
+  ).scalar_one_or_none()
+  if existing is not None:
+    raise MappingAssociationExistsError(
+      body.mapping_id, body.from_element_id, body.to_element_id
+    )
 
   assoc = Association(
     id=generate_prefixed_ulid("assoc"),

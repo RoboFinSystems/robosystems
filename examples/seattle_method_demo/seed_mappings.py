@@ -168,6 +168,7 @@ def seed_mappings(graph_id: str, dry_run: bool = False) -> tuple[int, list[str]]
 
   warnings: list[str] = []
   created = 0
+  skipped = 0
   for mini_qname, rsgaap_qname in ALL_MAPPINGS:
     mini_id = mini_lookup.get(mini_qname)
     rsgaap_id = rsgaap_lookup.get(rsgaap_qname)
@@ -180,13 +181,24 @@ def seed_mappings(graph_id: str, dry_run: bool = False) -> tuple[int, list[str]]
     if dry_run:
       created += 1
       continue
-    client.create_mapping_association(
-      graph_id,
-      mapping_id=mapping_id,
-      from_element_id=mini_id,
-      to_element_id=rsgaap_id,
-    )
-    created += 1
+    try:
+      client.create_mapping_association(
+        graph_id,
+        mapping_id=mapping_id,
+        from_element_id=mini_id,
+        to_element_id=rsgaap_id,
+      )
+      created += 1
+    except Exception as exc:  # noqa: BLE001
+      # 409 means this pair is already mapped — the demo is documented as
+      # re-runnable against an existing graph (`--graph`, `--step`), so a
+      # repeat is the expected path, not an error. Anything else propagates.
+      if "409" not in str(exc):
+        raise
+      skipped += 1
+
+  if skipped:
+    print(f"  {skipped} mapping(s) already present — skipped")
 
   return created, warnings
 

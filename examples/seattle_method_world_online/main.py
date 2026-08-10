@@ -267,11 +267,28 @@ def step_ingest(graph_id: str, dry_run: bool = False, limit: int | None = None) 
   print("─" * 70)
   print(f"Step 5 — ingest World Online GL → graph {graph_id}")
   print("─" * 70)
-  created, warnings = ingest_mod.ingest(graph_id, dry_run=dry_run, limit=limit)
+  created, warnings, failures = ingest_mod.ingest(
+    graph_id, dry_run=dry_run, limit=limit
+  )
   if warnings:
     print(f"  {len(warnings)} warning(s) (see ingest output above)")
   action = "Would create" if dry_run else "Created"
   print(f"  {action} {created} event(s)")
+
+  # Stop the run rather than reconcile against a ledger with holes in it. Every
+  # downstream step — rollforwards, reconciliation, the four statements — reads
+  # these events, so continuing produces totals that look authoritative and are
+  # quietly short by whatever failed to post.
+  if failures:
+    print(f"\n  ❌ {len(failures)} entr(y/ies) failed to post:")
+    for f in failures[:25]:
+      print(f"    ✗ {f}")
+    if len(failures) > 25:
+      print(f"    … and {len(failures) - 25} more")
+    raise SystemExit(
+      "  Ingest incomplete — the ledger is missing entries, so the "
+      "reconciliation below would be meaningless."
+    )
 
 
 def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:
