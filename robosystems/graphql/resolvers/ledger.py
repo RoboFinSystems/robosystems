@@ -26,6 +26,9 @@ from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
+  open_extensions_session_for_any as _open_session_for_any,
+)
+from robosystems.graphql.resolvers._common import (
   resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.ledger import (
@@ -126,6 +129,11 @@ from robosystems.operations.roboledger.schedules import ScheduleService
 # matches the router-level `_svc` pattern already in place.
 _fiscal_svc = FiscalCalendarService()
 _schedule_svc = ScheduleService()
+
+# Reports can arrive on a graph that never provisioned `roboledger` — a
+# cross-graph share writes them there — so the report *reads* accept either
+# extension. Everything else on this resolver stays `roboledger`-only.
+_REPORT_EXTENSIONS = ("roboledger", "roboinvestor")
 
 
 def _raise_ledger_not_initialized() -> NoReturn:
@@ -821,12 +829,19 @@ class LedgerQuery:
     return ClosingBookStructures.from_pydantic(response)
 
   # ── Reports ─────────────────────────────────────────────────────────────
+  #
+  # The report reads gate on `_REPORT_EXTENSIONS` rather than `roboledger`
+  # alone: a cross-graph share writes report rows into the recipient's schema,
+  # so an investor-only tenant holds reports it could never author. Gating
+  # these on `roboledger` would hide data the platform delivered on purpose,
+  # and force every recipient to provision a ledger they will never post to.
+  # The write paths below stay `roboledger`-only — receiving is not authoring.
 
   @strawberry.field
   def reports(self, info: Info[GraphQLContext, None]) -> ReportList | None:
     """List all report definitions for this graph."""
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.list_reports(session)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -840,7 +855,7 @@ class LedgerQuery:
   ) -> Report | None:
     """Single report definition with structures + entity name."""
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report(session, report_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -860,7 +875,7 @@ class LedgerQuery:
     ``getStatement`` round-trip path.
     """
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report_package(session, report_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -900,7 +915,7 @@ class LedgerQuery:
       )
     graph_id = require_graph_id(info)
     try:
-      with _open_session(info, "roboledger") as session:
+      with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report_download_url(
           session,
           graph_id,

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.models.api.fact_provenance import AssertedProvenance
+from robosystems.models.extensions import Report as ReportModel
 from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
   NotAuthorizedError,
@@ -451,8 +452,21 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
     fs.id = "fs_shared"
     return fs
 
+  # A source FactSet with no Structure exercises the catch-all copy — this
+  # test is about provenance stamping, not structure resolution.
+  source_fact_sets = [
+    {
+      "id": "fs_src_01",
+      "structure_id": None,
+      "factset_type": "report",
+      "period_start": date(2026, 1, 1),
+      "period_end": date(2026, 3, 31),
+      "entity_id": "ent_src",
+    }
+  ]
   source_facts = [
     {
+      "fact_set_id": "fs_src_01",
       "element_id": "e1",
       "value": 1.0,
       "string_value": None,
@@ -490,6 +504,7 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
     result = _share_to_target(
       source_graph_id="kg_src",
       report_snapshot=report_snapshot,
+      source_fact_sets=source_fact_sets,
       source_facts=source_facts,
       target_graph_id="kg_tgt",
       shared_by="usr_share",
@@ -521,8 +536,19 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
   ext_cm = MagicMock()
   ext_cm.__enter__.return_value = target_session
 
+  source_fact_sets = [
+    {
+      "id": "fs_src_01",
+      "structure_id": None,
+      "factset_type": "report",
+      "period_start": date(2026, 1, 1),
+      "period_end": date(2026, 12, 31),
+      "entity_id": "ent_src",
+    }
+  ]
   source_facts = [
     {
+      "fact_set_id": "fs_src_01",
       "element_id": "e_policy",
       "value": None,
       "string_value": "# Inventory Policy\n\nFIFO, lower of cost or NRV.",
@@ -563,6 +589,7 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
     result = _share_to_target(
       source_graph_id="kg_src",
       report_snapshot=report_snapshot,
+      source_fact_sets=source_fact_sets,
       source_facts=source_facts,
       target_graph_id="kg_tgt",
       shared_by="usr_share",
@@ -579,6 +606,86 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
   assert copied[0].string_value.startswith("# Inventory Policy")
   assert copied[0].value is None
   assert copied[0].content_type == "text/markdown"
+
+
+def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
+  """The holon is the wire format: the recipient views the publication the
+  sender actually made, not one re-derived from the copied rows.
+
+  Both artifacts are re-keyed under the recipient's own graph + report id —
+  presigning is per-graph — and ``bundle_url`` is stamped, because every
+  download flavor is gated on it. Without the stamp the recipient's Holon tab
+  stays dark even with the object sitting in S3.
+  """
+  from robosystems.operations.roboledger.commands import reports as reports_mod
+
+  graph = MagicMock()
+  graph.schema_extensions = ["roboledger"]
+  platform_session = MagicMock()
+  platform_session.execute.return_value.scalar_one_or_none.return_value = graph
+  platform_cm = MagicMock()
+  platform_cm.__enter__.return_value = platform_session
+
+  target_session = MagicMock()
+  ext_cm = MagicMock()
+  ext_cm.__enter__.return_value = target_session
+
+  # `shared_report.id` is assigned by the DB on flush; stand it in so the
+  # recipient's bundle key is the one the assertions can name.
+  def _assign_id(obj):
+    if isinstance(obj, ReportModel):
+      obj.id = "rpt_copy"
+
+  target_session.add.side_effect = _assign_id
+
+  s3 = MagicMock()
+  s3.upload_string.return_value = True
+
+  with (
+    patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
+    patch.object(reports_mod, "S3Client", return_value=s3),
+    patch.object(reports_mod, "_ensure_linked_entity"),
+    patch.object(reports_mod, "is_source_blocked", return_value=False),
+  ):
+    result = _share_to_target(
+      source_graph_id="kg_src",
+      report_snapshot={
+        "id": "rpt_src",
+        "name": "FY Report",
+        "taxonomy_id": "tax_1",
+        "period_type": "annual",
+        "comparative": False,
+        "generation_count": 3,
+      },
+      source_fact_sets=[],
+      source_facts=[],
+      publication_artifacts={
+        ".jsonld": '{"@context": "flat"}',
+        ".holon.jsonld": '{"@graph": "holon"}',
+      },
+      target_graph_id="kg_tgt",
+      shared_by="usr_share",
+    )
+
+  assert result.status == "shared"
+
+  written = {
+    call.kwargs["key"]: call.kwargs["content"]
+    for call in s3.upload_string.call_args_list
+  }
+  assert written == {
+    "report-bundles/kg_tgt/rpt_copy/g3.jsonld": '{"@context": "flat"}',
+    "report-bundles/kg_tgt/rpt_copy/g3.holon.jsonld": '{"@graph": "holon"}',
+  }
+
+  shared = next(
+    call.args[0]
+    for call in target_session.add.call_args_list
+    if isinstance(call.args[0], ReportModel)
+  )
+  assert shared.generation_count == 3
+  assert str(shared.bundle_url).endswith("report-bundles/kg_tgt/rpt_copy/g3.jsonld")
 
 
 # ── regenerate_report filing-status gate ──────────────────────────────────

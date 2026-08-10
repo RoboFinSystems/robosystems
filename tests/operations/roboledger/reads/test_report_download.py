@@ -26,9 +26,14 @@ def _report(
   bundle_url: str | None = "s3://bkt/report-bundles/kg1/rpt_1/g3.jsonld",
   *,
   generation_count: int = 3,
+  generation_status: str = "published",
 ):
   """A minimal stand-in for a Report ORM row."""
-  return SimpleNamespace(bundle_url=bundle_url, generation_count=generation_count)
+  return SimpleNamespace(
+    bundle_url=bundle_url,
+    generation_count=generation_count,
+    generation_status=generation_status,
+  )
 
 
 def _session(report) -> MagicMock:
@@ -54,6 +59,31 @@ class TestNotFoundAndNotAvailable:
     session = _session(_report())
     with pytest.raises(ValueError, match="Unsupported download format"):
       get_report_download_url(session, "kg1", "rpt_1", flavor="turtle")
+
+  @pytest.mark.unit
+  def test_a_published_report_serves_a_holon_without_a_flat_bundle(self):
+    """A cross-graph shared copy has no flat bundle of its own — the sender's
+    holon is copied in beside the rows. `bundle_url` names the flat object the
+    holon path never reads, so gating the holon on it would hide an artifact
+    that is present and valid."""
+    session = _session(_report(bundle_url=None))
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/holon"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
+
+    assert resp is not None
+    assert resp.download_url == "https://signed.example/holon"
+    assert resp.format == "holon-jsonld"
+
+  @pytest.mark.unit
+  def test_an_unpublished_report_still_has_no_holon(self):
+    """The negative control: dropping the `bundle_url` gate must not turn the
+    holon into a draft-preview surface."""
+    session = _session(_report(bundle_url=None, generation_status="draft"))
+    with pytest.raises(ReportBundleNotAvailableError, match="not published"):
+      get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
 
 
 class TestJsonLd:

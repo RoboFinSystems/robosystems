@@ -87,6 +87,27 @@ def require_extension(info: Info[GraphQLContext, None], extension: str) -> None:
     )
 
 
+def require_any_extension(
+  info: Info[GraphQLContext, None], extensions: tuple[str, ...]
+) -> None:
+  """Like :func:`require_extension`, but any one of several will do.
+
+  For reads whose data can arrive on a graph that never provisioned the
+  extension that *owns* the table. A cross-graph report share writes ledger
+  rows into the recipient's schema, so an investor-only tenant legitimately
+  holds reports it can never author — gating those reads on `roboledger`
+  would hide data the platform delivered on purpose. The tenant schema always
+  has the tables (`provision_tenant_schema` creates all of them regardless of
+  the graph's extensions), so this is a policy gate, not a structural one.
+  """
+  provisioned = info.context["schema_extensions"]
+  if not any(extension in provisioned for extension in extensions):
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      message=(f"none of {', '.join(extensions)} is provisioned for this graph"),
+      extensions={"code": "EXTENSION_NOT_PROVISIONED"},
+    )
+
+
 def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
   """Shared auth, extension-gate, and extensions-session prelude.
 
@@ -99,6 +120,22 @@ def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
   require_extension(info, extension)
   graph_id = require_graph_id(info)
   # Local import keeps this module importable without a running extensions DB.
+  from robosystems.db.extensions import extensions_session
+
+  return extensions_session(graph_id)
+
+
+def open_extensions_session_for_any(
+  info: Info[GraphQLContext, None], extensions: tuple[str, ...]
+):
+  """`open_extensions_session` for reads served to more than one domain.
+
+  See :func:`require_any_extension` — the received-report surface is the case
+  this exists for.
+  """
+  require_user(info)
+  require_any_extension(info, extensions)
+  graph_id = require_graph_id(info)
   from robosystems.db.extensions import extensions_session
 
   return extensions_session(graph_id)

@@ -359,11 +359,6 @@ def get_report_download_url(
   report = session.get(Report, report_id)
   if report is None:
     return None
-  if not report.bundle_url:
-    raise ReportBundleNotAvailableError(
-      f"Report '{report_id}' has no published bundle — publish or "
-      f"regenerate the report to produce one."
-    )
   generation_count = int(report.generation_count or 0)
 
   # HOLON_JSONLD is a *derived* projection — materialized + cached on demand
@@ -371,13 +366,31 @@ def get_report_download_url(
   # in _RDF_FLAVOR_VALUES: this branch MUST stay above the _RDF_FLAVOR_VALUES
   # check below, which presigns the publish-stamped JSON-LD and rejects every
   # other RDF flavor as "reserved for future use".
+  #
+  # It also sits above the ``bundle_url`` gate below, and asks about
+  # publication directly instead. ``bundle_url`` names the *flat* JSON-LD
+  # object, which the holon path never reads — it serves its own cached object
+  # or rebuilds from rows. Gating on it made the holon unreachable for a report
+  # that legitimately has no flat bundle of its own: a cross-graph shared copy,
+  # whose holon is the sender's published artifact copied in alongside the rows.
   if flavor == RdfFlavor.HOLON_JSONLD.value:
+    if str(report.generation_status) != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a holon."
+      )
     return _materialize_and_presign_holon(
       session=session,
       graph_id=graph_id,
       report_id=report_id,
       generation_count=generation_count,
       expires_in=expires_in,
+    )
+
+  if not report.bundle_url:
+    raise ReportBundleNotAvailableError(
+      f"Report '{report_id}' has no published bundle — publish or "
+      f"regenerate the report to produce one."
     )
   if flavor in _RDF_FLAVOR_VALUES:
     return _presign_stored_rdf_bundle(
