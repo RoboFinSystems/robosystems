@@ -147,8 +147,9 @@ def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   """Find the mini CoA taxonomy_id on the graph by name."""
   taxonomies = client.list_taxonomies(graph_id) or []
   for tax in taxonomies:
-    if "mini" in (tax.get("name") or "").lower():
-      return tax.get("id")
+    # ariadne-generated GraphQL models: attribute access, not mapping `.get()`.
+    if "mini" in (tax.name or "").lower():
+      return tax.id
   return None
 
 

@@ -55,10 +55,15 @@ def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   constraint admits a fixed enum with no 'mini' member — so element lookups
   scope by ``taxonomy_id``, resolved once here.
   """
+  # `list_taxonomies` comes from the ariadne-generated GraphQL client, whose
+  # models are Pydantic with attribute access and non-optional `id`/`name` —
+  # not the attrs/dict shape the OpenAPI client returns. Mapping-style `.get()`
+  # raises AttributeError here, which is what the sibling element lookup below
+  # already gets right.
   taxonomies = client.list_taxonomies(graph_id) or []
   for tax in taxonomies:
-    if "mini" in (tax.get("name") or "").lower():
-      return tax.get("id")
+    if "mini" in (tax.name or "").lower():
+      return tax.id
   return None
 
 

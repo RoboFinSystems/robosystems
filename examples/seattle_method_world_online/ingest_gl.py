@@ -266,8 +266,9 @@ def _build_event_payload(
 def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   taxonomies = client.list_taxonomies(graph_id) or []
   for tax in taxonomies:
-    if "mini" in (tax.get("name") or "").lower():
-      return tax.get("id")
+    # ariadne-generated GraphQL models: attribute access, not mapping `.get()`.
+    if "mini" in (tax.name or "").lower():
+      return tax.id
   return None
 
 
