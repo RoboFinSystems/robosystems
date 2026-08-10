@@ -1107,13 +1107,22 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND rd.source_graph_id IS NOT NULL
   """
 
+  # Inner-joined to `taxonomies` for the same reason as `FACT_HAS_ELEMENT`
+  # below: `reports.taxonomy_id` carries no foreign key, so a report whose
+  # taxonomy is absent from this schema — the cross-graph share case, where
+  # the sender's reporting extension may not have travelled — reaches here
+  # intact and costs the recipient their entire rebuild. Dropping the one
+  # edge is the proportionate response; `_ensure_shared_elements` is
+  # responsible for the taxonomy actually arriving.
   tables["REPORT_USES_TAXONOMY"] = f"""
     CREATE OR REPLACE TABLE REPORT_USES_TAXONOMY AS
     SELECT
-      id                              AS src,
-      taxonomy_id                     AS dst
-    FROM postgres_scan('{c}', '{s}', 'reports')
-    WHERE generation_status = 'published'
+      r.id                            AS src,
+      r.taxonomy_id                   AS dst
+    FROM postgres_scan('{c}', '{s}', 'reports') r
+    JOIN postgres_scan('{c}', '{s}', 'taxonomies') t
+      ON t.id = r.taxonomy_id
+    WHERE r.generation_status = 'published'
   """
 
   tables["REPORT_HAS_FACT"] = f"""

@@ -430,6 +430,35 @@ def provision_tenant_schema(graph_id: str) -> None:
     conn.commit()
 
 
+def tenant_schema_exists(graph_id: str) -> bool:
+  """Whether ``graph_id`` still has a tenant schema in the extensions DB.
+
+  Cross-graph paths need this because ``extensions_session`` cannot tell
+  them: ``SET search_path`` to a schema that does not exist is legal in
+  PostgreSQL and only fails later, on the first query, as an ordinary
+  ``ProgrammingError`` indistinguishable from a genuine schema fault. Code
+  that must distinguish "the recipient was deprovisioned" from "something is
+  broken" has to ask up front — see ``_delete_shared_copy``.
+
+  Returns ``False`` when no extension domain is enabled or when ``graph_id``
+  is not a tenant-schema id (subgraphs share their parent's schema).
+  """
+  if not env.EXTENSIONS_ENABLED:
+    return False
+  if not _VALID_SCHEMA_PATTERN.match(graph_id):
+    return False
+
+  engine = _get_engine()
+  with engine.connect() as conn:
+    return (
+      conn.execute(
+        text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :name"),
+        {"name": graph_id},
+      ).first()
+      is not None
+    )
+
+
 def drop_tenant_schema(graph_id: str) -> bool:
   """Drop a tenant's extensions OLTP schema and everything in it.
 

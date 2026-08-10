@@ -54,6 +54,8 @@ that have no roboledger tenants.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import ProgrammingError
@@ -496,6 +498,19 @@ async def _dispatch(
     raise HTTPException(status_code=409, detail=str(exc))
 
 
+def _result_payload(envelope: OperationEnvelope) -> dict[str, Any]:
+  """Return an `on_fresh_success` envelope's result as a plain dict.
+
+  `wrap_completed` runs every command result through
+  `model_dump(mode="json")`, so a hook that reaches for `envelope.result.foo`
+  reads absent rather than raising — the share, revoke, and purge hooks all
+  shipped that way and marked nothing stale. Going through this helper keeps
+  the normalization visible at each call site.
+  """
+  result = envelope.result
+  return result if isinstance(result, dict) else {}
+
+
 def _ledger_404() -> HTTPException:
   return HTTPException(
     status_code=404,
@@ -881,7 +896,15 @@ async def update_entity_op(
       )
     return result
 
-  return await _dispatch(ctx, _runner, cache)
+  # `name`, `legal_name`, `ticker`, `cik` and the rest of the updatable fields
+  # are columns of the materialized Entity node, so an edit that never marks
+  # the graph leaves LadybugDB answering with the old company details.
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "entity_updated"),
+  )
 
 
 change_reporting_style_op = _registrar.register(
@@ -2413,10 +2436,15 @@ async def share_report_op(
     # this, delivery depends on the recipient happening to have unrelated
     # ledger activity of their own. Mark each recipient that actually
     # received a copy. (`roboinvestor-maturity.md` D1, delivery half.)
-    result = getattr(envelope, "result", None)
-    for item in getattr(result, "results", []) or []:
-      if getattr(item, "status", None) == "shared":
-        mark_graph_stale(item.target_graph_id, "report_shared_in")
+    #
+    # Read as a dict, not attributes: `wrap_completed` normalizes the
+    # command's Pydantic result through `model_dump(mode="json")` before the
+    # hook ever sees it. Attribute access here is not a type error — it
+    # silently reads as absent, which is how this callback first shipped
+    # doing nothing at all.
+    for item in _result_payload(envelope).get("results") or []:
+      if item.get("status") == "shared":
+        mark_graph_stale(item["target_graph_id"], "report_shared_in")
 
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_recipients_stale)
 
@@ -2484,8 +2512,7 @@ async def revoke_report_share_op(
   def _mark_recipient_stale(envelope) -> None:
     # Same reasoning as the share path: the copy leaves the recipient's graph
     # only when their projection is rebuilt. Skip when nothing was deleted.
-    result = getattr(envelope, "result", None)
-    if getattr(result, "copy_deleted", False):
+    if _result_payload(envelope).get("copy_deleted"):
       mark_graph_stale(body.target_graph_id, "report_share_revoked")
 
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_recipient_stale)
@@ -2919,8 +2946,7 @@ async def block_source_graph_op(
     # Only a purge changes queryable content, and the OLAP projection is a
     # full rebuild from OLTP — a block on its own has nothing to re-project,
     # so it must not trigger one.
-    result = getattr(envelope, "result", None)
-    if getattr(result, "purged_report_count", 0):
+    if _result_payload(envelope).get("purged_report_count"):
       mark_graph_stale(graph_id, "shared_reports_purged")
 
   return await _dispatch(ctx, _runner, cache, on_fresh_success=_mark_stale_if_purged)

@@ -20,6 +20,7 @@ from robosystems.logger import logger
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
 )
+from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
@@ -477,12 +478,18 @@ class CreateMappingAssociationTool:
       )
       with extensions_session(graph_id) as session:
         result = create_mapping_association(session, body, created_by="mapping-agent")
-        return {
-          "association_id": result.id,
-          "from_element_id": result.from_element_id,
-          "to_element_id": result.to_element_id,
-          "confidence": result.confidence,
-        }
+      # The registrar-published tools get this from `OperationSpec`; this one
+      # is hand-written and reaches the command directly, so it has to mark
+      # the graph itself. Associations are materialized, and `auto-map-elements`
+      # writes its whole mapping run through this tool — without the mark the
+      # operator's work never reaches LadybugDB.
+      mark_graph_stale(graph_id, "mapping_association_created")
+      return {
+        "association_id": result.id,
+        "from_element_id": result.from_element_id,
+        "to_element_id": result.to_element_id,
+        "confidence": result.confidence,
+      }
     except Exception as exc:
       logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}

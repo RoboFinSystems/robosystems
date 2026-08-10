@@ -1043,8 +1043,23 @@ def _delete_shared_copy(
   """Delete the copy of a shared report from the target tenant schema.
 
   Returns True when a copy was found and removed.
+
+  A recipient whose graph has been deprovisioned has no schema left, and is
+  treated as "the copy is already gone" rather than an error. Raising would
+  strand the share permanently: revocation stamps ``revoked_at`` only after
+  this returns, and ``delete_report`` refuses a report that still has an
+  active share row — so the sender could neither withdraw the report nor
+  delete it, over a recipient that no longer exists. Deleting the schema
+  deleted the copy; that is the outcome revocation was asking for.
   """
-  from robosystems.db.extensions import extensions_session
+  from robosystems.db.extensions import extensions_session, tenant_schema_exists
+
+  if not tenant_schema_exists(target_graph_id):
+    logger.info(
+      f"Recipient {target_graph_id} has no extensions schema; treating the "
+      f"shared copy of report {source_report_id} as already removed."
+    )
+    return False
 
   with extensions_session(target_graph_id) as target_session:
     deleted = _delete_copies_in_session(
@@ -1173,12 +1188,14 @@ def _share_to_target(
       # The concepts have to land before the facts that cite them. A fact
       # whose element_id resolves nowhere is not a partial delivery — it
       # takes down the recipient's entire next materialization (see
-      # `_ensure_shared_elements`).
+      # `_ensure_shared_elements`). The report's own taxonomy is passed
+      # separately because it can be missing when every fact resolves.
       _ensure_shared_elements(
         target_session,
         source_graph_id,
         {fd["element_id"] for fd in source_facts if fd.get("element_id")},
         shared_by,
+        report_taxonomy_id=report_snapshot["taxonomy_id"],
       )
 
       for fact_data in source_facts:
@@ -1227,6 +1244,7 @@ def _ensure_shared_elements(
   source_graph_id: str,
   element_ids: set[str],
   shared_by: str,
+  report_taxonomy_id: str | None = None,
 ) -> None:
   """Copy the sender's own concepts into the recipient's schema.
 
@@ -1253,6 +1271,15 @@ def _ensure_shared_elements(
   hangs off is typically not itself cited by any fact. Copying element-wise
   would violate that FK on the first note.
 
+  ``report_taxonomy_id`` is ensured **independently of the facts**, because
+  the two can go missing separately. A report built on a sender-specific
+  reporting extension whose facts all cite standard concepts leaves
+  ``element_ids`` fully resolvable and the taxonomy absent — and
+  ``reports.taxonomy_id`` has no foreign key either, so the copy is written
+  without complaint and ``REPORT_USES_TAXONOMY`` then points at nothing.
+  Keying the taxonomy copy off missing *elements* made delivery of the one
+  depend on the absence of the other.
+
   Copies are stamped ``source='linked'``, which is deliberately outside
   ``COA_SOURCES``. The recipient needs the sender's concepts to read the
   report; they must never appear in the recipient's own chart of accounts.
@@ -1267,21 +1294,29 @@ def _ensure_shared_elements(
   fact-insert loop below write the exact dangling references this function
   exists to prevent — the original defect, behind a rarer trigger.
   """
-  if not element_ids:
-    return
-
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions import Element, Taxonomy
 
-  present = {
-    row[0]
-    for row in target_session.execute(
-      text("SELECT id FROM elements WHERE id = ANY(:ids)"),
-      {"ids": list(element_ids)},
-    ).fetchall()
-  }
-  missing = element_ids - present
-  if not missing:
+  missing: set[str] = set()
+  if element_ids:
+    present = {
+      row[0]
+      for row in target_session.execute(
+        text("SELECT id FROM elements WHERE id = ANY(:ids)"),
+        {"ids": list(element_ids)},
+      ).fetchall()
+    }
+    missing = element_ids - present
+
+  report_taxonomy_missing = (
+    bool(report_taxonomy_id)
+    and not target_session.execute(
+      text("SELECT 1 FROM taxonomies WHERE id = :tid"),
+      {"tid": report_taxonomy_id},
+    ).first()
+  )
+
+  if not missing and not report_taxonomy_missing:
     return
 
   # Copied field-by-field rather than by raw INSERT: half of both tables is
@@ -1324,40 +1359,66 @@ def _ensure_shared_elements(
   )
 
   with extensions_session(source_graph_id) as source_session:
-    taxonomy_ids = [
-      row[0]
-      for row in source_session.execute(
-        text("""
-          SELECT DISTINCT e.taxonomy_id
-          FROM elements e
-          JOIN taxonomies t ON t.id = e.taxonomy_id
-          WHERE e.id = ANY(:ids)
-            AND t.taxonomy_type = 'reporting_extension'
-        """),
-        {"ids": list(missing)},
-      ).fetchall()
-    ]
+    taxonomy_ids: set[str] = set()
+    if missing:
+      taxonomy_ids = {
+        row[0]
+        for row in source_session.execute(
+          text("""
+            SELECT DISTINCT e.taxonomy_id
+            FROM elements e
+            JOIN taxonomies t ON t.id = e.taxonomy_id
+            WHERE e.id = ANY(:ids)
+              AND t.taxonomy_type = 'reporting_extension'
+          """),
+          {"ids": list(missing)},
+        ).fetchall()
+      }
+      if not taxonomy_ids:
+        logger.warning(
+          f"Shared facts from {source_graph_id} cite {len(missing)} concept(s) "
+          "outside any reporting extension; not copied."
+        )
+
+    if report_taxonomy_missing:
+      # Same `reporting_extension` restriction the element path applies, for
+      # the same two reasons: a report built on a library framework resolves
+      # by deterministic id in every tenant and needs no copy, and a report
+      # somehow bound to the sender's chart of accounts must not drag that
+      # chart across the boundary. When neither holds, the edge is dropped by
+      # the materializer's own join rather than copied.
+      if source_session.execute(
+        text(
+          "SELECT 1 FROM taxonomies "
+          "WHERE id = :tid AND taxonomy_type = 'reporting_extension'"
+        ),
+        {"tid": report_taxonomy_id},
+      ).first():
+        taxonomy_ids.add(str(report_taxonomy_id))
+      else:
+        logger.warning(
+          f"Shared report from {source_graph_id} cites taxonomy "
+          f"{report_taxonomy_id!r}, which the recipient does not have and "
+          "which is not a reporting extension; not copied."
+        )
+
     if not taxonomy_ids:
-      logger.warning(
-        f"Shared facts from {source_graph_id} cite {len(missing)} concept(s) "
-        "outside any reporting extension; not copied."
-      )
       return
+
+    copy_ids = sorted(taxonomy_ids)
 
     # Detached from the source session before it closes — these become new
     # rows in a different schema, not attached instances.
     taxonomies = [
       ({f: getattr(t, f) for f in _TAX_FIELDS}, dict(t.metadata_ or {}))
-      for t in source_session.execute(
-        select(Taxonomy).where(Taxonomy.id.in_(taxonomy_ids))
-      )
+      for t in source_session.execute(select(Taxonomy).where(Taxonomy.id.in_(copy_ids)))
       .scalars()
       .all()
     ]
     elements = [
       {f: getattr(e, f) for f in _ELEM_FIELDS}
       for e in source_session.execute(
-        select(Element).where(Element.taxonomy_id.in_(taxonomy_ids))
+        select(Element).where(Element.taxonomy_id.in_(copy_ids))
       )
       .scalars()
       .all()
