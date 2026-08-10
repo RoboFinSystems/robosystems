@@ -805,6 +805,12 @@ Resources:
         - Id: failed
           Label: NumberOfNotificationsFailed across all topics
           ReturnData: true
+          # Period is schema-optional but the service rejects the alarm without
+          # it here: an alarm normally inherits its period from a MetricStat,
+          # and a SEARCH-only expression has none to inherit from. Omitting it
+          # fails the stack with "Period must not be null". Keep it equal to the
+          # SEARCH period below.
+          Period: 300
           Expression: >-
             SUM(SEARCH('{AWS/SNS,TopicName} MetricName="NumberOfNotificationsFailed"',
             'Sum', 300))
