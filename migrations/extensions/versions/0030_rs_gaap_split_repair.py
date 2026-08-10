@@ -13,8 +13,9 @@ those references and neither has ever been re-propagated:
 * ``rs-gaap-calculations/v1`` — four cash-flow ``derivation`` arcs pointed
   at concepts no calc network wires, so long-term debt and intangible
   flows could never reach investing/financing and fell through to
-  operating working capital. Observed live: an $80,000 note issuance
-  rendered with financing at zero.
+  operating working capital. Observed live: a long-term debt issuance
+  rendered with financing at zero and operating overstated by the full
+  amount of the issuance.
 
 The library copy at provision time is additive (``ON CONFLICT DO NOTHING``)
 and no migration has ever pinned either package for resync, so provisioned

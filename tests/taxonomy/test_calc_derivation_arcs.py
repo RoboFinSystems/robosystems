@@ -12,7 +12,7 @@ That is not hypothetical: the 2026-06-06 Default Style split (``bfa0ebc7``)
 replaced four combined leaves, and the derivation arcs keying on two of
 them were not repointed. Long-term debt issuance and repayment kept
 deriving from ``LongTermDebtNoncurrent``, which no calc network wires — so
-an $80k note issuance rendered as an operating working-capital change with
+a note issuance rendered as an operating working-capital change with
 financing at zero, and the statement still tied, because the residual had
 nowhere else to go.
 
