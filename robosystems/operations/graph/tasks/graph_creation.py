@@ -55,15 +55,14 @@ class GraphCreationTask(BaseTask):
         f"running full deprovision: {billing_error}"
       )
       try:
-        from robosystems.database import get_db_session
+        from robosystems.config import env
+        from robosystems.db.platform import platform_session
         from robosystems.operations.graph.deprovision_service import (
-          DeprovisionService,
+          GraphDeprovisionService,
         )
 
-        db_gen = get_db_session()
-        db = next(db_gen)
-        try:
-          deprovision = DeprovisionService()
+        with platform_session() as db:
+          deprovision = GraphDeprovisionService(environment=env.ENVIRONMENT)
           deprovision_result = await deprovision.deprovision_graph(
             graph_id=result.graph_id,
             session=db,
@@ -74,13 +73,14 @@ class GraphCreationTask(BaseTask):
             f"Deprovisioned graph {result.graph_id} after billing failure: "
             f"{deprovision_result.status}"
           )
-        finally:
-          try:
-            next(db_gen)
-          except StopIteration:
-            pass
       except Exception as cleanup_error:
-        logger.error(f"Failed to clean up graph {result.graph_id}: {cleanup_error}")
+        # Swallowed so it cannot replace the billing error the caller needs to
+        # see. What stops this path silently rotting again is the test that
+        # drives it, not this handler — it was an ImportError for four months.
+        logger.error(
+          f"Failed to clean up graph {result.graph_id}: {cleanup_error}",
+          exc_info=True,
+        )
       raise
 
     # Report to Dagster observable asset

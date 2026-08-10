@@ -21,11 +21,24 @@ Used by both the consumer loop and the Dagster reaper sensor.
 # operator thinks are still in budget — the MappingOperator makes one AI call
 # per CoA element during rs-gaap refinement, so a 100-element CoA at ~3-4s per
 # call lands around 6-7 minutes.
+#
+# The two creation budgets are derived from the Graph API calls they make, not
+# from how long a run usually takes. One call's worst case is the client's own
+# ``timeout`` across ``max_retries + 1`` attempts plus exponential backoff —
+# ~127s on ``GraphClientConfig`` defaults. Graph creation makes two such calls
+# (create_database, install_schema) before provisioning the extensions tenant
+# schema and copying the taxonomy library into it; subgraph creation makes
+# three, and its third is the fork, whose duration scales with the parent's
+# data. Both previously sat at 60s — below a *single* call's retry budget — so
+# a slow-but-succeeding run was killed mid-flight, and until the rollback was
+# fixed that killed run stranded its allocation.
+# ``tests/worker/test_task_timeout_coverage.py`` pins both against the client
+# config, so raising a retry budget without raising these fails there.
 TASK_TIMEOUTS: dict[str, int] = {
   "operator": 600,  # 10 minutes
   "extensions_materialize": 1800,  # 30 minutes
-  "graph_creation": 60,  # 1 minute
-  "subgraph_creation": 60,  # 1 minute
+  "graph_creation": 600,  # 10 minutes
+  "subgraph_creation": 900,  # 15 minutes (the fork copies parent data)
   "graph_materialization": 120,  # 2 minutes
   "dagster_job_monitor": 3600,  # 1 hour (backup/restore can be long)
   # Drain (120s) + reattach (300s) are awaited before health verification even

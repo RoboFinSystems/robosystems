@@ -65,6 +65,78 @@ def test_timeouts_are_positive_ints() -> None:
     assert timeout > 0, f"{task_type} timeout must be positive"
 
 
+def _worst_case_graph_call_seconds() -> float:
+  """Worst-case wall clock for one Graph API call, from the client's own config.
+
+  Every attempt can burn the full request timeout, and ``_execute_with_retry``
+  makes ``max_retries + 1`` of them with exponential backoff between. Jitter
+  adds up to 10% per delay and is ignored here — it only makes the real number
+  larger, so a budget that clears this bound clears it with jitter too.
+  """
+  from robosystems.graph_api.client.config import GraphClientConfig
+
+  config = GraphClientConfig()
+  attempts = config.max_retries + 1
+  backoff = sum(
+    config.retry_delay * (config.retry_backoff**i) for i in range(attempts - 1)
+  )
+  return config.timeout * attempts + backoff
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  ("task_type", "graph_api_calls"),
+  [
+    # create_database, install_schema
+    ("graph_creation", 2),
+    # create_database, install_schema, fork_from_parent
+    ("subgraph_creation", 3),
+  ],
+)
+def test_creation_budgets_cover_their_graph_api_calls(
+  task_type: str, graph_api_calls: int
+) -> None:
+  """A creation budget must exceed the retry budget of the calls it makes.
+
+  Both of these sat at 60s — less than one call's worst case — so a slow run
+  was killed mid-provision rather than allowed to finish. The failure mode is
+  invisible from the code: the only symptom is a task that always dies at the
+  same elapsed time, and (before the rollback was fixed) an allocation left
+  behind on a one-graph-per-instance writer.
+
+  The bound is deliberately the *floor*, not the budget: it ignores the
+  extensions tenant provisioning, the taxonomy copy, and the fork's own data
+  volume, all of which come on top.
+  """
+  floor = _worst_case_graph_call_seconds() * graph_api_calls
+  assert TASK_TIMEOUTS[task_type] > floor, (
+    f"{task_type} budget ({TASK_TIMEOUTS[task_type]}s) must exceed the worst-case "
+    f"retry budget of its {graph_api_calls} Graph API calls ({floor:.0f}s), which is "
+    "only the floor — the schema and data work it does on top is unbounded by this. "
+    "Raise the budget in robosystems/worker/constants.py, or lower the client's "
+    "timeout/max_retries in graph_api/client/config.py."
+  )
+
+
+@pytest.mark.unit
+def test_creation_budgets_leave_room_for_their_own_rollback() -> None:
+  """The rollback runs inside the same worker task, after the pipeline fails.
+
+  ``GraphCreationService`` catches the timeout's ``CancelledError`` and runs
+  teardown under ``CLEANUP_TIMEOUT_SECONDS``. Pinned so that shrinking the task
+  budget toward the rollback budget — which would leave a rollback with no room
+  to finish — fails here.
+  """
+  from robosystems.operations.graph.graph_creation_service import (
+    CLEANUP_TIMEOUT_SECONDS,
+  )
+
+  assert TASK_TIMEOUTS["graph_creation"] > CLEANUP_TIMEOUT_SECONDS, (
+    f"graph_creation budget ({TASK_TIMEOUTS['graph_creation']}s) must exceed the "
+    f"rollback budget ({CLEANUP_TIMEOUT_SECONDS}s) it triggers on failure."
+  )
+
+
 @pytest.mark.unit
 def test_tier_upgrade_budget_covers_its_internal_waits() -> None:
   """The tier migration awaits drain + reattach before it verifies anything.
