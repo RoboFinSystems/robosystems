@@ -257,8 +257,15 @@ def create_event_block(
       # Handler executes; errors roll back the whole unit of work.
       python_handler.dispatch(session, event, typed_metadata, created_by)
 
+      # Read the row into the envelope BEFORE committing. `commit()` expires
+      # every attribute on the instance, so a later `event.id` triggers a
+      # reload — and if that reload comes back empty the ORM raises
+      # ObjectDeletedError, which surfaces as a 500 for a write that already
+      # succeeded. That is the worst failure shape available: the caller is
+      # told the write failed, so a retry duplicates a committed event.
+      envelope = _to_envelope(event, body.dimension_ids)
       session.commit()
-      return _to_envelope(event, body.dimension_ids)
+      return envelope
 
     # 2. Fall through to the DSL registry
     agent_type = _resolve_agent_type(session, body.agent_id)
@@ -285,8 +292,10 @@ def create_event_block(
     # Fire handler — flushes Transaction + Entry + LineItems inside
     apply_handler(session, event, handler, created_by=created_by)
 
+    # Envelope before commit — see the python-handler path above.
+    envelope = _to_envelope(event, body.dimension_ids)
     session.commit()
-    return _to_envelope(event, body.dimension_ids)
+    return envelope
 
   # Capture-only path (apply_handlers=False)
   event = _build_event_row(body, created_by, status="captured")
@@ -299,8 +308,10 @@ def create_event_block(
       [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
     )
 
+  # Envelope before commit — see the python-handler path above.
+  envelope = _to_envelope(event, body.dimension_ids)
   session.commit()
-  return _to_envelope(event, body.dimension_ids)
+  return envelope
 
 
 def fire_handler_on_commit(
@@ -416,8 +427,11 @@ def update_event_block(
     # Errors propagate; the surrounding transaction rolls back.
     fire_handler_on_commit(session, event, created_by)
 
+  # Envelope before commit — see `create_event_block`. The dimension read has
+  # to happen here too: it reads `event.id`, which is expired by the commit.
+  envelope = _to_envelope(event, _load_dimension_ids(session, event.id))
   session.commit()
-  return _to_envelope(event, _load_dimension_ids(session, event.id))
+  return envelope
 
 
 def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
