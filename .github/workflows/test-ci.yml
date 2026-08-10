@@ -27,11 +27,17 @@ jobs:
           ref: ${{ github.ref }}
           token: ${{ github.token }}
 
+      # Pull requests from forks carry untrusted code, so they are pinned to
+      # ephemeral GitHub-hosted runners regardless of RUNNER_LABELS. Self-hosted
+      # runners persist between jobs; running a fork's code on one would let an
+      # external contributor reach the runner host and anything it can access.
+      # RUNNER_LABELS is a GitHub variable that can be flipped to self-hosted at
+      # any time, so the guard lives here rather than relying on its value.
       - name: Select runner
         id: select
         uses: ./.github/actions/select-runner
         with:
-          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
+          runner_labels: ${{ github.event.pull_request.head.repo.fork && 'github-hosted' || vars.RUNNER_LABELS || 'github-hosted' }}
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
           github_token: ${{ github.token }}
 
