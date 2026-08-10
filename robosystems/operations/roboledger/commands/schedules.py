@@ -224,13 +224,22 @@ def create_schedule(
     created_by=created_by,
   )
 
+  # Read every attribute the response needs before the commit expires the
+  # instance. A post-commit access issues a refresh SELECT on a connection the
+  # commit already returned to the pool, whose search_path may have been reset
+  # to `public` — so the row resolves to the wrong schema and a schedule that
+  # committed comes back to the caller as a 500.
+  metadata = structure.metadata_ or {}
+  structure_id = structure.id
+  structure_name = structure.name
+  structure_taxonomy_id = structure.taxonomy_id
+
   session.commit()
 
-  metadata = structure.metadata_ or {}
   return ScheduleCreatedResponse(
-    structure_id=structure.id,
-    name=structure.name,
-    taxonomy_id=structure.taxonomy_id,
+    structure_id=structure_id,
+    name=structure_name,
+    taxonomy_id=structure_taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
     rule_summary=_rule_summary(rule_results),
@@ -385,25 +394,32 @@ def update_schedule(
     )
     rule_summary = _rule_summary(rule_results)
 
+  # Captured before the commit expires the instance — these are not only the
+  # response's values, they are the parameter the recounts below bind, so a
+  # refresh that resolves to the wrong schema would break the counts too.
+  structure_id = structure.id
+  structure_name = structure.name
+  structure_taxonomy_id = structure.taxonomy_id
+
   session.commit()
 
   # Recount for response (same as create_schedule response shape)
   count_row = session.execute(
     text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
-    {"sid": structure.id},
+    {"sid": structure_id},
   ).fetchone()
   period_row = session.execute(
     text(
       "SELECT COUNT(DISTINCT (period_start, period_end)) AS cnt "
       "FROM facts WHERE structure_id = :sid"
     ),
-    {"sid": structure.id},
+    {"sid": structure_id},
   ).fetchone()
 
   return ScheduleCreatedResponse(
-    structure_id=structure.id,
-    name=structure.name,
-    taxonomy_id=structure.taxonomy_id,
+    structure_id=structure_id,
+    name=structure_name,
+    taxonomy_id=structure_taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
     rule_summary=rule_summary,
@@ -748,13 +764,22 @@ def rebuild_schedule(
     created_by=created_by,
   )
 
+  # Read every attribute the response needs before the commit expires the
+  # instance. A post-commit access issues a refresh SELECT on a connection the
+  # commit already returned to the pool, whose search_path may have been reset
+  # to `public` — so the row resolves to the wrong schema and a schedule that
+  # committed comes back to the caller as a 500.
+  metadata = structure.metadata_ or {}
+  structure_id = structure.id
+  structure_name = structure.name
+  structure_taxonomy_id = structure.taxonomy_id
+
   session.commit()
 
-  metadata = structure.metadata_ or {}
   return ScheduleCreatedResponse(
-    structure_id=structure.id,
-    name=structure.name,
-    taxonomy_id=structure.taxonomy_id,
+    structure_id=structure_id,
+    name=structure_name,
+    taxonomy_id=structure_taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
     rule_summary=_rule_summary(rule_results),

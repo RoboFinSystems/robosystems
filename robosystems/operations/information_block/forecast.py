@@ -619,8 +619,9 @@ def create(
   session.flush()
 
   _write_lever_fact_set(session, structure, mechanics, entity_id, created_by)
+  structure_id = structure.id
   session.commit()
-  return structure.id
+  return structure_id
 
 
 def _load_forecast_or_404(session: Session, structure_id: str) -> Structure:
@@ -722,8 +723,9 @@ def update(
     )
 
   session.flush()
+  structure_id = structure.id
   session.commit()
-  return structure.id
+  return structure_id
 
 
 def delete(
