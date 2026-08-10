@@ -52,11 +52,11 @@ Dedicated frontend app: [`roboledger-app`](https://github.com/RoboFinSystems/rob
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
-Portfolio management and investment tracking extension — tracks investor holdings and links them back to the companies behind them.
+Portfolio management and investment tracking extension — tracks holdings in private companies and links them back to the businesses that issued them.
 
 - **Portfolio Blocks** — the same molecule discipline as RoboLedger: a portfolio plus its positions and securities are validated and written as one envelope, with cost basis and current value held as integer cents and dollar totals computed at the boundary. Positions move through an active / disposed / archived lifecycle; reads expose `portfolios`, `positions`, `holdings` (rolled up by issuer), and the assembled `portfolioBlock`.
 - **Securities** — register and maintain ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail (strike price, liquidation preference, vesting)
-- **Cross-graph research** — a security links to its issuer through a mutual handshake: the investor records the issuer's `source_graph_id`, and the issuer shares a report that materializes its entity in the investor's graph. This joins private holdings to SEC public-company data in the shared repository — the differentiated capability — with authorization enforced at the report-sharing boundary, not the OLTP layer.
+- **Cross-graph research** — a security can point at the graph of the company that issued it, when that company also runs on the platform. The investor records the issuer's `source_graph_id` up front as a pre-association; when the issuer later shares a published report into the investor's graph, the issuer's entity is materialized there and any securities waiting on that `source_graph_id` link to it. A holding then traverses through to the issuer's own reported facts — `Portfolio → Position → Security → Entity → Report → Fact` — with authorization enforced at the report-sharing boundary, not the OLTP layer.
 
 Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/roboinvestor-app).
 

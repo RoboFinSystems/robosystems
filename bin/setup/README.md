@@ -271,7 +271,7 @@ just setup-gha
 | --------------------- | ------------- | ------------------------------------- |
 | `AWS_ECR_REPOSITORY`  | `robosystems` | ECR repository name                   |
 | `AWS_ACCOUNT_ID`      | User input    | AWS account ID                        |
-| `AWS_REGION`          | `us-east-1`   | AWS region                            |
+| `AWS_REGION`          | `$AWS_REGION` | AWS region (falls back to `us-east-1`)|
 | `ENVIRONMENT_PROD`    | `prod`        | Production environment name           |
 | `ENVIRONMENT_STAGING` | `staging`     | Staging environment name (if enabled) |
 
