@@ -17,7 +17,7 @@ The Custom Graph Schema demo demonstrates how to create graph databases with cus
 
 - **3 Node Types**: Person, Company, Project
 - **3 Relationship Types**: Employment, Project Participation, Sponsorship
-- **~50 Generated Entities**: Realistic sample data with relationships
+- **~74 Generated Entities**: 60 people, 8 companies, 6 projects, with relationships
 - **Interactive Queries**: Explore collaboration patterns, team structures, and more
 
 **The `schema.json` file is the official RoboSystems template for custom graph schemas** - copy it and customize for your own use cases!
@@ -49,6 +49,8 @@ just demo-custom-graph
 3. Generates sample data (people, companies, projects)
 4. Uploads and ingests data into the graph
 5. Runs verification queries with beautiful table output
+6. Indexes the demo's markdown documents for search
+7. Provisions a `memory` subgraph and exercises structured + semantic memory
 
 **First run**: Takes ~1-2 minutes to complete all steps.
 
@@ -88,7 +90,6 @@ This is the **official RoboSystems template** for creating custom graph schemas.
   "name": "custom_graph_demo",
   "version": "1.0.0",
   "description": "People, companies, and projects schema",
-  "extends": "base",
   "nodes": [
     {
       "name": "Person",
@@ -130,11 +131,12 @@ Supported data types in your schema:
 
 - `is_primary_key: true` - Unique identifier for the node
 - `is_required: true` - Field must have a value
-- `extends: "base"` - Inherit base schema properties (identifier, timestamps)
+
+The API's schema model also accepts an optional top-level `extends` field, which inherits base schema properties (identifier, timestamps). The demo's `schema.json` doesn't use it — its keys are exactly `name`, `version`, `description`, `nodes`, `relationships`, and `metadata`.
 
 ## Step-by-Step Walkthrough
 
-The `just demo-custom-graph` command runs all 5 steps automatically. This section explains what happens during each step.
+The `just demo-custom-graph` command runs all 7 steps automatically. This section explains what happens during each step.
 
 ### Step 1: Setup Credentials (`setup_credentials.py`)
 
@@ -160,7 +162,7 @@ uv run examples/custom_graph_demo/setup_credentials.py --force  # Force new
 - Reads `schema.json` from the demo directory
 - Creates new Ladybug graph database with custom schema
 - Registers graph with user account
-- Stores graph_id in `credentials/config.json`
+- Stores graph_id in `.local/config.json`
 
 **Control via flags:**
 ```bash
@@ -193,12 +195,14 @@ def build_custom_schema_definition() -> CustomSchemaDefinition:
 - Validates all required properties are present
 
 **Generated data includes:**
-- 50 People with realistic names, ages, titles, and interests
-- 10 Companies across various industries and locations
-- 15 Projects with budgets, statuses, and timelines
+- 60 People with realistic names, ages, titles, and interests
+- 8 Companies across various industries and locations
+- 6 Projects with budgets, statuses, and timelines
 - Employment relationships (Person → Company)
 - Project participation (Person → Project)
 - Sponsorship relationships (Company → Project)
+
+Company and project counts are derived from the person count (one company per 8 people, one project per 10, with floors of 4 and 6), so `--count 100` scales all three together.
 
 **Manual execution (if needed):**
 ```bash
@@ -242,13 +246,45 @@ uv run examples/custom_graph_demo/query_graph.py --all
 # Run specific preset
 uv run examples/custom_graph_demo/query_graph.py --preset people
 
+# List the available presets and exit
+uv run examples/custom_graph_demo/query_graph.py --list
+
+# Run one Cypher query and exit
+uv run examples/custom_graph_demo/query_graph.py --query "MATCH (n) RETURN count(n)"
+
 # Interactive query mode
 uv run examples/custom_graph_demo/query_graph.py
 ```
 
+### Step 6: Index Documents (`upload_documents.py`)
+
+**What happens automatically:**
+- Uploads the markdown files in `examples/custom_graph_demo/documents/` into the graph's search index
+- Runs a few sample searches so you can see document retrieval sitting alongside the graph data
+
+**Manual execution (if needed):**
+```bash
+uv run examples/custom_graph_demo/upload_documents.py
+```
+
+### Step 7: Memory Subgraph (`memory_subgraph.py`)
+
+**What happens automatically:**
+- Creates a subgraph inside the graph you just built — named `memory` by default, provisioned on the `knowledge` schema extension
+- Seeds Concept / Observation / Session nodes on the subgraph and traverses them with exact Cypher — the *structured* memory modality
+- Stores free-text memories on the **parent** graph with `remember` and retrieves them by meaning with `recall` — the *semantic* modality
+
+The split is deliberate. A subgraph exists to be cheap to create and throw away and is written to directly, so the API refuses semantic memory there (403) rather than keeping a second vector store in step with the parent's. Structured knowledge belongs in the subgraph; recall belongs on the parent.
+
+**Manual execution (if needed):**
+```bash
+uv run examples/custom_graph_demo/memory_subgraph.py
+uv run examples/custom_graph_demo/memory_subgraph.py --name mymemory
+```
+
 ## Available Preset Queries
 
-The demo includes 10 preset queries demonstrating common graph patterns:
+The demo includes 7 preset queries demonstrating common graph patterns:
 
 ### 1. Summary - Node Counts
 
@@ -264,9 +300,9 @@ uv run examples/custom_graph_demo/query_graph.py --preset summary
 ┏━━━━━━━━━┳━━━━━━━━┓
 ┃ label   ┃ count  ┃
 ┡━━━━━━━━━╇━━━━━━━━┩
-│ Person  │ 50     │
-│ Company │ 10     │
-│ Project │ 15     │
+│ Person  │ 60     │
+│ Company │ 8      │
+│ Project │ 6      │
 └─────────┴────────┘
 ```
 
@@ -277,11 +313,13 @@ View all people with their roles and companies:
 ```cypher
 MATCH (p:Person)-[:PERSON_WORKS_FOR_COMPANY]->(c:Company)
 RETURN
-  p.name,
-  p.title,
-  c.name AS company,
-  p.interests
-ORDER BY p.name
+    p.identifier AS person_id,
+    p.name AS name,
+    p.title AS role,
+    c.name AS company,
+    p.interests AS interests
+ORDER BY name
+LIMIT 25
 ```
 
 ### 3. Companies - Team Overview
@@ -293,73 +331,74 @@ MATCH (c:Company)
 OPTIONAL MATCH (c)<-[:PERSON_WORKS_FOR_COMPANY]-(p:Person)
 OPTIONAL MATCH (c)-[:COMPANY_SPONSORS_PROJECT]->(proj:Project)
 RETURN
-  c.name,
-  c.industry,
-  c.location,
-  count(DISTINCT p) AS team_members,
-  count(DISTINCT proj) AS sponsored_projects
+    c.name AS company,
+    c.industry AS industry,
+    c.location AS location,
+    count(DISTINCT p) AS team_members,
+    count(DISTINCT proj) AS sponsored_projects
 ORDER BY team_members DESC
 ```
 
-### 4. Projects - Active Projects
+### 4. Projects - Sponsors and Teams
 
-View active projects with team sizes and sponsors:
-
-```cypher
-MATCH (proj:Project)
-WHERE proj.status = 'active'
-OPTIONAL MATCH (proj)<-[:PERSON_WORKS_ON_PROJECT]-(p:Person)
-OPTIONAL MATCH (proj)<-[:COMPANY_SPONSORS_PROJECT]-(c:Company)
-RETURN
-  proj.name,
-  proj.budget,
-  count(DISTINCT p) AS team_size,
-  collect(DISTINCT c.name) AS sponsors
-ORDER BY proj.budget DESC
-```
-
-### 5. Employment - Who Works Where
-
-See all employment relationships:
+View projects with their sponsor and team size:
 
 ```cypher
-MATCH (p:Person)-[:PERSON_WORKS_FOR_COMPANY]->(c:Company)
-RETURN p.name AS person, c.name AS company, c.industry
-ORDER BY c.name, p.name
-```
-
-### 6. Project Teams - Team Composition
-
-View project teams with their members:
-
-```cypher
-MATCH (p:Person)-[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
+MATCH (proj:Project)<-[:PERSON_WORKS_ON_PROJECT]-(p:Person)
 MATCH (proj)<-[:COMPANY_SPONSORS_PROJECT]-(c:Company)
 RETURN
-  proj.name AS project,
-  proj.status,
-  proj.budget,
-  collect(DISTINCT p.name) AS team_members,
-  collect(DISTINCT c.name) AS sponsors
-ORDER BY proj.name
+    proj.name AS project,
+    proj.status AS status,
+    c.name AS sponsor,
+    proj.budget AS budget,
+    count(DISTINCT p) AS team_members
+ORDER BY project
 ```
 
-### 7. Cross-Company Collaboration
+### 5. Teams - Cross-Company Collaboration
 
-Discover cross-company project collaborations:
+Find pairs of people from different companies working the same project — the multi-hop pattern a relational schema makes painful:
 
 ```cypher
 MATCH (p1:Person)-[:PERSON_WORKS_FOR_COMPANY]->(c1:Company),
       (p2:Person)-[:PERSON_WORKS_FOR_COMPANY]->(c2:Company),
       (p1)-[:PERSON_WORKS_ON_PROJECT]->(proj:Project),
       (p2)-[:PERSON_WORKS_ON_PROJECT]->(proj)
-WHERE c1.identifier <> c2.identifier AND p1.identifier < p2.identifier
+WHERE p1.identifier < p2.identifier AND c1.identifier <> c2.identifier
 RETURN
-  proj.name AS project,
-  c1.name AS company_a,
-  c2.name AS company_b,
-  count(*) AS cross_company_pairs
-ORDER BY cross_company_pairs DESC
+    proj.name AS project,
+    c1.name AS company_a,
+    p1.name AS teammate_a,
+    c2.name AS company_b,
+    p2.name AS teammate_b
+ORDER BY proj.name, company_a, company_b
+LIMIT 50
+```
+
+### 6. Interests - What People Work On
+
+Aggregate the technical interests across the population:
+
+```cypher
+MATCH (p:Person)
+RETURN p.interests AS interest_list, count(*) AS people
+ORDER BY people DESC, interest_list ASC
+LIMIT 20
+```
+
+### 7. Graphviz - A Subgraph Worth Drawing
+
+A small, connected slice suitable for pasting into a visualization tool:
+
+```cypher
+MATCH (p:Person)-[:PERSON_WORKS_ON_PROJECT]->(proj:Project)
+MATCH (p)-[:PERSON_WORKS_FOR_COMPANY]->(c:Company)
+RETURN
+    p.name AS person,
+    c.name AS company,
+    proj.name AS project
+ORDER BY proj.name, company
+LIMIT 40
 ```
 
 ### All Available Presets
@@ -367,13 +406,10 @@ ORDER BY cross_company_pairs DESC
 1. **summary** - Node and relationship counts
 2. **people** - People with employment info
 3. **companies** - Companies with team sizes
-4. **projects** - Active projects overview
-5. **employment** - Employment relationships
-6. **project_teams** - Project team composition
-7. **cross_company** - Cross-company collaboration
-8. **company_network** - Company collaboration network
-9. **person_network** - Person collaboration network
-10. **industries** - Companies by industry
+4. **projects** - Projects with sponsors and team members
+5. **teams** - Cross-company teams on shared projects
+6. **interests** - Top technical interests across the population
+7. **graphviz** - A lightweight subgraph to visualize
 
 ## Interactive Query Mode
 
@@ -383,28 +419,28 @@ After running the demo, explore your graph data interactively:
 uv run examples/custom_graph_demo/query_graph.py
 ```
 
-This launches an interactive session where you can:
+This launches an interactive session at a `cypher>` prompt. Anything you type that isn't one of the four commands below is executed as Cypher — so a bare preset name is a syntax error, not a shortcut.
 
 **Run Preset Queries by Name:**
 ```
-> people
-> projects
-> cross_company
+cypher> preset people
+cypher> preset projects
+cypher> preset teams
 ```
 
 **Execute Custom Cypher Queries:**
 ```
-> MATCH (p:Person) WHERE p.age > 40 RETURN p.name, p.age, p.title ORDER BY p.age DESC
+cypher> MATCH (p:Person) WHERE p.age > 40 RETURN p.name, p.age, p.title ORDER BY p.age DESC
 ```
 
 **List Available Presets:**
 ```
-> presets
+cypher> presets
 ```
 
 **Exit the Session:**
 ```
-> quit
+cypher> quit
 ```
 
 **Features:**
@@ -445,13 +481,36 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
+Some clients — claude.ai and Claude Desktop custom connectors among them — have no field for a custom header. For those, the credential travels in the URL instead: `http://localhost:8000/v1/graphs/<your-graph-id>/mcp?token=<graph-scoped API key>`. Only **graph-scoped** keys are accepted this way; an account-wide key in a URL is rejected outright. See [AI Operators & MCP](AI-Operators-and-MCP) for generating one.
+
 4. Restart your MCP-compatible AI tool
 
-5. The MCP server provides these tools:
+5. A custom graph serves 25 tools. The ones that matter most here:
+
+   **Schema and DDL** — the surface that makes a custom graph extensible after creation:
    - `get-graph-schema` - View available node and relationship types
-   - `read-graph-cypher` - Run Cypher queries
+   - `get-graphql-schema` - The typed GraphQL schema served for this graph
+   - `add-node-table` - Add a new node type to the live graph
+   - `add-relationship-table` - Add a new relationship type to the live graph
+
+   **Querying:**
+   - `read-graph-cypher` - Run Cypher reads
+   - `write-graph-cypher` - Run Cypher writes (subject to the graph's write policy)
+   - `query-graphql` - Typed GraphQL reads
    - `get-graph-info` - Inspect graph topology and node/relationship counts
-   - `get-example-queries` - Get sample queries
+
+   **Subgraphs and lifecycle:**
+   - `list-subgraphs`, `create-subgraph`, `delete-subgraph`
+   - `create-backup`, `set-write-policy`, `sync-connection`
+
+   **Memory** — the surface Step 7 exercises:
+   - `remember`, `recall`, `update-memory`, `forget`
+
+   **Documents** — the surface Step 6 exercises:
+   - `search-documents`, `get-document-section`, `get-document`, `list-documents`
+   - `create-document`, `update-document`, `delete-document`
+
+   Note that `get-example-queries` is **not** served on a custom graph — it's gated on the RoboLedger extension, because the examples it returns are written against that schema. Use `get-graph-schema` instead; on a custom graph it is the tool an agent orients with.
 
 **Example MCP Usage:**
 
@@ -697,7 +756,7 @@ This represents: *Alice works as a Senior Engineer at TechCorp, dedicating 40 ho
 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Connect to your custom graph database:
-   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbug` (get graph_id from `credentials/config.json`)
+   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbug` (get graph_id from `.local/config.json`)
 3. **Enable "Fetch all edges between vertices"** in settings
 4. Run visualization queries to explore your data
 

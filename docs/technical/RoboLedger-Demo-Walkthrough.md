@@ -1,8 +1,9 @@
 # RoboLedger Demos
 
-RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in two flavors:
+RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in three flavors:
 
 - **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (~60 seconds), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
+- **Showcase scenarios** (`just demo-coffee-roaster`, `just demo-saas-startup`) — the same scenario engine pointed at two businesses with a story: Driftline Coffee (profitable but cash-poor) and Cadence Labs (burning cash on a deferred-revenue runway). Use these when the *shape of the numbers* is the point. See [Showcase Scenarios](#showcase-scenarios) below.
 - **Seattle Method / XBRL** (`just demo-seattle-method`, `just demo-world-online`) — built on Charlie Hoffman's *published* [Seattle Method](https://github.com/seattlemethod/prototypes) reference datasets. These prove cross-taxonomy projection and round-trip XBRL fidelity against an external reference, at both toy and realistic scale. See [Seattle Method XBRL Demos](#seattle-method-xbrl-demos) below.
 
 Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
@@ -26,6 +27,7 @@ The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok
 - [Resetting the Demo](#resetting-the-demo)
 - [Customization](#customization)
 - [Comparison to the QuickBooks Workflow](#comparison-to-the-quickbooks-workflow)
+- [Showcase Scenarios](#showcase-scenarios)
 - [Seattle Method XBRL Demos](#seattle-method-xbrl-demos)
 - [Next Steps](#next-steps)
 
@@ -35,7 +37,7 @@ When `just demo-roboledger` finishes (~60 seconds), the tenant has:
 
 - A new entity (or one provisioned into an existing graph) modeling **Cascade Advisory Group LLC**, a 3–5 person boutique consulting firm
 - **16 months** of business data on a rolling window ending at the current month, so the demo always covers "recent history" regardless of when you run it
-- A clean 27-account Chart of Accounts with 100% renderable mapping coverage to rs-gaap
+- A clean 27-account Chart of Accounts, fully mapped to rs-gaap
 - ~305 typed business events (`invoice_issued`, `payment_received`, `bill_received`, `bill_paid`, `journal_entry_recorded`) emulating data arriving via the same HTTP API a real adapter uses
 - ~132 discharge chains linking payments to their originating invoices/bills (REA duality)
 - A fiscal calendar with the prior month's prior month closed and the last completed month queued — **exactly one period ready to close**
@@ -47,7 +49,7 @@ After setup, the natural flow is:
 
 1. Open the frontend, browse the entity, mapping coverage, and the filed annual report
 2. Drop into the AI close workflow on the queued period via Claude Desktop or any MCP client
-3. Inspect the rule engine output (the demo ships 38 validator checks; first run passes all 38)
+3. Inspect the verification output — the rules attached to each Information Block, plus the rule tallies the close itself returns
 4. Query the graph directly to explore the data shape
 
 ## Prerequisites
@@ -114,14 +116,14 @@ just demo-roboledger --ai
 | **Agents** | 17 | 6 customers + 8 vendors + 2 employees + 1 government (IRS). Same shape a real QB sync produces. |
 | **Business events** | ~305 | Typed event stream: invoice/payment pairs, bill/payment pairs, opening-balance and payroll journal entries. Mirrors the exact event vocabulary QB ingestion emits. |
 | **Discharge chains** | ~132 | `payment_received → invoice_issued` and `bill_paid → bill_received` links — the REA duality that drives open-AR / open-AP aging |
-| **CoA → rs-gaap mappings** | 27 | 100% coverage, all renderable under the active Reporting Style |
+| **CoA → rs-gaap mappings** | 27 | 100% coverage. 24 are renderable under the active Reporting Style; 3 PP&E-gross targets are unreachable — see [The Mapping View](#the-mapping-view) |
 | **Fiscal calendar** | 1 | `closed_through = month_before_last`, `close_target = last_completed_month` |
 | **Fiscal periods** | 16 | One per month, first 14 closed, last 2 open |
-| **Schedules** | 6 | 2 depreciation (computer equipment, office furniture) + 4 prepaid amortization (insurance, software licenses, AWS prepay, etc.) |
+| **Schedules** | 6 | 2 depreciation (computer equipment, office furniture) + 4 prepaid amortization (business insurance, its year-two renewal, software subscription, cloud hosting) |
 | **Schedule facts** | mixed | Historical (pre-target, baked into opening balances) vs in_scope (target onward, surfaced by the close workflow) |
 | **Documents** | 4 | Markdown policies: close procedures, depreciation, prepaid, revenue recognition |
 | **Filed FY report** | 1 | Annual report — facts generated, package assembled, lifecycle stamped `filed`. Demonstrates the full Report-Block lifecycle end-to-end. |
-| **Rules** | 38 | Validator + arithmetic checks; demo data is intentionally clean, so all 38 pass on first run |
+| **Verification rules** | ~134 | Not authored by the demo — auto-generated. One `SumEquals` proof per schedule, plus the `RollUp` / `EqualTo` / `Derive` rules that ship with the seeded rs-gaap statement structures. Count them yourself in [The Rule Engine](#the-rule-engine). |
 
 Every event flows through the same HTTP API the frontend UI and MCP tools call. The only direct-DB path is `_reset.py`, used to clean up between re-runs.
 
@@ -152,9 +154,13 @@ To inspect:
 API_KEY=$(jq -r .api_key .local/config.json)
 GRAPH_ID=$(jq -r '.graphs | keys[0]' .local/config.json)
 
-# List reports
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/reports" \
-  -H "X-API-Key: $API_KEY" | jq '.'
+# List reports — reads go through the graph-scoped GraphQL endpoint.
+# Note the double nesting: the `reports` root field returns a ReportList,
+# whose own `reports` field holds the rows.
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ reports { reports { id name filingStatus periodEnd } } }"}' | jq '.'
 
 # Inspect facts on the filed report
 docker exec robosystems-pg psql -U postgres -d extensions -tAc "
@@ -183,57 +189,92 @@ The natural way to drive the close is via the AI workflow. With Claude Desktop o
 1. Paste the prompt from `examples/roboledger_demo/prompt.md` (or copy the close-month-specific prompt the setup script prints at the end)
 2. Ask: *"Close the books for the most recent completed month."*
 
-The agent walks through the standard 8-step close checklist (loaded into the tenant as the `close procedures` document):
+Two checklists are in play, and it's worth keeping them apart.
 
-1. **Review** the active close procedures — `search-documents` finds the checklist
-2. **Check period status** — `get-period-close-status` shows the target month with any pending obligations
-3. **Resolve open obligations** — schedules with in-scope facts pending approval; the agent proposes journal entries to record them
-4. **Generate and review month-end accruals** — depreciation (PP&E rollforward), prepaid amortization (insurance, software, AWS)
-5. **Validate** — `evaluate-rules` runs the 38 structural and arithmetic checks
-6. **Close the period** — `close-period` flips the boundary forward
-7. **Generate the close report** — month-over-month variance + balance sheet snapshot
-8. **Document** — append any close notes to the documents corpus
+**The tenant's accounting procedure** is a document loaded into the graph — `search-documents` for "close procedures" finds it. It is the human-readable policy for *this* company, and for Cascade Advisory Group it runs:
 
-Each step exercises a different RoboLedger surface: documents, schedules, journal entries, rule engine, period management, reports. The agent's run is auditable — every action is a typed operation in the event log, replayable on demand.
+1. **Bank reconciliation** — reconcile Operating Checking to the statement
+2. **Accounts receivable review** — invoices sent, AR aging, unbilled revenue
+3. **Accounts payable review** — vendor bills entered, payroll taxes current
+4. **Depreciation** — post the two fixed-asset schedules ($158.33/month combined)
+5. **Prepaid expense amortization** — post the active prepaid schedules
+6. **Review trial balance** — debits equal credits, compare to prior month
+7. **Generate financial statements** — income statement, balance sheet, mapping rollups
+8. **Period close** — close the fiscal period once everything is posted
+
+**The executable tool sequence** is a different thing: the generic MCP workflow that actually drives the close. Don't reconstruct it from this page — ask the server. `get-close-playbook` returns it, version-locked to the deployed build, so it can never drift from the tool names and schemas it describes. As of the current build the recurring sequence is:
+
+1. `get-fiscal-calendar` — orient: `closed_through`, `close_target`, `closeable_now`, blockers
+2. `sync-connection` — only if the blockers include `sync_stale`; then poll until it clears
+3. `get-period-close-status` — which schedules are pending / drafted / posted, and for how much
+4. `promote-obligations` (`dispatch_handlers=true`) — drafts every matured schedule's closing entry in one sweep. **This is how schedule drafts come into being; there is no `create-closing-entry` tool.** Manual one-offs go through `create-event-block` with `event_type='journal_entry_recorded'`.
+5. `list-period-drafts` — review every draft with DR/CR detail and the `all_balanced` check
+6. Summarize to the user and get explicit approval
+7. `close-period` — atomic: posts the drafts, runs the balance-sheet equation check, stamps the period's statement FactSets, advances `closed_through`
+8. Post-close verification — read the receipt back: `entries_posted`, `statements_stamped`, `rule_summary`, `statement_rule_summary`
+
+Note what is *not* in it: `evaluate-rules` is not a close step. The close runs the rules itself and hands the tallies back on its own response (see [The Rule Engine](#the-rule-engine)).
+
+Each step exercises a different RoboLedger surface: documents, schedules, journal entries, verification, period management, reports. The agent's run is auditable — every action is a typed operation in the event log, replayable on demand.
 
 If you'd rather drive manually, the same operations are exposed via REST under `/extensions/roboledger/{graph_id}/operations/`.
 
 ## The Rule Engine
 
-The demo ships with 38 rules covering structural validity (no cycles in the CoA, unique qnames, leaf accounts have classifications), arithmetic checks (debit-credit balance per entry, period rollforward integrity, accounting equation), and policy adherence (rolling forward accumulated depreciation, prepaid amortization completion).
+Rules are not a global corpus you run against the tenant. **Every rule hangs off an Information Block** — it is part of the block's envelope, alongside the block's elements, facts, and verification results. That is the single most important thing to internalize about verification in RoboLedger, and it's why there is no "list all rules" endpoint.
 
-To run:
+The demo authors none of them. They arrive two ways:
+
+- **One `SumEquals` proof per schedule.** Give a schedule a cost basis (`original_amount`) and the platform generates the rule that proves the periodic amounts sum back to it. All six demo schedules carry one.
+- **The seeded rs-gaap statement structures.** Balance sheet, income statement, cash flow and equity blocks arrive from the taxonomy library with their `RollUp` and `EqualTo` rules already attached — the calculation arcs, expressed as verifiable rules. The `Derive` rules on those blocks (and on the metric block) are the other half of the same grammar: same `$Variable` expressions, evaluated to *compute* a value rather than to check one, which is what `compute-metrics` runs.
+
+To see them, walk the blocks:
 
 ```bash
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ informationBlocks { name blockType rules { rulePattern ruleSeverity ruleOrigin } } }"}' \
+  | jq '[.data.informationBlocks[].rules[]] | group_by(.rulePattern)
+        | map({pattern: .[0].rulePattern, count: length})'
+```
+
+On a freshly loaded demo tenant that returns roughly 134 rules: ~88 `RollUp`, ~30 `Derive`, ~10 `EqualTo`, and the 6 schedule `SumEquals` proofs. The exact numbers move with the seeded rs-gaap library, which is why the query above is the answer rather than a table on this page.
+
+The pattern vocabulary is broader than what the demo happens to exercise — `Adjustment`, `CoExists`, `Derive`, `EqualTo`, `Exists`, `GreaterThan`, `GreaterThanOrEqualToZero`, `LessThan`, `RollForward`, `RollUp`, `SumEquals`, `Variance`. Of those, `EqualTo` / `RollForward`, `RollUp`, `Exists`, `CoExists`, and `SumEquals` have evaluators today; the rest return `skipped` rather than failing.
+
+### Evaluating a block
+
+`evaluate-rules` is scoped to **one** Information Block. It takes a `structure_id` — posting an empty body returns a 422:
+
+```bash
+# Pick a block — here, the first of the six schedules
+BLOCK_ID=$(curl -s -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ informationBlocks(blockType: \"schedule\") { id name } }"}' \
+  | jq -r '.data.informationBlocks[0].id')
+
 curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/evaluate-rules" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}' | jq '.result | {passed, failed, total, by_severity}'
+  -d "{\"structure_id\": \"$BLOCK_ID\"}" | jq '.result.summary'
 ```
 
-First-run output:
+The response is an `OperationEnvelope` whose `result` is `{structure_id, results[], summary}`. `summary` is a count keyed by outcome — `{"pass": N, "fail": N, "error": N, "skipped": N}` — and `results` carries one row per rule. Optional `period_start` / `period_end` narrow the fact-binding window; without them the engine binds the most recent in-scope fact per element.
 
-```json
-{
-  "passed": 38,
-  "failed": 0,
-  "total": 38,
-  "by_severity": {"error": 0, "warning": 0, "info": 0}
-}
-```
+### What the close runs for you
 
-The demo data is intentionally clean — the rule engine isn't supposed to find issues. The value is showing the *shape* of the rule engine output and the breadth of what it covers. Once you start the close workflow and the agent proposes adjustments, the rule engine catches anything that would break the books.
+You rarely call `evaluate-rules` by hand during a close. `close-period` runs the engine itself — over every schedule structure with facts in the closed period, and over the statement blocks it just stamped — and returns the tallies on its own response:
 
-To see what's actually being checked:
+- `rule_summary` — the schedule-rule tally (`pass` / `fail` / `error` / `skipped`), with `evaluated_structure_ids` naming the blocks
+- `statement_rule_summary` — the same tally across the stamped canonical statements
 
-```bash
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/rules" \
-  -H "X-API-Key: $API_KEY" | jq '.[] | {name, severity, target_kind}' | head -40
-```
+That is the verification surface an operator actually reads: the close reports what passed, not a separate validation pass run beforehand. The demo data is intentionally clean, so the value here is seeing the *shape* of the output — once the agent starts proposing adjustments, these are the numbers that catch anything that would break the books.
 
 ## The Mapping View
 
-100% of the 27 CoA accounts are mapped to rs-gaap reporting concepts, and 100% of those mappings are **renderable** — they target concepts the active Reporting Style's structures actually walk.
+All 27 CoA accounts are mapped to rs-gaap reporting concepts. **Coverage and renderability are two different measurements**, and the demo is deliberately set up to show the gap: 27 of 27 are mapped, 24 are renderable, and 3 target concepts the active Reporting Style's structures don't walk.
 
 From the frontend, **Chart of Accounts** shows each account with its rs-gaap target alongside. From the MCP:
 
@@ -243,38 +284,55 @@ list-mapping-structures
 
 get-mapping-summary --mapping_id=<id>
 → {
+    "mapping_id": "struct_…",
     "total_coa_elements": 27,
     "mapped_count": 27,
     "unmapped_count": 0,
-    "coverage_percent": 100,
-    "unreachable_count": 0,
-    "confidence_distribution": { "high": 27, "medium": 0, "low": 0, "manual": 0 }
+    "coverage_percent": 100.0,
+    "confidence_distribution": { "high": 27, "medium": 0, "low": 0, "manual": 0 },
+    "unreachable_count": 3,
+    "unreachable": [
+      { "coa_code": "1300", "coa_name": "Computer Equipment",
+        "target_qname": "rs-gaap:PropertyPlantAndEquipmentGross" },
+      { "coa_code": "1310", "coa_name": "Office Furniture",
+        "target_qname": "rs-gaap:PropertyPlantAndEquipmentGross" },
+      { "coa_code": "1350", "coa_name": "Accumulated Depreciation",
+        "target_qname": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment" }
+    ]
   }
 ```
 
-Every mapping was machine-generated by the MappingOperator at demo-load time. The 27 accounts are chosen to have unambiguous canonical targets (Operating Cash → CashCashEquivalentsAndShortTermInvestments, Consulting Revenue → RevenueFromContractWithCustomerExcludingAssessedTax, etc.) — useful for showing how the workflow looks when coverage is complete, separately from the harder real-world mapping cases.
+The three unreachable mappings are the PP&E-gross pair and its contra — correct mappings at a grain the active Reporting Style presents net, so they never surface as their own statement lines. That's a real modelling situation, not a defect, and it's exactly the case `unreachable_count` exists to make visible.
+
+By default the mappings come from the hardcoded table in `examples/roboledger_demo/mappings.py`. Pass `--ai` to have the **MappingOperator** generate them instead (requires Bedrock). The 27 accounts are chosen to have unambiguous canonical targets (Operating Cash → CashCashEquivalentsAndShortTermInvestments, Consulting Revenue → RevenueFromContractWithCustomerExcludingAssessedTax, etc.) — useful for showing how the workflow looks when coverage is complete, separately from the harder real-world mapping cases.
 
 ## Schedules
 
 The demo creates 6 schedules to show RoboLedger's recurring-entry surface:
 
-| Schedule | Type | Asset | Monthly amount |
+| Schedule | Type | Basis | Monthly amount |
 |---|---|---|---|
-| Computer equipment | Depreciation | $4,800 PP&E, 3-year life | $133.33 |
-| Office furniture | Depreciation | $1,500 PP&E, 5-year life | $25 |
-| Business insurance | Prepaid amortization | $1,200/year | $100 |
-| Software licenses | Prepaid amortization | $300/year | $25 |
-| AWS prepay | Prepaid amortization | $600/year | $50 |
-| Professional services renewal | Prepaid amortization | $450/year, staggered | $37.50 |
+| Computer Equipment Depreciation | Depreciation | $4,800 PP&E, 36-month life | $133.33 |
+| Office Furniture Depreciation | Depreciation | $1,500 PP&E, 60-month life | $25.00 |
+| Business Insurance | Prepaid amortization | $1,200 annual policy, 12 months | $100.00 |
+| Business Insurance (Year 2 Renewal) | Prepaid amortization | $1,200 renewal, 12 months, starts after year one runs out | $100.00 |
+| Software Subscription | Prepaid amortization | $300 annual license, 12 months | $25.00 |
+| Cloud Hosting (AWS Savings Plan) | Prepaid amortization | $600 annual commitment, 12 months | $50.00 |
+
+The start offsets and useful lives are staggered on purpose, so the set covers every case: schedules that straddle the `closed_through` boundary, a year-one policy that has already run out before it, and the year-two renewal that starts after it. That mix is what makes the first close draw only the months a real bookkeeper would still owe.
 
 Schedules generate **schedule facts** for each period in their window. Facts before `closed_through` are flagged `historical` (already baked into the closed-period opening balances). Facts at or after the close target are flagged `in_scope` — they're the obligations the close workflow proposes to materialize as actual entries.
 
-To inspect:
+A schedule is an Information Block with `blockType: "schedule"`, so you inspect it the same way you inspect any other block:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/schedules" \
-  -H "X-API-Key: $API_KEY" | jq '.[] | {id, name, classification, monthly_amount}'
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ informationBlocks(blockType: \"schedule\") { id name blockType } }"}' | jq '.'
 ```
+
+For the mechanics behind a single schedule — the debit/credit template, the cost basis, the generated periods — call the `get-information-block` MCP tool with the block's `id`.
 
 ## Frontend Tour
 
@@ -282,23 +340,39 @@ Once the demo is loaded, walk through these screens in roboledger-app at `http:/
 
 | Screen | What to look at |
 |---|---|
-| **Entity** | The Cascade Advisory Group profile, with fiscal year metadata and a recent activity summary |
-| **Connections** | Empty for the synthetic demo (no QB connection — this is the whole point) |
-| **Chart of Accounts** | 27 accounts, each with its rs-gaap mapping displayed inline. 100% mapped, 100% renderable. |
-| **Transactions** | The full posted event log — invoices, payments, bills, payroll JEs |
-| **Ledger / Journal Entries** | Manual JE form and the entry list grouped by transaction |
-| **Schedules** | 6 schedules with their facts and in-scope state |
-| **Documents** | 4 policy markdown files, searchable |
-| **Reports** | The filed FY annual report — click in for the full BS / IS / CF / SE rendering with Information Block drill-downs |
-| **Close** | The fiscal calendar view + the one queued period ready to close + blocker payload (in_scope schedule facts) |
-| **Inbox** | Empty for the demo (events auto-commit for QB-style sources; demo events do the same) |
+| **Home** | The landing dashboard for the tenant |
+| **Entity → Entity Info** | The Cascade Advisory Group profile, with fiscal year metadata and a recent activity summary |
+| **Entity → All Entities** | Every entity on the graph — one, for this demo |
+| **Entity → Connections** | Empty for the synthetic demo (no QB connection — this is the whole point) |
 | **Agents** | The 17 parties: customers, vendors, employees, IRS |
+| **Ledger → Chart of Accounts** | 27 accounts, each with its rs-gaap mapping displayed inline |
+| **Ledger → Inbox** | Empty for the demo (events auto-commit for QB-style sources; demo events do the same) |
+| **Ledger → Transactions** | The full posted event log — invoices, payments, bills, payroll JEs |
+| **Ledger → Trial Balance** | Debits and credits by account; balances to the cent |
+| **Ledger → Statements** | Live statements rendered from the current ledger, without waiting on a report |
+| **Ledger → Closing Book** | The fiscal calendar view + the one queued period ready to close + blocker payload (in_scope schedule facts) |
+| **Reports → View Reports** | The filed FY annual report — click in for the full BS / IS / CF / SE rendering with Information Block drill-downs |
+| **Reports → Create Report** | The report-authoring path that produced it |
+| **Reports → Publish Lists / Blocked Senders** | Distribution controls for a filed report |
+| **Explorer** | Ad-hoc traversal of the materialized graph |
+| **Plan** | The FP&A surface — forecast blocks and scenarios over the same ledger |
+| **Library** | The taxonomy library behind the mappings |
+| **Console** | Direct query access from inside the app |
+| **Search** | Full-text search across the graph, including the 4 policy documents |
 
-The "Close" screen is the most product-distinctive surface — drives the AI-assisted close workflow and surfaces all the period's outstanding items in one place.
+The **Closing Book** screen is the most product-distinctive surface — it drives the AI-assisted close workflow and surfaces all the period's outstanding items in one place.
 
 ## Exploring with MCP
 
-For agent-driven exploration, the demo is the easiest entrypoint to the RoboLedger MCP server. Connect Claude Desktop (or any MCP client) to the local server (`http://localhost:8000/v1/mcp`) and try:
+For agent-driven exploration, the demo is the easiest entrypoint to the RoboLedger MCP server. MCP is graph-scoped — the connector URL carries the `graph_id`, so point your client at `http://localhost:8000/v1/graphs/$GRAPH_ID/mcp` with an `X-API-Key` header. For Claude Code:
+
+```bash
+claude mcp add --transport http robosystems-roboledger \
+  http://localhost:8000/v1/graphs/<your-graph-id>/mcp \
+  --header "X-API-Key: <your key>"
+```
+
+See [AI Operators & MCP](AI-Operators-and-MCP) for the header-less connector form and the stdio bridge. Once connected, try:
 
 ```text
 "What entities are in this graph?"
@@ -320,9 +394,12 @@ For agent-driven exploration, the demo is the easiest entrypoint to the RoboLedg
 → build-fact-grid
 
 "Close the books for the most recent completed month"
-→ multi-step workflow: get-period-close-status, list-period-drafts,
-  preview-event-block, create-event-block, evaluate-rules, close-period
+→ multi-step workflow: get-close-playbook, get-fiscal-calendar,
+  get-period-close-status, promote-obligations, list-period-drafts,
+  close-period
 ```
+
+`get-close-playbook` is the one to start with — it returns the canonical sequence, the decisions the operator has to make, and the gotchas that aren't visible from any single tool's schema, all version-locked to the deployed build.
 
 The full prompt for the AI close workflow lives at `examples/roboledger_demo/prompt.md` — paste it into the client to load the workflow context, then ask the close question.
 
@@ -350,13 +427,14 @@ The demo's content lives in `examples/roboledger_demo/`:
 - `mappings.py` — the CoA → rs-gaap mapping table. Change targets to demo different statement compositions.
 - `policies.py` — the four policy documents loaded as searchable content.
 - `agents.py` — the 17 parties (customers, vendors, employees, government).
-- `validate.py` — the 38 rules. Add or modify checks to demo different validation scenarios.
-- `main.py` — the orchestration script. Idempotent (unconditionally clears prior tenant state before loading); re-running picks up your edits.
+- `validate.py` — a self-check run right after the schedules are created, proving the Information Block machinery holds together (FactSets exist, the auto-generated `SumEquals` rules evaluate clean, the GraphQL envelope resolves, an asset disposal computes the right NBV). Everything it creates is throwaway and removed before it returns. It also runs standalone: `uv run python -m examples.roboledger_demo.validate <graph_id>`.
+- `download_bundles.py` — renders the exported artifact set for the filed report.
+- `main.py` — the orchestration script, and where `COMPANY_NAME` and the schedule definitions live. Idempotent (unconditionally clears prior tenant state before loading); re-running picks up your edits.
 
 Common customizations:
 
-- **Change the company name and shape** — edit `data.py` `COMPANY_NAME` and the revenue / expense generators
-- **Add a failing rule** — modify `validate.py` to introduce a deliberate violation, then run `evaluate-rules` to see it caught
+- **Change the company name and shape** — edit `COMPANY_NAME` in `main.py` and the revenue / expense generators in `data.py`
+- **Make a rule fail** — schedules generate their `SumEquals` proof from `original_amount`; change a schedule's basis in `main.py` so the periodic amounts no longer sum back to it, then run `evaluate-rules` on that block to see it caught
 - **Demo a different industry** — replace the consulting revenue generators with retail, SaaS, or manufacturing patterns
 - **Test multi-year history** — extend the rolling window beyond 16 months in `data.py`
 
@@ -369,9 +447,31 @@ Common customizations:
 | Data shape | Designed for the product — clean, 100% mappable, balanced | Real-world messy — partial mapping coverage, edge-case transaction types |
 | Use for | Product evaluation, regression testing, agent demos, learning the feature set | Real-data smoke testing, your own books, adapter debugging |
 | Iteration speed | Fast — re-running the recipe wipes and reloads | Slow — re-sync takes minutes, data isn't deterministic |
-| Mapping coverage | 100% renderable on first run | Variable — auto-map agent runs, partial coverage typical, manual remap for edge cases |
+| Mapping coverage | 100% mapped on first run (3 targets unreachable under the active Reporting Style) | Variable — the MappingOperator runs, partial coverage typical, manual remap for edge cases |
 
 Both paths produce the same OLTP shape, the same materialized graph, and the same Report-Block lifecycle. The demo is for showing the product; QB is for using it on your own books. See the [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) guide for the QB workflow.
+
+## Showcase Scenarios
+
+Cascade Advisory Group is deliberately unremarkable — a healthy consulting firm whose books balance and whose story is "here is the product." Two sibling demos run the same scenario engine against businesses that have a *financial* story, for when the numbers themselves are the point:
+
+```bash
+# Driftline Coffee — a roaster that is profitable on paper and short of cash
+just demo-coffee-roaster
+
+# Cadence Labs — a SaaS company burning cash against a deferred-revenue runway
+just demo-saas-startup
+```
+
+Both take the same flags as `just demo-roboledger`: an optional `[graph_id]` to load into an existing graph, `--ai` to map the Chart of Accounts with the MappingOperator instead of the hardcoded table, and `--dry-run` to validate without writing.
+
+There is also a RoboInvestor demo — Meridian Ventures Fund I, including the cross-graph report share between a fund and an issuer:
+
+```bash
+just demo-roboinvestor
+```
+
+See [RoboInvestor Operations](RoboInvestor-Operations) for what it exercises.
 
 ## Seattle Method XBRL Demos
 
@@ -388,8 +488,11 @@ Charlie's 14-journal-entry Q1 2024 lemonade-stand dataset, tagged against his `m
 # author rollforwards → reconcile → materialize the 4-statement report.
 just demo-seattle-method
 
-# A single step (pull | load | seed-mappings | ingest | author-rollforwards | reconcile | create-report)
-just demo-seattle-method --step ingest
+# A single step. Steps: pull | provision | load | seed-mappings | ingest |
+# author-rollforwards | reconcile | create-report | download-bundles.
+# Only `pull` and `provision` run standalone; every other step needs --graph.
+just demo-seattle-method --step provision
+just demo-seattle-method --step ingest --graph <graph_id>
 
 # Re-render just the artifacts against an existing graph
 just demo-seattle-method-reconcile <graph_id>
@@ -410,6 +513,10 @@ just demo-world-online
 # Smoke-test the whole pipeline on a 50-entry subset first
 just demo-world-online --limit 50
 
+# A single step. Same registry as the lemonade stand plus trial-balance and
+# statement-reconcile; again, only `pull` and `provision` run without --graph.
+just demo-world-online --step ingest --graph <graph_id>
+
 # Re-render individual artifacts against an existing graph
 just demo-world-online-reconcile <graph_id>            # GL pivot vs the published summary
 just demo-world-online-create-report <graph_id>        # rs-gaap 4-statement report
@@ -428,9 +535,9 @@ Its load-bearing design decision is **opening balances as ordinary transactions*
 Once you're comfortable with the demo:
 
 - **Connect a real QB company** — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) to layer real data on top of the same workflow
-- **Customize the demo** — modify `data.py` to demo a different vertical for a specific prospect
-- **Extend the rule engine** — add domain-specific validation rules in `validate.py`
+- **Customize the demo** — modify `data.py` to demo a different vertical for a specific prospect, or start from one of the [showcase scenarios](#showcase-scenarios)
+- **Author your own Information Blocks** — `create-information-block` builds `schedule` and `rollforward` blocks, each carrying its own verification rules
 - **Build a custom MCP workflow** — the close prompt at `examples/roboledger_demo/prompt.md` is one starting point; you can build vertical-specific agent workflows on the same MCP surface
 - **Go deeper on the model** — [RoboLedger Operations](RoboLedger-Operations) (command writes and the fact grid), [Reporting & Rendering](Reporting-and-Rendering) (how statements are built), and [Information Blocks](Information-Blocks) (the unifying envelope)
 
-If you're evaluating RoboLedger for a real engagement: run the demo, drive the AI close, inspect the rule engine output, then connect one of your own QB companies via the QB Local guide. The full evaluation arc takes ~30 minutes if everything's smooth.
+If you're evaluating RoboLedger for a real engagement: run the demo, drive the AI close, read the rule tallies the close hands back, then connect one of your own QB companies via the QB Local guide. The full evaluation arc takes ~30 minutes if everything's smooth.

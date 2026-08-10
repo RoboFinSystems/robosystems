@@ -14,10 +14,11 @@ The retrieval workflow has three stages:
 2. **Index** the content into OpenSearch as searchable sections, each carrying a local vector embedding for semantic matching.
 3. **Query** the index through two MCP tools — `search-documents` returns ranked snippets, `get-document-section` returns the full section text — so an Operator finds and reads exactly the policy it needs.
 
-There are two corpora available:
+There are three corpora available:
 
-- **Your uploaded documents** — per-graph, private to that graph. Policies, procedures, internal notes.
-- **SEC filing narratives** — on the shared `sec` repository: MD&A, risk factors, and iXBRL disclosure text, cross-referenced back to the structured XBRL graph.
+- **Your uploaded documents** — per-graph, private to that graph. Policies, procedures, internal notes. Indexed in OpenSearch.
+- **SEC filing narratives** — on the shared `sec` repository: MD&A, risk factors, and iXBRL disclosure text, cross-referenced back to the structured XBRL graph. Indexed in OpenSearch.
+- **Semantic memory** — short free-text recollections an Operator writes for itself, in a per-graph vector store that is **separate from OpenSearch**. See [Semantic Memory: The Second Retrieval Plane](#semantic-memory-the-second-retrieval-plane).
 
 Indexing and semantic search run a local embedding model in-image. They make **no external API calls and consume no AI credits**.
 
@@ -26,7 +27,7 @@ Indexing and semantic search run a local embedding model in-image. They make **n
 Before starting, ensure you have:
 
 - Docker running locally with the full stack up (`just start`)
-- `SEMANTIC_SEARCH_ENABLED=true` in your environment (this single flag gates the search routers, the document routers, and all of the search/document MCP tools)
+- `SEMANTIC_SEARCH_ENABLED=true` in your environment (gates the documents router and all of the search/document MCP tools; the search router itself mounts when either `SEMANTIC_SEARCH_ENABLED` **or** `SEMANTIC_MEMORY_ENABLED` is on, because it hosts memory `recall` too)
 - OpenSearch running and reachable at `OPENSEARCH_URL` (default `http://localhost:9200`)
 - A demo user and a writable graph — `just demo-user` then `just demo-roboledger`
 
@@ -73,7 +74,7 @@ Upload a markdown policy into your graph. The platform splits it on headings, em
 API_KEY=$(jq -r .api_key .local/config.json)
 GRAPH_ID=<your graph id>
 
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -84,15 +85,23 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
   }'
 ```
 
-The response reports how many sections were indexed:
+The operation returns an `OperationEnvelope` (camelCase keys), with the indexing report nested under `result`:
 
 ```json
 {
-  "id": "doc_abc123def456",
-  "document_id": "udoc_doc_abc123def456",
-  "sections_indexed": 4,
-  "total_content_length": 512,
-  "section_ids": ["udoc_doc_abc123def456_0", "udoc_doc_abc123def456_1", "..."]
+  "operation": "index-document",
+  "operationId": "op_01K2...",
+  "status": "completed",
+  "result": {
+    "id": "doc_abc123def456",
+    "document_id": "udoc_doc_abc123def456",
+    "sections_indexed": 4,
+    "total_content_length": 512,
+    "section_ids": ["udoc_doc_abc123def456_0", "udoc_doc_abc123def456_1", "..."]
+  },
+  "at": "2026-08-09T18:04:11.921Z",
+  "createdBy": "user_01K2...",
+  "idempotentReplay": false
 }
 ```
 
@@ -166,8 +175,9 @@ AI Operators interact with the index through MCP tools. All of them require `SEM
 - `get-document` — returns the full document from PostgreSQL (the source of truth).
 - `list-documents` — browse documents by metadata; filter by `folder` or `source_type`.
 - `update-document` — update an existing document.
+- `delete-document` — remove a document from PostgreSQL and OpenSearch together.
 
-**Note:** The document tools register only on your own graphs, not on shared repositories. The write tools (`create-document`, `update-document`) additionally require a writable graph. The search tools (`search-documents`, `get-document-section`) work against both your graphs and shared repositories like `sec`.
+**Note:** The document tools register only on your own graphs, not on shared repositories. The write tools (`create-document`, `update-document`, `delete-document`) additionally require a writable graph. The search tools (`search-documents`, `get-document-section`) work against both your graphs and shared repositories like `sec`.
 
 For SEC narrative hits, the `search-documents` results include the XBRL elements referenced in that disclosure (`xbrl_elements`). An Operator can hand one to `resolve-element` to look up the XBRL element, then run `read-graph-cypher` to pull the structured values — pivoting from narrative to numbers.
 
@@ -175,9 +185,9 @@ For Operator setup and the broader MCP tool surface, see [AI Operators and MCP](
 
 ### Option 2: REST API
 
-Both the upload and search surfaces are plain REST under `/v1/graphs/{graph_id}`. Use the `X-API-Key` header and read the key from `.local/config.json`.
+Both surfaces live under `/v1/graphs/{graph_id}`. Use the `X-API-Key` header and read the key from `.local/config.json`. Search and section-fetch are REST endpoints (`POST /search`, `GET /search/{document_id}`); document reads are REST GETs under `/documents`; document writes are the `index-document` and `delete-document` operations.
 
-Upload, search, and section-fetch are shown in the [worked example](#worked-example-ground-an-operator-on-the-ppe-depreciation-policy) above. The document lifecycle also supports list, get, update, and delete:
+Indexing, search, and section-fetch are shown in the [worked example](#worked-example-ground-an-operator-on-the-ppe-depreciation-policy) above. The read side of the document lifecycle is list and get:
 
 ```bash
 API_KEY=$(jq -r .api_key .local/config.json)
@@ -194,7 +204,7 @@ curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_abc123def456" \
 
 The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API Documentation](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally) rather than re-deriving it here.
 
-**Important:** Document write operations (`create`, `update`, `delete`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot upload documents into it — upload into your own graph. See [Document Management](Document-Management) for the full document lifecycle.
+**Important:** The document write operations (`index-document`, `delete-document`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot index documents into it — index into your own graph. See [Document Management](Document-Management) for the full document lifecycle.
 
 ### Option 3: just Commands
 
@@ -244,7 +254,8 @@ A document is split into sections, each section is embedded and indexed independ
 - `ixbrl_disclosure` — inline-XBRL disclosure text, cross-referenced to the graph
 - `xbrl_textblock` — XBRL text-block facts
 - `connection_doc` — documents originating from a connected data source
-- `memory` — Operator memory entries
+
+Those five are the whole set. `memory` is **not** among them — semantic memories are never written to OpenSearch and never come back from `POST /search`. The value `source_type="memory"` does exist, but only as a field synthesized onto the hits that memory `recall` returns from its own vector store; see the next section.
 
 **Markdown sectioning** (for uploaded documents):
 
@@ -261,6 +272,38 @@ A document is split into sections, each section is embedded and indexed independ
 **Local embeddings, no credits.** Embeddings are produced in-image by a small open model (`BAAI/bge-small-en-v1.5`, 384 dimensions). There are no external API calls and **no AI credits are consumed** for indexing or semantic search.
 
 **Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. Searches against the `sec` repository resolve subgraph IDs (such as `sec_historical`) back to the parent `sec` index — subgraphs are a storage split, not a search boundary.
+
+## Semantic Memory: The Second Retrieval Plane
+
+Alongside the document index there is a second retrieval plane: a **per-graph semantic memory store**, backed by LanceDB on the graph's writer instance rather than by OpenSearch. It is where an Operator files short free-text recollections — "the AR aging shows a stale invoice from Acme to follow up on" — and retrieves them later by meaning.
+
+The two planes are deliberately kept apart. Documents are authored artifacts with titles, folders, sections, and a PostgreSQL record; memories are unstructured notes with no sectioning and no document row. Nothing an Operator remembers is written to OpenSearch, and nothing you index as a document shows up in recall.
+
+**MCP tools:** `remember`, `recall`, `update-memory`, `forget`.
+
+**REST surface:**
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/v1/graphs/{graph_id}/memory/recall` | Ranked semantic recall — body `{query, k, memory_type, source}` |
+| GET | `/v1/graphs/{graph_id}/memory` | List memories (filter by `memory_type`, `source`; `limit`/`offset`) |
+| GET | `/v1/graphs/{graph_id}/memory/{memory_id}` | Fetch one memory by its `mem_…` id |
+| POST | `/v1/graphs/{graph_id}/operations/remember` | Store a memory |
+| POST | `/v1/graphs/{graph_id}/operations/update-memory` | Partially update one; re-embeds when `text` changes |
+| POST | `/v1/graphs/{graph_id}/operations/forget` | Delete one by id |
+
+```bash
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/memory/recall" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "what did we decide about the Acme invoice", "k": 5}'
+```
+
+`recall` returns the **same `SearchResponse` shape as document search** — the same `SearchHit` objects, so an Operator can rank memory hits and document hits with one set of field names. What it does *not* mean is that memories live in the search index: `recall` reads LanceDB, `POST /search` reads OpenSearch, and the two never see each other's records. The `source_type: "memory"` you see on a recall hit is stamped on at read time, not stored in an index.
+
+**Different flags gate it.** Memory is controlled by `SEMANTIC_MEMORY_ENABLED`, with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the four MCP tools — **not** by `SEMANTIC_SEARCH_ENABLED`. A deployment can run document search with memory off, or memory with document search off. (The `/search` router mounts if *either* flag is on, since it hosts `recall` as well.)
+
+**Scope rules.** Memory is blocked on shared repositories. `remember` and `update-memory` are additionally blocked on subgraphs — a subgraph exists to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable. `just demo-custom-graph` exercises both halves: step 6 indexes markdown documents, and step 7 creates a `knowledge` subgraph that pairs structured graph traversal on the subgraph with semantic recall on the parent.
 
 ## Response Shapes
 
@@ -284,14 +327,16 @@ The authoritative, machine-readable definition of every field lives in the OpenA
 The search service is disabled or OpenSearch is unreachable.
 
 ```bash
-# Confirm the feature flag is enabled
-grep SEMANTIC_SEARCH_ENABLED .env.local
+# Confirm the search routes are mounted (they are absent when the flag is off)
+curl -s http://localhost:8000/openapi.json | jq '.paths | keys | map(select(test("/search")))'
 
 # Confirm OpenSearch is reachable at OPENSEARCH_URL
 curl http://localhost:9200
 ```
 
-**Solution:** Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is running and reachable at `OPENSEARCH_URL`, then `just restart`. This one flag controls the search routers, the document routers, and all six search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `get-document`, `list-documents`) at once.
+**Note:** `grep SEMANTIC_SEARCH_ENABLED .env.local` is not a useful check — the flag defaults to `true` and ships commented out, so no output means the default applies, not that the feature is off. Ask the running API which routes it mounted instead.
+
+**Solution:** Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is running and reachable at `OPENSEARCH_URL`, then `just restart`. That flag controls the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once.
 
 ### Newly Uploaded Document Doesn't Appear in Search
 
@@ -323,7 +368,7 @@ Document content is excluded from the search response body, so when there are no
 
 - **[AI Operators and MCP](AI-Operators-and-MCP)** - How Operators use MCP tools to ground answers on your data
 - **[Document Management](Document-Management)** - The full document upload, list, update, and delete lifecycle
-- **[File Uploads](File-Uploads)** - Getting unstructured content into the platform before indexing
+- **[File Uploads](File-Uploads)** - Bulk tabular node and relationship data into a custom graph (a separate surface — it does not index documents)
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - The SEC narrative and iXBRL corpus, and the graph bridge
 
 **Codebase Documentation:**

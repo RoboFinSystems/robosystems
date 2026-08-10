@@ -1,6 +1,6 @@
 # Graph Operations
 
-This guide shows you how to perform graph-lifecycle writes — creating subgraphs and backups, restoring, changing tier, and materializing — through the RoboSystems CQRS command surface and how to monitor long-running operations to completion.
+This guide shows you how to perform graph-lifecycle writes — creating subgraphs and backups, changing tier, and materializing — through the RoboSystems CQRS command surface and how to monitor long-running operations to completion.
 
 ## Table of Contents
 
@@ -30,18 +30,34 @@ Every one of these commands returns the same JSON shape, an **`OperationEnvelope
 
 Reads stay on the other side of the split as ordinary REST `GET`s — listing subgraphs, listing backups, checking operation status, and health checks are never tunneled through the command surface.
 
-The six core lifecycle operations:
+Fifteen operations are mounted on this surface. The lifecycle group is the one most callers reach for:
 
 | Operation | Mutates | Sync or async |
 | --- | --- | --- |
 | **create-subgraph** | Adds a child graph under a parent | Sync (empty) or async (forked) |
 | **delete-subgraph** | Removes a child graph | Sync |
-| **create-backup** | Produces a stored dump | Async |
-| **restore-backup** | Rebuilds a graph from a dump | Async |
+| **create-backup** | Produces a stored, downloadable dump | Async |
 | **change-tier** | Migrates a graph to a new instance tier | Async |
 | **materialize** | Rebuilds the analytical graph from OLTP/staged data | Async (sync on dry run) |
+| **update-graph-metadata** | Renames, re-describes, or re-tags a graph | Sync |
+| **delete-graph** | Destroys the graph itself | Async |
 
-Two further operations live on the same surface and follow the same contract: `delete-graph` and `change-reporting-style`. They are covered briefly in the [Operations Reference](#operations-reference).
+The rest move content and memory in and out of the graph, using the identical envelope and `Idempotency-Key` contract:
+
+| Operation | Mutates | Sync or async |
+| --- | --- | --- |
+| **create-file-upload** | Presigns an upload target for a staging file | Sync |
+| **ingest-file** | Stages an uploaded file into a columnar table | Sync |
+| **delete-file** | Removes a staged file | Sync |
+| **index-document** | Adds a document to the search index | Sync |
+| **delete-document** | Removes a document from the index | Sync |
+| **remember** | Stores a semantic memory | Sync |
+| **update-memory** | Revises a stored memory | Sync |
+| **forget** | Deletes a stored memory | Sync |
+
+`delete-graph` and the content/memory operations are covered briefly in the [Operations Reference](#operations-reference).
+
+**Not on this surface:** `change-reporting-style` is a RoboLedger operation, not a graph-lifecycle one — it lives at `POST /extensions/roboledger/{graph_id}/operations/change-reporting-style`. See [RoboLedger Operations](RoboLedger-Operations).
 
 ## Prerequisites
 
@@ -71,7 +87,7 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-s
 curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-backup" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
-  -d '{"backup_format": "full_dump", "retention_days": 30, "encryption": true}'
+  -d '{"backup_format": "full_dump", "retention_days": 30}'
 ```
 
 The full surface — every field, every status code — is in the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` when running locally). This page carries the concepts and the worked tasks; the spec is the exhaustive reference.
@@ -145,7 +161,7 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-b
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Idempotency-Key: backup-2026-06-11-001" \
   -H "Content-Type: application/json" \
-  -d '{"backup_format": "full_dump", "retention_days": 30, "encryption": true}'
+  -d '{"backup_format": "full_dump", "retention_days": 30}'
 ```
 
 **Important:** A natural mistake is to reuse a key while changing the body (for example, bumping `retention_days`). That returns a 409, not a fresh operation. Pick a new key when the request changes.
@@ -195,7 +211,7 @@ Each subsection lists the body fields that matter and the relevant guards. The O
 
 Adds a child graph under a parent. The resulting subgraph id is `{parent_graph_id}_{name}` (for example, `kg1a2b3c4d5_dev`).
 
-- **Body:** `name` (alphanumeric, 1–20 chars, lowercased), `display_name` (required), optional `description`, `schema_extensions`, `subgraph_type` (only `static`), and `fork_parent`.
+- **Body:** `name` (alphanumeric, 1–20 chars, lowercased), `display_name` (required), optional `description`, `schema_extensions`, `metadata`, `subgraph_type` (`static` — the parent's base schema plus extensions, and the default — or `knowledge` for a knowledge-only schema, or `empty` for a bare database), and `fork_parent`.
 - **Sync/async:** Creating an empty subgraph is **synchronous** (200). Setting `fork_parent: true` copies the parent's data and runs **asynchronously** (202 with an `operation_id`).
 - Subgraph count is capped by tier — see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
 
@@ -217,15 +233,17 @@ Removes a child graph. **Synchronous.**
 
 Produces a stored dump. **Asynchronous** (202).
 
-- **Body:** `backup_format` (must be `full_dump`), `backup_type` (default `full`), `retention_days` (1–2555, default 30), `compression` (forced `true`), `encryption` (default `false`), optional `schedule`.
-- Encrypted backups can be **restored** but **not downloaded**; unencrypted backups can be downloaded but not restored.
+- **Body:** `backup_format` (must be `full_dump`), `backup_type` (default `full`), `retention_days` (1–90, default 30), `compression` (forced `true`), optional `schedule`.
+- **Requires graph `admin`.** A member or viewer gets 403.
+- Blocked on shared repositories, and killable per deployment: with `BACKUP_CREATION_ENABLED=false` the operation returns 403 for everyone.
 
-### restore-backup
+**You do not have to ask for a backup to have one.** Every active customer graph and subgraph is backed up nightly, on a schedule that fans out one job per graph so a single failure does not take the fleet's backups with it. `create-backup` is the *on-demand* path — the one you reach for before a risky change, or when you want a dump to download right now. Backups on the read side carry an `initiated_by` field distinguishing the two: `scheduled` backups are taken on your behalf and do not count against the tier's daily backup limit; `user` ones do. Shared repositories such as `sec` are excluded from the nightly sweep — they are re-ingestible from their public source. The schedule runs in staging and production; on a local `dev` stack it ships stopped, so the only backups you will see there are ones you asked for.
 
-Rebuilds a graph from a dump. **Asynchronous** (202).
+### Backups Are for Downloading, Not Restoring
 
-- **Body:** `backup_id`, `create_system_backup` (default `true`), `verify_after_restore` (default `true`).
-- Only **encrypted** backups are restorable. Restore is **forbidden on entity graphs** — rebuild those with `materialize` instead (see [Common Pitfalls](#common-pitfalls)).
+There is no customer-facing restore operation, and this is deliberate rather than a gap. Every graph type that has an upstream is recovered by rebuilding from that upstream, not from a snapshot: entity graphs re-materialize from the extensions OLTP database, generic graphs from their staged source files, shared repositories by re-ingesting. Backups exist so you have a retrievable record of what a graph held — see [Downloading and Unpacking a Backup](#downloading-and-unpacking-a-backup).
+
+The two classes with no upstream — entity subgraphs and the semantic memory store — are recovered by downloading the payload and rebuilding, or by an operator-run restore that has no public endpoint.
 
 ### change-tier
 
@@ -244,7 +262,7 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/change-t
 
 Rebuilds the analytical graph (LadybugDB) from OLTP or staged source data. **Asynchronous** (202), except a dry run which runs **synchronously** — it returns a `completed` envelope reporting what it would do, without executing.
 
-- **Body:** `source` (`staged` or `extensions`), `rebuild`, `force`, `ignore_errors` (default `true`), `dry_run`, `materialize_embeddings`.
+- **Body:** `source` (`staged` or `extensions`; omit it to materialize from the DuckDB staging tables), `rebuild`, `force`, `dry_run`, `materialize_embeddings` — all four booleans default `false`.
 
 ```bash
 # Materialize an entity graph from the extensions OLTP database
@@ -265,12 +283,20 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/material
 
 After a materialize completes, the rebuilt graph is queryable — see [Querying the Analytical Graph](Querying-the-Analytical-Graph).
 
-### delete-graph and change-reporting-style
+### delete-graph
 
-Two further operations share the surface:
+Deletes the graph itself. **Asynchronous** (202).
 
-- **`delete-graph`** (async, 202) — deletes the graph itself. Requires `confirm` in the body to equal the `graph_id`, and the caller must be both an org **owner** and a graph **admin**.
-- **`change-reporting-style`** (sync, 200) — sets the active reporting style for the graph by `reporting_style_id`.
+- **Body:** `confirm` (required — must equal the `graph_id` in the URL) and `at_period_end` (default `false`). With `at_period_end: true`, cancellation and teardown are deferred to the end of the current billing period and the graph stays usable until then.
+- The caller must be both an org **owner** and a graph **admin**.
+
+### Content and Memory Operations
+
+The remaining eight operations share the surface and the contract, and are all synchronous:
+
+- **`create-file-upload` / `ingest-file` / `delete-file`** — the staging-file path: presign an upload target, stage the uploaded file into a columnar table, then `materialize` to move it into the graph.
+- **`index-document` / `delete-document`** — add and remove documents in the search index. See [Search and AI Retrieval](Search-and-AI-Retrieval).
+- **`remember` / `update-memory` / `forget`** — the per-graph semantic memory store an Operator writes to. See [AI Operators and MCP](AI-Operators-and-MCP).
 
 ## Worked Example: Create a Backup and Watch It Complete
 
@@ -285,7 +311,7 @@ curl -s -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/operations/create-b
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Idempotency-Key: backup-2026-06-11-001" \
   -H "Content-Type: application/json" \
-  -d '{"backup_format": "full_dump", "retention_days": 30, "encryption": true}'
+  -d '{"backup_format": "full_dump", "retention_days": 30}'
 ```
 
 **Output:**
@@ -352,11 +378,11 @@ curl -s "http://localhost:8000/v1/graphs/kg1a2b3c4d5/backups/bk1a2b3c4d5/downloa
 curl -L -o backup.zip "PASTE_THE_DOWNLOAD_URL"
 ```
 
-Only **unencrypted** backups can be downloaded. The URL expires after `expires_in` seconds (300–86400, default 3600), and each download counts against your graph tier's or repository plan's monthly download allowance.
+The URL expires after `expires_in` seconds (300–86400, default 3600), and each download counts against your graph tier's or repository plan's monthly download allowance.
 
 ### Which File You Get
 
-You don't have to guess: every entry from `GET /v1/graphs/{graph_id}/backups` carries a **`download_extension`** telling you what the download will be and therefore how to unpack it. It is `null` for encrypted backups, which cannot be downloaded at all.
+You don't have to guess: every entry from `GET /v1/graphs/{graph_id}/backups` carries a **`download_extension`** telling you what the download will be and therefore how to unpack it. It is `null` only when the backup has no stored object yet.
 
 | `download_extension` | Filename | Contents |
 | --- | --- | --- |
@@ -430,15 +456,15 @@ conn.close()
 
 ### Shared Repositories Reject These Operations
 
-`create-backup`, `restore-backup`, `change-tier`, `delete-subgraph`, and `delete-graph` all return **403** on shared repositories such as `sec`. Run lifecycle operations against a graph you own.
+`create-backup`, `change-tier`, `delete-subgraph`, and `delete-graph` all return **403** on shared repositories such as `sec`. Run lifecycle operations against a graph you own.
 
-### restore-backup Is Forbidden on Entity Graphs
+### There Is No restore-backup Operation
 
-Calling `restore-backup` on an entity graph returns **400** telling you to use `materialize` instead. Entity graphs are rebuilt from the extensions OLTP database, not restored from a dump.
+Looking for one is the most common wrong turn on this surface. Backups are a download capability; recovery is a rebuild from the upstream — `materialize` for entity and generic graphs, re-ingestion for shared repositories. See [Backups Are for Downloading, Not Restoring](#backups-are-for-downloading-not-restoring).
 
-### A Backup Is Either Downloadable or Restorable — Not Both
+### create-backup Needs Graph Admin
 
-Only **encrypted** backups can be restored, and **encrypted** backups cannot be downloaded. Decide up front: set `encryption: true` for disaster recovery, or leave it `false` if you need to pull the dump down.
+`create-backup` calls `verify_admin_access` before anything else — a member or viewer gets **403**, as does everyone when the deployment sets `BACKUP_CREATION_ENABLED=false`.
 
 ### create-backup Only Supports full_dump
 
@@ -446,7 +472,7 @@ Any `backup_format` other than `full_dump` returns **400**.
 
 ### Retention Is Capped, Not Rejected
 
-If `retention_days` exceeds your tier's maximum, it is silently **clamped** to the cap rather than rejected. Check the stored value if it matters.
+If `retention_days` exceeds your tier's maximum (7, 30, or 90 depending on tier), it is silently **clamped** to the cap rather than rejected. Check the stored value if it matters. 90 days is the hard ceiling on any tier: the storage lifecycle expires backup objects then regardless of what was requested, so an uncapped value would leave a completed record pointing at a deleted file.
 
 ### Reusing an Idempotency-Key With a Changed Body Is a 409
 

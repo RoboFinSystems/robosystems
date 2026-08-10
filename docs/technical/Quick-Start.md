@@ -42,7 +42,7 @@ just demo-user
 just demo-custom-graph
 ```
 
-**First run**: `just start` pulls and builds images and runs database migrations, so it takes a few minutes. The demos take 1-2 minutes the first time.
+**First run**: `just start` pulls the published images and runs database migrations, so it takes a few minutes. The demos take 1-2 minutes the first time.
 
 **Subsequent runs**: The demos reuse the existing user and graph (~20 seconds).
 
@@ -204,12 +204,12 @@ To learn how graphs, subgraphs, repositories, and tenancy fit together, see [Gra
 
 ## Step 6: Your First Query
 
-With a `graph_id` in hand, run authenticated Cypher through the platform API at `POST /v1/graphs/{graph_id}/query`. The body is a `CypherQueryRequest`: a required `query` string plus an optional `parameters` object (use `$param` placeholders in the query for safe parameter binding).
+With a `graph_id` in hand, run authenticated Cypher through the platform API at `POST /v1/graphs/{graph_id}/query/cypher`. The body is a `CypherStatementRequest`: a required `query` string plus an optional `parameters` object (use `$param` placeholders in the query for safe parameter binding) and an optional `timeout` in seconds (1–300, default 60). Its sibling, `POST /v1/graphs/{graph_id}/query/sql`, runs read-only SQL over the same graph's columnar (DuckDB) tables — a relational lens on the same data.
 
 Count nodes by label in your graph:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (n) RETURN labels(n) AS label, count(*) AS count"}'
@@ -218,13 +218,13 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query" \
 A parameterized query, passing values through `parameters` rather than string-interpolating them:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (p:Person) WHERE p.age > $min_age RETURN p.name, p.age", "parameters": {"min_age": 40}}'
 ```
 
-**Note:** Main graphs are **read-only** through `/query` — you load data through the ingestion pipeline (which is exactly what `just demo-custom-graph` does). Only subgraphs accept writes. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the read-vs-write model.
+**Note:** Main graphs are **read-only** through `/query/cypher` — you load data through the ingestion pipeline (which is exactly what `just demo-custom-graph` does). Only subgraphs accept writes. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the read-vs-write model.
 
 For quick, throwaway checks you can bypass platform auth and hit the Graph API directly with the `just graph-query` recipe:
 
@@ -232,7 +232,7 @@ For quick, throwaway checks you can bypass platform auth and hit the Graph API d
 just graph-query "$GRAPH_ID" "MATCH (n) RETURN count(n)"
 ```
 
-This is a convenience path for local debugging only — it does not run through platform authentication, billing, or access control. Real integrations use the authenticated `POST /v1/graphs/{graph_id}/query` endpoint.
+This is a convenience path for local debugging only — it does not run through platform authentication, billing, or access control. Real integrations use the authenticated `POST /v1/graphs/{graph_id}/query/cypher` endpoint.
 
 The full endpoint surface, request and response schemas, and parameter details live in the OpenAPI docs at `http://localhost:8000/docs` (or the hosted reference at [api.robosystems.ai/docs](https://api.robosystems.ai/docs)).
 
@@ -269,7 +269,7 @@ just start
 docker ps   # Verify the robosystems containers are healthy
 ```
 
-The first `just start` builds images and runs migrations, so allow a few minutes before the health check responds.
+The first `just start` pulls images and runs migrations, so allow a few minutes before the health check responds.
 
 ### Health Check Returns 404
 
@@ -290,7 +290,7 @@ curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
 
 ### Write Query Rejected on a Main Graph
 
-**Solution:** Main graphs are read-only through `/query`. Load data through the ingestion pipeline (the demos do this), or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+**Solution:** Main graphs are read-only through `/query/cypher`. Load data through the ingestion pipeline (the demos do this), or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
 
 ### Code or Environment Changes Are Not Taking Effect
 

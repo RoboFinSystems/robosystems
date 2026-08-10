@@ -173,7 +173,6 @@ Known remaining friction:
 | --- | --- |
 | **Docker build mode** (`just rebuild`, `just reset-local`) | Two Arelle cache bundles are tracked as symlinks. Without Developer Mode and `git config core.symlinks true`, Git checks them out as small text files and the build fails while extracting them. Image mode — plain `just start`, which pulls published images — is unaffected. |
 | **PostgreSQL data directory** | If the repo is on an NTFS path, `initdb` cannot set permissions on the `./data/postgres/data` bind mount and the container will not start. |
-| **`just venv`** | Runs `source .venv/bin/activate`; Windows virtualenvs place that script under `.venv/Scripts/`. Run `uv sync --all-extras --dev` directly instead. |
 | **`just test-dbt`** | Defaults its temp directory to `` `mktemp -d` ``, producing a Git Bash path that the Windows Python interpreter cannot resolve. |
 | **Ports** | Subject to the same WinNAT exclusions described in Troubleshooting above. |
 

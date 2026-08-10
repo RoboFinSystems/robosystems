@@ -26,7 +26,7 @@ Before working with graphs locally, ensure you have:
 - Docker running locally
 - RoboSystems development environment set up
 - Services started with `just start`
-- Demo credentials created with `just demo-user` (writes your API key and a `graph_id` to `.local/config.json`)
+- Demo credentials created with `just demo-user` (writes your API key to `.local/config.json`), plus `just demo-custom-graph` or `just demo-roboledger` to provision a graph and record its `graph_id` under `.graphs.<slot>`
 
 All authenticated examples below read the API key from `.local/config.json` and target `http://localhost:8000`. Use the `X-API-Key` header for backend testing; `Authorization: Bearer` is a frontend concern only.
 
@@ -48,7 +48,7 @@ The parent graph identifier follows the regex `kg[a-f0-9]{16,}`. A subgraph appe
 
 Because the `graph_id` lives in the URL path, the tenant scope is unambiguous and is checked by middleware before your request reaches business logic. This applies uniformly across REST, GraphQL, and MCP:
 
-- **REST**: `POST /v1/graphs/{graph_id}/query`
+- **REST**: `POST /v1/graphs/{graph_id}/query/cypher`
 - **GraphQL**: `POST /extensions/{graph_id}/graphql` — the `graph_id` comes from the URL, so queries do **not** take a `graphId` argument. Write `{ entity { … } }`, not `{ entity(graphId: "kg_x") { … } }`.
 - **MCP**: tools read the `graph_id` from connection context rather than as a tool argument.
 
@@ -64,8 +64,9 @@ A tier determines the instance size, storage budget, subgraph capacity, backup l
 | **`ladybug-shared`** | Shared Repository (platform-managed, not customer-selectable) |
 
 **Instance type, RAM, vCPU, max subgraphs, storage limit, API rate multiplier and backup retention
-are served, not documented here.** Call **`GET /v1/offering`** for the machine-readable set, or see
-**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. Both are computed from
+are served, not documented here.** Call **`GET /v1/graphs/tiers`** for the per-tier limits as the
+platform enforces them, **`GET /v1/offering`** for the same set alongside public pricing, or see
+**[robosystems.ai/pricing](https://robosystems.ai/pricing)**. All are computed from
 [`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)
 — the same file the GHA deployment layer uses to provision the instances and the application imports
 at runtime. A number in that response is a number the platform is actually enforcing.
@@ -136,12 +137,14 @@ For the full request and response schema — every field, type, and validation r
 
 ### List Your Graphs
 
-`GET /v1/graphs` returns the graphs you can access, along with available shared repositories.
+`GET /v1/graphs` returns the graphs you can access, plus the shared repositories you are **subscribed to** — not the ones on offer. The response is `{graphs[], selectedGraphId}`, with subscribed repositories appended into the same `graphs[]` array carrying `isRepository: true`. To discover repositories you have *not* subscribed to, use `GET /v1/offering`.
 
 ```bash
 curl "http://localhost:8000/v1/graphs" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)"
 ```
+
+`POST /v1/graphs/{graph_id}/select` sets the `selectedGraphId` that comes back on subsequent list calls — it is how the frontends remember which graph you were last working in.
 
 ### Inspect a Single Graph
 
@@ -154,6 +157,19 @@ just graph-info kg1234567890abcdef
 # Graph API health check
 just graph-health
 ```
+
+Several more read endpoints answer the questions that come up around a single graph:
+
+| Endpoint | Answers |
+| --- | --- |
+| `GET /v1/graphs/{graph_id}/health` | Is this graph's database reachable and healthy? |
+| `GET /v1/graphs/{graph_id}/limits` | What operational limits does its tier enforce? |
+| `GET /v1/graphs/{graph_id}/metrics` | What is its current activity profile? |
+| `GET /v1/graphs/{graph_id}/usage` | Credits and storage together, as one report |
+| `GET /v1/graphs/{graph_id}/members` | Who can reach it, and at what role |
+| `GET /v1/graphs/{graph_id}/subgraphs/{subgraph_name}` | Detail on one subgraph |
+
+And three that are about the platform rather than one graph: `GET /v1/graphs/tiers` (every creatable tier with its limits and `api_rate_multiplier`), `GET /v1/graphs/capacity` (fleet capacity per tier), and `GET /v1/graphs/extensions` (the schema extensions available to a new graph). `POST /v1/graphs/schema/validate` checks a custom schema before you provision anything with it.
 
 ## Subgraphs
 
@@ -178,7 +194,7 @@ A **subgraph** is an isolated child database that lives on the same instance as 
 
 ### Create a Subgraph
 
-Subgraph creation is a graph operation and returns an `OperationEnvelope`. By default it creates an empty subgraph; set `fork_parent: true` to clone the parent's data.
+Subgraph creation is a graph operation and returns an `OperationEnvelope`. Both `name` and `display_name` are **required**; the rest of the body is optional. By default it creates an empty subgraph; set `fork_parent: true` to clone the parent's data.
 
 ```bash
 curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/operations/create-subgraph" \
@@ -192,7 +208,11 @@ curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/operations/crea
   }'
 ```
 
-The resulting subgraph ID is `kg1234567890abcdef_dev`.
+The resulting subgraph ID is `kg1234567890abcdef_dev`. Three further optional fields shape what you get:
+
+- **`subgraph_type`** — `static` (the default: the parent's base schema plus its extensions), `knowledge` (a knowledge-only schema), or `empty` (a bare database with no schema at all).
+- **`schema_extensions`** — override the extensions the subgraph gets; it inherits the parent's by default.
+- **`metadata`** — a free-form object stored with the subgraph, for your own labelling.
 
 ### List Subgraphs
 
@@ -207,10 +227,10 @@ Subgraph lifecycle writes (create, delete) follow the same operation pattern as 
 
 ## Querying a Graph
 
-Graphs are queried with Cypher over `POST /v1/graphs/{graph_id}/query`.
+Graphs are queried with Cypher over `POST /v1/graphs/{graph_id}/query/cypher`. The sibling route `POST /v1/graphs/{graph_id}/query/sql` runs DuckDB SQL against the graph's staging tables — the columnar side of the same graph, used during ingestion and materialization rather than for graph traversal.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (n) RETURN labels(n) AS label, count(*) AS count"}'
@@ -230,13 +250,20 @@ just lbug-query kg1234567890abcdef "MATCH (n) RETURN count(n)"
 
 ### Querying with MCP
 
-Any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, and others) can query a graph through the RoboSystems MCP server. The `graph_id` comes from the connection's context, so it is never passed as a tool argument. The graph-facing tools are:
+Any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, and others) can query a graph through the RoboSystems MCP server. The `graph_id` comes from the connection's context, so it is never passed as a tool argument.
 
-- `get-graph-schema` — view available node and relationship types (run this first)
-- `read-graph-cypher` — run read-only Cypher queries
-- `get-example-queries` — get sample queries for the graph
+The tool set is not fixed — it is assembled from the graph's schema extensions, so a plain custom graph and a RoboLedger graph see very different lists. **`GET /v1/graphs/{graph_id}/mcp/tools` is the authoritative answer for a given graph;** what follows is the shape of it. On a plain graph the tools fall into six families:
 
-`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked. For the GraphQL plane (typed extensions reads), use `get-graphql-schema` and `query-graphql`. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example.
+| Family | Tools |
+| --- | --- |
+| **Graph reads** | `get-graph-schema` (run this first), `read-graph-cypher`, `get-graph-info` |
+| **Graph writes** | `write-graph-cypher`, `add-node-table`, `add-relationship-table` |
+| **GraphQL plane** | `get-graphql-schema`, `query-graphql` |
+| **Lifecycle** | `list-subgraphs`, `create-subgraph`, `delete-subgraph`, `create-backup`, `set-write-policy`, `sync-connection` |
+| **Memory** | `remember`, `recall`, `update-memory`, `forget` |
+| **Documents** | `create-document`, `get-document`, `list-documents`, `update-document`, `delete-document`, `search-documents`, `get-document-section` |
+
+`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, and only where the main-graph read-only rule above allows them. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
 
 ## Troubleshooting
 

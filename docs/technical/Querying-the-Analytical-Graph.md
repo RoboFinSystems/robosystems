@@ -15,18 +15,18 @@ The analytical graph is a materialized projection. Data flows `S3 → DuckDB sta
 
 There are three windows onto the same analytical data:
 
-1. **The graph itself** — Cypher via `POST /v1/graphs/{graph_id}/query`.
-2. **The DuckDB staging tables** — SQL via `POST /v1/graphs/{graph_id}/tables/query`, a pre-ingestion view of the same rows.
+1. **The graph itself** — Cypher via `POST /v1/graphs/{graph_id}/query/cypher`.
+2. **The DuckDB columnar tables** — SQL via `POST /v1/graphs/{graph_id}/query/sql`, a relational lens on the same graph-centric data, often ahead of the materialized graph.
 3. **MCP tools** — `read-graph-cypher` and `get-graph-schema`, the agent-facing wrappers over the first window.
 
 ```text
 S3 (Parquet)
    │
    ▼
-DuckDB staging tables  ──  SQL  ──▶  POST /v1/graphs/{g}/tables/query
+DuckDB staging tables  ──  SQL  ──▶  POST /v1/graphs/{g}/query/sql
    │
    ▼  (materialize)
-LadybugDB analytical graph  ──  Cypher  ──▶  POST /v1/graphs/{g}/query
+LadybugDB analytical graph  ──  Cypher  ──▶  POST /v1/graphs/{g}/query/cypher
    │                                          read-graph-cypher (MCP)
    └──────────────────────────────────────▶  get-graph-schema (MCP)
 ```
@@ -55,14 +55,14 @@ For application and integration code, use the public HTTP API at `http://localho
 
 ## The Public Query Endpoint
 
-The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query`. The public API at port 8000 adds authentication, rate limiting, billing and lifecycle enforcement, circuit breakers, and queueing on top of the lower-level graph engine.
+The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query/cypher`. The public API at port 8000 adds authentication, rate limiting, billing and lifecycle enforcement, circuit breakers, and queueing on top of the lower-level graph engine.
 
 ### Running Ad-Hoc Cypher
 
 Read the API key from `.local/config.json` and post a Cypher query with named parameters:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/query" \
+curl -X POST "http://localhost:8000/v1/graphs/sec/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -72,7 +72,7 @@ curl -X POST "http://localhost:8000/v1/graphs/sec/query" \
   }'
 ```
 
-The response is a `CypherQueryResponse`, where each row is a dictionary keyed by the returned columns:
+The response is a `CypherStatementResponse`, where each row is a dictionary keyed by the returned columns:
 
 ```json
 {
@@ -89,7 +89,7 @@ The response is a `CypherQueryResponse`, where each row is a dictionary keyed by
 
 ### Request Fields
 
-The request body is a `CypherQueryRequest`:
+The request body is a `CypherStatementRequest`:
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -101,9 +101,16 @@ The model forbids extra fields. **Always parameterize** with `$name` placeholder
 
 ### Read-Only on Main Graphs
 
-The query endpoint is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**, with a message steering you to the staging pipeline — data enters a main graph only through `S3 → DuckDB → materialize`. Subgraphs are the exception and do allow writes. See [Graph Operations](Graph-Operations) for the write/materialize path.
+Read-only is not a property of this endpoint — it is a property of the platform. Every statement, whichever transport carried it, runs through a single **`StatementKernel`** (`middleware/graph/statement_kernel.py`): a transport-independent authorization gauntlet shared by `/query/cypher`, `/query/sql`, the MCP `read-graph-cypher` tool, and the Operator path, delegating keyword analysis to `security/cypher_analyzer.py`. One implementation means those surfaces cannot drift apart from one another.
 
-Schema DDL and bulk operations are also blocked through `/query`: `COPY`/`LOAD`/`IMPORT` return 400; `EXPORT`/`INSTALL`/`ATTACH` and `CREATE`/`DROP`/`ALTER TABLE` return 403. The graph schema is immutable after graph creation.
+The kernel is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**, with a message steering you to the staging pipeline — data enters a main graph only through `S3 → DuckDB → materialize`. See [Graph Operations](Graph-Operations) for the write/materialize path.
+
+Subgraphs are the exception and do allow writes, subject to two carve-outs:
+
+- **Shared repositories and their subgraphs never accept writes.** The exception is for *user* subgraphs only; a write against `sec` — or against any `sec` subgraph — is refused unconditionally.
+- **Writing to a user subgraph requires the `member` or `admin` role.** A viewer gets 403: read-only access stays read-only on subgraphs too.
+
+Schema DDL and bulk operations are blocked everywhere: `COPY`/`LOAD`/`IMPORT` return 400; `EXPORT`/`INSTALL`/`ATTACH` and `CREATE`/`DROP`/`ALTER TABLE` return 403. The graph schema is immutable after graph creation.
 
 ### Response Modes and Queueing
 
@@ -116,32 +123,34 @@ curl -N "http://localhost:8000/v1/operations/{operation_id}/stream" \
 
 Streaming result delivery is available by setting `Accept: application/x-ndjson` or `Accept: text/event-stream`, and `chunk_size` (10–10,000) tunes the streamed batch size.
 
-For the full request/response schema and every query parameter, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (operation `executeCypherQuery`), or `http://localhost:8000/docs` when running locally.
+For the full request/response schema and every query parameter, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (operation `executeCypher`; its SQL peer below is `executeSql`), or `http://localhost:8000/docs` when running locally.
 
 ## Querying the Staging Tables
 
-Before rows reach the graph, they live in DuckDB staging tables. Querying staging with SQL is the way to validate data quality, debug ingestion, or use familiar SQL joins and aggregations on the same dataset.
+The same graph-centric data is also addressable relationally, through the graph's DuckDB columnar tables. Rows land there on their way to the graph, so the tables are often ahead of the materialized graph — which makes SQL over them the way to validate data quality, debug ingestion, or use familiar SQL joins and aggregations on the same dataset.
 
 ### SQL Over Staging
 
-`POST /v1/graphs/{graph_id}/tables/query` runs read-only SQL over the staging database. Parameters here are a **positional array** with `?` placeholders — a different convention from the Cypher endpoint's named `$param`:
+`POST /v1/graphs/{graph_id}/query/sql` runs read-only SQL over the columnar tables. Parameters here are a **positional array** with `?` placeholders — a different convention from the Cypher endpoint's named `$param` — and `$1`/`$2`-style numbered placeholders bind against the same array:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/tables/query" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d5/query/sql" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
-    "sql": "SELECT name, cik FROM Entity WHERE name LIKE ? LIMIT ?",
-    "parameters": ["%NVIDIA%", 10]
+    "sql": "SELECT name, industry FROM Company WHERE industry = ? LIMIT ?",
+    "parameters": ["Energy", 10]
   }'
 ```
 
-The response is a `TableQueryResponse`, where rows are **arrays**, not dictionaries:
+Use a graph you own — shared repositories such as `sec` reject SQL outright (see [below](#shared-repositories-reject-public-staging-sql)).
+
+The response is a `SqlStatementResponse`, where rows are **arrays**, not dictionaries:
 
 ```json
 {
-  "columns": ["name", "cik"],
-  "rows": [["NVIDIA CORP", "0001045810"]],
+  "columns": ["name", "industry"],
+  "rows": [["Energy Innovators 1", "Energy"]],
   "row_count": 1,
   "execution_time_ms": 4.1
 }
@@ -170,7 +179,7 @@ LIMIT 20;
 
 ### Shared Repositories Reject Public Staging SQL
 
-The public `POST /v1/graphs/{graph_id}/tables/query` endpoint returns **HTTP 403** for shared repositories and subgraphs (for example, `sec`), with a message directing you to the graph query endpoint instead. This is a real trap: `just tables-query sec "..."` works because that recipe talks straight to the lower-level graph engine (which has no shared-repo guard), but the **public** `/v1/graphs/sec/tables/query` path is blocked. For shared repos, query the graph with Cypher rather than the staging tables.
+The public `POST /v1/graphs/{graph_id}/query/sql` endpoint returns **HTTP 403** for shared repositories and their subgraphs (for example, `sec`), with a message directing you to `POST /query/cypher` instead — a shared repository has no user columnar tables to query, so SQL is refused there entirely while Cypher continues to serve its reads from the graph. This is a real trap: `just tables-query sec "..."` works because that recipe talks straight to the lower-level graph engine (which has no shared-repo guard), but the **public** `/v1/graphs/sec/query/sql` path is blocked. For shared repos, query the graph with Cypher rather than the staging tables.
 
 ## Command-Line Recipes
 
@@ -232,7 +241,7 @@ curl -X POST "http://localhost:8000/v1/graphs/sec/mcp/call-tool" \
   -d '{"name": "read-graph-cypher", "arguments": {"query": "MATCH (e:Entity) RETURN e.name LIMIT 5"}}'
 ```
 
-Alongside these two, the graph plane exposes related tools such as `get-graph-info`, `get-example-queries`, and `resolve-element`. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
+Alongside these two, `get-graph-info` is available on every graph, and on graphs carrying the `roboledger` extension (including `sec`) the plane also exposes `get-example-queries` and `resolve-element`. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
 
 **Note:** `read-graph-cypher` strips string literals before scanning for write keywords, but the scan matches on whole words. A variable or property named exactly like a blocked keyword — for example a property access `n.set` or a variable `delete` — trips the word-boundary match and is rejected. Names that merely contain a keyword as a substring (such as `created_at` or `deleted`) are fine; avoid naming a read-only variable exactly `set`, `create`, `delete`, `merge`, `remove`, or `drop`.
 
@@ -253,6 +262,20 @@ MATCH (n) WITH labels(n) AS label, count(n) AS c RETURN label, c ORDER BY c DESC
 ```
 
 From an agent, `get-graph-schema` returns the same information in one call (node types, properties with their data types — `STRING`, `INT64`, `DOUBLE`, `BOOLEAN`, `TIMESTAMP`, `JSON` — and relationships).
+
+Over HTTP the same discovery is two plain `GET`s, and they answer different questions:
+
+```bash
+# Runtime schema — what is actually in the database right now:
+# node labels, relationship types, and sample properties per node type
+curl -s "http://localhost:8000/v1/graphs/sec/schema" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+
+# Declared schema — the definition the graph was created with.
+# Add ?include_data_stats=true for live node/relationship counts.
+curl -s "http://localhost:8000/v1/graphs/sec/schema/export" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+```
 
 ### Traversal Patterns
 
@@ -313,9 +336,9 @@ LIMIT 20
 
 ## Gotchas and Limits
 
-- **Two parameter conventions.** Cypher uses named `$param` with a `parameters` object; staging SQL uses positional `?` with a `parameters` array. They are not interchangeable.
-- **Write attempts return 403 on main graphs.** Data enters via the staging pipeline; only subgraphs accept writes through the query path.
-- **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/tables/query` returns 403 for shared repositories and subgraphs — query the graph with Cypher instead.
+- **Two parameter conventions.** Cypher uses named `$param` with a `parameters` object; staging SQL uses positional `?` (or `$1`, `$2`) with a `parameters` array. They are not interchangeable.
+- **Write attempts return 403 on main graphs.** Data enters via the staging pipeline. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
+- **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.
 - **Cypher query length is capped at 50,000 characters** and `timeout` is 1–300 seconds (default 60).
 - **Queries are scoped to one graph.** There are no cross-database or cross-graph queries; each request targets a single `graph_id`.
 - **Ingestion is sequential and single-writer.** Each database allows one writer at a time and a limited number of concurrent connections, so favor read-only traversals when querying live graphs.

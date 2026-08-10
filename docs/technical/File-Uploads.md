@@ -1,6 +1,8 @@
 # File Uploads
 
-This guide shows you how to load bulk node and relationship data into a **custom (generic) graph** using the files router at `/v1/graphs/{graph_id}/files`. You upload parquet, CSV, or JSON files, stage them, and ingest them into your graph — all without your file bytes ever passing through the API server.
+This guide shows you how to load bulk node and relationship data into a **custom (generic) graph**. You upload parquet, CSV, or JSON files, stage them, and ingest them into your graph — all without your file bytes ever passing through the API server.
+
+The write path is a set of **content operations** at `POST /v1/graphs/{graph_id}/operations/{op_name}` — `create-file-upload`, `ingest-file`, and `delete-file`. Each returns an `OperationEnvelope` and accepts an `Idempotency-Key`. Reads stay on the files router at `GET /v1/graphs/{graph_id}/files`.
 
 **Quick Start:** Run `just demo-custom-graph` to exercise the entire upload → stage → ingest → query flow end-to-end against a real schema.
 
@@ -14,7 +16,7 @@ This guide shows you how to load bulk node and relationship data into a **custom
 - [The Upload Flow](#the-upload-flow)
   - [Step 1: Request a Presigned Upload URL](#step-1-request-a-presigned-upload-url)
   - [Step 2: Upload the Bytes to S3](#step-2-upload-the-bytes-to-s3)
-  - [Step 3: Mark Uploaded and Ingest](#step-3-mark-uploaded-and-ingest)
+  - [Step 3: Stage the File and Ingest](#step-3-stage-the-file-and-ingest)
   - [Step 4: Verify the Data](#step-4-verify-the-data)
 - [Auto-Ingest vs Batch](#auto-ingest-vs-batch)
 - [Supported Formats and Limits](#supported-formats-and-limits)
@@ -27,24 +29,27 @@ This guide shows you how to load bulk node and relationship data into a **custom
 
 ## Overview
 
-The files router lets you load bulk data — nodes and relationships — into a custom graph by uploading flat files. Files are tracked as first-class, graph-scoped resources keyed by a `file_id`, and each one flows through a fixed pipeline:
+This surface lets you load bulk data — nodes and relationships — into a custom graph by uploading flat files. Files are tracked as first-class, graph-scoped resources keyed by a `file_id`, and each one flows through a fixed pipeline:
 
 1. **Upload** the file directly to S3 using a presigned URL.
 2. **Stage** it into a DuckDB table (queryable immediately).
 3. **Ingest** it into the LadybugDB graph, either per-file or in a single batch.
 
-This is a different surface from document management. The files router moves **structured tabular data into the graph**; it does not store or index documents. For entity-graph document management (PDFs, policies, full-text and semantic search), see [Document Management](Document-Management) instead.
+This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For entity-graph document management (PDFs, policies, full-text and semantic search), see [Document Management](Document-Management) instead.
 
 ## When to Use This
 
-Use the files router when you are loading data into a **custom / generic graph** — the kind you create with a `schema.json` template (see [Custom Graph Schema](Custom-Graph-Schema)).
+Use this surface when you are loading data into a **custom / generic graph** — the kind you create with a `schema.json` template (see [Custom Graph Schema](Custom-Graph-Schema)).
 
-Two graph types are explicitly **not** supported, and the router rejects them:
+Three graph types are explicitly **not** supported, and the operations reject them:
 
 | Graph type | Result | Why |
 | --- | --- | --- |
-| **Entity graphs** | HTTP 400 | Entity graph data is managed through the extensions pipeline (connectors and OLTP APIs). Use `POST /materialize` with `source='extensions'` instead. |
+| **Entity graphs** | HTTP 400 | Entity graph data is managed through the extensions pipeline (connectors and OLTP APIs). Use `POST /v1/graphs/{graph_id}/operations/materialize` with `{"source": "extensions"}` instead. |
 | **Shared repositories** (and their subgraphs) | HTTP 403 | Shared repositories such as the SEC repo are read-only. File uploads and data ingestion are not allowed. |
+| **Subgraphs** | HTTP 403 | Staging rebuilds the database and swaps it into place, which would discard the direct writes a subgraph exists for. Upload to the parent graph, or write to the subgraph directly through its own MCP connector. |
+
+The subgraph block applies to `create-file-upload` and `ingest-file`. `delete-file` deliberately stays open on subgraphs so files staged before the block was introduced remain removable.
 
 If you are loading custom domain data — customers, products, orders, or any node/relationship model you defined yourself — this is the right surface.
 
@@ -74,20 +79,20 @@ All `curl` examples below read the API key from `.local/config.json` and target 
 
 ## Quick Start
 
-The fastest way to see the full upload → stage → ingest → query flow is the bundled demo, which generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries:
+The fastest way to see the full upload → stage → ingest → query flow is the bundled demo, which generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries. It runs seven steps in all, finishing with document indexing and a `knowledge` subgraph that exercises structured and semantic memory:
 
 ```bash
 just demo-custom-graph
 ```
 
-To drive the flow yourself against an existing graph, the minimal path is three calls — request a presigned URL, `PUT` the bytes to S3, then `PATCH` the file as uploaded with `ingest_to_graph: true`:
+To drive the flow yourself against an existing graph, the minimal path is three calls — request a presigned URL, `PUT` the bytes to S3, then call `ingest-file` with `ingest_to_graph: true`:
 
 ```bash
 API_KEY=$(jq -r .api_key .local/config.json)
 GRAPH_ID=kg1a2b3c4d
 
 # 1. Request a presigned upload URL (auto-creates the Person table)
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/files" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"file_name": "Person.parquet", "content_type": "application/x-parquet", "table_name": "Person"}'
@@ -97,14 +102,16 @@ The sections below walk each step in detail. For the complete end-to-end script,
 
 ## The Upload Flow
 
-The flow is four steps: request a presigned URL, PUT the bytes to S3, mark the file as uploaded, then verify. The API never receives your file bytes — it hands back a time-limited S3 URL and you upload directly to S3.
+The flow is four steps: request a presigned URL, PUT the bytes to S3, stage the file, then verify. The API never receives your file bytes — it hands back a time-limited S3 URL and you upload directly to S3.
+
+All three write calls are operations, which means two things hold for every one of them. They require the **member/admin write role** on the graph — a graph `viewer` is rejected. And they accept an `Idempotency-Key` header: a retry with the same key inside 24 hours returns the original envelope with `idempotentReplay: true` and does not re-run the command, while reusing a key with a different body returns **409**.
 
 ### Step 1: Request a Presigned Upload URL
 
-`POST /v1/graphs/{graph_id}/files` returns a presigned S3 URL and a `file_id`. It auto-creates the staging table named in `table_name` if it does not already exist.
+`POST /v1/graphs/{graph_id}/operations/create-file-upload` returns a presigned S3 URL and a `file_id`. It auto-creates the staging table named in `table_name` if it does not already exist.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/files" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/create-file-upload" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -114,18 +121,28 @@ curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/files" \
   }'
 ```
 
-The response gives you everything you need for the next two steps:
+The response is an `OperationEnvelope`; the presign payload sits inside `result`:
 
 ```json
 {
-  "upload_url": "https://...",
-  "expires_in": 3600,
-  "file_id": "<uuid>",
-  "s3_key": "user-staging/<user_id>/kg1a2b3c4d/Person/<file_id>/Person.parquet"
+  "operation": "create-file-upload",
+  "operationId": "op_01K2...",
+  "status": "completed",
+  "result": {
+    "upload_url": "https://...",
+    "expires_in": 3600,
+    "file_id": "<uuid>",
+    "s3_key": "user-staging/<user_id>/kg1a2b3c4d/Person/<file_id>/Person.parquet"
+  },
+  "at": "2026-08-09T18:04:11.921Z",
+  "createdBy": "user_01K2...",
+  "idempotentReplay": false
 }
 ```
 
-**Note:** `table_name` is required for this endpoint. The presigned URL expires in 3600 seconds (1 hour) — re-request it if it lapses.
+Envelope keys are camelCase on the wire, and the payload you want is one level down — extract it with `jq -r .result.upload_url` and `jq -r .result.file_id`.
+
+**Note:** `table_name` is required for this operation. The presigned URL expires in 3600 seconds (1 hour) — re-request it if it lapses.
 
 ### Step 2: Upload the Bytes to S3
 
@@ -139,37 +156,47 @@ curl -X PUT "<upload_url from step 1>" \
 
 **Important:** The `Content-Type` on this `PUT` must match the `content_type` you sent in step 1. The presigned URL is signed with that content type, and S3 rejects the request if it does not match.
 
-### Step 3: Mark Uploaded and Ingest
+### Step 3: Stage the File and Ingest
 
-`PATCH /v1/graphs/{graph_id}/files/{file_id}` with `status=uploaded` tells the platform the bytes are in S3. The router validates the object exists (via a `head_object`), counts rows, and triggers DuckDB staging. Set `ingest_to_graph: true` to also push the staged data into the graph in the same call.
+`POST /v1/graphs/{graph_id}/operations/ingest-file` tells the platform the bytes are in S3. It validates the object exists (via a `head_object`), counts rows, and triggers DuckDB staging. Set `ingest_to_graph: true` to also push the staged data into the graph in the same call. There is no status field — naming the `file_id` is what marks it uploaded.
 
 ```bash
-curl -X PATCH "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/ingest-file" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
-  -d '{ "status": "uploaded", "ingest_to_graph": true }'
+  -d '{ "file_id": "<file_id>", "ingest_to_graph": true }'
 ```
 
-The response confirms the staged file and, for async work, hands you an `operation_id` and a `monitor_url`:
+The staging details come back inside `result`. When background work is dispatched — a large file staged through Dagster, or the graph-ingest chain — the envelope carries `status: "pending"` and the `result` picks up an `operation_id` and a `monitor_url`:
 
 ```json
 {
-  "status": "success",
-  "file_id": "...",
-  "upload_status": "uploaded",
-  "file_size_bytes": 12345,
-  "row_count": 50,
-  "operation_id": "<uuid>",
-  "monitor_url": "/v1/operations/<uuid>/stream"
+  "operation": "ingest-file",
+  "operationId": "op_01K2...",
+  "status": "pending",
+  "result": {
+    "status": "success",
+    "file_id": "...",
+    "upload_status": "uploaded",
+    "file_size_bytes": 12345,
+    "row_count": 50,
+    "operation_id": "<uuid>",
+    "monitor_url": "/v1/operations/<uuid>/stream"
+  },
+  "at": "2026-08-09T18:04:19.402Z",
+  "createdBy": "user_01K2...",
+  "idempotentReplay": false
 }
 ```
 
+The top-level `operationId` on a pending envelope is what you pass to `/v1/operations/{operation_id}/stream` to follow the work. A small file staged inline with no follow-on ingest comes back `status: "completed"` instead.
+
 ### Step 4: Verify the Data
 
-Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Search and AI Retrieval](Search-and-AI-Retrieval) for the MCP path.
+Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Search and AI Retrieval](Search-and-AI-Retrieval) for the MCP path.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/query" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{ "query": "MATCH (p:Person) RETURN count(p) AS people" }'
@@ -182,7 +209,7 @@ just graph-query kg1a2b3c4d "MATCH (p:Person) RETURN count(p) AS people"
 just graph-info kg1a2b3c4d
 ```
 
-**Note:** Main graphs are read-only to Cypher — use `POST /query` to verify, not to write. You cannot create nodes via Cypher on a main graph (subgraphs are writable).
+**Note:** Main graphs are read-only to Cypher — use `POST /query/cypher` to verify, not to write. You cannot create nodes via Cypher on a main graph (subgraphs are writable).
 
 ## Auto-Ingest vs Batch
 
@@ -190,8 +217,8 @@ There are two ingestion modes. They differ only in *when* staged data reaches th
 
 | Mode | How | When to use |
 | --- | --- | --- |
-| **Real-time (auto-ingest)** | `PATCH` with `ingest_to_graph: true` — each file is ingested incrementally as you mark it uploaded | A single file, or incremental updates |
-| **Batch** | `PATCH` with `ingest_to_graph: false` (the default) for many files, then one `materialize` operation | Bulk loads of many files — cheaper and faster |
+| **Real-time (auto-ingest)** | `ingest-file` with `ingest_to_graph: true` — each file is ingested incrementally as you stage it | A single file, or incremental updates |
+| **Batch** | `ingest-file` with `ingest_to_graph: false` (the default) for many files, then one `materialize` operation | Bulk loads of many files — cheaper and faster |
 
 For batch loads, stage all your files first, then rebuild the graph from staging in a single operation:
 
@@ -200,10 +227,12 @@ curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/materialize"
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Idempotency-Key: $(date +%s)" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"rebuild": true}'
 ```
 
-The `materialize` operation rebuilds the LadybugDB graph from the staging tables, returns an `OperationEnvelope` (HTTP 202), and supports an `Idempotency-Key` header and a `dry_run` flag. Because staging is the source of truth, this is safe to repeat.
+The `materialize` operation rebuilds the LadybugDB graph from the staging tables, returns an `OperationEnvelope` (HTTP 202), and supports an `Idempotency-Key` header and a `dry_run` flag.
+
+**Pass `rebuild: true` once the graph already holds materialized rows.** DuckDB staging tables rebuild from *all* uploaded files, so a plain `{}` materialize over a graph that has previously ingested files *and* newly staged ones would re-copy the old rows — duplicate node keys fail the COPY, and duplicate relationships load silently. That combination is rejected with **409**, and the resolution is `rebuild: true`. A first materialize (nothing ingested yet) and a repeat call with nothing new staged are both unaffected.
 
 ## Supported Formats and Limits
 
@@ -241,32 +270,29 @@ curl "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)"
 ```
 
-**Disable or archive a file** via `PATCH`. A file moves through `pending` → `uploaded` → `disabled` / `archived`. Once uploaded, it cannot be reset to `pending`.
+A file's upload status is one of `pending`, `uploaded`, or `failed`. Nothing sets it directly — `pending` is minted by `create-file-upload`, and `ingest-file` moves it to `uploaded` (or `failed`) as a side effect of staging.
 
-```bash
-curl -X PATCH "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
-  -H "Content-Type: application/json" \
-  -d '{ "status": "archived" }'
-```
-
-**Delete a file.** A plain delete removes the S3 object and the database record. Add `cascade=true` to also remove the file's rows from DuckDB and mark the graph stale (a rebuild is then recommended).
+**Delete a file** with `POST /v1/graphs/{graph_id}/operations/delete-file`. A plain delete removes the S3 object and the database record. Set `cascade: true` in the body to also remove the file's rows from DuckDB and mark the graph stale (a rebuild is then recommended).
 
 ```bash
 # Remove S3 object + DB record only (DuckDB rows excluded from queries, not physically removed)
-curl -X DELETE "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{ "file_id": "<file_id>" }'
 
 # Full cascade: also removes DuckDB rows and marks the graph stale
-curl -X DELETE "http://localhost:8000/v1/graphs/kg1a2b3c4d/files/<file_id>?cascade=true" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -X POST "http://localhost:8000/v1/graphs/kg1a2b3c4d/operations/delete-file" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{ "file_id": "<file_id>", "cascade": true }'
 ```
 
-The delete response reports what happened: `cascade_deleted`, `tables_affected`, and `graph_marked_stale`.
+The envelope's `result` reports what happened: `cascade_deleted`, `tables_affected`, and `graph_marked_stale`.
 
 ## Monitoring Async Work
 
-When staging or ingestion runs asynchronously (large files, or `ingest_to_graph: true`), the response carries an `operation_id` and a `monitor_url`. Stream progress over Server-Sent Events:
+When staging or ingestion runs asynchronously (large files, or `ingest_to_graph: true`), the envelope comes back `status: "pending"` and carries an `operationId`, with the same id repeated as `result.operation_id` alongside a `monitor_url`. Stream progress over Server-Sent Events:
 
 ```bash
 curl -N "http://localhost:8000/v1/operations/<operation_id>/stream" \
@@ -284,48 +310,48 @@ API_KEY=$(jq -r .api_key .local/config.json)
 GRAPH_ID=kg1a2b3c4d
 
 # 1. Request a presigned upload URL (auto-creates the Person table)
-RESPONSE=$(curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/files" \
+RESPONSE=$(curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/create-file-upload" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"file_name": "Person.parquet", "content_type": "application/x-parquet", "table_name": "Person"}')
 
-UPLOAD_URL=$(echo "$RESPONSE" | jq -r .upload_url)
-FILE_ID=$(echo "$RESPONSE" | jq -r .file_id)
+UPLOAD_URL=$(echo "$RESPONSE" | jq -r .result.upload_url)
+FILE_ID=$(echo "$RESPONSE" | jq -r .result.file_id)
 
 # 2. Upload the bytes directly to S3 (Content-Type must match step 1)
 curl -X PUT "$UPLOAD_URL" \
   -H "Content-Type: application/x-parquet" \
   --data-binary @Person.parquet
 
-# 3. Mark uploaded and ingest into the graph
-curl -X PATCH "http://localhost:8000/v1/graphs/$GRAPH_ID/files/$FILE_ID" \
+# 3. Stage the file and ingest it into the graph
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/ingest-file" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"status": "uploaded", "ingest_to_graph": true}'
+  -d "{\"file_id\": \"$FILE_ID\", \"ingest_to_graph\": true}"
 
 # 4. Verify the data landed in the graph
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query/cypher" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (p:Person) RETURN count(p) AS people"}'
 ```
 
-For the full request and response schemas (`FileUploadRequest`, `FileUploadResponse`, `FileStatusUpdate`, `GetFileInfoResponse`, `DeleteFileResponse`), see the live API reference at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
+For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, `DeleteFileOp`, `OperationEnvelope`, `GetFileInfoResponse`, `DeleteFileResponse`), see the live API reference at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
 
 ## Gotchas and Pitfalls
 
-- **Entity graphs are rejected (HTTP 400).** Their data is managed through the extensions pipeline; use `POST /materialize` with `source='extensions'` instead. This is the load-bearing scope boundary for this surface.
-- **Shared repositories are rejected (HTTP 403)** on upload, status update, and delete — they are read-only.
-- **`table_name` is required** in the `POST /files` body. Omitting it returns a 400.
+- **Entity graphs are rejected (HTTP 400).** Their data is managed through the extensions pipeline; use `POST /v1/graphs/{graph_id}/operations/materialize` with `{"source": "extensions"}` instead. This is the load-bearing scope boundary for this surface.
+- **Shared repositories are rejected (HTTP 403)** on all three operations — they are read-only.
+- **Subgraphs are rejected (HTTP 403)** on `create-file-upload` and `ingest-file`. Upload to the parent graph, or write to the subgraph directly through its own MCP connector. `delete-file` still works on a subgraph.
+- **`table_name` is required** in the `create-file-upload` body. Omitting it returns a 400.
 - **Extension must match content type.** A `.csv` uploaded with `application/x-parquet` returns a 400.
 - **Filename safety.** `..`, `/`, and `\` are rejected; the name is capped at 255 characters.
-- **You must `PUT` to S3 before the `PATCH`.** `PATCH status=uploaded` runs a `head_object`; if the object is not in S3, it returns 404 ("File not found in S3"). An empty file (size 0 or less) returns 400 ("File is empty").
-- **No reset to `pending`.** Once uploaded, only `uploaded`, `disabled`, and `archived` are valid statuses.
-- **Storage tier limit.** The `PATCH` checks total staged bytes against your graph tier's storage limit; exceeding it returns HTTP 413.
+- **You must `PUT` to S3 before calling `ingest-file`.** It runs a `head_object`; if the object is not in S3, it returns 404 ("File not found in S3"). An empty file (size 0 or less) returns 400 ("File is empty").
+- **Storage tier limit.** `ingest-file` gates on the **measured instance footprint**, not on the sum of staged bytes — the check is scoped to the parent graph, so a subgraph is measured against its parent's box, and blue/green `-wip`/`-prev` build artifacts are excluded so an in-flight rebuild does not reject an upload the durable footprint can absorb. Over the limit returns HTTP 413; usage that cannot be verified returns HTTP 503 with a `Retry-After: 30` header.
 - **Presigned URLs expire in 1 hour.** Re-request the URL if it lapses before you upload.
 - **`Content-Type` on the S3 `PUT` must match** the `content_type` used to generate the URL, or S3 rejects the signature.
-- **Delete without `cascade` leaves DuckDB rows.** A non-cascade delete removes the S3 object and DB record only; DuckDB excludes the file from queries but does not physically remove the data. Use `cascade=true` to remove DuckDB rows and mark the graph stale.
-- **Main graphs are read-only to Cypher.** Verify ingested data with `POST /query` reads; you cannot write nodes via Cypher on a main graph (subgraphs are writable).
+- **Delete without `cascade` leaves DuckDB rows.** A non-cascade delete removes the S3 object and DB record only; DuckDB excludes the file from queries but does not physically remove the data. Set `cascade: true` to remove DuckDB rows and mark the graph stale.
+- **Main graphs are read-only to Cypher.** Verify ingested data with `POST /query/cypher` reads; you cannot write nodes via Cypher on a main graph (subgraphs are writable).
 
 ## Related Documentation
 
@@ -333,7 +359,7 @@ For the full request and response schemas (`FileUploadRequest`, `FileUploadRespo
 
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design the schema and tables that file uploads populate; `just demo-custom-graph` runs this exact flow end-to-end
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - Query the loaded graph with MCP tools (`read-graph-cypher`, `get-graph-schema`) after ingest
-- **[Document Management](Document-Management)** - For entity-graph documents (the contrasting surface; not the files router)
+- **[Document Management](Document-Management)** - For entity-graph markdown documents (the contrasting surface; this page is bulk tabular data)
 
 **Codebase Documentation:**
 

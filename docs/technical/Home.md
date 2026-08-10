@@ -12,6 +12,7 @@ Orientation and self-hosting: stand up a local stack, learn the vocabulary, and 
 - **[Core Concepts](Core-Concepts)** - The vocabulary: graphs, tiers, blocks, operators, operational vs analytical
 - **[Architecture Overview](Architecture-Overview)** - System design and components
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions (self-hosting)
+- **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Set up WSL2 and run the stack on Windows
 - **[Security & Compliance](Security-and-Compliance)** - The security posture, built-in controls, and optional compliance stacks for forks
 
 ## Demos
@@ -34,6 +35,7 @@ The core platform API and graph management.
 - **[Credits & Billing](Credits-and-Billing)** - The credit model: only AI operations consume credits
 - **[AI Operators & MCP](AI-Operators-and-MCP)** - The MCP surface and the three retrieval planes
 - **[Pipeline Guide](Pipeline-Guide)** - Data pipelines, Dagster architecture, and custom adapters
+- **[Building Custom Integrations](Building-Custom-Integrations)** - The supported customization route
 
 ## Extensions Layer
 

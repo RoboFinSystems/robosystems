@@ -22,7 +22,10 @@ For everything in this guide — `curl`, MCP, SDK smoke tests — use the API ke
 - [Worked Examples](#worked-examples)
 - [API Key Lifecycle](#api-key-lifecycle)
 - [Graph-Scoped Access](#graph-scoped-access)
+- [Organizations and Roles](#organizations-and-roles)
+- [Graph Membership](#graph-membership)
 - [The JWT / Bearer Boundary](#the-jwt--bearer-boundary)
+- [Accounts, Passwords, and Registration](#accounts-passwords-and-registration)
 - [Single Sign-On (SSO)](#single-sign-on-sso)
 - [Troubleshooting](#troubleshooting)
 - [Related Documentation](#related-documentation)
@@ -30,7 +33,7 @@ For everything in this guide — `curl`, MCP, SDK smoke tests — use the API ke
 
 ## Overview
 
-Authentication in RoboSystems is credential-in-header, validated by a FastAPI dependency before any handler runs. There is exactly one route you can hit anonymously — `GET /v1/status`, the health probe — and everything else requires a valid credential. A request carries either an `X-API-Key` header (programmatic) or an `Authorization: Bearer` header (frontend session); both resolve to the same authenticated `User`.
+Authentication in RoboSystems is credential-in-header, validated by a FastAPI dependency before any handler runs. Anonymous access is limited to the health probe (`GET /v1/status`), the public offering (`GET /v1/offering`), and the pre-login auth flow — registration, login, password reset, email verification, invitation preview, the password policy, and the CAPTCHA config. Everything else requires a valid credential. A request carries either an `X-API-Key` header (programmatic) or an `Authorization: Bearer` header (frontend session); both resolve to the same authenticated `User`.
 
 Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself.
 
@@ -88,7 +91,7 @@ The header name is exactly `X-API-Key` (case-insensitive per HTTP, but use this 
 
 ### Health Check (Unauthenticated)
 
-`GET /v1/status` is the only routinely-anonymous endpoint — it is the load-balancer health probe. No credential needed:
+`GET /v1/status` is the load-balancer health probe and needs no credential:
 
 ```bash
 curl http://localhost:8000/v1/status
@@ -127,7 +130,10 @@ curl -X GET "http://localhost:8000/v1/graphs" \
 The extensions GraphQL endpoint is graph-scoped at the URL level: the `graph_id` is a path parameter, never a query argument. The same `X-API-Key` authenticates you, and the endpoint validates your access to that specific graph before the resolver runs:
 
 ```bash
-GRAPH_ID=$(jq -r '.graphs.roboledger.graph_id // .graph_id' .local/config.json)
+# Slot names vary by which demo you ran — list them first:
+#   jq -r '.graphs | keys' .local/config.json
+# `just demo-roboledger` writes the `cascade_demo` slot.
+GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)
 
 curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
@@ -146,7 +152,14 @@ API keys are managed under `/v1/user/api-keys`. The full request/response schema
 
 ### Key Format
 
-A RoboSystems API key is the literal prefix `rfs` followed by 64 hex characters (67 characters total), e.g. `rfs9ce10...`. Keys are stored **hashed** (bcrypt) — never in plaintext. The server cannot show you the raw key after it is created; it only ever exposes the 8-character `prefix` (e.g. `rfs9ce10`) used to identify the key in lists.
+A RoboSystems API key is a short literal prefix followed by 64 hex characters. There are two variants:
+
+| Variant | Prefix | Length | Scope |
+| --- | --- | --- | --- |
+| **Account-wide** | `rfs` | 67 characters | Every graph your user can reach |
+| **Graph-scoped** | `rfsc` | 68 characters | One graph (and its subgraphs) |
+
+The prefix difference exists for human and incident legibility only — **the authoritative scope check is the key row's `graph_id`, never the spelling of the prefix.** Keys are stored **hashed** (bcrypt) — never in plaintext. The server cannot show you the raw key after it is created; it only ever exposes the 8-character `prefix` (the key's first eight characters, e.g. `rfs9ce10` or `rfsc9ce1`) used to identify the key in lists.
 
 ### Create a Key
 
@@ -157,7 +170,7 @@ curl -X POST "http://localhost:8000/v1/user/api-keys" \
   -d '{"name": "CI pipeline key", "description": "for nightly smoke tests"}'
 ```
 
-The request fields are `name` (required), `description` (optional), and `expires_at` (optional, ISO-8601, must be in the future):
+The request fields are `name` (required), `description` (optional), `expires_at` (optional, ISO-8601, must be in the future), and `graph_id` (optional). Supplying a `graph_id` mints a **graph-scoped** key: it works only for that graph and its subgraphs, and it is the only kind of key an MCP connector URL accepts. Omit it for an account-wide key.
 
 ```bash
 curl -X POST "http://localhost:8000/v1/user/api-keys" \
@@ -189,7 +202,7 @@ curl -X GET "http://localhost:8000/v1/user/api-keys" \
   -H "Content-Type: application/json"
 ```
 
-Each entry exposes `id`, `name`, `description`, `prefix`, `is_active`, `last_used_at`, `expires_at`, and `created_at` — but **never** the raw key.
+Each entry exposes `id`, `name`, `description`, `prefix`, `is_active`, `last_used_at`, `expires_at`, `created_at`, and `graph_id` (the key's graph scope; `null` means account-wide) — but **never** the raw key.
 
 ### Update a Key
 
@@ -225,6 +238,80 @@ The practical consequence is the status-code split:
 
 This applies uniformly across the REST graph endpoints (`/v1/graphs/{graph_id}/...`), the extensions command and view operations (`/extensions/{domain}/{graph_id}/operations/...`), and the GraphQL endpoint (`/extensions/{graph_id}/graphql`). The same key, validated against per-graph access. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the multi-tenant model and how graph access is granted.
 
+## Organizations and Roles
+
+Every user belongs to an **organization**. The org is the account that owns graphs and carries billing, and it is where "who can do what" is ultimately decided. Registering normally creates a personal org with you as its sole owner; registering through an invitation link joins you to the inviting org instead (see [Registration and invitations](#registration-and-invitations) below).
+
+Organizations are multi-user. A member holds exactly one of three roles:
+
+| Role | What it carries |
+| --- | --- |
+| **`owner`** | Everything an admin can do, plus checkout, payment methods, and the Stripe customer portal. An org always has at least one owner |
+| **`admin`** | Manage members and invitations, view invoices, change org settings, and manage another member's subscriptions |
+| **`member`** | Belongs to the org and works in the graphs they have been granted; manages only their own subscriptions |
+
+Two guard rails are worth knowing before you write tooling against this. **Owner promotion and demotion are not available through the member endpoints** — `PUT /v1/orgs/{org_id}/members/{user_id}` rejects both directions with a 400, because transferring ownership needs a dedicated handoff workflow rather than a role flip that could strand an org with no owner. And **no one changes their own role here**: an admin targeting themselves is rejected outright, and an owner targeting themselves runs into the owner guard.
+
+The org surface lives under `/v1/orgs`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/orgs` | The organizations you belong to |
+| `GET \| PUT /v1/orgs/{org_id}` | Read or update the org (update requires admin or owner; only an owner may change the org type) |
+| `GET /v1/orgs/{org_id}/graphs` | The graphs the org owns |
+| `GET /v1/orgs/{org_id}/members` | Roster, with each member's role and join date |
+| `PUT \| DELETE /v1/orgs/{org_id}/members/{user_id}` | Change a member's role, or remove them (members may remove themselves) |
+| `GET /v1/orgs/{org_id}/limits` | Account-level limits, including the graph cap |
+| `GET /v1/orgs/{org_id}/usage` | Usage aggregated across every graph in the org (`days` controls the lookback, default 30) |
+
+### The invitation flow
+
+Adding someone to an org is an invitation, not a direct write — there is no endpoint that attaches an existing account to an org you administer. An admin or owner invites an **email address that has no account yet**, and the invited person becomes a member by registering through the emailed link:
+
+1. **Invite** — `POST /v1/orgs/{org_id}/invitations` with `{"email": "...", "role": "member"}`. The role defaults to `member`.
+2. **Preview** — the registration page calls `GET /v1/auth/invitations/{token}` (anonymous) to show what is being joined: org name, invited email, role, and expiry. Unknown, expired, revoked, and already-accepted tokens all return 404.
+3. **Accept** — the invitee registers with `POST /v1/auth/register` carrying `invite_token`. They join the inviting org at the invited role instead of receiving a personal org, and the token itself proves control of the mailbox, so the account skips separate email verification. The email in the registration must match the one that was invited.
+
+Admins and owners can also list pending invitations (`GET /v1/orgs/{org_id}/invitations`), revoke a pending one (`DELETE .../invitations/{invitation_id}`), and resend (`POST .../invitations/{invitation_id}/resend` — this rotates the token, extends the expiry, and sends a fresh email).
+
+Invitations are gated by the `ORG_MEMBER_INVITATIONS_ENABLED` feature flag. A deployment with the flag off returns `501 Not Implemented` from every invitation endpoint.
+
+## Graph Membership
+
+Org roles decide who can administer the account; **graph membership decides who can reach a given graph.** Grants are managed per graph under `/v1/graphs/{graph_id}/members`, and every one of the four routes requires graph admin:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/graphs/{graph_id}/members` | Everyone with access — explicit grants plus implicit org admins |
+| `POST /v1/graphs/{graph_id}/members` | Grant access to an org member at a chosen role |
+| `PUT /v1/graphs/{graph_id}/members/{user_id}` | Change an explicit member's graph role |
+| `DELETE /v1/graphs/{graph_id}/members/{user_id}` | Revoke an explicit grant |
+
+Graph roles are their own three-level ladder, distinct from org roles: **`viewer`** (read-only), **`member`** (read/write), and **`admin`** (full control, including managing other members).
+
+Four rules govern the surface, and each one is a distinct error if you trip it:
+
+- **You can only grant access to someone already in the graph's owning organization.** There is no cross-org sharing here; the invitation flow above is how a person enters the org in the first place.
+- **Org owners and admins hold implicit graph admin** on every graph their org owns. They appear in the listing with `source: "org_role"` and a null `granted_at`, as opposed to `source: "explicit"` for a direct grant. Their access is managed by changing their org role — you cannot revoke it from the graph.
+- **Subgraphs inherit the parent's permissions.** Calling the member endpoints on a subgraph returns 400 and points you at the parent graph.
+- **Shared repositories have no member management.** They are subscription-based, so these endpoints return 403 for `sec` and its peers. See [Shared Repositories](Shared-Repositories).
+
+```bash
+curl "http://localhost:8000/v1/graphs/kg1234567890abcdef/members" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+```
+
+```text
+{
+  "members": [
+    {"user_id": "user_...", "name": "...", "email": "...",
+     "role": "admin", "source": "explicit", "granted_at": "..."}
+  ],
+  "total": 1,
+  "graph_id": "kg1234567890abcdef"
+}
+```
+
 ## The JWT / Bearer Boundary
 
 The browser frontends authenticate with JWT Bearer tokens, not API keys. This is the boundary you do not cross when testing the backend.
@@ -241,6 +328,45 @@ The flow, at a glance:
 `login` returns a short-lived Bearer JWT that the frontend session layer carries on subsequent requests and refreshes automatically before it expires. The token is signed with HS256.
 
 **For backend testing you never need this path.** There is no reason to call `login` from `curl` when you have an API key — the API key authenticates the same `User` against the same endpoints. If you find yourself wrangling Bearer tokens in a shell script, you are on the wrong door; switch to `X-API-Key`. The Bearer path exists for browser sessions across the three frontend domains, where token-based session handling and refresh are the right model.
+
+The four endpoints above are the session flow. The rest of the account lifecycle — how a user comes into existence, and how they change their credentials — is below.
+
+## Accounts, Passwords, and Registration
+
+### Registration and invitations
+
+`POST /v1/auth/register` creates a user. Without an `invite_token` it also creates a personal organization with the new user as owner; with one, the user joins the inviting org at the invited role instead (see [The invitation flow](#the-invitation-flow)). The request carries `name`, `email`, `password`, an optional `captcha_token`, and the optional `invite_token`.
+
+Two anonymous endpoints exist so a registration form can be built correctly before anyone has a credential:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /v1/auth/captcha/config` | Whether CAPTCHA is required and the site key to use (`null` when disabled) |
+| `GET /v1/auth/password/policy` | The password requirements the form should enforce |
+
+`POST /v1/auth/password/check` scores a candidate password against that policy, so a form can give live feedback without attempting a registration.
+
+Email verification, where a deployment enables it, is a two-endpoint pair: `POST /v1/auth/email/verify` consumes the token from the email link (and returns a JWT, so the user lands logged in), and `POST /v1/auth/email/resend` re-sends it for the authenticated user.
+
+### Resetting a forgotten password
+
+The reset flow is anonymous end to end, because by definition the user cannot authenticate:
+
+1. `POST /v1/auth/password/forgot` sends the reset email. It **always** reports success, whether or not the address exists — that is deliberate, so the endpoint cannot be used to enumerate accounts.
+2. `GET /v1/auth/password/reset/validate` checks a token without consuming it, so the reset page can fail fast on a dead link. It returns a masked email on success.
+3. `POST /v1/auth/password/reset` sets the new password and returns a JWT for auto-login.
+
+### Changing a known password
+
+An authenticated user changes their own password with `PUT /v1/user/password`, supplying `current_password`, `new_password`, and `confirm_password`. The current password is re-verified; the endpoint is unavailable to SSO-only accounts.
+
+**A password change invalidates every JWT that user holds, but leaves their API keys working.** Changing the password bumps the user's `session_version`, and any token minted before the bump stops authenticating — so every open browser session is signed out, including the one that made the change. API keys are a separate credential family and are untouched: a script or CI job running on `X-API-Key` keeps working straight through a password change. The same applies to a password *reset*, which invalidates sessions the same way.
+
+The practical consequence: **rotating a password is not a way to cut off programmatic access.** If a key may be compromised, revoke the key (`DELETE /v1/user/api-keys/{id}`) — changing the password will not do it for you.
+
+### Updating your profile
+
+`PUT /v1/user` updates the authenticated user's own profile — `name` and `email`. It is the write counterpart to the `GET /v1/user` whoami call used in the [worked examples](#authenticated-rest-get-whoami) above.
 
 ## Single Sign-On (SSO)
 
@@ -291,7 +417,11 @@ The graph-scoped GraphQL endpoint takes `graph_id` from the URL path, not as a q
 
 ### `/v1/status` Works but Everything Else 401s
 
-`/v1/status` is the only unauthenticated endpoint. If it returns 200 but authenticated calls 401, the stack is up and the problem is your credential, not the server. Re-run `just demo-user` to refresh `.local/config.json`, then re-read the key inline.
+`/v1/status` is the load-balancer health probe and needs no credential. If it returns 200 but authenticated calls 401, the stack is up and the problem is your credential, not the server. Re-run `just demo-user` to refresh `.local/config.json`, then re-read the key inline.
+
+### Every Browser Session Signed Out After a Password Change
+
+Expected. Changing or resetting a password bumps the user's `session_version`, which invalidates every JWT issued before that moment — including the session that made the change. Log in again to get a fresh token. API keys are unaffected and keep working. See [Changing a known password](#changing-a-known-password).
 
 ### Health Check Hits the Wrong Path
 
@@ -306,6 +436,7 @@ The graph-scoped GraphQL endpoint takes `graph_id` from the URL path, not as a q
 - **[Quick Start](Quick-Start)** - Start the local stack and run `just demo-user` to get your first API key
 - **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The per-graph access model and 401-vs-403 semantics
 - **[Graph Operations](Graph-Operations)** - Where authenticated requests go: operation envelopes and `X-API-Key` in practice
+- **[Credits and Billing](Credits-and-Billing)** - What the organization carries: credit pools, account limits, and the role-gated billing endpoints
 
 **API Reference:**
 

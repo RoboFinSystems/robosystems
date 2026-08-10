@@ -2,7 +2,7 @@
 
 This guide shows you how to manage the institutional-knowledge document store that lives over each entity graph — uploading policies, procedures, and notes as markdown, and feeding them into the search and retrieval layer your AI agents read from. Documents live in PostgreSQL as the source of truth and are projected into OpenSearch as a sectioned, searchable index.
 
-**Quick Start:** Create a markdown document with the `create-document` MCP tool, and it is automatically split into sections and indexed for search. Document **creation is MCP-only today** — the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get); there is no REST upload endpoint.
+**Quick Start:** Create a markdown document with `POST /v1/graphs/{graph_id}/operations/index-document` (or the `create-document` MCP tool), and it is automatically split into sections and indexed for search. Creation, update, and deletion are **content operations**; the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get).
 
 ## Overview
 
@@ -15,14 +15,14 @@ The document store is a per-graph layer for unstructured, human- and agent-autho
 
 PostgreSQL holds the full document; OpenSearch holds a derived projection used only for search. Create and update write PostgreSQL first, then sync to OpenSearch; delete removes both. This split keeps the canonical record durable while letting the retrieval index be rebuilt at any time.
 
-Documents are the foundation of the retrieval layer your AI agents read from — policies become searchable context an agent can cite, and "memories" are simply documents filed under `folder="memory"`. For the search and retrieval side, see [Search and AI Retrieval](Search-and-AI-Retrieval). For binary file ingestion (which is a distinct surface), see [File Uploads](File-Uploads).
+Documents are the foundation of the retrieval layer your AI agents read from — policies become searchable context an agent can cite. Agent recollections are a **separate** surface: semantic memory is now first-class, with its own per-graph vector store and its own operations (see [Semantic Memory Is a Separate Surface](#semantic-memory-is-a-separate-surface)). For the search and retrieval side, see [Search and AI Retrieval](Search-and-AI-Retrieval). For bulk tabular node and relationship data (parquet, CSV, JSON staged into the graph), see [File Uploads](File-Uploads).
 
 ## Prerequisites
 
 - A running local stack (`just start` brings up PostgreSQL, Valkey, LadybugDB, OpenSearch, the API, and Dagster).
 - A **non-shared user graph** — document operations are rejected on shared public repositories (SEC and other platform-managed repos).
 - An API key. Run `just demo-user` from the `robosystems/` directory; credentials are written to `.local/config.json`. Read the key with `jq -r .api_key .local/config.json`.
-- `SEMANTIC_SEARCH_ENABLED=true`. The entire documents (and search) router is feature-flag-gated. When the flag is off, the routes are not mounted at all and calls return 404 rather than 503.
+- `SEMANTIC_SEARCH_ENABLED=true`. The flag gates both halves, but differently. The read routers (`/documents`, `/search`) are conditionally mounted — with the flag off they do not exist and calls return **404**. The `index-document` and `delete-document` operations are always mounted and return **503 "Document search is not enabled"** instead.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ API_KEY=$(jq -r .api_key .local/config.json)
 GRAPH_ID=<your graph id>
 
 # Upload a policy document
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -48,17 +48,27 @@ curl "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
   -H "X-API-Key: $API_KEY"
 ```
 
-The upload response reports how many sections were indexed:
+The operation returns an `OperationEnvelope`; the indexing report sits inside `result`:
 
 ```json
 {
-  "id": "doc_01J9XYZ...",
-  "document_id": "udoc_doc_01J9XYZ...",
-  "sections_indexed": 2,
-  "total_content_length": 187,
-  "section_ids": ["udoc_doc_01J9XYZ..._0", "udoc_doc_01J9XYZ..._1"]
+  "operation": "index-document",
+  "operationId": "op_01K2...",
+  "status": "completed",
+  "result": {
+    "id": "doc_01J9XYZ...",
+    "document_id": "udoc_doc_01J9XYZ...",
+    "sections_indexed": 2,
+    "total_content_length": 187,
+    "section_ids": ["udoc_doc_01J9XYZ..._0", "udoc_doc_01J9XYZ..._1"]
+  },
+  "at": "2026-08-09T18:04:11.921Z",
+  "createdBy": "user_01K2...",
+  "idempotentReplay": false
 }
 ```
+
+Envelope keys are camelCase on the wire; the payload fields inside `result` keep their snake_case names.
 
 The full endpoint and schema surface is published in the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally). This guide covers the concepts and tasks; the OpenAPI spec is the authoritative reference for request and response shapes.
 
@@ -78,23 +88,22 @@ A document is a markdown payload plus a small set of metadata fields. The canoni
 | **`sections_indexed`** | Count of OpenSearch sections produced from the content |
 | **`created_at` / `updated_at`** | Timestamps |
 
-Every document is scoped to a `graph_id` (the tenant boundary) and carries the `user_id` of the uploader. `source_type` defaults to `"uploaded_doc"`; the document store is primarily the **user- and agent-authored** surface — uploads and memories — rather than a connection sync target.
+Every document is scoped to a `graph_id` (the tenant boundary) and carries the `user_id` of the uploader. `source_type` defaults to `"uploaded_doc"`; the document store is primarily the **user- and agent-authored** surface rather than a connection sync target.
 
 The list response is a lighter shape than the detail response: it returns `document_title`, `section_count` (mapped from `sections_indexed`), `source_type`, `folder`, `tags`, and timestamps. Fetch a single document by id to get the full `content` back.
 
 ## CRUD via the REST Surface
 
-All document operations live under `/v1/graphs/{graph_id}/documents` and require the `X-API-Key` header. Each handler validates your API key and per-graph access before running, and writes additionally require write permission on the graph.
+The document surface is split the way the platform splits every content surface: **reads are REST GETs**, **writes are operations**. Both require the `X-API-Key` header, and each handler validates your API key and per-graph access before running; writes additionally require the member/admin write role on the graph.
 
-The five operations are:
+| Kind | Method | Path | Purpose |
+| --- | --- | --- | --- |
+| Read | GET | `/v1/graphs/{graph_id}/documents` | List documents (optional `?source_type=` filter) |
+| Read | GET | `/v1/graphs/{graph_id}/documents/{document_id}` | Get one document, full content |
+| Write | POST | `/v1/graphs/{graph_id}/operations/index-document` | Create a document (omit `document_id`) or update one (supply it) |
+| Write | POST | `/v1/graphs/{graph_id}/operations/delete-document` | Delete a document |
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/v1/graphs/{graph_id}/documents` | List documents (optional `?source_type=` filter) |
-| GET | `/v1/graphs/{graph_id}/documents/{document_id}` | Get one document, full content |
-| POST | `/v1/graphs/{graph_id}/documents` | Upload (create) a document |
-| PUT | `/v1/graphs/{graph_id}/documents/{document_id}` | Update — partial; only provided fields change |
-| DELETE | `/v1/graphs/{graph_id}/documents/{document_id}` | Delete (returns 204 No Content) |
+Both operations return an `OperationEnvelope` and accept an `Idempotency-Key` header — a retry with the same key inside 24 hours replays the original envelope with `idempotentReplay: true` rather than re-running the command.
 
 ### Get a Document
 
@@ -107,14 +116,14 @@ Returns the full document including raw `content`, `tags`, `folder`, `external_i
 
 ### Update a Document (Partial)
 
-The PUT handler is a genuine partial update. Only the fields you include in the request body are applied; omitted fields are left untouched. Updating `content` re-sections and re-indexes the document.
+Update is the **same** `index-document` operation with a `document_id` supplied. It is a genuine partial update: only the fields you include in the request body are applied, and omitted fields are left untouched. Updating `content` re-sections and re-indexes the document.
 
 ```bash
 # Update only the content — re-sections and re-indexes
-curl -X PUT "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"content": "# Scope\n\nUpdated scope language for FY2026.\n"}'
+  -d '{"document_id": "doc_01J9XYZ...", "content": "# Scope\n\nUpdated scope language for FY2026.\n"}'
 ```
 
 To **clear** a field rather than leave it untouched, pass `null` explicitly (e.g. `{"tags": null}`). The handler distinguishes "field omitted" from "field set to null", so this is the only way to remove existing tags or a folder via update.
@@ -122,11 +131,13 @@ To **clear** a field rather than leave it untouched, pass `null` explicitly (e.g
 ### Delete a Document
 
 ```bash
-curl -X DELETE "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
-  -H "X-API-Key: $API_KEY" -i
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/delete-document" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"document_id": "doc_01J9XYZ..."}'
 ```
 
-Delete returns **204 No Content**. It removes the PostgreSQL row and the document's OpenSearch sections together, so the document disappears from search immediately.
+Delete returns a **200 `OperationEnvelope`** whose `result` is `{"document_id": "doc_01J9XYZ...", "deleted": true}`; a document that does not exist returns 404. It removes the PostgreSQL row and the document's OpenSearch sections together, so the document disappears from search immediately.
 
 ## Markdown Frontmatter and Sectioning
 
@@ -137,7 +148,7 @@ Documents are markdown, and the way they are split into sections determines how 
 If the content opens with a YAML frontmatter block, it is stripped from the body and can fill **unset** metadata fields — `title`, `tags`, and `folder`. Explicit values in the request always win over frontmatter; frontmatter only fills gaps.
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -159,12 +170,12 @@ The body is split into sections on markdown heading boundaries (`#` through `###
 
 ## Upsert by `external_id`
 
-`external_id` is unique per graph and drives idempotent re-ingestion. When you upload a document with an `external_id` that already exists in the graph, the upload routes to an update of the existing document instead of creating a duplicate.
+`external_id` is unique per graph and drives idempotent re-ingestion. When you index a document with an `external_id` that already exists in the graph, the call routes to an update of the existing document instead of creating a duplicate.
 
-This is the pattern for syncing documents from an external system where each source item has a stable id (for example, a Google Drive file id). Re-uploading the same `external_id` after the source changes updates the stored document in place:
+This is the pattern for syncing documents from an external system where each source item has a stable id (for example, a Google Drive file id). Re-indexing the same `external_id` after the source changes updates the stored document in place:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/documents" \
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -195,8 +206,10 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/search" \
   -H "Content-Type: application/json" \
   -d '{"query": "revenue recognition ASC 606", "source_type": "uploaded_doc", "size": 5}'
 
-curl -X DELETE "http://localhost:8000/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
-  -H "X-API-Key: $API_KEY" -i
+curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/delete-document" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"document_id": "doc_01J9XYZ..."}'
 ```
 
 **Note:** `GET /documents/{id}` and `GET /search/{id}` return different things. The first returns the whole PostgreSQL document by its `doc_...` id; the second returns a single OpenSearch section by its `udoc_..._{index}` id. Do not conflate the two ids. The full search story — BM25 versus semantic search, ranking, and agent retrieval — is covered in [Search and AI Retrieval](Search-and-AI-Retrieval).
@@ -209,37 +222,46 @@ The same document operations are exposed as MCP tools for agent-driven workflows
 | --- | --- |
 | `create-document` | Create a document |
 | `update-document` | Update an existing document |
+| `delete-document` | Delete a document |
 | `get-document` | Fetch one document |
 | `list-documents` | List documents in the active graph |
 | `search-documents` | Search the document index (returns a `document_id` per hit) |
 | `get-document-section` | Fetch a full section by the id returned from search |
 
-These tools replaced the earlier `remember-text` / `recall-text` semantic-memory tools. The replacement is conceptual as well as mechanical: **memories are documents filed under `folder="memory"`**. To save an agent observation as a durable, searchable note, create a document in the memory folder:
-
-```text
-create-document --title "Q4 close observation" --folder memory \
-  --content "# Note\n\nThe AR aging shows a stale invoice from Acme to follow up on."
-```
-
 `search-documents` returns a `document_id` per hit; pass it to `get-document-section` for the full section text. Semantic (KNN) search is opt-in; the default mode is BM25 full-text. The MCP retrieval tools are documented alongside the rest of the search surface in [Search and AI Retrieval](Search-and-AI-Retrieval).
+
+## Semantic Memory Is a Separate Surface
+
+Agent recollections used to be modelled as documents filed under `folder="memory"` — a convention that the `create-document` tool description still advertises. That is now the legacy pattern. **Semantic memory is first-class**: a per-graph LanceDB vector store with its own storage, its own tools, and its own feature flag.
+
+| Surface | Operations |
+| --- | --- |
+| MCP tools | `remember`, `recall`, `update-memory`, `forget` |
+| REST reads | `GET /v1/graphs/{g}/memory`, `GET /v1/graphs/{g}/memory/{memory_id}`, `POST /v1/graphs/{g}/memory/recall` |
+| Write operations | `POST /v1/graphs/{g}/operations/{remember\|update-memory\|forget}` |
+
+The gating is **different from documents**: memory is controlled by `SEMANTIC_MEMORY_ENABLED` (with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the MCP tools), not by `SEMANTIC_SEARCH_ENABLED`. Like documents, memory is blocked on shared repositories. Unlike documents, `remember` and `update-memory` are also blocked on subgraphs — a subgraph is meant to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
+
+Memory recall is covered with the rest of the retrieval layer in [Search and AI Retrieval](Search-and-AI-Retrieval).
 
 ## Tier Limits
 
 Each graph tier caps the number of uploaded documents. The limit counts only documents with `source_type="uploaded_doc"` and is enforced **on create only** — never on the `external_id` upsert path.
 
-| Tier | Document limit |
-| --- | --- |
-| `ladybug-standard` | 100 |
-| `ladybug-large` | 1,000 |
-| `ladybug-xlarge` | 10,000 |
+When a create would exceed the limit, the call returns **422** with a "Document limit reached" message. Because upsert by `external_id` skips the check, re-syncing existing documents is always safe regardless of the limit.
 
-When a create would exceed the limit, the upload returns **422** with a "Document limit reached" message. Because upsert by `external_id` skips the check, re-syncing existing documents is always safe regardless of the limit.
+The cap itself is served rather than restated here. `GET /v1/graphs/{graph_id}/limits` returns a `documents` block with your graph's `current_count`, its `max_documents` for the tier, and an `approaching_limit` flag:
+
+```bash
+curl "http://localhost:8000/v1/graphs/$GRAPH_ID/limits" \
+  -H "X-API-Key: $API_KEY" | jq .documents
+```
 
 ## Troubleshooting
 
-### Calls Return 404 Instead of Working
+### Reads Return 404, Writes Return 503
 
-The documents and search routers are only mounted when `SEMANTIC_SEARCH_ENABLED=true`. When the flag is off, the routes do not exist, so requests 404 rather than returning a feature-disabled error. Confirm the flag is set in your environment and restart the stack if you changed it.
+The two halves fail differently when `SEMANTIC_SEARCH_ENABLED` is off. The documents and search **read** routers are conditionally mounted, so the routes do not exist and requests 404 rather than returning a feature-disabled error. The `index-document` and `delete-document` **operations** are always mounted and return 503 "Document search is not enabled" instead. Either way the fix is the same: confirm the flag in your environment and restart the stack if you changed it.
 
 ### Document Saves but `sections_indexed` Is 0
 
@@ -255,7 +277,7 @@ Document operations are blocked on shared public repositories (SEC and other pla
 
 ### Update Changed More (or Less) Than Expected
 
-The PUT handler is strictly partial: omitted fields are untouched, and a field is only cleared if you pass it explicitly as `null`. If an update did not clear `tags` or `folder`, you likely omitted the field — send `{"tags": null}` to clear it. If an update changed a field you did not mean to touch, you probably included it in the body.
+Update via `index-document` is strictly partial: omitted fields are untouched, and a field is only cleared if you pass it explicitly as `null`. If an update did not clear `tags` or `folder`, you likely omitted the field — send `{"tags": null}` to clear it. If an update changed a field you did not mean to touch, you probably included it in the body.
 
 ### Content Rejected as Too Long
 
@@ -266,7 +288,7 @@ Content is capped at 500,000 characters at the request layer. Individual section
 **Wiki Guides:**
 
 - **[Search and AI Retrieval](Search-and-AI-Retrieval)** - How documents become searchable and how AI agents retrieve them
-- **[File Uploads](File-Uploads)** - Ingesting binary files, a distinct surface from this markdown document store
+- **[File Uploads](File-Uploads)** - Bulk tabular node and relationship data (parquet, CSV, JSON), a distinct surface from this markdown document store
 - **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Sync structured ledger data into a graph
 
 **Codebase Documentation:**

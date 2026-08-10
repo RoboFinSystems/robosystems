@@ -24,7 +24,7 @@ The extensions surface has a single organizing rule: **the graph (tenant) is alw
 
 ## The Three Sub-Surfaces
 
-Everything on the extensions surface falls into one of three sub-surfaces, split by transport rather than by HTTP verb. Reads go through GraphQL, writes go through named command operations, and graph-backed analytics go through named view operations.
+Everything on the extensions surface falls into one of three sub-surfaces, split by transport rather than by HTTP verb. Typed reads go through GraphQL, writes go through named command operations, and graph-backed analytics go through named view operations.
 
 | Sub-surface | Method + Path | Read/Write | Backs onto |
 | --- | --- | --- | --- |
@@ -36,13 +36,14 @@ A few details worth pinning down:
 
 - **GraphQL typed reads** are served by a single Strawberry endpoint per graph. The schema is composed dynamically per deployment (see [Feature Flags](#feature-flags-and-the-dynamically-built-schema)). In dev, this endpoint renders GraphiQL with introspection.
 - **Command writes** are explicit, named operations (`close-period`, `share-report`, `create-security`) rather than resource CRUD. They match the multi-step domain operations they actually perform. Each returns an [`OperationEnvelope`](#the-operationenvelope-contract).
-- **Analytical view operations** share the same envelope contract as command writes but are read-only and routed to the materialized graph rather than the OLTP database. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube) is the canonical example. These are gated independently of the OLTP domains, so a deployment without RoboLedger tenants can still use them.
+- **Analytical view operations** share the same envelope contract as command writes but are read-only and routed to the materialized graph rather than the OLTP database. There are two: `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube) and `financial-statement-analysis`. These are gated independently of the OLTP domains, so a deployment without RoboLedger tenants can still use them.
+- **One more shape rides the command-operation transport.** A few RoboLedger operations are POST `…/operations/{name}` and return an `OperationEnvelope` like a command write, but read the OLTP database instead of writing to it. `live-financial-statement` generates an ad-hoc statement straight from the tenant's ledger using the active CoA→GAAP mapping, with no materialization step. Because it reads the same PostgreSQL database the ledger commands write, it is gated by `ROBOLEDGER_ENABLED` rather than `FACT_GRID_ENABLED`.
 
 For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the live OpenAPI spec at [`https://api.robosystems.ai/docs`](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
 
 ## Graph-Scoping at the URL
 
-The `graph_id` is always a URL path parameter, never a query argument or request-body field. The path accepts both parent graph IDs (`kg` + 16 or more hex chars, e.g. `kg1a2b3c4d5e6f7890`) and subgraph IDs (`{parent_id}_{subgraph_name}`, e.g. `kg1a2b3c4d5e6f7890_dev`).
+The `graph_id` is always a URL path parameter, never a query argument or request-body field. The path pattern accepts parent graph IDs (`kg` + 16 or more hex chars, e.g. `kg1a2b3c4d5e6f7890`), shared-repository IDs (`sec`, `sec_historical`), the reserved `library` sentinel (which browses the shared public taxonomy library), and subgraph IDs (`{parent_id}_{subgraph_name}`, e.g. `kg1a2b3c4d5e6f7890_dev`).
 
 This matters most for GraphQL. The graph is determined by the URL, and resolvers read it from request context — so GraphQL queries do **not** take a `graphId` argument:
 
@@ -52,6 +53,8 @@ Right:  { entity { name } }
 ```
 
 Putting the tenant in the URL rather than the query body eliminates a whole class of "I queried the wrong tenant" bugs: the scope is fixed before the resolver runs, and there is no way to override it from inside the query.
+
+Subgraph IDs are the one case where matching the pattern is not enough. On the **GraphQL** sub-surface a subgraph is rejected with **HTTP 403** — a subgraph is a modality container with no extensions schema of its own, so the request is refused rather than quietly resolved to its parent. The check runs after authentication and before the access check, so the denial stays attributable. Target the parent graph instead. The command and view operations carry no such guard.
 
 ## Auth Runs Before the Handler
 
@@ -77,16 +80,18 @@ Each sub-surface is gated by a feature flag, and the gating happens at **schema-
 | `ROBOLEDGER_ENABLED` | RoboLedger command operations + reads + GraphQL ledger fields | `true` |
 | `ROBOINVESTOR_ENABLED` | RoboInvestor command operations + GraphQL investor fields | `true` |
 | `EXTENSIONS_GRAPHQL_ENABLED` | Kill switch for the `/extensions/{graph_id}/graphql` endpoint | `true` |
-| `FACT_GRID_ENABLED` | Graph-backed analytical view operations (`build-fact-grid`, etc.) | `true` |
+| `FACT_GRID_ENABLED` | Graph-backed analytical view operations (`build-fact-grid`, `financial-statement-analysis`) | `true` |
 
 `EXTENSIONS_ENABLED` is a **derived** property — it is `ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED`, not a standalone environment variable. It controls whether the extensions database engine is active at all. (The legacy `LEDGER_ENABLED` / `INVESTOR_ENABLED` names have been retired; use the `ROBO*` names.)
+
+The database that engine opens is configured with **`EXTENSIONS_DATABASE_URL`** — a database separate from the platform's `DATABASE_URL`, with its own independent migration history (both live on the same RDS instance in deployed environments). Tenancy inside it is **schema-per-graph**: each request sets `search_path` to the graph's own schema with `public` as the fallback, so a graph's rows are never visible from another graph's session.
 
 **The GraphQL schema is composed per deployment.** A baseline set of query fields is always present (information blocks, taxonomy blocks, and the library), and the domain-specific field sets are added only when their flag is on:
 
 - `ROBOLEDGER_ENABLED` adds the ledger query fields (roughly three dozen — `entity`, `trialBalance`, `fiscalCalendar`, `reports`, `mappings`, and more).
 - `ROBOINVESTOR_ENABLED` adds the investor query fields (`portfolios`, `securities`, `positions`, `holdings`, and related).
 
-Because the schema is built at construction time, a ledger-only deployment literally has no `portfolios` field — introspection never reveals it, and clients should branch on the introspected schema rather than discovering disabled domains through trial-and-error runtime errors. Note that analytical view operations are gated by `FACT_GRID_ENABLED` independently of `ROBOLEDGER_ENABLED`: they are mounted under the `/extensions/roboledger/...` path but stay available on deployments (such as SEC-only setups) that have no RoboLedger tenants.
+Because the schema is built at construction time, a ledger-only deployment literally has no `portfolios` field — introspection never reveals it, and clients should branch on the introspected schema rather than discovering disabled domains through trial-and-error runtime errors. Note that the *graph-backed* analytical view operations are gated by `FACT_GRID_ENABLED` independently of `ROBOLEDGER_ENABLED`: they are mounted under the `/extensions/roboledger/...` path but stay available on deployments (such as SEC-only setups) that have no RoboLedger tenants. The OLTP-backed read operation `live-financial-statement` sits on the same path but follows `ROBOLEDGER_ENABLED`.
 
 ## The OperationEnvelope Contract
 
@@ -195,7 +200,8 @@ For the exact request-body fields of any operation, consult the OpenAPI spec at 
 
 - **GraphQL takes no `graphId` argument.** Use `{ entity { … } }`, never `{ entity(graphId: "kg_x") }`. The graph is the URL.
 - **Use `X-API-Key` for local and backend testing**, not `Authorization: Bearer`. Read the key from `.local/config.json` with `jq -r .api_key .local/config.json`. Do not put the key in a `TOKEN=` shell variable or in the URL.
-- **Analytical views are gated by `FACT_GRID_ENABLED`, not `ROBOLEDGER_ENABLED`.** They live under the `/extensions/roboledger/...` path but are flagged independently, so they remain available on SEC-only deployments.
+- **Graph-backed analytical views (`build-fact-grid`, `financial-statement-analysis`) are gated by `FACT_GRID_ENABLED`, not `ROBOLEDGER_ENABLED`.** They live under the `/extensions/roboledger/...` path but are flagged independently, so they remain available on SEC-only deployments. `live-financial-statement`, which reads the OLTP database rather than the graph, follows `ROBOLEDGER_ENABLED` like the command writes.
+- **Subgraph IDs are rejected on the GraphQL endpoint with HTTP 403.** They match the path pattern, so the failure surfaces at runtime rather than as a validation error. Target the parent graph. The operation endpoints do not apply this restriction.
 - **`build-fact-grid` requires a scoping filter** — `elements` and/or `canonical_concepts`, plus at least one of `periods` / `period_type` / `fiscal_year`, or you get HTTP 400.
 - **A GraphQL "error" can still return HTTP 200.** Anonymous introspection is allowed, so an unauthenticated request can return a `200` with an `UNAUTHENTICATED` error code in `extensions.code`; HTTP 401 means credentials were presented but invalid.
 - **Idempotency conflicts return HTTP 409** when the same key is reused with a different request body. Identical replays return `idempotentReplay: true` without re-executing.

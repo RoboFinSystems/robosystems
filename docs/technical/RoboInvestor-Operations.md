@@ -2,7 +2,7 @@
 
 This guide shows you how to drive the RoboInvestor command surface against a local RoboSystems stack — creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
 
-RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. There is no synthetic-data demo recipe for RoboInvestor (unlike `just demo-roboledger`), so this is an API-first walkthrough.
+RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself. If you would rather see the whole surface driven end-to-end first, `just demo-roboinvestor` builds the **Meridian Ventures Fund I** scenario, including the cross-graph report share described in [Cross-Graph Issuer Linking](#cross-graph-issuer-linking).
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ The RoboInvestor command surface lives under the extensions mount and is graph-s
 POST /extensions/roboinvestor/{graph_id}/operations/{op_name}
 ```
 
-Like every extensions write surface, these operations follow CQRS: **writes go through REST command operations; reads go through GraphQL only.** There are no REST read routes. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header.
+The RoboInvestor surface follows CQRS strictly: **all six operations are writes, and reads go through GraphQL only.** There are no REST read routes here. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header. (RoboLedger additionally exposes a few read-shaped analytical operations on its own mount — see [Extensions Surface Overview](Extensions-Surface-Overview) — so the "operations are always writes" rule is a RoboInvestor property, not a corpus-wide one.)
 
 The surface is intentionally small. Portfolios and positions are written through a single molecule — the **Portfolio Block** — rather than through atom-level CRUD. Securities are the one standalone entity with their own create / update / delete operations.
 
@@ -45,7 +45,7 @@ The surface is intentionally small. Portfolios and positions are written through
   ```
 
 - `ROBOINVESTOR_ENABLED=true` in your environment. This flag gates both the RoboInvestor operations and the GraphQL investor fields. If it is off, the REST operations return HTTP 404 "Investor module not initialized." and the GraphQL fields raise `INVESTOR_NOT_INITIALIZED`.
-- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension.
+- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. `just demo-roboinvestor` provisions one (into the `roboinvestor_demo` slot of `.local/config.json`) along with the Meridian Ventures Fund I data set.
 - An API key. Run `just demo-user` to create or reuse demo credentials, then read the key from `.local/config.json`.
 
 ## The Two Write Surfaces
@@ -76,14 +76,20 @@ All portfolio and position writes flow through the three Portfolio Block operati
 
 ## Quick Start
 
-Read your credentials once, then drive the surface with `curl`:
+The quickest way to get a graph that actually carries the `roboinvestor` extension is `just demo-roboinvestor`, which provisions the investor graph into the `roboinvestor_demo` slot. Then read your credentials once and drive the surface with `curl`:
 
 ```bash
 API_KEY=$(jq -r .api_key .local/config.json)
-GRAPH_ID=$(jq -r '.graphs | to_entries[0].value.graph_id' .local/config.json)
+GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 ```
 
-The `graph_id` is nested under `graphs.<slot>.graph_id` in `.local/config.json` — it is not a top-level key, and the slot name varies by which demo script created it, so read the id out of the nested structure rather than assuming a slot name. The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites).
+The `graph_id` is nested under `graphs.<slot>.graph_id` in `.local/config.json` — it is not a top-level key, and the slot name varies by which demo script created it. **Name the slot; do not pick one positionally.** A `to_entries[0]` grabs whichever slot sorts first, which is typically a RoboLedger graph — every command on this page then fails with `EXTENSION_NOT_PROVISIONED`. List the slots first if you are unsure which is yours:
+
+```bash
+jq -r '.graphs | keys[]' .local/config.json
+```
+
+The graph must carry the `roboinvestor` extension; see [Prerequisites](#prerequisites).
 
 The minimal end-to-end path is: create a security, create a portfolio block that references it, then read it back via GraphQL. The walkthrough below does exactly that.
 
@@ -106,6 +112,8 @@ curl -X POST "http://localhost:8000/extensions/roboinvestor/$GRAPH_ID/operations
     "outstanding_shares": 6500000
   }'
 ```
+
+`entity_id` here is the **issuer** entity, and it must already exist in this graph — the placeholder `ent_acme_holdings` above will return HTTP 404 (`EntityNotFoundError`) on a graph that has no such entity. Omit the field entirely to create an unlinked security, or supply a real issuer id (see [Cross-Graph Issuer Linking](#cross-graph-issuer-linking)).
 
 The response is an `OperationEnvelope` whose `result` is a `SecurityResponse`. It carries an `id` (shaped like `sec_...`), `is_active: true`, and `terms: {}` by default. `security_type` is an open vocabulary — common values include `common_stock`, `preferred_stock`, `warrant`, `convertible_note`, `safe`, `option`, `llc_unit`, `lp_interest`, and `restricted_stock_unit`. `security_subtype` is free text.
 
@@ -194,11 +202,13 @@ The cross-graph link is what ties an investor's holding back to the issuing comp
 
 When you call `create-security`, the issuer link is resolved in priority order:
 
-1. If `entity_id` is provided, that issuer entity is used directly.
+1. If `entity_id` is provided, that issuer entity is used directly — and it must already exist in this graph. An unknown `entity_id` is a hard **HTTP 404** (`EntityNotFoundError`, "Entity not found."), not a silent fall-through to step 2.
 2. Otherwise, if `source_graph_id` is provided, the operation looks for an `Entity` already materialized in *this* graph whose metadata records a matching `source_graph_id` — that is, an issuer that has already shared a report into this graph. If found, it links the security to that entity.
 3. Otherwise, the security is created with `entity_id` left NULL, to be linked later.
 
 This is a **mutual handshake**: the investor records the company's `graph_id`, *and* the company shares a report into the investor's graph. Neither alone establishes the link. Authorization lives at the report-sharing boundary, not in the RoboInvestor OLTP layer — recording a `source_graph_id` for a company that has not shared a report simply leaves the security unlinked until that report arrives.
+
+`just demo-roboinvestor` is the executable proof of this handshake: it provisions the Meridian Ventures Fund I investor graph into the `roboinvestor_demo` slot, provisions an issuer graph (the SaaS startup scenario) into `saas_startup`, and performs the report share that links the two. Its flags let you drive each half separately — `--issuer <id>` targets an existing issuer graph, `--reload-issuer` rebuilds it, `--skip-share` stops short of the share so you can watch a security sit unlinked, and `--revoke` shares, then revokes and verifies the teardown. `--dry-run` previews the portfolio without writing anything.
 
 ## Reading Data Back With GraphQL
 
@@ -254,6 +264,7 @@ Common error responses:
 
 | Condition | HTTP | Error |
 | --- | --- | --- |
+| Supplied `entity_id` matches no entity in this graph | 404 | `EntityNotFoundError` |
 | Referenced security does not exist | 404 | `SecurityNotFoundError` |
 | Referenced position does not exist | 404 | `PositionNotFoundError` |
 | Position id belongs to a different portfolio | 409 | `PositionPortfolioMismatchError` |
@@ -261,6 +272,9 @@ Common error responses:
 | Delete portfolio with active positions, no confirmation | 409 | `ActivePositionsRequireConfirmationError` |
 | RoboInvestor module not initialized (REST) | 404 | "Investor module not initialized." |
 | RoboInvestor module not initialized (GraphQL) | — | `INVESTOR_NOT_INITIALIZED` |
+| Graph is not provisioned with the `roboinvestor` extension (GraphQL) | — | `EXTENSION_NOT_PROVISIONED` |
+
+The last two are easy to confuse. `INVESTOR_NOT_INITIALIZED` means the domain is available but this graph has no investor data yet; `EXTENSION_NOT_PROVISIONED` means the graph never carried the `roboinvestor` extension at all — the usual cause is pointing `GRAPH_ID` at a RoboLedger graph.
 
 ## Gotchas
 

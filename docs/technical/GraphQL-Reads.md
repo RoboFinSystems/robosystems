@@ -58,20 +58,23 @@ just demo-user
 # 2. Provision a graph with synthetic ledger data
 just demo-roboledger
 
-# 3. Read your graph_id out of config.json. The slot name varies by demo
-#    script (cascade_demo, cascade_demo_<entity_type>, roboledger_skeleton,
-#    roboledger_demo). List the slots, then pick yours:
+# 3. List the graph slots in config.json. Each demo script writes its own
+#    (e.g. cascade_demo, cascade_demo_<entity_type>, roboledger_skeleton,
+#    roboinvestor_demo, saas_startup, custom_graph_demo, ...):
 jq -r '.graphs | keys[]' .local/config.json
-GRAPH_ID=$(jq -r '.graphs | to_entries[0].value.graph_id' .local/config.json)
 
-# 4. Run your first GraphQL read
+# 4. Pull the graph_id out by slot name. `just demo-roboledger` writes to
+#    `cascade_demo`; substitute yours if you ran a different script:
+GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)
+
+# 5. Run your first GraphQL read
 curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ entity { id name } }"}'
 ```
 
-The slot name under `graphs.*` is not uniform across demo scripts, so read the `graph_id` out of config rather than hard-coding a slot name.
+Slot names under `graphs.*` are not uniform across demo scripts, and picking one positionally (`to_entries[0]`) grabs whichever slot happens to sort first — often another demo's graph, which then fails every query on this page. List the slots and name the one you want.
 
 ## The Endpoint
 
@@ -79,7 +82,8 @@ The slot name under `graphs.*` is not uniform across demo scripts, so read the `
 POST /extensions/{graph_id}/graphql
 ```
 
-- `graph_id` is a FastAPI path parameter validated against the platform's graph-or-subgraph ID pattern (`kg` + 16+ hex chars, optionally a subgraph suffix). It is **not** a GraphQL argument — resolvers read it from request context.
+- `graph_id` is a FastAPI path parameter validated against the platform's graph-or-subgraph ID pattern. Three kinds of value work: an entity graph (`kg` + 16 or more hex chars), a shared-repository id (`sec`, `sec_historical`), or the reserved **`library`** sentinel, which browses the shared public taxonomy library rather than a tenant. It is **not** a GraphQL argument — resolvers read it from request context.
+- **Subgraph IDs match the pattern but are rejected with HTTP 403.** A subgraph is a modality container with no extensions schema of its own, so `POST /extensions/{parent}_{name}/graphql` fails at runtime rather than at validation. Target the parent graph.
 - The request body is a standard GraphQL POST payload: a JSON object with a `query` string, optional `variables` object, and optional `operationName`.
 - In dev, opening the same URL in a browser (a GET request) renders the **GraphiQL** explorer with introspection enabled, so you can browse the schema and run queries interactively.
 - The endpoint is mounted only when `ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED` is set, and can be disabled entirely with `EXTENSIONS_GRAPHQL_ENABLED=false`.
@@ -112,11 +116,29 @@ The schema is not static — it is composed at startup from the extensions enabl
 | --- | --- | --- |
 | Ledger fields | `ROBOLEDGER_ENABLED` | `entity`, `agents`, `transactions`, `fiscalCalendar`, `periodCloseStatus`, `trialBalance`, `reports` |
 | Investor fields | `ROBOINVESTOR_ENABLED` | `portfolios`, `securities`, `positions`, `holdings`, `portfolioBlock` |
-| Always-on fields | not flag-gated | `informationBlock` / `informationBlocks`, taxonomy and library reads, `hello` (an auth probe) |
+| Always-on fields | not flag-gated | `informationBlock` / `informationBlocks`, taxonomy blocks, the `library*` family, `hello` (an auth probe) |
 
-The consequence: on a ledger-only deployment, a field like `portfolios` is **absent from the schema entirely**. Introspection won't list it, and querying it is a schema validation error rather than a runtime "not initialized" error. Clients should branch on the schema shape they discover through introspection rather than trial-and-error against fields that may not exist.
+The consequence: on a ledger-only deployment, a field like `portfolios` is **absent from the schema entirely**. Introspection won't list it, and querying it is a schema validation error rather than a runtime "not initialized" error. Clients should branch on the schema shape they discover through introspection rather than trial-and-error against fields that may not exist. This is why the recommended first step from any client — human or agent — is to read the schema (GraphiQL or `get-graphql-schema`) and query only the fields the deployment actually exposes.
 
-This is why the recommended first step from any client — human or agent — is to read the schema (GraphiQL or `get-graphql-schema`) and query only the fields the deployment actually exposes.
+### The always-on group in full
+
+The always-on group is larger than one table cell suggests. Three query classes — information blocks, taxonomy blocks, and the library — are composed on every deployment regardless of flags, because they are cross-domain and not gated by a per-graph extension:
+
+- **Information blocks** — `informationBlock`, `informationBlocks`
+- **Taxonomy blocks** — `taxonomyBlock`, `taxonomyBlocks`
+- **Library taxonomies** — `libraryTaxonomies`, `libraryTaxonomy`, `libraryTaxonomyArcs`, `libraryTaxonomyArcCount`
+- **Library elements** — `libraryElements`, `libraryElement`, `searchLibraryElements`, `libraryElementTree`, `libraryElementEquivalents`, `libraryElementArcs`, `libraryElementClassifications`
+- **Library structures** — `libraryStructures`, `libraryStructure`
+- **Liveness** — `hello`
+
+The `library*` family needs no flag because its visibility follows the session `search_path`, which follows from the URL's `graph_id`: a tenant graph sees its own taxonomy rows with public fallback, while the reserved `library` sentinel browses the shared public library on its own.
+
+```bash
+curl -X POST "http://localhost:8000/extensions/library/graphql" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ libraryTaxonomies { name } }"}'
+```
 
 ## A Worked Query: Fiscal Calendar and Entity
 
@@ -205,7 +227,10 @@ The ledger query root exposes a wide set of reads. Discover the full, deployment
 - **Transactions** — `transactions`, `transaction`
 - **Taxonomy / mappings** — `taxonomies`, `reportingTaxonomy`, `elements`, `mappingCandidates`, `unmappedElements`, `structures`, `mappings`, `mapping`, `mappingCoverage`
 - **Close / fiscal** — `periodCloseStatus`, `fiscalCalendar`, `periodDrafts`, `closingBookStructures`
-- **Reports** — `reports`, `report`, `reportPackage`, `statement`, `publishLists`, `publishList`
+- **Reports** — `reports`, `report`, `reportPackage`, `reportDownloadUrl`, `statement`
+- **Publishing / cross-graph sharing** — `publishLists`, `publishList`, `blockedSourceGraphs` (the recipient's block list — source graphs barred from sharing reports *into* this graph, managed by the `block-source-graph` / `unblock-source-graph` operations)
+
+`reportDownloadUrl(reportId, format, expiresIn)` is worth calling out: it is the **only** way to download a published report's serialization bundle. The REST download route was retired, and a download is a read of stored state, so it lives here on the read surface rather than as a REST resource or a named operation. Every format resolves to a short-lived presigned S3 URL — JSON-LD is stamped at publish time, XBRL is materialized and cached on first request — and the resolver returns that URL, never the bytes. The client follows it to S3. `format` defaults to JSON-LD; `expiresIn` is the URL's lifetime in seconds, bounded between 60 and 3600, and an out-of-range value returns an `INVALID_EXPIRES_IN` error. A report that exists but has no published bundle yet raises `REPORT_BUNDLE_NOT_AVAILABLE`; a report id that doesn't exist returns `null`.
 
 On an investor-enabled deployment, the investor query root adds `portfolios`, `securities`, `security`, `positions`, `position`, `holdings`, and `portfolioBlock`.
 
@@ -253,6 +278,8 @@ The intended flow is two steps: discover the schema, then query it.
 
 `query-graphql` is strictly read-only. It rejects mutations and subscriptions before execution, and enforces a complexity gate: maximum query depth 10, maximum 200 fields, and maximum 20 aliases. Queries that exceed these limits are rejected rather than executed.
 
+Direct HTTP queries are bounded too, just more loosely, and on a different third axis. The endpoint applies Strawberry limiters for maximum depth 15, maximum 30 aliases, and maximum 2000 **tokens** — `EXTENSIONS_GRAPHQL_MAX_DEPTH`, `EXTENSIONS_GRAPHQL_MAX_ALIASES`, and `EXTENSIONS_GRAPHQL_MAX_TOKENS`, all tunable at runtime through SSM without a redeploy. They exist to bound query cost against the small extensions OLTP connection pool, where each resolved field can open a session. Introspection is exempt from the depth limiter, so SDK codegen is unaffected.
+
 Note the easy-to-confuse pairing: `get-graphql-schema` returns the **GraphQL SDL** for this OLTP plane, while `get-graph-schema` (no `ql`) returns the **Cypher/graph** schema for the analytical LadybugDB plane. They are different tools for different planes. See [AI Operators and MCP](AI-Operators-and-MCP) for the full MCP tool surface.
 
 ## Error Surface
@@ -289,11 +316,11 @@ The field you asked for isn't in this deployment's schema. Two common causes:
 
 ### `graph_id` not found in config / can't build the URL
 
-`graph_id` is nested under `graphs.<slot>.graph_id` in `.local/config.json` — it is not a top-level key. The slot name varies by which demo script created it (`cascade_demo`, `cascade_demo_<entity_type>`, `roboledger_skeleton`, or `roboledger_demo`), so don't assume the slot name. List the slots and pull the id out:
+`graph_id` is nested under `graphs.<slot>.graph_id` in `.local/config.json` — it is not a top-level key. The slot name varies by which demo script created it (`cascade_demo`, `cascade_demo_<entity_type>`, `roboledger_skeleton`, `roboinvestor_demo`, `saas_startup`, `custom_graph_demo`, and others), so don't assume the slot name. List the slots and pull the id out:
 
 ```bash
 jq -r '.graphs | keys[]' .local/config.json
-GRAPH_ID=$(jq -r '.graphs | to_entries[0].value.graph_id' .local/config.json)
+GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)   # substitute your slot
 ```
 
 ### `LEDGER_NOT_INITIALIZED` on a fresh graph
@@ -316,7 +343,7 @@ The graph is scoped by the URL path, never by a query argument. The query body i
 
 **Wiki Guides:**
 
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The four-surface extensions model (GraphQL reads, command writes, analytical views, materialization) and how they fit together
+- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The three sub-surfaces (GraphQL typed reads, command writes, analytical view operations), the shared `OperationEnvelope`, and the feature-flag story
 - **[RoboLedger Operations](RoboLedger-Operations)** - The write counterpart at `/extensions/roboledger/{graph_id}/operations/*`, making the read/write split concrete
 - **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - The Cypher/OLAP plane this page contrasts against, with `read-graph-cypher` and `get-graph-schema`
 - **[AI Operators and MCP](AI-Operators-and-MCP)** - The MCP tool surface, including `get-graphql-schema` and `query-graphql`

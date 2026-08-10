@@ -31,7 +31,7 @@ claude mcp add --transport http robosystems-sec \
 
 **Claude (claude.ai / Desktop)** — generate a **connector URL** from the **MCP page** in the app (`/connect`) and paste it into Settings → Connectors → Add custom connector. The dialog has no header field, so the URL carries its own graph-scoped, revocable API key as a query parameter — accepted only on the MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
 
-The transport speaks JSON-RPC 2.0 (protocol versions 2024-11-05 through 2025-06-18), streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
+The transport speaks JSON-RPC 2.0 and negotiates MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. JSON-RPC batching is rejected unconditionally. The transport streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
 
 ---
 
@@ -62,23 +62,52 @@ A `call-tool` request body is a `MCPToolCall`: a tool `name` plus an `arguments`
 
 ### Tool Catalog
 
-The following tool names are the exact strings accepted by `call-tool`. They are grouped by the plane or capability they serve.
+The following tool names are the exact strings accepted by `call-tool`. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; the tools that manage memory, documents, and the graph workspace sit alongside them rather than inside one.
+
+**Retrieval — the three planes:**
 
 | Tool | Plane / role | Gated by |
 | --- | --- | --- |
 | `read-graph-cypher` | Analytical (read-only Cypher) | Always available |
 | `get-graph-schema` | Analytical schema (Cypher/graph) | Always available |
+| `get-graph-info` | Basic information about the graph itself | Always available |
 | `query-graphql` | Operational (typed OLTP read) | `EXTENSIONS_GRAPHQL_ENABLED` + `MCP_GRAPHQL_ENABLED` |
 | `get-graphql-schema` | Operational schema (GraphQL SDL) | `EXTENSIONS_GRAPHQL_ENABLED` + `MCP_GRAPHQL_ENABLED` |
 | `search-documents` | Unstructured (hybrid BM25 + KNN) | `SEMANTIC_SEARCH_ENABLED` |
 | `get-document-section` | Unstructured (full section text) | `SEMANTIC_SEARCH_ENABLED` |
 | `financial-statement-analysis` | Curated analytical (LadybugDB) | `roboledger` schema extension |
-| `live-financial-statement` | Curated operational (OLTP) | `roboledger` schema extension |
+| `live-financial-statement` | Curated operational (OLTP) | `roboledger` extension; writable, non-shared graphs |
 | `build-fact-grid` | Curated analytical (XBRL hypercube) | `FACT_GRID_ENABLED` |
-| `resolve-element` | Cross-plane bridge (qname → graph) | `roboledger` schema extension |
+| `resolve-element` | Cross-plane bridge (qname → graph) | `roboledger` extension **and** the repository manifest's `has_semantic_enrichment` flag |
 | `get-example-queries` | Discovery helper | `roboledger` schema extension |
-| `write-graph-cypher` | Memory write (subgraphs only) | `MCP_MEMORY_ENABLED` |
-| `add-node-table` / `add-relationship-table` | Memory schema (subgraphs only) | `MCP_MEMORY_ENABLED` |
+
+**Semantic memory** — a per-graph vector store that gives an Operator state across turns:
+
+| Tool | Role | Gated by |
+| --- | --- | --- |
+| `recall` | Read stored memories | `SEMANTIC_MEMORY_ENABLED` + `MCP_SEMANTIC_MEMORY_ENABLED`; not on shared repos |
+| `remember` / `update-memory` | Store and revise | Same, plus a writable non-subgraph (a subgraph gets no store of its own) |
+| `forget` | Delete a memory | Same, plus a writable graph |
+
+**Documents** — CRUD over the platform's document rows, distinct from searching them:
+
+| Tool | Role | Gated by |
+| --- | --- | --- |
+| `get-document` / `list-documents` | Read | `SEMANTIC_SEARCH_ENABLED`; user graphs only (shared repos have no document rows) |
+| `create-document` / `update-document` / `delete-document` | Write | Same, plus a writable graph |
+
+**Workspace** — the lifecycle subset mirroring `/v1/graphs/{g}/operations/*`:
+
+| Tool | Role | Gated by |
+| --- | --- | --- |
+| `list-subgraphs` | Navigation — each row carries the subgraph's connector URL | `MCP_WORKSPACE_ENABLED` |
+| `create-subgraph` / `delete-subgraph` / `create-backup` | Lifecycle writes | `MCP_WORKSPACE_ENABLED`; writable graphs only |
+| `write-graph-cypher` | Write Cypher | `MCP_SUBGRAPH_OPS_ENABLED`; writable subgraphs only |
+| `add-node-table` / `add-relationship-table` | Subgraph schema DDL | `MCP_SUBGRAPH_OPS_ENABLED`; writable subgraphs only |
+| `set-write-policy` | Set a connection's outbound write-back policy | Writable, non-shared graphs |
+| `sync-connection` | Trigger an on-demand connector resync | Writable, non-shared parent graphs |
+
+`change-tier` is deliberately absent: it is a multi-minute destructive volume migration with billing consequences, so it stays on REST for humans. Restore is absent because it has no customer-facing surface at all — see [Graph Operations](Graph-Operations).
 
 In addition, **write tools are auto-generated** from the operation specs of each enabled extension (mapping, schedule, and event writes, for example). These are derived from the same `OperationSpec`s that back the REST command surface, so the MCP write tools and the `/extensions/*/operations/*` endpoints stay in lockstep. The exact set depends on which extensions are enabled; enumerate it for a given graph by calling `/mcp/tools`.
 
@@ -170,14 +199,12 @@ The Operator endpoint runs a Claude-driven executor against a graph. It is mount
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/graphs/{graph_id}/operator` | List operators available on this graph |
+| `GET` | `/v1/graphs/{graph_id}/operator` | List operators available on this graph; `?capability=` filters (for example `financial_analysis`, `rag_search`) |
 | `POST` | `/v1/graphs/{graph_id}/operator` | Auto-select an operator and execute |
 | `GET` | `/v1/graphs/{graph_id}/operator/{operator_type}` | Metadata for a specific operator |
 | `POST` | `/v1/graphs/{graph_id}/operator/{operator_type}` | Execute a specific operator |
-| `POST` | `/v1/graphs/{graph_id}/operator/batch` | Batch (up to 10 queries) |
-| `POST` | `/v1/graphs/{graph_id}/operator/recommend` | Rank operators by confidence for a query |
 
-**Auto-select vs specific.** `POST /operator` lets the platform pick the best operator for the message (use `/operator/recommend` to preview that ranking). `POST /operator/{operator_type}` targets one operator directly.
+**Auto-select vs specific.** `POST /operator` ranks the available operators internally and dispatches to the best match for the message — there is no endpoint to preview that ranking. `POST /operator/{operator_type}` targets one operator directly. Note that `{operator_type}` is a path parameter, so a misspelled or invented operator name returns **404 "Operator type '…' not found"** rather than a routing error.
 
 **Modes** (`mode` field on the request): `quick`, `standard`, `extended`, `streaming`. Each maps to an execution profile with a tool-call budget and timeout:
 
@@ -299,7 +326,7 @@ For direct, API-bypassing graph access during development, `just lbug-query GRAP
 | Concern | Detail |
 | --- | --- |
 | `read-graph-cypher` is read-only | Write Cypher (`CREATE`/`SET`/`DELETE`/`REMOVE`/`MERGE`/`DROP`) raises "Only read-only queries are allowed" |
-| Write Cypher is a different tool | `write-graph-cypher` works on **subgraphs only** (memory), never the parent graph or shared repos; gated by `MCP_MEMORY_ENABLED` |
+| Write Cypher is a different tool | `write-graph-cypher` works on **subgraphs only** (memory), never the parent graph or shared repos; gated by `MCP_SUBGRAPH_OPS_ENABLED` |
 | `query-graphql` is read-only | Mutations and subscriptions are rejected; depth/field/alias complexity is gated |
 | Discover schema first | `get-graph-schema` returns the **Cypher** schema; `get-graphql-schema` returns the **GraphQL SDL** — distinct tools, easy to confuse |
 | Tool catalog varies | Gated by feature flags and per-graph `schema_extensions`; call `/mcp/tools` before assuming a tool exists |
@@ -311,7 +338,7 @@ For direct, API-bypassing graph access during development, `just lbug-query GRAP
 | `agent` tools are not AI | On ledger graphs, `create-agent` / `list-agents` / `update-agent` manage **REA counterparties** — customers, vendors, employees (the accounting-ontology term). The AI executor layer is always called an Operator |
 | Credits | Only AI (LLM) calls consume credits; every database/search tool call is free |
 
-Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `SEMANTIC_SEARCH_ENABLED`, `MCP_GRAPHQL_ENABLED`, `MCP_MEMORY_ENABLED`, `FACT_GRID_ENABLED`) determine the catalog at runtime. See the [Configuration README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/README.md) in codebase.
+Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `SEMANTIC_SEARCH_ENABLED`, `MCP_GRAPHQL_ENABLED`, `MCP_SUBGRAPH_OPS_ENABLED`, `MCP_WORKSPACE_ENABLED`, `SEMANTIC_MEMORY_ENABLED`, `MCP_SEMANTIC_MEMORY_ENABLED`, `FACT_GRID_ENABLED`) determine the catalog at runtime. See the [Configuration README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/README.md) in codebase.
 
 ---
 

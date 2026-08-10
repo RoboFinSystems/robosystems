@@ -5,7 +5,7 @@ The supported way to connect your own data sources to RoboSystems is to build an
 **Start here:**
 
 - [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template) — the scaffold. Click *Use this template*, wire your extract/transform, pick your lane's emitter, set two repo secrets, and it runs on a schedule with zero infrastructure.
-- [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration) — a real integration built from the template: RFS's own marketing/usage metrics (GitHub, npm, PyPI, Docker Hub) collected daily and asserted as a monthly metric series on the company's own graph.
+- [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration) — a worked example built from the template: RFS's own marketing/usage metrics (GitHub, npm, PyPI, Docker Hub) modelled as a custom vocabulary and emitted as a monthly metric series.
 - SDKs: [`robosystems-client`](https://pypi.org/project/robosystems-client/) (Python) and [`@robosystems/client`](https://www.npmjs.com/package/@robosystems/client) (TypeScript), regenerated from the live [OpenAPI spec](https://api.robosystems.ai/openapi.json).
 
 ## The three lanes

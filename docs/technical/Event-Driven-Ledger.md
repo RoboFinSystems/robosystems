@@ -90,15 +90,17 @@ The Event Block is the envelope every write carries. It is created via the CQRS 
 | **Duality / correction** | `obligated_by_event_id`, `discharges_event_id`, `replaced_by_event_id`, `replaces_event_id` (all nullable) | Link an event to the obligation it discharges. The `obligated_by` / `discharges` pair is settable on create; the `replaces` pair is populated by the supersede flow, not supplied on a plain create |
 | **Control** | `apply_handlers` (bool, default `False`) | Whether to fire a handler and post the GL in this call |
 
-The envelope adds `id`, `status`, `created_at`, and `created_by` to the response.
+The envelope adds `id`, `status`, `created_at`, `created_by`, and `is_reconciling_item` to the response.
 
-**Two enumerated dimensions worth memorizing.** `resource_type` is one of `goods, services, money, right, obligation, information, labor` (or null). `source` is one of `manual, system, schedule, quickbooks, xero, plaid`.
+**`resource_type` is a closed enum; `source` deliberately is not.** `resource_type` is one of `goods, services, money, right, obligation, information, labor` (or null), enforced by a CHECK constraint. `source` carries no CHECK constraint at all: the platform-emitted values `manual`, `system`, and `schedule` are always valid, and anything else is validated at the operations layer against the graph's **registered platform Connections**. So it accepts a connected provider name (`quickbooks`, `xero`, `plaid`, …) or a `source_name` registered through an `external` connection — registering a connection opens a new source name without a schema change.
 
 **`event_category` is gated by `event_class`** at the database level. Economic events use `sales, purchase, financing, payroll, treasury, adjustment, recognition, other`; support events use `control, approval, reconciliation, inquiry`. A `sales` category on a `support` event is rejected by a CHECK constraint — the class and category must agree.
 
 **The three-phase validation pipeline.** Every create runs schema validation (Pydantic types and enums), then category/class consistency (the DB CHECK), and — only when `apply_handlers=true` — handler validation of `metadata` and the resulting entries. A capture-only event clears the first two phases and is stored without ever touching handler logic.
 
 **Idempotency is `(source, external_id)`.** A partial unique index over events with a non-null `external_id` means re-posting the same `external_id` from the same `source` will not duplicate the event. Omit `external_id` and you give up that guarantee — supply it for anything an adapter might retry.
+
+**Reconciling items are the escape hatch when an adapter changes its mind.** `committed` and `fulfilled` events are immutable to sync, so when a re-sync surfaces a changed upstream payload for an event whose GL is already posted, the platform does not rewrite the books. It sets `events.payload_drift` (a partial-indexed Boolean that drives a reconciliation queue), stashes the incoming payload in `metadata.drift_payload` with `metadata.drift_detected_at`, and surfaces the event as a **reconciling item** — the local books legitimately no longer mirror the source, and the difference awaits an explicit disposition: restate the affected months, or book a catch-up entry in the open period. The live payload and GL are untouched. Read the queue with the `isReconcilingItem` Boolean filter on the `eventBlocks` GraphQL field.
 
 ## The Event Lifecycle
 
@@ -130,12 +132,21 @@ every non-terminal status also ──▶ voided      (terminal)
 
 There is no standalone `void` or `supersede` operation. Both transitions go through `update-event-block` with a `transition_to` field; moving to `superseded` additionally requires a `superseded_by_id`.
 
+**Two operations move events forward without a fresh create:**
+
+- **`execute-event-block`** completes the capture-to-post story for graphs whose connection carries `write_policy='qb_authoritative'` or `'hybrid'`. It publishes the captured GL plan to the source-of-truth system, records the returned transaction id on the event's metadata, transitions the event to `fulfilled` (or `pending` if the upstream system rejects it), and promotes the draft GL rows to `posted`. Native-policy events fast-path through with no external write — RoboSystems is the system of record there.
+- **`promote-obligations`** sweeps matured `schedule_entry_due` obligations whose period boundary has passed, promotes them to `classified`, and drafts their closing entries in the same transaction.
+
+Both are live command operations under `/extensions/roboledger/{graph_id}/operations/` and are exposed as MCP tools.
+
 ## Handlers: How Events Become GL Entries
 
 A handler is the piece that knows the accounting. It receives the event and produces one or more balanced entries. RoboLedger resolves handlers from a **hybrid registry** with two layers:
 
 - **Python handlers** for complex, multi-step workflows. A fixed set of seven hub-defined handlers covers the core economic events (recording a journal entry, reversing one, receiving a payment, paying a bill, disposing of an asset, and the two schedule handlers). Python handlers win when both layers could match.
 - **DSL handlers** in a database-backed `event_handlers` table. Each row is a declarative template that maps an event to debit/credit entries — simple enough that a tenant can configure new GL patterns without code. This is the fallback layer.
+
+**Aliases mean the seven handlers answer to far more than seven `event_type`s.** The Python registry maps roughly a dozen additional event types onto `journal_entry_recorded`, because the on-approve GL shape is identical and only the inbox label, `event_category`, and downstream filtering differ. `invoice_issued`, `bill_received`, `sales_receipt_recorded`, `cash_expense_recorded`, `check_written`, `credit_card_charge`, `credit_card_refund`, `deposit_received`, and `inventory_adjusted` all resolve this way — so the `invoice_issued` event in Step 1 below *does* have a handler, even though it isn't one of the seven names.
 
 **The DSL template shape.** A handler's `transaction_template` is a JSON document describing the entries to build:
 
@@ -237,7 +248,14 @@ The response is an `EventBlockEnvelope` with a fresh `evt_`-prefixed `id` and `s
 
 ### Step 2: Record a Journal Entry Through the Event Layer
 
-To post in a single call, set `apply_handlers: true`. This fires the `journal_entry_recorded` Python handler, which reads the flat single-entry metadata shape (`posting_date`, `memo`, `status`, `type`, and a balanced `line_items` array) and posts the GL atomically. Amounts are in cents, and the entry must balance.
+To post in a single call, set `apply_handlers: true`. This fires the `journal_entry_recorded` Python handler, which posts the GL atomically. Amounts are in cents, and every entry must balance.
+
+The handler accepts **two metadata shapes**, and the validator enforces exactly one:
+
+- **Flat** — one entry described by top-level fields (`posting_date`, `memo`, `status`, `type`, and a balanced `line_items` array). This is the native, manual, and scheduled path, and it is what the example below uses.
+- **Nested** — an `entries[]` array of per-entry specs, for QuickBooks ingest and multi-entry imports where one event produces several journals (a revenue entry and a tax entry, say).
+
+Supplying both is rejected, as is supplying neither.
 
 ```bash
 curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/create-event-block" \

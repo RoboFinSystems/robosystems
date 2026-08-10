@@ -64,7 +64,7 @@ An operator composes across all three — pulling a policy from the unstructured
                            ↓
 ┌─────────────────────────────────────────────────────────┐
 │                  Graph API Layer                        │
-│          (Backend Abstraction, DuckDB Staging)          │
+│          (Engine Abstraction, DuckDB Staging)           │
 └─────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -77,7 +77,7 @@ An operator composes across all three — pulling a policy from the unstructured
 
 ### FastAPI Backend
 
-**Location**: `/robosystems/main.py`, `/robosystems/routers/`
+**Location**: `/main.py` (app factory), `/robosystems/routers/`
 
 The FastAPI backend serves two distinct API surfaces:
 
@@ -93,7 +93,7 @@ The FastAPI backend serves two distinct API surfaces:
 
 RoboLedger and RoboInvestor are product extensions served under a unified `/extensions/*` surface that splits reads from writes by transport:
 
-- **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint. The schema is composed dynamically: `InformationBlockQuery` (`informationBlock` / `informationBlocks`) is always-on regardless of product flags; `LedgerQuery` and `InvestorQuery` are gated by `ROBOLEDGER_ENABLED` / `ROBOINVESTOR_ENABLED`. A ledger-only deployment exposes ledger + information-block fields but not investor fields — introspection never reveals disabled domains. Types auto-derive from Pydantic response models; adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
+- **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint. The schema is composed dynamically: `InformationBlockQuery`, `TaxonomyBlockQuery`, and `LibraryQuery` are always-on regardless of product flags — they are cross-domain, and their visibility follows the session `search_path` derived from the URL's `graph_id`. `LedgerQuery` and `InvestorQuery` are gated by `ROBOLEDGER_ENABLED` / `ROBOINVESTOR_ENABLED`. A ledger-only deployment exposes ledger fields plus the always-on roots but not investor fields — introspection never reveals disabled domains. Types auto-derive from Pydantic response models; adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
 - **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — ledger commands (`close-period`, `share-report`, `create-mapping-association`, `create-information-block`, `evaluate-rules`, etc.) and roboinvestor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
 - **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) is the first one; this is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
 
@@ -103,16 +103,42 @@ Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL
 
 **Graph Lifecycle Operations (CQRS command surface):**
 
-Graph lifecycle writes use the same `OperationEnvelope` / idempotency / audit infrastructure as the extensions surface, exposed at `POST /v1/graphs/{graph_id}/operations/{op_name}`:
+Graph lifecycle and content writes use the same `OperationEnvelope` / idempotency / audit infrastructure as the extensions surface, exposed at `POST /v1/graphs/{graph_id}/operations/{op_name}`. They fall into three groups:
+
+**Lifecycle** (`routers/graphs/operations.py`):
 
 - **create-subgraph** — Initialize a subgraph with optional fork of parent data (sync without fork, async with fork)
 - **delete-subgraph** — Remove a subgraph database with optional pre-delete backup
-- **create-backup** — Encrypted backup with configurable format and retention (async, returns pending envelope)
-- **restore-backup** — Restore from backup; blocked for entity graphs (OLTP is source of truth — use `materialize` instead)
+- **delete-graph** — Permanently destroy a user graph and cancel its subscription, immediately or at the billing-period boundary
+- **update-graph-metadata** — Edit the graph's platform-level label (display name, description, tags)
+- **create-backup** — Full-dump backup with tier-capped retention (async, returns pending envelope)
 - **change-tier** — Change graph infrastructure tier with Stripe billing integration (async)
-- **materialize** — Ingest DuckDB-staged tables into the graph, direct or Dagster-orchestrated (async)
+- **materialize** — Rebuild the graph from DuckDB staging tables or extensions OLTP data, direct or Dagster-orchestrated (async)
+
+**Content** (`routers/graphs/content_ops.py`) — file staging and the document corpus:
+
+- **create-file-upload** / **ingest-file** / **delete-file** — Presign an S3 upload, stage the uploaded file into DuckDB, remove it
+- **index-document** / **delete-document** — Write a document to PostgreSQL and the OpenSearch index, or remove it
+
+**Memory** (`routers/graphs/content_ops.py`) — the semantic memory store:
+
+- **remember** / **update-memory** / **forget** — Store, edit, and delete a semantic memory (see [Semantic Memory](#semantic-memory))
+
+There is no customer-facing restore operation. Backups are a *download* capability: `GET /v1/graphs/{g}/backups/{backup_id}/download` returns the archive, and restoring it into a running graph is an operator-run internal path. For entity graphs the extensions OLTP database is the source of truth, so the recovery path is `materialize`, not a graph restore.
 
 Reads remain as REST GETs at their existing paths (`GET /v1/graphs/{g}/subgraphs`, `GET /v1/graphs/{g}/backups`, `GET /v1/graphs/{g}/health`, etc.). The shared dispatch infrastructure lives in `middleware/operations.py`; the extensions registrar (`middleware/extensions.py`) imports from it so both surfaces share idempotency, audit, and envelope semantics.
+
+### Identity & Org Model
+
+**Location**: `/robosystems/routers/orgs/`, `/robosystems/routers/graphs/members.py`, `/robosystems/models/core/org/`
+
+Authorization has two nested boundaries: the **org** owns and pays, the **graph** is the unit of access.
+
+**Orgs** (`/v1/orgs/*`) are the billing and ownership boundary. Every graph belongs to exactly one org (`Graph.org_id`), as does every subscription and invoice. Users join orgs through an `OrgUser` row carrying one of three roles — `owner`, `admin`, `member` — and orgs come in three types (`personal`, `team`, `enterprise`). A new user gets a personal org by default; a user who registers through an invitation link joins the issuing org at the invited role instead. `OrgLimits` caps provisioning per org (graph count and similar safety limits), so team members share one allowance rather than each getting their own.
+
+**Graph membership** (`/v1/graphs/{graph_id}/members`) is a separate, finer grant with ordered roles `viewer < member < admin`. Org membership alone confers no graph access — a plain org member needs an explicit `GraphUser` row. The two layers compose in `GraphUser.get_effective_role`, which returns the stronger of the explicit grant and the implicit admin that org owners and admins hold on every graph their org owns. Grants attach to parent graphs only: subgraphs resolve to their parent and inherit its permissions. Shared repositories (SEC) have no member management at all — access there is subscription-based.
+
+This resolution runs in the auth dependency before any handler executes, so every graph-scoped route across the core API, the extensions surface, and MCP enforces the same rule.
 
 ### MCP Server
 
@@ -122,7 +148,7 @@ Reads remain as REST GETs at their existing paths (`GET /v1/graphs/{g}/subgraphs
 Model Context Protocol server for AI integration:
 
 - **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
-- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, memory graph operations (write Cypher, add node/relationship tables), semantic element resolution (LanceDB vector search), and document search (OpenSearch full-text + semantic)
+- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management, subgraph knowledge-graph writes (write Cypher, add node/relationship tables), semantic memory (`recall` / `remember` / `update-memory` / `forget`), canonical-concept element resolution (SEC-manifest-gated), and document search (OpenSearch full-text + semantic)
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
@@ -145,6 +171,27 @@ Unified operator architecture for autonomous financial operations:
 
 **See**: [Operator README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/operators/README.md) in codebase
 
+### Semantic Memory
+
+**Kernel**: `/robosystems/operations/memory/`
+**Storage**: `/robosystems/graph_api/core/lance/memory_store.py`
+
+Per-graph semantic memory gives an Operator state that survives a session — a durable place to record what it learned about a book, rather than re-deriving it on every conversation.
+
+The subsystem splits along the usual three lines:
+
+- **Writes** go through the content-operation envelope — `remember`, `update-memory`, `forget` at `POST /v1/graphs/{g}/operations/{op}` — so memory writes carry the same idempotency and audit trail as any other write.
+- **Reads** split in two. `POST /v1/graphs/{g}/memory/recall` is the ranked semantic read; `GET /v1/graphs/{g}/memory` and `GET /v1/graphs/{g}/memory/{memory_id}` are the deterministic governance reads that let a human see and audit what an operator has stored.
+- **MCP tools** (`recall` / `remember` / `update-memory` / `forget`) mirror the same four verbs for AI clients.
+
+All three transports are thin adapters over `MemoryService`, which imports no FastAPI or MCP. The kernel computes embeddings locally (fastembed, 384-dim — the same embedding service document search uses, so no credits are consumed) and delegates persistence to a writer-routed graph client.
+
+Storage is a single LanceDB `memory` table per graph, living on the graph API instance at `{LANCE_INDEX_PATH}/{graph_id}/memory/`. It is mutated row by row rather than rebuilt, and it is deliberately **not** part of the tar.gz replica-sync pipeline — every memory operation routes to the writer/master instance.
+
+This is distinct from a **memory subgraph** (see [Subgraphs](#subgraphs-workspaces)), which is a structural knowledge graph of Concept/Observation/Session nodes queried in Cypher. Semantic memory is the vector store: unstructured recollections retrieved by similarity.
+
+The surface is gated by `SEMANTIC_MEMORY_ENABLED` (the master switch over REST, operations, and recall) with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on tool registration. Both are off by default.
+
 ### Background Worker
 
 **Location**: `/robosystems/worker/`
@@ -163,7 +210,7 @@ Always-on ECS service for long-running operator tasks and background operations:
 
 **Location**: `/robosystems/dagster/`
 
-Dagster is the orchestration system for scheduled tasks, event-driven triggers, and data pipelines. The background worker (Valkey queue) handles user-initiated agent tasks with real-time progress streaming.
+Dagster is the orchestration system for scheduled tasks, event-driven triggers, and data pipelines. The background worker (Valkey queue) handles user-initiated operator tasks with real-time progress streaming.
 
 **Architecture:**
 
@@ -172,13 +219,20 @@ Dagster is the orchestration system for scheduled tasks, event-driven triggers, 
 ```
 dagster/
 ├── definitions.py         # Collector: platform + adapter pipelines
+├── reporting.py           # AssetMaterialization reporting from outside Dagster jobs
 ├── resources/             # Shared Dagster resources (DB, S3, Graph)
 ├── assets/
 │   ├── graphs.py          # User graph operation assets
 │   └── shared_repositories/  # S3 publish + replica refresh (all shared repos)
-├── jobs/                  # Platform jobs (billing, infrastructure, graph, provisioning)
+├── jobs/                  # Platform jobs (billing, infrastructure, graph lifecycle,
+│                          # migration, backups, extensions, shared repositories)
 └── sensors/
-    └── provisioning.py    # Watch for pending subscriptions
+    ├── graph_lifecycle.py               # Expired subscriptions → suspend/deprovision
+    ├── invoice_billing.py               # Invoice-billed subscription renewals
+    ├── materialization.py               # Stale graphs → rematerialization jobs
+    ├── scheduled_obligation_promoter.py # Period-boundary obligation promotion
+    ├── usage_monitor.py                 # Storage usage against tier limits
+    └── worker_reaper.py                 # Reap stale worker inflight tasks
 
 adapters/sec/pipeline/     # SEC pipeline (assets, jobs, sensors, schedule)
 adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
@@ -192,7 +246,7 @@ adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
 | **Graph Operations** | Database creation, backup/restore, materialization |
 | **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize) |
-| **Event Triggers** | Subscription provisioning, repository sync, adapter sensors |
+| **Event Triggers** | Graph lifecycle transitions, stale-graph rematerialization, repository sync, adapter sensors |
 
 **Key Features:**
 - **Pipeline Orchestration**: Scheduled and event-driven data pipelines
@@ -200,7 +254,7 @@ adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
 - **Year Partitioning**: Process historical data by year
 - **Observability**: Built-in UI at `localhost:8002` for monitoring
 - **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
-- **Sensors**: Event-driven job triggers (e.g., new subscription → provision graph)
+- **Sensors**: Event-driven job triggers (e.g., expired subscription → suspend, then deprovision; stale graph → rematerialize)
 - **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
 
 **Infrastructure (AWS):**
@@ -221,7 +275,7 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 
 **Performance Features:**
 - **Bulk Ingestion**: S3 Parquet → DuckDB staging → LadybugDB graph pipeline
-- **Vector Search**: LanceDB IVF-PQ indexes for semantic similarity queries (~5ms latency over millions of elements)
+- **Vector Search**: Native in-graph HNSW indexes built at materialization and queried from Cypher via `CALL QUERY_VECTOR_INDEX`
 - **Streaming Results**: NDJSON support for memory-efficient large query responses
 - **Connection Pooling**: Efficient resource management per database
 - **Admission Control**: CPU/memory backpressure to prevent overload
@@ -233,18 +287,19 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 - **Auto-Scaling**: EC2 writer clusters scale based on demand
 
 **Pluggable Architecture:**
-The backend abstraction layer allows alternative implementations. Neo4j support exists in the codebase but is experimental and disabled by default.
+Engines sit behind a common interface (`graph_api/interfaces/engine.py`), so alternative implementations are possible. LadybugDB is the only one today.
 
 ### Graph API
 
 **Location**: `/robosystems/graph_api/`
 
-FastAPI microservice providing unified interface for all backends:
+FastAPI microservice providing the unified interface to the graph engine:
 
 - **HTTP REST Interface**: Port 8001 (default)
-- **Backend Abstraction**: Consistent API regardless of backend
+- **Engine Abstraction**: Consistent API behind the engine interface
 - **Multi-Database Management**: Multiple databases per instance
-- **Vector Search**: LanceDB-backed semantic similarity endpoints (build, search, export, delete)
+- **Vector Index Management**: Build, inspect, and delete vector indexes (LadybugDB HNSW; searched in Cypher)
+- **Semantic Memory**: Per-graph LanceDB memory table with row-level CRUD
 - **Connection Pooling**: Efficient resource management
 - **Streaming Support**: NDJSON for large query results
 - **Admission Control**: CPU/memory backpressure
@@ -257,7 +312,7 @@ FastAPI microservice providing unified interface for all backends:
 
 The client factory layer provides intelligent routing between application code and graph database infrastructure:
 
-- **Backend-Agnostic**: Works seamlessly with any configured backend
+- **Engine-Agnostic**: Talks HTTP to the Graph API, never to the engine directly
 - **Automatic Discovery**: Finds database instances via DynamoDB registry
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
@@ -266,20 +321,19 @@ The client factory layer provides intelligent routing between application code a
 
 **See**: [Client Factory Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/client/README.md) in codebase
 
-### Backend Factory System
+### Engine Interface
 
-**Location**: `/robosystems/graph_api/backends/`
+**Interface**: `/robosystems/graph_api/interfaces/engine.py`
+**Implementation**: `/robosystems/graph_api/core/ladybug/`
 
-The backend factory provides pluggable graph database backends with a unified interface:
+`GraphEngineInterface` is the contract every graph engine implements — query execution, batched transactions, health check, close. `GRAPH_BACKEND_TYPE` selects the implementation; `ladybug` is the only supported value today, and startup validation rejects anything else.
 
-- **Backend Abstraction**: Common interface with pluggable backend implementations
-- **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
-- **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
-- **Connection Management**: Backend-appropriate connection pooling and lifecycle management
-- **Query Translation**: Cypher query execution with backend-specific optimizations
-- **Ingestion Strategies**: Parquet-optimized bulk data loading for each backend type
+The LadybugDB implementation splits along the concurrency boundary the engine imposes:
 
-**See**: [Backend Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/backends/README.md) in codebase
+- **Engine** (`engine.py`): a single owned connection to one database file, for isolated work
+- **Pool** (`pool.py`): the path for anything serving concurrent requests — one shared `lbug.Database` per file, since two Database objects over the same file do not see each other's committed writes
+- **Manager** (`manager.py`): lifecycle of the `.lbug` files on a node — create, delete, inspect, apply schema, and the blue-green swap that promotes a `-wip` database to active
+- **Service** (`service.py`): the query path the routers expose, with validation, timeouts, streaming, health, and metrics
 
 ### DuckDB Staging System
 
@@ -294,18 +348,19 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 - **S3 Integration**: Direct S3 file access via httpfs extension
 - **SQL Preview**: Query staged data with full SQL before graph materialization
 
-### LanceDB Vector Search
+### Vector Search
 
-**Location**: `/robosystems/graph_api/core/lance/`
+**Location**: `/robosystems/graph_api/routers/databases/vector_search.py`, `/robosystems/graph_api/core/lance/`
 
-Embedded vector search on graph API instances — no additional infrastructure required:
+Vector search runs on the graph API instances themselves — no separate vector cluster. There are two distinct paths, and they should not be confused.
 
-- **IVF-PQ Indexes**: Approximate nearest neighbor search (cosine distance, 384-dim vectors)
-- **Per-Graph Indexes**: Each graph/table pair gets its own index at `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/`
-- **Embedding Model**: BAAI/bge-small-en-v1.5 via fastembed
-- **Lifecycle**: Build from DuckDB staging → Search on instance → Export as tar.gz to S3 → Replicas download on boot
-- **Graceful Degradation**: Brute-force below 1,000 rows; falls back to canonical concept matching if index unavailable
-- **Primary Use Case**: MCP `resolve-element` tool maps natural-language financial concepts to XBRL element names (~5ms latency). Gated by `MCP_VECTOR_SEARCH_ENABLED` (SSM).
+**In-graph HNSW (the live path).** Vector indexes are built on materialized LadybugDB tables and queried *from Cypher* via `CALL QUERY_VECTOR_INDEX`, not through a separate search endpoint. The materialization path builds them; a query joins similarity against the rest of the graph in one statement, which is the point — a vector hit is only useful in a financial graph if you can traverse from it. The Graph API's vector routes manage the index (build, metadata, delete); the search itself lives in the query language.
+
+**LanceDB (the memory path).** The embedded LanceDB store on each instance backs [Semantic Memory](#semantic-memory) — a per-graph `memory` table under `{LANCE_INDEX_PATH}/{graph_id}/memory/`, mutated row by row and routed to the writer instance. Embeddings are 384-dim, computed locally with BAAI/bge-small-en-v1.5 via fastembed.
+
+Alongside it sits `LanceManager`, a batch IVF-PQ index builder with a DuckDB-staging-to-tar.gz lifecycle. It is **dormant, not dead**: only its `delete` path runs today (tearing down a graph's lance directory when the database is dropped). It is retained as the IVF-PQ foundation for a planned `lance` vector-store subgraph, which — unlike LadybugDB — would expose vector search over the Graph API routes rather than through Cypher.
+
+**What element resolution actually uses.** The MCP `resolve-element` tool maps natural-language financial concepts to XBRL element names using neither of the above: it matches against a small in-memory set of curated canonical-concept embeddings (`adapters/sec/enrichment`) with a text-label fallback. There is no per-element vector index — the SEC corpus carries millions of elements dominated by single-filing filer extensions, and embedding search across all of them returns low-signal noise. The tool is manifest-gated on `has_semantic_enrichment`, which only the SEC repository sets.
 
 ### Infrastructure Design
 
@@ -323,9 +378,9 @@ The platform offers multiple tiers with different isolation levels and capabilit
 
 | Tier | Display Name | Description |
 |------|--------------|-------------|
-| `ladybug-standard` | LadybugDB Standard | Cost-efficient entry tier with subgraph support |
-| `ladybug-large` | LadybugDB Large | Enhanced performance for growing teams |
-| `ladybug-xlarge` | LadybugDB XLarge | Maximum performance and scale |
+| `ladybug-standard` | Standard | Cost-efficient entry tier with subgraph support |
+| `ladybug-large` | Large | Enhanced performance for growing teams |
+| `ladybug-xlarge` | XLarge | Maximum performance and scale |
 | `ladybug-shared` | — | Platform-managed fleet for public repositories (SEC) |
 
 Every customer tier is **dedicated** — one database per instance. Instance types, RAM, vCPU,
@@ -336,8 +391,6 @@ infrastructure:
 - **`GET /v1/offering`** — machine-readable, computed from the authoritative config
 - **[robosystems.ai/pricing](https://robosystems.ai/pricing)** — the public pricing page
 - **[`.github/configs/graph.yml`](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** — the source itself, used by the GHA deployment layer and imported by the application at runtime
-
-*Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 
 ### Subgraphs (Workspaces)
 
@@ -351,7 +404,7 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 
 **Subgraph Types:**
 - **Static** (default): Empty subgraph inheriting the parent's base schema
-- **Memory**: Pre-built schema with Concept, Observation, and Session nodes plus relationship types — no base schema (Entity/Period), optimized for AI agent memory
+- **Memory**: Pre-built schema with Concept, Observation, and Session nodes plus relationship types — no base schema (Entity/Period), optimized for AI operator memory
 
 **How Subgraphs Work:**
 - Created on the same EC2 instance as the parent graph (no additional infrastructure cost)
@@ -386,14 +439,16 @@ For current tier specifications including instance types, memory allocation, sub
 
 Business workflow orchestration and service layer. Two categories of code live here: platform services (unchanged for years) and extension domain logic (a CQRS-shaped subtree introduced with the GraphQL Extensions surface).
 
-**Platform services** (`operations/graph/`, `operations/lbug/`, `operations/providers/`, top-level modules):
+**Platform services** (`operations/graph/`, `operations/extensions/`, `operations/providers/`, `operations/search/`, `operations/memory/`, top-level modules):
 
 - **Entity Graph Service**: Entity-specific graph creation workflows with curated schemas
 - **Generic Graph Service**: Custom schema graph creation with user-defined node/relationship types
 - **Table Service**: Schema-driven DuckDB staging table management and file ingestion
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
-- **Credit Service**: AI agent usage tracking with token-based consumption
+- **Credit Service**: AI operator usage tracking with token-based consumption
 - **Search Service**: OpenSearch-backed full-text and semantic document search
+- **Memory Service**: Transport-independent semantic memory kernel over the per-graph LanceDB store
+- **Materialization**: OLTP → OLAP rebuild of a graph from the extensions database
 - **Connection Service**: Provider-agnostic connection management (QuickBooks, SEC) with encrypted credential storage
 
 **Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`, `operations/information_block/`):
@@ -416,15 +471,33 @@ operations/roboinvestor/
 └── commands/    # portfolios, securities, positions
 
 operations/information_block/  # Cross-domain; not nested under roboledger
-├── registry.py  # BlockTypeRegistryEntry, REGISTRY dict (frozen at import)
-├── commands.py  # Generic create/update/delete dispatch by block_type
-├── reads.py     # get/list_information_blocks — envelope reads
-├── envelope.py  # Shared atom → Lite projection helpers
-├── schedule.py  # Schedule handler (declarative construction mode)
-├── statement.py # Statement handlers (compositional, stub)
-├── metric.py    # Metric handler (derivative, stub)
-└── rules/       # Rule evaluation engine (evaluate_rules_for_structure)
+├── types.py        # BlockTypeRegistryEntry — the code-owned per-block-type descriptor
+├── registry.py     # REGISTRY dict (frozen at import); binds each type to its handlers
+├── commands.py     # Generic create/update/delete dispatch by block_type
+├── reads.py        # get/list_information_blocks — envelope reads
+├── envelope.py     # Shared atom → Lite projection helpers
+├── rules/          # Rule evaluation engine (evaluate_rules_for_structure)
+│
+│                   # ── Block-type handlers ──
+├── statement.py    # balance_sheet / income_statement / cash_flow_statement /
+│                   # equity_statement — four types, one envelope builder
+├── disclosure.py   # regulatory_disclosure notes (compositional mode)
+├── text_block.py   # Narrative text-block disclosures bound from a Document
+├── schedule.py     # Schedule handler (declarative construction mode)
+├── rollforward.py  # Attribution blocks over ledger LineItems (declarative mode)
+├── metric.py       # Metric handler (derivative mode) — standing metric time series
+├── metrics.py      # compute-metrics / assert-metrics write paths
+├── chart.py        # Chart View projection over a rendering
+├── classify.py     # Association classifier — reserved import path, not implemented
+│
+│                   # ── FP&A forecasting arm ──
+├── forecast.py               # Authored scenario container: levers, line assertions, growth
+├── forecast_compute.py       # Walks the driver cascade into forward FactSets
+├── forecast_articulation.py  # Balance-sheet roll, schedule projection, derived cash flow
+└── forecast_history.py       # Back-solves realized lever rates from closed months
 ```
+
+The **forecasting arm** (`forecast*.py`) is the FP&A operating-plan engine: a scenario is authored as an Information Block, and the compute path projects it forward month by month into the same FactSet shape the historical statements use — so a plan and an actual render through one renderer.
 
 **Single source of truth.** `reads/*.py` and `commands/*.py` are the only place domain logic lives. Three different transports call into them:
 
@@ -468,8 +541,12 @@ adapters/
 │       ├── process.py      # sec_processed_filings asset
 │       ├── stage.py        # DuckDB staging assets
 │       ├── materialize.py  # LadybugDB materialization assets
-│       ├── vector_publish.py # LanceDB vector index S3 publishing
+│       ├── artifact.py     # Precomputed Parquet artifacts from DuckDB staging
+│       ├── s3_publish.py   # Publish the .lbug repository database to S3
+│       ├── duckdb_s3_publish.py # Publish the .duckdb staging database to S3
+│       ├── r2_publish.py   # Publish the .lbug database to Cloudflare R2
 │       ├── text_index.py   # OpenSearch text indexing (textblocks, narratives, iXBRL)
+│       ├── entity_sync/    # Per-CIK sync of filings into a user's own graph
 │       ├── jobs.py         # Job definitions
 │       └── sensors.py      # Sensors + schedule
 ├── quickbooks/             # QuickBooks adapter
@@ -524,7 +601,7 @@ adapters/
 **Authentication & Authorization** (`/middleware/auth/`):
 - JWT token validation and refresh
 - API key authentication
-- SSO integration (Google, GitHub)
+- Cross-app SSO (shared session across robosystems / roboledger / roboinvestor)
 - Permission enforcement
 
 **Billing & Credits** (`/middleware/billing/`):
@@ -602,13 +679,16 @@ The models split across two databases with independent migration histories:
 
 ### LanceDB
 
-**Purpose**: Vector similarity search on graph instances
+**Purpose**: Semantic memory storage on graph instances
 
 - **Embedded Engine**: Runs alongside LadybugDB on EC2 graph instances (no separate cluster)
-- **Per-Graph Indexes**: `{LANCE_INDEX_PATH}/{graph_id}/{table_name}/{table_name}.lance/`
-- **IVF-PQ Partitions**: Optimized for large-scale ANN search (cosine distance, 384-dim vectors)
-- **S3 Distribution**: Indexes exported as tar.gz archives, downloaded by replicas at boot
+- **Per-Graph Memory Table**: `{LANCE_INDEX_PATH}/{graph_id}/memory/memory.lance/`
+- **Incremental CRUD**: Rows are added, patched, and deleted in place — never rebuilt in bulk
+- **Writer-Routed**: Not part of the replica sync; all memory operations go to the writer/master instance
+- **384-dim Vectors**: Embeddings from BAAI/bge-small-en-v1.5 via fastembed
 - **Default path**: `./data/lance/` (configurable via `LANCE_INDEX_PATH`)
+
+The same directory tree also hosts the dormant IVF-PQ index builder described under [Vector Search](#vector-search); graph-query vector search itself is native to LadybugDB, not LanceDB.
 
 ### OpenSearch
 
@@ -617,9 +697,9 @@ The models split across two databases with independent migration histories:
 - **BM25 Keyword Search**: Standard analyzer for natural language queries over document text
 - **Semantic Search**: `knn_vector` field (384-dim HNSW, cosine similarity) for embedding-based retrieval
 - **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
-- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`), user-uploaded documents (`uploaded_doc`), synced connection documents (`connection_doc`), and agent memory (`memory`)
+- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`), user-uploaded documents (`uploaded_doc`), and synced connection documents (`connection_doc`). Semantic memory is *not* here — it lives in LanceDB on the graph instance.
 - **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
-- **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` controls availability; `SEMANTIC_SEARCH_ENABLED` controls hybrid KNN search; `tuning/indexing/ENABLE_EMBEDDINGS` controls embedding generation during indexing
+- **Feature-Flag Gated**: `SEMANTIC_SEARCH_ENABLED` (on by default) gates the search service entirely — there is no separate text or embedding toggle, and embedding generation during indexing is unconditional
 
 ### DynamoDB
 
@@ -632,19 +712,22 @@ The models split across two databases with independent migration histories:
 
 ### PostgreSQL
 
-**Purpose**: Primary relational databases — two of them, on the same RDS instance with independent migration histories
+**Purpose**: Primary relational databases — three of them, on the same RDS instance, each with its own migration history
 
 **Platform database (`robosystems`)** — IAM, billing, and metadata:
 - **Identity & Access Management**: Users, orgs, permissions, graphs
 - **Subscription Management**: Plans, billing, credits
 - **File Registry**: Track uploaded files per table (GraphFile, GraphTable)
 - **Schema Registry**: Graph schema definitions (GraphSchema)
-- **Dagster Orchestration**: Job runs, schedules, sensors, and asset metadata
 
 **Extensions database (`extensions`)** — per-graph OLTP for RoboLedger and RoboInvestor:
 - Transactional state (ledger entries, schedules, reports, portfolio positions) written through the `/extensions/*/operations/*` command surface
 - **Schema-per-graph-id tenancy**: each graph's data is isolated in its own PostgreSQL schema via `SET search_path`
 - Materialized into the graph (LadybugDB) for analytical queries — see the Pattern C pipeline in the [Pipeline Guide](Pipeline-Guide)
+
+**Dagster database (`dagster`)** — orchestration state:
+- Job runs, schedules, sensor cursors, event logs, and asset metadata
+- Owned and migrated by Dagster itself (`DAGSTER_POSTGRES_DB`); it has no Alembic history. The two application histories are `migrations/platform/` and `migrations/extensions/`, and running either never touches the others.
 
 ### Valkey (Redis)
 
@@ -655,7 +738,9 @@ The models split across two databases with independent migration histories:
 - Graph client routing cache (DB 2)
 - Server-sent events pub/sub and operation state tracking (DB 3)
 - Distributed locks (DB 4)
+- MCP tool result cache — schema, info (DB 5)
 - Background worker task queue (DB 6)
+- Operation idempotency envelope cache (DB 7)
 
 Database allocations are managed in [valkey_registry.py](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/valkey_registry.py).
 
@@ -691,7 +776,6 @@ s3://robosystems-user-{env}/
 s3://robosystems-user-{env}/
   shared-repositories/databases/sec.lbug
   shared-repositories/databases/sec.duckdb
-  shared-repositories/databases/sec.Element.lance.tar.gz
 ```
 
 **Configuration**: Path helpers are centralized in [`robosystems/config/storage/`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/storage/README.md) with `shared.py` for external data sources and `graph.py` for customer graph storage
@@ -797,17 +881,23 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
 - **`dagster.yaml`**: Dagster webserver, daemon, and run workers for pipeline orchestration
+- **`worker.yaml`**: ECS Fargate background task worker (the Valkey-queue consumer)
 
 #### LadybugDB Infrastructure
 
 - **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
 - **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
 - **`graph-ladybug.yaml`**: EC2 writer clusters for LadybugDB (all customer tiers are dedicated — one database per instance)
-- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download .lbug and .lance.tar.gz from S3 on boot)
+- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download the `.lbug` database from S3 on boot)
 
 #### Search
 
 - **`opensearch.yaml`**: Amazon OpenSearch Service domain for unstructured content search (VPC-private, feature-flag gated)
+
+#### Security & Compliance
+
+- **`security.yaml`**: Account-global detective controls baseline
+- **`audit.yaml`**: Long-retention forwarding of security-audit logs to S3
 
 #### Observability
 
@@ -922,7 +1012,7 @@ See individual app repositories for specific deployment workflows.
 - XBRL filing downloads via Dagster pipeline (quarterly partitions)
 - Arelle-based XBRL parsing with fastembed enrichment
 - Nightly automated incremental pipeline (download → process → stage → materialize → publish → replica refresh)
-- LanceDB vector indexes for semantic XBRL element resolution via MCP tools
+- Curated canonical-concept resolution mapping natural language to XBRL element names via the `resolve-element` MCP tool
 - OpenSearch text and semantic indexing of filing narratives, text blocks, and iXBRL disclosures
 - Rate-limited API access with backoff
 
@@ -950,9 +1040,13 @@ See individual app repositories for specific deployment workflows.
 ### Multi-Tenancy
 
 - **Database Isolation**: Each entity gets a dedicated graph database on a dedicated instance
-- **Access Control**: Schema-per-graph isolation in PostgreSQL (`SET search_path` re-stamped per
+- **Data Isolation**: Schema-per-graph isolation in PostgreSQL (`SET search_path` re-stamped per
   session), enforced by application-layer scoping on every read and write
-- **Resource Limits**: Tier-based resource allocation
+- **Access Control**: Two nested boundaries — the org owns and pays, the graph is the unit of
+  access. Org roles (`owner` / `admin` / `member`) compose with per-graph roles
+  (`viewer` < `member` < `admin`) into one effective role, resolved before any handler runs
+  (see [Identity & Org Model](#identity--org-model))
+- **Resource Limits**: Tier-based resource allocation, with per-org provisioning caps
 
 ### Scalability
 
@@ -960,7 +1054,7 @@ See individual app repositories for specific deployment workflows.
 - **Vertical Scaling**: Tiered instance types (large → xlarge)
 - **Caching**: Valkey for hot data
 - **Pipeline Orchestration**: Dagster for data pipelines and batch operations
-- **Real-time Operations**: Background worker with Valkey queue for SSE-enabled agent tasks
+- **Real-time Operations**: Background worker with Valkey queue for SSE-enabled operator tasks
 
 ### Reliability
 

@@ -8,7 +8,7 @@ RoboSystems renders financial statements once, on the server, from atomic facts 
 - [The Calc-DAG Model](#the-calc-dag-model)
 - [What the Renderer Derives for You](#what-the-renderer-derives-for-you)
 - [Reporting Style Decides Which Structures the Renderer Walks](#reporting-style-decides-which-structures-the-renderer-walks)
-- [The Six View Projections](#the-six-view-projections)
+- [The View Projections](#the-view-projections)
 - [Guard Rails](#guard-rails)
 - [The Report Is the Package](#the-report-is-the-package)
 - [How to Request a Rendered Report](#how-to-request-a-rendered-report)
@@ -22,7 +22,7 @@ RoboSystems renders financial statements once, on the server, from atomic facts 
 Three ideas run through the entire reporting layer:
 
 - **One renderer, many sources.** A single Python algorithm renders statements for SEC filings, materialized tenant graphs, and live OLTP ledgers. Because the calc walk lives on the server, every consumer — the dashboard, an MCP-driven AI assistant, the Python client — gets identical numbers. One line of frontend code replaces the equivalent of hundreds of lines of client-side calculation.
-- **One block, six shapes.** An Information Block is a data envelope around a set of facts. A *View* is one lens over that envelope. The rendered statement (rows, subtotals, period columns) is just one View; there are five others (see [The Six View Projections](#the-six-view-projections)).
+- **One block, many shapes.** An Information Block is a data envelope around a set of facts. A *View* is one lens over that envelope. The rendered statement (rows, subtotals, period columns) is just one View; several others project the same molecule (see [The View Projections](#the-view-projections)).
 - **Facts are structure-agnostic; a statement is a walk over a structure.** The same flat bundle of facts can be rendered as a GAAP Balance Sheet or a tax-basis Balance Sheet — two different walks over the same facts. Nothing about a fact knows what statement it belongs to.
 
 Rendering happens in two phases:
@@ -59,43 +59,46 @@ All of these are computed, not stored on the ledger — which is exactly why bac
 
 Two companies can hold the same facts and still present different statements — different ordering, different subtotal layout, a single-step versus multi-step income statement. That choice is the **Reporting Style**.
 
-Every tenant picks a Reporting Style at provision time (the field is non-nullable). The Style maps to one **Network** — a presentation tree — per statement type. At render time the engine does one deterministic join: Style → Network → the leaves the calc DAG rolls up. It never guesses which structure to walk.
+The Style is pinned **per Entity**, not per graph: `entities.reporting_style_id` is non-nullable and is defaulted from the entity's legal form when the entity is created (corporation → Default, partnership → PART, llc → LLC), so heterogeneous subsidiaries can each carry their own style while still resolving to the same canonical calc-DAG subtotals. Three Styles ship — `BSC-{CORP|PART|LLC}-IS02-CF1`, an equity-form axis over a fixed classified balance sheet, multi-step income statement, and indirect cash flow. Each maps to one **Network** — a presentation tree — per statement type. At render time the engine does one deterministic join: Style → Network → the leaves the calc DAG rolls up. It never guesses which structure to walk.
 
 ```text
 Reporting Style  ──▶  Network (per statement type)  ──▶  leaves  ──▶  calc DAG roll-up
-   (chosen once)        (presentation tree)            (your CoA)     (derived subtotals)
+   (per entity)         (presentation tree)            (your CoA)     (derived subtotals)
 ```
 
-Switching a Style later changes future renders but never retroactively rewrites a filed report: each saved FactSet pins its own structure at create time, so frozen reports keep the presentation they were filed with.
+Switching a Style later (`change-reporting-style`) changes future renders but never retroactively rewrites a filed report: each saved FactSet pins its own structure at create time, so frozen reports keep the presentation they were filed with.
 
-## The Six View Projections
+## The View Projections
 
-An Information Block carries facts plus the structural metadata around them. A **View** is one projection of that envelope. The same block supports six:
+An Information Block carries facts plus the structural metadata around them. A **View** is one projection of that envelope. Seven are modeled; **two ship on the envelope today**:
 
-| View | What it shows | Computed where |
+| View | What it shows | Status |
 | --- | --- | --- |
-| **Rendering** | Ordered statement rows with subtotals, depth, and one value per period | Server (needs the calc walk) |
-| **Fact Table** | The raw fact list (element, period, unit, value) | Projection of atoms in the envelope |
-| **Report Elements** | The element/concept definitions referenced | Projection of atoms in the envelope |
-| **Verification Results** | Rule-engine outcomes for the block | Projection of atoms in the envelope |
-| **Model Structure** | The presentation/calculation tree itself | Projection of atoms in the envelope |
-| **Business Rules** | The rules bound to the block | Projection of atoms in the envelope |
+| **Rendering** | Ordered statement rows with subtotals, depth, and one value per period | Server-computed (needs the calc walk) |
+| **Chart** | Panel and series configuration over the rendering's rows and periods | Server-computed, for metric blocks |
+| **Fact Table** | The raw fact list (element, period, unit, value) | Derivable client-side from `facts`; backend arm pending |
+| **Report Elements** | The element/concept definitions referenced | Backend support pending |
+| **Verification Results** | Rule-engine outcomes for the block | Backend support pending |
+| **Model Structure** | The presentation/calculation tree itself | Backend support pending |
+| **Business Rules** | The rules bound to the block | Backend support pending |
 
-Only **Rendering** is server-computed — it is the one View that requires walking the structure and footing the subtotals. The other five are projections of atom lists the envelope already carries, so a client can assemble them without a round trip.
+`ViewProjections` — the `view` field on the envelope — carries exactly `rendering` and `chart`. The other five come online as their backend support lands; `fact_table` in particular is trivially derivable from the envelope's own `facts` list and may stay a frontend-only projection. Missing projections render as empty states rather than breaking the dispatcher.
 
-In the GraphQL envelope, the rendered View lives at `view.rendering` and is populated for the statement family (Balance Sheet, Income Statement, Cash Flow, Equity). Non-statement blocks such as Schedules group their facts by period and do not carry a server-computed `rendering`.
+In the GraphQL envelope, the rendered View lives at `view.rendering` and is populated for the statement family (Balance Sheet, Income Statement, Cash Flow, Equity, Comprehensive Income). Non-statement blocks such as Schedules group their facts by period and do not carry a server-computed `rendering`.
 
 A `RenderingLite` payload is intentionally small:
 
 ```text
 RenderingLite
-  rows[]        element_name, classification, depth, is_subtotal, values[]  (one per period)
-  periods[]     label, start, end
+  rows[]        element_id, element_qname, element_name, classification,
+                balance_type, item_type, depth, is_subtotal, text_value,
+                values[]  (one per period)
+  periods[]     label, start, end, forecast
   validation    passed, checks[], failures[], warnings[]
   unmapped_count
 ```
 
-Each row's `classification` follows FASB SFAC 6 (`asset`, `liability`, `equity`, `revenue`, `expense`), `depth` drives indentation, and `is_subtotal` marks derived roll-up rows. The browser renders this directly — no calculation required.
+Each row's `classification` follows FASB SFAC 6 (`asset`, `liability`, `equity`, `revenue`, `expense`), `depth` drives indentation, and `is_subtotal` marks derived roll-up rows. `element_id` / `element_qname` are the join key the chart arm keys off, `item_type` carries the value-domain format family (monetary, ratio, percent, multiple, days) that drives per-row formatting, and `text_value` holds a non-numeric row's text. On a period column, `forecast` is the machine-readable seam marker for a column sourced from a forecast scenario's FactSet — labels also carry a `(forecast)` suffix, but style off the flag, not the label. The browser renders all of this directly — no calculation required.
 
 ## Guard Rails
 
@@ -132,9 +135,13 @@ There are several addressable surfaces, depending on whether you want a saved Re
 
 Full request/response schemas live in the [live OpenAPI spec](https://api.robosystems.ai/docs) — this page shows usage, not the full endpoint surface.
 
-### Build a Fact Grid (Pivot Over the Hypercube)
+### Build a Fact Grid (Scoped Slice of the Hypercube)
 
-`build-fact-grid` produces a pivot table over the XBRL hypercube in the graph. It works on the SEC shared repo and on materialized tenant graphs. The request must supply `elements` and/or `canonical_concepts`, **and** at least one of `periods` / `period_type` / `fiscal_year` — otherwise it returns a 400.
+`build-fact-grid` queries the XBRL hypercube in the graph. It does **not** produce a pivot table: it returns a scoped, deduplicated fact slice plus the aspects those facts span — the raw material a pivot is built from. Arranging cells is the consumer's job, deliberately, because summing across entities, units, or elements that merely share a local name is a presentation decision the endpoint refuses to make on the caller's behalf. The response is a `ViewResponse` carrying `metadata`, `dimensions`, `facts[]`, and an optional `summary`.
+
+It works on the SEC shared repo and on materialized tenant graphs. The request must supply `elements` and/or `canonical_concepts`, **and** at least one of `periods` / `period_type` / `fiscal_year` — otherwise it returns a 400.
+
+The `sec` examples below need a subscription to the shared repository; a fresh `just demo-user` key gets a 403 until you run `just demo-sec-subscribe`.
 
 ```bash
 curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
@@ -148,7 +155,7 @@ curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-f
   }'
 ```
 
-A richer pivot puts entities on rows and periods on columns, with custom column labels:
+A narrower slice puts entities on rows and pins the exact period columns you want back:
 
 ```bash
 curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
@@ -158,17 +165,16 @@ curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-f
     "canonical_concepts": ["revenue"],
     "entities": ["NVDA", "AMD"],
     "form": "10-K",
+    "period_type": "annual",
     "view_config": {
       "rows": [{"type": "entity"}],
       "columns": [{"type": "period",
-        "member_labels": {"2023-12-31": "FY23", "2024-12-31": "FY24"}}],
-      "values": "numeric_value",
-      "aggregation_function": "sum"
+        "selected_members": ["2024-01-28", "2025-01-26"]}]
     }
   }'
 ```
 
-`view_config.rows` and `view_config.columns` each take axis configs whose `type` is one of `element`, `period`, `dimension`, or `entity`, with optional `member_order`, `member_labels`, and `selected_members`. The SEC graph this runs against is the one set up in the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) guide.
+`view_config` carries only `rows` and `columns`. Each is a list of axis configs whose `type` is one of `element`, `period`, or `entity` — `dimension` is rejected with a 422 — plus optional `selected_members` and `include_null_dimension`. **`view_config` filters; it does not format.** There are no ordering, labelling, value-field, or aggregation-function options, because ordering and labelling are presentation concerns belonging to the consumer that arranges the facts into a table. The SEC graph this runs against is the one set up in the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) guide.
 
 ### Create a Saved Report
 
@@ -226,7 +232,7 @@ The same operations are exposed as MCP tools — `build-fact-grid`, `financial-s
 
 ## The BlockView Frontend
 
-The dashboard's BlockView is an **envelope-driven dispatcher**. It receives an Information Block envelope and switches on `block_type` and the requested View mode to choose how to display it — rendered statement rows, a fact table, the model structure tree, and so on. Because the envelope already carries pre-computed `view.rendering` rows plus the atom lists for the other five Views, the component dispatches and displays; it does not calculate. Switching View mode for a block is a client-side re-projection, not a new server request.
+The dashboard's BlockView is an **envelope-driven dispatcher**. It receives an Information Block envelope and switches on `block_type` and the requested View mode to choose how to display it — rendered statement rows, a fact table, the model structure tree, and so on. Because the envelope already carries pre-computed `view.rendering` rows and `view.chart` config plus the atom lists the remaining View modes project from, the component dispatches and displays; it does not calculate. Switching View mode for a block is a client-side re-projection, not a new server request.
 
 ## How to Contribute: Writing Blocks
 
@@ -264,7 +270,7 @@ If a number is wrong, the fix is almost never in the renderer — it is in the m
 
 **Wiki Guides:**
 
-- **[Information Blocks](Information-Blocks)** - The data envelope, block types, FactSets, and the six View projections at the data layer
+- **[Information Blocks](Information-Blocks)** - The data envelope, block types, FactSets, and the View projections at the data layer
 - **[RoboLedger Operations](RoboLedger-Operations)** - The command writes (`create-report`, `regenerate-report`, period close) that produce the facts this page renders
 - **[Serialization & Export](Serialization-and-Export)** - Exporting and distributing rendered reports (iXBRL, package sharing)
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query the SEC graph that `build-fact-grid` and `financial-statement-analysis` run against

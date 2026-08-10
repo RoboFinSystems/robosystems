@@ -54,23 +54,39 @@ curl http://localhost:8000/v1/offering
 A customer graph's subscription is created automatically when the graph is provisioned. A **shared repository** is different — you subscribe to it explicitly, choosing one of its plans:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/subscription" \
+curl -X POST "http://localhost:8000/v1/graphs/sec/subscriptions" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
-  -d '{"plan_name": "starter"}'
+  -d '{"plan_name": "sec-starter"}'
 ```
 
-Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
+Plan names are repository-prefixed: `sec-starter` and `sec-advanced`. Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/sec/subscription" \
+curl "http://localhost:8000/v1/graphs/sec/subscriptions" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)"
 ```
+
+Changing plan and cancelling are the other two verbs on the same path:
+
+```bash
+# Move to the higher plan (synchronous for repositories)
+curl -X PATCH "http://localhost:8000/v1/graphs/sec/subscriptions" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{"new_plan_name": "sec-advanced"}'
+
+# Cancel at period end (access stays until the period closes)
+curl -X POST "http://localhost:8000/v1/graphs/sec/subscriptions/cancel" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+```
+
+Cancellation defaults to end-of-period; pass `immediate: true` together with `confirm: "sec"` to stop access right away. All three write calls accept an optional `user_id`, so an org owner or admin can subscribe, change, or cancel on behalf of another member of their organization — repository access is per-user while the billing is org-level, so the subscriber is what determines who gets in. A member acting on their own subscription omits it.
 
 Once subscribed, you query the repository exactly like your own graph — its id (`sec`) is the `graph_id` in the URL:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/sec/query" \
+curl -X POST "http://localhost:8000/v1/graphs/sec/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}'
@@ -82,10 +98,12 @@ Database operations (query, MCP, search) are **free** — they draw down rate-li
 
 SEC EDGAR is the one shared repository available today — public-company filings and XBRL financial data, synced daily, with semantic enrichment for natural-language element resolution. Its plans are read-only and differ on throughput and backup-download allowance:
 
-| Plan | Price | Monthly AI credits | Access |
-| --- | --- | --- | --- |
-| **Starter** | $29/month | 5,000 | Read |
-| **Advanced** | $99/month | 17,000 | Read |
+| Plan | `plan_name` | Price | Monthly AI credits | Access |
+| --- | --- | --- | --- | --- |
+| **Starter** | `sec-starter` | $29/month | 5,000 | Read |
+| **Advanced** | `sec-advanced` | $99/month | 17,000 | Read |
+
+Prices and credit allocations are served live and unauthenticated at **`GET /v1/offering`** — that response, not this table, is the authority if the two ever disagree.
 
 The Advanced plan carries roughly 5× the rate limits of Starter. Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 

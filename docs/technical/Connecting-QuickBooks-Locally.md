@@ -35,6 +35,7 @@ Pick whichever you prefer — Intuit and the RoboSystems backend don't care whic
 - [Running the Stack](#running-the-stack)
 - [Connecting Your First Company](#connecting-your-first-company)
 - [What Happens Under the Hood](#what-happens-under-the-hood)
+- [Write Policy and the QB Outbox](#write-policy-and-the-qb-outbox)
 - [Sync Patterns](#sync-patterns)
 - [The Mapping Workflow](#the-mapping-workflow)
 - [Generating Reports](#generating-reports)
@@ -489,7 +490,33 @@ associations ──────────────▶  Association nodes
                               ASSOCIATION_HAS_TO_ELEMENT
 ```
 
-The graph is now queryable via Cypher. Reports, AI agents, and analytical views read from LadybugDB; the OLTP database remains the source of truth for transactional reads and writes.
+The graph is now queryable via Cypher. Reports, AI Operators, and analytical views read from LadybugDB; the OLTP database remains the source of truth for transactional reads and writes.
+
+## Write Policy and the QB Outbox
+
+A connection's **write policy** decides which system owns the general ledger, and therefore whether RoboLedger-originated entries flow *back* into QuickBooks. It is a property of the `Connection` row, and a new QuickBooks connection defaults to `qb_authoritative`:
+
+| Policy | Who is the source of truth | What happens to RoboLedger-originated entries |
+| --- | --- | --- |
+| `native` | RoboSystems | Manual JEs and schedule drafts post locally on dispatch. No outbound publish. |
+| `qb_authoritative` | QuickBooks | Drafts publish to QuickBooks — on `execute-event-block`, or at period close — and hold as DRAFT locally until QB accepts. Inbound QB sync auto-commits. |
+
+(`hybrid` is declared in the enum but not yet wired; only `native` and `qb_authoritative` are implemented.)
+
+The policy is switchable after the fact:
+
+```bash
+curl -X PUT "http://localhost:8000/v1/graphs/$GRAPH_ID/connections/$CONN_ID/write-policy" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"write_policy": "native"}'
+```
+
+The same control is available on MCP as `set-write-policy --connection_id … --write_policy …`.
+
+Under `qb_authoritative`, close-period is the outbox flush. A draft publishes to QuickBooks on close when both halves of the predicate hold: the graph has a live QuickBooks connection with a write-back policy, **and** the draft's triggering event is RoboLedger-originated (`source` is `schedule` or `manual`) and not already in QB (no `qb_external_id`). Transactions that came *in* from QuickBooks are excluded — they already live there. Preview exactly what will publish with the MCP tool `list-period-drafts` before closing; it reads the same predicate the close does, so the preview cannot drift from the write.
+
+This is why `close-period` returns a split rather than a single count: `entries_published_to_qb` is what went out to QuickBooks (each promoted to posted at publish time), `entries_posted_locally` is what the local bulk transition posted, and `entries_posted` is the total. On a `native` connection the first number is always zero. See [RoboLedger Operations](RoboLedger-Operations) for the full close envelope.
 
 ## Sync Patterns
 
@@ -501,7 +528,13 @@ The graph is now queryable via Cypher. Reports, AI agents, and analytical views 
 
 The sync is idempotent: events are upserted by `(source, external_id)`, so re-syncing the same data updates rather than duplicates. For full rebuilds, the loader first deletes existing CoA elements and associations scoped to the connection, then re-inserts — safe for QB-authoritative connections where the GL is a mirror of QB.
 
-**Auto-sync** can be enabled on the connection (`auto_sync_enabled=true`); a Dagster schedule then runs incremental syncs on a cadence.
+There is no scheduled sync yet. The connection carries an `auto_sync_enabled` field (defaulting to `true`), but nothing currently consumes it — the QuickBooks pipeline registers no Dagster schedules. Syncs are triggered by hand: the Connections UI, `POST /v1/graphs/{graph_id}/connections/{connection_id}/sync`, or the `sync-connection` MCP tool.
+
+### Reconciling items
+
+Re-syncing is not always a no-op. When a re-sync surfaces a **changed** upstream payload for a transaction whose GL is already posted — someone edited it in QuickBooks after it was captured — the local books legitimately no longer mirror the source. RoboSystems does not silently overwrite the posted entry: it flags the event as a **reconciling item** (`isReconcilingItem` on the API), leaves the live payload and GL untouched, and stashes the incoming payload alongside for review. The sync outcome reports the count.
+
+List them with `list-event-blocks --is_reconciling_item=true` (also filterable on the GraphQL `eventBlocks` field), then agree an explicit disposition for each: **restate** the affected months by reopening and re-closing them — the usual default inside the current fiscal year — or book a **catch-up** entry in the open period when external reporting has already locked the prior months. This is normal customer behavior, not an alarm, but the close playbook gates on it: don't close over unreviewed reconciling items.
 
 ## The Mapping Workflow
 
@@ -509,7 +542,7 @@ Your QB Chart of Accounts uses tenant-specific account names ("Truist Checking 6
 
 ### The MappingOperator
 
-On first sync, RoboSystems auto-triggers the MappingOperator (`_trigger_auto_map_if_needed` in the QB loader). The agent:
+On first sync, RoboSystems auto-triggers the MappingOperator (`_trigger_auto_map_if_needed` in the QB loader). The Operator:
 
 1. Reads each unmapped CoA element along with its classification (asset / liability / equity / revenue / expense / gain / loss — derived from QB's `AccountType`)
 2. Asks the suggester (`suggest-mapping`) for renderable `rs-gaap:*` candidates that match the classification AND appear on the active Reporting Style's rendering structures
@@ -529,26 +562,34 @@ get-mapping-summary --mapping_id=…   # see coverage stats + unreachable count
 get-unmapped-elements                # find CoA elements still needing mapping
 ```
 
-Or via the API:
+Or via GraphQL — mapping reads live on the typed-read surface, not on `/v1`:
 
 ```bash
-curl "http://localhost:8000/v1/graphs/$GRAPH_ID/mappings/$MAPPING_ID/summary" \
-  -H "X-API-Key: $API_KEY"
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ mappingCoverage(mappingId: \"struct_…\") { mappedCount unmappedCount coveragePercent unreachableCount } }"}'
 ```
+
+(`{ mappings { structures { id name } } }` finds the mapping structure id.)
 
 Key metric: **`unreachable_count`** — mappings to rs-gaap concepts that don't render under the active Reporting Style. Should be 0 after a clean auto-map run. If non-zero, either the mappings were created before the renderable filter was added or the Reporting Style structures have changed since.
 
 ### Manual remap
 
-When the agent picks the wrong target — e.g., `Precious Metals` mapped to `InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` instead of `LongTermInvestmentsAndReceivablesNet` — fix via the MCP:
+When the Operator picks the wrong target — e.g., `Precious Metals` mapped to `InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` instead of `LongTermInvestmentsAndReceivablesNet` — fix via the MCP. Both halves are MCP tools, so the whole correction stays in one place:
 
 ```bash
 # Get the source element id
 list-mapping-structures
 get-unmapped-elements    # or query the CoA UI / database
 
-# Delete the wrong mapping (the REST endpoint /delete-mapping-association)
-# Create the correct one via MCP
+# Delete the wrong mapping
+delete-mapping-association \
+  --mapping_id struct_… \
+  --association_id assoc_…
+
+# Create the correct one
 create-mapping-association \
   --from_element_id elem_… \
   --to_element_id <rs-gaap concept id> \
@@ -561,14 +602,14 @@ The corrected mapping is durable across re-syncs (delete + re-insert of CoA elem
 
 ### The Reporting Style and rendering structures
 
-The active **Reporting Style** (`Default Style — Composition` by default; alternatives: `Small Private Company`, `Banking`) determines which rendering structures the renderer walks. The four standard structures are:
+The active **Reporting Style** determines which rendering structures the renderer walks. Three ship today: `Default Style — Composition` (the default), `Partnership Style — Composition (partners' capital equity)`, and `Limited Liability Company Style — Composition (members' equity)`. The two alternatives swap the balance-sheet and equity networks for their equity form; everything else is shared. Switch with the `change-reporting-style` operation. Under the Default Style the four standard structures are:
 
 - `rs-gaap — Balance Sheet — Classified`
 - `rs-gaap — Income Statement — Multi-step`
 - `rs-gaap — Cash Flow Statement — Indirect`
 - `rs-gaap — Statement of Changes in Equity — Roll Forward (Total)`
 
-Each carries a curated set of rs-gaap concepts (~78 total across the four). The Default Style is filing-grade aggregation — `Cash and Cash Equivalents and Short Term Investments` is one line for all bank accounts; `Selling, General and Administrative Expense` is one line for many expense categories. Detail belongs in supporting Information Blocks below the statement face, not in the statement itself.
+Each carries a curated set of rs-gaap concepts — `get-mapping-summary` (or the GraphQL `mappingCoverage` field above) reports the live counts for your tenant. The Default Style is filing-grade aggregation — `Cash and Cash Equivalents and Short Term Investments` is one line for all bank accounts; `Selling, General and Administrative Expense` is one line for many expense categories. Detail belongs in supporting Information Blocks below the statement face, not in the statement itself.
 
 ## Generating Reports
 
@@ -651,8 +692,9 @@ If you have an MCP client connected to the RoboSystems server (Claude Code, cust
 get-mapping-summary --mapping_id <mapping_struct_id>
 get-unmapped-elements
 
-# Build a fact-grid pivot over BS line items
-build-fact-grid --period_start 2025-01-01 --period_end 2025-12-31
+# Pull specific facts out of the hypercube (needs a concept filter AND a
+# period filter; returns a flat fact list, not a pivot)
+build-fact-grid --canonical_concepts '["revenue"]' --period_type annual --fiscal_year 2025
 
 # Ad-hoc graph query
 read-graph-cypher --cypher "MATCH (e:Entity) RETURN e.name, e.fiscal_year_end"

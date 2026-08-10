@@ -1,11 +1,11 @@
 # Taxonomy & Frameworks
 
-RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchies, calculation arcs, and rules are queryable, versionable rows seeded from JSON-LD packages. This page explains the substrate — the `fac` and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
+RoboSystems treats accounting vocabulary as data, not code: concepts, hierarchies, calculation arcs, and rules are queryable, versionable rows seeded from JSON-LD packages. This page explains the substrate — the `fac`, `cm`, and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [The Two Frameworks](#the-two-frameworks)
+- [The Three Frameworks](#the-three-frameworks)
 - [The Canonical Ontology](#the-canonical-ontology)
 - [The Element Atom and Associations](#the-element-atom-and-associations)
 - [Traits](#traits)
@@ -26,18 +26,23 @@ Two ideas anchor the entire taxonomy substrate:
 
 Structure — the shape of a financial statement, the way subtotals roll up — lives in `Association` rows typed by an `association_type` (the XBRL "linkbase" model). Per-element semantics (asset vs. liability, operating vs. nonoperating, cash-flow classification) live in `traits` bound to elements through a junction table. The whole thing is seeded from a JSON-LD package library that every tenant graph copies from at provision time.
 
-## The Two Frameworks
+## The Three Frameworks
 
-RoboSystems ships two frameworks. One is the universal substrate; the other is the curated US-GAAP reporting vocabulary built on top of it.
+RoboSystems ships three frameworks. Two are universal substrate; the third is the curated US-GAAP reporting vocabulary built on top of them.
 
 | Framework | Role | Depends on | Contents |
 | --- | --- | --- | --- |
-| **`fac`** | Universal substrate and dependency root | — | Fundamental Accounting Concepts plus the trait vocabulary |
-| **`rs-gaap`** | Canonical US-GAAP reporting vocabulary | `fac@v1` | Roughly 2,000 curated concepts plus presentation, calculation, labels, disclosures, and rules |
+| **`fac`** | Universal accounting substrate | — | Fundamental Accounting Concepts plus the trait vocabulary |
+| **`cm`** | Universal posting-role substrate | — | The `cm:Debit` / `cm:Credit` posting-role concepts |
+| **`rs-gaap`** | Canonical US-GAAP reporting vocabulary | `fac@v1`, `cm@v1` | Roughly 2,000 curated concepts plus presentation, calculation, labels, disclosures, and rules |
 
-**`fac`** (Fundamental Accounting Concepts) is the smallest framework: a set of fundamental concepts plus the trait vocabulary that every other framework reuses. It is the dependency root — `rs-gaap` declares `depends_on: fac@v1`.
+**`fac`** (Fundamental Accounting Concepts) is a set of fundamental concepts plus the trait vocabulary that every other framework reuses. It is deliberately framework-neutral: codification references and validation rules that target a specific regime's concepts live with that regime, never here, so a downstream framework inheriting `fac` never drags another regime's rules along.
+
+**`cm`** (Conceptual Model) is the smallest framework by a wide margin — two concepts. Forked from Charlie Hoffman's Seattle Method `universal` model, it seeds the `cm:Debit` and `cm:Credit` posting roles that anchor `has-part` arcs from chart-of-accounts elements, making double-entry posting structure a first-class queryable atom rather than opaque mechanics metadata. It is not a reporting taxonomy; it expands additively (Thing, Event, Transaction, LineItem) as event serialization pulls those concepts in.
 
 **`rs-gaap`** is the working reporting vocabulary. Every renderable presentation parent and calculation child is an `rs-gaap:*` concept. It is a curated RoboSystems framework — a frozen, intentionally narrow set of concepts chosen for clean rendering and mapping — not a live mirror of the full FASB US-GAAP taxonomy. Each tenant receives a curated subset of `rs-gaap` rather than the full public catalog (see [The JSON-LD Package Library](#the-json-ld-package-library)).
+
+`fac` and `cm` are both dependency roots with empty `depends_on` lists; `rs-gaap` declares `depends_on: [fac@v1, cm@v1]`. So pinning `rs-gaap@v1` resolves three frameworks, not two.
 
 ## The Canonical Ontology
 
@@ -60,7 +65,7 @@ The Element is the atom of the taxonomy. One row in the `elements` table can rep
 - an abstract grouping that has no value of its own (`element_type="abstract"`)
 - a dimension axis or member (`element_type="axis"` / `"member"`)
 
-Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), `period_type` (`duration | instant`), `element_type`, `is_monetary`, `code` (the CoA code), and `source`. The `source` column captures provenance — values include `fac`, `rs-gaap`, `us-gaap`, `ifrs`, `quickbooks`, `xero`, `plaid`, `native`, `import`, and `system`. Tenant-authored elements are always written with `source="native"`.
+Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), `period_type` (`duration | instant`), `element_type`, `is_monetary`, `code` (the CoA code), and `source`. The `source` column captures provenance — values are `fac`, `cm`, `rs-gaap`, `rs-metric`, `rs-driver`, `us-gaap`, `ifrs`, `quickbooks`, `xero`, `plaid`, `native`, `import`, `system`, and `linked`. Tenant-authored elements are always written with `source="native"`. Two are worth calling out: `system` is reserved for the internal FK-anchor rows the taxonomy seed creates, and `linked` marks a concept that arrived with a report shared from another graph — the sender's reporting extension has to exist locally for their facts to mean anything, but their accounts are not the recipient's chart of accounts. Neither appears in the Chart of Accounts.
 
 **Associations are the structure.** Hierarchy and semantics are not stored on the Element; they live in `Association` rows, each typed by an `association_type` that mirrors an XBRL linkbase:
 
@@ -69,9 +74,13 @@ Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), 
 | `presentation` | The renderable tree — the order and nesting a statement displays |
 | `calculation` | Parent = sum of weighted children; the spine of subtotal derivation |
 | `mapping` | A chart-of-accounts element mapped to a reporting concept |
+| `derivation` | One element is derived from another |
 | `equivalence` | Two elements are interchangeable |
 | `general-special` | A general concept refined by a more specific one |
 | `essence-alias` | One element is an alias for another |
+| `has-part` | The Conceptual Model posting arcs — `cm:Debit` / `cm:Credit` to a CoA element, declaring a posting template's legs as first-class atoms |
+
+Six of these are authorable from the public write path; `derivation` and `has-part` are system-emitted, so `create-taxonomy-block` rejects them.
 
 Associations are unique on `(structure_id, from, to, association_type)`, so the same two elements can participate in several linkbases at once — a concept can sit in a presentation tree *and* a calculation rollup with different parents. The `calculation` linkbase is the DAG the renderer walks to derive and foot subtotals; see [Reporting & Rendering](Reporting-and-Rendering) for how that projection works.
 
@@ -90,12 +99,16 @@ frameworks/
 ├── README.md
 ├── ontology/v1/   → context.jsonld, ontology.ttl, shapes.ttl
 ├── fac/           → v1.json + packages/{fac-traits, fac, fac-presentation, fac-calculations}
+├── cm/            → v1.json + packages/cm
 └── rs-gaap/       → v1.json + tenant-exclude/ + bridges/ + packages/{rs-gaap, rs-gaap-traits,
                       rs-gaap-hierarchy, rs-gaap-presentation, rs-gaap-calculations,
                       rs-gaap-type-subtype, rs-gaap-references, rs-gaap-labels, rs-gaap-disclosures,
                       rs-gaap-disclosure-mechanics, rs-gaap-reporting-checklist,
-                      rs-gaap-reporting-styles, rs-gaap-rollup-rules, rs-gaap-rules}
+                      rs-gaap-reporting-styles, rs-gaap-rollup-rules, rs-gaap-rules,
+                      rs-metric, rs-driver}
 ```
+
+`rs-metric` (the metric catalog) and `rs-driver` (the forecast-lever catalog) are the two newest `rs-gaap` packages, both required and tenant-copied.
 
 The pin manifest (`frameworks/{name}/v1.json`) declares the framework, its version, its `framework_type` (`reporting | extension | custom`), its `depends_on` list, and the ordered `packages[]` and `bridges[]` it composes. Each package and bridge entry carries a `tenant_copy` flag:
 
@@ -105,6 +118,8 @@ The pin manifest (`frameworks/{name}/v1.json`) declares the framework, its versi
 | `false` | Seeded to the public library only; skipped on the per-tenant copy |
 
 **Provisioning.** A tenant graph carries a `taxonomy_pin` (for example `{"framework": "rs-gaap@v1"}`). When the graph is provisioned, the library copies the pinned vocabulary from the public schema into the tenant schema, preserving stable element ids so cross-references stay valid.
+
+**Per-tenant curation is finer than the package.** `tenant_copy` decides which *packages* a tenant gets; a second, per-qname filter decides which *concepts* inside them survive. `frameworks/rs-gaap/tenant-exclude/v1.json` declares a `tenant_exclude_keep_critical` policy: a tenant keeps exactly the concepts that render under the active Reporting Style — the working set — plus their structural scaffolding (the calc DAG, rollup ancestors, rule operands, and the synthesized PP&E grains). Everything else renders nowhere and cannot be mapped, because mapping candidates are capped at the renderable working set, so it is dropped. The rule is **kept ⟺ used**, and it means only a small fraction of the ~2,000 public `rs-gaap` concepts ever lands in a tenant schema. The excluded set is broken out by category in the artifact for audit: dimension members and domains, disaggregation leaves, industry verticals, type-subtype-disconnected concepts, and unanchored intermediate aggregates. Any concept is re-added by a resync the moment a future Reporting Style or a deeper breakdown wires it — adding is cheap, deleting after a tenant has mapped to a concept is not.
 
 **Library-origin rows are immutable inside every tenant.** Once a concept is copied from the public library into a tenant, you extend it — you never mutate it. This is enforced by immutability triggers and is the foundation of the contribution model below: tenants add native elements alongside the library, never edit the library in place.
 
@@ -149,6 +164,8 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 | `create-mapping-association` | Add one CoA → reporting-concept mapping edge |
 | `delete-mapping-association` | Drop one mapping edge by id |
 | `auto-map-elements` | Run the MappingOperator asynchronously over a mapping structure |
+| `change-reporting-style` | Switch the reporting entity's Reporting Style after validating the target Style composes completely in the tenant schema |
+| `bind-text-block` | Bind a platform Document (or one of its sections) to a disclosure element as a Nonnumeric text-block fact |
 
 `auto-map-elements` is a worker-backed operation that returns `202` with a `pending` envelope, then streams progress over SSE. It auto-approves mappings with confidence at or above `0.90`, flags those between `0.70` and `0.89` for review, and skips anything below `0.70`.
 
@@ -254,9 +271,9 @@ The `origin` field on each element reports `library` for copied-from-public rows
 
 ## Reading the Library
 
-There are two GraphQL read surfaces, both Strawberry-backed with GraphiQL available in dev.
+There is **one** GraphQL endpoint and one composed `Query` root — Strawberry-backed, with GraphiQL available in dev. What changes is the *scope* the URL selects, not the schema: the library fields are composed unconditionally, so every `library*` field resolves on any graph-scoped endpoint too.
 
-**Browse the canonical public library** through the `library` sentinel (`graph_id="library"`, `search_path=public`):
+**Browse the canonical public library** through the `library` sentinel — a first-class `graph_id` that pins `search_path=public`:
 
 ```bash
 curl -X POST "http://localhost:8000/extensions/library/graphql" \
@@ -265,7 +282,7 @@ curl -X POST "http://localhost:8000/extensions/library/graphql" \
   -d '{"query": "{ libraryElement(qname: \"rs-gaap:Assets\") { id qname name balanceType periodType source } libraryTaxonomies(standard: \"rs-gaap\") { id name version } }"}'
 ```
 
-The `LibraryQuery` root exposes fields for taxonomies (`libraryTaxonomies`, `libraryTaxonomy`, `libraryTaxonomyArcs`, `libraryTaxonomyArcCount`), elements (`libraryElements`, `libraryElement`, `searchLibraryElements`, `libraryElementTree`, `libraryElementEquivalents`, `libraryElementArcs`, `libraryElementClassifications`), and the `TaxonomyBlockQuery` root exposes `taxonomyBlock(id:)` and `taxonomyBlocks(...)`.
+The library fields cover taxonomies (`libraryTaxonomies`, `libraryTaxonomy`, `libraryTaxonomyArcs`, `libraryTaxonomyArcCount`), elements (`libraryElements`, `libraryElement`, `searchLibraryElements`, `libraryElementTree`, `libraryElementEquivalents`, `libraryElementArcs`, `libraryElementClassifications`), and structures (`libraryStructures(taxonomyId, blockType)`, `libraryStructure`). `taxonomyBlock(id:)` and `taxonomyBlocks(...)` read tenant blocks.
 
 **Read a tenant view** (the library copy plus the tenant's own CoA and extensions in one query) through the standard graph-scoped endpoint (`search_path={schema}, public`):
 
@@ -273,7 +290,7 @@ The `LibraryQuery` root exposes fields for taxonomies (`libraryTaxonomies`, `lib
 POST /extensions/{graph_id}/graphql
 ```
 
-The full field set is introspectable from GraphiQL in dev, or browse the spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
+The two scopes differ in what the same fields see, not in which fields exist: `library` browses the public catalog only, while a tenant `graph_id` sees that tenant's rows with public fallback. The full field set is introspectable from GraphiQL in dev, or browse the spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs).
 
 ## Common Pitfalls
 
@@ -308,6 +325,8 @@ Chart-of-accounts elements must carry a `trait`, and stock concepts (`asset`, `c
 ### Framework Source Edits Need a Reseed
 
 Editing `frameworks/**/taxonomy.jsonld` does not take effect on a plain restart — the baked image copy is re-read. Run `just reset-local` to reseed the library from source.
+
+Validate the edit before you pay for a reseed. `just framework-validate` checks the `rs-gaap` framework's structure, package integrity, and chart-of-accounts coverage; `--summary` gives the terse form and `--coverage-only` just the coverage report.
 
 ## Related Documentation
 

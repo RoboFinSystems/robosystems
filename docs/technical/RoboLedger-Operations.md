@@ -1,6 +1,6 @@
 # RoboLedger Operations
 
-This guide shows you how to drive RoboLedger's command-write and analytical-view surface — the graph-scoped operations at `POST /extensions/roboledger/{graph_id}/operations/{op_name}`. Command writes mutate the ledger (update the entity, close a period, generate a report); analytical views query the XBRL hypercube to build pivot tables. Both share one response contract and live under the same URL prefix.
+This guide shows you how to drive RoboLedger's command-write and analytical-view surface — the graph-scoped operations at `POST /extensions/roboledger/{graph_id}/operations/{op_name}`. Command writes mutate the ledger (update the entity, close a period, generate a report); analytical views read facts back out, either from the XBRL hypercube or from the live OLTP ledger. Both share one response contract and live under the same URL prefix.
 
 **Quick Start:** Run `just demo-roboledger` to provision a fully-populated tenant, then `curl` any operation below using the API key from `.local/config.json`.
 
@@ -14,8 +14,7 @@ This guide shows you how to drive RoboLedger's command-write and analytical-view
 - [Worked Example: close-period](#worked-example-close-period)
 - [Analytical View Operations](#analytical-view-operations)
 - [Worked Example: build-fact-grid](#worked-example-build-fact-grid)
-- [Financial Statement Analysis](#financial-statement-analysis)
-- [Report Bundle Downloads](#report-bundle-downloads)
+- [Financial Statements](#financial-statements)
 - [Gotchas and Pitfalls](#gotchas-and-pitfalls)
 - [Related Documentation](#related-documentation)
 
@@ -27,7 +26,7 @@ RoboLedger's extensions surface follows a CQRS split with three sub-surfaces, al
 | --- | --- | --- |
 | **Typed reads** | `POST /extensions/{graph_id}/graphql` | Strawberry GraphQL — entity, fiscal calendar, mappings, reports. See [GraphQL Reads](GraphQL-Reads). |
 | **Command writes** | `POST /extensions/roboledger/{graph_id}/operations/{op_name}` | Mutations — close a period, update the entity, generate a report. |
-| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only pivots over the XBRL hypercube (`build-fact-grid`). |
+| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only fact queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`) and over the live OLTP ledger (`live-financial-statement`). |
 
 This page covers the latter two. The `graph_id` always comes from the URL path — FastAPI dependencies validate authentication and per-graph access before the handler runs. The reads sibling is documented in [GraphQL Reads](GraphQL-Reads), and the surface as a whole in [Extensions Surface Overview](Extensions-Surface-Overview).
 
@@ -79,20 +78,23 @@ The registered command-write operations, grouped by workflow stage (from [`route
 
 | Stage | Operations |
 | --- | --- |
-| **Setup** | `initialize`, `update-entity` |
+| **Setup** | `initialize`, `update-entity`, `change-reporting-style` |
 | **Taxonomy Blocks** | `create-taxonomy-block`, `update-taxonomy-block`, `delete-taxonomy-block`, `link-entity-taxonomy` |
 | **Mapping** | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements` |
-| **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `evaluate-rules` |
+| **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `bind-text-block`, `evaluate-rules` |
+| **Forecasting and Metrics** | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` |
 | **Agents** | `create-agent`, `update-agent` |
 | **Event Blocks** | `create-event-block`, `update-event-block`, `execute-event-block`, `preview-event-block` |
 | **Event Handlers** | `create-event-handler`, `update-event-handler` |
 | **Journal Entries** | `update-journal-entry`, `delete-journal-entry` |
-| **Schedules** | `promote-obligations` |
+| **Schedules** | `promote-obligations`, `rebuild-schedule` |
 | **Close Workflow** | `set-close-target`, `close-period`, `reopen-period` |
-| **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `file-report`, `transition-filing-status` |
-| **Publish Lists** | `create-publish-list`, `update-publish-list`, `delete-publish-list`, `add-publish-list-members`, `remove-publish-list-member` |
+| **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `revoke-report-share`, `file-report`, `transition-filing-status` |
+| **Publish Lists and Distribution** | `create-publish-list`, `update-publish-list`, `delete-publish-list`, `add-publish-list-members`, `remove-publish-list-member`, `block-source-graph`, `unblock-source-graph` |
 
 `auto-map-elements` is the async one (returns `202 pending`); the rest complete synchronously. The exact request body for each is in the OpenAPI spec — the worked examples below show the two most common shapes.
+
+**Forecasting and metrics** is the arc least self-evident from its operation names. A *forecast block* carries a driver cascade: `compute-forecast` walks it month-by-month forward from the block's base period — lever-driven `rs-driver` rules in dependency order, carry-forward for unmodeled income-statement lines, then calc-DAG subtotals — upserting one scenario income-statement FactSet (plus a working-capital balance-sheet set) per forward month, keyed by the block's `scenario_id` (`NULL` means actuals). `backfill-plan-history` fills the plan's *historical* columns behind the close boundary by running a real reopen → reclose cycle per month; it is chunked, so loop until `remaining_periods` comes back empty. `compute-metrics` derives a period's standing metric FactSet from the entity's most recent persisted report facts, and `assert-metrics` is its observation sibling — externally-observed values (usage counts, marketing numbers, hand-carried figures) written into the same standing-FactSet shape with asserted provenance. Structures carrying Derive rules are compute-owned and reject assertions, so derived and asserted series never share a structure. All four are deterministic and non-AI: they consume no credits.
 
 A second example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 
@@ -108,6 +110,8 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/u
     "entity_type": "llc"
   }'
 ```
+
+**Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`. Every flavor — `JSONLD` (the default), `HOLON_JSONLD`, `XBRL_2_1` — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. See [GraphQL Reads](GraphQL-Reads).
 
 ## Worked Example: close-period
 
@@ -142,15 +146,25 @@ On success, the envelope's `result` is a close summary:
     },
     "period": "2026-03",
     "entries_posted": 3,
+    "entries_published_to_qb": 2,
+    "entries_posted_locally": 1,
     "target_auto_advanced": true,
     "rule_summary": {"pass": 38, "fail": 0, "error": 0, "skipped": 0},
-    "evaluated_structure_ids": ["..."]
+    "evaluated_structure_ids": ["..."],
+    "statements_stamped": true,
+    "statement_stamp_note": null,
+    "stamped_statement_sets": {"struct_...": "fs_..."},
+    "statement_rule_summary": {"pass": 12, "fail": 0, "error": 0, "skipped": 0}
   },
   "at": "2026-06-11T00:00:00Z",
   "createdBy": "user_...",
   "idempotentReplay": false
 }
 ```
+
+`entries_posted` is the total across both post paths, and `entries_published_to_qb` / `entries_posted_locally` are the split. On a graph whose QuickBooks connection is `qb_authoritative`, the close first publishes eligible RoboLedger-originated drafts back to QuickBooks (each is promoted to posted at publish time); everything else goes through the local bulk transition. See [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) for the write-policy model behind that split.
+
+The close also stamps the period's canonical statement FactSets. `stamped_statement_sets` maps `structure_id` → `fact_set_id` for each set minted, and `statement_rule_summary` reports statement-rule verification (distinct from `rule_summary`, which is the schedule-rule pass). When the tenant hasn't set up reporting yet, `statements_stamped` is `false` and `statement_stamp_note` carries the soft-skip reason (`no_coa_mapping`, `no_entity`, `no_statement_structures`, or `no_taxonomy`) — the close still succeeds.
 
 **Blockers are structured.** When a period cannot close, `close-period` returns `422` with a structured `blockers` array — not a flat message. Clients must parse `detail.blockers`:
 
@@ -170,9 +184,11 @@ The same `closed_through` / `close_target` cursors surface as a read on the Grap
 
 ## Analytical View Operations
 
-Analytical view operations are read-only queries over the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing. They are the bridge from accounting facts to a tabular, pivot-ready shape.
+Analytical view operations are read-only queries over the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing.
 
-`build-fact-grid` is the primary view operation. It takes a set of concept filters and period filters, walks the matching `Fact` nodes, deduplicates them, and projects the result into a pivot table according to a `view_config`. The same logic is exposed as the MCP tool `build-fact-grid` for agent-driven use.
+`build-fact-grid` is the primary view operation. It takes a set of concept filters and period filters, walks the matching `Fact` nodes, deduplicates them, and returns them as a **flat list** alongside the aspects those facts span.
+
+**It does not pivot.** Arranging the facts into a table is the consumer's job, because collapsing cells safely requires the full aspect signature — two facts can share an element and a period end and still differ on `period_start`, `duration_type`, `unit`, or entity. Summing across those is a presentation decision the endpoint deliberately refuses to make on the caller's behalf. The same logic is exposed as the MCP tool `build-fact-grid`, with the same flat contract.
 
 Two things make this router distinct from the command writes:
 
@@ -184,7 +200,11 @@ The request body is a `CreateViewRequest` (defined in [`models/api/views/view_co
 - **Concept filter** — `elements[]` (XBRL qnames like `us-gaap:Assets`) or `canonical_concepts[]` (semantic names like `revenue`, `net_income`, which match every mapped qname for that concept).
 - **Period filter** — `periods[]` (`YYYY-MM-DD`), or `period_type` (`annual` / `quarterly` / `instant`), or `fiscal_year`.
 
-You must provide at least one concept filter **and** at least one period filter, or the request returns `400`. Other optional fields scope the query further: `entity`, `entities[]`, `form`, `fiscal_period` (`FY`, `Q1`, …), `include_summary`, and `view_config`.
+You must provide at least one concept filter **and** at least one period filter, or the request returns `400`. Note that `fiscal_period` is *not* a period filter — it narrows the fiscal context of an already-scoped query.
+
+On a **shared-repository** graph (SEC), `entity` or `entities` is required as well: those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. A tenant graph is already scoped to its entity by the URL — and that entity is often a private company with no ticker or CIK to filter on — so the requirement applies only to shared repos.
+
+Other optional fields scope the query further: `entity`, `entities[]`, `form`, `fiscal_period` (`FY`, `Q1`, …), `include_summary`, `limit` (default `250`, max `5000`), and `view_config`.
 
 ## Worked Example: build-fact-grid
 
@@ -202,57 +222,113 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/b
   }'
 ```
 
-The envelope's `result` is a `ViewResponse`:
+The envelope's `result` is a `ViewResponse` — `metadata`, `dimensions`, `facts`, `summary`:
 
 ```json
 {
   "metadata": {
-    "view_id": "...",
+    "view_id": "3e0b2208-ab92-4629-9e74-e69a7a4b60e0",
     "facts_processed": 3,
-    "construction_time_ms": 42,
-    "source": "..."
+    "construction_time_ms": 42.1,
+    "source": "fact_grid",
+    "period_start": null,
+    "period_end": null,
+    "truncated": false
   },
-  "presentations": {
-    "pivot_table": {
-      "index": ["..."],
-      "columns": ["..."],
-      "data": [["..."]],
-      "metadata": {"...": "..."}
-    },
-    "summary": {"...": "..."}
+  "dimensions": [
+    {"name": "Element", "type": "element",
+     "members": ["us-gaap:Assets", "us-gaap:Liabilities", "us-gaap:StockholdersEquity"]},
+    {"name": "Period", "type": "period", "members": ["2026-03-31"]}
+  ],
+  "facts": [
+    {"element_id": "us-gaap:Assets", "element_name": "Assets",
+     "period_start": null, "period_end": "2026-03-31", "duration_type": null,
+     "value": 1842300.0, "unit": "USD", "entity_ticker": null, "entity_name": null},
+    {"element_id": "us-gaap:Liabilities", "element_name": "Liabilities",
+     "period_start": null, "period_end": "2026-03-31", "duration_type": null,
+     "value": 612450.0, "unit": "USD", "entity_ticker": null, "entity_name": null},
+    {"element_id": "us-gaap:StockholdersEquity", "element_name": "StockholdersEquity",
+     "period_start": null, "period_end": "2026-03-31", "duration_type": null,
+     "value": 1229850.0, "unit": "USD", "entity_ticker": null, "entity_name": null}
+  ],
+  "summary": {
+    "us-gaap:Assets": {"count": 1, "total": 1842300.0, "average": 1842300.0,
+                       "min": 1842300.0, "max": 1842300.0},
+    "us-gaap:Liabilities": {"count": 1, "total": 612450.0, "average": 612450.0,
+                            "min": 612450.0, "max": 612450.0},
+    "us-gaap:StockholdersEquity": {"count": 1, "total": 1229850.0, "average": 1229850.0,
+                                   "min": 1229850.0, "max": 1229850.0}
   }
 }
 ```
 
-`presentations` always contains `pivot_table`; it also contains `summary` when `include_summary: true`.
+`facts[]` is the payload: one deduplicated record per fact, carrying its full aspect signature (`element_id`, `element_name`, `period_start`, `period_end`, `duration_type`, `value`, `unit`, `entity_ticker`, `entity_name`). `dimensions[]` reports the aspects those facts span — element / period / entity with their observed members — which is what a client needs to lay out rows and columns itself. `summary` is present only when `include_summary: true`, and its `total` sums across every returned period, which is meaningful for duration facts and not for instants.
 
-The `view_config` block gives you control over the pivot layout — which axis is rows, which is columns, how members are labeled, and the aggregation function. This example pivots revenue across NVIDIA and AMD by fiscal year against the SEC shared repository (replace `$GRAPH_ID` with the SEC shared-repository graph id for your deployment):
+`metadata.truncated` is `true` when more facts matched than `limit` allowed. The returned facts are the most recent by period, so a truncated response is a valid answer to a narrower question — raise `limit` or tighten the filters to see the rest.
+
+The `view_config` block scopes the query further; it is **filtering only**. This example asks the SEC shared repository for NVIDIA's annual revenue, restricted to three specific period members (NVIDIA's fiscal year ends in late January, so the members are its fiscal year ends, not calendar ones):
 
 ```bash
-curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+curl -X POST "http://localhost:8000/extensions/roboledger/sec/operations/build-fact-grid" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "canonical_concepts": ["revenue"],
-    "entities": ["NVDA", "AMD"],
+    "entities": ["NVDA"],
     "form": "10-K",
-    "fiscal_period": "FY",
+    "period_type": "annual",
     "view_config": {
-      "rows": [{"type": "entity"}],
       "columns": [{"type": "period",
-                   "selected_members": ["2022-12-31", "2023-12-31", "2024-12-31"],
-                   "member_labels": {"2022-12-31": "FY22", "2023-12-31": "FY23", "2024-12-31": "FY24"}}],
-      "values": "numeric_value",
-      "aggregation_function": "sum"
+                   "selected_members": ["2023-01-29", "2024-01-28", "2025-01-26"]}]
     }
   }'
 ```
 
-A `ViewConfig` has `rows[]` and `columns[]` of axis configs (`type` is one of `element`, `period`, `dimension`, `entity`), a `values` source (default `numeric_value`), an `aggregation_function` (`sum`, `average`, `count`), and an optional `fill_value`. The full schema is in [`models/api/views/`](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/models/api/views).
+The result is again a flat list — three facts, one per fiscal year, each carrying the entity and the duration window it came from:
 
-## Financial Statement Analysis
+```json
+{
+  "facts": [
+    {"element_id": "us-gaap:Revenues", "element_name": "Revenues",
+     "period_start": "2024-01-29", "period_end": "2025-01-26",
+     "duration_type": "annual", "value": 130497000000.0, "unit": "USD",
+     "entity_ticker": "NVDA", "entity_name": "NVIDIA CORP"},
+    {"element_id": "us-gaap:Revenues", "element_name": "Revenues",
+     "period_start": "2023-01-30", "period_end": "2024-01-28",
+     "duration_type": "annual", "value": 60922000000.0, "unit": "USD",
+     "entity_ticker": "NVDA", "entity_name": "NVIDIA CORP"},
+    {"element_id": "us-gaap:Revenues", "element_name": "Revenues",
+     "period_start": "2022-01-31", "period_end": "2023-01-29",
+     "duration_type": "annual", "value": 26974000000.0, "unit": "USD",
+     "entity_ticker": "NVDA", "entity_name": "NVIDIA CORP"}
+  ]
+}
+```
 
-`financial-statement-analysis` is the second view operation. It renders a complete financial statement from the hypercube rather than returning a free-form pivot. The body takes a `statement_type` — one of `income_statement`, `balance_sheet`, `cash_flow_statement`, or `equity_statement` — plus either a `report_id` (for tenant graphs) or a `ticker` (for shared-repository graphs).
+A `ViewConfig` has exactly two fields: `rows[]` and `columns[]`, each a list of axis configs. An axis config has a `type` (`element`, `period`, or `entity`), an optional `selected_members[]`, and `include_null_dimension`. `rows` and `columns` are naming conventions only — both filter identically, and neither controls layout. There is no `values`, `aggregation_function`, `fill_value`, or `member_labels`: ordering, labelling, and aggregation belong to the consumer. A `dimension` axis type is rejected outright, because the fact query filters on `has_dimensions = false` — dimensional facts never reach the response, so a dimension axis could only ever be a silent no-op. The full schema is in [`models/api/views/`](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/models/api/views).
+
+## Financial Statements
+
+Two operations render a *complete* statement rather than a free-form slice. Which one you want depends on where the truth for that graph lives.
+
+### live-financial-statement — tenant graphs
+
+`live-financial-statement` is the authoritative path for a RoboLedger entity graph. It builds the statement directly from the tenant's OLTP ledger through the active CoA→GAAP mapping, so **no materialization is required** — a ledger you synced a minute ago is already reportable. It is rejected on shared-repository graphs.
+
+It lives in a third router, [`reads.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py), sibling to `operations.py` (command writes) and `views.py` (graph-backed views). All three mount under the same `/operations/` prefix, but `reads.py` is gated by `ROBOLEDGER_ENABLED` — unlike `views.py`, which stays mounted for SEC-only deployments.
+
+```bash
+curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/live-financial-statement" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"statement_type": "balance_sheet", "period_type": "annual", "fiscal_year": 2026}'
+```
+
+`statement_type` is one of `income_statement`, `balance_sheet`, `cash_flow_statement`, or `equity_statement`. Scope the window either explicitly (`period_start` / `period_end`) or by fiscal context (`period_type`, `fiscal_year`), anchored on the graph's fiscal calendar; explicit dates win. `limit` caps the fact rows returned. The result carries the resolved `periods[]` (current plus prior comparative), the rendered `facts[]` with `depth` and `is_subtotal` for indentation, and an `unmapped_count`.
+
+### financial-statement-analysis — materialized and shared-repository graphs
+
+`financial-statement-analysis` renders the same four statement types out of the hypercube (`Structure → FactSet → Fact`). Use it against the SEC shared repository, or against a tenant graph whose ledger has already been materialized to LadybugDB.
 
 ```bash
 curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/financial-statement-analysis" \
@@ -261,25 +337,12 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/f
   -d '{"statement_type": "balance_sheet", "report_id": "..."}'
 ```
 
-How statements are rendered from the hypercube — the structures, the calc rollup, the footing — is the subject of [Reporting and Rendering](Reporting-and-Rendering).
+The either/or is hard-enforced, and the two graph classes fail in opposite directions:
 
-## Report Bundle Downloads
+- On a **tenant** graph, omitting `report_id` returns `400 "report_id is required for tenant graphs."`
+- On a **shared repository**, omitting both `ticker` and `report_id` returns `400 "ticker is required on shared-repository graphs (e.g. SEC)."` Supplying `ticker` auto-resolves the latest matching filing; a `fiscal_year` that resolves to nothing is a `404`, never a silent fallback to a different year.
 
-Downloading a generated report bundle is a plain REST `GET`, **not** an operation. There is no envelope and no idempotency key — you are fetching an artifact, not running a command.
-
-```bash
-# JSON-LD: returns a JSON envelope wrapping a presigned download URL
-curl "http://localhost:8000/extensions/roboledger/$GRAPH_ID/reports/$REPORT_ID/download?format=jsonld" \
-  -H "X-API-Key: $API_KEY"
-
-# XBRL 2.1: streams a zip directly
-curl "http://localhost:8000/extensions/roboledger/$GRAPH_ID/reports/$REPORT_ID/download?format=xbrl-2.1" \
-  -H "X-API-Key: $API_KEY" -o report.zip
-```
-
-`format=jsonld` returns a presigned-URL JSON envelope; `format=xbrl-2.1` streams a zip. A report generated before the bundle-serialization feature has no stamped artifact and returns `404`.
-
-Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`) — the download endpoint only fetches an already-produced bundle.
+How statements are rendered — the structures, the calc rollup, the footing — is the subject of [Reporting and Rendering](Reporting-and-Rendering).
 
 ## Gotchas and Pitfalls
 
@@ -301,7 +364,11 @@ Do not parse a flat error string — read `detail.blockers`. `sync_stale` is ove
 
 ### Fact Grid Needs Both a Concept and a Period Filter
 
-`build-fact-grid` enforces two guards: it `400`s if you omit the concept filter (`elements` or `canonical_concepts`) and `400`s if you omit the period filter (`periods`, `period_type`, or `fiscal_year`). Always send at least one of each.
+`build-fact-grid` enforces three guards, each a `400`:
+
+- No concept filter — omitting both `elements` and `canonical_concepts`.
+- No period filter — omitting all of `periods`, `period_type`, and `fiscal_year`. `fiscal_period` alone does not satisfy this.
+- No entity filter **on a shared-repository graph** — omitting both `entity` and `entities` against SEC returns `"entity or entities is required on shared-repository graphs (e.g. SEC)."` The same call against a tenant graph is fine, since the URL already scopes it.
 
 ### Fact Grid Only Sees Materialized Data
 
@@ -334,6 +401,7 @@ Reusing an `Idempotency-Key` with a different request body returns `409`, not a 
 
 - **[RoboLedger operations router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/operations.py)** - The registered command-write operations
 - **[Analytical view router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/views.py)** - `build-fact-grid` and `financial-statement-analysis`
+- **[OLTP reads router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py)** - `live-financial-statement`
 - **[Operation envelope](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/operations.py)** - `OperationEnvelope`, idempotency, audit
 - **[Operations kernel](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic patterns behind every operation
 

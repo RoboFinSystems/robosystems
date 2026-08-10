@@ -12,13 +12,14 @@ RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data 
 
 ## Current Pipelines
 
-| Pipeline   | Status           | Tracking                                                                 |
-| ---------- | ---------------- | ------------------------------------------------------------------------ |
-| SEC        | Production-ready | [#117](https://github.com/RoboFinSystems/robosystems/issues/117)         |
-| QuickBooks | In Development   | [#118](https://github.com/RoboFinSystems/robosystems/issues/118)         |
+| Pipeline   | Status           |
+| ---------- | ---------------- |
+| SEC        | Production-ready |
+| QuickBooks | Production-ready |
 
-**Infrastructure:**
-- Shared replicas deployment: [#113](https://github.com/RoboFinSystems/robosystems/issues/113)
+A third connector is live but is not a pipeline in this sense: **`external`** ("External Integration") registers a source namespace on a graph for an integration the platform does not run. It is registration and telemetry rather than execution config — the integration itself runs outside the platform, holds its own source credentials, and writes through the public API. That is the connector side of the [integration lane](#adding-custom-data-sources) below; the implementation is `operations/providers/external_provider.py`.
+
+The authoritative, live list of connectors is served rather than documented: `GET /v1/graphs/{graph_id}/connections/options` returns each provider with its configuration and supported features.
 
 ---
 
@@ -86,9 +87,12 @@ robosystems/adapters/
 │       ├── process.py          # sec_processed_filings asset
 │       ├── stage.py            # DuckDB staging assets
 │       ├── materialize.py      # LadybugDB materialization
-│       ├── vector_publish.py   # LanceDB vector index S3 publishing
+│       ├── artifact.py         # Precomputed Parquet knowledge artifacts
 │       ├── text_index.py       # OpenSearch text indexing (textblocks, narratives, iXBRL)
-│       ├── s3_publish.py       # Publish .lbug / .duckdb to S3 for replicas
+│       ├── s3_publish.py       # Publish .lbug to S3 for replicas
+│       ├── duckdb_s3_publish.py # Publish .duckdb staging DBs to S3
+│       ├── r2_publish.py       # Publish .lbug to Cloudflare R2 (zero-egress downloads)
+│       ├── entity_sync/        # Entity metadata sync assets
 │       ├── jobs.py             # Job definitions
 │       └── sensors.py          # Sensors + schedule
 └── quickbooks/                 # QuickBooks adapter
@@ -98,14 +102,22 @@ robosystems/adapters/
 
 robosystems/dagster/            # Platform orchestration (collector)
 ├── definitions.py              # Collects platform + adapter pipelines
+├── reporting.py                # Report asset materializations from outside Dagster jobs
 ├── resources/                  # Shared Dagster resources (DB, S3, Graph)
 ├── assets/
 │   ├── graphs.py               # User graph operation assets
 │   └── shared_repositories/    # S3 publish + replica refresh
-├── jobs/                       # Platform jobs (billing, infrastructure, graph, provisioning)
+├── jobs/                       # Platform jobs (billing, infrastructure, graph, backups)
 └── sensors/
-    └── provisioning.py         # Subscription/repository provisioning
+    ├── graph_lifecycle.py      # Provisioning, expiry, suspension, deprovisioning
+    ├── materialization.py      # Stale-graph rebuild
+    ├── invoice_billing.py      # Subscription renewal + invoicing
+    ├── scheduled_obligation_promoter.py
+    ├── usage_monitor.py
+    └── worker_reaper.py
 ```
+
+The platform side carries far more than the SEC publish-and-refresh chain this page traces: scheduled billing, instance health, registry and storage cleanup, the nightly fleet backup (`0 3 * * *`, fanned out one run per customer graph), and the sensors above. [`dagster/README.md`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md) carries the full job and sensor inventory with each one's cron or trigger; treat it, not this page, as the list.
 
 ---
 
@@ -116,8 +128,9 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  DAGSTER (ECS Fargate) - Orchestration                       │
-│  ├── Daemon: 512 CPU / 1024 MB (singleton, runs migrations)  │
-│  ├── Webserver: 512 CPU / 1024 MB (1-3 replicas, auto-scale) │
+│  ├── Daemon: 1024 CPU / 2048 MB (singleton, runs migrations) │
+│  ├── Webserver: 512 CPU / 1024 MB (desired count 0 by        │
+│  │     default; scaled to 1 on demand for tunnel access)     │
 │  ├── Capacity: 80% SPOT + 20% On-Demand                      │
 │  └── Jobs: Download, process Arelle, call Graph API          │
 ├──────────────────────────────────────────────────────────────┤
@@ -131,7 +144,7 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 │  ├── ASG: Min=2, Max=10, TargetTracking on CPU               │
 │  ├── S3 download: Pull .lbug + .duckdb from S3 on boot      │
 │  ├── Read-only; sized below the master (no DuckDB staging)   │
-│  └── ALB on port 8001, health check /status                  │
+│  └── ALB on port 8001, health check /health                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -243,9 +256,9 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 
 **Graph API endpoints:**
 
-- `/databases/{graph_id}/tables` - Create staging table
-- `/databases/{graph_id}/tables/query` - SQL validation
-- `/databases/{graph_id}/tables/{name}/ingest` - Materialize to graph
+- `POST /databases/{graph_id}/tables` - Create staging table
+- `POST /databases/{graph_id}/tables/query` - SQL validation
+- `POST /databases/{graph_id}/tables/{table_name}/materialize` - Materialize to graph
 
 ---
 
@@ -321,8 +334,7 @@ Some functions must stay as Lambda (event-driven, not orchestration):
 | `graph_volume_detachment.py` | ASG lifecycle hook handler                           |
 | `postgres_rotation.py`       | AWS Secrets Manager rotation                         |
 | `valkey_rotation.py`         | AWS Secrets Manager rotation                         |
-| `graph_api_rotation.py`      | AWS Secrets Manager rotation                         |
-| `postgres_init.py`           | RDS event handler (secrets + database creation)      |
+| `api_key_rotation.py`        | AWS Secrets Manager rotation                         |
 
 ---
 

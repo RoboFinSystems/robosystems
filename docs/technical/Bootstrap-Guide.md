@@ -85,9 +85,14 @@ just bootstrap robosystems-sso eu-west-1    # Custom profile AND region
 Bootstrap handles everything:
 1. Deploys OIDC federation CloudFormation stack
 2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`)
-3. Creates ECR repository for Docker images
-4. Creates `.envrc` for automatic profile/region selection
-5. Prompts to run `setup-aws` (application secrets) and `setup-gha` (deployment variables)
+3. Prompts for the CloudWatch alert email (`AWS_SNS_ALERT_EMAIL`)
+4. Creates ECR repository for Docker images
+5. Creates `.envrc` for automatic profile/region selection
+6. Prompts to run `setup-aws` (application secrets) and `setup-gha` (deployment variables)
+
+**The alert email is required.** Bootstrap auto-detects it from your SSO user where it can, but exits with an error if you leave it blank — CloudWatch alarms need a destination before you deploy. AWS sends a confirmation email you must accept to activate the subscription.
+
+**The ECR repository name is fixed at `robosystems`**, whatever you named your fork — the deploy role's ECR scope and the workflow defaults both assume that name, so a fork-derived name would create a repository the deploy role can't reach. Bootstrap then offers three lifecycle policies: Robust (the full operational policy, recommended), Basic (keep the last 20 untagged images), or Skip (leave an existing policy untouched). Set `ECR_LIFECYCLE_POLICY=robust|basic|skip` to answer non-interactively, or re-apply later with `just bootstrap-ecr-lifecycle`.
 
 **What gets created in AWS:**
 - OIDC Identity Provider for GitHub Actions
@@ -104,7 +109,9 @@ These secrets are **not required** for deployment but enhance workflow functiona
 | Secret | Purpose | Required For |
 |--------|---------|--------------|
 | `ACTIONS_TOKEN` | GitHub PAT with `repo` scope | Push to protected branches, create tags/releases, PRs that auto-trigger CI |
-| `ANTHROPIC_API_KEY` | Claude API key | AI-generated PR summaries and release notes |
+| `ANTHROPIC_API_KEY` | Claude API key | AI-generated release notes (`tag-release.yml`); without it the changelog falls back to a plain commit list |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | The `@claude` PR/issue assistant workflow (`claude.yml`) |
+| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | Docker Hub credentials | Publishing release images to Docker Hub, gated by the `DOCKERHUB_PUBLISHING_ENABLED` variable |
 
 **ACTIONS_TOKEN details:**
 - Enables pushing to protected `main` branch, creating tags/releases, and PRs that auto-trigger CI workflows
@@ -113,17 +120,20 @@ These secrets are **not required** for deployment but enhance workflow functiona
 
 ### GitHub Variables (`just setup-gha`)
 
-While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`), the `setup-gha` script provides full control over ~80 deployment variables:
+While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`), the `setup-gha` script provides full control over the deployment variable set. Run `gh variable list` to see everything currently configured; the categories are:
 
 | Category | Examples | Purpose |
 |----------|----------|---------|
 | API | `API_MIN_CAPACITY_*`, `API_CPU_*`, `API_FARGATE_SPOT_WEIGHT_*` | Scaling, Fargate sizing, Spot/On-Demand mix |
 | Database | `DATABASE_INSTANCE_SIZE_*`, `DATABASE_POSTGRES_VERSION_*` | RDS sizing and configuration |
+| RDS Proxy | `RDS_PROXY_ENABLED_*`, `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*` | Connection pooling in front of RDS (optional) |
 | Dagster | `DAGSTER_DAEMON_CPU_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*` | Orchestration resources and Spot config |
+| Worker | `WORKER_ENABLED_*`, `WORKER_CPU_*`, `WORKER_MEMORY_*`, `WORKER_MIN_COUNT_*`, `WORKER_MAX_COUNT_*`, `WORKER_AUTOSCALING_ENABLED_*` | Background worker service (off by default) |
 | LadybugDB | `LBUG_*_ENABLED_*`, `LBUG_*_MIN_INSTANCES_*` | Graph database tier configuration |
 | Shared Replicas | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*` | Read-only replica fleet for shared repos |
 | Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
 | OpenSearch | `OPENSEARCH_ENABLED_*`, `OPENSEARCH_INSTANCE_TYPE_*`, `OPENSEARCH_EBS_SIZE_*` | Document search (disabled by default) |
+| Observability | `OBSERVABILITY_ENABLED_*` | Managed Prometheus / Grafana stacks (optional) |
 | Security | `WAF_ENABLED_*`, `CLOUDTRAIL_ENABLED`, `VPC_FLOW_LOGS_ENABLED`, `SECURITY_ENABLED`, `AUDIT_ENABLED_*`, `SECRETS_ROTATION_ENABLED_*` | WAF, CloudTrail, flow logs, detective baseline, audit retention, key rotation (all off by default) |
 | Infrastructure | `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`, `VPC_MAX_AVAILABILITY_ZONES` | VPC and networking |
 
@@ -145,7 +155,7 @@ Safe to re-run — existing resources are never overwritten.
 
 ### SSM Parameters & Secrets Manager
 
-Both are created by `just setup-aws`. Secrets Manager holds sensitive credentials; SSM Parameter Store holds feature flags and runtime tuning.
+Both are seeded by `just setup-aws` — some flags fall back to their code defaults until you set them explicitly. Secrets Manager holds sensitive credentials; SSM Parameter Store holds feature flags and runtime tuning.
 
 #### Secrets Manager
 
@@ -158,7 +168,6 @@ robosystems/{env}                      # Single JSON secret per environment
   ├── JWT_ISSUER                       # JWT issuer (set in internal mode)
   ├── JWT_AUDIENCE                     # JWT audience (set in internal mode)
   ├── CONNECTION_CREDENTIALS_KEY       # Fernet key for OAuth tokens (auto-generated)
-  ├── GRAPH_BACKUP_ENCRYPTION_KEY      # Graph backup encryption (auto-generated)
   ├── INTUIT_CLIENT_ID                 # QuickBooks OAuth
   ├── INTUIT_CLIENT_SECRET
   ├── INTUIT_ENVIRONMENT               # "production" or "sandbox"
@@ -181,7 +190,7 @@ aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretS
 aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string "$(cat updated.json)"
 ```
 
-Safe to re-run `just setup-aws` — existing secrets are never overwritten. Three keys (`JWT_SECRET_KEY`, `CONNECTION_CREDENTIALS_KEY`, `GRAPH_BACKUP_ENCRYPTION_KEY`) are auto-generated; all others are placeholders to configure later.
+Safe to re-run `just setup-aws` — existing secrets are never overwritten. Two keys (`JWT_SECRET_KEY`, `CONNECTION_CREDENTIALS_KEY`) are auto-generated; all others are placeholders to configure later. Graph backups carry no application-layer key of their own — they rely on S3 server-side encryption (SSE-AES256).
 
 #### SSM Parameter Store
 
@@ -190,13 +199,13 @@ Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs 
 **Parameter hierarchy:**
 ```
 /robosystems/{env}/
-  features/           # Boolean feature flags (~25 flags)
+  features/           # Boolean feature flags — `just ssm-list <env> features` for the full set
     RATE_LIMIT_ENABLED
     BILLING_ENABLED
     CONNECTIONS_ENABLED
-    TEXT_SEARCH_ENABLED
-    MCP_VECTOR_SEARCH_ENABLED
-    MCP_MEMORY_ENABLED
+    SEMANTIC_SEARCH_ENABLED
+    MCP_SUBGRAPH_OPS_ENABLED
+    TAXONOMY_AUTHORING_ENABLED
     ROBOLEDGER_ENABLED          # RoboLedger extensions surface (ops + GraphQL)
     ROBOINVESTOR_ENABLED        # RoboInvestor extensions surface
     EXTENSIONS_GRAPHQL_ENABLED  # GraphQL reads endpoint kill switch
@@ -256,7 +265,7 @@ The OIDC stack creates three roles:
 | Role | Repositories / Users | Permissions |
 |------|----------------------|-------------|
 | `RoboSystemsGitHubActionsRole` | `robosystems` | Full infrastructure |
-| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app` | Limited frontend |
+| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app`, `robosystems-holon-viewer` | Limited frontend |
 | `RoboSystemsAppSuperAdminRole` | SSO users (via IAM Identity Center) | Application admin only (no infra) |
 
 After bootstrapping the backend, set up frontend apps:
@@ -321,6 +330,15 @@ Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) are 99% client
 
 **Note:** Unlike the API, frontend apps don't have an `internal` mode - App Runner is always internet-facing. Use the API's internal mode if you need VPC-only access for microservice/extension use cases.
 
+### Access Modes
+
+Configured via `APP_ACCESS_MODE_PROD` / `APP_ACCESS_MODE_STAGING`:
+
+| Mode | Domain Required | Use Case |
+|------|-----------------|----------|
+| `public` (default) | Yes | CloudFront with a custom domain and HTTPS — needs `DOMAIN_NAME_ROOT` / `DOMAIN_NAME_PROD` hosted in Route53 |
+| `public-http` | No | CloudFront on the AWS-issued distribution domain — the path for a fork with no Route53 domain |
+
 ### Bootstrap
 
 From the frontend app repository:
@@ -343,7 +361,7 @@ This checks for the OIDC infrastructure (deployed by the main robosystems repo) 
 
 ## SES Email Identity
 
-Bootstrap automatically sets up Amazon SES for transactional emails (account verification, password reset, welcome). You'll be prompted for your email domain (default: `robosystems.ai`), which is saved as the `SES_DOMAIN` GitHub variable.
+Bootstrap automatically sets up Amazon SES for transactional emails (account verification, password reset, welcome). You'll be prompted for your email domain (default: `robosystems.ai`), which is saved as the `AWS_SES_DOMAIN` GitHub variable.
 
 This involves three steps:
 
@@ -423,8 +441,9 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 
 # Optional / Re-run individually
 just setup-aws                    # Secrets, feature flags, tuning params
-just setup-gha                    # Full GitHub variable control (~80 vars)
+just setup-gha                    # Full GitHub variable control
 just setup-bedrock                # Local AI/Bedrock development
+just bootstrap-ecr-lifecycle      # Re-apply the ECR image lifecycle policy
 
 # Optional secrets (enhance workflow functionality)
 gh secret set ACTIONS_TOKEN        # For protected branches, releases, PRs
@@ -448,11 +467,14 @@ aws sts get-caller-identity
 | `api.yaml` | GitHub Actions | ECS API service |
 | `waf.yaml` | GitHub Actions | Web Application Firewall (optional) |
 | `dagster.yaml` | GitHub Actions | ECS Dagster service |
+| `worker.yaml` | GitHub Actions | ECS background worker service (optional, `WORKER_ENABLED_*`) |
 | `opensearch.yaml` | GitHub Actions | OpenSearch document search (optional) |
 | `graph-*.yaml` | GitHub Actions | LadybugDB infrastructure |
 | `prometheus.yaml` | GitHub Actions | Managed Prometheus (optional) |
 | `grafana.yaml` | GitHub Actions | Managed Grafana (optional) |
 | `cloudtrail.yaml` | GitHub Actions | AWS audit logging (optional) |
+| `security.yaml` | GitHub Actions | Detective security baseline — GuardDuty, Security Hub, Inspector, Access Analyzer, Config (optional, `SECURITY_ENABLED`) |
+| `audit.yaml` | GitHub Actions | Long-retention security-audit log pipeline (optional, `AUDIT_ENABLED_*`) |
 | `bastion.yaml` | GitHub Actions | SSM bastion host |
 
 ## Related Documentation

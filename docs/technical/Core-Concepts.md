@@ -78,7 +78,7 @@ The `Element` node is keyed by `identifier` and carries properties such as `qnam
 You can see Elements directly with a Cypher read over the analytical graph:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query" \
+curl -X POST "http://localhost:8000/v1/graphs/kg1234567890abcdef/query/cypher" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{"query": "MATCH (e:Element) RETURN e.qname, e.balance LIMIT 5"}'
@@ -96,7 +96,7 @@ just graph-query kg1234567890abcdef "MATCH (e:Element) RETURN e.qname LIMIT 5"
 
 The Information Block is the platform's load-bearing primitive: a typed, queryable, exchangeable unit of accounting information. It bundles *atoms* (Elements, associations, facts) with *molecular wiring* (classification, rules, mechanics, presentation) into one self-describing object.
 
-What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, and `metric`. The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
+What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `forecast`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure`, and `metric`. The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
 
 Information Blocks are read through the GraphQL surface. Note that `graph_id` comes from the URL, not from a query argument:
 
@@ -156,7 +156,7 @@ A practical consequence: banking and insurance presentations are **reporting sty
 Each tenant has two stores, and knowing which one you are talking to determines which transport you use.
 
 - **Operational graph (OLTP)** — live transactional state, held in the PostgreSQL `extensions` database with a schema per `graph_id`. You read it through **GraphQL** at `POST /extensions/{graph_id}/graphql`.
-- **Analytical graph (OLAP)** — the XBRL hypercube of reporting facts, held in LadybugDB's columnar engine. You read it through **Cypher** at `POST /v1/graphs/{graph_id}/query`.
+- **Analytical graph (OLAP)** — the XBRL hypercube of reporting facts, held in LadybugDB's columnar engine. You read it through **Cypher** at `POST /v1/graphs/{graph_id}/query/cypher`.
 
 The operational store is the source of truth for transactions; its rows are **materialized** into the analytical graph for reporting and analysis (`POST /v1/graphs/{graph_id}/operations/materialize`). The materialization pipeline runs PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
 
@@ -166,13 +166,13 @@ The operational store is the source of truth for transactions; its rows are **ma
 
 ## The Three Retrieval Planes
 
-The same operational/analytical/unstructured split is exposed to AI clients through the MCP (Model Context Protocol) surface as three retrieval planes. Each plane pairs a query tool with a schema tool, so a client can introspect before it queries:
+The same operational/analytical/unstructured split is exposed to AI clients through the MCP (Model Context Protocol) surface as three retrieval planes. Each plane pairs a query tool with a companion tool — a schema tool on the two structured planes, so a client can introspect before it queries, and a drill-down fetch on the document plane:
 
-| Plane | Query tool | Schema tool | Backs onto |
+| Plane | Query tool | Companion tool | Backs onto |
 | --- | --- | --- | --- |
-| **Operational** (typed OLTP reads) | `query-graphql` | `get-graphql-schema` | Extensions GraphQL surface |
-| **Analytical** (read-only Cypher) | `read-graph-cypher` | `get-graph-schema` | LadybugDB OLAP graph |
-| **Unstructured** (document/filing search) | `search-documents` | `get-document-section` | Document / SEC-filing index |
+| **Operational** (typed OLTP reads) | `query-graphql` | `get-graphql-schema` (schema) | Extensions GraphQL surface |
+| **Analytical** (read-only Cypher) | `read-graph-cypher` | `get-graph-schema` (schema) | LadybugDB OLAP graph |
+| **Unstructured** (document/filing search) | `search-documents` | `get-document-section` (drill-down) | Document / SEC-filing index |
 
 An Operator — or any MCP client — composes across the planes: pull a policy from the unstructured plane, a live balance from the operational plane, and a reporting fact from the analytical plane, then reason over all three.
 
@@ -182,7 +182,9 @@ A few rules worth knowing up front:
 - `query-graphql` rejects mutations and subscriptions and takes `graph_id` from context, not as an argument. Run `get-graphql-schema` first.
 - `search-documents` returns a `document_id` per hit; pass it to `get-document-section` for the full section text. Semantic (KNN) ranking is opt-in via `semantic=true` (the default is keyword BM25).
 
-A fourth MCP tool, `resolve-element`, maps a natural-language financial concept to its XBRL Element name using vector search — useful for grounding a query before you run it.
+Retrieval is not the whole surface. Beyond the three planes, MCP also carries graph-lifecycle, subgraph-write, semantic-memory, and document-management tools — 25 in all on a standard entity graph.
+
+On shared repositories with semantic enrichment (SEC), a further tool, `resolve-element`, maps a natural-language financial concept to its XBRL Element name using vector search — useful for grounding a query before you run it. It is not registered on a customer entity graph.
 
 → Deep-dive: [AI Operators and MCP](AI-Operators-and-MCP)
 

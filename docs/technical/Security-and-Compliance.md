@@ -18,6 +18,7 @@ RoboSystems runs on AWS, so security splits three ways — and knowing which lay
 - [Optional Compliance Stacks](#optional-compliance-stacks)
 - [Enabling the Optional Stacks](#enabling-the-optional-stacks)
 - [SOC 2 Posture for Forks](#soc-2-posture-for-forks)
+- [Reporting a Vulnerability](#reporting-a-vulnerability)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
@@ -25,8 +26,8 @@ RoboSystems runs on AWS, so security splits three ways — and knowing which lay
 
 These are always on in any deployment — you inherit them by running the platform:
 
-- **Authentication** — JWT (30-min TTL, JTI revocation, fails closed) and API keys (`rfs` prefix, bcrypt cost-12 at rest, per-key expiry). See [Authentication & API Keys](Authentication-and-API-Keys).
-- **Access control** — role-based (admin / member / viewer) at the org, graph, and shared-repository levels.
+- **Authentication** — JWT (30-min TTL, JTI revocation, fails closed) and API keys (`rfs` prefix, `rfsc` for graph-scoped keys, bcrypt cost-12 at rest, per-key expiry). See [Authentication & API Keys](Authentication-and-API-Keys).
+- **Access control** — role-based at three levels, each with its own vocabulary: org (owner / admin / member), graph (admin / member / viewer), and shared repository (read / write / admin).
 - **Tenant isolation** — every graph is a separate database; extensions OLTP uses schema-per-graph PostgreSQL isolation. Enforced at the data layer, not just in app code, with a CI structural test.
 - **Encryption** — TLS 1.2+ in transit; AES-256 at rest (RDS, EBS, S3); Fernet field-encryption for OAuth/connection credentials.
 - **Abuse protection** — sliding-window rate limiting, progressive auth-failure backoff with IP threat levels, CAPTCHA, Cypher query analysis, and load-shedding admission control.
@@ -76,6 +77,15 @@ RoboSystems is **aligning its controls to SOC 2 in preparation for a future audi
 In short: RoboSystems aligns its control **design** to what SOC 2 expects and ships the optional **evidence infrastructure**; achieving a report is your organization's engagement with an auditor.
 
 > This page is operator guidance, not legal or attestation advice. Confirm scope and requirements with the CPA firm you engage.
+
+## Reporting a Vulnerability
+
+Report security issues privately — please don't open a public issue:
+
+- **Email** — [security@robosystems.ai](mailto:security@robosystems.ai)
+- **GitHub Security Advisory** — [open a private advisory](https://github.com/RoboFinSystems/robosystems/security/advisories/new)
+
+The machine-readable contact record is served at [`/.well-known/security.txt`](https://api.robosystems.ai/.well-known/security.txt) (RFC 9116), and the disclosure policy is [`SECURITY.md`](https://github.com/RoboFinSystems/robosystems/blob/main/SECURITY.md). Every report gets reviewed. There is no paid bug bounty program and no monetary rewards are offered.
 
 ## Related Documentation
 

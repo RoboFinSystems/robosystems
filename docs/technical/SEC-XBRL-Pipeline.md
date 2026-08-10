@@ -48,9 +48,23 @@ just demo-sec --ticker TSLA --year 2023 --skip-queries
 5. **Stage** - Uploads to S3 and creates DuckDB staging tables
 6. **Validate** - Automatic data quality checks and deduplication
 7. **Ingest** - Direct DuckDB → Ladybug via database extension
-8. **Access Grant** - Grants SEC repository access to your user
+8. **Subscription** - Subscribes your user to the SEC shared repository (plan `starter` by default)
 9. **Config Update** - Updates credentials with SEC graph info
 10. **Example Queries** - Runs preset queries showing your data (unless skipped)
+
+SEC access is a **subscription**, not a one-off grant — the shared repository is billed like any other plan. If you only want the subscription and no data:
+
+```bash
+# Subscribe only; skip the download/process/ingest pipeline entirely
+just demo-sec --subscribe-only
+
+# Or use the dedicated recipe. sec-advanced raises rate limits and credits.
+just demo-sec-subscribe                 # sec-starter (default)
+just demo-sec-subscribe sec-advanced
+
+# Pick the plan on a full run
+just demo-sec --plan sec-advanced
+```
 
 **Note:** Setup and loading takes 1-5 minutes depending on the number of years of data.
 
@@ -86,27 +100,32 @@ The SEC pipeline uses a staging-first architecture. Data goes through DuckDB sta
 
 ### Explore Preset Queries
 
-The demo command automatically runs 15 preset queries showing your data. To explore the data interactively or re-run all queries:
+The demo command automatically runs 25 preset queries showing your data — 15 graph queries plus 10 document searches. To explore the data interactively or re-run all queries:
 
 ```bash
 # Interactive mode (enter queries directly, list presets, run specific ones)
 just demo-sec-query
+
+# List every preset without running anything
+just demo-sec-query --list
 ```
 
-In interactive mode, you can:
-- Type `presets` to list all available queries
+In interactive mode (the prompt is `sec>`), you can:
+- Type `presets` to list all available queries, graph and search
 - Type `preset <name>` to run a specific query (e.g., `preset entities`)
+- Type `search <query>` for a full-text search across filings
+- Type `search <query> @NVDA` to scope that search to one entity
 - Enter custom Cypher queries directly
 - Type `help` for available commands
 - Type `quit` to exit
 
-**Available Presets:**
+**Graph Query Presets (Cypher):**
 - `summary` - Node and relationship counts
 - `entities` - Public companies with basic info
 - `recent_reports` - Most recent SEC filings
 - `report_types` - Report form type counts
 - `financial_facts` - Sample financial facts
-- `dimensions` - Dimensional qualifiers on facts
+- `fact_dimensions` - Dimensional qualifiers on facts
 - `fact_periods` - Facts by time periods
 - `elements` - Most commonly used XBRL elements
 - `report_structure` - Fact counts per report
@@ -116,6 +135,18 @@ In interactive mode, you can:
 - `taxonomy_structures` - Report taxonomy structures
 - `element_hierarchy` - Element parent-child relationships
 - `report_taxonomy_detail` - Complete report taxonomy structure
+
+**Document Search Presets (OpenSearch):**
+- `risk_factors` - Risk factor disclosures across all entities
+- `ai_strategy` - Mentions of AI and machine learning strategy
+- `revenue_recognition` - Revenue recognition policy disclosures
+- `cybersecurity` - Cybersecurity risk and incident disclosures
+- `goodwill_impairment` - Goodwill and impairment discussions
+- `segment_reporting` - Operating segment descriptions and breakdowns
+- `mda_overview` - Management discussion and analysis highlights (10-K Item 7)
+- `mda_quarterly` - Quarterly MD&A highlights (10-Q Item 2)
+- `supply_chain` - Supply chain and sourcing disclosures
+- `tariff_trade` - Tariff, trade policy, and geopolitical risk mentions (10-K)
 
 ## Authentication Setup
 
@@ -175,21 +206,27 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
+Some clients — claude.ai and Claude Desktop custom connectors among them — have no field for a custom header. For those, the credential travels in the URL instead: `http://localhost:8000/v1/graphs/sec/mcp?token=<graph-scoped API key>`. Only **graph-scoped** keys are accepted this way; an account-wide key in a URL is rejected outright. See [AI Operators & MCP](AI-Operators-and-MCP) for generating one.
+
 4. Restart your MCP-compatible AI tool
 
 5. The MCP server provides these tools:
 
    **Curated Tools** (no Cypher needed):
-   - `financial-statement-analysis` - Structured financial statement by ticker and type (income_statement, balance_sheet, cash_flow_statement)
+   - `financial-statement-analysis` - Structured financial statement by ticker and type (`income_statement`, `balance_sheet`, `cash_flow_statement`, `equity_statement`)
+   - `build-fact-grid` - Pivot facts across entities, periods, and dimensions — the multidimensional view over the XBRL hypercube
+   - `resolve-element` - Look up XBRL element details by name or canonical concept (uses vector search when available)
 
    **Graph Tools** (general purpose):
    - `read-graph-cypher` - Run Cypher queries directly
    - `get-graph-schema` - View available node and relationship types
+   - `get-graphql-schema` - The typed GraphQL schema served for this graph
+   - `query-graphql` - Typed GraphQL reads, as an alternative to raw Cypher
    - `get-graph-info` - Inspect graph topology and node/relationship counts
-   - `resolve-element` - Look up XBRL element details by name or canonical concept (uses LanceDB vector search when available)
    - `get-example-queries` - Get sample queries for common patterns
+   - `list-subgraphs` - Enumerate this repository's subgraphs and their connector URLs (in production, that includes the deeper `sec_historical` archive)
 
-   **Search Tools** (requires `TEXT_SEARCH_ENABLED=true` in `.env.local`):
+   **Search Tools** (gated by `SEMANTIC_SEARCH_ENABLED`, which defaults to on):
    - `search-documents` - Full-text search across filing narratives, MD&A, risk factors, and iXBRL disclosures
    - `get-document-section` - Retrieve full text of a document found via search
 
@@ -289,8 +326,8 @@ Access via the RoboSystems Python client:
 
 ```python
 from robosystems_client import RoboSystemsClient
-from robosystems_client.api.query.execute_cypher_query import sync_detailed as execute_query
-from robosystems_client.models.cypher_query_request import CypherQueryRequest
+from robosystems_client.api.query.execute_cypher import sync_detailed as execute_query
+from robosystems_client.models.cypher_statement_request import CypherStatementRequest
 import json
 from pathlib import Path
 
@@ -308,7 +345,7 @@ client = RoboSystemsClient(
 )
 
 # Run Cypher query
-request = CypherQueryRequest(
+request = CypherStatementRequest(
     query="""
     MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
     WHERE e.name CONTAINS 'NVIDIA'
@@ -320,9 +357,13 @@ request = CypherQueryRequest(
 
 response = execute_query(graph_id="sec", client=client, body=request)
 
+# `parsed` is the decoded JSON body — a dict, not a typed model.
+# Keys: success, data, columns, row_count, execution_time_ms, graph_id, timestamp, error
 if response.parsed:
-    print(f"Results: {response.parsed.data}")
+    print(f"Results: {response.parsed['data']}")
 ```
+
+`CypherStatementRequest` also takes an optional `timeout` (seconds, 1–300, default 60).
 
 ### Option 5: G.V() Graph IDE For Interactive Exploration
 
@@ -447,7 +488,7 @@ LIMIT 10;
 
 ## Understanding the Data Model
 
-The SEC graph has 14 node types and 24 relationship types organized around two core traversal patterns.
+The SEC graph has 14 node types and 22 relationship types organized around two core traversal patterns.
 
 ### Node Types
 
@@ -616,7 +657,7 @@ just sec-load NVDA 2025
 
 ## Next Steps
 
-- **Explore Preset Queries**: Run `just demo-sec-query` to see 15 curated query examples
+- **Explore Preset Queries**: Run `just demo-sec-query` to see 25 curated examples — 15 Cypher queries and 10 document searches
 - **Visualize with G.V()**: Use our favorite tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
 - **Learn Cypher**: Explore graph query patterns with [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **Validate Staging**: Use DuckDB CLI or SQL IDEs to inspect staging tables before ingestion

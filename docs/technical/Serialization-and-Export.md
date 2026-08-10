@@ -1,14 +1,14 @@
 # Serialization & Export
 
-This guide shows you how a published RoboLedger report is projected into portable file formats — JSON-LD and XBRL 2.1 — and how to download those artifacts from the platform.
+This guide shows you how a published RoboLedger report is projected into portable file formats — JSON-LD, the dataset-form holon, and XBRL 2.1 — and how to download those artifacts from the platform.
 
-**Quick Start:** Publish a report with `create-report`, then `GET .../reports/{report_id}/download?format=jsonld` to get a presigned link to its bundle.
+**Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field to get a presigned link to its bundle.
 
 ## Overview
 
 A published report in RoboLedger isn't a single rendered document — it's a structured object that can be projected into different portable file formats without re-querying the database. That object is the **StatementBundle**, an in-memory envelope assembled from the report's facts, periods, framework slice, and per-statement [Information Blocks](Information-Blocks). Two encoder families walk that one envelope:
 
-- `serialize_to_rdf` produces **JSON-LD** — the canonical, web-native artifact. One file, identified by global URIs, that any JSON tool can read.
+- `serialize_to_rdf` produces **JSON-LD** in two flavors — the flat canonical artifact (`jsonld`), one file identified by global URIs that any JSON tool can read, and the dataset-form **holon** (`holon-jsonld`), which carries the same content as named graphs.
 - `serialize_to_xbrl` produces an **XBRL 2.1** package — the filing-grade, standards-blessed format for interop with regulators and downstream tooling.
 
 End to end, this page covers:
@@ -16,8 +16,8 @@ End to end, this page covers:
 1. What a `StatementBundle` carries and why both encoders share it
 2. How a bundle is produced and stamped at publish time
 3. How generation-stamped bundles are stored in S3
-4. How to download a bundle in each format
-5. What the JSON-LD and XBRL artifacts contain
+4. How to download a bundle in each flavor
+5. What each artifact contains
 6. How SHACL validation at publish and round-trip validation prove conformance
 7. How to contribute the Block content that gets serialized
 
@@ -40,16 +40,22 @@ A bundle is built by `build_report_bundle(session, graph_id, report_id)` and car
 | --- | --- |
 | `entity` | The reporting entity: `id, name, legal_name, ein, country` |
 | `periods` | Reporting periods: `start, end, label, period_type` (`duration` or `instant`) |
-| `reporting_style` | Resolved style id, e.g. `BSC-CORP-IS02-CF1` |
-| `framework_pins` | Each `{framework, version}`, e.g. `rs-gaap` / `v1` |
+| `reporting_style` | The entity's resolved `reporting_style_id` — a **UUID**, e.g. `025f5d48-12ce-5d65-b9eb-4f137a10ef06` |
+| `framework_pins` | Each `{framework, version}` — three of them, since `rs-gaap@v1` depends on both `fac@v1` and `cm@v1` |
 | `schema_concepts` | Concept declarations: `qname, name, label, balance_type, period_type, is_abstract, is_monetary, element_type, source` |
 | `linkbases` | `presentation_links`, `calculation_links`, `definition_links` — each an ELR of `BundleArc[]` (`arc_type, arcrole, from_qname, to_qname, order_value, weight`) |
 | `period_nodes` | `id, period_start, period_end, period_type` (`period_start` is `None` for instants) |
 | `units` | `id, measure`, e.g. `iso4217:USD` |
 | `facts` | `id, element_id, element_qname, value, period_ref, unit_ref, entity_ref, decimals, fact_set_id, structure_id` |
 | `ib_envelopes` | One `InformationBlockEnvelope` per statement Network |
-| `mode` | `report` (a published, immutable report) |
+| `structure_display_order` | Per-structure sort key, published as `rs:structureOrder` |
+| `mode` | `report` (a published, immutable report) or `live` (an ad-hoc snapshot) |
 | `report_meta` | `report_id, generation_count, filing_status, filed_at, supersedes_id, source_graph_id, source_report_id, shared_at` |
+| `live_meta` | Present instead of `report_meta` on a `live` bundle |
+
+**`reporting_style` is an id, not a code.** The bundle carries `entities.reporting_style_id` verbatim and the JSON-LD emits it unchanged as `rs:reportingStyle`. The familiar four-segment code (`BSC-CORP-IS02-CF1`) is the Style Structure's own `reportingStyleCode` metadata — resolve the UUID against the Style to get it.
+
+**Two modes, one shape.** `mode='report'` is the published, immutable path described throughout this page. `mode='live'` bundles are an ad-hoc snapshot: they are response-body-only and **cannot be imported as a Report**. The discriminator is a first-class JSON-LD type, not a flag — a report serializes as `rs:Report` and a live snapshot as `rs:LiveSnapshot`.
 
 **Why one envelope.** The income statement, balance sheet, and cash flow statement are each an [Information Block](Information-Blocks). The bundle is the instance layer that exports those Blocks: it pairs each statement's structural skeleton (the linkbases and concept declarations) with the actual facts. JSON-LD and XBRL are two renderings of the same underlying content — keeping the assembly in one place guarantees the two formats can never drift apart.
 
@@ -98,70 +104,65 @@ report-bundles/{graph_id}/{report_id}/g{generation_count}.jsonld
 
 So the first publish writes `g1.jsonld`, a regenerate writes `g2.jsonld`, and so on. Older generations stay in S3 — they are not overwritten — and the `Report.bundle_url` column always points at the current generation's full `s3://` URI. This gives you an immutable history of every projection the platform ever published for a report.
 
+The on-demand flavors cache beside it under the same generation stamp — `g{n}.zip` for the XBRL package and `g{n}.holon.jsonld` for the holon — written the first time each is requested and reused thereafter.
+
 ## Downloading a Bundle
 
-The only external export surface is one REST endpoint:
+The export surface is a **GraphQL read field**, not a REST resource. A download is a read of stored state, so it lives on the read surface alongside every other report read:
 
 ```text
-GET /extensions/roboledger/{graph_id}/reports/{report_id}/download
+POST /extensions/{graph_id}/graphql
+{ reportDownloadUrl(reportId:, format:, expiresIn:) { … } }
 ```
 
-| Query param | Default | Notes |
+| Argument | Default | Notes |
 | --- | --- | --- |
-| `format` | `jsonld` | Accepted values: `jsonld`, `xbrl-2.1` |
-| `expires_in` | `300` | Presigned-URL TTL in seconds (min `60`, max `3600`); ignored for XBRL |
+| `reportId` | — | Required; the `id` from the `create-report` response |
+| `format` | `JSONLD` | `JSONLD`, `HOLON_JSONLD`, or `XBRL_2_1` |
+| `expiresIn` | `300` | Presigned-URL TTL in seconds (min `60`, max `3600`); out-of-range values raise `INVALID_EXPIRES_IN` |
 
-The two formats behave differently: **JSON-LD returns a presigned link to the stored artifact; XBRL streams a freshly built zip.**
+**Every flavor resolves to a presigned S3 URL** in the same `ReportBundleDownload` envelope — the API never streams bytes, because neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. The resolver returns a URL; the client follows it to S3. What differs between flavors is only *when* the object was built:
 
-### Format `jsonld` — Presigned Link to the Stored Bundle
+| Flavor | Content type | Built |
+| --- | --- | --- |
+| `JSONLD` | `application/ld+json` | Stamped to S3 inside the publish transaction |
+| `HOLON_JSONLD` | `application/ld+json` | Materialized and cached on first request |
+| `XBRL_2_1` | `application/zip` | Materialized and cached on first request |
 
-Because the JSON-LD bundle was already built and stored at publish time, the download endpoint returns a short-lived presigned S3 URL rather than the bytes:
+Each cached artifact is keyed by `generation_count`, and a generation is immutable — so the cache can never go stale.
+
+### Requesting a Download URL
 
 ```bash
-curl "http://localhost:8000/extensions/roboledger/$GRAPH_ID/reports/$REPORT_ID/download?format=jsonld" \
-  -H "X-API-Key: $API_KEY"
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: JSONLD) { downloadUrl expiresAt contentType format generationCount } }"}'
 ```
 
-The response is a JSON envelope:
+The response carries the envelope under `data.reportDownloadUrl`:
 
 ```json
 {
-  "download_url": "https://...s3...",
-  "expires_at": "2026-06-11T19:05:00Z",
-  "content_type": "application/ld+json",
+  "downloadUrl": "https://...s3...",
+  "expiresAt": "2026-06-11T19:05:00Z",
+  "contentType": "application/ld+json",
   "format": "jsonld",
-  "generation_count": 1
+  "generationCount": 1
 }
 ```
 
 Follow the presigned URL to fetch the artifact:
 
 ```bash
-curl -L "<download_url from previous response>" -o report.jsonld
+curl -L "<downloadUrl from previous response>" -o report.jsonld
 ```
 
-### Format `xbrl-2.1` — On-Demand Zip Stream
+Swap `format: XBRL_2_1` for the filing package (`-o report.zip`) or `format: HOLON_JSONLD` for the dataset-form holon — the query shape and the response envelope are identical.
 
-XBRL packages are not stored — they are rebuilt on every request by re-running `build_report_bundle` plus `serialize_to_xbrl`. The endpoint streams the zip directly in the response body (no JSON wrapper):
+**Note:** Reports published before serialization shipped have a `NULL` `bundle_url`. Any flavor requested for one of those raises `REPORT_BUNDLE_NOT_AVAILABLE` with a message to regenerate the report. There is no automatic backfill — run `regenerate-report` to stamp a current generation.
 
-```bash
-curl "http://localhost:8000/extensions/roboledger/$GRAPH_ID/reports/$REPORT_ID/download?format=xbrl-2.1" \
-  -H "X-API-Key: $API_KEY" \
-  -o report.zip
-```
-
-The response carries the package as headers and body:
-
-```text
-Content-Type: application/zip
-Content-Disposition: attachment; filename="<report_id>-g1.zip"
-X-Bundle-Format: xbrl-2.1
-X-Bundle-Generation: 1
-```
-
-**Note:** Reports published before serialization shipped have a `NULL` `bundle_url`. A `format=jsonld` download for one of those returns a 404 with a message to regenerate the report to produce a bundle. There is no automatic backfill — run `regenerate-report` to stamp a current generation.
-
-For the full request/response schema, query parameter constraints, and error codes, see the live OpenAPI spec at [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` when running locally). The download `operation_id` is `getReportBundleDownloadUrl`.
+The field also raises `REPORT_BUNDLE_SIGNING_FAILED` on a signing or materialization fault, and returns `null` when the `reportId` does not resolve at all. Introspect the full schema from GraphiQL in dev, or browse [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) for the surrounding operations.
 
 ## What's Inside Each Format
 
@@ -175,7 +176,11 @@ The JSON-LD artifact is a single document with one `@graph`. Concepts are identi
 - `rs:numericValue` — the numeric value
 - `rs:decimals` — declared precision (default `INF`)
 
-There is no `xbrli:context` / `contextRef` indirection — period, unit, and entity are attached to each fact node. The reporting style appears as `rs:reportingStyle` (e.g. `"BSC-CORP-IS02-CF1"`). This shape mirrors how the framework itself (rs-gaap, fac) already lives in the system: the bundle is the **instance layer** of the same canonical RDF ontology that defines the concepts.
+There is no `xbrli:context` / `contextRef` indirection — period, unit, and entity are attached to each fact node. The reporting style appears as `rs:reportingStyle` carrying the Style's UUID (e.g. `"025f5d48-12ce-5d65-b9eb-4f137a10ef06"`), not its four-segment code. This shape mirrors how the framework itself (rs-gaap, fac, cm) already lives in the system: the bundle is the **instance layer** of the same canonical RDF ontology that defines the concepts.
+
+### Holon JSON-LD
+
+`holon-jsonld` is the same content in **dataset form**: instead of one `@graph`, the document carries named graphs for the report holon's scene, boundary, and projection. It is a derived projection of the very same `StatementBundle` the flat JSON-LD comes from — not a separate assembly — so the two can never disagree. Unlike the flat flavor it is not stamped at publish; it is materialized on first request and cached under a `.holon.jsonld` key alongside the other generation artifacts.
 
 ### XBRL 2.1
 
@@ -278,16 +283,18 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/r
   -H "Content-Type: application/json" \
   -d '{"report_id": "'"$REPORT_ID"'"}'
 
-# 3. Download the new generation
-curl "http://localhost:8000/extensions/roboledger/$GRAPH_ID/reports/$REPORT_ID/download?format=jsonld" \
-  -H "X-API-Key: $API_KEY"
+# 3. Get a download URL for the new generation
+curl -X POST "http://localhost:8000/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ reportDownloadUrl(reportId: \"'"$REPORT_ID"'\", format: JSONLD) { downloadUrl expiresAt generationCount } }"}'
 ```
 
 All of these operations return an `OperationEnvelope` and accept an `Idempotency-Key` header. For the exact request schemas of each operation, see [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs). For the mechanics of mapping a chart of accounts to framework concepts, see the [RoboLedger Operations](RoboLedger-Operations) guide.
 
 ## Troubleshooting
 
-### JSON-LD Download Returns 404
+### `REPORT_BUNDLE_NOT_AVAILABLE`
 
 The report has no stored bundle (`bundle_url` is `NULL`) — it was published before serialization shipped, or was never published.
 
@@ -300,17 +307,17 @@ curl -X POST "http://localhost:8000/extensions/roboledger/$GRAPH_ID/operations/r
   -d '{"report_id": "'"$REPORT_ID"'"}'
 ```
 
-### Download Returns 400 for a Format
+### An Unrecognized Format
 
-The endpoint accepts `jsonld` and `xbrl-2.1`. Any other value returns a 400 with the list of supported flavors in the error detail.
+`format` is a GraphQL enum, so an unknown name fails validation before the resolver runs.
 
-**Solution:** Use `format=jsonld` or `format=xbrl-2.1`.
+**Solution:** Use `JSONLD`, `HOLON_JSONLD`, or `XBRL_2_1`.
 
-### XBRL Download Is Slow on Large Reports
+### The First XBRL Download Is Slow on Large Reports
 
-The XBRL package is built fresh on every request (it is not cached in S3), so it re-runs the full bundle build and encode each time.
+Only the **first** download of a given generation pays for the build: it re-runs `build_report_bundle` plus `serialize_to_xbrl` and writes the zip to S3. Every later request for the same generation is a cache hit that just presigns the stored object. The same is true of `HOLON_JSONLD`.
 
-**Solution:** This is expected. If you need a stable artifact to reference repeatedly, download once and persist the zip yourself.
+**Solution:** This is expected on the first call and does not repeat. Regenerating the report starts a new generation, so the next download after a `regenerate-report` pays the build cost once again.
 
 ### Publish Fails on Bundle Upload
 
@@ -330,7 +337,8 @@ The JSON-LD bundle is uploaded inside the publish transaction. If S3 is unreacha
 
 **API & Codebase:**
 
-- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec for the download endpoint and report operations
+- **[API Documentation](https://api.robosystems.ai/docs)** - Live OpenAPI spec for the report operations
+- **[GraphQL Reads](GraphQL-Reads)** - The read surface `reportDownloadUrl` lives on
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration in codebase
 - **[Models — Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md)** - Extensions OLTP models in codebase
 
