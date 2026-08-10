@@ -160,7 +160,7 @@ Each tenant has two stores, and knowing which one you are talking to determines 
 
 The operational store is the source of truth for transactions; its rows are **materialized** into the analytical graph for reporting and analysis (`POST /v1/graphs/{graph_id}/operations/materialize`). The materialization pipeline runs PostgreSQL OLTP → DuckDB staging → LadybugDB graph.
 
-**Important:** On a main graph, Cypher access is **read-only**. Writes flow through the staging-and-materialize pipeline (for analytical data) or through Event Blocks (on the operational side). Only subgraphs accept Cypher writes.
+**Important:** On a main graph, Cypher access is **read-only** — the analytical graph is a projection, so hand-editing it would be undone at the next rebuild. Writes take one of two doors: the **extensions command surface** (`POST /extensions/{domain}/{graph_id}/operations/{op_name}`) for operational data — Event Blocks are one such command, alongside period close, entity updates, securities and the rest — or the **staging-and-materialize pipeline** for bulk analytical loads. Only subgraphs accept Cypher writes, and only from a `member` or `admin`.
 
 → Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
 
