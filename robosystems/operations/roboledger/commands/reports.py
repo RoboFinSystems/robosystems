@@ -1260,6 +1260,12 @@ def _ensure_shared_elements(
   sender's CoA would be a different (and wrong) situation, and is left for
   the materializer's own guard to absorb rather than dragging a foreign
   chart of accounts across the boundary.
+
+  **Fails closed.** A read failure against the source propagates, and
+  ``_share_to_target``'s handler turns it into a per-recipient error item
+  with the target transaction rolled back. Swallowing it would let the
+  fact-insert loop below write the exact dangling references this function
+  exists to prevent — the original defect, behind a rarer trigger.
   """
   if not element_ids:
     return
@@ -1317,68 +1323,70 @@ def _ensure_shared_elements(
     "is_active",
   )
 
-  try:
-    with extensions_session(source_graph_id) as source_session:
-      taxonomy_ids = [
-        row[0]
-        for row in source_session.execute(
-          text("""
-            SELECT DISTINCT e.taxonomy_id
-            FROM elements e
-            JOIN taxonomies t ON t.id = e.taxonomy_id
-            WHERE e.id = ANY(:ids)
-              AND t.taxonomy_type = 'reporting_extension'
-          """),
-          {"ids": list(missing)},
-        ).fetchall()
-      ]
-      if not taxonomy_ids:
-        logger.warning(
-          f"Shared facts from {source_graph_id} cite {len(missing)} concept(s) "
-          "outside any reporting extension; not copied."
-        )
-        return
+  with extensions_session(source_graph_id) as source_session:
+    taxonomy_ids = [
+      row[0]
+      for row in source_session.execute(
+        text("""
+          SELECT DISTINCT e.taxonomy_id
+          FROM elements e
+          JOIN taxonomies t ON t.id = e.taxonomy_id
+          WHERE e.id = ANY(:ids)
+            AND t.taxonomy_type = 'reporting_extension'
+        """),
+        {"ids": list(missing)},
+      ).fetchall()
+    ]
+    if not taxonomy_ids:
+      logger.warning(
+        f"Shared facts from {source_graph_id} cite {len(missing)} concept(s) "
+        "outside any reporting extension; not copied."
+      )
+      return
 
-      # Detached from the source session before it closes — these become new
-      # rows in a different schema, not attached instances.
-      taxonomies = [
-        ({f: getattr(t, f) for f in _TAX_FIELDS}, dict(t.metadata_ or {}))
-        for t in source_session.execute(
-          select(Taxonomy).where(Taxonomy.id.in_(taxonomy_ids))
-        )
-        .scalars()
-        .all()
-      ]
-      elements = [
-        {f: getattr(e, f) for f in _ELEM_FIELDS}
-        for e in source_session.execute(
-          select(Element)
-          .where(Element.taxonomy_id.in_(taxonomy_ids))
-          .order_by(Element.depth)
-        )
-        .scalars()
-        .all()
-      ]
-  except Exception:
-    logger.warning(
-      f"Could not read shared concepts from {source_graph_id}; the "
-      "recipient's materialization will skip the facts citing them."
-    )
-    return
+    # Detached from the source session before it closes — these become new
+    # rows in a different schema, not attached instances.
+    taxonomies = [
+      ({f: getattr(t, f) for f in _TAX_FIELDS}, dict(t.metadata_ or {}))
+      for t in source_session.execute(
+        select(Taxonomy).where(Taxonomy.id.in_(taxonomy_ids))
+      )
+      .scalars()
+      .all()
+    ]
+    elements = [
+      {f: getattr(e, f) for f in _ELEM_FIELDS}
+      for e in source_session.execute(
+        select(Element).where(Element.taxonomy_id.in_(taxonomy_ids))
+      )
+      .scalars()
+      .all()
+    ]
 
+  existing_taxonomies = {
+    row[0]
+    for row in target_session.execute(
+      text("SELECT id FROM taxonomies WHERE id = ANY(:ids)"),
+      {"ids": [f["id"] for f, _ in taxonomies]},
+    ).fetchall()
+  }
+
+  # Same two-pass shape as the elements below, and for the same reason:
+  # `parent_taxonomy_id` is a self-FK, so an extension whose parent is
+  # another extension in this batch would depend on insert order. It names a
+  # library taxonomy in every case seen so far — but "every case seen so far"
+  # is what the depth ordering relied on too.
+  tax_parents: dict[str, str] = {}
   for fields, metadata in taxonomies:
-    if target_session.get(Taxonomy, fields["id"]):
+    if fields["id"] in existing_taxonomies:
       continue
-    # `parent_taxonomy_id` on an extension names the standard it extends —
-    # a library taxonomy, present in every tenant. Null it rather than fail
-    # the share if the recipient somehow lacks it.
-    if fields["parent_taxonomy_id"] and not target_session.get(
-      Taxonomy, fields["parent_taxonomy_id"]
-    ):
-      fields["parent_taxonomy_id"] = None
+    parent_id = fields.pop("parent_taxonomy_id")
+    if parent_id:
+      tax_parents[fields["id"]] = parent_id
     target_session.add(
       Taxonomy(
         **fields,
+        parent_taxonomy_id=None,
         metadata_={**metadata, "source_graph_id": source_graph_id},
         is_shared=False,
         is_locked=True,
@@ -1387,15 +1395,103 @@ def _ensure_shared_elements(
     )
   target_session.flush()
 
-  # Depth-ordered so a child's self-referencing `parent_id` resolves to a
-  # row already inserted.
-  copied = 0
+  # Wire the parents that resolve; leave the rest null rather than fail the
+  # share over a taxonomy the recipient happens not to have.
+  if tax_parents:
+    resolvable_tax = {
+      row[0]
+      for row in target_session.execute(
+        text("SELECT id FROM taxonomies WHERE id = ANY(:ids)"),
+        {"ids": list(set(tax_parents.values()))},
+      ).fetchall()
+    }
+    for child_id, parent_id in tax_parents.items():
+      if parent_id in resolvable_tax:
+        target_session.execute(
+          text("UPDATE taxonomies SET parent_taxonomy_id = :pid WHERE id = :cid"),
+          {"pid": parent_id, "cid": child_id},
+        )
+    target_session.flush()
+
+  element_ids_in = [f["id"] for f in elements]
+  existing_elements = {
+    row[0]
+    for row in target_session.execute(
+      text("SELECT id FROM elements WHERE id = ANY(:ids)"),
+      {"ids": element_ids_in},
+    ).fetchall()
+  }
+  # `idx_elements_qname` is UNIQUE across the whole tenant, so a second
+  # sender using the same namespace prefix — `acme:` is nobody's reserved
+  # word — would otherwise fail the entire share on a collision neither
+  # party controls. Skip the colliding concept instead; its facts land
+  # without a concept edge, which the materializer's inner join already
+  # absorbs.
+  taken_qnames = {
+    row[0]
+    for row in target_session.execute(
+      text("SELECT qname FROM elements WHERE qname = ANY(:qnames) AND id != ALL(:ids)"),
+      {
+        "qnames": [f["qname"] for f in elements if f["qname"]],
+        "ids": element_ids_in,
+      },
+    ).fetchall()
+  }
+
+  # Two passes, because `parent_id` is a self-FK and **`depth` cannot order
+  # it**: the column defaults to 0 and nothing populates it, so every row in
+  # a tenant carries depth 0 and sorting by it is a no-op. An earlier version
+  # ordered by depth and passed its tests on whatever order the heap happened
+  # to return. Insert parentless, then wire parents that resolve — which also
+  # covers a parent living outside the copied taxonomies (the sender's CoA,
+  # say) without failing the share, matching how `parent_taxonomy_id` is
+  # handled above.
+  parents: dict[str, str] = {}
+  skipped_qname = 0
   for fields in elements:
-    if target_session.get(Element, fields["id"]):
+    if fields["id"] in existing_elements:
       continue
-    target_session.add(Element(**fields, source="linked", created_by=shared_by))
-    copied += 1
+    if fields["qname"] and fields["qname"] in taken_qnames:
+      logger.warning(
+        f"Concept {fields['qname']!r} from {source_graph_id} collides with an "
+        "existing qname in the recipient; skipped."
+      )
+      skipped_qname += 1
+      continue
+    parent_id = fields.pop("parent_id")
+    if parent_id:
+      parents[fields["id"]] = parent_id
+    target_session.add(
+      Element(**fields, parent_id=None, source="linked", created_by=shared_by)
+    )
   target_session.flush()
+
+  resolvable = {
+    row[0]
+    for row in target_session.execute(
+      text("SELECT id FROM elements WHERE id = ANY(:ids)"),
+      {"ids": list(set(parents.values()))},
+    ).fetchall()
+  }
+  for child_id, parent_id in parents.items():
+    if parent_id in resolvable:
+      target_session.execute(
+        text("UPDATE elements SET parent_id = :pid WHERE id = :cid"),
+        {"pid": parent_id, "cid": child_id},
+      )
+  target_session.flush()
+
+  copied = len(elements) - len(existing_elements) - skipped_qname
+  # Concepts cited by a fact but not carried by any copied extension — a
+  # mixed batch copies what it can and drops the rest, so name them rather
+  # than leaving the omission silent.
+  uncovered = missing - {f["id"] for f in elements}
+  if uncovered:
+    logger.warning(
+      f"{len(uncovered)} concept(s) cited by facts from {source_graph_id} "
+      f"belong to no reporting extension and were not copied: "
+      f"{sorted(uncovered)[:5]}"
+    )
 
   logger.info(
     f"Copied {copied} concept(s) in {len(taxonomies)} reporting extension(s) "
