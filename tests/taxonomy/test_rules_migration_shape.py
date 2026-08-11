@@ -196,6 +196,78 @@ class TestTenantPin:
     assert DEFAULT_TAXONOMY_PIN.get("rs-gaap-rules") == "v1"
 
 
+class TestRuleVariableKeyCase:
+  """``rules.rule_variables`` is stored snake_case; the JSON-LD source
+  spells the same fields camelCase.
+
+  Migration 0030 crossed the two and wrote the wire spelling into the
+  column, which every seeded ``RollUp`` rule in public and in both
+  provisioned tenants then failed to evaluate — ``evaluators.py`` indexes
+  ``v["variable_name"]`` with no fallback, so the rows raised
+  ``KeyError`` and recorded ``status='error'``. 0031 repaired the data.
+
+  These tests hold the two ends together: what the writer emits and what
+  the evaluator reads. A DB round-trip would catch it too, but this file's
+  contract is static checks, and the failure mode is a key name — which
+  is comparable without a database.
+  """
+
+  def test_serializer_emits_the_keys_the_evaluator_indexes(self) -> None:
+    """The real cross-check: every key ``evaluators.py`` pulls off a
+    rule-variable entry must be one the serializer writes."""
+    import re as _re
+
+    from robosystems.operations.taxonomy_block.library_creator import (
+      rule_variables_json,
+    )
+    from robosystems.taxonomy.model import RuleVariableSpec
+
+    evaluators_src = (
+      Path(__file__).resolve().parents[2]
+      / "robosystems"
+      / "operations"
+      / "information_block"
+      / "rules"
+      / "evaluators.py"
+    ).read_text()
+
+    indexed_keys = set(
+      _re.findall(r'\bv\[["\']([a-zA-Z_]+)["\']\]', evaluators_src)
+    ) | set(_re.findall(r'\bv\.get\(["\']([a-zA-Z_]+)["\']', evaluators_src))
+    assert indexed_keys, "found no rule-variable key access in evaluators.py"
+
+    emitted = set(
+      rule_variables_json(
+        [RuleVariableSpec(variable_name="Assets", variable_qname="rs-gaap:Assets")]
+      )[0]
+    )
+    missing = indexed_keys - emitted
+    assert not missing, (
+      f"evaluators.py reads {sorted(missing)} but the writer never emits it — "
+      "a rule serialized this way raises KeyError at evaluation time"
+    )
+
+  def test_wire_spelling_never_reaches_the_column(self) -> None:
+    """``variableName`` / ``variableQname`` belong to the JSON-LD source
+    (taxonomy/loader.py, arelle/context.py), not to the JSONB column."""
+    from robosystems.operations.taxonomy_block.library_creator import (
+      rule_variables_json,
+    )
+    from robosystems.taxonomy.model import RuleVariableSpec
+
+    emitted = rule_variables_json(
+      [RuleVariableSpec(variable_name="Assets", variable_qname="rs-gaap:Assets")]
+    )
+    assert emitted == [{"variable_name": "Assets", "variable_qname": "rs-gaap:Assets"}]
+
+  def test_repair_migration_targets_the_wire_spelling(self) -> None:
+    """0031 must key its ``WHERE`` on the camelCase spelling and write the
+    snake_case one — inverted, it would re-break every rule it touches."""
+    sql = (_MIGRATION_PATH.parent / "0031_rule_variable_key_case.py").read_text()
+    assert "'variable_name'," in sql and "'variable_qname'," in sql
+    assert "? 'variableName'" in sql
+
+
 class TestTenantWriterRuleCols:
   def test_rule_cols_include_polymorphic_target_fks(self) -> None:
     """The public→tenant INSERT...SELECT must name the polymorphic FK
