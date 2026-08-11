@@ -97,6 +97,11 @@ runs:
         echo "🔄 Refreshing graph container on ${INSTANCE_ID} (${{ inputs.node-type }})"
         echo "   busy-wait ceiling: ${MAX_WAIT_MINUTES}m, total budget: ${BUDGET_SECONDS}s"
 
+        # Two commands, run as sequential lines of one script. The first is a
+        # presence guard with its own exit code, so "the instance has not picked up
+        # this script yet" is reported as itself rather than inferred from bash's
+        # generic 127 — see the exit-code handling below.
+        #
         # executionTimeout is always explicit. The AWS-RunShellScript default is
         # 3600s, which happens to accommodate a 30-minute busy-wait today, but
         # leaving it implicit means a later raise of max-wait-minutes truncates
@@ -105,7 +110,7 @@ runs:
           --instance-ids "${INSTANCE_ID}" \
           --document-name "AWS-RunShellScript" \
           --comment "graph container refresh (${{ inputs.environment }})" \
-          --parameters "commands=[\"MAX_WAIT_MINUTES=${MAX_WAIT_MINUTES} FORCE_IGNORE_BUSY=${FORCE_IGNORE_BUSY} /usr/local/bin/refresh-graph-container.sh\"],executionTimeout=[\"${BUDGET_SECONDS}\"]" \
+          --parameters "commands=[\"[ -x /usr/local/bin/refresh-graph-container.sh ] || { echo REFRESH_RESULT=skipped-no-script; exit 4; }\",\"MAX_WAIT_MINUTES=${MAX_WAIT_MINUTES} FORCE_IGNORE_BUSY=${FORCE_IGNORE_BUSY} /usr/local/bin/refresh-graph-container.sh\"],executionTimeout=[\"${BUDGET_SECONDS}\"]" \
           --query "Command.CommandId" \
           --output text \
           --region "${REGION}")
@@ -165,12 +170,30 @@ runs:
             --output text \
             --region "${REGION}" 2>/dev/null || echo "-1")
 
-          # Exit 3 means the instance has not cycled since the complete-environment
-          # contract landed, so the script declined to start a container missing
-          # mounts the boot configured. That is a transitional state to be waited
-          # out (ASG churn) or backfilled — not a broken refresh — so it must not
-          # fail the deploy. It is reported loudly and distinctly so a fleet that
-          # never cycles cannot hide behind a green run.
+          # Two exit codes mean "this instance has not picked up the new
+          # deployment yet," which is a transitional state to be waited out (ASG
+          # churn) or backfilled — not a broken refresh — so neither may fail the
+          # deploy. Both are reported loudly and distinctly, so a fleet that never
+          # cycles cannot hide behind a green run.
+          #
+          #     4 — refresh-graph-container.sh is not on the instance at all.
+          #         Common scripts are downloaded from S3 in userdata, i.e. only at
+          #         boot, so uploading a new one does not put it on a running
+          #         instance. Every instance predating this change reports 4 until
+          #         it cycles. The guard that emits it is an explicit -x test in
+          #         the dispatched command, deliberately NOT an inference from
+          #         bash's 127: a missing `docker` inside the script would also
+          #         exit 127, and that is a real failure, not a stale instance.
+          #     3 — the script is present but /etc/environment predates the
+          #         complete-environment contract, so it declined to start a
+          #         container missing mounts the boot configured.
+          if [ "${RESPONSE_CODE}" == "4" ]; then
+            echo "::warning::${INSTANCE_ID} skipped: refresh-graph-container.sh is not on this instance yet (it is installed at boot). The container was left running its current image. Cycle the instance to pick it up."
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "result=skipped-no-script" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           if [ "${RESPONSE_CODE}" == "3" ]; then
             echo "::warning::${INSTANCE_ID} skipped: /etc/environment predates the complete-environment contract. The container was left running its current image. Cycle the instance or backfill /etc/environment."
             echo "${OUTPUT}" | tail -20
