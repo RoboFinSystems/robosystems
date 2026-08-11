@@ -77,11 +77,6 @@ on:
         required: false
         type: string
         default: "writer"
-      graph_health_check_timeout:
-        description: "Seconds to wait for graph health check"
-        required: false
-        type: string
-        default: "30"
       max_wait_minutes:
         description: "Minutes to wait for in-flight destructive ops on the target instance"
         required: false
@@ -149,25 +144,24 @@ jobs:
           if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
             echo "📦 Collecting writer instances..."
 
-            # Get all graph writers using the LadybugRole tag
+            # Get all graph writers using the LadybugRole tag. WriterTier comes
+            # out of this same response — reading it with a per-instance
+            # describe-tags call inside the loop below is O(n) API calls from a
+            # single runner and throttles long before a large fleet finishes.
             LBUG_WRITERS=$(aws ec2 describe-instances \
               --filters \
                 "Name=tag:Environment,Values=${{ inputs.environment }}" \
                 "Name=tag:LadybugRole,Values=writer" \
                 "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
+              --query "Reservations[].Instances[].[InstanceId, Tags[?Key=='WriterTier']|[0].Value]" \
               --output text \
               --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
 
-            # Process graph writers
-            for INSTANCE in $LBUG_WRITERS; do
-              TIER=$(aws ec2 describe-tags \
-                --filters \
-                  "Name=resource-id,Values=$INSTANCE" \
-                  "Name=key,Values=WriterTier" \
-                --query "Tags[0].Value" \
-                --output text \
-                --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+            # Process graph writers (tab-separated "<instance-id> <tier>" rows)
+            while read -r INSTANCE TIER; do
+              [ -n "$INSTANCE" ] || continue
+              # An untagged instance renders as the literal "None" in text output
+              [ "$TIER" == "None" ] && TIER=""
 
               # Filter instances based on node_types parameter
               if [ "$NODE_TYPES" == "shared" ]; then
@@ -193,7 +187,7 @@ jobs:
               else
                 INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
               fi
-            done
+            done <<< "$LBUG_WRITERS"
           fi
 
           # Collect shared replicas (only if all or shared-replicas is selected)
@@ -241,7 +235,11 @@ jobs:
     needs: [collect-graph-instances]
     if: needs.collect-graph-instances.outputs.has_instances == 'true'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    timeout-minutes: 15
+    # Derived from the busy-wait ceiling, not a fixed number: a static 15 was
+    # shorter than the 30-minute default wait, so a genuinely busy instance
+    # could never be waited out — the job was killed first. The +15 covers the
+    # pull, restart, and health check on top of the wait.
+    timeout-minutes: ${{ fromJSON(inputs.max_wait_minutes || '30') + 15 }}
     permissions:
       id-token: write
       contents: read
@@ -263,13 +261,6 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
 
-      - name: Get AWS Account ID
-        id: aws-account
-        run: |
-          # Fetch from STS - validates OIDC connection is working
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
-
       - name: Update Graph Container
         uses: ./.github/actions/refresh-graph-containers
         with:
@@ -278,8 +269,6 @@ jobs:
           node-type: ${{ matrix.node_type }}
           backend: ${{ matrix.backend }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
-          aws-account-id: ${{ steps.aws-account.outputs.account_id }}
-          health-check-timeout: ${{ inputs.graph_health_check_timeout || '30' }}
           max-wait-minutes: ${{ inputs.max_wait_minutes || '30' }}
           force-ignore-busy: ${{ inputs.force_ignore_busy || 'false' }}
 

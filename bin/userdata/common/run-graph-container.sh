@@ -4,6 +4,27 @@
 
 set -e
 
+# Determine container name based on node type. The container name represents the
+# service role, not the storage engine. This is the ONLY place that derives it —
+# refresh-graph-container.sh asks for it via --print-container-name rather than
+# re-deriving, so there is exactly one spelling of the mapping.
+determine_container_name() {
+    if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
+        echo "graph-api-shared"
+    else
+        echo "graph-api"
+    fi
+}
+
+# Name query: answered before the full validation below, because the mapping needs
+# nothing but NODE_TYPE and callers should not have to construct a whole runnable
+# environment just to ask what the container is called.
+if [ "${1:-}" = "--print-container-name" ]; then
+    : ${NODE_TYPE:?"NODE_TYPE must be set"}
+    determine_container_name
+    exit 0
+fi
+
 # Validate required environment variables
 : ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
@@ -25,15 +46,6 @@ LOGS_MOUNT_TARGET="${LOGS_MOUNT_TARGET:-/app/logs}"
 STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
 STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
-
-# Determine container name based on node type
-determine_container_name() {
-    if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-        echo "graph-api-shared"
-    else
-        echo "graph-api"
-    fi
-}
 
 CONTAINER_NAME=$(determine_container_name)
 

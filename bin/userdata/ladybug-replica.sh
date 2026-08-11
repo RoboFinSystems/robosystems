@@ -160,6 +160,12 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/run-graph-container.sh \
   exit 1
 }
 
+aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/refresh-graph-container.sh \
+    /usr/local/bin/refresh-graph-container.sh || {
+  echo "ERROR: Could not download container refresh script from S3"
+  exit 1
+}
+
 aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-health-check.sh \
     /usr/local/bin/graph-health-check.sh || {
   echo "ERROR: Could not download health check script from S3"
@@ -169,6 +175,7 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-health-check.sh \
 # Make scripts executable
 chmod +x /usr/local/bin/register-graph-instance.sh
 chmod +x /usr/local/bin/run-graph-container.sh
+chmod +x /usr/local/bin/refresh-graph-container.sh
 chmod +x /usr/local/bin/graph-health-check.sh
 
 # ==================================================================================
@@ -224,7 +231,15 @@ export DOCKER_PROFILE="ladybug-shared-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES}"
 
-# Persist variables to /etc/environment for health checks and restarts
+# Persist variables to /etc/environment for health checks and restarts.
+#
+# This must stay a superset of everything run-graph-container.sh reads, because
+# a container refresh sources only this file. Anything exported above but not
+# written here silently falls back to that script's defaults, and the refreshed
+# container then differs from the one this boot started — which is exactly how
+# the mount paths and DOCKER_PROFILE below went missing: a refreshed replica
+# came back with no Lance mount (while LANCE_INDEX_PATH still pointed into it)
+# and no staging mount.
 echo "DATABASE_TYPE=ladybug" >> /etc/environment
 echo "NODE_TYPE=${LBUG_NODE_TYPE}" >> /etc/environment
 echo "CONTAINER_PORT=${LBUG_PORT}" >> /etc/environment
@@ -239,10 +254,24 @@ echo "AWS_REGION=${AWS_REGION}" >> /etc/environment
 echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
 echo "REPOSITORY_TYPE=${REPOSITORY_TYPE}" >> /etc/environment
 echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES}" >> /etc/environment
-echo "LANCE_INDEX_PATH=/app/data/lance" >> /etc/environment
+echo "DATA_MOUNT_SOURCE=${DATA_MOUNT_SOURCE}" >> /etc/environment
+echo "DATA_MOUNT_TARGET=${DATA_MOUNT_TARGET}" >> /etc/environment
+echo "LOGS_MOUNT_SOURCE=${LOGS_MOUNT_SOURCE}" >> /etc/environment
+echo "LOGS_MOUNT_TARGET=${LOGS_MOUNT_TARGET}" >> /etc/environment
+echo "STAGING_MOUNT_SOURCE=${STAGING_MOUNT_SOURCE}" >> /etc/environment
+echo "STAGING_MOUNT_TARGET=${STAGING_MOUNT_TARGET}" >> /etc/environment
+echo "LANCE_MOUNT_SOURCE=${LANCE_MOUNT_SOURCE}" >> /etc/environment
+echo "LANCE_MOUNT_TARGET=${LANCE_MOUNT_TARGET}" >> /etc/environment
+echo "LANCE_INDEX_PATH=${LANCE_MOUNT_TARGET}" >> /etc/environment
+echo "DOCKER_PROFILE=${DOCKER_PROFILE}" >> /etc/environment
 echo "DATABASE_ENDPOINT=${DATABASE_ENDPOINT:-}" >> /etc/environment
 echo "DATABASE_PORT=${DATABASE_PORT:-5432}" >> /etc/environment
 echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
+# Asserts that everything above was written. refresh-graph-container.sh refuses to
+# refresh below this version rather than start a container missing mounts this boot
+# configured. Bump it here and in that script together whenever a variable a
+# refresh depends on is added above.
+echo "GRAPH_ENV_SCHEMA=2" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
