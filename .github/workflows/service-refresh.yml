@@ -135,10 +135,15 @@ jobs:
           # shorter than the 30-minute default wait, so a genuinely busy instance
           # could never be waited out.
           #
-          # Computed in shell, NOT in a `${{ }}` expression: GitHub Actions
+          # Computed in shell, NOT in a workflow expression: GitHub Actions
           # expressions have no arithmetic operators (the operator set is
           # grouping, index, dereference, !, comparisons, && and ||), so a `+`
-          # there is a workflow parse error, not a value.
+          # in one is a workflow parse error, not a value.
+          #
+          # Do not write the literal dollar-brace-brace sequence in this block,
+          # not even in a comment: the expression parser scans the whole `run:`
+          # body and does not know what a shell comment is, so an empty or
+          # malformed one here invalidates the entire workflow file.
           MAX_WAIT="${{ inputs.max_wait_minutes || '30' }}"
           if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
             echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
@@ -259,9 +264,12 @@ jobs:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
     # Derived from the busy-wait ceiling by the collect job (see its "Compute
     # refresh job timeout" step) rather than hardcoded here, so the two cannot
-    # drift. The `|| 45` is a floor for the impossible case of an empty output,
-    # since an empty timeout-minutes is not a valid value.
-    timeout-minutes: ${{ needs.collect-graph-instances.outputs.job_timeout_minutes || 45 }}
+    # drift. fromJSON is required, not decorative: job outputs are always
+    # strings and timeout-minutes must be a number, so passing the output
+    # through raw is a type error that invalidates the workflow. A `|| 45`
+    # fallback has the same problem — it yields a string — and is unnecessary
+    # anyway, since this job only runs when the collect job set the output.
+    timeout-minutes: ${{ fromJSON(needs.collect-graph-instances.outputs.job_timeout_minutes) }}
     permissions:
       id-token: write
       contents: read
