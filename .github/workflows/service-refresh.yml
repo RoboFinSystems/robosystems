@@ -125,7 +125,29 @@ jobs:
     outputs:
       matrix: ${{ steps.collect.outputs.matrix }}
       has_instances: ${{ steps.collect.outputs.has_instances }}
+      job_timeout_minutes: ${{ steps.budget.outputs.job_timeout_minutes }}
     steps:
+      - name: Compute refresh job timeout
+        id: budget
+        run: |
+          # The refresh job must outlive the instance-side busy-wait, so this is
+          # derived from max_wait_minutes rather than hardcoded — a static 15 was
+          # shorter than the 30-minute default wait, so a genuinely busy instance
+          # could never be waited out.
+          #
+          # Computed in shell, NOT in a `${{ }}` expression: GitHub Actions
+          # expressions have no arithmetic operators (the operator set is
+          # grouping, index, dereference, !, comparisons, && and ||), so a `+`
+          # there is a workflow parse error, not a value.
+          MAX_WAIT="${{ inputs.max_wait_minutes || '30' }}"
+          if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
+            exit 1
+          fi
+          # +15 covers the pull, restart and health check on top of the wait.
+          echo "job_timeout_minutes=$((MAX_WAIT + 15))" >> $GITHUB_OUTPUT
+          echo "Refresh job timeout: $((MAX_WAIT + 15))m (busy-wait ceiling ${MAX_WAIT}m)"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -235,11 +257,11 @@ jobs:
     needs: [collect-graph-instances]
     if: needs.collect-graph-instances.outputs.has_instances == 'true'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    # Derived from the busy-wait ceiling, not a fixed number: a static 15 was
-    # shorter than the 30-minute default wait, so a genuinely busy instance
-    # could never be waited out — the job was killed first. The +15 covers the
-    # pull, restart, and health check on top of the wait.
-    timeout-minutes: ${{ fromJSON(inputs.max_wait_minutes || '30') + 15 }}
+    # Derived from the busy-wait ceiling by the collect job (see its "Compute
+    # refresh job timeout" step) rather than hardcoded here, so the two cannot
+    # drift. The `|| 45` is a floor for the impossible case of an empty output,
+    # since an empty timeout-minutes is not a valid value.
+    timeout-minutes: ${{ needs.collect-graph-instances.outputs.job_timeout_minutes || 45 }}
     permissions:
       id-token: write
       contents: read
