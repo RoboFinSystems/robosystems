@@ -272,6 +272,17 @@ jobs:
           echo "🔍 Linting CloudFormation templates..."
           uv run cfn-lint
 
+      - name: Lint GitHub Actions workflows
+        timeout-minutes: 1
+        run: |
+          echo "🔍 Linting GitHub Actions workflows..."
+          # GitHub does not validate a workflow file until it is triggered, so a
+          # malformed expression is invisible until it breaks a run — and for a
+          # reusable workflow like service-refresh.yml the run it breaks is a
+          # deploy. Accepted pre-existing findings are baselined in
+          # .github/actionlint.yaml; anything reported here is new.
+          uv run actionlint -shellcheck=
+
       - name: Scan dependencies for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:

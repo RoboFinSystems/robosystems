@@ -1,0 +1,41 @@
+# actionlint configuration — see `just lint-actions`.
+#
+# Why this exists: a malformed `${{ }}` expression makes a workflow file invalid,
+# and GitHub does not tell you until the workflow is triggered. For a reusable
+# workflow like service-refresh.yml, which prod.yml and staging.yml both call,
+# that means the first thing it breaks is a deploy. Two such errors shipped in
+# #1139 and were only noticed from the Actions tab. actionlint catches them at
+# commit time; this file is what keeps its output at zero so a new finding is
+# visible instead of buried.
+#
+# The ignores below are a documented baseline of findings that predate the linter
+# being introduced. Each is accepted for a stated reason, not silenced because it
+# was inconvenient. Do not add to this list to make a new finding go away —
+# adding an entry here is a decision that needs the same justification as these.
+
+self-hosted-runner:
+  labels:
+    - self-hosted-arm64
+
+paths:
+  .github/workflows/**:
+    ignore:
+      # service-refresh.yml types its workflow_call toggles as `string` and
+      # accepts either form at the point of use (`== true || == 'true'`), which is
+      # deliberate: the same inputs are passed from workflow_dispatch (boolean)
+      # and from three calling workflows. actionlint is stricter than the runtime
+      # here. Retyping them is a behavior change and belongs in its own PR.
+      - 'bool value cannot be assigned'
+      # ACTIONS_TOKEN is an organization-level secret, so it is not declared in
+      # any workflow_call `secrets:` block and actionlint cannot see it.
+      - 'property "actions_token" is not defined'
+      # Composite action inputs do not support `type:`; GitHub ignores the key
+      # rather than failing. Harmless, and cleaning it touches three actions
+      # unrelated to whatever change is in flight.
+      - 'unexpected key "type" for definition of input'
+      # graph-asg-refresh.yml offers an empty `tier` choice on purpose — it means
+      # "all tiers".
+      - 'string should not be empty'
+      # A required workflow_call input with a default: the default is unreachable,
+      # which is untidy but not wrong.
+      - 'but it is also required'

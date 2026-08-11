@@ -126,6 +126,7 @@ test-all:
     @just format
     @just typecheck
     @just cf-lint-all
+    @just lint-actions
 
 # Run tests (exclude slow tests)
 test module="":
@@ -156,6 +157,7 @@ test-code:
     @just format
     @just typecheck
     @just cf-lint-all
+    @just lint-actions
 
 # Run linting
 lint fix="":
@@ -186,6 +188,23 @@ cf-lint template:
 # Lint all CloudFormation templates
 cf-lint-all:
     @uv run cfn-lint -t cloudformation/*.yaml
+
+# Lint GitHub Actions workflows and composite actions.
+#
+# GitHub does not validate a workflow file until it is triggered, so a malformed
+# expression is invisible until it breaks a run — and for a reusable workflow like
+# service-refresh.yml, the run it breaks is a deploy. Accepted pre-existing
+# findings are baselined in .github/actionlint.yaml, so any output here is new.
+#
+# shellcheck integration is off: it reports dozens of info-level SC2086 quoting
+# notes across workflows that predate this recipe, which would drown the errors
+# that actually invalidate a file. Run `just lint-actions-shell` to see them.
+lint-actions:
+    @uv run actionlint -shellcheck=
+
+# Same, with shellcheck integration on (noisy; not part of the gate)
+lint-actions-shell:
+    @uv run actionlint
 
 # Validate the rs-gaap framework: structure + package integrity + CoA coverage (--summary terse, --coverage-only for just coverage)
 framework-validate *args="":
