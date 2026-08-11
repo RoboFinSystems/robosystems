@@ -30,6 +30,7 @@ rows alongside the old ones (duplicate concepts, dangling FKs).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -48,6 +49,7 @@ from robosystems.models.extensions import (
   Trait,
 )
 from robosystems.taxonomy.model import (
+  RuleVariableSpec,
   TaxonomyPackage,
   TraitAssignmentSpec,
 )
@@ -140,6 +142,34 @@ def _association_id(
 
 def _rule_id(standard: str, local_id: str) -> str:
   return generate_deterministic_uuid(f"{standard}:{local_id}", namespace="rule")
+
+
+# The stored key names for a rule's variable list. Snake_case is the storage
+# contract: operations/information_block/rules/evaluators.py indexes
+# ``v["variable_name"]`` directly, so any other spelling raises KeyError at
+# evaluation time rather than failing on write. The JSON-LD source spells the
+# same fields ``variableName`` / ``variableQname`` (see taxonomy/loader.py and
+# arelle/context.py) — that is the wire form and must not reach this column.
+RULE_VARIABLE_NAME_KEY = "variable_name"
+RULE_VARIABLE_QNAME_KEY = "variable_qname"
+
+
+def rule_variables_json(variables: Iterable[RuleVariableSpec]) -> list[dict[str, str]]:
+  """Serialize a rule's variables for the ``rules.rule_variables`` JSONB column.
+
+  Every writer — the library seeder and any migration that rewrites the
+  column — must go through here. Migration 0030 hand-rolled the dict with
+  the JSON-LD spelling and broke evaluation for all 21 seeded RollUp rules
+  across public and every tenant; 0031 repaired the data and this function
+  exists so the shape has one definition to drift from.
+  """
+  return [
+    {
+      RULE_VARIABLE_NAME_KEY: v.variable_name,
+      RULE_VARIABLE_QNAME_KEY: v.variable_qname,
+    }
+    for v in variables
+  ]
 
 
 def _default_role_uri(package: TaxonomyPackage) -> str:
@@ -793,10 +823,7 @@ def create_library_rules(
         counts["rules_skipped"] += 1
         continue
 
-    variables_json = [
-      {"variable_name": v.variable_name, "variable_qname": v.variable_qname}
-      for v in rule.rule_variables
-    ]
+    variables_json = rule_variables_json(rule.rule_variables)
 
     session.execute(
       pg_insert(Rule.__table__)
