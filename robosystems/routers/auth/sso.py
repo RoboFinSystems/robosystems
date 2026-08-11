@@ -46,6 +46,7 @@ from .utils import (
   SSO_SESSION_EXPIRY_SECONDS,
   SSO_TOKEN_EXPIRY_SECONDS,
   Config,
+  is_safe_relative_path,
 )
 
 # Create router for SSO endpoints
@@ -56,7 +57,7 @@ router = APIRouter()
   "/sso-token",
   response_model=SSOTokenResponse,
   summary="Generate SSO Token",
-  description="Step 1 of 3 in the cross-app SSO flow. Issues a single-use token (60s TTL) for handoff to a target application.",
+  description="Step 1 of 3 in the cross-app SSO flow. Issues a single-use token (5 minute TTL) for handoff to a target application.",
   operation_id="generateSSOToken",
   responses={**COMMON_ERROR_RESPONSES},
 )
@@ -213,6 +214,12 @@ async def sso_token_exchange(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid target application"
       )
 
+    # Validate return URL as a same-app relative path
+    if request.return_url and not is_safe_relative_path(request.return_url):
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid return URL"
+      )
+
     # Verify SSO token
     secret_key = Config.get_jwt_secret()
 
@@ -289,9 +296,11 @@ async def sso_token_exchange(
                 detail="SSO token is already being processed",
               )
 
-            # Atomically mark token as being exchanged to prevent race conditions
+            # Atomically mark token as being exchanged to prevent race conditions.
+            # Marker must outlive the token itself or the double-exchange guard
+            # expires while the token is still valid.
             await redis_client.setex(
-              f"sso_token_exchange:{token_id}", SSO_SESSION_EXPIRY_SECONDS, "exchanged"
+              f"sso_token_exchange:{token_id}", SSO_TOKEN_EXPIRY_SECONDS, "exchanged"
             )
 
             # Log successful token exchange marking
@@ -321,7 +330,7 @@ async def sso_token_exchange(
             )
 
           await redis_client.setex(
-            f"sso_token_exchange:{token_id}", SSO_SESSION_EXPIRY_SECONDS, "exchanged"
+            f"sso_token_exchange:{token_id}", SSO_TOKEN_EXPIRY_SECONDS, "exchanged"
           )
 
       except redis.RedisError as e:
@@ -400,6 +409,7 @@ async def sso_token_exchange(
             "token_id": token_id,  # Reference to original SSO token
             "target_app": request.target_app,
             "return_url": request.return_url,
+            "session_version": current_session_version,
             "created_at": datetime.now(UTC).isoformat(),
           }
 
@@ -429,6 +439,8 @@ async def sso_token_exchange(
           "token_id": token_id,
           "target_app": request.target_app,
           "return_url": request.return_url,
+          "session_version": current_session_version,
+          "created_at": datetime.now(UTC).isoformat(),
         }
 
         await redis_client.setex(
@@ -453,8 +465,9 @@ async def sso_token_exchange(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Target app URL not configured"
       )
 
-    # Create secure handoff URL - uses POST endpoint instead of URL params
-    redirect_url = f"{base_url}/auth/sso-complete"
+    # Handoff entry point: the target app's login page consumes ?session_id=
+    # and calls sso-complete itself.
+    redirect_url = f"{base_url}/login"
 
     return SSOExchangeResponse(
       session_id=session_id,
@@ -559,7 +572,7 @@ async def sso_complete(
             detail="Session expired or invalid",
           )
 
-        session_data = json.loads(session_data_str.decode("utf-8"))
+        session_data = json.loads(session_data_str)
         user_id = session_data.get("user_id")
         token_id = session_data.get("token_id")
 
@@ -589,6 +602,29 @@ async def sso_complete(
     if not user or not user.is_active:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
+      )
+
+    # Reject handoffs whose sessions were invalidated between exchange and
+    # completion (password change, deactivation).
+    try:
+      handoff_session_version = int(session_data.get("session_version", 0) or 0)
+      current_session_version = int(getattr(user, "session_version", 0) or 0)
+    except (TypeError, ValueError):
+      handoff_session_version, current_session_version = 0, 0
+
+    if handoff_session_version != current_session_version:
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        details={
+          "action": "sso_completion_session_invalidated",
+          "session_id": session_id[:8] + "...",
+          "user_id": user_id,
+        },
+        risk_level="medium",
+      )
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Session has been invalidated",
       )
 
     # Create new JWT token for this session with device binding

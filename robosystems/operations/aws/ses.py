@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -112,9 +113,23 @@ class SESEmailService:
       "roboinvestor": env.ROBOINVESTOR_URL,
       "robosystems": env.ROBOSYSTEMS_URL,
     }
+    self.login_home_url = self.app_urls.get(
+      env.LOGIN_HOME_APP, self.app_urls[_DEFAULT_APP]
+    )
 
     if not self.from_address:
       logger.warning("EMAIL_FROM_ADDRESS not configured - emails will not be sent")
+
+  def _auth_link_parts(self, app: str) -> tuple[str, str]:
+    """Base URL and return_to suffix for auth action links (verify/reset/invite).
+
+    When AUTH_EMAIL_LINKS_TO_LOGIN_HOME is on, auth links target the login
+    home and carry the originating app as return_to so the user is bridged
+    onward after the action. Email branding stays per-app either way.
+    """
+    if env.AUTH_EMAIL_LINKS_TO_LOGIN_HOME:
+      return self.login_home_url, f"&return_to={quote(app)}"
+    return self.app_urls.get(app, self.app_urls[_DEFAULT_APP]), ""
 
   def _get_email_template(
     self, email_type: str, template_data: dict[str, Any]
@@ -467,12 +482,12 @@ View usage details: {url}
     app: str = "roboledger",
   ) -> bool:
     """Send the email-verification link for `app` (unknown app → robosystems)."""
-    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
+    base_url, return_to = self._auth_link_parts(app)
 
     template_data = {
       "user_name": user_name,
       "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
-      "verification_url": f"{base_url}/auth/verify-email?token={token}",
+      "verification_url": f"{base_url}/auth/verify-email?token={token}{return_to}",
       "expiry_hours": EMAIL_TOKEN_EXPIRY_HOURS,
     }
 
@@ -486,12 +501,12 @@ View usage details: {url}
     app: str = "roboledger",
   ) -> bool:
     """Send the password-reset link for `app` (unknown app → robosystems)."""
-    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
+    base_url, return_to = self._auth_link_parts(app)
 
     template_data = {
       "user_name": user_name,
       "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
-      "reset_url": f"{base_url}/auth/reset-password?token={token}",
+      "reset_url": f"{base_url}/auth/reset-password?token={token}{return_to}",
       "expiry_hours": PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
     }
 
@@ -524,13 +539,13 @@ View usage details: {url}
     The recipient has no account yet — `token` is carried into the registration
     link so accepting and signing up are one step.
     """
-    base_url = self.app_urls.get(app, self.app_urls[_DEFAULT_APP])
+    base_url, return_to = self._auth_link_parts(app)
 
     template_data = {
       "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
       "inviter_name": inviter_name,
       "org_name": org_name,
-      "invite_url": f"{base_url}/register?invite={token}",
+      "invite_url": f"{base_url}/register?invite={token}{return_to}",
       "expiry_days": ORG_INVITATION_EXPIRY_DAYS,
     }
 

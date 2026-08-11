@@ -63,6 +63,15 @@ def verify_password(password: str, hashed: str) -> bool:
 # JWT token functions are now imported from middleware.auth.jwt
 
 
+def is_safe_relative_path(path: str) -> bool:
+  """True when path is a same-app relative path.
+
+  Rejects scheme-relative URLs ("//host"), absolute URLs, and backslashes
+  (browsers normalize "/\\host" to "//host").
+  """
+  return path.startswith("/") and not path.startswith("//") and "\\" not in path
+
+
 def detect_app_source(request) -> str:
   """Detect the calling app from the Referer and Origin headers.
 

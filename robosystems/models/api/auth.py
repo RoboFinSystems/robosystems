@@ -105,6 +105,32 @@ class SSOCompleteRequest(BaseModel):
   session_id: str = Field(..., description="Temporary session ID from secure handoff")
 
 
+class OIDCProviderInfo(BaseModel):
+  """OIDC provider availability model."""
+
+  enabled: bool = Field(..., description="Whether OIDC SSO is available")
+  provider_label: str | None = Field(
+    None, description="Display label for the OIDC provider (e.g. 'Okta')"
+  )
+
+
+class AuthProvidersResponse(BaseModel):
+  """Auth posture response model.
+
+  Describes which authentication methods this deployment offers so the
+  login surface can render the correct posture from runtime configuration.
+  """
+
+  password_auth: bool = Field(
+    ..., description="Whether password authentication is available"
+  )
+  oidc: OIDCProviderInfo = Field(..., description="OIDC SSO availability")
+  registration: bool = Field(
+    ..., description="Whether self-service registration is open"
+  )
+  passkeys: bool = Field(..., description="Whether passkey authentication is available")
+
+
 class PasswordCheckRequest(BaseModel):
   """Password strength check request model."""
 
