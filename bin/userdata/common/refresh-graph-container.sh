@@ -127,7 +127,7 @@ log "target image=${ECR_IMAGE}"
 #
 # This is a coordination signal, NOT a guard. `instance_busy`'s own module logs
 # write failures and never raises them, on the principle that a broken counter
-# must not block the actual work — see ref/data-plane.md §65. Every escape hatch
+# must not block the actual work — see ref/data-plane.md §4. Every escape hatch
 # below is therefore deliberate and must stay: a negative counter is idle, a
 # counter stuck with a stale heartbeat is a crashed writer, and a missing registry
 # row proceeds. Do not tighten these into a resource control.
