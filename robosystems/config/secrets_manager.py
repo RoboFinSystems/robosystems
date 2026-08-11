@@ -31,9 +31,12 @@ Feature flags are not secrets and live in SSM Parameter Store at
 ## Usage
 
 The environment is detected automatically:
-- prod/staging: fetch from AWS Secrets Manager, cached both by an LRU on
-  ``get_secret`` and by the instance-level ``_cache`` dict (~256ms cold,
-  ~0.01ms warm)
+- prod/staging: fetch from AWS Secrets Manager, cached by the instance-level
+  ``_cache`` dict with a **1-hour TTL** (``cache_ttl_seconds``) — ~256ms cold,
+  ~0.01ms warm. There is deliberately **no** ``lru_cache`` on this path: an LRU
+  never expires, so a rotated secret would be pinned for the life of the
+  process. The TTL is what makes rotation self-healing without a restart, and
+  ``refresh()`` is what makes it immediate.
 - dev: return an empty dict so callers fall back to environment variables
 
 env.py reads every sensitive value through this module, guarded so a missing

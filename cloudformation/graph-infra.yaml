@@ -838,6 +838,174 @@ Resources:
         - Key: Description
           Value: "Unified log group for all Graph API instances"
 
+  # ========================================
+  # GRAPH CONTAINER REFRESH
+  # ========================================
+  # Fans a container refresh out across the graph fleet with one tag-targeted SSM
+  # command per node-type group. The per-instance logic lives on the instance in
+  # refresh-graph-container.sh; this is the trigger and the aggregator.
+  #
+  # Its value over calling `aws ssm send-command` from a workflow is that the
+  # platform gets a refresh path that is not GitHub Actions — an ops CLI command,
+  # a post-image-push hook, or an Operator tool — with the rate-control defaults
+  # applied in one place rather than at each caller.
+  GraphContainerRefreshFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-graph-container-refresh"
+      Description: "Fleet-wide graph container refresh via tag-targeted SSM Run Command"
+      PackageType: Image
+      Architectures:
+        - arm64
+      # Dispatch and aggregation only — the 30-minute busy-wait happens on the
+      # instance, which is precisely why this does not need to outlive it. A
+      # Lambda that waited would exceed the 15-minute ceiling and pay to idle.
+      Timeout: 120
+      MemorySize: 256
+      Role: !GetAtt GraphContainerRefreshRole.Arn
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          ALERT_TOPIC_ARN: !Ref InfraAlertTopic
+      Code:
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - graph_container_refresh.lambda_handler
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-graph-container-refresh"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  GraphContainerRefreshRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GraphContainerRefreshPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # SendCommand is scoped to the document AND to instances carrying
+              # this environment's Service tag, so this role cannot be used to
+              # run shell on arbitrary instances in the account.
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Environment: !Ref Environment
+                    ssm:resourceTag/Service: !Ref ServiceTag
+              - Effect: Allow
+                Action:
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                  - ssm:GetCommandInvocation
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-graph-container-refresh-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Failure notification is push, not poll. Previously a failed refresh surfaced
+  # only as a red job in a workflow someone had to be watching; nothing paged.
+  # This fires regardless of whether anyone is looking at the run.
+  GraphRefreshFailureRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-graph-refresh-failure"
+      Description: Page when a graph container refresh invocation fails or times out
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.ssm
+        detail-type:
+          - EC2 Command Invocation Status-change Notification
+        detail:
+          status:
+            - Failed
+            - TimedOut
+      Targets:
+        - Id: infra-alerts-sns
+          Arn: !Ref InfraAlertTopic
+          InputTransformer:
+            InputPathsMap:
+              instance: $.detail.instance-id
+              command: $.detail.command-id
+              state: $.detail.status
+            InputTemplate: !Sub >-
+              "Graph container refresh <state> on instance <instance> (SSM command <command>)
+              in ${Environment}. The container was left as-is; check the command output for
+              REFRESH_RESULT and the instance's docker state."
+
+  # A TopicPolicy replaces the topic's access policy wholesale, so the SNS
+  # default same-account owner statement must be reproduced here — every
+  # CloudWatch alarm in this stack publishes to this topic through it, and
+  # omitting it would silence all of them.
+  InfraAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref InfraAlertTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DefaultOwnerAccess
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - sns:GetTopicAttributes
+              - sns:SetTopicAttributes
+              - sns:AddPermission
+              - sns:RemovePermission
+              - sns:DeleteTopic
+              - sns:Subscribe
+              - sns:ListSubscriptionsByTopic
+              - sns:Publish
+            Resource: !Ref InfraAlertTopic
+            Condition:
+              StringEquals:
+                AWS:SourceOwner: !Ref AWS::AccountId
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref InfraAlertTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+
 Outputs:
   # CloudWatch Log Groups
   GraphUnifiedLogGroupName:

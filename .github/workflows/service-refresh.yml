@@ -50,6 +50,11 @@ on:
         required: false
         type: boolean
         default: false
+      force_restart:
+        description: "Restart containers even when the image is unchanged (for secret rotation)"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       environment:
@@ -87,6 +92,15 @@ on:
         required: false
         type: string
         default: "false"
+      force_restart:
+        description: >-
+          Restart containers even when the image digest is unchanged. Set by
+          secrets rotation, whose whole purpose is replacing the process so it
+          re-reads rotated credentials — without this the digest-skip correctly
+          finds nothing to pull and the refresh is a no-op.
+        required: false
+        type: string
+        default: "false"
       # API refresh configuration
       api_refresh_enabled:
         description: "Refresh API ECS service"
@@ -114,193 +128,127 @@ permissions: {}
 
 jobs:
   # ============================================
-  # Graph Container Refresh (EC2 instances via SSM)
+  # Graph Container Refresh (fleet-wide, via SSM)
   # ============================================
-  collect-graph-instances:
+  # One job, one Lambda invocation, one tag-targeted SSM command per node-type
+  # group. This replaced a collector that enumerated every instance into a
+  # GitHub Actions matrix and gave each its own runner job. That design had a
+  # hard ceiling — a matrix caps at 256 jobs, and `databases_per_instance: 1`
+  # makes customer count equal instance count — and it paid runner-minutes to
+  # sleep through a 30-minute busy-wait. Runner time here is now bounded and
+  # independent of fleet size.
+  refresh-graph:
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
+    # The busy-wait happens on the instance, not here, so this only has to
+    # outlive polling. Still derived from the wait ceiling rather than fixed, so
+    # raising max_wait_minutes cannot leave the poll cut short mid-rollout.
+    timeout-minutes: ${{ fromJSON(inputs.max_wait_minutes || '30') }}
     permissions:
       id-token: write
       contents: read
-    outputs:
-      matrix: ${{ steps.collect.outputs.matrix }}
-      has_instances: ${{ steps.collect.outputs.has_instances }}
-      job_timeout_minutes: ${{ steps.budget.outputs.job_timeout_minutes }}
     steps:
-      - name: Compute refresh job timeout
-        id: budget
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+
+      - name: Refresh graph containers
+        env:
+          REGION: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+          ENV_NAME: ${{ inputs.environment }}
+          NODE_TYPES: ${{ inputs.graph_node_types || 'writer' }}
+          MAX_WAIT: ${{ inputs.max_wait_minutes || '30' }}
+          FORCE_IGNORE_BUSY: ${{ inputs.force_ignore_busy || 'false' }}
+          FORCE_RESTART: ${{ inputs.force_restart || 'false' }}
         run: |
-          # The refresh job must outlive the instance-side busy-wait, so this is
-          # derived from max_wait_minutes rather than hardcoded — a static 15 was
-          # shorter than the 30-minute default wait, so a genuinely busy instance
-          # could never be waited out.
-          #
-          # Computed in shell, NOT in a workflow expression: GitHub Actions
-          # expressions have no arithmetic operators (the operator set is
-          # grouping, index, dereference, !, comparisons, && and ||), so a `+`
-          # in one is a workflow parse error, not a value.
-          #
-          # Do not write the literal dollar-brace-brace sequence in this block,
-          # not even in a comment: the expression parser scans the whole `run:`
-          # body and does not know what a shell comment is, so an empty or
-          # malformed one here invalidates the entire workflow file.
-          MAX_WAIT="${{ inputs.max_wait_minutes || '30' }}"
-          if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
-            echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
+          set -uo pipefail
+          FUNCTION="RoboSystemsGraphInfra${ENV_NAME^}-graph-container-refresh"
+
+          # Stack names are Pascal-cased per environment; ${ENV_NAME^} uppercases
+          # the first character (staging -> Staging) to match.
+          echo "Invoking ${FUNCTION}"
+
+          PAYLOAD=$(jq -n \
+            --arg env "$ENV_NAME" --arg nt "$NODE_TYPES" \
+            --argjson wait "$MAX_WAIT" \
+            --argjson ignore_busy "$([ "$FORCE_IGNORE_BUSY" = "true" ] && echo true || echo false)" \
+            --argjson force_restart "$([ "$FORCE_RESTART" = "true" ] && echo true || echo false)" \
+            '{action:"start", environment:$env, node_types:$nt, max_wait_minutes:$wait,
+              force_ignore_busy:$ignore_busy, force_restart:$force_restart}')
+
+          aws lambda invoke --function-name "$FUNCTION" \
+            --cli-binary-format raw-in-base64-out \
+            --payload "$PAYLOAD" --region "$REGION" /tmp/start.json >/dev/null || {
+            echo "::error::Failed to invoke ${FUNCTION}"; exit 1; }
+
+          cat /tmp/start.json | jq .
+          if [ "$(jq -r '.statusCode' /tmp/start.json)" != "200" ]; then
+            echo "::error::Refresh dispatch failed: $(jq -r '.error // "unknown"' /tmp/start.json)"
             exit 1
           fi
-          # +15 covers the pull, restart and health check on top of the wait.
-          echo "job_timeout_minutes=$((MAX_WAIT + 15))" >> $GITHUB_OUTPUT
-          echo "Refresh job timeout: $((MAX_WAIT + 15))m (busy-wait ceiling ${MAX_WAIT}m)"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+          IDS=$(jq -r '[.commands[].command_id | select(. != null)]' /tmp/start.json)
+          if [ "$(jq -r 'length' <<<"$IDS")" = "0" ]; then
+            echo "No graph instances matched — nothing to refresh."
+            echo "### Graph refresh: no instances matched" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Dispatched commands: $IDS"
 
-      - name: Collect instances to update
-        id: collect
-        run: |
-          echo "🔍 Collecting graph database instances for environment: ${{ inputs.environment }}"
+          # Poll to terminal. The budget mirrors the instance-side ceiling plus
+          # headroom for the pull, restart and health check.
+          DEADLINE=$(( $(date +%s) + MAX_WAIT * 60 + 900 ))
+          while true; do
+            aws lambda invoke --function-name "$FUNCTION" \
+              --cli-binary-format raw-in-base64-out \
+              --payload "$(jq -n --argjson ids "$IDS" '{action:"status", command_ids:$ids}')" \
+              --region "$REGION" /tmp/status.json >/dev/null || true
 
-          NODE_TYPES="${{ inputs.graph_node_types }}"
-          INSTANCES_JSON="[]"
+            if [ "$(jq -r '.complete // false' /tmp/status.json)" = "true" ]; then break; fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::warning::Refresh did not reach a terminal state within the budget; it may still be running on the fleet."
+              break
+            fi
+            sleep 20
+          done
 
-          # Check what to update based on node_types input
-          if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
-            echo "📦 Collecting writer instances..."
+          jq . /tmp/status.json
 
-            # Get all graph writers using the LadybugRole tag. WriterTier comes
-            # out of this same response — reading it with a per-instance
-            # describe-tags call inside the loop below is O(n) API calls from a
-            # single runner and throttles long before a large fleet finishes.
-            LBUG_WRITERS=$(aws ec2 describe-instances \
-              --filters \
-                "Name=tag:Environment,Values=${{ inputs.environment }}" \
-                "Name=tag:LadybugRole,Values=writer" \
-                "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].[InstanceId, Tags[?Key=='WriterTier']|[0].Value]" \
-              --output text \
-              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+          # The per-instance outcome breakdown is the point of this summary. A run
+          # that no-ops on nearly every instance must be distinguishable from one
+          # that pulled nothing and quietly did nothing, and a fleet stuck on
+          # skipped-* has to be visible rather than hiding behind a green job.
+          {
+            echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES})"
+            echo
+            echo "| Outcome | Instances |"
+            echo "| --- | --- |"
+            jq -r '.refresh_results // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
+            echo
+            echo "| Invocation status | Count |"
+            echo "| --- | --- |"
+            jq -r '.counts // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            # Process graph writers (tab-separated "<instance-id> <tier>" rows)
-            while read -r INSTANCE TIER; do
-              [ -n "$INSTANCE" ] || continue
-              # An untagged instance renders as the literal "None" in text output
-              [ "$TIER" == "None" ] && TIER=""
-
-              # Filter instances based on node_types parameter
-              if [ "$NODE_TYPES" == "shared" ]; then
-                if [ "$TIER" != "shared" ]; then
-                  continue
-                fi
-              elif [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "all" ]; then
-                true
-              fi
-
-              # Determine node type based on tier
-              if [ "$TIER" == "shared" ]; then
-                NODE_TYPE="shared-writer"
-                echo "  Found graph shared writer: $INSTANCE"
-              else
-                NODE_TYPE="writer"
-                echo "  Found graph writer: $INSTANCE (tier: ${TIER:-standard})"
-              fi
-
-              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"ladybug\"}"
-              if [ "$INSTANCES_JSON" == "[]" ]; then
-                INSTANCES_JSON="[$INSTANCE_OBJ]"
-              else
-                INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
-              fi
-            done <<< "$LBUG_WRITERS"
+          # `failed` already excludes the skip exit codes (3 = stale
+          # /etc/environment, 4 = script not installed yet). Those mean the
+          # instance has not cycled onto the new scripts and its container was
+          # deliberately left alone — a transitional state that must not fail a
+          # deploy, but must stay visible, which the summary above does.
+          SKIPPED=$(jq -r '.skipped // 0' /tmp/status.json)
+          if [ "${SKIPPED:-0}" -gt 0 ]; then
+            echo "::warning::${SKIPPED} instance(s) skipped — not yet cycled onto the new refresh scripts. Cycle them (graph-asg-refresh.yml) to pick them up."
           fi
 
-          # Collect shared replicas (only if all or shared-replicas is selected)
-          if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "shared-replicas" ]; then
-            echo "📦 Collecting shared replica instances..."
-
-            # Get shared replica instances by NodeType tag
-            SHARED_REPLICAS=$(aws ec2 describe-instances \
-              --filters \
-                "Name=tag:Environment,Values=${{ inputs.environment }}" \
-                "Name=tag:NodeType,Values=shared_replica" \
-                "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
-              --output text \
-              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
-
-            for INSTANCE in $SHARED_REPLICAS; do
-              echo "  Found shared replica: $INSTANCE"
-              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"shared-replica\",\"backend\":\"ladybug\"}"
-              if [ "$INSTANCES_JSON" == "[]" ]; then
-                INSTANCES_JSON="[$INSTANCE_OBJ]"
-              else
-                INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
-              fi
-            done
+          FAILED=$(jq -r '.failed // 0' /tmp/status.json)
+          if [ "${FAILED:-0}" -gt 0 ]; then
+            echo "::error::${FAILED} instance(s) failed to refresh"
+            jq -r '.failures[]? | "  \(.instance_id): \(.status) (exit \(.response_code))"' /tmp/status.json
+            exit 1
           fi
-
-          echo "instances_json=$INSTANCES_JSON"
-
-          if [ "$INSTANCES_JSON" == "[]" ]; then
-            echo "ℹ️ No graph instances found to update"
-            echo "matrix={}" >> $GITHUB_OUTPUT
-            echo "has_instances=false" >> $GITHUB_OUTPUT
-          else
-            echo "✅ Found graph instances to update"
-            echo "matrix={\"include\":$INSTANCES_JSON}" >> $GITHUB_OUTPUT
-            echo "has_instances=true" >> $GITHUB_OUTPUT
-
-            # Display what will be updated
-            echo "📋 Graph instances to update:"
-            echo "$INSTANCES_JSON" | jq -r '.[] | "  - \(.instance_id) (\(.backend)/\(.node_type))"'
-          fi
-
-  refresh-graph:
-    needs: [collect-graph-instances]
-    if: needs.collect-graph-instances.outputs.has_instances == 'true'
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    # Derived from the busy-wait ceiling by the collect job (see its "Compute
-    # refresh job timeout" step) rather than hardcoded here, so the two cannot
-    # drift. fromJSON is required, not decorative: job outputs are always
-    # strings and timeout-minutes must be a number, so passing the output
-    # through raw is a type error that invalidates the workflow. A `|| 45`
-    # fallback has the same problem — it yields a string — and is unnecessary
-    # anyway, since this job only runs when the collect job set the output.
-    timeout-minutes: ${{ fromJSON(needs.collect-graph-instances.outputs.job_timeout_minutes) }}
-    permissions:
-      id-token: write
-      contents: read
-    strategy:
-      matrix: ${{ fromJSON(needs.collect-graph-instances.outputs.matrix) }}
-      max-parallel: 10
-      fail-fast: false
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
-          token: ${{ github.token }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
-
-      - name: Update Graph Container
-        uses: ./.github/actions/refresh-graph-containers
-        with:
-          environment: ${{ inputs.environment }}
-          instance-id: ${{ matrix.instance_id }}
-          node-type: ${{ matrix.node_type }}
-          backend: ${{ matrix.backend }}
-          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
-          max-wait-minutes: ${{ inputs.max_wait_minutes || '30' }}
-          force-ignore-busy: ${{ inputs.force_ignore_busy || 'false' }}
+          echo "Refresh complete."
 
   # ============================================
   # API ECS Service Refresh

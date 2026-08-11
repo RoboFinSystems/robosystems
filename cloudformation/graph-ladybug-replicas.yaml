@@ -428,6 +428,16 @@ Resources:
                 Value: !Ref ComponentTag
               - Key: NodeType
                 Value: shared_replica
+              # Gives the fleet one tag key that selects any graph node:
+              # LadybugRole in (writer, replica). The value MUST be `replica`,
+              # not `shared_replica` — graph_volume_monitor's
+              # discover_lbug_instances filter is what drives volume expansion,
+              # and replicas carry no data volume to manage, so a value that
+              # matched it would pull the whole replica fleet into that loop.
+              # See discover_replica_instance_ids for why they are enumerated
+              # separately.
+              - Key: LadybugRole
+                Value: replica
               - Key: CreatedBy
                 Value: CloudFormation
           - ResourceType: volume

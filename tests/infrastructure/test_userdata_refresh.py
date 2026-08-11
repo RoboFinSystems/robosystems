@@ -21,11 +21,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "bin" / "userdata" / "common" / "refresh-graph-container.sh"
-ACTION = REPO_ROOT / ".github" / "actions" / "refresh-graph-containers" / "action.yml"
+LAMBDA = REPO_ROOT / "bin" / "lambda" / "graph_container_refresh.py"
 
 # Exit codes the script uses to mean "this instance has not picked up the new
-# deployment yet." The composite action maps these to a warning-and-skip instead
-# of a failed deploy, so they are a contract between two files.
+# deployment yet." The refresh Lambda classifies these as skips rather than
+# failures, so they are a contract between two files — see
+# TestExitCodeContract at the bottom.
 EXIT_STALE_ENV = 3
 
 REQUIRED_ENV = {
@@ -285,6 +286,34 @@ class TestDigestSkip:
     assert result.exit_code == 0
     assert result.restarted
 
+  def test_force_restart_overrides_a_digest_match(self, refresh):
+    """Secrets rotation refreshes containers to make them re-read rotated
+    credentials, and rotation does not change the image. Without this override the
+    digest-skip correctly finds nothing to pull and the rotation refresh becomes a
+    no-op on every instance, leaving each process on its cached secrets until the
+    TTL lapses.
+    """
+    result = refresh(
+      STUB_PULLED_ID="sha256:aaa",
+      STUB_RUNNING_ID="sha256:aaa",
+      STUB_CONTAINER_RUNNING="true",
+      FORCE_RESTART="true",
+    )
+    assert result.exit_code == 0
+    assert "REFRESH_RESULT=updated" in result.output
+    assert result.restarted
+    assert "FORCE_RESTART=true" in result.output
+
+  def test_digest_match_still_no_ops_without_force_restart(self, refresh):
+    """The override must be opt-in, or every deploy bounces the whole fleet."""
+    result = refresh(
+      STUB_PULLED_ID="sha256:aaa",
+      STUB_RUNNING_ID="sha256:aaa",
+      STUB_CONTAINER_RUNNING="true",
+    )
+    assert "REFRESH_RESULT=no-op" in result.output
+    assert not result.restarted
+
 
 class TestFailurePropagation:
   """Non-zero exits are what let a fleet-wide --max-errors budget halt a rollout."""
@@ -324,25 +353,35 @@ class TestImageTag:
 
 
 class TestExitCodeContract:
-  """The skip exit codes are a contract between the script and the action.
+  """The skip exit codes are a contract between the script and its aggregator.
 
-  If the script's code changes without the action's mapping changing, a stale
-  instance goes from a warning to a red deploy — the exact failure this pairing
-  exists to prevent, and one nothing else would catch.
+  SSM records any non-zero exit as `Failed`, so something has to know that 3 and
+  4 mean "this instance has not cycled onto the new scripts yet, and its
+  container was deliberately left alone." If the script's codes drift from the
+  aggregator's classification, an un-cycled fleet goes from a warning back to a
+  failed deploy — the exact regression this pairing exists to prevent, and one
+  nothing else would catch. The aggregator moved from the composite action to the
+  Lambda when the per-instance matrix was retired; the contract did not change.
   """
 
-  def test_action_maps_the_scripts_stale_env_code(self):
+  def test_lambda_classifies_the_scripts_stale_env_code_as_a_skip(self):
     script = SCRIPT.read_text()
-    action = ACTION.read_text()
+    handler = LAMBDA.read_text()
     assert f"EXIT_STALE_ENV={EXIT_STALE_ENV}" in script
-    assert f'RESPONSE_CODE}}" == "{EXIT_STALE_ENV}"' in action
+    assert f'{EXIT_STALE_ENV}: "skipped-stale-env"' in handler
 
-  def test_action_guards_for_a_missing_script(self):
+  def test_lambda_guards_for_a_missing_script(self):
     """Instances install common scripts at boot, so an un-cycled instance has no
     script to run. That must be a distinct exit code rather than an inference
     from bash's 127, which a missing `docker` would also produce.
     """
-    action = ACTION.read_text()
-    assert "-x /usr/local/bin/refresh-graph-container.sh" in action
-    assert "exit 4" in action
-    assert 'RESPONSE_CODE}" == "4"' in action
+    handler = LAMBDA.read_text()
+    assert "-x {REFRESH_SCRIPT}" in handler or "-x /usr/local/bin" in handler
+    assert "exit 4" in handler
+    assert '4: "skipped-no-script"' in handler
+
+  def test_skips_are_excluded_from_the_failure_count(self):
+    """`failed` is what the workflow fails on, so skips must not reach it."""
+    handler = LAMBDA.read_text()
+    assert '"failed": len(failures)' in handler
+    assert '"skipped": skipped' in handler

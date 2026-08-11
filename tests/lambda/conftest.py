@@ -97,3 +97,9 @@ def gvd(aws):
 def gvmon(aws):
   """graph_volume_monitor module under mock_aws."""
   yield _import_lambda("graph_volume_monitor")
+
+
+@pytest.fixture
+def gcr(aws):
+  """graph_container_refresh module under mock_aws."""
+  yield _import_lambda("graph_container_refresh")
