@@ -134,6 +134,8 @@ dmypy.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 CLAUDE.local.md
+# Playwright MCP session artifacts (snapshots, console logs)
+.playwright-mcp/
 
 .gemini/
 GEMINI.md
