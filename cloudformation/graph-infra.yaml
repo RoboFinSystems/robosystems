@@ -1065,3 +1065,12 @@ Outputs:
     Value: !Ref InfraAlertTopic
     Export:
       Name: !Sub "${AWS::StackName}-AlertTopicArn"
+
+  # Published so callers never reconstruct the function name from the stack-name
+  # convention. service-refresh.yml reads this output rather than string-building
+  # it, so the name exists in exactly one place — here.
+  GraphContainerRefreshFunctionName:
+    Description: Lambda that fans a graph container refresh across the fleet
+    Value: !Ref GraphContainerRefreshFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-GraphContainerRefreshFunctionName"

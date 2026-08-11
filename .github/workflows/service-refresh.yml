@@ -148,11 +148,42 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+
+      # Neither the stack name nor the function name is reconstructed here.
+      # stack-config.sh is the single source of truth for stack names, and the
+      # function name is a CloudFormation output of that stack — string-building
+      # either one would put the same fact in two files that then drift.
+      - name: Resolve the refresh function
+        id: fn
+        env:
+          REGION: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+          ENV_NAME: ${{ inputs.environment }}
+        run: |
+          set -uo pipefail
+          STACK=$(bash bin/tools/stack-config.sh "$ENV_NAME" graph.infra)
+          echo "graph-infra stack: $STACK"
+
+          FUNCTION=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='GraphContainerRefreshFunctionName'].OutputValue" \
+            --output text --region "$REGION" 2>/dev/null) || FUNCTION=""
+
+          if [ -z "$FUNCTION" ] || [ "$FUNCTION" = "None" ]; then
+            echo "::error::${STACK} has no GraphContainerRefreshFunctionName output. Deploy graph-infra before refreshing graph containers."
+            exit 1
+          fi
+          echo "function=$FUNCTION" >> $GITHUB_OUTPUT
 
       - name: Refresh graph containers
         env:
@@ -162,12 +193,9 @@ jobs:
           MAX_WAIT: ${{ inputs.max_wait_minutes || '30' }}
           FORCE_IGNORE_BUSY: ${{ inputs.force_ignore_busy || 'false' }}
           FORCE_RESTART: ${{ inputs.force_restart || 'false' }}
+          FUNCTION: ${{ steps.fn.outputs.function }}
         run: |
           set -uo pipefail
-          FUNCTION="RoboSystemsGraphInfra${ENV_NAME^}-graph-container-refresh"
-
-          # Stack names are Pascal-cased per environment; ${ENV_NAME^} uppercases
-          # the first character (staging -> Staging) to match.
           echo "Invoking ${FUNCTION}"
 
           PAYLOAD=$(jq -n \
