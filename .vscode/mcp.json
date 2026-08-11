@@ -47,25 +47,6 @@
         "ROBOSYSTEMS_GRAPH_ID": "${input:robosystems-graph-id}"
       }
     },
-    "Context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "puppeteer": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
-    },
-    "postgres": {
-      "command": "uvx",
-      "args": ["postgres-mcp", "--access-mode=unrestricted"],
-      "env": {
-        "DATABASE_URI": "postgresql://postgres:postgres@localhost:5432/robosystems"
-      }
-    },
     "aws-documentation": {
       "command": "uvx",
       "args": ["awslabs.aws-documentation-mcp-server@latest"],
