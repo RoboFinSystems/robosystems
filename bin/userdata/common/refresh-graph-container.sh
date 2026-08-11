@@ -15,6 +15,14 @@
 #   FORCE_IGNORE_BUSY  "true" bypasses the busy-counter wait entirely. Emergency
 #                      escape hatch — an interrupted materialization may require a
 #                      full graph rebuild.
+#   FORCE_RESTART      "true" restarts even when the image digest is unchanged, for
+#                      callers whose goal is the restart itself rather than a new
+#                      image. Secrets rotation is the case that matters: the
+#                      container reads its credentials from Secrets Manager and
+#                      caches them in-process, so the process has to be replaced to
+#                      pick up rotated ones promptly. Without this the digest-skip
+#                      correctly concludes there is nothing to pull, and rotation
+#                      propagates only when the cache TTL lapses.
 #
 # Exits 0 when the container was refreshed OR was already current, non-zero on
 # failure. The non-zero exit is load-bearing: SSM records it as `Failed`, which is
@@ -25,6 +33,7 @@ set -o pipefail
 
 MAX_WAIT_MINUTES="${MAX_WAIT_MINUTES:-30}"
 FORCE_IGNORE_BUSY="${FORCE_IGNORE_BUSY:-false}"
+FORCE_RESTART="${FORCE_RESTART:-false}"
 
 # Busy counter > 0 but no heartbeat for 6h → treat as crashed. 6h comfortably
 # covers even full SEC historical backfills (30-120min); anything longer is
@@ -109,6 +118,13 @@ log "target image=${ECR_IMAGE}"
 # ==================================================================================
 # WAIT FOR IN-FLIGHT DESTRUCTIVE OPS
 # ==================================================================================
+# This is one of two implementations of the `instance_busy` contract; the other
+# is the ASG-wide gate in .github/actions/refresh-graph-asg/action.yml, which asks
+# "is ANY instance in this ASG busy?" from a runner before replacing instances —
+# a decision an instance cannot make about itself. Neither is redundant, but the
+# fail-open rules below must stay identical in both. See that file's note at
+# STALE_WINDOW_SECONDS.
+#
 # This is a coordination signal, NOT a guard. `instance_busy`'s own module logs
 # write failures and never raises them, on the principle that a broken counter
 # must not block the actual work — see ref/data-plane.md §65. Every escape hatch
@@ -219,7 +235,8 @@ CONTAINER_RUNNING=$(docker inspect --format '{{.State.Running}}' "${CONTAINER_NA
 
 if [ -n "${PULLED_IMAGE_ID}" ] &&
   [ "${PULLED_IMAGE_ID}" = "${RUNNING_IMAGE_ID}" ] &&
-  [ "${CONTAINER_RUNNING}" = "true" ]; then
+  [ "${CONTAINER_RUNNING}" = "true" ] &&
+  [ "${FORCE_RESTART}" != "true" ]; then
   log "already on ${ECR_IMAGE} (${PULLED_IMAGE_ID:0:19}) and running — no restart needed"
   echo "REFRESH_RESULT=no-op"
   exit 0
@@ -227,6 +244,11 @@ fi
 
 if [ "${CONTAINER_RUNNING}" != "true" ]; then
   log "container is not running — refreshing regardless of image match"
+elif [ "${FORCE_RESTART}" = "true" ] && [ "${PULLED_IMAGE_ID}" = "${RUNNING_IMAGE_ID}" ]; then
+  # The restart IS the point here, not the image. Secrets rotation relies on this:
+  # credentials are fetched from Secrets Manager and cached in-process, so the
+  # process must be replaced for a rotated secret to take effect promptly.
+  log "FORCE_RESTART=true — restarting on an unchanged image to drop in-process caches"
 fi
 
 # ==================================================================================

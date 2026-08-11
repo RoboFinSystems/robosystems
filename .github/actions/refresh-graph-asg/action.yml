@@ -26,8 +26,9 @@ inputs:
       on ANY instance in the target WRITER ASG before starting the
       refresh. Polls every 60 seconds. NOTE: This action skips the
       shared tier entirely — shared-tier busy protection (which covers
-      SEC staging on the shared-master) runs via refresh-graph-containers,
-      called per-instance from service-refresh.yml.
+      SEC staging on the shared-master) runs on the instance itself, in
+      refresh-graph-container.sh, dispatched fleet-wide from
+      service-refresh.yml.
     required: false
     default: "30"
   force-ignore-busy:
@@ -38,6 +39,26 @@ inputs:
       require a full graph rebuild.
     required: false
     default: "false"
+  wait-for-completion:
+    description: >-
+      If true (default), monitor each instance refresh to a terminal state and
+      fail the run if any refresh fails. If false, start the refreshes and
+      return — the ASG carries them out regardless of whether anything is
+      watching, so this trades the failure signal for not holding a runner
+      through a fleet roll that can outlast any sensible job timeout. The
+      busy-counter gate still runs either way; it is the part that cannot be
+      deferred. Mirrors `wait_for_completion` on SharedReplicaRefreshConfig.
+    required: false
+    default: "true"
+  completion-wait-minutes:
+    description: >-
+      How long to monitor for completion when wait-for-completion is true.
+      Ignored otherwise. The default of 20 preserves the previously hardcoded
+      1200s; raise it for a large fleet — Dagster's replica equivalent budgets
+      2 hours, sized for ~100 instances. Note the job timeout is derived from
+      this, so raising it raises the cap rather than fighting it.
+    required: false
+    default: "20"
 
 outputs:
   refreshed-asgs:
@@ -81,8 +102,26 @@ runs:
         WARMUP="${{ inputs.instance-warmup }}"
         MAX_WAIT_ATTEMPTS="${{ inputs.max-wait-minutes }}"
         FORCE_IGNORE_BUSY="${{ inputs.force-ignore-busy }}"
+        WAIT_FOR_COMPLETION="${{ inputs.wait-for-completion }}"
+        COMPLETION_WAIT_MINUTES="${{ inputs.completion-wait-minutes }}"
         # Stale detection: counter > 0 but heartbeat older than 6h → crashed.
         # 6h comfortably covers full SEC backfills; anything longer is likely hung.
+        #
+        # This is the SECOND of two implementations of the `instance_busy`
+        # contract; the other is `wait_until_idle` in
+        # bin/userdata/common/refresh-graph-container.sh. They are not
+        # interchangeable and neither is redundant: that one asks "am I busy?" on
+        # the instance before swapping its own container, this one asks "is ANY
+        # instance in this ASG busy?" from the runner before calling
+        # start_instance_refresh, which replaces instances and so cannot be a
+        # decision an instance makes about itself.
+        #
+        # What they MUST share is the interpretation, because `instance_busy` is a
+        # coordination signal and not a guard (ref/data-plane.md §65): a negative
+        # counter is idle, a counter with a stale heartbeat is a crashed writer,
+        # and a missing registry row proceeds. Change a fail-open rule in one and
+        # change it in the other, or the two drift — as the stale window already
+        # did once, when this comment said 2h while the constant said 6h.
         STALE_WINDOW_SECONDS=21600
 
         # Environment suffix for stack names
@@ -212,9 +251,10 @@ runs:
           # Wait for in-flight destructive operations on ANY instance in this
           # writer ASG before starting the refresh. Covers user materialization,
           # extensions mat, and bulk table creates. Shared-tier SEC staging
-          # protection runs through refresh-graph-containers (per-instance via
-          # service-refresh.yml) — the ladybug-shared branch of this loop skips
-          # to `continue` above, so this block never executes for shared tiers.
+          # protection runs in refresh-graph-container.sh on the instance,
+          # dispatched fleet-wide from service-refresh.yml — the ladybug-shared
+          # branch of this loop skips to `continue` above, so this block never
+          # executes for shared tiers.
           if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
             echo "  force-ignore-busy=true — skipping destructive-op wait"
           else
@@ -253,14 +293,23 @@ runs:
                   continue
                 fi
 
-                # Stale detection: counter > 0 but no heartbeat for 2h → crashed
+                # Stale detection: counter > 0 but no heartbeat for the stale
+                # window (6h, see STALE_WINDOW_SECONDS above) → treat as crashed.
                 if [ -n "$BUSY_LAST_AT" ]; then
                   BUSY_LAST_EPOCH=$(date -u -d "${BUSY_LAST_AT}" +%s 2>/dev/null || echo 0)
                   BUSY_NOW_EPOCH=$(date -u +%s)
                   BUSY_AGE=$((BUSY_NOW_EPOCH - BUSY_LAST_EPOCH))
                   if [ $BUSY_LAST_EPOCH -gt 0 ] && [ $BUSY_AGE -gt $STALE_WINDOW_SECONDS ]; then
-                    echo "    ::warning::Stale busy counter on ${BUSY_INSTANCE_ID}: count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT} (${BUSY_AGE}s ago). Treating as crashed."
+                    echo "    ::warning::Stale busy counter on ${BUSY_INSTANCE_ID}: count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT} (${BUSY_AGE}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed."
                     continue
+                  fi
+                  # An unparseable heartbeat disables the crashed-writer escape
+                  # hatch, so the wait can only end in idle or timeout. Say so
+                  # once rather than let an operator watch it run out with no
+                  # explanation. `date -d` needs GNU coreutils (present on the
+                  # ubuntu runners this action runs on).
+                  if [ "$BUSY_LAST_EPOCH" -eq 0 ] && [ $WAIT_ATTEMPT -eq 1 ]; then
+                    echo "    ::warning::Could not parse heartbeat '${BUSY_LAST_AT}' on ${BUSY_INSTANCE_ID} — stale-counter detection is inactive for this run"
                   fi
                 fi
 
@@ -325,11 +374,6 @@ runs:
         # Remove trailing comma
         REFRESHED_ASGS="${REFRESHED_ASGS%,}"
 
-        echo ""
-        echo "========================================"
-        echo "Waiting for Refreshes to Complete"
-        echo "========================================"
-
         if [ "$TOTAL_REFRESHED" -eq 0 ]; then
           echo "No ASGs were refreshed"
           echo "refreshed_asgs=" >> $GITHUB_OUTPUT
@@ -338,10 +382,47 @@ runs:
           exit 0
         fi
 
-        # Wait for all refreshes to complete (max 20 minutes)
-        MAX_WAIT=1200
+        # Fire-and-forget. An instance refresh is an ASG-side operation that keeps
+        # running whether or not anything watches it, so holding a runner through
+        # it is a choice rather than a requirement — and a bad one for a large
+        # fleet, where a roll can outlast any sensible job timeout. Mirrors
+        # `wait_for_completion` on SharedReplicaRefreshConfig
+        # (robosystems/dagster/assets/shared_repositories/replicas.py), which is
+        # the same decision for the replica fleet.
+        #
+        # The busy-counter gate above is NOT skipped in this mode: it must run
+        # before instances are replaced, and that is exactly what cannot be
+        # deferred.
+        if [ "$WAIT_FOR_COMPLETION" != "true" ]; then
+          echo ""
+          echo "========================================"
+          echo "Refreshes Started (not waiting)"
+          echo "========================================"
+          echo "Total ASGs refreshed: $TOTAL_REFRESHED"
+          echo "ASGs: $REFRESHED_ASGS"
+          echo ""
+          echo "Progress is not monitored here. Check it with:"
+          echo "  aws autoscaling describe-instance-refreshes --auto-scaling-group-name <asg> --region $REGION"
+          echo "refreshed_asgs=$REFRESHED_ASGS" >> $GITHUB_OUTPUT
+          echo "total_refreshed=$TOTAL_REFRESHED" >> $GITHUB_OUTPUT
+          if [ "$HAS_ERRORS" = true ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "One or more tiers failed before their refresh could start"
+            exit 1
+          fi
+          echo "status=started" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo ""
+        echo "========================================"
+        echo "Waiting for Refreshes to Complete"
+        echo "========================================"
+
+        MAX_WAIT=$((COMPLETION_WAIT_MINUTES * 60))
         POLL_INTERVAL=30
         ELAPSED=0
+        echo "Monitoring for up to ${COMPLETION_WAIT_MINUTES}m (poll every ${POLL_INTERVAL}s)"
 
         while [ $ELAPSED -lt $MAX_WAIT ]; do
           ALL_COMPLETE=true

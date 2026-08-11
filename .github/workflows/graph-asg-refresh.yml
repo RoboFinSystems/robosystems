@@ -35,6 +35,16 @@ on:
         required: false
         type: boolean
         default: false
+      wait_for_completion:
+        description: "Monitor refreshes to completion (uncheck to start them and return)"
+        required: false
+        type: boolean
+        default: true
+      completion_wait_minutes:
+        description: "Minutes to monitor for completion (ignored when not waiting)"
+        required: false
+        type: string
+        default: "20"
   workflow_call:
     inputs:
       environment:
@@ -61,6 +71,16 @@ on:
         required: false
         type: boolean
         default: false
+      wait_for_completion:
+        description: "Monitor refreshes to completion (false starts them and returns)"
+        required: false
+        type: string
+        default: "true"
+      completion_wait_minutes:
+        description: "Minutes to monitor for completion (ignored when not waiting)"
+        required: false
+        type: string
+        default: "20"
 
 permissions:
   id-token: write
@@ -72,9 +92,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh-asgs:
+  # This job exists only to do arithmetic, because GitHub Actions expressions have
+  # no arithmetic operators and `timeout-minutes` can read `needs` but not compute.
+  #
+  # It is not cosmetic. The action's busy-counter wait runs **per tier,
+  # sequentially**, each up to max_wait_minutes, and a run with no `tier` input
+  # iterates every writer tier. A fixed 45-minute job cap was therefore roughly
+  # 2.4x smaller than the worst-case internal budget (3 tiers x 30m, plus a 20m
+  # refresh-completion wait), so both the "timed out waiting for idle" error and
+  # the completion-wait branch were unreachable: a legitimately slow refresh was
+  # killed by the runner and reported as a bare cancellation with no diagnostic.
+  budget:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
+    outputs:
+      job_timeout_minutes: ${{ steps.compute.outputs.job_timeout_minutes }}
+    steps:
+      - name: Compute job timeout from the internal wait budget
+        id: compute
+        env:
+          MAX_WAIT: ${{ inputs.max_wait_minutes || '30' }}
+          TIER: ${{ inputs.tier }}
+          WAIT_FOR_COMPLETION: ${{ inputs.wait_for_completion }}
+          COMPLETION_WAIT: ${{ inputs.completion_wait_minutes || '20' }}
+        run: |
+          set -uo pipefail
+          for pair in "max_wait_minutes:$MAX_WAIT" "completion_wait_minutes:$COMPLETION_WAIT"; do
+            if ! [[ "${pair#*:}" =~ ^[0-9]+$ ]]; then
+              echo "::error::${pair%%:*} must be a positive integer, got '${pair#*:}'"
+              exit 1
+            fi
+          done
+
+          # One tier when explicitly targeted; otherwise every writer tier the
+          # action iterates. ladybug-shared is skipped before its busy wait, so it
+          # contributes nothing — keep this count in step with TIER_STACKS minus
+          # SHARED_TIERS in .github/actions/refresh-graph-asg/action.yml.
+          if [ -n "$TIER" ]; then TIERS=1; else TIERS=3; fi
+
+          # The busy-counter gate runs per tier in both modes and cannot be
+          # deferred, so it is always in the budget. The completion wait only
+          # applies when monitoring — that is the whole point of the async mode.
+          if [ "$WAIT_FOR_COMPLETION" = "false" ]; then COMPLETION=0; else COMPLETION="$COMPLETION_WAIT"; fi
+
+          # +10 slack for runner startup, checkout, and describe calls.
+          TOTAL=$(( MAX_WAIT * TIERS + COMPLETION + 10 ))
+          echo "job_timeout_minutes=${TOTAL}" >> $GITHUB_OUTPUT
+          echo "Busy wait ${MAX_WAIT}m x ${TIERS} tier(s) + ${COMPLETION}m completion + 10m slack = ${TOTAL}m"
+
+  refresh-asgs:
+    needs: [budget]
+    runs-on: ubuntu-latest
+    # Must exceed the action's own internal budget, or its timeout branches can
+    # never report. Derived, never fixed — see the budget job.
+    timeout-minutes: ${{ fromJSON(needs.budget.outputs.job_timeout_minutes) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -97,6 +168,8 @@ jobs:
           instance-warmup: ${{ inputs.instance_warmup }}
           max-wait-minutes: ${{ inputs.max_wait_minutes }}
           force-ignore-busy: ${{ inputs.force_ignore_busy }}
+          wait-for-completion: ${{ inputs.wait_for_completion }}
+          completion-wait-minutes: ${{ inputs.completion_wait_minutes }}
 
       - name: Summary
         if: always()

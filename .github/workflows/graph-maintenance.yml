@@ -246,7 +246,11 @@ jobs:
       (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true' && needs.schedule-gate.outputs.task == 'docker-cleanup'))
     needs: [schedule-gate]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Must exceed the step's own internal budget, or the runner kills the job
+    # before the "still running past budget" branch can report anything. That
+    # budget is 1200s per environment, and a scheduled run does staging and prod
+    # sequentially — so 2 x 20m, plus slack for dispatch and summarising.
+    timeout-minutes: 50
     outputs:
       instances_cleaned: ${{ steps.cleanup.outputs.instances_cleaned }}
       space_freed: ${{ steps.cleanup.outputs.space_freed }}
@@ -260,105 +264,71 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      - name: Discover Graph Instances
-        id: instances
+      # One tag-targeted command per environment instead of a serial loop that
+      # issued an SSM command per instance and waited on each in turn. Same
+      # defect the graph container refresh had: O(n) API calls and wall-clock
+      # linear in fleet size, on a fleet where customer count is instance count.
+      #
+      # `aws ssm wait command-executed` is deliberately not used here either —
+      # its botocore waiter is delay:5 x maxAttempts:20, so it gives up after 100
+      # seconds and reports failure for a prune that is still running.
+      - name: Run Docker Cleanup
+        id: cleanup
         run: |
-          # For manual runs, use selected environment; for scheduled, do both
+          set -uo pipefail
+          REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             ENVS="${{ inputs.environment }}"
           else
             ENVS="staging prod"
           fi
 
-          INSTANCE_IDS=""
+          TOTAL=0
+          SUMMARY=""
+
           for ENV in $ENVS; do
-            echo "🔍 Discovering instances for $ENV..."
+            echo "🧹 Dispatching docker cleanup across ${ENV} graph writers..."
 
-            # Find LadybugDB writer instances by tag. This covers every writer
-            # tier including shared: the launch template tags all of them
-            # LadybugRole=writer and distinguishes the tier with WriterTier.
-            # There is no LadybugRole=shared-writer — a second query for that
-            # value matched nothing and has been removed.
-            WRITERS=$(aws ec2 describe-instances \
-              --filters \
-                "Name=tag:Environment,Values=$ENV" \
-                "Name=tag:LadybugRole,Values=writer" \
-                "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
-              --output text 2>/dev/null || echo "")
-
-            for ID in $WRITERS; do
-              if [ -n "$ID" ]; then
-                INSTANCE_IDS="$INSTANCE_IDS $ID"
-                echo "  Found: $ID"
-              fi
-            done
-          done
-
-          INSTANCE_IDS=$(echo $INSTANCE_IDS | xargs)
-          echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
-          echo "📋 Total instances to clean: $(echo $INSTANCE_IDS | wc -w | xargs)"
-
-      - name: Run Docker Cleanup
-        id: cleanup
-        run: |
-          INSTANCE_IDS="${{ steps.instances.outputs.instance_ids }}"
-          if [ -z "$INSTANCE_IDS" ]; then
-            echo "::warning::No instances to clean"
-            echo "instances_cleaned=0" >> $GITHUB_OUTPUT
-            echo "space_freed=0" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          CLEANED=0
-          TOTAL_FREED=""
-
-          for INSTANCE_ID in $INSTANCE_IDS; do
-            echo "🧹 Cleaning Docker on $INSTANCE_ID..."
-
-            # Send cleanup command
-            COMMAND_ID=$(aws ssm send-command \
-              --instance-ids "$INSTANCE_ID" \
+            # Every writer tier carries LadybugRole=writer; the tier is on
+            # WriterTier. There is no LadybugRole=shared-writer value.
+            CMD=$(aws ssm send-command \
               --document-name "AWS-RunShellScript" \
-              --parameters commands="docker system prune -af 2>&1 && df -h / | tail -1" \
-              --query 'Command.CommandId' \
-              --output text)
+              --comment "graph docker cleanup (${ENV})" \
+              --targets "Key=tag:Environment,Values=${ENV}" "Key=tag:LadybugRole,Values=writer" \
+              --parameters 'commands=["docker system prune -af 2>&1 | tail -3","df -h / | tail -1"],executionTimeout=["900"]' \
+              --max-concurrency "20%" --max-errors "50%" \
+              --query "Command.CommandId" --output text --region "$REGION" 2>/dev/null) || CMD=""
 
-            echo "  Command ID: $COMMAND_ID"
-
-            # Wait for completion
-            if aws ssm wait command-executed \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" 2>/dev/null; then
-
-              OUTPUT=$(aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardOutputContent' \
-                --output text 2>/dev/null || echo "")
-
-              echo "  ✅ Cleanup completed"
-              # Extract disk usage line
-              DISK_LINE=$(echo "$OUTPUT" | grep -E '^/dev/' | tail -1 || echo "")
-              if [ -n "$DISK_LINE" ]; then
-                echo "  Disk: $DISK_LINE"
-                TOTAL_FREED="$TOTAL_FREED\n$INSTANCE_ID: $DISK_LINE"
-              fi
-              CLEANED=$((CLEANED + 1))
-            else
-              echo "  ⚠️ Cleanup timed out or failed"
-              ERROR=$(aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardErrorContent' \
-                --output text 2>/dev/null || echo "Unknown error")
-              echo "  Error: $ERROR"
+            if [ -z "$CMD" ] || [ "$CMD" = "None" ]; then
+              echo "  ℹ️ No ${ENV} graph writers matched — skipping"
+              continue
             fi
+            echo "  Command: $CMD"
+
+            # Bounded poll to terminal.
+            DEADLINE=$(( $(date +%s) + 1200 ))
+            while true; do
+              PENDING=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
+                --query "length(CommandInvocations[?Status=='Pending' || Status=='InProgress' || Status=='Delayed'])" \
+                --output text 2>/dev/null || echo 0)
+              [ "${PENDING:-0}" = "0" ] && break
+              [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "  ⚠️ cleanup still running past budget"; break; }
+              sleep 20
+            done
+
+            OK=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
+              --query "length(CommandInvocations[?Status=='Success'])" --output text 2>/dev/null || echo 0)
+            BAD=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
+              --query "length(CommandInvocations[?Status=='Failed' || Status=='TimedOut'])" --output text 2>/dev/null || echo 0)
+            echo "  ✅ ${OK} cleaned, ${BAD} failed"
+            TOTAL=$(( TOTAL + OK ))
+            SUMMARY="${SUMMARY}\n${ENV}: ${OK} cleaned, ${BAD} failed"
           done
 
-          echo "instances_cleaned=$CLEANED" >> $GITHUB_OUTPUT
+          echo "instances_cleaned=$TOTAL" >> $GITHUB_OUTPUT
           echo "space_freed<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$TOTAL_FREED" >> $GITHUB_OUTPUT
+          echo -e "$SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
   # =============================================================================
