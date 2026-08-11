@@ -118,6 +118,13 @@ log "target image=${ECR_IMAGE}"
 # ==================================================================================
 # WAIT FOR IN-FLIGHT DESTRUCTIVE OPS
 # ==================================================================================
+# This is one of two implementations of the `instance_busy` contract; the other
+# is the ASG-wide gate in .github/actions/refresh-graph-asg/action.yml, which asks
+# "is ANY instance in this ASG busy?" from a runner before replacing instances —
+# a decision an instance cannot make about itself. Neither is redundant, but the
+# fail-open rules below must stay identical in both. See that file's note at
+# STALE_WINDOW_SECONDS.
+#
 # This is a coordination signal, NOT a guard. `instance_busy`'s own module logs
 # write failures and never raises them, on the principle that a broken counter
 # must not block the actual work — see ref/data-plane.md §65. Every escape hatch

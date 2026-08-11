@@ -72,9 +72,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh-asgs:
+  # This job exists only to do arithmetic, because GitHub Actions expressions have
+  # no arithmetic operators and `timeout-minutes` can read `needs` but not compute.
+  #
+  # It is not cosmetic. The action's busy-counter wait runs **per tier,
+  # sequentially**, each up to max_wait_minutes, and a run with no `tier` input
+  # iterates every writer tier. A fixed 45-minute job cap was therefore roughly
+  # 2.4x smaller than the worst-case internal budget (3 tiers x 30m, plus a 20m
+  # refresh-completion wait), so both the "timed out waiting for idle" error and
+  # the completion-wait branch were unreachable: a legitimately slow refresh was
+  # killed by the runner and reported as a bare cancellation with no diagnostic.
+  budget:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
+    outputs:
+      job_timeout_minutes: ${{ steps.compute.outputs.job_timeout_minutes }}
+    steps:
+      - name: Compute job timeout from the internal wait budget
+        id: compute
+        env:
+          MAX_WAIT: ${{ inputs.max_wait_minutes || '30' }}
+          TIER: ${{ inputs.tier }}
+        run: |
+          set -uo pipefail
+          if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
+            exit 1
+          fi
+
+          # One tier when explicitly targeted; otherwise every writer tier the
+          # action iterates. ladybug-shared is skipped before its busy wait, so it
+          # contributes nothing — keep this count in step with TIER_STACKS minus
+          # SHARED_TIERS in .github/actions/refresh-graph-asg/action.yml.
+          if [ -n "$TIER" ]; then TIERS=1; else TIERS=3; fi
+
+          # + 20 for the action's refresh-completion wait (MAX_WAIT=1200 there,
+          # once for all ASGs rather than per tier) and + 10 slack for runner
+          # startup, checkout, and describe calls.
+          TOTAL=$(( MAX_WAIT * TIERS + 20 + 10 ))
+          echo "job_timeout_minutes=${TOTAL}" >> $GITHUB_OUTPUT
+          echo "Busy wait ${MAX_WAIT}m x ${TIERS} tier(s) + 20m completion + 10m slack = ${TOTAL}m"
+
+  refresh-asgs:
+    needs: [budget]
+    runs-on: ubuntu-latest
+    # Must exceed the action's own internal budget, or its timeout branches can
+    # never report. Derived, never fixed — see the budget job.
+    timeout-minutes: ${{ fromJSON(needs.budget.outputs.job_timeout_minutes) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

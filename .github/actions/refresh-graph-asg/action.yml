@@ -84,6 +84,22 @@ runs:
         FORCE_IGNORE_BUSY="${{ inputs.force-ignore-busy }}"
         # Stale detection: counter > 0 but heartbeat older than 6h → crashed.
         # 6h comfortably covers full SEC backfills; anything longer is likely hung.
+        #
+        # This is the SECOND of two implementations of the `instance_busy`
+        # contract; the other is `wait_until_idle` in
+        # bin/userdata/common/refresh-graph-container.sh. They are not
+        # interchangeable and neither is redundant: that one asks "am I busy?" on
+        # the instance before swapping its own container, this one asks "is ANY
+        # instance in this ASG busy?" from the runner before calling
+        # start_instance_refresh, which replaces instances and so cannot be a
+        # decision an instance makes about itself.
+        #
+        # What they MUST share is the interpretation, because `instance_busy` is a
+        # coordination signal and not a guard (ref/data-plane.md §65): a negative
+        # counter is idle, a counter with a stale heartbeat is a crashed writer,
+        # and a missing registry row proceeds. Change a fail-open rule in one and
+        # change it in the other, or the two drift — as the stale window already
+        # did once, when this comment said 2h while the constant said 6h.
         STALE_WINDOW_SECONDS=21600
 
         # Environment suffix for stack names
@@ -255,14 +271,23 @@ runs:
                   continue
                 fi
 
-                # Stale detection: counter > 0 but no heartbeat for 2h → crashed
+                # Stale detection: counter > 0 but no heartbeat for the stale
+                # window (6h, see STALE_WINDOW_SECONDS above) → treat as crashed.
                 if [ -n "$BUSY_LAST_AT" ]; then
                   BUSY_LAST_EPOCH=$(date -u -d "${BUSY_LAST_AT}" +%s 2>/dev/null || echo 0)
                   BUSY_NOW_EPOCH=$(date -u +%s)
                   BUSY_AGE=$((BUSY_NOW_EPOCH - BUSY_LAST_EPOCH))
                   if [ $BUSY_LAST_EPOCH -gt 0 ] && [ $BUSY_AGE -gt $STALE_WINDOW_SECONDS ]; then
-                    echo "    ::warning::Stale busy counter on ${BUSY_INSTANCE_ID}: count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT} (${BUSY_AGE}s ago). Treating as crashed."
+                    echo "    ::warning::Stale busy counter on ${BUSY_INSTANCE_ID}: count=${BUSY_COUNT}, kind=${BUSY_KIND}, last=${BUSY_LAST_AT} (${BUSY_AGE}s ago > ${STALE_WINDOW_SECONDS}s). Treating as crashed."
                     continue
+                  fi
+                  # An unparseable heartbeat disables the crashed-writer escape
+                  # hatch, so the wait can only end in idle or timeout. Say so
+                  # once rather than let an operator watch it run out with no
+                  # explanation. `date -d` needs GNU coreutils (present on the
+                  # ubuntu runners this action runs on).
+                  if [ "$BUSY_LAST_EPOCH" -eq 0 ] && [ $WAIT_ATTEMPT -eq 1 ]; then
+                    echo "    ::warning::Could not parse heartbeat '${BUSY_LAST_AT}' on ${BUSY_INSTANCE_ID} — stale-counter detection is inactive for this run"
                   fi
                 fi
 
