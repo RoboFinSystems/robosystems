@@ -4,7 +4,7 @@ Sharing is authorized capability-style: whoever holds a graph's id can copy a
 published report into it. These are the tests for the three controls that make
 that model sound — the recipient can delete what landed and block the sender,
 and the sender can withdraw. See
-``local/RoboSystems/specs/extensions/cross-graph-share-controls.md``.
+``local/RoboSystems/archive/cross-graph-share-controls.md``.
 """
 
 from __future__ import annotations
