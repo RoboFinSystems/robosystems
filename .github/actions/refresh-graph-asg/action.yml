@@ -26,8 +26,9 @@ inputs:
       on ANY instance in the target WRITER ASG before starting the
       refresh. Polls every 60 seconds. NOTE: This action skips the
       shared tier entirely — shared-tier busy protection (which covers
-      SEC staging on the shared-master) runs via refresh-graph-containers,
-      called per-instance from service-refresh.yml.
+      SEC staging on the shared-master) runs on the instance itself, in
+      refresh-graph-container.sh, dispatched fleet-wide from
+      service-refresh.yml.
     required: false
     default: "30"
   force-ignore-busy:
@@ -212,9 +213,10 @@ runs:
           # Wait for in-flight destructive operations on ANY instance in this
           # writer ASG before starting the refresh. Covers user materialization,
           # extensions mat, and bulk table creates. Shared-tier SEC staging
-          # protection runs through refresh-graph-containers (per-instance via
-          # service-refresh.yml) — the ladybug-shared branch of this loop skips
-          # to `continue` above, so this block never executes for shared tiers.
+          # protection runs in refresh-graph-container.sh on the instance,
+          # dispatched fleet-wide from service-refresh.yml — the ladybug-shared
+          # branch of this loop skips to `continue` above, so this block never
+          # executes for shared tiers.
           if [ "$FORCE_IGNORE_BUSY" = "true" ]; then
             echo "  force-ignore-busy=true — skipping destructive-op wait"
           else

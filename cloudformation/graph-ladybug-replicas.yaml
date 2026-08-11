@@ -428,16 +428,6 @@ Resources:
                 Value: !Ref ComponentTag
               - Key: NodeType
                 Value: shared_replica
-              # Gives the fleet one tag key that selects any graph node:
-              # LadybugRole in (writer, replica). The value MUST be `replica`,
-              # not `shared_replica` — graph_volume_monitor's
-              # discover_lbug_instances filter is what drives volume expansion,
-              # and replicas carry no data volume to manage, so a value that
-              # matched it would pull the whole replica fleet into that loop.
-              # See discover_replica_instance_ids for why they are enumerated
-              # separately.
-              - Key: LadybugRole
-                Value: replica
               - Key: CreatedBy
                 Value: CloudFormation
           - ResourceType: volume
@@ -578,6 +568,32 @@ Resources:
           PropagateAtLaunch: true
         - Key: NodeType
           Value: shared_replica
+          PropagateAtLaunch: true
+        # Gives the fleet one tag key that selects any graph node: LadybugRole in
+        # (writer, replica).
+        #
+        # Deliberately here on the ASG rather than in the launch template's
+        # TagSpecifications, and that placement is the whole point. The ASG
+        # references the template as `Version: !GetAtt
+        # ReplicaLaunchTemplate.LatestVersionNumber`, so *any* template edit bumps
+        # that version, which changes an ASG property that requires replacement
+        # and fires `UpdatePolicy: AutoScalingRollingUpdate`. With MaxBatchSize 1
+        # and PauseTime PT30M, adding a tag there would roll the entire replica
+        # fleet on the next deploy — each instance cold-downloading ~120GB of
+        # sec.lbug. Updating ASG `Tags` is a no-interruption change instead, and
+        # PropagateAtLaunch still puts the tag on every future instance.
+        #
+        # Replicas are meant to pick up new images on the nightly Dagster-driven
+        # ASG refresh, or on an explicit graph-asg-refresh.yml dispatch — never as
+        # a side effect of deploying a CloudFormation template.
+        #
+        # The value MUST be `replica`, not `shared_replica`:
+        # graph_volume_monitor's discover_lbug_instances filter drives volume
+        # expansion, and replicas carry no data volume to manage, so a value that
+        # matched it would pull the whole replica fleet into that loop. See
+        # discover_replica_instance_ids for why they are enumerated separately.
+        - Key: LadybugRole
+          Value: replica
           PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
