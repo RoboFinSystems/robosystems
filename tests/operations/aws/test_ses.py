@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from robosystems.config import env
 from robosystems.operations.aws.ses import SESEmailService
 
 
@@ -409,3 +410,87 @@ class TestCapacityWarningEmail:
     assert any(
       tag["Name"] == "EmailType" and tag["Value"] == "capacity_warning" for tag in tags
     )
+
+
+class TestAuthLinkTargets:
+  """Auth action links honor AUTH_EMAIL_LINKS_TO_LOGIN_HOME."""
+
+  def _html(self, mock_ses_client):
+    return mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
+      "Data"
+    ]
+
+  @pytest.mark.asyncio
+  async def test_links_target_app_when_flag_off(self, ses_service, mock_ses_client):
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-1"}
+
+    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", False):
+      await ses_service.send_verification_email(
+        user_email="test@example.com",
+        user_name="Test",
+        token="tok1",
+        app="roboledger",
+      )
+
+    html = self._html(mock_ses_client)
+    assert "https://roboledger.ai/auth/verify-email?token=tok1" in html
+    assert "return_to" not in html
+
+  @pytest.mark.asyncio
+  async def test_auth_links_target_login_home_when_flag_on(
+    self, ses_service, mock_ses_client
+  ):
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-2"}
+
+    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", True):
+      await ses_service.send_verification_email(
+        user_email="test@example.com",
+        user_name="Test",
+        token="tok2",
+        app="roboledger",
+      )
+      html = self._html(mock_ses_client)
+      assert "https://robosystems.ai/auth/verify-email?token=tok2" in html
+      assert "return_to=roboledger" in html
+      # Branding stays per-app
+      assert "RoboLedger" in html
+
+      mock_ses_client.reset_mock()
+      mock_ses_client.send_email.return_value = {"MessageId": "msg-3"}
+      await ses_service.send_password_reset_email(
+        user_email="test@example.com",
+        user_name="Test",
+        token="tok3",
+        app="roboinvestor",
+      )
+      html = self._html(mock_ses_client)
+      assert "https://robosystems.ai/auth/reset-password?token=tok3" in html
+      assert "return_to=roboinvestor" in html
+
+      mock_ses_client.reset_mock()
+      mock_ses_client.send_email.return_value = {"MessageId": "msg-4"}
+      await ses_service.send_org_invitation_email(
+        user_email="new@example.com",
+        inviter_name="Inviter",
+        org_name="Test Org",
+        token="tok4",
+        app="roboledger",
+      )
+      html = self._html(mock_ses_client)
+      assert "https://robosystems.ai/register?invite=tok4" in html
+      assert "return_to=roboledger" in html
+
+  @pytest.mark.asyncio
+  async def test_welcome_link_unaffected_by_flag(self, ses_service, mock_ses_client):
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-5"}
+
+    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", True):
+      await ses_service.send_welcome_email(
+        user_email="test@example.com",
+        user_name="Test",
+        app="roboledger",
+      )
+
+    html = self._html(mock_ses_client)
+    assert "https://roboledger.ai/home" in html
+    assert "return_to" not in html

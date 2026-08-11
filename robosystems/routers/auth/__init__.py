@@ -9,6 +9,7 @@ from .login import router as login_router
 from .logout import router as logout_router
 from .password import router as password_router
 from .password_reset import router as password_reset_router
+from .providers import router as providers_router
 
 # Import sub-routers
 from .register import router as register_router
@@ -37,5 +38,6 @@ router.include_router(password_reset_router)
 
 router.include_router(sso_router)
 
-# Security
+# Configuration
 router.include_router(captcha_router)
+router.include_router(providers_router)

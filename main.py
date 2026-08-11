@@ -234,6 +234,9 @@ def create_app() -> FastAPI:
       # accept Idempotency-Key for safe retries — must be in allow_headers
       # or browser preflight will reject it for cross-origin requests.
       "Idempotency-Key",
+      # Auth endpoints read X-App-Source for email branding when Referer-based
+      # detection can't identify the originating product app.
+      "X-App-Source",
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600,  # Cache preflight requests for 1 hour

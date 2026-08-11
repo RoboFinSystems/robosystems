@@ -375,6 +375,9 @@ class EnvConfig:
   ROBOLEDGER_URL = get_str_env("ROBOLEDGER_URL", "https://roboledger.ai")
   ROBOINVESTOR_URL = get_str_env("ROBOINVESTOR_URL", "https://roboinvestor.ai")
   ROBOSYSTEMS_URL = get_str_env("ROBOSYSTEMS_URL", "https://robosystems.ai")
+  # Which app hosts the interactive auth surface ("login home"). Single-app
+  # deployments designate their own app key here.
+  LOGIN_HOME_APP = get_str_env("LOGIN_HOME_APP", "robosystems")
 
   # JWT configuration
   JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
@@ -467,6 +470,27 @@ class EnvConfig:
   CAPTCHA_ENABLED = get_bool_env(
     "CAPTCHA_ENABLED",
     get_parameter_value("CAPTCHA_ENABLED", "false").lower() == "true",
+  )
+  # Auth posture flags surfaced by GET /v1/auth/providers so the login home
+  # renders the deployment's auth methods from runtime config.
+  PASSWORD_AUTH_ENABLED = get_bool_env(
+    "PASSWORD_AUTH_ENABLED",
+    get_parameter_value("PASSWORD_AUTH_ENABLED", "true").lower() == "true",
+  )
+  SSO_OIDC_ENABLED = get_bool_env(
+    "SSO_OIDC_ENABLED",
+    get_parameter_value("SSO_OIDC_ENABLED", "false").lower() == "true",
+  )
+  SSO_OIDC_PROVIDER_LABEL = get_str_env("SSO_OIDC_PROVIDER_LABEL", "SSO")
+  PASSKEYS_ENABLED = get_bool_env(
+    "PASSKEYS_ENABLED",
+    get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",
+  )
+  # When enabled, verification/reset/invitation email links target the login
+  # home instead of the originating app.
+  AUTH_EMAIL_LINKS_TO_LOGIN_HOME = get_bool_env(
+    "AUTH_EMAIL_LINKS_TO_LOGIN_HOME",
+    get_parameter_value("AUTH_EMAIL_LINKS_TO_LOGIN_HOME", "false").lower() == "true",
   )
 
   # --- Organization ---
