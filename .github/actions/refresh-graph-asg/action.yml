@@ -39,6 +39,26 @@ inputs:
       require a full graph rebuild.
     required: false
     default: "false"
+  wait-for-completion:
+    description: >-
+      If true (default), monitor each instance refresh to a terminal state and
+      fail the run if any refresh fails. If false, start the refreshes and
+      return — the ASG carries them out regardless of whether anything is
+      watching, so this trades the failure signal for not holding a runner
+      through a fleet roll that can outlast any sensible job timeout. The
+      busy-counter gate still runs either way; it is the part that cannot be
+      deferred. Mirrors `wait_for_completion` on SharedReplicaRefreshConfig.
+    required: false
+    default: "true"
+  completion-wait-minutes:
+    description: >-
+      How long to monitor for completion when wait-for-completion is true.
+      Ignored otherwise. The default of 20 preserves the previously hardcoded
+      1200s; raise it for a large fleet — Dagster's replica equivalent budgets
+      2 hours, sized for ~100 instances. Note the job timeout is derived from
+      this, so raising it raises the cap rather than fighting it.
+    required: false
+    default: "20"
 
 outputs:
   refreshed-asgs:
@@ -82,6 +102,8 @@ runs:
         WARMUP="${{ inputs.instance-warmup }}"
         MAX_WAIT_ATTEMPTS="${{ inputs.max-wait-minutes }}"
         FORCE_IGNORE_BUSY="${{ inputs.force-ignore-busy }}"
+        WAIT_FOR_COMPLETION="${{ inputs.wait-for-completion }}"
+        COMPLETION_WAIT_MINUTES="${{ inputs.completion-wait-minutes }}"
         # Stale detection: counter > 0 but heartbeat older than 6h → crashed.
         # 6h comfortably covers full SEC backfills; anything longer is likely hung.
         #
@@ -352,11 +374,6 @@ runs:
         # Remove trailing comma
         REFRESHED_ASGS="${REFRESHED_ASGS%,}"
 
-        echo ""
-        echo "========================================"
-        echo "Waiting for Refreshes to Complete"
-        echo "========================================"
-
         if [ "$TOTAL_REFRESHED" -eq 0 ]; then
           echo "No ASGs were refreshed"
           echo "refreshed_asgs=" >> $GITHUB_OUTPUT
@@ -365,10 +382,47 @@ runs:
           exit 0
         fi
 
-        # Wait for all refreshes to complete (max 20 minutes)
-        MAX_WAIT=1200
+        # Fire-and-forget. An instance refresh is an ASG-side operation that keeps
+        # running whether or not anything watches it, so holding a runner through
+        # it is a choice rather than a requirement — and a bad one for a large
+        # fleet, where a roll can outlast any sensible job timeout. Mirrors
+        # `wait_for_completion` on SharedReplicaRefreshConfig
+        # (robosystems/dagster/assets/shared_repositories/replicas.py), which is
+        # the same decision for the replica fleet.
+        #
+        # The busy-counter gate above is NOT skipped in this mode: it must run
+        # before instances are replaced, and that is exactly what cannot be
+        # deferred.
+        if [ "$WAIT_FOR_COMPLETION" != "true" ]; then
+          echo ""
+          echo "========================================"
+          echo "Refreshes Started (not waiting)"
+          echo "========================================"
+          echo "Total ASGs refreshed: $TOTAL_REFRESHED"
+          echo "ASGs: $REFRESHED_ASGS"
+          echo ""
+          echo "Progress is not monitored here. Check it with:"
+          echo "  aws autoscaling describe-instance-refreshes --auto-scaling-group-name <asg> --region $REGION"
+          echo "refreshed_asgs=$REFRESHED_ASGS" >> $GITHUB_OUTPUT
+          echo "total_refreshed=$TOTAL_REFRESHED" >> $GITHUB_OUTPUT
+          if [ "$HAS_ERRORS" = true ]; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "One or more tiers failed before their refresh could start"
+            exit 1
+          fi
+          echo "status=started" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo ""
+        echo "========================================"
+        echo "Waiting for Refreshes to Complete"
+        echo "========================================"
+
+        MAX_WAIT=$((COMPLETION_WAIT_MINUTES * 60))
         POLL_INTERVAL=30
         ELAPSED=0
+        echo "Monitoring for up to ${COMPLETION_WAIT_MINUTES}m (poll every ${POLL_INTERVAL}s)"
 
         while [ $ELAPSED -lt $MAX_WAIT ]; do
           ALL_COMPLETE=true
