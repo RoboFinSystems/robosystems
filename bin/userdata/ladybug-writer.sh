@@ -268,6 +268,12 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/run-graph-container.sh \
   exit 1
 }
 
+aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/refresh-graph-container.sh \
+    /usr/local/bin/refresh-graph-container.sh || {
+  echo "ERROR: Could not download container refresh script from S3"
+  exit 1
+}
+
 aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-health-check.sh \
     /usr/local/bin/graph-health-check.sh || {
   echo "ERROR: Could not download health check script from S3"
@@ -284,6 +290,7 @@ aws s3 cp s3://${DEPLOYMENT_BUCKET}/userdata/common/graph-lifecycle.sh \
 chmod +x /usr/local/bin/setup-cloudwatch-graph.sh
 chmod +x /usr/local/bin/register-graph-instance.sh
 chmod +x /usr/local/bin/run-graph-container.sh
+chmod +x /usr/local/bin/refresh-graph-container.sh
 chmod +x /usr/local/bin/graph-health-check.sh
 chmod +x /usr/local/bin/graph-lifecycle.sh
 
@@ -420,6 +427,11 @@ echo "LANCE_MOUNT_SOURCE=${LANCE_MOUNT_SOURCE}" >> /etc/environment
 echo "LANCE_MOUNT_TARGET=${LANCE_MOUNT_TARGET}" >> /etc/environment
 echo "LANCE_INDEX_PATH=${LANCE_MOUNT_TARGET}" >> /etc/environment
 echo "DOCKER_PROFILE=${DOCKER_PROFILE}" >> /etc/environment
+# Asserts that everything above was written. refresh-graph-container.sh refuses to
+# refresh below this version rather than start a container missing mounts this boot
+# configured. Bump it here and in that script together whenever a variable a
+# refresh depends on is added above.
+echo "GRAPH_ENV_SCHEMA=2" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh

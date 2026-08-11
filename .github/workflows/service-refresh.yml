@@ -77,11 +77,6 @@ on:
         required: false
         type: string
         default: "writer"
-      graph_health_check_timeout:
-        description: "Seconds to wait for graph health check"
-        required: false
-        type: string
-        default: "30"
       max_wait_minutes:
         description: "Minutes to wait for in-flight destructive ops on the target instance"
         required: false
@@ -130,7 +125,29 @@ jobs:
     outputs:
       matrix: ${{ steps.collect.outputs.matrix }}
       has_instances: ${{ steps.collect.outputs.has_instances }}
+      job_timeout_minutes: ${{ steps.budget.outputs.job_timeout_minutes }}
     steps:
+      - name: Compute refresh job timeout
+        id: budget
+        run: |
+          # The refresh job must outlive the instance-side busy-wait, so this is
+          # derived from max_wait_minutes rather than hardcoded — a static 15 was
+          # shorter than the 30-minute default wait, so a genuinely busy instance
+          # could never be waited out.
+          #
+          # Computed in shell, NOT in a `${{ }}` expression: GitHub Actions
+          # expressions have no arithmetic operators (the operator set is
+          # grouping, index, dereference, !, comparisons, && and ||), so a `+`
+          # there is a workflow parse error, not a value.
+          MAX_WAIT="${{ inputs.max_wait_minutes || '30' }}"
+          if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
+            exit 1
+          fi
+          # +15 covers the pull, restart and health check on top of the wait.
+          echo "job_timeout_minutes=$((MAX_WAIT + 15))" >> $GITHUB_OUTPUT
+          echo "Refresh job timeout: $((MAX_WAIT + 15))m (busy-wait ceiling ${MAX_WAIT}m)"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -149,25 +166,24 @@ jobs:
           if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
             echo "📦 Collecting writer instances..."
 
-            # Get all graph writers using the LadybugRole tag
+            # Get all graph writers using the LadybugRole tag. WriterTier comes
+            # out of this same response — reading it with a per-instance
+            # describe-tags call inside the loop below is O(n) API calls from a
+            # single runner and throttles long before a large fleet finishes.
             LBUG_WRITERS=$(aws ec2 describe-instances \
               --filters \
                 "Name=tag:Environment,Values=${{ inputs.environment }}" \
                 "Name=tag:LadybugRole,Values=writer" \
                 "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
+              --query "Reservations[].Instances[].[InstanceId, Tags[?Key=='WriterTier']|[0].Value]" \
               --output text \
               --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
 
-            # Process graph writers
-            for INSTANCE in $LBUG_WRITERS; do
-              TIER=$(aws ec2 describe-tags \
-                --filters \
-                  "Name=resource-id,Values=$INSTANCE" \
-                  "Name=key,Values=WriterTier" \
-                --query "Tags[0].Value" \
-                --output text \
-                --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+            # Process graph writers (tab-separated "<instance-id> <tier>" rows)
+            while read -r INSTANCE TIER; do
+              [ -n "$INSTANCE" ] || continue
+              # An untagged instance renders as the literal "None" in text output
+              [ "$TIER" == "None" ] && TIER=""
 
               # Filter instances based on node_types parameter
               if [ "$NODE_TYPES" == "shared" ]; then
@@ -193,7 +209,7 @@ jobs:
               else
                 INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
               fi
-            done
+            done <<< "$LBUG_WRITERS"
           fi
 
           # Collect shared replicas (only if all or shared-replicas is selected)
@@ -241,7 +257,11 @@ jobs:
     needs: [collect-graph-instances]
     if: needs.collect-graph-instances.outputs.has_instances == 'true'
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    timeout-minutes: 15
+    # Derived from the busy-wait ceiling by the collect job (see its "Compute
+    # refresh job timeout" step) rather than hardcoded here, so the two cannot
+    # drift. The `|| 45` is a floor for the impossible case of an empty output,
+    # since an empty timeout-minutes is not a valid value.
+    timeout-minutes: ${{ needs.collect-graph-instances.outputs.job_timeout_minutes || 45 }}
     permissions:
       id-token: write
       contents: read
@@ -263,13 +283,6 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
 
-      - name: Get AWS Account ID
-        id: aws-account
-        run: |
-          # Fetch from STS - validates OIDC connection is working
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
-
       - name: Update Graph Container
         uses: ./.github/actions/refresh-graph-containers
         with:
@@ -278,8 +291,6 @@ jobs:
           node-type: ${{ matrix.node_type }}
           backend: ${{ matrix.backend }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
-          aws-account-id: ${{ steps.aws-account.outputs.account_id }}
-          health-check-timeout: ${{ inputs.graph_health_check_timeout || '30' }}
           max-wait-minutes: ${{ inputs.max_wait_minutes || '30' }}
           force-ignore-busy: ${{ inputs.force_ignore_busy || 'false' }}
 

@@ -274,7 +274,11 @@ jobs:
           for ENV in $ENVS; do
             echo "🔍 Discovering instances for $ENV..."
 
-            # Find LadybugDB writer instances by tag
+            # Find LadybugDB writer instances by tag. This covers every writer
+            # tier including shared: the launch template tags all of them
+            # LadybugRole=writer and distinguishes the tier with WriterTier.
+            # There is no LadybugRole=shared-writer — a second query for that
+            # value matched nothing and has been removed.
             WRITERS=$(aws ec2 describe-instances \
               --filters \
                 "Name=tag:Environment,Values=$ENV" \
@@ -283,16 +287,7 @@ jobs:
               --query "Reservations[].Instances[].InstanceId" \
               --output text 2>/dev/null || echo "")
 
-            # Find shared-writer instances
-            SHARED_WRITERS=$(aws ec2 describe-instances \
-              --filters \
-                "Name=tag:Environment,Values=$ENV" \
-                "Name=tag:LadybugRole,Values=shared-writer" \
-                "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
-              --output text 2>/dev/null || echo "")
-
-            for ID in $WRITERS $SHARED_WRITERS; do
+            for ID in $WRITERS; do
               if [ -n "$ID" ]; then
                 INSTANCE_IDS="$INSTANCE_IDS $ID"
                 echo "  Found: $ID"

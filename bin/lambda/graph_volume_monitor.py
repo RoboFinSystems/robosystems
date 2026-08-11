@@ -227,7 +227,21 @@ def monitor_all_instances(expand_immediately: bool = False) -> dict[str, Any]:
 
 
 def discover_lbug_instances() -> list[dict]:
-  """Discover all running Graph instances"""
+  """Discover all running Graph writer instances.
+
+  `writer` is the only value the writer launch template ever puts on
+  `LadybugRole`, across every tier — the tier is carried separately on
+  `WriterTier`. This filter previously also listed `shared_master` and
+  `shared_replica`, which are `NODE_TYPE` values and never appear on
+  `LadybugRole`, so they matched nothing.
+
+  Do not widen this to match any `LadybugRole` value. Replicas carry no
+  `LadybugRole` today and are slated to get `replica` (deliberately not
+  `shared_replica`) so that a tag expression can select the whole graph fleet.
+  Either way they must stay out of this function: its callers drive volume
+  expansion and replicas carry no data volume to manage. See
+  `discover_replica_instance_ids`, which enumerates them separately.
+  """
 
   instances = []
 
@@ -236,10 +250,7 @@ def discover_lbug_instances() -> list[dict]:
     response = ec2.describe_instances(
       Filters=[
         {"Name": "tag:Service", "Values": ["RoboSystems"]},
-        {
-          "Name": "tag:LadybugRole",
-          "Values": ["writer", "shared_master", "shared_replica"],
-        },
+        {"Name": "tag:LadybugRole", "Values": ["writer"]},
         {"Name": "instance-state-name", "Values": ["running"]},
         {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
       ]

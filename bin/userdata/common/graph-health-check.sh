@@ -23,17 +23,21 @@ set -e
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 
-# Validate the runtime type and derive the container name from the instance role
+# Validate the runtime type
 if [ "${DATABASE_TYPE}" != "ladybug" ]; then
   echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
   exit 1
 fi
 
-if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-  CONTAINER_NAME="graph-api-shared"
-else
-  CONTAINER_NAME="graph-api"
-fi
+# Ask run-graph-container.sh for the container name rather than re-deriving the
+# NODE_TYPE mapping a third time. Both scripts are downloaded from S3 in the same
+# userdata block, so they are always the same vintage. If it is missing, this
+# check cannot identify the container OR restart it (see below), so failing here
+# is more honest than guessing a name and reporting health for it.
+CONTAINER_NAME=$(/usr/local/bin/run-graph-container.sh --print-container-name) || {
+  echo "[$(date)] ERROR: could not determine container name from run-graph-container.sh"
+  exit 1
+}
 
 # Check container status
 if docker ps | grep -q $CONTAINER_NAME; then

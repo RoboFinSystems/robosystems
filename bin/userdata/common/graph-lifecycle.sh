@@ -20,11 +20,12 @@ INSTANCE_REGISTRY_TABLE="${INSTANCE_REGISTRY_TABLE:-robosystems-graph-${ENVIRONM
 # ==================================================================================
 # DATABASE-SPECIFIC CONFIGURATION
 # ==================================================================================
-if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-    CONTAINER_NAME="graph-api-shared"
-else
-    CONTAINER_NAME="graph-api"
-fi
+# Ask run-graph-container.sh for the container name rather than re-deriving the
+# NODE_TYPE mapping. It owns that mapping; every other copy of it drifted.
+CONTAINER_NAME=$(/usr/local/bin/run-graph-container.sh --print-container-name) || {
+    echo "ERROR: could not determine container name from run-graph-container.sh" >&2
+    exit 1
+}
 GRAPH_API_PORT="8001"
 DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
 CONNECTIONS_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/connections"
