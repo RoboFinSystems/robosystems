@@ -127,6 +127,35 @@ on:
 permissions: {}
 
 jobs:
+  # This job exists only to do arithmetic. GitHub Actions expressions have no
+  # arithmetic operators, and `timeout-minutes` can read `needs` but not compute,
+  # so the one place a derived timeout can come from is another job's output.
+  #
+  # It is not optional. The refresh job's internal poll budget is
+  # max_wait_minutes + 15, so a job timeout of max_wait_minutes alone gets the
+  # runner killed *before* the poll's own graceful give-up branch can fire — a
+  # healthy-but-slow refresh would read as a hard workflow failure. A previous
+  # incarnation of this arithmetic was lost when the collector job it lived in was
+  # deleted, which is exactly how that bug came back.
+  graph-refresh-budget:
+    if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      job_timeout_minutes: ${{ steps.budget.outputs.job_timeout_minutes }}
+    steps:
+      - name: Compute refresh job timeout
+        id: budget
+        run: |
+          MAX_WAIT="${{ inputs.max_wait_minutes || '30' }}"
+          if ! [[ "$MAX_WAIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_wait_minutes must be a positive integer, got '$MAX_WAIT'"
+            exit 1
+          fi
+          # +20 covers the poll loop's own +15 headroom plus runner startup.
+          echo "job_timeout_minutes=$((MAX_WAIT + 20))" >> $GITHUB_OUTPUT
+          echo "Refresh job timeout: $((MAX_WAIT + 20))m (busy-wait ceiling ${MAX_WAIT}m)"
+
   # ============================================
   # Graph Container Refresh (fleet-wide, via SSM)
   # ============================================
@@ -138,12 +167,13 @@ jobs:
   # sleep through a 30-minute busy-wait. Runner time here is now bounded and
   # independent of fleet size.
   refresh-graph:
+    needs: [graph-refresh-budget]
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
-    # The busy-wait happens on the instance, not here, so this only has to
-    # outlive polling. Still derived from the wait ceiling rather than fixed, so
-    # raising max_wait_minutes cannot leave the poll cut short mid-rollout.
-    timeout-minutes: ${{ fromJSON(inputs.max_wait_minutes || '30') }}
+    # Must exceed the poll budget computed inside the step below, or the runner
+    # kills the job before the poll can report anything. Derived, never fixed —
+    # see graph-refresh-budget.
+    timeout-minutes: ${{ fromJSON(needs.graph-refresh-budget.outputs.job_timeout_minutes) }}
     permissions:
       id-token: write
       contents: read
@@ -226,13 +256,28 @@ jobs:
           echo "Dispatched commands: $IDS"
 
           # Poll to terminal. The budget mirrors the instance-side ceiling plus
-          # headroom for the pull, restart and health check.
+          # headroom for the pull, restart and health check, and the job's own
+          # timeout is derived to exceed it (see graph-refresh-budget).
           DEADLINE=$(( $(date +%s) + MAX_WAIT * 60 + 900 ))
+          echo '{}' > /tmp/status.json
+          POLL_ERRORS=0
           while true; do
-            aws lambda invoke --function-name "$FUNCTION" \
-              --cli-binary-format raw-in-base64-out \
-              --payload "$(jq -n --argjson ids "$IDS" '{action:"status", command_ids:$ids}')" \
-              --region "$REGION" /tmp/status.json >/dev/null || true
+            if aws lambda invoke --function-name "$FUNCTION" \
+                 --cli-binary-format raw-in-base64-out \
+                 --payload "$(jq -n --argjson ids "$IDS" '{action:"status", command_ids:$ids}')" \
+                 --region "$REGION" /tmp/status.json >/dev/null; then
+              POLL_ERRORS=0
+            else
+              # A transient failure is fine to ride out, but a poller that can
+              # never reach the Lambda must not look like "still in progress"
+              # until the deadline — the fleet may be mid-rollout and unwatched.
+              POLL_ERRORS=$((POLL_ERRORS + 1))
+              echo "::warning::status poll failed (${POLL_ERRORS} consecutive)"
+              if [ "$POLL_ERRORS" -ge 5 ]; then
+                echo "::error::Cannot reach ${FUNCTION} to read refresh status after ${POLL_ERRORS} attempts. The refresh may still be running on the fleet — check the SSM command history."
+                exit 1
+              fi
+            fi
 
             if [ "$(jq -r '.complete // false' /tmp/status.json)" = "true" ]; then break; fi
             if [ "$(date +%s)" -ge "$DEADLINE" ]; then

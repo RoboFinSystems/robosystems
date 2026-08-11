@@ -246,7 +246,11 @@ jobs:
       (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true' && needs.schedule-gate.outputs.task == 'docker-cleanup'))
     needs: [schedule-gate]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Must exceed the step's own internal budget, or the runner kills the job
+    # before the "still running past budget" branch can report anything. That
+    # budget is 1200s per environment, and a scheduled run does staging and prod
+    # sequentially — so 2 x 20m, plus slack for dispatch and summarising.
+    timeout-minutes: 50
     outputs:
       instances_cleaned: ${{ steps.cleanup.outputs.instances_cleaned }}
       space_freed: ${{ steps.cleanup.outputs.space_freed }}
