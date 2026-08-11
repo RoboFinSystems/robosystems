@@ -66,10 +66,14 @@ def verify_password(password: str, hashed: str) -> bool:
 def is_safe_relative_path(path: str) -> bool:
   """True when path is a same-app relative path.
 
-  Rejects scheme-relative URLs ("//host"), absolute URLs, and backslashes
-  (browsers normalize "/\\host" to "//host").
+  Rejects scheme-relative URLs ("//host"), absolute URLs, backslashes
+  (browsers normalize "/\\host" to "//host"), and ASCII tab/newline
+  characters (browsers strip those before URL parsing, so "/<TAB>/host"
+  would normalize to "//host").
   """
-  return path.startswith("/") and not path.startswith("//") and "\\" not in path
+  if not path.startswith("/") or path.startswith("//"):
+    return False
+  return not any(c in path for c in "\\\t\n\r")
 
 
 def detect_app_source(request) -> str:

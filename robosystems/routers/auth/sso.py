@@ -610,7 +610,11 @@ async def sso_complete(
       handoff_session_version = int(session_data.get("session_version", 0) or 0)
       current_session_version = int(getattr(user, "session_version", 0) or 0)
     except (TypeError, ValueError):
-      handoff_session_version, current_session_version = 0, 0
+      # Fail closed: this check exists to reject invalidated sessions, so a
+      # value that cannot be parsed must not be treated as a match.
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
+      )
 
     if handoff_session_version != current_session_version:
       SecurityAuditLogger.log_security_event(

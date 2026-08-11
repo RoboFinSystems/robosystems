@@ -152,6 +152,32 @@ class TestSSOComplete:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Session has been invalidated"
 
+  @patch("robosystems.routers.auth.sso.User.get_by_id")
+  @patch("robosystems.routers.auth.sso.get_async_redis_client")
+  @patch("robosystems.routers.auth.sso.get_sso_lock_manager")
+  async def test_complete_unparseable_session_version_fails_closed(
+    self,
+    mock_lock_manager,
+    mock_redis_client,
+    mock_get_by_id,
+    mock_user,
+  ):
+    """A session_version that cannot be parsed must reject, not pass."""
+    mock_lock_manager.return_value = None
+
+    redis_instance = AsyncMock()
+    redis_instance.get.return_value = json.dumps(
+      {**SESSION_DATA, "session_version": "garbage"}
+    )
+    mock_redis_client.return_value = redis_instance
+    mock_get_by_id.return_value = mock_user
+
+    with pytest.raises(HTTPException) as exc_info:
+      await sso_complete(**_call_args())
+
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert exc_info.value.detail == "Invalid session data"
+
   @patch("robosystems.routers.auth.sso.get_async_redis_client")
   @patch("robosystems.routers.auth.sso.get_sso_lock_manager")
   async def test_complete_missing_session(
