@@ -243,6 +243,8 @@ def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
 
 
 def test_get_main_cors_origins_respects_environment(monkeypatch):
+  # Prod with the URL defaults — byte-identical to the historical hardcoded
+  # list, proving the derivation changes nothing on the managed platform.
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
   assert EnvConfig.get_main_cors_origins() == [
     "https://roboledger.ai",
@@ -251,7 +253,21 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
     "https://holon.robosystems.ai",
   ]
 
+  # Staging derives from the deployment's own URLs — CloudFormation passes
+  # the staging.* values on managed staging (workflow fallbacks match).
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "staging", raising=False)
+  monkeypatch.setattr(
+    EnvConfig, "ROBOLEDGER_URL", "https://staging.roboledger.ai", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "ROBOINVESTOR_URL", "https://staging.roboinvestor.ai", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "ROBOSYSTEMS_URL", "https://staging.robosystems.ai", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "HOLON_URL", "https://staging.holon.robosystems.ai", raising=False
+  )
   assert EnvConfig.get_main_cors_origins() == [
     "https://staging.roboledger.ai",
     "https://staging.roboinvestor.ai",
@@ -263,6 +279,27 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
   origins = EnvConfig.get_main_cors_origins()
   assert "http://localhost:3000" in origins
   assert "https://roboledger.ai" in origins
+
+
+def test_get_main_cors_origins_derives_fork_domain(monkeypatch):
+  """A dedicated-tenant fork serving its own domain allows its own frontend
+  without code changes: origins derive from the deployment's app URLs, with
+  empty URLs skipped, paths stripped, and duplicates collapsed."""
+  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
+  monkeypatch.setattr(
+    EnvConfig, "ROBOLEDGER_URL", "https://tenant.robosystems.ai", raising=False
+  )
+  monkeypatch.setattr(EnvConfig, "ROBOINVESTOR_URL", "", raising=False)
+  monkeypatch.setattr(
+    EnvConfig, "ROBOSYSTEMS_URL", "https://tenant.robosystems.ai/", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "HOLON_URL", "https://holon.robosystems.ai", raising=False
+  )
+  assert EnvConfig.get_main_cors_origins() == [
+    "https://tenant.robosystems.ai",
+    "https://holon.robosystems.ai",
+  ]
 
 
 def test_get_lbug_cors_origins(monkeypatch):
