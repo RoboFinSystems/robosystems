@@ -11,7 +11,7 @@ Thanks for your interest in contributing. This repository is the API and backend
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [How to Contribute](#how-to-contribute)
-- [Licensing and Sign-off](#licensing-and-sign-off)
+- [Licensing and Certification](#licensing-and-certification)
 - [Branching](#branching)
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
@@ -86,7 +86,7 @@ Check existing issues first, then include steps to reproduce, expected versus ac
 
 Issues labeled `good first issue` or `help wanted` are good starting points.
 
-## Licensing and Sign-off
+## Licensing and Certification
 
 ### Licensing
 
@@ -94,30 +94,21 @@ RoboSystems is licensed under Apache 2.0 and will stay that way. Contributions a
 
 There is no contributor license agreement to sign and we do not ask you to assign copyright. You keep it.
 
-### Developer Certificate of Origin
+### Certification
 
-Every commit must carry a `Signed-off-by` line certifying you have the right to submit the work under the project's license. This is the [Developer Certificate of Origin](https://developercertificate.org/), the same mechanism the Linux kernel uses. It is a statement about *provenance* — that the work is yours to give — not a transfer of rights.
+The pull request template carries a certification checkbox. Tick it when you open the PR:
 
-Sign off automatically with `-s`:
+> I have the right to submit this work under the Apache 2.0 license, and do so. Where any part of it is owned by my employer, I have their permission.
 
-```bash
-git commit -s -m "feat(api): add portfolio analysis endpoint"
-```
+That is an assertion about **provenance** — that the work is yours to give — not a transfer of rights. If part of what you are contributing is owned by your employer, or came from a project under a different license, resolve that before opening the PR rather than after.
 
-which appends a trailer to the commit message:
+We ask for this once per pull request rather than as a `Signed-off-by` trailer on every commit. The obligation is identical; the ceremony is lighter, and it does not send you back through a rebase to satisfy a bot.
 
-```
-Signed-off-by: Your Name <you@example.com>
-```
+### Commit signing
 
-Use your real name and an address you can be reached at. If the work is owned by your employer, confirm you have their permission before signing off.
+Merges into `main` are performed by a maintainer and land as signed merge commits, so every change reaching the default branch carries a verified signature and an identified approver.
 
-To add sign-off to commits you have already written:
-
-```bash
-git commit --amend -s --no-edit       # the most recent commit
-git rebase --signoff origin/main      # every commit on your branch
-```
+Signing your own commits is welcome but not required. If you want them to show as Verified, register your signing key on your GitHub account — see [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification).
 
 ## Branching
 
@@ -230,7 +221,7 @@ A first-time contributor's workflow runs need maintainer approval before they st
 - Coverage does not regress meaningfully
 - Documentation is updated alongside behavior changes
 - One feature or fix per PR
-- Every commit carries a `Signed-off-by` line — see [Licensing and Sign-off](#licensing-and-sign-off)
+- The certification checkbox is ticked — see [Licensing and Certification](#licensing-and-certification)
 - At least one maintainer approval before merge, and a maintainer performs the merge
 
 Address review feedback with new commits rather than force-pushing, so reviewers can follow what changed.
