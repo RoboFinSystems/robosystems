@@ -155,36 +155,19 @@ jobs:
       branch_ref: ${{ needs.create-branch.outputs.branch_name }}
     secrets: inherit
 
-  # Check if ACTIONS_TOKEN is available for dispatch-based deployments
-  # Dispatch gives independent workflow runs for better monitoring
-  # Reusable workflows are fallback when PAT not available
-  check-deploy-method:
-    needs: create-tag
-    runs-on: ubuntu-latest
-    outputs:
-      use_dispatch: ${{ steps.check.outputs.use_dispatch }}
-    steps:
-      - name: Check for ACTIONS_TOKEN
-        id: check
-        run: |
-          if [ "${{ secrets.ACTIONS_TOKEN != '' }}" = "true" ]; then
-            echo "use_dispatch=true" >> $GITHUB_OUTPUT
-            echo "✅ ACTIONS_TOKEN available - will dispatch independent workflow runs"
-          else
-            echo "use_dispatch=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ ACTIONS_TOKEN not set - using reusable workflows (bundled in this run)"
-          fi
-
   # ============================================================================
-  # DISPATCH-BASED DEPLOYMENTS (when ACTIONS_TOKEN is available)
-  # Each deployment runs as an independent workflow for better monitoring
+  # DEPLOYMENTS
+  # Each deployment is dispatched as an independent workflow run for better
+  # monitoring. workflow_dispatch is exempt from GitHub's "GITHUB_TOKEN events
+  # don't trigger workflows" rule, so this works with the default token too;
+  # ACTIONS_TOKEN is preferred when available.
   # ============================================================================
 
-  deploy-staging-dispatch:
-    needs: [create-branch, create-tag, check-deploy-method]
-    if: |
-      needs.check-deploy-method.outputs.use_dispatch == 'true' &&
-      (inputs.deploy_target == 'staging' || inputs.deploy_target == 'all')
+  deploy-staging:
+    needs: [create-tag]
+    if: inputs.deploy_target == 'staging' || inputs.deploy_target == 'all'
+    permissions:
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -193,7 +176,7 @@ jobs:
       - name: Dispatch staging deployment
         id: dispatch
         env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
         run: |
           echo "🚀 Dispatching staging deployment from tag ${{ needs.create-tag.outputs.tag_name }}"
 
@@ -205,10 +188,12 @@ jobs:
           # Wait briefly for the run to be created
           sleep 5
 
-          # Get the run ID of the triggered workflow
+          # Get the run ID of the triggered workflow (dispatched at the tag,
+          # so filtering by the tag ref avoids grabbing an unrelated run)
           RUN_ID=$(gh run list \
             --repo ${{ github.repository }} \
             --workflow=staging.yml \
+            --branch ${{ needs.create-tag.outputs.tag_name }} \
             --limit 1 \
             --json databaseId \
             --jq '.[0].databaseId')
@@ -216,13 +201,15 @@ jobs:
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "✅ Staging deployment dispatched: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
 
-  deploy-prod-dispatch:
-    needs: [create-branch, create-tag, check-deploy-method, deploy-staging-dispatch]
+  deploy-prod:
+    needs: [create-tag, deploy-staging]
     if: |
-      always() &&
-      needs.check-deploy-method.outputs.use_dispatch == 'true' &&
+      !cancelled() &&
+      needs.create-tag.result == 'success' &&
       (inputs.deploy_target == 'prod' || inputs.deploy_target == 'all') &&
-      (needs.deploy-staging-dispatch.result == 'success' || needs.deploy-staging-dispatch.result == 'skipped')
+      (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
+    permissions:
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -238,7 +225,7 @@ jobs:
       - name: Dispatch prod deployment
         id: dispatch
         env:
-          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+          GH_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
         run: |
           echo "🚀 Dispatching prod deployment from tag ${{ needs.create-tag.outputs.tag_name }}"
 
@@ -250,10 +237,12 @@ jobs:
           # Wait briefly for the run to be created
           sleep 5
 
-          # Get the run ID of the triggered workflow
+          # Get the run ID of the triggered workflow (dispatched at the tag,
+          # so filtering by the tag ref avoids grabbing an unrelated run)
           RUN_ID=$(gh run list \
             --repo ${{ github.repository }} \
             --workflow=prod.yml \
+            --branch ${{ needs.create-tag.outputs.tag_name }} \
             --limit 1 \
             --json databaseId \
             --jq '.[0].databaseId')
@@ -261,59 +250,16 @@ jobs:
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "✅ Prod deployment dispatched: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
 
-  # ============================================================================
-  # REUSABLE WORKFLOW DEPLOYMENTS (fallback when ACTIONS_TOKEN not available)
-  # Deployments run as part of this workflow - less visibility but no PAT needed
-  # ============================================================================
-
-  deploy-staging-reusable:
-    needs: [create-branch, create-tag, check-deploy-method]
-    if: |
-      needs.check-deploy-method.outputs.use_dispatch == 'false' &&
-      (inputs.deploy_target == 'staging' || inputs.deploy_target == 'all')
-    permissions:
-      contents: read
-      deployments: write
-      id-token: write
-      security-events: write
-    uses: ./.github/workflows/staging.yml
-    secrets: inherit
-
-  deploy-prod-reusable:
-    needs: [create-branch, create-tag, check-deploy-method, deploy-staging-reusable]
-    if: |
-      always() &&
-      needs.check-deploy-method.outputs.use_dispatch == 'false' &&
-      (inputs.deploy_target == 'prod' || inputs.deploy_target == 'all') &&
-      (needs.deploy-staging-reusable.result == 'success' || needs.deploy-staging-reusable.result == 'skipped')
-    permissions:
-      contents: read
-      deployments: write
-      id-token: write
-      security-events: write
-    uses: ./.github/workflows/prod.yml
-    secrets: inherit
-
   create-summary:
-    needs:
-      [
-        create-branch,
-        create-tag,
-        check-deploy-method,
-        deploy-staging-dispatch,
-        deploy-prod-dispatch,
-        deploy-staging-reusable,
-        deploy-prod-reusable,
-      ]
+    needs: [create-branch, create-tag, deploy-staging, deploy-prod]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Create summary
         env:
-          USE_DISPATCH: ${{ needs.check-deploy-method.outputs.use_dispatch }}
-          STAGING_RUN_ID: ${{ needs.deploy-staging-dispatch.outputs.run_id }}
-          PROD_RUN_ID: ${{ needs.deploy-prod-dispatch.outputs.run_id }}
+          STAGING_RUN_ID: ${{ needs.deploy-staging.outputs.run_id }}
+          PROD_RUN_ID: ${{ needs.deploy-prod.outputs.run_id }}
         run: |
           echo "## Release Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -328,11 +274,11 @@ jobs:
           echo "**Release URL:** ${{ needs.create-tag.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Show deployment method and links
-          if [ "$USE_DISPATCH" = "true" ]; then
-            echo "### Deployments (Independent Workflows)" >> $GITHUB_STEP_SUMMARY
+          # Show deployment links
+          if [ "${{ inputs.deploy_target }}" != "none" ]; then
+            echo "### Deployments" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Deployments are running as **separate workflow runs** for independent monitoring." >> $GITHUB_STEP_SUMMARY
+            echo "Deployments run as **separate workflow runs** for independent monitoring." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
 
             if [ -n "$STAGING_RUN_ID" ]; then
@@ -343,12 +289,6 @@ jobs:
             fi
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Monitor all deployments: \`gh run list --workflow=staging.yml\` / \`gh run list --workflow=prod.yml\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### Deployments (Reusable Workflows)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Deployments are running as **part of this workflow** (ACTIONS_TOKEN not configured)." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "To enable independent deployment tracking, set the \`ACTIONS_TOKEN\` secret." >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
