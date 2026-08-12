@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.models.core import Org, OrgLimits, OrgType, ScimToken
 from robosystems.models.core.user.scim_token import DEFAULT_TOKEN_LIFETIME_DAYS
@@ -22,6 +23,10 @@ class ScimBootstrapError(Exception):
 
 class OrgNotFoundError(ScimBootstrapError):
   """A supplied org id does not resolve."""
+
+
+class OrgBoundaryError(ScimBootstrapError):
+  """The deployment is pinned to one enterprise org and this isn't it."""
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,15 @@ def bootstrap_scim(
   replacement, swap it into the IdP, then revoke the old token; two live
   tokens are legal during the swap.
   """
+  # Once the deployment pins its enterprise org, bootstrap can only mint
+  # tokens for that org — no new-org creation, no other-org targeting.
+  if env.ENTERPRISE_ORG_ID:
+    if org_id != env.ENTERPRISE_ORG_ID:
+      raise OrgBoundaryError(
+        f"This deployment is pinned to org {env.ENTERPRISE_ORG_ID}; "
+        "pass that org_id (org_name creation is disabled once pinned)"
+      )
+
   if org_id is not None:
     org = Org.get_by_id(org_id, session)
     if org is None:

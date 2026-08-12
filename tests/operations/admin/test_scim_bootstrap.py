@@ -1,11 +1,14 @@
 """Tests for SCIM provisioning bootstrap."""
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
+from robosystems.config import env
 from robosystems.models.core import Org, OrgLimits, OrgType, ScimToken
 from robosystems.operations.admin import (
+  OrgBoundaryError,
   OrgNotFoundError,
   bootstrap_scim,
   revoke_scim_token,
@@ -66,6 +69,35 @@ class TestBootstrapScim:
 
     delta = result.expires_at - datetime.now(UTC)
     assert timedelta(days=29) < delta <= timedelta(days=30)
+
+
+class TestOrgBoundaryPin:
+  """Once ENTERPRISE_ORG_ID pins the deployment, bootstrap can only mint
+  tokens for that org — no new-org creation, no other-org targeting."""
+
+  def test_pinned_refuses_org_name_creation(self, test_db):
+    org = Org.create(name="Pinned", org_type=OrgType.ENTERPRISE, session=test_db)
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      with pytest.raises(OrgBoundaryError):
+        bootstrap_scim(test_db, org_name="Second Org")
+
+  def test_pinned_refuses_other_org_id(self, test_db):
+    org = Org.create(name="Pinned2", org_type=OrgType.ENTERPRISE, session=test_db)
+    other = Org.create(name="Other", org_type=OrgType.ENTERPRISE, session=test_db)
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      with pytest.raises(OrgBoundaryError):
+        bootstrap_scim(test_db, org_id=other.id)
+
+  def test_pinned_allows_matching_org_id(self, test_db):
+    org = Org.create(name="Pinned3", org_type=OrgType.ENTERPRISE, session=test_db)
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      result = bootstrap_scim(test_db, org_id=org.id, token_name="pinned-token")
+
+    assert result.org_id == org.id
+    assert ScimToken.validate_token(result.raw_token, test_db) is not None
 
 
 class TestRevokeScimToken:

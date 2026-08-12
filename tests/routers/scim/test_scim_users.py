@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from robosystems.config import env
 from robosystems.models.core import (
   Org,
   OrgRole,
@@ -116,6 +117,31 @@ class TestUsersCrud:
     assert user.email_verified is True
     assert OrgUser.get_by_org_and_user(enterprise_org.id, user.id, test_db) is not None
 
+  def test_create_without_external_id_is_400(self, client, scim_auth):
+    """externalId is the OIDC link predicate — provisioning without it makes
+    a silently never-linkable user, so the create must fail loud."""
+    resp = client.post(
+      "/scim/v2/Users",
+      headers=scim_auth,
+      json={"userName": f"noext+{uuid.uuid4().hex[:8]}@customer.example"},
+    )
+    assert resp.status_code == 400
+    body = resp.json()["detail"]
+    assert body["scimType"] == "invalidValue"
+    assert "externalId" in body["detail"]
+
+  def test_create_with_blank_external_id_is_400(self, client, scim_auth):
+    resp = client.post(
+      "/scim/v2/Users",
+      headers=scim_auth,
+      json={
+        "userName": f"blank+{uuid.uuid4().hex[:8]}@customer.example",
+        "externalId": "   ",
+      },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["scimType"] == "invalidValue"
+
   def test_duplicate_email_is_409_uniqueness(
     self, client, scim_auth, test_db, enterprise_org
   ):
@@ -178,6 +204,26 @@ class TestOrgScoping:
     ids = {r["id"] for r in resp.json()["Resources"]}
     assert mine.id in ids
     assert len(ids) == 1
+
+  def test_pinned_org_refuses_other_orgs_token(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """Once ENTERPRISE_ORG_ID pins the deployment, a valid token minted for
+    any other org gets the same generic 401 as an invalid token."""
+    other_org = Org.create(name="Stray", org_type=OrgType.ENTERPRISE, session=test_db)
+    _token, stray_raw = ScimToken.create(other_org.id, "stray-scim", test_db)
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(enterprise_org.id)):
+      stray = client.get(
+        "/scim/v2/Users", headers={"Authorization": f"Bearer {stray_raw}"}
+      )
+      pinned = client.get("/scim/v2/Users", headers=scim_auth)
+
+    assert stray.status_code == 401
+    assert (
+      "urn:ietf:params:scim:api:messages:2.0:Error" in stray.json()["detail"]["schemas"]
+    )
+    assert pinned.status_code == 200
 
 
 class TestDeactivation:

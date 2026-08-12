@@ -481,12 +481,16 @@ class EnvConfig:
     "SSO_OIDC_ENABLED",
     get_parameter_value("SSO_OIDC_ENABLED", "false").lower() == "true",
   )
-  SSO_OIDC_PROVIDER_LABEL = get_str_env("SSO_OIDC_PROVIDER_LABEL", "SSO")
-  # OIDC connection config (non-secret). The issuer is the IdP's org
-  # authorization server (e.g. https://<org>.okta.com — NOT /oauth2/default,
-  # which mints API access tokens rather than sign-in ID tokens).
-  SSO_OIDC_ISSUER = get_str_env("SSO_OIDC_ISSUER", "")
-  SSO_OIDC_CLIENT_ID = get_str_env("SSO_OIDC_CLIENT_ID", "")
+  # The SSO connection block lives in the base robosystems/{env} secret on
+  # deployed environments (JWT_ISSUER precedent — not secrets per se, but
+  # they ride with SSO_OIDC_CLIENT_SECRET so the whole connection is one
+  # operator surface). Env vars win everywhere, which is the local-dev path.
+  SSO_OIDC_PROVIDER_LABEL = get_secret_value("SSO_OIDC_PROVIDER_LABEL", "SSO")
+  # The issuer is the IdP's org authorization server (e.g.
+  # https://<org>.okta.com — NOT /oauth2/default, which mints API access
+  # tokens rather than sign-in ID tokens).
+  SSO_OIDC_ISSUER = get_secret_value("SSO_OIDC_ISSUER", "")
+  SSO_OIDC_CLIENT_ID = get_secret_value("SSO_OIDC_CLIENT_ID", "")
   # SCIM 2.0 provisioning surface (IdP pushes users into the enterprise org).
   # Gated independently of OIDC — a deployment may run one without the other.
   SCIM_ENABLED = get_bool_env(
@@ -494,7 +498,17 @@ class EnvConfig:
     get_parameter_value("SCIM_ENABLED", "false").lower() == "true",
   )
   # Org role SCIM-provisioned users join the enterprise org with.
-  SSO_DEFAULT_ROLE = get_str_env("SSO_DEFAULT_ROLE", "member")
+  SSO_DEFAULT_ROLE = get_secret_value("SSO_DEFAULT_ROLE", "member")
+  # Pins the single org this deployment's SCIM/OIDC surface operates against.
+  # Set after the first `scim bootstrap` mints the enterprise org (the id only
+  # exists then); once set, bearer tokens for other orgs are refused, bootstrap
+  # can only target this org, and OIDC first-login linking requires membership.
+  # Rides in the base secret with the SSO connection block.
+  ENTERPRISE_ORG_ID = get_secret_value("ENTERPRISE_ORG_ID", "")
+  # ID-token claim compared against the SCIM-provisioned external_id at
+  # first-login linking. Okta: externalId ≡ sub. Entra pairs SCIM externalId
+  # (objectId) with the `oid` claim, not `sub` — override there.
+  SSO_OIDC_BINDING_CLAIM = get_secret_value("SSO_OIDC_BINDING_CLAIM", "sub")
   PASSKEYS_ENABLED = get_bool_env(
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",

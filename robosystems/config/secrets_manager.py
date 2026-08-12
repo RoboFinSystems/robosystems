@@ -10,6 +10,9 @@ Secrets are organized in AWS Secrets Manager with the following structure:
   Contains:
     Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY
     JWT/Auth: JWT_ISSUER, JWT_AUDIENCE
+    Enterprise SSO connection: SSO_OIDC_ISSUER, SSO_OIDC_CLIENT_ID,
+      SSO_OIDC_CLIENT_SECRET, SSO_OIDC_PROVIDER_LABEL, SSO_OIDC_BINDING_CLAIM,
+      SSO_DEFAULT_ROLE, ENTERPRISE_ORG_ID (dedicated deployments only)
     Service URLs: ROBOSYSTEMS_URL, ROBOLEDGER_URL, ROBOINVESTOR_URL
     Email: EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME
     External services: INTUIT_*, SEC_GOV_USER_AGENT, OPENFIGI_API_KEY,
@@ -236,8 +239,17 @@ SECRET_MAPPINGS = {
   "AWS_S3_SECRET_ACCESS_KEY": (None, "AWS_S3_SECRET_ACCESS_KEY"),
   # --- Admin ---
   "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
-  # --- External Service API Keys ---
+  # --- Enterprise SSO connection (JWT_ISSUER precedent: the issuer/client
+  # id/org pin are not secrets per se, but they ride with the client secret
+  # so the whole IdP connection is one operator surface in the base secret) ---
   "SSO_OIDC_CLIENT_SECRET": (None, "SSO_OIDC_CLIENT_SECRET"),
+  "SSO_OIDC_ISSUER": (None, "SSO_OIDC_ISSUER"),
+  "SSO_OIDC_CLIENT_ID": (None, "SSO_OIDC_CLIENT_ID"),
+  "SSO_OIDC_PROVIDER_LABEL": (None, "SSO_OIDC_PROVIDER_LABEL"),
+  "SSO_OIDC_BINDING_CLAIM": (None, "SSO_OIDC_BINDING_CLAIM"),
+  "SSO_DEFAULT_ROLE": (None, "SSO_DEFAULT_ROLE"),
+  "ENTERPRISE_ORG_ID": (None, "ENTERPRISE_ORG_ID"),
+  # --- External Service API Keys ---
   "INTUIT_CLIENT_ID": (None, "INTUIT_CLIENT_ID"),
   "INTUIT_CLIENT_SECRET": (None, "INTUIT_CLIENT_SECRET"),
   "INTUIT_REDIRECT_URI": (None, "INTUIT_REDIRECT_URI"),

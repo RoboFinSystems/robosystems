@@ -10,6 +10,7 @@ FastAPI's ``{"detail": ...}``.
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...db.platform import get_db_session
 from ...logger import get_logger
 from ...models.api.scim import ERROR_SCHEMA
@@ -69,8 +70,22 @@ def require_scim_org(
     )
     raise _scim_unauthorized()
 
-  token.update_last_used(session)
   org_id = str(token.org_id)
+  # One-org boundary: once the deployment pins its enterprise org, a valid
+  # token for any other org is refused with the same generic 401 as an
+  # invalid token (no reason leak).
+  if env.ENTERPRISE_ORG_ID and org_id != env.ENTERPRISE_ORG_ID:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.SCIM_AUTH_FAILURE,
+      ip_address=client_ip,
+      user_agent=request.headers.get("User-Agent"),
+      endpoint=str(request.url.path),
+      details={"failure_reason": "org_boundary", "token_org_id": org_id},
+      risk_level="high",
+    )
+    raise _scim_unauthorized()
+
+  token.update_last_used(session)
   request.state.scim_org_id = org_id
   request.state.scim_token_id = str(token.id)
   return org_id

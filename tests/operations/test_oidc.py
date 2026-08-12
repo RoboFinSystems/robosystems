@@ -17,7 +17,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from robosystems.models.core import User, UserIdentity
+from robosystems.config import env
+from robosystems.models.core import Org, OrgRole, OrgType, OrgUser, User, UserIdentity
 from robosystems.operations import oidc as oidc_ops
 from robosystems.operations.oidc import (
   OIDCConnection,
@@ -301,10 +302,16 @@ class TestResolveOidcUser:
     assert identity is not None and identity.last_login_at is not None
 
   def test_email_match_links_scim_provisioned_user(self, test_db):
-    user = _create_user(test_db, external_id="okta-ext-2")
+    # Okta shape: the IdP user id arrives as SCIM externalId and OIDC sub —
+    # the binding claim value must EQUAL the stored external_id to link.
+    user = _create_user(test_db, external_id="okta|sub-2")
 
     resolution = resolve_oidc_user(
-      test_db, issuer=ISSUER, subject="okta|sub-2", email=user.email.upper()
+      test_db,
+      issuer=ISSUER,
+      subject="okta|sub-2",
+      email=user.email.upper(),
+      binding_value="okta|sub-2",
     )
 
     assert resolution.user.id == user.id
@@ -319,12 +326,55 @@ class TestResolveOidcUser:
     user = _create_user(test_db, external_id=None, password_hash="some-hash")
 
     with pytest.raises(OIDCUserNotProvisionedError):
-      resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-3", email=user.email)
+      resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-3",
+        email=user.email,
+        binding_value="okta|sub-3",
+      )
     assert UserIdentity.get_by_issuer_subject(ISSUER, "okta|sub-3", test_db) is None
+
+  def test_email_match_refused_on_binding_mismatch(self, test_db):
+    """external_id must EQUAL the binding claim — presence is not provenance.
+    A user provisioned under one IdP identity must not link from another."""
+    user = _create_user(test_db, external_id="okta|someone-else")
+
+    with pytest.raises(OIDCUserNotProvisionedError):
+      resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-mm",
+        email=user.email,
+        binding_value="okta|sub-mm",
+      )
+    assert UserIdentity.get_by_issuer_subject(ISSUER, "okta|sub-mm", test_db) is None
+
+  def test_email_match_refused_without_binding_value(self, test_db):
+    """No binding claim value → never link, even for an otherwise-eligible
+    user (a misconfigured SSO_OIDC_BINDING_CLAIM fails closed)."""
+    user = _create_user(test_db, external_id="okta|sub-nb")
+
+    with pytest.raises(OIDCUserNotProvisionedError):
+      resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-nb", email=user.email)
+
+  def test_email_match_refused_empty_external_id(self, test_db):
+    """An empty-string external_id (an IdP sending externalId: "") is not
+    provenance and must not link — even against an empty binding value."""
+    user = _create_user(test_db, external_id="")
+
+    with pytest.raises(OIDCUserNotProvisionedError):
+      resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-empty",
+        email=user.email,
+        binding_value="",
+      )
 
   def test_email_match_refused_when_email_verified_false(self, test_db):
     """An explicitly-unverified email must not link (OIDC Core §5.7)."""
-    user = _create_user(test_db, external_id="okta-ext-ev")
+    user = _create_user(test_db, external_id="okta|sub-ev")
 
     with pytest.raises(OIDCUserNotProvisionedError):
       resolve_oidc_user(
@@ -333,13 +383,14 @@ class TestResolveOidcUser:
         subject="okta|sub-ev",
         email=user.email,
         email_verified=False,
+        binding_value="okta|sub-ev",
       )
     assert UserIdentity.get_by_issuer_subject(ISSUER, "okta|sub-ev", test_db) is None
 
   def test_email_match_links_when_email_verified_absent(self, test_db):
     """Entra omits email_verified entirely — None must still be allowed to
     link (only an explicit False is refused)."""
-    user = _create_user(test_db, external_id="okta-ext-ev2")
+    user = _create_user(test_db, external_id="okta|sub-ev2")
 
     resolution = resolve_oidc_user(
       test_db,
@@ -347,6 +398,7 @@ class TestResolveOidcUser:
       subject="okta|sub-ev2",
       email=user.email,
       email_verified=None,
+      binding_value="okta|sub-ev2",
     )
     assert resolution.user.id == user.id
     assert resolution.linked is True
@@ -363,12 +415,26 @@ class TestResolveOidcUser:
 
   def test_second_subject_cannot_rebind_by_email(self, test_db):
     """One identity per issuer per user: once linked, a different subject
-    presenting the same email must not steal the account."""
-    user = _create_user(test_db, external_id="okta-ext-6")
-    resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-6a", email=user.email)
+    presenting the same email must not steal the account. The second call
+    passes a binding value equal to the stored external_id, so the refusal
+    below is pinned to the one-identity-per-issuer conjunct specifically."""
+    user = _create_user(test_db, external_id="okta|sub-6a")
+    resolve_oidc_user(
+      test_db,
+      issuer=ISSUER,
+      subject="okta|sub-6a",
+      email=user.email,
+      binding_value="okta|sub-6a",
+    )
 
     with pytest.raises(OIDCUserNotProvisionedError):
-      resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-6b", email=user.email)
+      resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-6b",
+        email=user.email,
+        binding_value="okta|sub-6a",
+      )
 
   def test_deactivated_user_with_valid_identity_refused(self, test_db):
     """The Okta two-app assignment-drift case: SCIM deactivated the user but
@@ -387,10 +453,77 @@ class TestResolveOidcUser:
       resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-7", email=user.email)
 
   def test_deactivated_user_cannot_link_by_email(self, test_db):
-    user = _create_user(test_db, external_id="okta-ext-8", is_active=False)
+    user = _create_user(test_db, external_id="okta|sub-8", is_active=False)
 
     with pytest.raises(OIDCUserNotProvisionedError):
-      resolve_oidc_user(test_db, issuer=ISSUER, subject="okta|sub-8", email=user.email)
+      resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-8",
+        email=user.email,
+        binding_value="okta|sub-8",
+      )
+
+  def test_org_boundary_refuses_nonmember_link(self, test_db):
+    """With ENTERPRISE_ORG_ID pinned, an eligible user outside the pinned org
+    must not link — the boundary scopes identities, not just tokens."""
+    org = Org.create(
+      name="Pinned Enterprise", org_type=OrgType.ENTERPRISE, session=test_db
+    )
+    user = _create_user(test_db, external_id="okta|sub-ob1")
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      with pytest.raises(OIDCUserNotProvisionedError):
+        resolve_oidc_user(
+          test_db,
+          issuer=ISSUER,
+          subject="okta|sub-ob1",
+          email=user.email,
+          binding_value="okta|sub-ob1",
+        )
+    assert UserIdentity.get_by_issuer_subject(ISSUER, "okta|sub-ob1", test_db) is None
+
+  def test_org_boundary_links_member(self, test_db):
+    org = Org.create(
+      name="Pinned Enterprise 2", org_type=OrgType.ENTERPRISE, session=test_db
+    )
+    user = _create_user(test_db, external_id="okta|sub-ob2")
+    OrgUser.create(
+      org_id=str(org.id), user_id=str(user.id), role=OrgRole.MEMBER, session=test_db
+    )
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      resolution = resolve_oidc_user(
+        test_db,
+        issuer=ISSUER,
+        subject="okta|sub-ob2",
+        email=user.email,
+        binding_value="okta|sub-ob2",
+      )
+    assert resolution.user.id == user.id
+    assert resolution.linked is True
+
+  def test_org_boundary_ignores_established_identity(self, test_db):
+    """The boundary gates LINKING only: an already-linked identity resolves
+    regardless (SCIM deactivation is the offboarding control there)."""
+    org = Org.create(
+      name="Pinned Enterprise 3", org_type=OrgType.ENTERPRISE, session=test_db
+    )
+    user = _create_user(test_db, external_id="okta|sub-ob3")
+    UserIdentity.create(
+      user_id=str(user.id),
+      issuer=ISSUER,
+      subject="okta|sub-ob3",
+      email_at_link=user.email,
+      session=test_db,
+    )
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      resolution = resolve_oidc_user(
+        test_db, issuer=ISSUER, subject="okta|sub-ob3", email=user.email
+      )
+    assert resolution.user.id == user.id
+    assert resolution.linked is False
 
 
 class TestDiscoveryMetadata:

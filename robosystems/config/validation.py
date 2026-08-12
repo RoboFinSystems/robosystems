@@ -172,6 +172,14 @@ class EnvValidator:
           "SSO_DEFAULT_ROLE: Must be 'member' or 'admin' — IdP-provisioned "
           "users must not default to a privileged role"
         )
+      # Warning, not error: the org id only exists after the first bootstrap
+      # run, so the enablement sequence is flags on → bootstrap → pin the id
+      # → restart. Unpinned, any org's bearer token is accepted.
+      if deployed and not getattr(env_config, "ENTERPRISE_ORG_ID", ""):
+        warnings.append(
+          "ENTERPRISE_ORG_ID: Unset while SCIM_ENABLED=true — SCIM/OIDC are "
+          "not scoped to a single org. Pin it after the first scim bootstrap."
+        )
     if (
       deployed
       and (
