@@ -49,10 +49,9 @@ on:
         required: true
         type: string
       instance_type:
-        description: "EC2 instance type for replicas"
-        required: false
+        description: "EC2 instance type for replicas (authoritative source is .github/configs/graph.yml)"
+        required: true
         type: string
-        default: "r7g.medium"
 
       # Auto-scaling Configuration
       min_instances:
