@@ -20,6 +20,7 @@ from .rate_limiting import (
   general_api_rate_limit_dependency,
   graph_scoped_rate_limit_dependency,
   logout_rate_limit_dependency,
+  oidc_rate_limit_dependency,
   public_api_rate_limit_dependency,
   rate_limit_dependency,
   sensitive_auth_rate_limit_dependency,
@@ -68,6 +69,7 @@ __all__ = [
   "get_subscription_rate_limit",
   "graph_scoped_rate_limit_dependency",
   "logout_rate_limit_dependency",
+  "oidc_rate_limit_dependency",
   "public_api_rate_limit_dependency",
   # Cache
   "rate_limit_cache",

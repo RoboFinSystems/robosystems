@@ -118,6 +118,36 @@ class TestEnvValidator:
       with pytest.raises(ConfigValidationError):
         EnvValidator.validate_required_vars(env_config)
 
+  def test_oidc_enabled_without_connection_fails(self):
+    """An enabled OIDC surface with a missing connection must fail at boot."""
+    env_config = MockEnvConfig()
+    env_config.SSO_OIDC_ENABLED = True
+    env_config.SSO_OIDC_ISSUER = ""
+    env_config.SSO_OIDC_CLIENT_ID = ""
+    env_config.SSO_OIDC_CLIENT_SECRET = ""
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_oidc_enabled_with_full_connection_passes(self):
+    env_config = MockEnvConfig()
+    env_config.SSO_OIDC_ENABLED = True
+    env_config.SSO_OIDC_ISSUER = "https://org.okta.example"
+    env_config.SSO_OIDC_CLIENT_ID = "client-id"
+    env_config.SSO_OIDC_CLIENT_SECRET = "client-secret"
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_password_auth_off_without_oidc_fails(self):
+    """A deployment with no login method at all is a boot-time config error."""
+    env_config = MockEnvConfig()
+    env_config.PASSWORD_AUTH_ENABLED = False
+    env_config.SSO_OIDC_ENABLED = False
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
   def test_validate_required_vars_prod_no_s3_credentials_ok(self):
     """Test validation passes when S3 credentials are missing in production (uses IAM roles)."""
     env_config = MockEnvConfig()

@@ -482,6 +482,11 @@ class EnvConfig:
     get_parameter_value("SSO_OIDC_ENABLED", "false").lower() == "true",
   )
   SSO_OIDC_PROVIDER_LABEL = get_str_env("SSO_OIDC_PROVIDER_LABEL", "SSO")
+  # OIDC connection config (non-secret). The issuer is the IdP's org
+  # authorization server (e.g. https://<org>.okta.com — NOT /oauth2/default,
+  # which mints API access tokens rather than sign-in ID tokens).
+  SSO_OIDC_ISSUER = get_str_env("SSO_OIDC_ISSUER", "")
+  SSO_OIDC_CLIENT_ID = get_str_env("SSO_OIDC_CLIENT_ID", "")
   PASSKEYS_ENABLED = get_bool_env(
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",
@@ -978,6 +983,10 @@ class EnvConfig:
   # ==========================================================================
   # 8. EXTERNAL SERVICE API KEYS
   # ==========================================================================
+
+  # Enterprise SSO (OIDC) — IdP client secret; issuer/client_id are plain
+  # config in the auth-posture block above
+  SSO_OIDC_CLIENT_SECRET = get_secret_value("SSO_OIDC_CLIENT_SECRET", "")
 
   # QuickBooks/Intuit
   INTUIT_CLIENT_ID = get_secret_value("INTUIT_CLIENT_ID", "")

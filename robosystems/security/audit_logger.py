@@ -46,6 +46,9 @@ class SecurityEventType(Enum):
   PASSWORD_RESET_COMPLETED = "password_reset_completed"
   # Token management events
   TOKEN_REFRESH = "token_refresh"
+  # OIDC login refused after the IdP authenticated (unprovisioned or
+  # deactivated user) — alarm-worthy, unlike ordinary auth noise
+  OIDC_LOGIN_DENIED = "oidc_login_denied"
   # Subgraph events
   SUBGRAPH_CREATED = "subgraph_created"
   SUBGRAPH_DELETED = "subgraph_deleted"
@@ -69,6 +72,7 @@ _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.API_KEY_INVALID: "AuthFailure",
   SecurityEventType.API_KEY_EXPIRED: "AuthFailure",
   SecurityEventType.AUTHORIZATION_DENIED: "AuthorizationDenied",
+  SecurityEventType.OIDC_LOGIN_DENIED: "AuthorizationDenied",
   SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",

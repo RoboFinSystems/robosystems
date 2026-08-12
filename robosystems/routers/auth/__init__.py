@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from ...config import env
 from .captcha import router as captcha_router
 from .email_verification import router as email_verification_router
 from .invitations import router as invitations_router
@@ -37,6 +38,13 @@ router.include_router(password_router)
 router.include_router(password_reset_router)
 
 router.include_router(sso_router)
+
+# Enterprise SSO (OIDC) — flag-gated so the surface doesn't exist unless the
+# deployment opted in (the managed platform never mounts it).
+if env.SSO_OIDC_ENABLED:
+  from .oidc import router as oidc_router
+
+  router.include_router(oidc_router)
 
 # Configuration
 router.include_router(captcha_router)
