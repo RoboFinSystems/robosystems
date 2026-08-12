@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 from robosystems.logger import logger
-from robosystems.models.core import User, UserIdentity
+from robosystems.models.core import OrgUser, User, UserIdentity
 
 
 class OIDCError(Exception):
@@ -401,16 +401,24 @@ def resolve_oidc_user(
   subject: str,
   email: str | None,
   email_verified: bool | None = None,
+  binding_value: str | None = None,
 ) -> OIDCResolution:
   """Resolve ``(issuer, sub)`` to a local user — link-only, never JIT.
 
   Primary lookup is the ``user_identities`` link. On a miss, exactly one
-  fallback: an active user whose email matches AND who carries a SCIM
-  ``external_id`` AND who has no identity for this issuer yet — then the
-  link is written and is the lookup forever after. The ``external_id``
-  predicate is load-bearing: without it, anyone controlling a matching
-  mailbox in the customer's IdP could bind onto a locally-created account
-  (an invited user, or later a client-portal guest).
+  fallback: an active user whose email matches AND whose SCIM ``external_id``
+  equals ``binding_value`` (the ID-token claim named by
+  ``SSO_OIDC_BINDING_CLAIM`` — ``sub`` by default; Okta sends the same user id
+  in both channels) AND who has no identity for this issuer yet — then the
+  link is written and is the lookup forever after. Equality, not mere
+  presence, is load-bearing twice over: presence alone let anyone controlling
+  a matching mailbox in the customer's IdP bind onto a locally-created
+  account, and it accepted an empty-string ``external_id`` as provenance.
+  A missing/empty ``binding_value`` never links.
+
+  When ``ENTERPRISE_ORG_ID`` pins the deployment's org, the fallback further
+  requires the matched user to be a member of that org — identities outside
+  the enterprise boundary never link, whatever their email or ``external_id``.
 
   The email-match fallback additionally refuses a claim whose ``email`` the
   IdP marked *unverified* (``email_verified: false``). It does not *require*
@@ -431,14 +439,21 @@ def resolve_oidc_user(
       raise OIDCUserNotProvisionedError("Identity link points at no user")
   else:
     user = User.get_by_email(email, session) if email else None
+    if user is None:
+      raise OIDCUserNotProvisionedError("No provisioned user for this identity")
     eligible = (
-      user is not None
-      and bool(user.is_active)
-      and user.external_id is not None
+      bool(user.is_active)
+      and bool(binding_value)
+      and user.external_id == binding_value
       and email_verified is not False
       and UserIdentity.get_by_user_and_issuer(str(user.id), issuer, session) is None
     )
-    if user is None or not eligible:
+    if eligible and env.ENTERPRISE_ORG_ID:
+      eligible = (
+        OrgUser.get_by_org_and_user(env.ENTERPRISE_ORG_ID, str(user.id), session)
+        is not None
+      )
+    if not eligible:
       raise OIDCUserNotProvisionedError("No provisioned user for this identity")
     identity = UserIdentity.create(
       user_id=str(user.id),

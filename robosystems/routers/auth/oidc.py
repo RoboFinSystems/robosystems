@@ -221,6 +221,10 @@ async def oidc_callback(
     logger.error(f"OIDC callback dependency failure: {exc}")
     return _fail_redirect("oidc_failed")
 
+  # The claim compared against the SCIM-stamped external_id at first-login
+  # linking (default `sub`; Entra deployments configure `oid`). Absent claim
+  # → None → linking is refused rather than comparing against "None".
+  binding_raw = claims.get(env.SSO_OIDC_BINDING_CLAIM)
   try:
     resolution = resolve_oidc_user(
       session,
@@ -228,6 +232,7 @@ async def oidc_callback(
       subject=str(claims["sub"]),
       email=claims.get("email"),
       email_verified=claims.get("email_verified"),
+      binding_value=str(binding_raw) if binding_raw is not None else None,
     )
   except OIDCUserNotProvisionedError:
     return _denied("not_provisioned", "user_not_provisioned", "medium")

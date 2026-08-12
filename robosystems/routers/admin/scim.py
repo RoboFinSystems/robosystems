@@ -11,6 +11,7 @@ from ...models.api.admin import (
   ScimTokenRevokeResponse,
 )
 from ...operations.admin import (
+  OrgBoundaryError,
   OrgNotFoundError,
   bootstrap_scim,
   revoke_scim_token,
@@ -43,6 +44,8 @@ async def scim_bootstrap(
       )
     except OrgNotFoundError as exc:
       raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except OrgBoundaryError as exc:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     logger.info(
       "Admin bootstrapped SCIM",

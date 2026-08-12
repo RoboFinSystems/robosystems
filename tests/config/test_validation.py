@@ -251,6 +251,40 @@ class TestEnvValidator:
     with patch("robosystems.config.validation.logger"):
       EnvValidator.validate_required_vars(env_config)
 
+  def test_scim_deployed_without_enterprise_org_id_warns(self):
+    """Unpinned deployment: a warning (never an error — the org id only
+    exists after the first bootstrap run, so boot must succeed unpinned)."""
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None
+    env_config.SCIM_ENABLED = True
+    env_config.RATE_LIMIT_ENABLED = True
+    env_config.ENTERPRISE_ORG_ID = ""
+
+    with (
+      patch("os.getenv", return_value=None),
+      patch("robosystems.config.validation.logger") as mock_logger,
+    ):
+      EnvValidator.validate_required_vars(env_config)
+      warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+      assert any("ENTERPRISE_ORG_ID" in msg for msg in warning_calls)
+
+  def test_scim_deployed_with_enterprise_org_id_no_warning(self):
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None
+    env_config.SCIM_ENABLED = True
+    env_config.RATE_LIMIT_ENABLED = True
+    env_config.ENTERPRISE_ORG_ID = "org_pinned123"
+
+    with (
+      patch("os.getenv", return_value=None),
+      patch("robosystems.config.validation.logger") as mock_logger,
+    ):
+      EnvValidator.validate_required_vars(env_config)
+      warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+      assert not any("ENTERPRISE_ORG_ID" in msg for msg in warning_calls)
+
   def test_validate_required_vars_prod_no_s3_credentials_ok(self):
     """Test validation passes when S3 credentials are missing in production (uses IAM roles)."""
     env_config = MockEnvConfig()

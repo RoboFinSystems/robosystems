@@ -275,17 +275,33 @@ RATE_LIMIT_ENABLED=true   # consumed by middleware/rate_limits/
 PASSWORD_AUTH_ENABLED=true    # false requires SSO_OIDC_ENABLED=true
 
 # Enterprise SSO (OIDC). Off by default; the managed platform never sets these.
+# The flags live in SSM Parameter Store (/features/); the whole connection
+# block below is read via get_secret_value — env vars locally, the
+# robosystems/{env} base secret when deployed (JWT_ISSUER precedent; nothing
+# SSO-related flows through CloudFormation).
 SSO_OIDC_ENABLED=false
 SSO_OIDC_ISSUER=            # IdP org authorization server, https:// when deployed;
                             # no query/fragment. For Okta this is https://<org>.okta.com,
                             # NOT /oauth2/default (that mints API tokens, not sign-in ID tokens)
 SSO_OIDC_CLIENT_ID=
-SSO_OIDC_CLIENT_SECRET=     # read via get_secret_value, not a plain env read
+SSO_OIDC_CLIENT_SECRET=
 SSO_OIDC_PROVIDER_LABEL=SSO # button label on the login home
 
 # SCIM 2.0 provisioning. Gated independently of OIDC.
 SCIM_ENABLED=false
 SSO_DEFAULT_ROLE=member     # validation rejects anything but member|admin
+
+# One-org boundary. Set AFTER the first `scim bootstrap` mints the enterprise
+# org (validation warns while unset + deployed). Once pinned: SCIM bearers for
+# other orgs 401, bootstrap only targets this org, and OIDC first-login
+# linking requires membership in it.
+ENTERPRISE_ORG_ID=
+
+# ID-token claim compared against the SCIM-stamped external_id at first-login
+# linking (equality required — presence is not provenance). Okta sends its
+# user id as both SCIM externalId and OIDC sub, so the default fits; Entra
+# pairs externalId (objectId) with `oid`.
+SSO_OIDC_BINDING_CLAIM=sub
 ```
 
 The OIDC redirect URI is derived, not configured:

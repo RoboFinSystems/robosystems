@@ -213,6 +213,17 @@ async def create_user(
     if org is None:
       raise _scim_error(status.HTTP_404_NOT_FOUND, "Provisioning org not found")
 
+    # externalId is the OIDC link predicate — a user provisioned without it
+    # can never SSO in, silently. Okta always sends it (POC-verified);
+    # refusing here turns a misconfigured IdP mapping into a visible error.
+    external_id = (body.external_id or "").strip()
+    if not external_id:
+      raise _scim_error(
+        status.HTTP_400_BAD_REQUEST,
+        "externalId is required",
+        scim_type="invalidValue",
+      )
+
     email = body.user_name.strip().lower()
     display_name = (
       (body.name.formatted if body.name else None)
@@ -236,7 +247,7 @@ async def create_user(
         email_verified=True,  # the IdP asserted the mailbox
         target_org=org,
         target_org_role=_default_role(),
-        external_id=body.external_id,
+        external_id=external_id,
       )
     except EmailAlreadyRegisteredError:
       raise _scim_error(

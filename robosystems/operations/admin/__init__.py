@@ -1,6 +1,7 @@
 """Administrative operations — support-plane actions with no self-serve surface."""
 
 from .scim_bootstrap import (
+  OrgBoundaryError,
   OrgNotFoundError,
   ScimBootstrapResult,
   bootstrap_scim,
@@ -18,6 +19,7 @@ from .user_status import UserStatusChange, set_user_active
 
 __all__ = [
   "DeletionBlocker",
+  "OrgBoundaryError",
   "OrgNotFoundError",
   "ScimBootstrapResult",
   "UserDeletionBlocked",
