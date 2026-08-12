@@ -24,7 +24,7 @@ from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.device_fingerprinting import extract_device_fingerprint
 from ...security.input_validation import sanitize_string, validate_email
-from .utils import verify_password
+from .utils import require_password_auth, verify_password
 
 # Create router for login endpoint
 router = APIRouter()
@@ -48,6 +48,7 @@ async def login(
   fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
+  _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
   # Validate and sanitize input
   if not validate_email(request.email):

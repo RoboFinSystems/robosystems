@@ -38,7 +38,7 @@ from ...security.input_validation import (
   validate_email,
 )
 from ...security.password import PasswordSecurity
-from .utils import detect_app_source, hash_password
+from .utils import detect_app_source, hash_password, require_password_auth
 
 # Create router for register endpoint
 router = APIRouter()
@@ -65,8 +65,13 @@ async def register(
   background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
   rate_limit: None = Depends(auth_rate_limit_dependency),
+  _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
   # Check if registration is enabled.
+  #
+  # Note the guard above outranks invitations: with password auth disabled,
+  # an invitation must not become a side door to a password account — invited
+  # staff arrive via the IdP instead.
   #
   # An invitation is itself the authorization to register, so closing
   # registration stops *unsolicited* signups without also blocking the people

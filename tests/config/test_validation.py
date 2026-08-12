@@ -148,6 +148,109 @@ class TestEnvValidator:
     with pytest.raises(ConfigValidationError):
       EnvValidator.validate_required_vars(env_config)
 
+  # The ConfigValidationError message is deliberately generic (details go to
+  # logs), so each rejection test below is paired with a passing twin that
+  # differs only in the value under test — that's what pins causality.
+
+  def _prod_oidc_config(self, issuer: str) -> MockEnvConfig:
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None  # prod rejects an explicit URL
+    env_config.SSO_OIDC_ENABLED = True
+    env_config.SSO_OIDC_ISSUER = issuer
+    env_config.SSO_OIDC_CLIENT_ID = "client-id"
+    env_config.SSO_OIDC_CLIENT_SECRET = "client-secret"
+    return env_config
+
+  def test_oidc_deployed_requires_https_issuer(self):
+    """Outside local development the issuer must be https."""
+    env_config = self._prod_oidc_config("http://org.okta.example")
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
+  def test_oidc_deployed_https_issuer_passes(self):
+    env_config = self._prod_oidc_config("https://org.okta.example")
+
+    with (
+      patch("os.getenv", return_value=None),
+      patch("robosystems.config.validation.logger"),
+    ):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_oidc_dev_allows_http_issuer(self):
+    env_config = MockEnvConfig()  # ENVIRONMENT=dev
+    env_config.SSO_OIDC_ENABLED = True
+    env_config.SSO_OIDC_ISSUER = "http://localhost:9999"
+    env_config.SSO_OIDC_CLIENT_ID = "client-id"
+    env_config.SSO_OIDC_CLIENT_SECRET = "client-secret"
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_oidc_issuer_with_query_rejected_everywhere(self):
+    # Passing twin: test_oidc_enabled_with_full_connection_passes (clean
+    # issuer, same dev environment).
+    env_config = MockEnvConfig()
+    env_config.SSO_OIDC_ENABLED = True
+    env_config.SSO_OIDC_ISSUER = "https://org.okta.example?next=x"
+    env_config.SSO_OIDC_CLIENT_ID = "client-id"
+    env_config.SSO_OIDC_CLIENT_SECRET = "client-secret"
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_scim_default_role_owner_rejected(self):
+    """IdP-provisioned users must never default to a privileged role."""
+    env_config = MockEnvConfig()
+    env_config.SCIM_ENABLED = True
+    env_config.SSO_DEFAULT_ROLE = "owner"
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_scim_default_role_admin_allowed(self):
+    env_config = MockEnvConfig()
+    env_config.SCIM_ENABLED = True
+    env_config.SSO_DEFAULT_ROLE = "admin"
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_scim_deployed_requires_rate_limiting(self):
+    """The OIDC/SCIM buckets are no-ops with rate limiting globally off."""
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None
+    env_config.SCIM_ENABLED = True
+    env_config.RATE_LIMIT_ENABLED = False
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
+  def test_scim_deployed_with_rate_limiting_passes(self):
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None
+    env_config.SCIM_ENABLED = True
+    env_config.RATE_LIMIT_ENABLED = True
+
+    with (
+      patch("os.getenv", return_value=None),
+      patch("robosystems.config.validation.logger"),
+    ):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_dev_scim_without_rate_limiting_ok(self):
+    env_config = MockEnvConfig()  # ENVIRONMENT=dev
+    env_config.SCIM_ENABLED = True
+    env_config.RATE_LIMIT_ENABLED = False
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
   def test_validate_required_vars_prod_no_s3_credentials_ok(self):
     """Test validation passes when S3 credentials are missing in production (uses IAM roles)."""
     env_config = MockEnvConfig()

@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -12,6 +13,26 @@ from sqlalchemy.orm import Session, relationship
 from robosystems.database import Model
 from robosystems.logger import logger
 from robosystems.utils.ulid import generate_prefixed_ulid
+
+
+@dataclass(frozen=True)
+class DeactivationResult:
+  """What a deactivation actually accomplished, not what it attempted.
+
+  The DB flag flip always commits (or the whole call raises); the two
+  side effects — auth-cache invalidation and API-key revocation — are
+  best-effort, and a caller acting as an offboarding kill switch (SCIM)
+  must know whether they took so it can fail loud and be retried.
+  """
+
+  # -1 when the key list could not even be loaded (count unknown).
+  keys_found: int
+  keys_revoked: int
+  cache_invalidated: bool
+
+  @property
+  def fully_applied(self) -> bool:
+    return self.cache_invalidated and self.keys_revoked == self.keys_found
 
 
 class User(Model):
@@ -153,8 +174,8 @@ class User(Model):
       session.rollback()
       raise
 
-  def deactivate(self, session: Session) -> int:
-    """Deactivate the user, returning how many API keys were revoked.
+  def deactivate(self, session: Session) -> DeactivationResult:
+    """Deactivate the user, reporting how completely the kill switch applied.
 
     Bumps ``session_version``, which invalidates every JWT issued for this
     user, and revokes all of the user's API keys. If the user is reactivated
@@ -166,6 +187,10 @@ class User(Model):
     API-key revocation is essential: keys don't carry ``session_version`` and
     ``UserAPIKey.get_by_key`` filters only on the key's own active flag, so
     without this a deactivated user would keep full programmatic access.
+
+    Idempotent and re-asserting: calling this on an already-inactive user
+    re-runs the cache invalidation and key sweep, which is exactly what a
+    retry after a partial failure needs.
     """
     self.is_active = False
     self.session_version = (self.session_version or 0) + 1
@@ -173,8 +198,13 @@ class User(Model):
     try:
       session.commit()
       session.refresh(self)
-      self._invalidate_auth_cache()
-      return self._revoke_api_keys(session)
+      cache_invalidated = self._invalidate_auth_cache()
+      keys_revoked, keys_found = self._revoke_api_keys(session)
+      return DeactivationResult(
+        keys_found=keys_found,
+        keys_revoked=keys_revoked,
+        cache_invalidated=cache_invalidated,
+      )
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -203,13 +233,14 @@ class User(Model):
       session.rollback()
       raise
 
-  def _revoke_api_keys(self, session: Session) -> int:
+  def _revoke_api_keys(self, session: Session) -> tuple[int, int]:
     """Deactivate this user's active API keys and clear their caches.
 
-    Returns how many were actually revoked, which is what callers must report:
-    revocation is best-effort per key, so the number attempted is not the
-    number that took, and an incident response that reads "4 keys revoked"
-    when one failed is worse than no number at all.
+    Returns ``(revoked, found)`` — the number that actually took alongside the
+    number attempted: revocation is best-effort per key, and an incident
+    response that reads "4 keys revoked" when one failed is worse than no
+    number at all. ``found`` is ``-1`` when the key list could not even be
+    loaded, which callers must read as incomplete.
 
     Called on deactivate so programmatic access is revoked alongside JWT
     invalidation. Each key's ``deactivate`` flips ``is_active`` and invalidates
@@ -224,7 +255,7 @@ class User(Model):
       active_keys = UserAPIKey.get_active_by_user_id(str(self.id), session)
     except Exception as e:
       logger.error(f"Failed to load API keys for deactivated user {self.id}: {e}")
-      return 0
+      return 0, -1
 
     revoked = 0
     for key in active_keys:
@@ -244,10 +275,10 @@ class User(Model):
         f"deactivation."
       )
 
-    return revoked
+    return revoked, len(active_keys)
 
-  def _invalidate_auth_cache(self) -> None:
-    """Invalidate auth caches derived from this user.
+  def _invalidate_auth_cache(self) -> bool:
+    """Invalidate auth caches derived from this user, True when it took.
 
     Always DELETE rather than rewrite: the cached entry's session_version
     is what gates the cache hit, so an old entry left in place defeats the
@@ -271,7 +302,7 @@ class User(Model):
       api_key_cache = cache_module.api_key_cache
     except Exception as e:
       logger.error(f"Auth cache module unavailable for user {self.id}: {e}")
-      return
+      return False
 
     user_id = str(self.id)
 
@@ -290,10 +321,10 @@ class User(Model):
     # One retry with a short backoff handles transient Redis blips
     # (connection reset, single-node failover) without going to extremes.
     if _try_invalidate():
-      return
+      return True
     time.sleep(0.05)
     if _try_invalidate():
-      return
+      return True
 
     # Both attempts failed. Log loudly — this is the fail-open window.
     # Surface as an error so it's monitorable; downstream alerting should
@@ -302,3 +333,4 @@ class User(Model):
       f"CRITICAL: auth cache invalidation failed twice for user {user_id}; "
       f"prior session may remain valid for up to JWT/cache TTL"
     )
+    return False

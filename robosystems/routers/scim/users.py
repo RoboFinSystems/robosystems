@@ -56,10 +56,13 @@ def _scim_error(
 
 
 def _default_role() -> OrgRole:
+  # Boot validation rejects anything outside member/admin; this is the
+  # runtime belt so a bypassed check can never mint owners.
   try:
-    return OrgRole(env.SSO_DEFAULT_ROLE)
+    role = OrgRole(env.SSO_DEFAULT_ROLE)
   except ValueError:
     return OrgRole.MEMBER
+  return role if role in (OrgRole.MEMBER, OrgRole.ADMIN) else OrgRole.MEMBER
 
 
 def _to_resource(user: User) -> ScimUserResource:
@@ -124,21 +127,41 @@ def _coerce_active(patch: ScimPatchRequest) -> bool | None:
   return None
 
 
-def _set_active(user: User, active: bool, org_id: str, session: Session) -> None:
-  if bool(user.is_active) == active:
-    return
-  if active:
-    user.activate(session)
-    event = SecurityEventType.SCIM_USER_REACTIVATED
-  else:
-    user.deactivate(session)  # session_version bump + API-key revocation
-    event = SecurityEventType.SCIM_USER_DEACTIVATED
+def _audit_active_change(user: User, org_id: str, event: SecurityEventType) -> None:
   SecurityAuditLogger.log_security_event(
     event_type=event,
     user_id=str(user.id),
     details={"action": event.value, "org_id": org_id, "external_id": user.external_id},
     risk_level="medium",
   )
+
+
+def _set_active(user: User, active: bool, org_id: str, session: Session) -> None:
+  transition = bool(user.is_active) != active
+
+  if active:
+    if not transition:
+      return
+    user.activate(session)
+    _audit_active_change(user, org_id, SecurityEventType.SCIM_USER_REACTIVATED)
+    return
+
+  # Deactivation runs even when the DB flag is already false: the flag flip
+  # is only part of the kill switch — an IdP retry after a 503 below is
+  # retrying the session-cache invalidation and API-key revocation, not the
+  # column write, so a short-circuit here would make the retry a no-op.
+  result = user.deactivate(session)
+  if transition:
+    _audit_active_change(user, org_id, SecurityEventType.SCIM_USER_DEACTIVATED)
+  if not result.fully_applied:
+    # The account is inactive in the DB, but revocation side effects did not
+    # all take. Fail the request so the IdP retries — deactivate is
+    # idempotent and re-asserts them — instead of reporting an offboarding
+    # complete that isn't.
+    raise _scim_error(
+      status.HTTP_503_SERVICE_UNAVAILABLE,
+      "Deactivation incompletely applied; retry",
+    )
 
 
 @router.get("/Users", include_in_schema=False)

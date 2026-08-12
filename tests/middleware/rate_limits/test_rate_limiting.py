@@ -600,3 +600,44 @@ class TestPublishedPrincipalIdentity:
     limit, window = get_rate_limit_config(identifier)
     anon_limit, _ = get_rate_limit_config("ip:10.0.0.9")
     assert limit > anon_limit
+
+
+class TestScimIpRateLimitDependency:
+  """Pre-auth IP backstop: rotating bogus bearers must share one IP bucket.
+
+  The per-token SCIM bucket keys off the presented bearer, so each invented
+  bearer would otherwise mint a fresh full-size bucket; this bucket caps that
+  churn per source IP before authentication.
+  """
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=300)
+  def test_rotating_bearers_share_the_ip_bucket(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      scim_ip_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 299)
+    keys = []
+    for token in ("rfssaaa", "rfssbbb", "rfssccc"):
+      request = _make_request(
+        headers={"Authorization": f"Bearer {token}"}, host="10.0.0.9"
+      )
+      scim_ip_rate_limit_dependency(request)
+      keys.append(mock_cache.check_rate_limit.call_args[0][0])
+
+    assert len(set(keys)) == 1
+    assert keys[0].startswith("apikey:scim-ip:10.0.0.9")
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=300)
+  def test_ip_bucket_gets_the_full_limit(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      scim_ip_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 299)
+    request = _make_request(headers={}, host="10.0.0.9")
+    scim_ip_rate_limit_dependency(request)
+    # Full 300, not the anonymous 30 — the bucket is deliberately IP-keyed.
+    assert mock_cache.check_rate_limit.call_args[0][1] == 300

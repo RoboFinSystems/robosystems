@@ -455,6 +455,28 @@ def scim_rate_limit_dependency(request: Request):
   )(request)
 
 
+def _scim_ip_identifier(request: Request) -> str:
+  # The `apikey:` prefix opts into the full limit (see
+  # create_custom_rate_limit_dependency); the key itself is purely IP-derived.
+  client_ip = request.client.host if request.client else "unknown"
+  return f"apikey:scim-ip:{client_ip}"
+
+
+def scim_ip_rate_limit_dependency(request: Request):
+  """Pre-authentication IP throttle in front of the SCIM surface.
+
+  The per-token bucket above keys off the *presented* bearer, so each newly
+  invented bogus bearer would otherwise mint a fresh full-size bucket; this
+  IP-keyed backstop caps that churn before authentication. Sized above
+  RATE_LIMIT_SCIM so a legitimate IdP burst exhausts its per-token budget
+  first, never this one.
+  """
+  limit = get_int_env("RATE_LIMIT_SCIM_IP", "300")  # 300/minute per IP
+  return create_custom_rate_limit_dependency(
+    limit, 60, "scim_ip", identifier_fn=_scim_ip_identifier
+  )(request)
+
+
 def general_api_rate_limit_dependency(request: Request):
   """General rate limiting for standard API endpoints."""
   limit = get_int_env("RATE_LIMIT_GENERAL_API", "200")  # 200/minute

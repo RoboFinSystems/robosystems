@@ -14,6 +14,12 @@ class ScimBootstrapRequest(BaseModel):
     description="Create a new ENTERPRISE org with this name (when org_id is omitted).",
   )
   token_name: str = Field(default="scim-provisioning")
+  expires_in_days: int = Field(
+    default=365,
+    ge=1,
+    le=3650,
+    description="Token lifetime. Every token expires; rotation is overlap-based.",
+  )
 
 
 class ScimBootstrapResponse(BaseModel):
@@ -22,6 +28,7 @@ class ScimBootstrapResponse(BaseModel):
   scim_token_id: str
   # The raw bearer token, shown exactly once — paste it into the IdP now.
   token: str
+  expires_at: str
 
 
 class ScimTokenRevokeResponse(BaseModel):

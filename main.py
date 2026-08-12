@@ -87,8 +87,16 @@ logger = get_logger("robosystems.api")
 
 # Path prefixes whose responses may contain per-user secrets (tokens,
 # API keys, billing details, org membership). These get `Cache-Control:
-# no-store` applied in the security-headers middleware.
-_SENSITIVE_PATH_PREFIXES = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs", "/scim")
+# no-store` applied in the security-headers middleware. `/admin` is here for
+# the SCIM bootstrap response, which carries a raw bearer token.
+_SENSITIVE_PATH_PREFIXES = (
+  "/v1/auth",
+  "/v1/user",
+  "/v1/billing",
+  "/v1/orgs",
+  "/scim",
+  "/admin",
+)
 
 
 def csp_variant_for_path(path: str) -> str:

@@ -142,6 +142,7 @@ class EnvValidator:
     # first login attempt, which presents as a confusing auth error — fail at
     # boot instead. And a deployment with password auth off and no OIDC is one
     # nobody can log in to.
+    deployed = env_config.ENVIRONMENT not in ("dev", "local", "test")
     if getattr(env_config, "SSO_OIDC_ENABLED", False):
       for var_name in (
         "SSO_OIDC_ISSUER",
@@ -150,12 +151,38 @@ class EnvValidator:
       ):
         if not getattr(env_config, var_name, None):
           errors.append(f"{var_name}: Required when SSO_OIDC_ENABLED=true")
+      issuer = getattr(env_config, "SSO_OIDC_ISSUER", "") or ""
+      if issuer and deployed and not issuer.startswith("https://"):
+        errors.append(
+          "SSO_OIDC_ISSUER: Must be an https:// URL outside local development"
+        )
+      if "?" in issuer or "#" in issuer:
+        errors.append("SSO_OIDC_ISSUER: Must not contain a query or fragment")
     if not getattr(env_config, "PASSWORD_AUTH_ENABLED", True) and not getattr(
       env_config, "SSO_OIDC_ENABLED", False
     ):
       errors.append(
         "PASSWORD_AUTH_ENABLED=false requires SSO_OIDC_ENABLED=true — "
         "otherwise no one can log in to this deployment"
+      )
+    if getattr(env_config, "SCIM_ENABLED", False):
+      default_role = getattr(env_config, "SSO_DEFAULT_ROLE", "member")
+      if default_role not in ("member", "admin"):
+        errors.append(
+          "SSO_DEFAULT_ROLE: Must be 'member' or 'admin' — IdP-provisioned "
+          "users must not default to a privileged role"
+        )
+    if (
+      deployed
+      and (
+        getattr(env_config, "SSO_OIDC_ENABLED", False)
+        or getattr(env_config, "SCIM_ENABLED", False)
+      )
+      and not getattr(env_config, "RATE_LIMIT_ENABLED", False)
+    ):
+      errors.append(
+        "RATE_LIMIT_ENABLED: Required when SSO_OIDC_ENABLED or SCIM_ENABLED — "
+        "the OIDC/SCIM rate buckets are no-ops without it"
       )
 
     # Validate value ranges and formats

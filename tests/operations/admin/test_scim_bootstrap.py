@@ -1,5 +1,7 @@
 """Tests for SCIM provisioning bootstrap."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from robosystems.models.core import Org, OrgLimits, OrgType, ScimToken
@@ -47,6 +49,23 @@ class TestBootstrapScim:
     # Both live during the swap.
     assert ScimToken.validate_token(first.raw_token, test_db) is not None
     assert ScimToken.validate_token(second.raw_token, test_db) is not None
+
+  def test_token_expires_by_default(self, test_db):
+    """Every token expires — there is deliberately no non-expiring mint."""
+    result = bootstrap_scim(test_db, org_name="Expiry Co")
+
+    delta = result.expires_at - datetime.now(UTC)
+    assert timedelta(days=364) < delta <= timedelta(days=365)
+    # Still valid today, and the stored row carries the expiry.
+    token = ScimToken.validate_token(result.raw_token, test_db)
+    assert token is not None
+    assert token.expires_at is not None
+
+  def test_custom_expiry_honored(self, test_db):
+    result = bootstrap_scim(test_db, org_name="Short Co", expires_in_days=30)
+
+    delta = result.expires_at - datetime.now(UTC)
+    assert timedelta(days=29) < delta <= timedelta(days=30)
 
 
 class TestRevokeScimToken:

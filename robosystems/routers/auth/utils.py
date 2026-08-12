@@ -47,6 +47,22 @@ class Config:
     }
 
 
+def require_password_auth() -> None:
+  """Dependency guard for every password-credential endpoint.
+
+  ``PASSWORD_AUTH_ENABLED=false`` (SSO-primary deployments) must disable the
+  whole credential surface — login, registration, reset, change — not just
+  its advertisement in ``/auth/providers``. A login that the UI hides but the
+  API still accepts is posture drift, not a posture: it would let a password
+  bypass the IdP's MFA and conditional-access policies.
+  """
+  if not env.PASSWORD_AUTH_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Password authentication is disabled on this deployment",
+    )
+
+
 # Redis clients are now imported from middleware.auth.jwt
 
 

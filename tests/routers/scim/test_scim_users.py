@@ -7,6 +7,7 @@ minted in the test DB and presented as the bearer.
 """
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 
@@ -244,3 +245,36 @@ class TestDeactivation:
     assert resp.status_code == 200
     test_db.refresh(member)
     assert member.is_active is True
+
+  def test_incomplete_deactivation_is_503_and_retryable(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """The offboarding kill switch must fail loud, not report success.
+
+    When the revocation side effects don't all take (here: the auth-cache
+    invalidation), the IdP must see a retryable failure — and the retry must
+    re-run those side effects even though the DB flag already flipped.
+    """
+    member = _make_member(test_db, enterprise_org)
+    deactivate_body = {
+      "Operations": [{"op": "replace", "path": "active", "value": False}]
+    }
+
+    with patch.object(User, "_invalidate_auth_cache", return_value=False):
+      resp = client.patch(
+        f"/scim/v2/Users/{member.id}", headers=scim_auth, json=deactivate_body
+      )
+    assert resp.status_code == 503
+
+    # The DB half still applied — the account is inactive either way.
+    test_db.refresh(member)
+    assert member.is_active is False
+    version_after_failure = member.session_version or 0
+
+    # The IdP retry re-asserts the side effects and now reports success.
+    resp = client.patch(
+      f"/scim/v2/Users/{member.id}", headers=scim_auth, json=deactivate_body
+    )
+    assert resp.status_code == 200
+    test_db.refresh(member)
+    assert (member.session_version or 0) > version_after_failure
