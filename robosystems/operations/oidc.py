@@ -368,7 +368,11 @@ async def validate_id_token(
   except pyjwt.PyJWTError as exc:
     raise OIDCTokenInvalidError(f"id_token rejected: {exc}") from exc
 
-  token_nonce = claims.get("nonce") or ""
+  # str() coercion, not just `or ""`: a non-string nonce claim (valid JSON,
+  # invalid per spec) would make compare_digest raise TypeError, which would
+  # escape the callback's OIDCTokenInvalidError handler and 500 instead of
+  # redirecting. Coercing keeps every rejection on the same path.
+  token_nonce = str(claims.get("nonce") or "")
   if not secrets.compare_digest(token_nonce, nonce):
     raise OIDCTokenInvalidError("id_token nonce mismatch")
 

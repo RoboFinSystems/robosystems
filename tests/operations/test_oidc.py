@@ -103,6 +103,13 @@ class TestValidateIdToken:
     with pytest.raises(OIDCTokenInvalidError, match="nonce"):
       await self._validate(token, jwks)
 
+  async def test_non_string_nonce_rejected_not_raised(self, private_pem, jwks):
+    """A non-string nonce claim must reject as OIDCTokenInvalidError, not
+    escape as a TypeError from compare_digest (which would 500 the callback)."""
+    token = _make_id_token(private_pem, nonce=12345)
+    with pytest.raises(OIDCTokenInvalidError, match="nonce"):
+      await self._validate(token, jwks)
+
   async def test_wrong_audience_rejected(self, private_pem, jwks):
     token = _make_id_token(private_pem, aud="some-other-client")
     with pytest.raises(OIDCTokenInvalidError):
