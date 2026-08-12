@@ -576,8 +576,10 @@ def setup_database(test_db):
     Org,
     OrgLimits,
     OrgUser,
+    ScimToken,
     User,
     UserAPIKey,
+    UserIdentity,
     UserRepository,
     UserRepositoryCredits,
     UserRepositoryCreditTransaction,
@@ -607,6 +609,8 @@ def setup_database(test_db):
     test_db.query(BillingCustomer).delete()
     test_db.query(OrgLimits).delete()
     test_db.query(OrgUser).delete()  # Delete org memberships before users/orgs
+    test_db.query(UserIdentity).delete()  # references users
+    test_db.query(ScimToken).delete()  # references orgs
     test_db.query(User).delete()
     test_db.query(Org).delete()
     test_db.commit()

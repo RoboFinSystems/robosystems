@@ -423,3 +423,72 @@ class TestPasswordResetEndpoints:
     assert log_args.kwargs["event_type"].value == "password_reset_completed"
     assert log_args.kwargs["user_id"] == "user_complete"
     assert log_args.kwargs["risk_level"] == "high"
+
+
+class TestPasswordlessAccountGuard:
+  """A NULL password_hash marks an IdP-governed account (SCIM-provisioned).
+
+  The reset flow must never bootstrap a password onto one: the forgot step
+  refuses to issue a token (behind the generic no-enumeration response), and
+  the reset step refuses even a token that somehow exists, indistinguishably
+  from an invalid token.
+  """
+
+  @pytest.mark.asyncio
+  @patch.object(UserToken, "create_token")
+  @patch.object(User, "get_by_email")
+  async def test_forgot_password_passwordless_user_gets_no_token(
+    self, mock_get_user, mock_create_token, client, test_db
+  ):
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_idp_123"
+    mock_user.email = "staff@customer.example"
+    mock_user.name = "IdP Staffer"
+    mock_user.is_active = True
+    mock_user.password_hash = None
+    mock_get_user.return_value = mock_user
+
+    response = client.post(
+      "/v1/auth/password/forgot",
+      json={"email": "staff@customer.example"},
+    )
+
+    assert response.status_code == 200
+    # Same generic message as every other outcome (no enumeration).
+    assert (
+      response.json()["message"]
+      == "If an account exists with this email, a password reset link has been sent."
+    )
+    mock_create_token.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch.object(UserToken, "verify_token")
+  @patch.object(User, "get_by_id")
+  async def test_reset_password_refused_for_passwordless_user(
+    self, mock_get_user, mock_verify_token, client, test_db
+  ):
+    mock_verify_token.return_value = "user_idp_123"
+
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_idp_123"
+    mock_user.email = "staff@customer.example"
+    mock_user.name = "IdP Staffer"
+    mock_user.is_active = True
+    mock_user.password_hash = None
+    mock_user.update = Mock()
+    mock_user.invalidate_sessions = Mock()
+    mock_get_user.return_value = mock_user
+
+    response = client.post(
+      "/v1/auth/password/reset",
+      json={
+        "token": "somehow_minted_token",
+        "new_password": "NewS3cur3P@ssw0rd!",
+      },
+    )
+
+    # Indistinguishable from an invalid token.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid or expired reset token"
+    mock_user.update.assert_not_called()
+    mock_user.invalidate_sessions.assert_not_called()

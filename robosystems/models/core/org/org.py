@@ -87,7 +87,7 @@ class Org(Model):
 
   @classmethod
   def create_personal_org_for_user(
-    cls, user_id: str, user_name: str, session: Session
+    cls, user_id: str, user_name: str, session: Session, auto_commit: bool = True
   ) -> "Org":
     """Create a personal org with the user as OWNER.
 
@@ -113,12 +113,13 @@ class Org(Model):
       auto_commit=False,
     )
 
-    try:
-      session.commit()
-      session.refresh(org)
-    except SQLAlchemyError:
-      session.rollback()
-      raise
+    if auto_commit:
+      try:
+        session.commit()
+        session.refresh(org)
+      except SQLAlchemyError:
+        session.rollback()
+        raise
 
     return org
 

@@ -73,10 +73,13 @@ async def forgot_password(
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")
 
-  # Try to find user
+  # Try to find user. A user with no password_hash is IdP-governed
+  # (SCIM-provisioned / passwordless): never issue a reset token for one, so
+  # a forgotten-password email can never bootstrap a password onto an account
+  # the customer's IdP owns. Same generic response either way.
   user = User.get_by_email(sanitized_email, session)
 
-  if user and user.is_active:
+  if user and user.is_active and user.password_hash:
     # Generate reset token
     token = UserToken.create_token(
       user_id=user.id,
@@ -118,19 +121,21 @@ async def forgot_password(
       risk_level="medium",
     )
   else:
-    # Log attempt for non-existent user (security monitoring)
+    # Log attempt without issuing a token (security monitoring)
     logger.warning(
-      f"Password reset requested for non-existent email: {sanitized_email}"
+      f"Password reset refused for email: {sanitized_email} (exists={user is not None})"
     )
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
+      user_id=str(user.id) if user else None,
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint="/v1/auth/password/forgot",
       details={
         "email": sanitized_email,
-        "user_exists": False,
+        "user_exists": user is not None,
+        "passwordless_account": bool(user and not user.password_hash),
       },
       risk_level="low",
     )
@@ -214,6 +219,22 @@ async def reset_password(
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="User not found",
+    )
+
+  # Belt to the forgot-request guard: an IdP-governed account (NULL
+  # password_hash) can never have a password set through the reset flow,
+  # even if a token somehow exists for it. Same response as a bad token.
+  if not user.password_hash:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTH_FAILURE,
+      user_id=user.id,
+      endpoint="/v1/auth/password/reset",
+      details={"failure_reason": "password_reset_on_passwordless_account"},
+      risk_level="medium",
+    )
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Invalid or expired reset token",
     )
 
   # Validate password strength (uses same rules as /password/check endpoint)
