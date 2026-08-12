@@ -47,7 +47,14 @@ def generate_subscription_invoice(
   Card customers settle it via the Stripe webhook; invoice-billing customers
   are tracked manually. Either way the invoice exists from the moment the
   subscription does.
+
+  Billing-off deployments (dedicated tenants — the fee flows through the
+  MSA, not platform billing) still generate the invoice as a usage record,
+  but at $0: the tier and period are the record; a plan-price amount would
+  assert a charge that doesn't exist on that vehicle.
   """
+  amount_cents = subscription.base_price_cents if BILLING_ENABLED else 0
+
   invoice = BillingInvoice.create_invoice(
     org_id=subscription.org_id,
     period_start=subscription.current_period_start,
@@ -61,7 +68,7 @@ def generate_subscription_invoice(
     resource_type=subscription.resource_type,
     resource_id=subscription.resource_id,
     description=description,
-    amount_cents=subscription.base_price_cents,
+    amount_cents=amount_cents,
     session=session,
   )
 
@@ -77,7 +84,7 @@ def generate_subscription_invoice(
     actor_type="system",
     event_data={
       "invoice_number": invoice.invoice_number,
-      "amount_cents": subscription.base_price_cents,
+      "amount_cents": amount_cents,
       "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
       "payment_terms": customer.payment_terms,
       "resource_type": subscription.resource_type,
@@ -93,7 +100,7 @@ def generate_subscription_invoice(
       "invoice_number": invoice.invoice_number,
       "subscription_id": subscription.id,
       "org_id": subscription.org_id,
-      "amount_cents": subscription.base_price_cents,
+      "amount_cents": amount_cents,
       "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
       "payment_terms": customer.payment_terms,
       "invoice_billing_enabled": customer.invoice_billing_enabled,

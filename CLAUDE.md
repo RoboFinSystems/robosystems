@@ -365,7 +365,7 @@ LBUG_DATABASE_PATH=/data/lbug-dbs
 
 # Feature Flags
 RATE_LIMIT_ENABLED=true
-BILLING_ENABLED=true
+BILLING_ENABLED=false      # code default; local dev and dedicated tenants run billing-off
 
 # Extensions — RoboLedger & RoboInvestor product surfaces
 ROBOLEDGER_ENABLED=true            # gates roboledger ops + GraphQL ledger fields

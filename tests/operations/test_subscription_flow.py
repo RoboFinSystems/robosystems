@@ -77,6 +77,72 @@ class TestSubscriptionCreation:
 
     assert sub1.id == sub2.id
 
+  def test_invoice_amount_zero_when_billing_disabled(
+    self, test_db, test_user, sample_graph, test_user_graph
+  ):
+    """Billing-off deployments keep the invoice as a usage record (tier +
+    period intact) but at $0 — the fee is settled off-platform."""
+    from robosystems.models.core.billing import BillingCustomer
+    from robosystems.operations.graph.subscription_service import (
+      generate_subscription_invoice,
+    )
+
+    service = GraphSubscriptionService(test_db)
+    with patch(
+      "robosystems.operations.graph.subscription_service.BILLING_ENABLED", False
+    ):
+      subscription = service.create_graph_subscription(
+        user_id=str(test_user.id),
+        graph_id=sample_graph.graph_id,
+        plan_name="ladybug-standard",
+      )
+      customer = BillingCustomer.get_or_create(subscription.org_id, test_db)
+      invoice = generate_subscription_invoice(
+        subscription=subscription,
+        customer=customer,
+        description="Graph Database Subscription - ladybug-standard",
+        session=test_db,
+      )
+
+    assert subscription.base_price_cents > 0
+    assert invoice.total_cents == 0
+    assert invoice.subtotal_cents == 0
+
+  def test_invoice_amount_real_when_billing_enabled(
+    self, test_db, test_user, sample_graph, test_user_graph
+  ):
+    """With billing on, the same invoice carries the plan price — managed
+    invoice-based billing depends on real amounts."""
+    from robosystems.models.core.billing import BillingCustomer
+    from robosystems.operations.graph.subscription_service import (
+      generate_subscription_invoice,
+    )
+
+    service = GraphSubscriptionService(test_db)
+    # Create the subscription with billing off (avoids the Stripe path)…
+    with patch(
+      "robosystems.operations.graph.subscription_service.BILLING_ENABLED", False
+    ):
+      subscription = service.create_graph_subscription(
+        user_id=str(test_user.id),
+        graph_id=sample_graph.graph_id,
+        plan_name="ladybug-standard",
+      )
+    customer = BillingCustomer.get_or_create(subscription.org_id, test_db)
+    # …then generate the invoice as a billing-on deployment would.
+    with patch(
+      "robosystems.operations.graph.subscription_service.BILLING_ENABLED", True
+    ):
+      invoice = generate_subscription_invoice(
+        subscription=subscription,
+        customer=customer,
+        description="Graph Database Subscription - ladybug-standard",
+        session=test_db,
+      )
+
+    assert invoice.total_cents == subscription.base_price_cents
+    assert invoice.total_cents > 0
+
 
 class TestSubscriptionEnforcement:
   """Test subscription enforcement cache."""

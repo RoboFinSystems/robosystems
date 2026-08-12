@@ -445,6 +445,63 @@ class TestEdgeCases:
       mock_logger.info.assert_called_once()
 
 
+class TestRequireGraphAccessBillingDisabled:
+  """require_graph_access with billing off — the dedicated-tenant posture.
+
+  Read and write access must both bypass the subscription machinery
+  entirely: no subscription row exists on those deployments, and the
+  lookup should never even run.
+  """
+
+  @pytest.fixture
+  def mock_session(self):
+    return Mock()
+
+  @pytest.fixture(autouse=True)
+  def clear_subscription_cache(self):
+    from robosystems.middleware.billing import enforcement
+
+    enforcement._subscription_cache.clear()
+    yield
+    enforcement._subscription_cache.clear()
+
+  def _active_graph(self):
+    graph = Mock()
+    graph.status = "active"
+    graph.is_repository = False
+    return graph
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_read_access_without_subscription(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = False
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = None
+
+    graph = require_graph_access("kg_billoff1", mock_session)
+
+    assert graph is mock_graph_class.get_by_id.return_value
+    mock_subscription_class.get_by_resource.assert_not_called()
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_write_access_without_subscription(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = False
+    mock_graph_class.get_by_id.return_value = self._active_graph()
+    mock_subscription_class.get_by_resource.return_value = None
+
+    graph = require_graph_access("kg_billoff2", mock_session, require_write=True)
+
+    assert graph is mock_graph_class.get_by_id.return_value
+    mock_subscription_class.get_by_resource.assert_not_called()
+
+
 class TestRequireGraphAccessGracePeriod:
   """Canceled-subscription grace period in require_graph_access.
 
