@@ -487,6 +487,14 @@ class EnvConfig:
   # which mints API access tokens rather than sign-in ID tokens).
   SSO_OIDC_ISSUER = get_str_env("SSO_OIDC_ISSUER", "")
   SSO_OIDC_CLIENT_ID = get_str_env("SSO_OIDC_CLIENT_ID", "")
+  # SCIM 2.0 provisioning surface (IdP pushes users into the enterprise org).
+  # Gated independently of OIDC — a deployment may run one without the other.
+  SCIM_ENABLED = get_bool_env(
+    "SCIM_ENABLED",
+    get_parameter_value("SCIM_ENABLED", "false").lower() == "true",
+  )
+  # Org role SCIM-provisioned users join the enterprise org with.
+  SSO_DEFAULT_ROLE = get_str_env("SSO_DEFAULT_ROLE", "member")
   PASSKEYS_ENABLED = get_bool_env(
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",

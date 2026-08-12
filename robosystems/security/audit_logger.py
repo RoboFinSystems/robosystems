@@ -49,6 +49,12 @@ class SecurityEventType(Enum):
   # OIDC login refused after the IdP authenticated (unprovisioned or
   # deactivated user) — alarm-worthy, unlike ordinary auth noise
   OIDC_LOGIN_DENIED = "oidc_login_denied"
+  # SCIM provisioning lifecycle (operational; only the auth failure alarms)
+  SCIM_USER_PROVISIONED = "scim_user_provisioned"
+  SCIM_USER_UPDATED = "scim_user_updated"
+  SCIM_USER_DEACTIVATED = "scim_user_deactivated"
+  SCIM_USER_REACTIVATED = "scim_user_reactivated"
+  SCIM_AUTH_FAILURE = "scim_auth_failure"
   # Subgraph events
   SUBGRAPH_CREATED = "subgraph_created"
   SUBGRAPH_DELETED = "subgraph_deleted"
@@ -73,6 +79,7 @@ _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.API_KEY_EXPIRED: "AuthFailure",
   SecurityEventType.AUTHORIZATION_DENIED: "AuthorizationDenied",
   SecurityEventType.OIDC_LOGIN_DENIED: "AuthorizationDenied",
+  SecurityEventType.SCIM_AUTH_FAILURE: "AuthFailure",
   SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",

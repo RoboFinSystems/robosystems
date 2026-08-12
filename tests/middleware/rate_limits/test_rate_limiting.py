@@ -360,6 +360,53 @@ class TestBillingRateLimitDependency:
 
 
 @pytest.mark.unit
+class TestScimRateLimitDependency:
+  """The SCIM bucket must key off the bearer token, not the caller IP.
+
+  Regression: the opaque SCIM token isn't recognized by get_user_identifier,
+  so without token-keying it fell to the anonymous IP path (1/10th the limit)
+  and every tenant behind one egress IP shared a bucket.
+  """
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=120)
+  def test_bearer_gets_full_limit_not_anonymous_tenth(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      scim_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 119)
+    request = _make_request(
+      headers={"Authorization": "Bearer rfssdeadbeef"}, host="10.0.0.9"
+    )
+    scim_rate_limit_dependency(request)
+
+    call_args = mock_cache.check_rate_limit.call_args
+    # Full 120, not the anonymous 12.
+    assert call_args[0][1] == 120
+    # Keyed off the token hash, not the IP.
+    assert call_args[0][0].startswith("apikey:scim:")
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=120)
+  def test_two_tokens_same_ip_get_separate_buckets(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      scim_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 119)
+    keys = []
+    for token in ("rfssaaa", "rfssbbb"):
+      request = _make_request(
+        headers={"Authorization": f"Bearer {token}"}, host="10.0.0.9"
+      )
+      scim_rate_limit_dependency(request)
+      keys.append(mock_cache.check_rate_limit.call_args[0][0])
+
+    assert keys[0] != keys[1]
+
+
+@pytest.mark.unit
 class TestNamedRateLimitDependencies:
   """Tests for named rate limit dependency functions."""
 

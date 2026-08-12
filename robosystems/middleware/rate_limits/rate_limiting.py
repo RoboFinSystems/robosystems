@@ -294,12 +294,21 @@ def get_user_from_request(request: Request) -> str | None:
 
 # Custom rate limiting dependencies for different endpoint categories
 def create_custom_rate_limit_dependency(
-  limit_per_hour: int, window_seconds: int = 3600, limit_name: str = "custom"
+  limit_per_hour: int,
+  window_seconds: int = 3600,
+  limit_name: str = "custom",
+  identifier_fn=None,
 ):
-  """Create a custom rate limiting dependency with specific limits."""
+  """Create a custom rate limiting dependency with specific limits.
+
+  ``identifier_fn`` overrides how the bucket key is derived from the request
+  (default: ``get_user_identifier``). Return an ``apikey:``/``jwt:``-prefixed
+  string to grant the full limit, anything else for the anonymous 1/10th.
+  """
+  resolve_identifier = identifier_fn or get_user_identifier
 
   def dependency(request: Request):
-    identifier = get_user_identifier(request)
+    identifier = resolve_identifier(request)
 
     # Include limit_name in the cache key to isolate each rate limit category
     # This prevents high-limit endpoints from polluting low-limit endpoint counters
@@ -417,6 +426,33 @@ def oidc_rate_limit_dependency(request: Request):
   """
   limit = get_int_env("RATE_LIMIT_OIDC", "120")  # 120/minute (2 per flow)
   return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
+
+
+def _scim_rate_limit_identifier(request: Request) -> str:
+  """Key the SCIM bucket off the bearer token, not the caller IP.
+
+  The SCIM token is an opaque ``rfss...`` string that ``get_user_identifier``
+  cannot reparse, so without this it would fall to the anonymous IP path —
+  throttling a legitimate IdP full-sync to a tenth of the budget and making
+  every tenant behind one egress IP share a bucket. The token *hash* is the
+  key; the raw token never lands in a cache key.
+  """
+  auth_header = request.headers.get("Authorization", "")
+  if auth_header.startswith("Bearer "):
+    import hashlib
+
+    token_hash = hashlib.sha256(auth_header[7:].encode()).hexdigest()
+    return f"apikey:scim:{token_hash}"
+  # No bearer → anonymous; the request 401s at require_scim_org anyway.
+  return get_user_identifier(request)
+
+
+def scim_rate_limit_dependency(request: Request):
+  """Rate limiting for the SCIM provisioning surface (server-to-server)."""
+  limit = get_int_env("RATE_LIMIT_SCIM", "120")  # 120/minute per token
+  return create_custom_rate_limit_dependency(
+    limit, 60, "scim", identifier_fn=_scim_rate_limit_identifier
+  )(request)
 
 
 def general_api_rate_limit_dependency(request: Request):

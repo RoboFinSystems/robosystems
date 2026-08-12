@@ -38,6 +38,7 @@ from ..logger import get_logger
 from .commands.billing import credits, invoices, subscriptions
 from .commands.graphs import graphs
 from .commands.ops import cache, instances, migrations
+from .commands.scim import scim
 from .commands.search import search
 from .commands.users_orgs import orgs, users
 from .commands.worker import worker
@@ -347,6 +348,7 @@ cli.add_command(orgs)
 cli.add_command(migrations)
 cli.add_command(cache)
 cli.add_command(instances)
+cli.add_command(scim)
 cli.add_command(search)
 cli.add_command(worker)
 

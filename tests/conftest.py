@@ -145,6 +145,14 @@ def client(test_db):
   app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
   app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
 
+  from robosystems.middleware.rate_limits import (
+    oidc_rate_limit_dependency,
+    scim_rate_limit_dependency,
+  )
+
+  app.dependency_overrides[oidc_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[scim_rate_limit_dependency] = lambda: None
+
   # Override the get_db_session dependency to use test database
   from robosystems.database import get_async_db_session, get_db_session
 

@@ -23,6 +23,7 @@ from .rate_limiting import (
   oidc_rate_limit_dependency,
   public_api_rate_limit_dependency,
   rate_limit_dependency,
+  scim_rate_limit_dependency,
   sensitive_auth_rate_limit_dependency,
   sse_connection_rate_limit_dependency,
   sso_rate_limit_dependency,
@@ -75,6 +76,7 @@ __all__ = [
   "rate_limit_cache",
   # Main rate limiting
   "rate_limit_dependency",
+  "scim_rate_limit_dependency",
   "sensitive_auth_rate_limit_dependency",
   "should_use_subscription_limits",
   "sse_connection_rate_limit_dependency",
