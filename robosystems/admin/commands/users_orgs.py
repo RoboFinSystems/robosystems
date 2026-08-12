@@ -180,6 +180,8 @@ def deactivate_user(client, identifier, yes):
 
   result = client._make_request("POST", f"/admin/v1/users/{user_id}/deactivate")
 
+  fully_applied = result.get("fully_applied", True)
+
   console.print(f"\n[green]Deactivated {result['email']}[/green]")
   console.print(f"  API keys revoked: {result['api_keys_revoked']}")
   if result.get("api_keys_failed"):
@@ -187,9 +189,19 @@ def deactivate_user(client, identifier, yes):
       f"[red]  {result['api_keys_failed']} API key(s) could NOT be revoked — "
       f"the account is only partially locked down. Re-run this command.[/red]"
     )
-  console.print("  All sessions invalidated.")
+  if fully_applied:
+    console.print("  All sessions invalidated.")
+  else:
+    console.print(
+      "[red]  Revocation side effects incompletely applied — a cached "
+      "session or key may keep authenticating until its TTL. Re-run this "
+      "command.[/red]"
+    )
   if not result["changed"]:
     console.print("[yellow]  (was already inactive — re-ran the revocation)[/yellow]")
+
+  if not fully_applied:
+    raise SystemExit(1)
 
 
 @users.command("activate")

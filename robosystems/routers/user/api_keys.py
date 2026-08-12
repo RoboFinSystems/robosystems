@@ -356,7 +356,16 @@ async def revoke_api_key(
 
     was_already_inactive = not api_key.is_active
 
-    api_key.deactivate(db)
+    if not api_key.deactivate(db):
+      # The key row is revoked, but its cached validation entry could not be
+      # cleared — until it is, the key may keep authenticating from cache.
+      # Fail the request so the caller retries: deactivate re-asserts the
+      # invalidation on an already-inactive key, so the retry converges.
+      raise create_error_response(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="API key revocation incompletely applied; retry",
+        code=ErrorCode.EXTERNAL_SERVICE_ERROR,
+      )
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
