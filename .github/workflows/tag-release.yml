@@ -34,7 +34,7 @@ jobs:
       release_url: ${{ steps.set-outputs.outputs.release_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ inputs.branch_ref }}

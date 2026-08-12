@@ -19,7 +19,7 @@ jobs:
       runner_config: ${{ steps.check.outputs.runner_config }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Check runner availability
         id: check
@@ -71,7 +71,7 @@ jobs:
         # token." (This is GitHub auth, not AWS — do not drop it as "unused".)
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Run Claude Code
         id: claude
