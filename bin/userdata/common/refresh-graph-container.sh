@@ -27,7 +27,11 @@
 # Exits 0 when the container was refreshed OR was already current, non-zero on
 # failure. The non-zero exit is load-bearing: SSM records it as `Failed`, which is
 # what lets a fleet-wide --max-errors budget halt a bad rollout instead of
-# marching a broken image across every customer's database.
+# marching a broken image across every customer's database. The one exception is
+# exit 3 (below), a benign skip: the fleet-refresh document (graph-infra.yaml
+# GraphRefreshDocument) normalizes it to 0 so a skip cannot consume that same
+# error budget — from SSM's side, only real failures look like failures. Hand
+# runs of this script still see the raw 3.
 
 set -o pipefail
 
@@ -45,10 +49,11 @@ STALE_WINDOW_SECONDS=21600
 REQUIRED_ENV_SCHEMA=2
 
 # Distinct exit code for "this instance predates the environment contract." The
-# caller maps it to a loud skip rather than a failure: the instance has not
-# cycled since the contract landed, which is a transitional state to be waited
-# out or backfilled, not a broken refresh. Any other non-zero exit is a real
-# failure and must stay one.
+# fleet document maps it to exit 0, and the aggregator classifies the skip off
+# the REFRESH_RESULT marker printed alongside it: the instance has not cycled
+# since the contract landed, which is a transitional state to be waited out or
+# backfilled, not a broken refresh. Any other non-zero exit is a real failure
+# and must stay one.
 EXIT_STALE_ENV=3
 
 log() { echo "[refresh] $*"; }

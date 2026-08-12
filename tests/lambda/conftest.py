@@ -39,6 +39,7 @@ def aws_env(monkeypatch):
     "INSTANCE_REGISTRY_TABLE", "robosystems-graph-test-instance-registry"
   )
   monkeypatch.setenv("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:test-topic")
+  monkeypatch.setenv("REFRESH_DOCUMENT_NAME", "robosystems-graph-test-graph-refresh")
   monkeypatch.setenv(
     "VOLUME_MANAGER_FUNCTION_ARN",
     "arn:aws:lambda:us-east-1:123456789012:function:test-volume-manager",

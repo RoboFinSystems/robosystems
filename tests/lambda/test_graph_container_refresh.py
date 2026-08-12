@@ -7,11 +7,16 @@ list, so a wrong expression does not error — it matches nothing and reports
 success. SSM ANDs across target keys and ORs within one, which is why "all"
 cannot be a single command and is instead one per node-type group.
 
-**Skip classification.** SSM records any non-zero exit as `Failed`. Exit 3 and 4
-mean "this instance has not cycled onto the new scripts, and its container was
-deliberately left running" — a transitional state. If those leak into the failure
-count, an un-cycled fleet fails a deploy, which is the regression this
-classification exists to prevent.
+**Skip classification.** A skip — "this instance has not cycled onto the new
+scripts, and its container was deliberately left running" — is a transitional
+state that must not fail a deploy. The refresh document normalizes skip exits to
+0 (a non-zero exit consumes SSM's MaxErrors budget and terminates the rest of
+the fleet's invocations), and the Lambda classifies skips off the
+REFRESH_RESULT stdout marker, never off an exit code. If skips leak into the
+failure count, an un-cycled fleet fails a deploy, which is the regression this
+classification exists to prevent — and which shipped once, precisely because
+the original classification read `ResponseCode` at the invocation level, a
+field the real API only sets on the plugin.
 """
 
 from unittest.mock import patch
@@ -21,12 +26,28 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _invocation(status: str, response_code: int | None, output: str = ""):
-  inv = {"InstanceId": "i-abc", "Status": status}
+def _invocation(
+  status: str,
+  response_code: int | None = None,
+  output: str = "",
+  status_details: str = "",
+):
+  """Shape an invocation the way `list_command_invocations(Details=True)`
+  actually returns it: the exit code lives on the plugin, never on the
+  invocation. The first version of this fixture put ResponseCode at the
+  invocation level — a shape the real API never produces — which is exactly how
+  the classification bug these tests exist to catch survived them.
+  """
+  inv: dict = {"InstanceId": "i-abc", "Status": status}
+  if status_details:
+    inv["StatusDetails"] = status_details
+  plugin: dict = {}
   if response_code is not None:
-    inv["ResponseCode"] = response_code
+    plugin["ResponseCode"] = response_code
   if output:
-    inv["CommandPlugins"] = [{"Output": output}]
+    plugin["Output"] = output
+  if plugin:
+    inv["CommandPlugins"] = [plugin]
   return inv
 
 
@@ -55,24 +76,22 @@ class TestTargeting:
       gcr._targets_for("nonsense", "prod")
 
 
-class TestCommandConstruction:
-  def test_guard_precedes_the_refresh_and_owns_exit_4(self, gcr):
-    commands = gcr._build_commands(30, False, False)
-    assert len(commands) == 2
-    assert commands[0].startswith("[ -x /usr/local/bin/refresh-graph-container.sh ]")
-    assert "exit 4" in commands[0]
-    assert commands[1].endswith("/usr/local/bin/refresh-graph-container.sh")
+class TestParameterConstruction:
+  """The wrapper shell lives in the document (graph-infra.yaml); the Lambda only
+  supplies the per-dispatch values. tests/infrastructure covers the document's
+  side of that contract."""
 
-  def test_overrides_are_passed_as_env_prefixes(self, gcr):
-    commands = gcr._build_commands(45, True, True)
-    assert "MAX_WAIT_MINUTES=45" in commands[1]
-    assert "FORCE_IGNORE_BUSY=true" in commands[1]
-    assert "FORCE_RESTART=true" in commands[1]
+  def test_overrides_become_document_parameters(self, gcr):
+    params = gcr._build_parameters(45, True, True, 3600)
+    assert params["MaxWaitMinutes"] == ["45"]
+    assert params["ForceIgnoreBusy"] == ["true"]
+    assert params["ForceRestart"] == ["true"]
+    assert params["ExecutionTimeout"] == ["3600"]
 
   def test_force_flags_default_to_false(self, gcr):
-    commands = gcr._build_commands(30, False, False)
-    assert "FORCE_IGNORE_BUSY=false" in commands[1]
-    assert "FORCE_RESTART=false" in commands[1]
+    params = gcr._build_parameters(30, False, False, 2700)
+    assert params["ForceIgnoreBusy"] == ["false"]
+    assert params["ForceRestart"] == ["false"]
 
 
 class TestStart:
@@ -84,16 +103,27 @@ class TestStart:
     assert ssm.send_command.call_count == len(gcr.ALL_GROUPS)
     assert [c["node_type"] for c in result["commands"]] == gcr.ALL_GROUPS
 
+  def test_dispatches_the_stack_owned_document(self, gcr):
+    """Never AWS-RunShellScript: the failure-paging rule filters on the document
+    name, so the generic document would silently un-scope the page."""
+    with patch.object(gcr, "ssm") as ssm:
+      ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
+      gcr.start({"node_types": "writer"})
+
+    kwargs = ssm.send_command.call_args.kwargs
+    assert kwargs["DocumentName"] == gcr.REFRESH_DOCUMENT
+    assert kwargs["DocumentName"] != "AWS-RunShellScript"
+
   def test_execution_timeout_exceeds_the_busy_wait(self, gcr):
-    """Left implicit, AWS-RunShellScript defaults to 3600s and a raised wait would
-    silently truncate the command mid-refresh."""
+    """Left implicit, a raised wait would silently truncate the command
+    mid-refresh."""
     with patch.object(gcr, "ssm") as ssm:
       ssm.send_command.return_value = {"Command": {"CommandId": "cmd-1"}}
       result = gcr.start({"node_types": "writer", "max_wait_minutes": 50})
 
     assert result["execution_timeout_seconds"] > 50 * 60
     params = ssm.send_command.call_args.kwargs["Parameters"]
-    assert params["executionTimeout"] == [str(result["execution_timeout_seconds"])]
+    assert params["ExecutionTimeout"] == [str(result["execution_timeout_seconds"])]
 
   def test_rate_control_defaults_are_applied_by_the_lambda(self, gcr):
     """Not just by the caller — otherwise a hand-rolled invocation hits the fleet
@@ -117,24 +147,50 @@ class TestStatusSkipClassification:
       ssm.get_paginator.return_value = _Paginator()
       return gcr.status({"command_id": "cmd-1"})
 
-  def test_stale_env_exit_is_a_skip_not_a_failure(self, gcr):
-    result = self._status(gcr, [_invocation("Failed", 3)])
-    assert result["failed"] == 0
-    assert result["skipped"] == 1
-    assert result["refresh_results"]["skipped-stale-env"] == 1
-
-  def test_missing_script_exit_is_a_skip_not_a_failure(self, gcr):
-    result = self._status(gcr, [_invocation("Failed", 4)])
+  def test_skips_arrive_as_success_and_classify_off_the_marker(self, gcr):
+    """The document normalizes skip exits to 0, so a skip is a Success
+    invocation whose only distinguishing feature is its stdout marker."""
+    result = self._status(
+      gcr, [_invocation("Success", 0, "REFRESH_RESULT=skipped-no-script")]
+    )
     assert result["failed"] == 0
     assert result["skipped"] == 1
     assert result["refresh_results"]["skipped-no-script"] == 1
 
+  def test_stale_env_marker_is_a_skip_not_a_failure(self, gcr):
+    result = self._status(
+      gcr, [_invocation("Success", 0, "REFRESH_RESULT=skipped-stale-env")]
+    )
+    assert result["failed"] == 0
+    assert result["skipped"] == 1
+    assert result["refresh_results"]["skipped-stale-env"] == 1
+
+  def test_a_hand_run_skip_with_a_raw_exit_code_gets_the_same_grace(self, gcr):
+    """Running refresh-graph-container.sh outside the document exits 3 with the
+    marker on stdout; the marker, not the exit code, is the signal."""
+    result = self._status(
+      gcr,
+      [_invocation("Failed", 3, "[refresh] ...\nREFRESH_RESULT=skipped-stale-env")],
+    )
+    assert result["failed"] == 0
+    assert result["skipped"] == 1
+
   def test_a_real_failure_still_counts(self, gcr):
     """127 from a missing binary inside the script is a genuine failure and must
-    not be downgraded just because it is also non-zero."""
+    not be downgraded just because a marker-less non-zero exit could look like
+    the old skip shape."""
     result = self._status(gcr, [_invocation("Failed", 127)])
     assert result["failed"] == 1
     assert result["skipped"] == 0
+    assert result["failures"][0]["response_code"] == "127"
+
+  def test_terminated_before_running_is_a_failure_with_no_exit_code(self, gcr):
+    """MaxErrors tripping elsewhere in the fleet terminates queued invocations;
+    SSM marks them Failed/Terminated with a plugin ResponseCode of -1."""
+    result = self._status(gcr, [_invocation("Failed", -1, status_details="Terminated")])
+    assert result["failed"] == 1
+    assert result["failures"][0]["response_code"] == ""
+    assert result["failures"][0]["status_details"] == "Terminated"
 
   def test_refresh_result_is_read_from_stdout(self, gcr):
     result = self._status(
@@ -149,7 +205,7 @@ class TestStatusSkipClassification:
       [
         _invocation("Success", 0, "REFRESH_RESULT=updated"),
         _invocation("Success", 0, "REFRESH_RESULT=no-op"),
-        _invocation("Failed", 4),
+        _invocation("Success", 0, "REFRESH_RESULT=skipped-no-script"),
         _invocation("Failed", 1),
       ],
     )
