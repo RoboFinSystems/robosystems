@@ -11,6 +11,7 @@ Thanks for your interest in contributing. This repository is the API and backend
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [How to Contribute](#how-to-contribute)
+- [Licensing and Sign-off](#licensing-and-sign-off)
 - [Branching](#branching)
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
@@ -84,6 +85,39 @@ Check existing issues first, then include steps to reproduce, expected versus ac
 ### First-time contributors
 
 Issues labeled `good first issue` or `help wanted` are good starting points.
+
+## Licensing and Sign-off
+
+### Licensing
+
+RoboSystems is licensed under Apache 2.0 and will stay that way. Contributions are accepted under the same license — as Apache 2.0 section 5 puts it, any contribution you intentionally submit for inclusion is licensed under those terms unless you state otherwise. Inbound equals outbound.
+
+There is no contributor license agreement to sign and we do not ask you to assign copyright. You keep it.
+
+### Developer Certificate of Origin
+
+Every commit must carry a `Signed-off-by` line certifying you have the right to submit the work under the project's license. This is the [Developer Certificate of Origin](https://developercertificate.org/), the same mechanism the Linux kernel uses. It is a statement about *provenance* — that the work is yours to give — not a transfer of rights.
+
+Sign off automatically with `-s`:
+
+```bash
+git commit -s -m "feat(api): add portfolio analysis endpoint"
+```
+
+which appends a trailer to the commit message:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+Use your real name and an address you can be reached at. If the work is owned by your employer, confirm you have their permission before signing off.
+
+To add sign-off to commits you have already written:
+
+```bash
+git commit --amend -s --no-edit       # the most recent commit
+git rebase --signoff origin/main      # every commit on your branch
+```
 
 ## Branching
 
@@ -196,6 +230,7 @@ A first-time contributor's workflow runs need maintainer approval before they st
 - Coverage does not regress meaningfully
 - Documentation is updated alongside behavior changes
 - One feature or fix per PR
+- Every commit carries a `Signed-off-by` line — see [Licensing and Sign-off](#licensing-and-sign-off)
 - At least one maintainer approval before merge, and a maintainer performs the merge
 
 Address review feedback with new commits rather than force-pushing, so reviewers can follow what changed.

@@ -244,13 +244,13 @@ jobs:
 
       - name: Checkout (for action)
         if: steps.check.outputs.skip_lookup == 'false'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           sparse-checkout: .github/actions/get-latest-ami
 
       - name: Configure AWS credentials
         if: steps.check.outputs.skip_lookup == 'false'
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
@@ -281,7 +281,7 @@ jobs:
       replica_instance_type: ${{ steps.set-matrix.outputs.replica_instance_type }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           sparse-checkout: |
             .github/configs/graph.yml
