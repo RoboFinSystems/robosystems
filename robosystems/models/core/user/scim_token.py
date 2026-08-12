@@ -2,7 +2,7 @@
 
 import hashlib
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 import bcrypt
@@ -14,6 +14,11 @@ from robosystems.database import Model
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.utils.ulid import generate_prefixed_ulid
+
+# Every SCIM token expires; this is the lifetime minted when a caller does
+# not choose one. There is deliberately no non-expiring mint (RFC 7644
+# expects limited-lifetime bearers) — rotation is overlap-based.
+DEFAULT_TOKEN_LIFETIME_DAYS = 365
 
 
 class ScimToken(Model):
@@ -60,8 +65,12 @@ class ScimToken(Model):
     """Mint a SCIM token, returning ``(row, plaintext)``.
 
     The plaintext is shown once and never stored — only its bcrypt hash and
-    SHA-256 fingerprint persist.
+    SHA-256 fingerprint persist. ``expires_at=None`` gets the default
+    lifetime, not "never" — the expiry invariant is enforced here so no
+    caller can mint a non-expiring token.
     """
+    if expires_at is None:
+      expires_at = datetime.now(UTC) + timedelta(days=DEFAULT_TOKEN_LIFETIME_DAYS)
     plain_token = f"rfss{secrets.token_hex(32)}"
 
     token = cls(
@@ -117,11 +126,15 @@ class ScimToken(Model):
     if candidate is None or not candidate.is_active:
       return None
     expires = candidate.expires_at
-    if expires is not None:
-      if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=UTC)
-      if expires < datetime.now(UTC):
-        return None
+    if expires is None:
+      # No non-expiring token is ever minted, so a NULL here is a row from
+      # before the invariant — refuse it rather than honoring it forever.
+      logger.warning(f"SCIM token {candidate.id} has no expiry; refusing. Rotate it.")
+      return None
+    if expires.tzinfo is None:
+      expires = expires.replace(tzinfo=UTC)
+    if expires < datetime.now(UTC):
+      return None
     if not cls._verify_token(plain_token, str(candidate.token_hash)):
       return None
     return candidate

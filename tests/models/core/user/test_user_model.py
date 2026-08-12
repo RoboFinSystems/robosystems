@@ -254,12 +254,26 @@ class TestUserModel:
 
     # Delete org-related tables before deleting users
     try:
-      from robosystems.models.core import Org, OrgInvitation, OrgLimits, OrgUser
+      from robosystems.models.core import (
+        Org,
+        OrgInvitation,
+        OrgLimits,
+        OrgUser,
+        ScimToken,
+      )
 
       db_session.query(OrgInvitation).delete()
       db_session.query(OrgUser).delete()
       db_session.query(OrgLimits).delete()
+      db_session.query(ScimToken).delete()
       db_session.query(Org).delete()
+    except ImportError:
+      pass
+
+    try:
+      from robosystems.models.core import UserIdentity
+
+      db_session.query(UserIdentity).delete()
     except ImportError:
       pass
 

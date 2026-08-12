@@ -21,6 +21,7 @@ from ...models.api.common import (
 from ...models.api.user import UpdatePasswordRequest
 from ...models.core import User
 from ...security.password import PasswordSecurity
+from ..auth.utils import require_password_auth
 
 router = APIRouter(tags=["User"])
 
@@ -41,6 +42,7 @@ async def update_user_password(
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
+  _password_auth: None = Depends(require_password_auth),
 ):
   user_id = getattr(current_user, "id", None) if current_user else None
 

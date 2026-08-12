@@ -18,8 +18,14 @@ def scim():
   "--org-name", help="Create a new ENTERPRISE org with this name (omit --org-id)."
 )
 @click.option("--token-name", default="scim-provisioning", help="Label for the token.")
+@click.option(
+  "--expires-in-days",
+  default=365,
+  type=click.IntRange(1, 3650),
+  help="Token lifetime. Rotate with an overlapping second token before expiry.",
+)
 @click.pass_obj
-def bootstrap(client, org_id, org_name, token_name):
+def bootstrap(client, org_id, org_name, token_name, expires_in_days):
   """Create-or-reuse the enterprise org and mint a SCIM token.
 
   The raw token prints ONCE and is never recoverable — paste it into the
@@ -28,7 +34,7 @@ def bootstrap(client, org_id, org_name, token_name):
   if not org_id and not org_name:
     raise click.UsageError("Provide either --org-id or --org-name.")
 
-  data = {"token_name": token_name}
+  data = {"token_name": token_name, "expires_in_days": expires_in_days}
   if org_id:
     data["org_id"] = org_id
   if org_name:
@@ -39,6 +45,7 @@ def bootstrap(client, org_id, org_name, token_name):
   console.print()
   console.print(f"[bold]Org:[/bold] {result['org_name']} ({result['org_id']})")
   console.print(f"[bold]Token ID:[/bold] {result['scim_token_id']}")
+  console.print(f"[bold]Expires:[/bold] {result['expires_at']}")
   console.print()
   console.print("[bold yellow]SCIM bearer token (shown once):[/bold yellow]")
   console.print(f"[green]{result['token']}[/green]")

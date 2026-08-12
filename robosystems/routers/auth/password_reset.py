@@ -40,7 +40,7 @@ from ...security.input_validation import (
   validate_email,
 )
 from ...security.password import PasswordSecurity
-from .utils import detect_app_source, hash_password
+from .utils import detect_app_source, hash_password, require_password_auth
 
 # Create router for password reset endpoints
 router = APIRouter()
@@ -59,6 +59,7 @@ async def forgot_password(
   background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
+  _password_auth: None = Depends(require_password_auth),
 ) -> dict:
   # Validate and sanitize email
   if not validate_email(request.email):
@@ -157,6 +158,7 @@ async def forgot_password(
 async def validate_reset_token(
   token: str = Query(..., description="Password reset token"),
   session: Session = Depends(get_async_db_session),
+  _password_auth: None = Depends(require_password_auth),
 ) -> ResetPasswordValidateResponse:
   # Validate token without consuming it
   user_id = UserToken.validate_token(
@@ -200,6 +202,7 @@ async def reset_password(
   request: ResetPasswordRequest,
   fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
+  _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
   # Verify token and get user
   user_id = UserToken.verify_token(

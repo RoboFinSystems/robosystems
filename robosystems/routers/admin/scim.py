@@ -39,6 +39,7 @@ async def scim_bootstrap(
         org_name=data.org_name,
         org_id=data.org_id,
         token_name=data.token_name,
+        expires_in_days=data.expires_in_days,
       )
     except OrgNotFoundError as exc:
       raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -56,6 +57,7 @@ async def scim_bootstrap(
       org_name=result.org_name,
       scim_token_id=result.scim_token_id,
       token=result.raw_token,
+      expires_at=result.expires_at.isoformat(),
     )
   finally:
     session.close()

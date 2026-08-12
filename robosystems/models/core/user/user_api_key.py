@@ -33,7 +33,7 @@ class UserAPIKey(Model):
   # Nullable: a row whose key has never been validated may not have one yet
   # (it is backfilled on validation, the only place plaintext is available).
   # A key revoked while this is NULL cannot be cache-invalidated by
-  # fingerprint — ``_invalidate_cache`` warns and the entry lapses on TTL.
+  # fingerprint — ``invalidate_cache`` warns and the entry lapses on TTL.
   key_fingerprint = Column(String(64), nullable=True, unique=True, index=True)
   prefix = Column(
     String, nullable=False, index=True
@@ -252,8 +252,14 @@ class UserAPIKey(Model):
         session.rollback()
         raise
 
-  def deactivate(self, session: Session) -> None:
-    """Deactivate the API key and invalidate cache."""
+  def deactivate(self, session: Session) -> bool:
+    """Deactivate the API key, returning whether its cache entry was cleared.
+
+    The DB flip either commits or this raises; the cache invalidation is
+    best-effort, and a caller acting as a kill switch must know whether it
+    took — a cached validation entry keeps the key usable until its TTL even
+    though the row is inactive.
+    """
     self.is_active = False
     self.updated_at = datetime.now(UTC)
     try:
@@ -263,7 +269,7 @@ class UserAPIKey(Model):
       session.rollback()
       raise
 
-    self._invalidate_cache()
+    return self.invalidate_cache()
 
   def activate(self, session: Session) -> None:
     """Activate the API key and invalidate cache."""
@@ -276,12 +282,12 @@ class UserAPIKey(Model):
       session.rollback()
       raise
 
-    self._invalidate_cache()
+    self.invalidate_cache()
 
   def delete(self, session: Session) -> None:
     """Delete the API key, clearing its cache entry first — the row's
     fingerprint is needed to find it."""
-    self._invalidate_cache()
+    self.invalidate_cache()
 
     session.delete(self)
     try:
@@ -295,12 +301,12 @@ class UserAPIKey(Model):
     """Deterministic SHA-256 fingerprint of a plaintext API key.
 
     Used as the cache key in `validate_api_key`. Stored on the row so
-    `_invalidate_cache` can clear the same entry without needing the plaintext.
+    `invalidate_cache` can clear the same entry without needing the plaintext.
 
     NOT credential storage: the API key itself is stored as bcrypt in
     ``key_hash`` (see ``_hash_api_key`` below). This SHA-256 is solely a
     deterministic lookup fingerprint so the cache key derived from the
-    plaintext (``sha256(plain_key)``) matches what ``_invalidate_cache``
+    plaintext (``sha256(plain_key)``) matches what ``invalidate_cache``
     reads off the row. A KDF would be the wrong tool: those exist to make
     low-entropy human secrets expensive to guess, and an API key is
     generated at full entropy.
@@ -327,12 +333,14 @@ class UserAPIKey(Model):
       logger.error(f"API key verification failed: {e}")
       return False
 
-  def _invalidate_cache(self) -> None:
-    """Drop this key's cached validation result.
+  def invalidate_cache(self) -> bool:
+    """Drop this key's cached validation result, True when it took.
 
     Keyed on ``key_fingerprint``, matching what ``validate_api_key`` caches
-    under. A row with a NULL fingerprint (never validated) cannot be targeted;
-    its cache entry, if any, lapses on TTL.
+    under. A row with a NULL fingerprint (never validated) cannot be targeted
+    but also has no addressable entry to leave stale — reported as success.
+    A False return means an entry may survive until its TTL, so callers
+    enforcing revocation must treat it as incomplete and retry.
     """
     try:
       # Imported lazily to avoid a circular dependency on the auth middleware.
@@ -347,9 +355,9 @@ class UserAPIKey(Model):
           f"API key {self.id} has no key_fingerprint; cache cannot be "
           f"invalidated until the key is validated once after deploy."
         )
-        return
+        return True
 
-      api_key_cache.invalidate_api_key(fingerprint)
+      cleared = bool(api_key_cache.invalidate_api_key(fingerprint))
 
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.AUTHORIZATION_DENIED,
@@ -359,6 +367,8 @@ class UserAPIKey(Model):
         },
         risk_level="low",
       )
+      return cleared
 
     except Exception as e:
       logger.error(f"Failed to invalidate cache for user API key {self.id}: {e}")
+      return False

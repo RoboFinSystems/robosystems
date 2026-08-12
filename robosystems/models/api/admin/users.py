@@ -91,6 +91,14 @@ class UserStatusResponse(BaseModel):
       "deactivation."
     ),
   )
+  fully_applied: bool = Field(
+    True,
+    description=(
+      "Whether every revocation side effect took, including session and "
+      "API-key cache invalidation. False means a cached credential may keep "
+      "authenticating until its TTL. Re-run the deactivation."
+    ),
+  )
 
 
 class UserActivityResponse(BaseModel):

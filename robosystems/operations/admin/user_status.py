@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from ...logger import get_logger
 from ...models.core import User
-from ...models.core.user.user_api_key import UserAPIKey
 from .user_deletion import UserNotFound
 
 logger = get_logger(__name__)
@@ -30,6 +29,9 @@ class UserStatusChange:
   changed: bool
   api_keys_revoked: int
   api_keys_failed: int = 0
+  # False when any revocation side effect did not take — a session/key cache
+  # entry may keep authenticating until its TTL. Re-run the deactivation.
+  fully_applied: bool = True
 
 
 def set_user_active(
@@ -64,12 +66,17 @@ def set_user_active(
   if active:
     found = 0
     revoked = 0
+    fully_applied = True
     user.activate(session)
   else:
-    found = len(UserAPIKey.get_active_by_user_id(str(user.id), session))
-    revoked = user.deactivate(session)
+    result = user.deactivate(session)
+    found = result.keys_found
+    revoked = result.keys_revoked
+    fully_applied = result.fully_applied
 
-  failed = found - revoked
+  # found == -1 means the key list could not be loaded at all; report one
+  # failure rather than a negative count so the operator still sees red.
+  failed = (found - revoked) if found >= 0 else 1
 
   logger.info(
     f"User {user_id} {'activated' if active else 'deactivated'}",
@@ -79,6 +86,7 @@ def set_user_active(
       "was_active": was_active,
       "api_keys_revoked": revoked,
       "api_keys_failed": failed,
+      "fully_applied": fully_applied,
     },
   )
 
@@ -89,4 +97,5 @@ def set_user_active(
     changed=was_active != active,
     api_keys_revoked=revoked,
     api_keys_failed=failed,
+    fully_applied=fully_applied,
   )

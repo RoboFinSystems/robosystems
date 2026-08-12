@@ -395,6 +395,7 @@ async def _set_active(
         "changed": change.changed,
         "api_keys_revoked": change.api_keys_revoked,
         "api_keys_failed": change.api_keys_failed,
+        "fully_applied": change.fully_applied,
       },
     )
 
@@ -405,6 +406,7 @@ async def _set_active(
       changed=change.changed,
       api_keys_revoked=change.api_keys_revoked,
       api_keys_failed=change.api_keys_failed,
+      fully_applied=change.fully_applied,
     )
   finally:
     session.close()

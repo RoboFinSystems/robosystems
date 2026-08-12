@@ -7,11 +7,13 @@ run once per tenant from the admin CLI. The raw token is returned exactly once
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.core import Org, OrgLimits, OrgType, ScimToken
+from robosystems.models.core.user.scim_token import DEFAULT_TOKEN_LIFETIME_DAYS
 
 
 class ScimBootstrapError(Exception):
@@ -29,6 +31,7 @@ class ScimBootstrapResult:
   scim_token_id: str
   # Shown once; only its hash is stored.
   raw_token: str
+  expires_at: datetime
 
 
 def bootstrap_scim(
@@ -37,11 +40,17 @@ def bootstrap_scim(
   org_name: str | None = None,
   org_id: str | None = None,
   token_name: str = "scim-provisioning",
+  expires_in_days: int = DEFAULT_TOKEN_LIFETIME_DAYS,
 ) -> ScimBootstrapResult:
   """Create-or-reuse the enterprise org and mint a SCIM token for it.
 
   Pass ``org_id`` to attach a token to an existing org, or ``org_name`` to
   create a fresh ``ENTERPRISE`` org (with default limits) first.
+
+  Every token expires — there is deliberately no "never" option (RFC 7644
+  expects limited-lifetime bearers). Rotation is overlap-based: mint the
+  replacement, swap it into the IdP, then revoke the old token; two live
+  tokens are legal during the swap.
   """
   if org_id is not None:
     org = Org.get_by_id(org_id, session)
@@ -55,7 +64,10 @@ def bootstrap_scim(
     )
     OrgLimits.create_default_limits(org.id, session)
 
-  token, raw_token = ScimToken.create(org.id, token_name, session)
+  expires_at = datetime.now(UTC) + timedelta(days=expires_in_days)
+  token, raw_token = ScimToken.create(
+    org.id, token_name, session, expires_at=expires_at
+  )
 
   logger.info(
     f"Bootstrapped SCIM for org {org.id}",
@@ -66,6 +78,7 @@ def bootstrap_scim(
     org_name=str(org.name),
     scim_token_id=str(token.id),
     raw_token=raw_token,
+    expires_at=expires_at,
   )
 
 

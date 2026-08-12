@@ -434,7 +434,7 @@ class TestUserAPIKeyModel:
     db_key = db_session.query(UserAPIKey).filter_by(id=api_key.id).first()
     assert db_key.last_used_at is None
 
-  @patch("robosystems.models.core.user.user_api_key.UserAPIKey._invalidate_cache")
+  @patch("robosystems.models.core.user.user_api_key.UserAPIKey.invalidate_cache")
   def test_deactivate_api_key(self, mock_invalidate, db_session):
     """Test deactivating an API key."""
     # Create a test user and API key
@@ -467,7 +467,7 @@ class TestUserAPIKeyModel:
     db_key = db_session.query(UserAPIKey).filter_by(id=api_key.id).first()
     assert db_key.is_active is False
 
-  @patch("robosystems.models.core.user.user_api_key.UserAPIKey._invalidate_cache")
+  @patch("robosystems.models.core.user.user_api_key.UserAPIKey.invalidate_cache")
   def test_activate_api_key(self, mock_invalidate, db_session):
     """Test activating an API key."""
     # Create a test user and API key
@@ -505,7 +505,7 @@ class TestUserAPIKeyModel:
     db_key = db_session.query(UserAPIKey).filter_by(id=api_key.id).first()
     assert db_key.is_active is True
 
-  @patch("robosystems.models.core.user.user_api_key.UserAPIKey._invalidate_cache")
+  @patch("robosystems.models.core.user.user_api_key.UserAPIKey.invalidate_cache")
   def test_delete_api_key(self, mock_invalidate, db_session):
     """Test deleting an API key."""
     # Create a test user and API key
@@ -535,7 +535,7 @@ class TestUserAPIKeyModel:
 
   @patch("importlib.import_module")
   @patch("robosystems.models.core.user.user_api_key.SecurityAuditLogger")
-  def test_invalidate_cache(self, mock_audit_logger, mock_import_module, db_session):
+  def testinvalidate_cache(self, mock_audit_logger, mock_import_module, db_session):
     """Test cache invalidation."""
     # Mock the cache module
     mock_cache_module = MagicMock()
@@ -553,7 +553,7 @@ class TestUserAPIKeyModel:
     )
 
     # Call invalidate cache
-    api_key._invalidate_cache()
+    api_key.invalidate_cache()
 
     # Verify cache invalidation was called with the fingerprint (matches the
     # cache key used by validate_api_key), not the bcrypt key_hash.
@@ -566,7 +566,7 @@ class TestUserAPIKeyModel:
 
   @patch("importlib.import_module")
   @patch("robosystems.models.core.user.user_api_key.logger")
-  def test_invalidate_cache_error(self, mock_logger, mock_import_module):
+  def testinvalidate_cache_error(self, mock_logger, mock_import_module):
     """Test cache invalidation error handling."""
     # Mock import failure
     mock_import_module.side_effect = ImportError("Module not found")
@@ -580,7 +580,7 @@ class TestUserAPIKeyModel:
     )
 
     # Call invalidate cache - should not raise
-    api_key._invalidate_cache()
+    api_key.invalidate_cache()
 
     # Verify error was logged
     mock_logger.error.assert_called_once()
@@ -650,8 +650,8 @@ class TestUserAPIKeyModel:
       prefix="rfs12345",
     )
 
-    # Mock _invalidate_cache to avoid import issues
-    with patch.object(api_key, "_invalidate_cache"):
+    # Mock invalidate_cache to avoid import issues
+    with patch.object(api_key, "invalidate_cache"):
       with pytest.raises(SQLAlchemyError):
         api_key.delete(mock_session)
 
