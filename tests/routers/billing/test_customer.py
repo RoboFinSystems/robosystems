@@ -235,3 +235,39 @@ class TestGetCustomer:
 
     assert result.payment_methods == []
     assert result.stripe_customer_id is None
+
+
+class TestCreatePortalSession:
+  """Portal sessions on a billing-off deployment.
+
+  With billing disabled there is no Stripe customer and no portal; the
+  endpoint previously called the provider with empty keys and 500'd.
+  """
+
+  @pytest.fixture
+  def mock_user(self):
+    user = Mock(spec=User)
+    user.id = "user_123"
+    user.email = "owner@example.com"
+    return user
+
+  @pytest.fixture
+  def mock_db(self):
+    return Mock()
+
+  @pytest.mark.asyncio
+  async def test_billing_disabled_returns_flag_without_stripe(self, mock_user, mock_db):
+    from robosystems.config import env
+    from robosystems.routers.billing.customer import create_portal_session
+
+    with (
+      patch.object(env, "BILLING_ENABLED", False),
+      patch(
+        "robosystems.routers.billing.customer.get_payment_provider"
+      ) as mock_provider,
+    ):
+      result = await create_portal_session("org_123", mock_user, mock_db, None)
+
+    assert result.billing_disabled is True
+    assert result.portal_url is None
+    mock_provider.assert_not_called()

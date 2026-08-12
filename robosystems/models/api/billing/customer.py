@@ -41,6 +41,11 @@ class BillingCustomer(BaseModel):
 class PortalSessionResponse(BaseModel):
   """Response for customer portal session creation."""
 
-  portal_url: str = Field(
-    ..., description="Stripe Customer Portal URL where user can manage payment methods"
+  portal_url: str | None = Field(
+    None,
+    description="Stripe Customer Portal URL where user can manage payment methods",
+  )
+  billing_disabled: bool = Field(
+    False,
+    description="True when billing is disabled on this deployment (no portal exists)",
   )

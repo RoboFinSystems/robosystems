@@ -1036,7 +1036,10 @@ def process_overage_invoices(
     for graph_info in graphs_with_negative_balance:
       try:
         overage_credits = abs(Decimal(str(graph_info["negative_balance"])))
-        usd_amount = float(overage_credits) * 0.005
+        # Billing-off deployments keep the overage *record* (credit quantity)
+        # but dollarize at $0 — the fee is settled off-platform via the MSA.
+        overage_rate = 0.005 if env.BILLING_ENABLED else 0.0
+        usd_amount = float(overage_credits) * overage_rate
 
         credits_record = GraphCredits.get_by_graph_id(graph_info["graph_id"], session)
 

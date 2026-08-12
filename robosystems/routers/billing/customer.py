@@ -107,8 +107,14 @@ async def create_portal_session(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
 ):
+  from ...config import env
+
+  # Same guard as checkout: with billing off there is no Stripe customer and
+  # no portal — calling the provider with empty keys would 500.
+  if not env.BILLING_ENABLED:
+    return PortalSessionResponse(portal_url=None, billing_disabled=True)
+
   try:
-    from ...config import env
     from ...models.core import OrgRole, OrgUser
 
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

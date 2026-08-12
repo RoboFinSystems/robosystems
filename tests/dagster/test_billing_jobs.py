@@ -60,3 +60,71 @@ class TestCreditAllocationLogic:
     # Verify job has expected ops
     op_names = [node.name for node in job_def.all_node_defs]
     assert "get_subscriptions_for_allocation" in op_names or len(op_names) >= 1
+
+
+class TestOverageDollarization:
+  """Overage invoices keep the credit quantity as the record everywhere,
+  but dollarize at $0 when billing is off (fee settled off-platform)."""
+
+  def _run_op(self, graphs):
+    from contextlib import contextmanager
+    from unittest.mock import Mock, patch
+
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.billing import process_overage_invoices
+
+    session = Mock()
+
+    @contextmanager
+    def _session_cm():
+      yield session
+
+    db = Mock()
+    db.get_session = _session_cm
+
+    with patch(
+      "robosystems.dagster.jobs.billing.GraphCredits.get_by_graph_id",
+      return_value=None,
+    ):
+      return process_overage_invoices(build_op_context(), db, graphs)
+
+  @pytest.mark.unit
+  def test_overage_zero_dollars_when_billing_disabled(self):
+    from unittest.mock import patch
+
+    from robosystems.config import env
+
+    graphs = [
+      {
+        "graph_id": "kg_x",
+        "user_id": "u1",
+        "negative_balance": -2000,
+        "graph_tier": "ladybug-standard",
+      }
+    ]
+    with patch.object(env, "BILLING_ENABLED", False):
+      invoices = self._run_op(graphs)
+
+    assert len(invoices) == 1
+    assert invoices[0]["overage_credits"] == 2000.0
+    assert invoices[0]["amount_usd"] == 0.0
+
+  @pytest.mark.unit
+  def test_overage_real_dollars_when_billing_enabled(self):
+    from unittest.mock import patch
+
+    from robosystems.config import env
+
+    graphs = [
+      {
+        "graph_id": "kg_y",
+        "user_id": "u1",
+        "negative_balance": -2000,
+        "graph_tier": "ladybug-standard",
+      }
+    ]
+    with patch.object(env, "BILLING_ENABLED", True):
+      invoices = self._run_op(graphs)
+
+    assert invoices[0]["amount_usd"] == 10.0
