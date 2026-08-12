@@ -38,7 +38,6 @@ logger.setLevel(logging.INFO)
 ssm = boto3.client("ssm")
 
 ENVIRONMENT = os.environ["ENVIRONMENT"]
-ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN", "")
 
 # The stack-owned SSM document that wraps refresh-graph-container.sh. Dispatching
 # our own document rather than AWS-RunShellScript is what lets the failure-paging
@@ -302,19 +301,21 @@ def _response_code(invocation: dict[str, Any]) -> str:
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-  """Dispatch on `event["action"]`."""
-  action = event.get("action")
+  """Dispatch on `event["action"]`.
 
-  try:
-    if action == "start":
-      return start(event)
-    elif action == "status":
-      return status(event)
-    else:
-      return {"statusCode": 400, "error": f"Unknown action: {action}"}
-  except Exception as e:
-    logger.error(f"Error in {action}: {e!s}", exc_info=True)
-    return {"statusCode": 500, "error": str(e)}
+  Caller mistakes (unknown action, missing command_ids) return 400-shaped
+  payloads. Operational failures propagate: an unhandled exception is what
+  increments the AWS/Lambda Errors metric, which the stack's
+  GraphContainerRefreshErrorsAlarm pages on. Swallowing them into a 500-shaped
+  payload left that alarm blind — a failed dispatch surfaced only as a red job
+  in a workflow someone had to be watching.
+  """
+  action = event.get("action")
+  if action == "start":
+    return start(event)
+  if action == "status":
+    return status(event)
+  return {"statusCode": 400, "error": f"Unknown action: {action}"}
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

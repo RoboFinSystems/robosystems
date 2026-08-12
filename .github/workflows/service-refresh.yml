@@ -242,8 +242,11 @@ jobs:
             echo "::error::Failed to invoke ${FUNCTION}"; exit 1; }
 
           cat /tmp/start.json | jq .
+          # A propagated exception has no statusCode at all — its message is in
+          # errorMessage (the Lambda raises operational failures so the stack's
+          # errors alarm pages on them; see graph_container_refresh.handler).
           if [ "$(jq -r '.statusCode' /tmp/start.json)" != "200" ]; then
-            echo "::error::Refresh dispatch failed: $(jq -r '.error // "unknown"' /tmp/start.json)"
+            echo "::error::Refresh dispatch failed: $(jq -r '.error // .errorMessage // "unknown"' /tmp/start.json)"
             exit 1
           fi
 
@@ -265,12 +268,15 @@ jobs:
             if aws lambda invoke --function-name "$FUNCTION" \
                  --cli-binary-format raw-in-base64-out \
                  --payload "$(jq -n --argjson ids "$IDS" '{action:"status", command_ids:$ids}')" \
-                 --region "$REGION" /tmp/status.json >/dev/null; then
+                 --region "$REGION" /tmp/status.json >/dev/null \
+               && [ "$(jq -r '.statusCode // empty' /tmp/status.json)" = "200" ]; then
               POLL_ERRORS=0
             else
               # A transient failure is fine to ride out, but a poller that can
-              # never reach the Lambda must not look like "still in progress"
-              # until the deadline — the fleet may be mid-rollout and unwatched.
+              # never reach the Lambda — or only ever gets a function-error
+              # payload back (no statusCode) — must not look like "still in
+              # progress" until the deadline; the fleet may be mid-rollout and
+              # unwatched.
               POLL_ERRORS=$((POLL_ERRORS + 1))
               echo "::warning::status poll failed (${POLL_ERRORS} consecutive)"
               if [ "$POLL_ERRORS" -ge 5 ]; then

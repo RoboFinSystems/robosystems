@@ -961,7 +961,6 @@ Resources:
       Environment:
         Variables:
           ENVIRONMENT: !Ref Environment
-          ALERT_TOPIC_ARN: !Ref InfraAlertTopic
           REFRESH_DOCUMENT_NAME: !Ref GraphRefreshDocument
       Code:
         ImageUri: !Ref LambdaImageUri
@@ -1070,6 +1069,33 @@ Resources:
               "Graph container refresh <state> on instance <instance> (SSM command <command>)
               in ${Environment}. The container was left as-is; check the command output for
               REFRESH_RESULT and the instance's docker state."
+
+  # The EventBridge rule above pages when the refresh fails on an instance; this
+  # pages when the dispatcher itself dies — a timeout, an OOM, an image that no
+  # longer imports, or a raised dispatch error. The handler deliberately lets
+  # operational failures propagate (bin/lambda/graph_container_refresh.py) so
+  # they land on this metric instead of hiding inside a 500-shaped payload that
+  # only a watched workflow run would ever surface.
+  GraphContainerRefreshErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-graph-container-refresh-errors
+      AlarmDescription: Graph container refresh Lambda failed — the dispatcher itself, not an instance-side refresh
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref GraphContainerRefreshFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
 
   # A TopicPolicy replaces the topic's access policy wholesale, so the SNS
   # default same-account owner statement must be reproduced here — every
