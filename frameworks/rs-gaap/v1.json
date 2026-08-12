@@ -2,7 +2,7 @@
   "framework": "rs-gaap",
   "version": "v1",
   "title": "RoboSystems rs-gaap Reporting Framework",
-  "description": "Sovereign rs-gaap leaf catalog (curated from FASB us-gaap) with named Disclosures, Disclosure Mechanics, presentation/rendering machinery, and Reporting Styles for vertical/filer-profile flavoring (Default, Small Private Company, Banking, Insurance, Mining, etc.). Depends on the fac framework for the universal accounting concept substrate and trait vocabulary; rs-gaap-traits/v1 binds those traits to rs-gaap elements (seeds the element_traits junction). The default framework pinned by every tenant graph filing under US GAAP.",
+  "description": "Sovereign rs-gaap leaf catalog (curated from FASB us-gaap) with named Disclosures, Disclosure Mechanics, presentation/rendering machinery, and Reporting Styles for legal-form flavoring (v1 ships Default, Partnership, and Limited Liability Company). Depends on the fac framework for the universal accounting concept substrate and trait vocabulary; rs-gaap-traits/v1 binds those traits to rs-gaap elements (seeds the element_traits junction). The default framework pinned by every tenant graph filing under US GAAP.",
   "framework_type": "reporting",
   "depends_on": [
     {"framework": "fac", "version": "v1"},

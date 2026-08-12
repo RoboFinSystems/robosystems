@@ -104,7 +104,6 @@ are different roles.
 
 Selected relationships:
 
-- `ENTITY_OWNS_ENTITY` — hierarchical ownership
 - `ELEMENT_HAS_LABEL`, `ELEMENT_HAS_REFERENCE`, `ELEMENT_HAS_TRAIT`
 - `ENTITY_HAS_TAXONOMY`, `TAXONOMY_EXTENDS_TAXONOMY`
 - `STRUCTURE_HAS_ASSOCIATION`, `ASSOCIATION_HAS_FROM_ELEMENT` / `_TO_ELEMENT`
@@ -115,6 +114,12 @@ Selected relationships:
 - `EVENT_OBLIGATED_BY_EVENT` — commitment to fulfillment
 - `EVENT_DISCHARGES_EVENT` — settlement / reciprocity
 - `EVENT_REPLACES_EVENT` — correction chain
+
+Parent–subsidiary ownership has **no edge**: nothing writes one on either path
+(SEC or OLTP materialization), so `base.py` deliberately defers
+`ENTITY_OWNS_ENTITY` until multi-entity consolidation ships. The designated
+source when it does is OLTP `entities.parent_entity_id`, mirrored today on the
+`Entity.parent_entity_id` property.
 
 `Agent` and `Event` are universal REA primitives; every planned RoboX extension
 needs them. `Event.event_action` carries the canonical action vocabulary

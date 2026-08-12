@@ -36,7 +36,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `graph/` | Platform graph lifecycle: creation, subscriptions, credits, pricing, tiers, subgraphs, deprovisioning, storage reclaim, backup/ingestion under `engine/`, worker tasks under `tasks/` |
 | `extensions/` | OLTP→OLAP materialization (`materialize.py`, `loader.py`, `staleness.py`) |
 | `billing/` | Subscription billing lifecycle shared by routers and off-boarding |
-| `admin/` | Support-plane actions with no self-serve surface (guarded account deletion) |
+| `admin/` | Support-plane actions with no self-serve surface: guarded account deletion, account activate/deactivate, SCIM tenant bootstrap |
 | `library/` | Taxonomy/framework library reads (shared and tenant) |
 | `search/` | Document search — client, embeddings, markdown parsing |
 | `memory/` | Per-graph semantic memory service |
@@ -44,6 +44,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `providers/` | External provider integrations and the provider registry |
 | `aws/` | S3 and SES helpers |
 | `connection_service.py`, `document_service.py` | Connection and document lifecycle |
+| `oidc.py` | OIDC login kernel: connection config, flow state, ID-token validation, link-only user resolution |
 | `user_provisioning.py` | Account-creation kernel shared by registration and IdP-driven (SCIM) provisioning |
 
 Cross-domain block envelopes sit at the top level; domain kernels hold reads, commands, and services; cross-cutting infrastructure is top level too.
@@ -58,7 +59,7 @@ Cross-domain block envelopes sit at the top level; domain kernels hold reads, co
 
 ```python
 # reads/fiscal_calendar.py
-def get_fiscal_calendar(session: Session) -> FiscalCalendarResponse | None:
+def build_fiscal_calendar_response(session: Session, ...) -> FiscalCalendarResponse:
     ...  # query, return Pydantic model
 
 # commands/fiscal_calendar.py

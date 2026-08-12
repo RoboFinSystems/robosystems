@@ -212,7 +212,7 @@ class SubgraphService:
         graph_id=database_name,
         schema_type="custom",  # Use custom to skip auto schema installation
         custom_schema_ddl=None,  # We'll install schema with extensions separately
-        is_subgraph=True,  # Bypass max_databases check for Enterprise/Premium
+        is_subgraph=True,  # Bypass max_databases check for Large/XLarge
       )
 
       # An empty subgraph (no base, no extensions) generates no DDL — skip the

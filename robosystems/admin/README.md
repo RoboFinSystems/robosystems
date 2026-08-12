@@ -1,6 +1,6 @@
 # Admin CLI
 
-Remote administration for the platform: subscriptions, invoices, credits, graphs, users, organizations, cache, instances, search indices, worker queues, and database migrations.
+Remote administration for the platform: subscriptions, invoices, credits, graphs, users, organizations, SCIM provisioning, cache, instances, search indices, worker queues, and database migrations.
 
 ## How it works
 
@@ -54,11 +54,11 @@ just admin dev stats
 ```bash
 just admin dev subscriptions list                          # List all
 just admin dev subscriptions list --status active
-just admin dev subscriptions list --tier ladybug-large
+just admin dev subscriptions list --resource-type graph
 just admin dev subscriptions list --email user@example.com
 just admin dev subscriptions list --include-canceled
 just admin dev subscriptions get SUBSCRIPTION_ID
-just admin dev subscriptions create USER_ID --resource-type graph --resource-id GRAPH_ID --plan-name ladybug-standard
+just admin dev subscriptions create --org-id ORG_ID --resource-id GRAPH_ID --plan-name ladybug-standard
 just admin dev subscriptions update SUBSCRIPTION_ID --status active --plan-name ladybug-large
 just admin dev subscriptions audit SUBSCRIPTION_ID
 just admin dev subscriptions audit SUBSCRIPTION_ID --event-type PAYMENT_FAILED
@@ -125,9 +125,13 @@ just admin dev users list --email example.com
 just admin dev users list --verified-only
 just admin dev users get USER_ID
 just admin dev users graphs USER_ID
-just admin dev users activity USER_ID --days 30
+just admin dev users activity USER_ID
+just admin dev users deactivate USER_OR_EMAIL
+just admin dev users activate USER_OR_EMAIL
 just admin dev users delete USER_OR_EMAIL --dry-run
 ```
+
+`users deactivate` is the support-plane response short of deletion; it takes a user ID or an email, as `activate` and `delete` do.
 
 `users delete` takes a user ID or an email. It frees the email address but retains billing and audit history, and refuses while the user's org still has live graphs, subscriptions in force, or active repository access.
 
@@ -142,6 +146,20 @@ just admin dev orgs update ORG_ID \
   --billing-contact-name "Accounts Payable" \
   --payment-terms "net_30" \
   --max-graphs 25
+```
+
+### scim
+
+SCIM provisioning for dedicated tenants. `bootstrap` creates-or-reuses the
+enterprise org and mints the bearer token the customer's IdP presents — the raw
+token prints once and is never recoverable, so paste it into the IdP connector
+immediately. Pass either `--org-id` (attach to an existing org) or `--org-name`
+(create a new `ENTERPRISE` org).
+
+```bash
+just admin prod scim bootstrap --org-name "Acme Inc"
+just admin prod scim bootstrap --org-id ORG_ID --token-name scim-provisioning --expires-in-days 365
+just admin prod scim revoke-token TOKEN_ID
 ```
 
 ### cache

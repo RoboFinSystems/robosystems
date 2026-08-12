@@ -33,7 +33,7 @@ def default_style_for(entity_type: str | None) -> str:
 
 
 def resolve_reporting_style_id(entity_data: dict[str, Any] | None) -> str:
-  """Resolve the Reporting Style id to pin on a new graph.
+  """Resolve the Reporting Style id to pin on a new entity.
 
   Precedence: an explicit ``reporting_style_id`` on the create request wins;
   otherwise it's derived from the entity's ``entity_type``; otherwise the

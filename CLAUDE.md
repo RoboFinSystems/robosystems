@@ -414,7 +414,9 @@ GET  /health                              # Health check
 ### LadybugDB Limitations
 
 - Sequential ingestion (one file at a time per database)
-- Connection pool size configurable (default 3, production config 10)
+- Connection pool is capped at 3 connections per database, everywhere. The per-tier
+  `connection_pool_size` in `.github/configs/graph.yml` and `LBUG_CONNECTION_POOL_SIZE` are surfaced
+  by `env.get_lbug_tier_config()` but read by nothing — tuning either is currently a no-op.
 - Single writer per database at a time
 
 ### Subgraphs

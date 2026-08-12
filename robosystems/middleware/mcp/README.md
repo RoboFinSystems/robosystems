@@ -132,20 +132,28 @@ delegates to `robosystems.operations.roboledger.{reads,commands}.*`.
 
 | Tool | Delegates to |
 |------|--------------|
-| `get-fiscal-calendar` | `reads/fiscal_calendar.get_fiscal_calendar` |
+| `get-fiscal-calendar` | `reads/fiscal_calendar.build_fiscal_calendar_response` |
 | `close-period` | `commands/fiscal_calendar.close_period` |
 | `reopen-period` | `commands/fiscal_calendar.reopen_period` |
-| `get-period-close-status` | `reads/fiscal_calendar.get_period_close_status` |
+| `backfill-plan-history` | `commands/fiscal_calendar.backfill_plan_history` |
+| `get-period-close-status` | `reads/schedules.get_period_close_status` |
 | `list-period-drafts` | `reads/period_drafts.list_period_drafts` |
 | `get-information-block` | `operations/information_block/reads.get_information_block` |
 | `list-information-blocks` | `operations/information_block/reads.list_information_blocks` |
 | `create-information-block` | `operations/information_block/commands.create_information_block` |
 | `update-information-block` | `operations/information_block/commands.update_information_block` |
 | `delete-information-block` | `operations/information_block/commands.delete_information_block` |
-| `get-unmapped-elements` | `reads/taxonomies.get_unmapped_elements` |
-| `suggest-mapping` | `commands/taxonomies.suggest_mapping` |
+| `list-mapping-structures` | `reads/taxonomies.list_mappings` |
+| `get-unmapped-elements` | `reads/taxonomies.list_unmapped_elements` |
+| `suggest-mapping` | `reads/taxonomies.suggest_mapping_candidates` |
 | `create-mapping-association` | `commands/taxonomies.create_mapping_association` |
-| `get-mapping-summary` | `reads/taxonomies.get_mapping_summary` |
+| `get-mapping-summary` | `reads/taxonomies.get_mapping_coverage` |
+
+Tool names and ops-function names are deliberately *not* kept in lockstep — the
+tool name is the agent-facing contract and the function name is the kernel's,
+so `suggest-mapping` is a read (`reads/`, not `commands/`) and
+`get-mapping-summary` reads coverage. Check the import block at the top of the
+tool module before assuming a name.
 
 Plus REA reads and event writes: `get-event-block` / `list-event-blocks` /
 `create-event-block`, `get-event-handler` / `list-event-handlers` (tenant
@@ -241,17 +249,24 @@ GRAPH_API_URL=http://localhost:8001   # auto-discovered in prod
 GRAPH_HTTP_TIMEOUT=60
 GRAPH_QUERY_TIMEOUT=30
 
+# Defaults as defined in config/env.py — most gates are on, not off
 ROBOLEDGER_ENABLED=true
-ROBOINVESTOR_ENABLED=false
+ROBOINVESTOR_ENABLED=true
 EXTENSIONS_GRAPHQL_ENABLED=true
 MCP_GRAPHQL_ENABLED=true
-FACT_GRID_ENABLED=false
-SEMANTIC_SEARCH_ENABLED=false
+FACT_GRID_ENABLED=true
+SEMANTIC_SEARCH_ENABLED=true
+MCP_WORKSPACE_ENABLED=true
+MCP_SUBGRAPH_OPS_ENABLED=true
+
+# The only two that default off — semantic memory is opt-in at both levels
 SEMANTIC_MEMORY_ENABLED=false
 MCP_SEMANTIC_MEMORY_ENABLED=false
-MCP_WORKSPACE_ENABLED=false
-MCP_SUBGRAPH_OPS_ENABLED=false
 ```
+
+Do not read a row in the gating summary as "off unless enabled": only the two
+semantic-memory flags default false. The rest are on, and a missing SSM
+parameter leaves them on — turning one off is an explicit act.
 
 The feature flags are SSM parameters, so they take effect at runtime without a
 redeploy:

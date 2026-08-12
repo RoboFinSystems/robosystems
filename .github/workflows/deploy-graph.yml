@@ -429,8 +429,14 @@ jobs:
           echo "📊 Deployment Summary:"
           echo "  - $LBUG_COUNT Graph writers (LadybugDB)"
 
-          # Extract shared replica config from graph.yml
-          REPLICA_INSTANCE_TYPE=$(yq eval ".${ENV_KEY}.replicas[0].instance.type // \"m7g.large\"" .github/configs/graph.yml)
+          # Extract shared replica config from graph.yml. No fallback default:
+          # a silent guess here provisions the wrong hardware for the whole
+          # replica fleet, so a missing key must stop the deploy instead.
+          REPLICA_INSTANCE_TYPE=$(yq eval ".${ENV_KEY}.replicas[0].instance.type" .github/configs/graph.yml)
+          if [ -z "$REPLICA_INSTANCE_TYPE" ] || [ "$REPLICA_INSTANCE_TYPE" = "null" ]; then
+            echo "::error::No replica instance type configured at .${ENV_KEY}.replicas[0].instance.type in .github/configs/graph.yml"
+            exit 1
+          fi
           echo "replica_instance_type=${REPLICA_INSTANCE_TYPE}" >> $GITHUB_OUTPUT
 
           echo "  - Shared replica instance type: ${REPLICA_INSTANCE_TYPE}"

@@ -258,7 +258,7 @@ class TestChangeGraphTierCmd:
       mock_sub_cls.get_by_resource.return_value = subscription
       mock_billing_cfg.get_subscription_plan.return_value = {
         "name": "ladybug-large",
-        "base_price_cents": 29900,
+        "base_price_cents": 24900,
       }
       mock_gc_cls.get_by_graph_id.return_value = graph_credits
       mock_env.BILLING_ENABLED = True
@@ -300,7 +300,7 @@ class TestChangeGraphTierCmd:
       mock_sub_cls.get_by_resource.return_value = subscription
       mock_billing_cfg.get_subscription_plan.return_value = {
         "name": "ladybug-large",
-        "base_price_cents": 29900,
+        "base_price_cents": 24900,
       }
       mock_gc_cls.get_by_graph_id.return_value = graph_credits
       mock_env.BILLING_ENABLED = True
@@ -349,7 +349,7 @@ class TestChangeGraphTierCmd:
       mock_sub_cls.get_by_resource.return_value = subscription
       mock_billing_cfg.get_subscription_plan.return_value = {
         "name": "ladybug-large",
-        "base_price_cents": 29900,
+        "base_price_cents": 24900,
       }
       mock_gc_cls.get_by_graph_id.return_value = graph_credits
       mock_env.BILLING_ENABLED = True

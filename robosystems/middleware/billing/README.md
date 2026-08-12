@@ -20,10 +20,13 @@ the codebase. If you are writing a new endpoint and reaching for credits, first
 check that it actually calls a model.
 
 **Storage is limit-enforced, not metered.** There is no storage-to-credits and
-no storage-to-USD path in the code. `CreditService.check_storage_limit()`
-reports usage against the graph's `storage_limit_gb` (with an optional admin
-override) and returns a status plus recommendations — it never computes a
-charge. Exceeding the limit gates the write path; it does not bill.
+no storage-to-USD path in the code. `GraphCredits.check_storage_limit()` — a
+method on the model in `models/core/graph/graph_credits.py`, not on
+`CreditService` — reports usage against the graph's `storage_limit_gb` (or
+`storage_override_gb` when an admin has set one) and returns usage, limit,
+percentage, and the `within_limit` / `approaching_limit` / `needs_warning`
+booleans. It never computes a charge. Exceeding the limit gates the write path;
+it does not bill.
 
 ## Credits
 
@@ -59,15 +62,22 @@ credit_service.consume_ai_tokens(
 ```
 
 Note the argument is `operation_description` — free text for the transaction
-record — not an `operation_type`. `model` takes the Bedrock inference-profile
-id and is mapped internally to the `TOKEN_PRICING` key. A model that has no
-pricing entry is a configuration error worth surfacing loudly, not defaulting
-silently.
+record — not an `operation_type`. `model` takes the Bedrock inference-profile id
+and is mapped through a hardcoded id → `TOKEN_PRICING`-key table inside
+`consume_ai_tokens`.
+
+**An unrecognised model does not fail — it bills at Sonnet rates.** The lookup
+defaults to `anthropic_claude_4_sonnet`, and if even that key were missing it
+falls back to a literal `3`/`15`, logging a warning either way. So adding a
+model without adding its mapping mis-bills quietly rather than erroring. When
+you introduce a new model, update the map in `consume_ai_tokens` and
+`TOKEN_PRICING` together.
 
 ## Enforcement
 
-`enforcement.py` holds the pre-flight gates. All three take a session and
-return a tuple rather than raising, so the caller controls the error shape.
+`enforcement.py` holds the pre-flight gates. All three take a session; the first
+two return a `(bool, error)` tuple rather than raising, so the caller controls
+the error shape. `require_graph_access` is the exception — it raises.
 
 `check_can_provision_graph(user_id, requested_tier, session) -> (bool, error)`
 resolves the user's organization and asks its `BillingCustomer` whether it may
@@ -113,12 +123,17 @@ from robosystems.middleware.billing import credit_cache
 credit_cache.cache_graph_credit_balance(
     graph_id="kg1a2b3c",
     balance=Decimal("50000"),
-    multiplier=Decimal("1.0"),
     graph_tier="standard",
 )
-balance = credit_cache.get_cached_graph_credit_balance("kg1a2b3c")
+cached = credit_cache.get_cached_graph_credit_balance("kg1a2b3c")
+if cached is not None:
+    balance, graph_tier = cached
 credit_cache.invalidate_graph_credit_balance("kg1a2b3c")
 ```
+
+`cache_graph_credit_balance` takes exactly `(graph_id, balance, graph_tier)` —
+there is no multiplier argument, and no multiplier is stored. The getter returns
+a `(Decimal, str)` tuple or `None` on a miss, not a bare balance.
 
 `update_cached_balance_after_consumption()` adjusts a cached balance in place
 and preserves the remaining TTL, so a consumption does not reset freshness.

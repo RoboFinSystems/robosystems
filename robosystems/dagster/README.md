@@ -38,9 +38,13 @@ Run a job by hand:
 ```bash
 uv run dagster job execute -m robosystems.dagster -j monthly_credit_allocation_job
 
-uv run dagster job execute -m robosystems.dagster -j sec_download_job \
+uv run dagster job execute -m robosystems.dagster -j sec_download \
   -c '{"ops": {"sec_raw_filings": {"config": {"ticker": "NVDA", "year": 2025}}}}'
 ```
+
+Asset jobs are registered under a name that drops the `_job` suffix carried by
+their Python variable (`sec_download_job` → `sec_download`). `-j` takes the
+registered name — the tables below use it.
 
 ## Scheduled jobs
 
@@ -64,17 +68,19 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 
 | Job | Trigger | Purpose |
 | --- | ------- | ------- |
-| `backup_graph_job`, `restore_graph_job` | API | Back up / restore a graph via S3 |
+| `backup_graph_job` | API, `nightly_graph_backup_schedule` | Back up a graph to S3 — on demand, and nightly at 03:00 America/New_York (schedule runs in staging/prod, stopped in dev) |
+| `restore_graph_job` | API | Restore a graph from S3 |
 | `stage_file_job`, `materialize_file_job` | API | Stage an uploaded file, then materialize it |
-| `materialize_graph_job` | `stale_graph_materialization_sensor` | Rebuild a graph marked stale |
+| `materialize_graph_job` | API | Rebuild a graph from its staging tables |
 | `suspend_expired_graphs_job` | `expired_graph_subscription_sensor` | Move graphs with expired subscriptions to suspended |
 | `deprovision_suspended_graphs_job` | `suspended_graph_deprovisioning_sensor` | Deprovision after the retention window |
 | `reap_stalled_provisioning_job` | `stalled_provisioning_sensor` | Write off subscriptions stuck mid-provisioning so their infrastructure is reclaimed |
 | `invoice_subscription_renewal_job` | `invoice_subscription_renewal_sensor` | Rotate billing periods and generate invoices for invoice-billed subscriptions |
 | `send_email_job` | API | Email notifications |
-| `shared_master_wake_job`, `shared_master_sleep_job`, `shared_replicas_refresh_job`, `shared_repository_refresh_replicas_job` | Schedule / sensor / manual | Shared repository master lifecycle and replica refresh |
+| `shared_master_wake`, `shared_master_sleep`, `shared_replicas_refresh`, `shared_repository_refresh_replicas_job` | Schedule / sensor / manual | Shared repository master lifecycle and replica refresh |
 | `ladybug_migration_export_job`, `ladybug_migration_import_job`, `ladybug_migration_cleanup_job` | Manual | LadybugDB version migration: export pre-deploy, import post-deploy, delete rollback backups post-verify |
-| `extensions_materialize_job`, `extensions_promote_obligations_job` | Sensor (extensions builds only) | OLTP→OLAP materialization and period-boundary obligation promotion |
+| `extensions_materialize_job` | `stale_graph_materialization_sensor` | OLTP→OLAP materialization for a graph marked stale (extensions builds only) |
+| `extensions_promote_obligations_job` | `scheduled_obligation_promotion_sensor` | Period-boundary obligation promotion (extensions builds only) |
 
 ## Sensors
 

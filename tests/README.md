@@ -264,7 +264,9 @@ mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_sessio
 
 ## Continuous integration
 
-CI runs linting, formatting, type checking, and the test suite on every pull request and on pushes to `main` and `staging` — the same gate as `just test-all`. Run it locally before opening a pull request; the full suite takes several minutes.
+`test-ci.yml` runs the gate on every pull request and on pushes to `main`; the staging and production deploy workflows call the same reusable `test.yml` before deploying, but they are manual dispatches, not push triggers.
+
+The gate is close to `just test-all` but not identical. CI runs the test suite (`pytest -m "not slow"`), the dbt tests, `ruff check`, `basedpyright`, CloudFormation lint, workflow lint, and a Trivy dependency scan. It does **not** run a formatting step — `just test-all` calls `just format`, which rewrites files rather than checking them, so unformatted code passes CI and gets reformatted on your next local run. Run `just test-all` locally before opening a pull request; the full suite takes several minutes.
 
 ## Reference
 
