@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from ...config import env
 from ...config.constants import (
-  EMAIL_TOKEN_EXPIRY_HOURS,
   JWT_EXPIRY_HOURS,
   TOKEN_GRACE_PERIOD_MINUTES,
 )
@@ -25,7 +24,11 @@ from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
-from ...models.core import Org, OrgInvitation, OrgLimits, OrgUser, User, UserToken
+from ...models.core import Org, OrgInvitation, User
+from ...operations.user_provisioning import (
+  EmailAlreadyRegisteredError,
+  provision_user,
+)
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.captcha import captcha_service
@@ -287,115 +290,85 @@ async def register(
 
   password_hash = hash_password(request.password)
 
-  # Use transaction for atomic user creation
+  # Verification policy: possession of the emailed invitation token proves
+  # control of the invited mailbox, and dev environments skip verification
+  # for convenience — only the remaining case sends a verification email.
+  needs_verification_email = invitation is None and env.EMAIL_VERIFICATION_ENABLED
+
   try:
-    # Create new user with email verification status based on environment
-    user = User.create(
+    provisioned = provision_user(
+      session,
       email=sanitized_email,
       name=sanitized_name,
       password_hash=password_hash,
-      session=session,
+      email_verified=not needs_verification_email,
+      invitation=invitation,
+      invited_org=invited_org,
+      create_verification_token=needs_verification_email,
+      ip_address=client_ip,
+      user_agent=user_agent,
     )
-
-    if invitation is not None:
-      # Possession of the emailed invitation token proves control of the
-      # invited mailbox, so no separate verification round-trip is needed.
-      user.verify_email(session)
-      logger.info(f"Email verified via invitation token for: {sanitized_email}")
-    elif not env.EMAIL_VERIFICATION_ENABLED:
-      # In development, automatically verify emails for convenience
-      user.verify_email(session)
-      logger.info(
-        f"Email automatically verified for development user: {sanitized_email}"
-      )
-    else:
-      # In production, queue verification email
-      reg_client_ip = fastapi_request.client.host if fastapi_request.client else None
-      reg_user_agent = fastapi_request.headers.get("user-agent")
-
-      token = UserToken.create_token(
-        user_id=user.id,
-        token_type="email_verification",
-        hours=EMAIL_TOKEN_EXPIRY_HOURS,
-        session=session,
-        ip_address=reg_client_ip,
-        user_agent=reg_user_agent,
-      )
-
-      app = detect_app_source(fastapi_request)
-
-      run_config = build_email_job_config(
-        email_type="email_verification",
-        to_email=sanitized_email,
-        user_name=sanitized_name,
-        token=token,
-        app=app,
-      )
-      background_tasks.add_task(
-        run_and_monitor_dagster_job,
-        job_name="send_email_job",
-        operation_id=None,
-        run_config=run_config,
-      )
-
-      SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.EMAIL_SENT,
-        user_id=user.id,
-        ip_address=reg_client_ip,
-        user_agent=reg_user_agent,
-        endpoint="/v1/auth/register",
-        details={"email_type": "verification", "app_source": app},
-        risk_level="low",
-      )
-
-      logger.info(f"Queued verification email for new user: {sanitized_email}")
-
-    if invitation is not None and invited_org is not None:
-      # Join the inviting org at the invited role instead of minting a
-      # personal org; the inviting org already carries limits and billing.
-      OrgUser.create(
-        org_id=invited_org.id,
-        user_id=user.id,
-        role=invitation.role,
-        session=session,
-        auto_commit=False,
-      )
-      invitation.mark_accepted(user.id, session, auto_commit=False)
-      org = invited_org
-      logger.info(
-        f"User {sanitized_email} joined org {org.id} via invitation {invitation.id}",
-        extra={
-          "user_id": user.id,
-          "org_id": org.id,
-          "org_role": invitation.role.value,
-        },
-      )
-    else:
-      # Create personal organization for the user
-      # RoboSystems is org-centric: all resources belong to orgs, not users
-      org = Org.create_personal_org_for_user(
-        user_id=user.id,
-        user_name=sanitized_name,
-        session=session,
-      )
-      logger.info(
-        f"Created personal org '{org.name}' ({org.id}) for user {sanitized_email}",
-        extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
-      )
-
-      # Create default org limits (safety limits for resource provisioning)
-      # Orgs can purchase subscriptions to increase limits
-      OrgLimits.create_default_limits(org.id, session)
-
-    # Commit the transaction
-    session.commit()
-
+  except EmailAlreadyRegisteredError:
+    # Race backstop; the pre-check above already audited the common case.
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
+    )
   except Exception as e:
-    session.rollback()
     logger.error(f"Failed to create user account: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to create user account",
+    )
+
+  user = provisioned.user
+  org = provisioned.org
+
+  if provisioned.verification_token is not None:
+    app = detect_app_source(fastapi_request)
+
+    run_config = build_email_job_config(
+      email_type="email_verification",
+      to_email=sanitized_email,
+      user_name=sanitized_name,
+      token=provisioned.verification_token,
+      app=app,
+    )
+    background_tasks.add_task(
+      run_and_monitor_dagster_job,
+      job_name="send_email_job",
+      operation_id=None,
+      run_config=run_config,
+    )
+
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.EMAIL_SENT,
+      user_id=user.id,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint="/v1/auth/register",
+      details={"email_type": "verification", "app_source": app},
+      risk_level="low",
+    )
+
+    logger.info(f"Queued verification email for new user: {sanitized_email}")
+  elif invitation is not None:
+    logger.info(f"Email verified via invitation token for: {sanitized_email}")
+  else:
+    logger.info(f"Email automatically verified for development user: {sanitized_email}")
+
+  if invitation is not None:
+    logger.info(
+      f"User {sanitized_email} joined org {org.id} via invitation {invitation.id}",
+      extra={
+        "user_id": user.id,
+        "org_id": org.id,
+        "org_role": invitation.role.value,
+      },
+    )
+  else:
+    logger.info(
+      f"Created personal org '{org.name}' ({org.id}) for user {sanitized_email}",
+      extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
     )
 
   # Extract device fingerprint for token binding

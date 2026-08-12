@@ -24,7 +24,7 @@ For the extensions side, see [`../extensions/README.md`](../extensions/README.md
 | `document/` | `Document` — metadata for uploaded markdown/text indexed in OpenSearch |
 | `graph/` | `Graph`, `GraphBackup`, `GraphCredits` + `GraphCreditTransaction`, `GraphFile`, `GraphSchema`, `GraphTable`, `GraphUsage`, `GraphUser`, `SourceFile` |
 | `org/` | `Org`, `OrgUser` (membership + role), `OrgInvitation`, `OrgLimits` |
-| `user/` | `User`, `UserAPIKey`, `UserToken`, `UserRepository`, and shared-repository credits |
+| `user/` | `User`, `UserAPIKey`, `UserToken`, `UserIdentity`, `ScimToken`, `UserRepository`, and shared-repository credits |
 
 `__init__.py` re-exports everything flat, so `from robosystems.models.core import User, Graph` works without reaching into subpackages.
 

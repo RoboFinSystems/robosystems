@@ -51,6 +51,7 @@ class UserToken(Model):
     session: Session,
     ip_address: str | None = None,
     user_agent: str | None = None,
+    auto_commit: bool = True,
   ) -> str:
     """Issue a token, returning the raw string to send to the user.
 
@@ -64,7 +65,7 @@ class UserToken(Model):
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-    cls.invalidate_user_tokens(user_id, token_type, session)
+    cls.invalidate_user_tokens(user_id, token_type, session, auto_commit=auto_commit)
 
     token = cls(
       user_id=user_id,
@@ -76,13 +77,14 @@ class UserToken(Model):
     )
 
     session.add(token)
-    try:
-      session.commit()
-      logger.info(f"Created {token_type} token for user {user_id}")
-    except SQLAlchemyError as e:
-      session.rollback()
-      logger.error(f"Failed to create token: {e}")
-      raise
+    if auto_commit:
+      try:
+        session.commit()
+        logger.info(f"Created {token_type} token for user {user_id}")
+      except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Failed to create token: {e}")
+        raise
 
     return raw_token
 
@@ -147,7 +149,7 @@ class UserToken(Model):
 
   @classmethod
   def invalidate_user_tokens(
-    cls, user_id: str, token_type: str, session: Session
+    cls, user_id: str, token_type: str, session: Session, auto_commit: bool = True
   ) -> int:
     """Mark every unused token of this type used; returns how many."""
     try:
@@ -160,7 +162,8 @@ class UserToken(Model):
         )
         .update({"used_at": datetime.now(UTC)})
       )
-      session.commit()
+      if auto_commit:
+        session.commit()
       if count > 0:
         logger.info(f"Invalidated {count} {token_type} tokens for user {user_id}")
       return count

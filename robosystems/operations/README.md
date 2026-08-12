@@ -44,6 +44,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `providers/` | External provider integrations and the provider registry |
 | `aws/` | S3 and SES helpers |
 | `connection_service.py`, `document_service.py` | Connection and document lifecycle |
+| `user_provisioning.py` | Account-creation kernel shared by registration and IdP-driven (SCIM) provisioning |
 
 Cross-domain block envelopes sit at the top level; domain kernels hold reads, commands, and services; cross-cutting infrastructure is top level too.
 

@@ -128,7 +128,9 @@ class SESEmailService:
     onward after the action. Email branding stays per-app either way.
     """
     if env.AUTH_EMAIL_LINKS_TO_LOGIN_HOME:
-      return self.login_home_url, f"&return_to={quote(app)}"
+      # The login home bridging back to itself is a no-op; skip the suffix.
+      suffix = "" if app == env.LOGIN_HOME_APP else f"&return_to={quote(app)}"
+      return self.login_home_url, suffix
     return self.app_urls.get(app, self.app_urls[_DEFAULT_APP]), ""
 
   def _get_email_template(

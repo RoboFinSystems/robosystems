@@ -43,19 +43,22 @@ class OrgLimits(Model):
     return f"<OrgLimits org={self.org_id} max_graphs={self.max_graphs}>"
 
   @classmethod
-  def create_default_limits(cls, org_id: str, session: Session) -> "OrgLimits":
+  def create_default_limits(
+    cls, org_id: str, session: Session, auto_commit: bool = True
+  ) -> "OrgLimits":
     """Create default safety limits for a new organization."""
     limits = cls(
       org_id=org_id,
       max_graphs=TuningConfig.get_org_graphs_default_limit(),
     )
     session.add(limits)
-    try:
-      session.commit()
-      session.refresh(limits)
-    except SQLAlchemyError:
-      session.rollback()
-      raise
+    if auto_commit:
+      try:
+        session.commit()
+        session.refresh(limits)
+      except SQLAlchemyError:
+        session.rollback()
+        raise
     return limits
 
   @classmethod

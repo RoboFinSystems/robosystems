@@ -22,7 +22,16 @@ class User(Model):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("user"))
   email = Column(String, unique=True, nullable=False, index=True)
   name = Column(String, nullable=False)
-  password_hash = Column(String, nullable=False)
+  # NULL for IdP-governed accounts (SCIM-provisioned, and later passwordless
+  # signup). Password login and password change already refuse a falsy hash;
+  # the password-reset flow refuses NULL outright so a reset email can never
+  # bootstrap a password onto an IdP-governed account.
+  password_hash = Column(String, nullable=True)
+  # SCIM externalId, round-tripped to the IdP. A non-null value marks the
+  # account as IdP-provisioned — the provenance predicate the OIDC email-match
+  # link step gates on (email alone must never bind an IdP login to a
+  # locally-created account).
+  external_id = Column(String, nullable=True, index=True)
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
   # Bumped on password reset / logout-everywhere; embedded in JWT payload and
@@ -69,17 +78,36 @@ class User(Model):
 
   @classmethod
   def create(
-    cls, email: str, name: str, password_hash: str, session: Session
+    cls,
+    email: str,
+    name: str,
+    password_hash: str | None,
+    session: Session,
+    external_id: str | None = None,
+    auto_commit: bool = True,
   ) -> "User":
-    """Create a new user."""
-    user = cls(email=email.lower(), name=name, password_hash=password_hash)
+    """Create a new user.
+
+    ``password_hash`` is required but nullable: pass ``None`` explicitly for
+    IdP-governed accounts rather than omitting it, so a passwordless user is
+    always a deliberate call-site decision.
+    """
+    user = cls(
+      email=email.lower(),
+      name=name,
+      password_hash=password_hash,
+      external_id=external_id,
+    )
     session.add(user)
-    try:
-      session.commit()
-      session.refresh(user)
-    except SQLAlchemyError:
-      session.rollback()
-      raise
+    if auto_commit:
+      try:
+        session.commit()
+        session.refresh(user)
+      except SQLAlchemyError:
+        session.rollback()
+        raise
+    else:
+      session.flush()
     return user
 
   @classmethod
