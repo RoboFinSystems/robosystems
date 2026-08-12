@@ -22,6 +22,7 @@ field the real API only sets on the plugin.
 from unittest.mock import patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 pytestmark = pytest.mark.unit
 
@@ -232,3 +233,26 @@ class TestHandler:
 
   def test_status_requires_a_command_id(self, gcr):
     assert gcr.handler({"action": "status"}, None)["statusCode"] == 400
+
+  def test_operational_failures_propagate(self, gcr):
+    """An unhandled exception is what increments the AWS/Lambda Errors metric
+    the stack's alarm pages on. Swallowed into a 500-shaped payload, a failed
+    dispatch was visible only as a red job in a workflow someone had to be
+    watching."""
+    with patch.object(gcr, "ssm") as ssm:
+      ssm.send_command.side_effect = RuntimeError("dispatch broke")
+      with pytest.raises(RuntimeError, match="dispatch broke"):
+        gcr.handler({"action": "start", "node_types": "writer"}, None)
+
+  def test_no_matching_instances_is_not_an_operational_failure(self, gcr):
+    """Staging routinely runs with no graph fleet at all; an empty tag match
+    must return cleanly, not page."""
+    with patch.object(gcr, "ssm") as ssm:
+      ssm.send_command.side_effect = ClientError(
+        {"Error": {"Code": "InvalidInstanceId"}}, "SendCommand"
+      )
+      result = gcr.handler({"action": "start", "node_types": "writer"}, None)
+    assert result["statusCode"] == 200
+    assert result["commands"] == [
+      {"node_type": "writer", "command_id": None, "matched": 0}
+    ]
