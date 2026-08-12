@@ -872,6 +872,14 @@ Resources:
   # queued invocations — a uniformly not-yet-cycled fleet could never even
   # report itself. Real failures keep their non-zero exits, so MaxErrors still
   # halts a bad rollout and the rule below still pages.
+  #
+  # Output forwarding: the script's output is captured to an on-instance log
+  # and only the REFRESH_RESULT line plus a bounded tail are echoed back. SSM
+  # truncates a plugin's inline Output after 2500 characters keeping the head,
+  # and the script prints its marker last — after docker-pull progress — so on
+  # a real image refresh the marker fell outside the window and the Lambda
+  # classified nothing (empty refresh_results on this document's first
+  # fleet-wide prod run). Marker first + 2000-byte tail fits by construction.
   GraphRefreshDocument:
     Type: AWS::SSM::Document
     Properties:
@@ -886,7 +894,9 @@ Resources:
           Instances that have not yet cycled onto the refresh script (or whose
           /etc/environment predates the completeness contract) exit 0 with a
           REFRESH_RESULT=skipped-* marker rather than consuming the MaxErrors
-          budget.
+          budget. Inline output carries the REFRESH_RESULT marker first, then a
+          bounded tail; full output is kept on the instance at
+          /var/log/graph-refresh-last.log.
         parameters:
           MaxWaitMinutes:
             type: String
@@ -915,7 +925,11 @@ Resources:
               timeoutSeconds: "{{ ExecutionTimeout }}"
               runCommand:
                 - '[ -x /usr/local/bin/refresh-graph-container.sh ] || { echo REFRESH_RESULT=skipped-no-script; exit 0; }'
-                - 'MAX_WAIT_MINUTES={{ MaxWaitMinutes }} FORCE_IGNORE_BUSY={{ ForceIgnoreBusy }} FORCE_RESTART={{ ForceRestart }} /usr/local/bin/refresh-graph-container.sh; rc=$?; [ "$rc" -eq 3 ] && exit 0; exit $rc'
+                - 'LOG=/var/log/graph-refresh-last.log'
+                - 'MAX_WAIT_MINUTES={{ MaxWaitMinutes }} FORCE_IGNORE_BUSY={{ ForceIgnoreBusy }} FORCE_RESTART={{ ForceRestart }} /usr/local/bin/refresh-graph-container.sh >"$LOG" 2>&1; rc=$?'
+                - 'grep "^REFRESH_RESULT=" "$LOG" || true'
+                - 'tail -c 2000 "$LOG"'
+                - '[ "$rc" -eq 3 ] && exit 0; exit $rc'
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-graph-refresh"
