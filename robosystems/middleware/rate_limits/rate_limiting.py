@@ -408,6 +408,17 @@ def sso_rate_limit_dependency(request: Request):
   return create_custom_rate_limit_dependency(limit, 60, "sso")(request)
 
 
+def oidc_rate_limit_dependency(request: Request):
+  """Rate limiting for the OIDC login/callback browser surface.
+
+  Both endpoints share this IP-keyed bucket, and a full flow spends two
+  requests (login → callback). Anonymous callers get limit//10, so the
+  default keeps ~12/min per IP — several complete flows plus retries.
+  """
+  limit = get_int_env("RATE_LIMIT_OIDC", "120")  # 120/minute (2 per flow)
+  return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
+
+
 def general_api_rate_limit_dependency(request: Request):
   """General rate limiting for standard API endpoints."""
   limit = get_int_env("RATE_LIMIT_GENERAL_API", "200")  # 200/minute

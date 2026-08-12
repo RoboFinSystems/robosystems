@@ -138,6 +138,26 @@ class EnvValidator:
         "Graph database operations will fail without proper authentication."
       )
 
+    # OIDC login: an enabled surface with a missing connection fails at the
+    # first login attempt, which presents as a confusing auth error — fail at
+    # boot instead. And a deployment with password auth off and no OIDC is one
+    # nobody can log in to.
+    if getattr(env_config, "SSO_OIDC_ENABLED", False):
+      for var_name in (
+        "SSO_OIDC_ISSUER",
+        "SSO_OIDC_CLIENT_ID",
+        "SSO_OIDC_CLIENT_SECRET",
+      ):
+        if not getattr(env_config, var_name, None):
+          errors.append(f"{var_name}: Required when SSO_OIDC_ENABLED=true")
+    if not getattr(env_config, "PASSWORD_AUTH_ENABLED", True) and not getattr(
+      env_config, "SSO_OIDC_ENABLED", False
+    ):
+      errors.append(
+        "PASSWORD_AUTH_ENABLED=false requires SSO_OIDC_ENABLED=true — "
+        "otherwise no one can log in to this deployment"
+      )
+
     # Validate value ranges and formats
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)
