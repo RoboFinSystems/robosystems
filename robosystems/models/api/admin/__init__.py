@@ -27,6 +27,11 @@ from .graphs import (
 )
 from .invoice import InvoiceLineItemResponse, InvoiceResponse
 from .orgs import OrgGraphInfo, OrgResponse, OrgUpdateRequest, OrgUserInfo
+from .scim import (
+  ScimBootstrapRequest,
+  ScimBootstrapResponse,
+  ScimTokenRevokeResponse,
+)
 from .subscription import (
   SubscriptionCreateRequest,
   SubscriptionResponse,
@@ -69,6 +74,9 @@ __all__ = [
   "OrgUserInfo",
   "RepositoryCreditPoolResponse",
   "ResetCreditPoolRequest",
+  "ScimBootstrapRequest",
+  "ScimBootstrapResponse",
+  "ScimTokenRevokeResponse",
   "SubscriptionCreateRequest",
   "SubscriptionResponse",
   "SubscriptionUpdateRequest",

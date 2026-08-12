@@ -67,6 +67,9 @@ from robosystems.routers.admin import (
   orgs_router as admin_orgs_router,
 )
 from robosystems.routers.admin import (
+  scim_router as admin_scim_router,
+)
+from robosystems.routers.admin import (
   subscription_router as admin_subscription_router,
 )
 from robosystems.routers.admin import (
@@ -85,7 +88,7 @@ logger = get_logger("robosystems.api")
 # Path prefixes whose responses may contain per-user secrets (tokens,
 # API keys, billing details, org membership). These get `Cache-Control:
 # no-store` applied in the security-headers middleware.
-_SENSITIVE_PATH_PREFIXES = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs")
+_SENSITIVE_PATH_PREFIXES = ("/v1/auth", "/v1/user", "/v1/billing", "/v1/orgs", "/scim")
 
 
 def csp_variant_for_path(path: str) -> str:
@@ -472,6 +475,12 @@ def create_app() -> FastAPI:
   app.include_router(operations_router_v1)
   app.include_router(billing_router_v1)
 
+  # SCIM 2.0 provisioning — flag-gated (the managed platform never mounts it).
+  if env.SCIM_ENABLED:
+    from robosystems.routers.scim import router as scim_router
+
+    app.include_router(scim_router)
+
   # Extensions GraphQL endpoint (Strawberry). Graph-scoped at
   # /extensions/{graph_id}/graphql — see robosystems/graphql/README.md.
   if env.EXTENSIONS_GRAPHQL_ENABLED and (
@@ -556,6 +565,7 @@ def create_app() -> FastAPI:
   app.include_router(admin_graphs_router, include_in_schema=False)
   app.include_router(admin_users_router, include_in_schema=False)
   app.include_router(admin_orgs_router, include_in_schema=False)
+  app.include_router(admin_scim_router, include_in_schema=False)
 
   def custom_openapi():
     """Generate the OpenAPI schema, then layer on this API's own conventions.

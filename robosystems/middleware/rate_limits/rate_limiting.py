@@ -419,6 +419,12 @@ def oidc_rate_limit_dependency(request: Request):
   return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
 
 
+def scim_rate_limit_dependency(request: Request):
+  """Rate limiting for the SCIM provisioning surface (server-to-server)."""
+  limit = get_int_env("RATE_LIMIT_SCIM", "120")  # 120/minute
+  return create_custom_rate_limit_dependency(limit, 60, "scim")(request)
+
+
 def general_api_rate_limit_dependency(request: Request):
   """General rate limiting for standard API endpoints."""
   limit = get_int_env("RATE_LIMIT_GENERAL_API", "200")  # 200/minute
