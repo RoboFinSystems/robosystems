@@ -59,7 +59,7 @@ Cross-domain block envelopes sit at the top level; domain kernels hold reads, co
 
 ```python
 # reads/fiscal_calendar.py
-def get_fiscal_calendar(session: Session) -> FiscalCalendarResponse | None:
+def build_fiscal_calendar_response(session: Session, ...) -> FiscalCalendarResponse:
     ...  # query, return Pydantic model
 
 # commands/fiscal_calendar.py
