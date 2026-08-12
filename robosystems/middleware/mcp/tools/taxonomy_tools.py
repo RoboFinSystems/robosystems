@@ -1,8 +1,12 @@
 """Taxonomy mapping read tools for CoA → GAAP mapping workflows.
 
-Four read-side tools; writes (`create-mapping-association`,
-`delete-mapping-association`, `create-associations`, etc.) are
-registrar-generated from the roboledger OperationSpec declarations.
+Four registered read-side tools, listed below. `ExpandToRsGaapCandidatesTool`
+is a fifth read class defined here but registered nowhere, so
+`expand-to-rs-gaap-candidates` is currently unreachable.
+
+Most writes (`delete-mapping-association`, `create-associations`, etc.) are
+registrar-generated from the roboledger OperationSpec declarations, but
+`CreateMappingAssociationTool` is hand-written in this module.
 
 1. list-mapping-structures: List `coa_mapping` structures with their OLTP ids
 2. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy

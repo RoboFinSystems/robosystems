@@ -2,9 +2,17 @@
 
 Authentication and per-graph authorization for the platform. This package
 exposes FastAPI **dependencies**, not ASGI middleware classes — you protect an
-endpoint by declaring the dependency in the route signature. It handles two
-credential types (JWT and API key), caches validation results in Valkey, and
-enforces graph access on every authenticated graph-scoped route.
+endpoint by declaring the dependency in the route signature. It handles three
+credential types (JWT, API key, and the SCIM bearer token), caches validation
+results in Valkey, and enforces graph access on every authenticated
+graph-scoped route.
+
+JWT and API key are the two general-purpose credentials and are
+interchangeable across the dependencies below. The SCIM token is not: it is
+accepted **only** at `/scim/v2` and nowhere else, and the general dependencies
+never accept it. Enterprise **OIDC login** is a different kind of thing again —
+a sign-in *method*, not a credential the API accepts; it terminates in an
+ordinary platform JWT.
 
 Rate limiting is a separate concern and lives in
 [`../rate_limits/`](../rate_limits/). This package's `__init__.py` re-exports
@@ -12,7 +20,7 @@ Rate limiting is a separate concern and lives in
 `subscription_aware_rate_limit_dependency` for convenience but implements
 neither.
 
-## The two credential surfaces
+## The credential surfaces
 
 **JWT (`Authorization: Bearer …`) is for frontends.** Short-lived HS256 access
 tokens, 30-minute expiry (`JWT_EXPIRY_HOURS = 0.5` in `config/constants.py` — a
@@ -38,6 +46,18 @@ concern:
 curl -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
      http://localhost:8000/v1/graphs/$GRAPH_ID/...
 ```
+
+**SCIM bearer tokens (`Authorization: Bearer …` at `/scim/v2`) are for an
+IdP.** `scim.py:require_scim_org` is their entire auth path: it resolves the
+presented bearer to an active, unexpired `scim_tokens` row, stamps
+`last_used_at`, and returns the token's **org** — SCIM is org-scoped, not
+user-scoped, and publishes `request.state.scim_org_id` for the handlers.
+Storage mirrors `UserAPIKey` (bcrypt `token_hash`, indexed fingerprint, stored
+`prefix`), but the plaintext carries its own `rfss` prefix, so a SCIM token can
+never satisfy the `^rfsc?[0-9a-f]{64}$` API-key format and vice versa. Failures
+answer in the SCIM error envelope (`{"schemas": [...], "detail": ..., "status":
+"401"}`), not FastAPI's `{"detail": ...}`, and never distinguish unknown from
+revoked from expired.
 
 ### Key scoping
 
@@ -68,13 +88,81 @@ auth take precedence on both; the query parameter is consulted only when
 neither is present. Do not add a third door without matching this table, the
 redaction lists, and a scope story.
 
-### SSO
+### SSO — one word, two mechanisms
 
+**Cross-app handoff** is the original one and involves no IdP at all.
 `jwt.py:create_sso_token` mints a single-use handoff JWT with a 300-second TTL,
-carrying `{"sso": true}` and a `token_id` used to enforce single use. Reuse of
-a spent token is treated as a possible replay of a leaked credential and logged
-as such. Used for handoff between app.robosystems.ai, roboledger.ai, and
-roboinvestor.ai.
+carrying `{"sso": true}` and a `token_id` used to enforce single use. These
+tokens have no `jti`, cannot be revoked, and `verify_jwt_claims` refuses them as
+session bearers. Reuse of a spent token is treated as a possible replay of a
+leaked credential and logged as such. Used for handoff between
+app.robosystems.ai, roboledger.ai, and roboinvestor.ai.
+
+**Enterprise SSO (OIDC login)** is the newer one: a real IdP sign-in for
+dedicated deployments. The kernel is `operations/oidc.py`; the browser-facing
+endpoints are `routers/auth/oidc.py`, mounted **only** when
+`SSO_OIDC_ENABLED=true` (`routers/auth/__init__.py`) and both
+`include_in_schema=False`, because they speak in redirects rather than JSON —
+deliberately not SDK surface. The managed platform never mounts them.
+
+```
+GET /v1/auth/oidc/login     → 302 to the IdP (also the IdP-initiated login URI)
+GET /v1/auth/oidc/callback  → validates the ID token, resolves the user,
+                              302s to the login home's ?session_id= bridge
+```
+
+Things worth knowing before touching this path:
+
+- **The IdP authenticates; the platform mints.** The callback does not issue a
+  JWT. It writes an `sso_session:{id}` payload and hands the browser to the same
+  `sso-complete` consumption path the cross-app bridge uses — which is why the
+  two "SSO" concepts meet at exactly one point.
+- **Resolution is link-only — login never creates a user.**
+  `resolve_oidc_user` looks up the `user_identities` link on `(issuer, sub)`. On
+  a miss there is exactly one fallback: an active user whose email matches, who
+  carries a SCIM `external_id`, and who has no identity for this issuer yet. The
+  `external_id` predicate is load-bearing — without it anyone controlling a
+  matching mailbox in the customer's IdP could bind onto a locally-created
+  account. An explicit `email_verified: false` is refused (a missing claim is
+  tolerated; Entra omits it).
+- **`is_active` is re-checked even on a valid link**, because IdP assignment and
+  SCIM assignment drift apart (Okta runs them as two apps).
+- **Failures redirect, they do not return JSON** — `?reason=` on the login home,
+  with the real distinction in the audit log. A top-level browser navigation
+  that dead-ends on an error body is unrecoverable UX.
+- **CSRF/replay defenses**: PKCE, a nonce, GETDEL flow state (a replayed state
+  reads as invalid), a path-scoped `oidc_flow` browser-binding cookie compared
+  with `compare_digest`, and a third-party-initiated `iss` that is validated
+  against the configured issuer rather than followed.
+
+### SCIM provisioning
+
+`SCIM_ENABLED=true` mounts `routers/scim` at `/scim/v2` (`main.py`) — gated
+independently of OIDC, since a deployment may run either alone. The surface is
+Users CRUD (`GET`/`POST /Users`, `GET`/`PUT`/`PATCH`/`DELETE /Users/{id}`) plus
+the `ServiceProviderConfig` / `ResourceTypes` / `Schemas` conformance probes,
+all `include_in_schema=False`. Every route sits behind two rate buckets and then
+`require_scim_org`: an IP bucket first, because each presented bearer keys its
+own token bucket and a caller inventing a new bearer per request would otherwise
+never be metered, then the per-token bucket for legitimate IdP traffic.
+SCIM-provisioned users join the org with `SSO_DEFAULT_ROLE`.
+
+### Deployment posture
+
+`GET /v1/auth/providers` (`routers/auth/providers.py`) reports which methods a
+deployment offers — `password_auth`, `oidc` (with `provider_label`),
+`registration`, `passkeys` — so the login surface renders posture from runtime
+config instead of hardcoding it.
+
+Posture is enforced, not merely advertised: `require_password_auth` in
+`routers/auth/utils.py` guards *every* password-credential endpoint (login,
+registration, reset, change) with a 403 when `PASSWORD_AUTH_ENABLED=false`. A
+login the UI hides but the API still accepts would let a password bypass the
+IdP's MFA and conditional-access policies. `config/validation.py` refuses to
+boot a deployment that disables password auth without enabling OIDC, that
+enables OIDC without a complete connection, that sets a privileged
+`SSO_DEFAULT_ROLE`, or that runs OIDC/SCIM with `RATE_LIMIT_ENABLED=false` —
+the OIDC and SCIM rate buckets are no-ops without it.
 
 ## Dependencies
 
@@ -182,7 +270,27 @@ JWT_ISSUER=...
 JWT_AUDIENCE=...
 VALKEY_URL=redis://localhost:6379
 RATE_LIMIT_ENABLED=true   # consumed by middleware/rate_limits/
+
+# Auth posture — reported by GET /v1/auth/providers
+PASSWORD_AUTH_ENABLED=true    # false requires SSO_OIDC_ENABLED=true
+
+# Enterprise SSO (OIDC). Off by default; the managed platform never sets these.
+SSO_OIDC_ENABLED=false
+SSO_OIDC_ISSUER=            # IdP org authorization server, https:// when deployed;
+                            # no query/fragment. For Okta this is https://<org>.okta.com,
+                            # NOT /oauth2/default (that mints API tokens, not sign-in ID tokens)
+SSO_OIDC_CLIENT_ID=
+SSO_OIDC_CLIENT_SECRET=     # read via get_secret_value, not a plain env read
+SSO_OIDC_PROVIDER_LABEL=SSO # button label on the login home
+
+# SCIM 2.0 provisioning. Gated independently of OIDC.
+SCIM_ENABLED=false
+SSO_DEFAULT_ROLE=member     # validation rejects anything but member|admin
 ```
+
+The OIDC redirect URI is derived, not configured:
+`{ROBOSYSTEMS_API_URL}/v1/auth/oidc/callback`. Register that exact value with
+the IdP.
 
 Read these through `robosystems.config.env`, never `os.getenv()`.
 

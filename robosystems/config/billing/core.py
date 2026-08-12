@@ -17,7 +17,15 @@ logger = logging.getLogger(__name__)
 
 # SINGLE SOURCE OF TRUTH: Subscription tier configuration
 # All tier-related settings are defined here in one place.
-# NOTE: Stripe prices are auto-created from this config on first checkout
+#
+# Editing a price here governs NEW checkouts only. Stripe prices are resolved
+# per checkout by matching the amount below against the plan product's active
+# prices, creating one if absent (PaymentProvider._get_or_create_graph_price).
+# Existing subscriptions stay attached to the immutable Stripe Price they were
+# created with, and stripe_price_id / base_price_cents are persisted per row on
+# billing_subscriptions — so a change here reprices nobody. Any price change
+# must ship a Stripe subscription-item swap plus a database backfill, or
+# existing subscribers keep paying the old amount indefinitely.
 #
 # Typical agent call (~5K input, ~1.5K output): ~38 credits
 #

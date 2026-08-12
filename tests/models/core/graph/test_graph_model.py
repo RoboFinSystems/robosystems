@@ -179,22 +179,22 @@ class TestGraphModel:
     assert standard_graph.can_have_subgraphs is True
 
     # Large tier can have subgraphs
-    enterprise_graph = Graph(
+    large_graph = Graph(
       graph_id="kg2",
-      graph_name="Enterprise",
+      graph_name="Large",
       graph_type="entity",
       graph_tier=GraphTier.LADYBUG_LARGE.value,
     )
-    assert enterprise_graph.can_have_subgraphs is True
+    assert large_graph.can_have_subgraphs is True
 
-    # Premium tier can have subgraphs
-    premium_graph = Graph(
+    # XLarge tier can have subgraphs
+    xlarge_graph = Graph(
       graph_id="kg3",
-      graph_name="Premium",
+      graph_name="XLarge",
       graph_type="entity",
       graph_tier=GraphTier.LADYBUG_XLARGE.value,
     )
-    assert premium_graph.can_have_subgraphs is True
+    assert xlarge_graph.can_have_subgraphs is True
 
   def test_has_specific_extension(self):
     """Test has_specific_extension method."""

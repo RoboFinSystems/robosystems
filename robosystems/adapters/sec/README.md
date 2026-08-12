@@ -38,10 +38,14 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 |-------|---------|
 | `XBRLGraphProcessor` | One XBRL filing → parquet files |
 | `XBRLDuckDBGraphProcessor` | Unified staging + materialization |
-| `DuckDBStager` | Parquet → DuckDB |
-| `LadybugMaterializer` | DuckDB → LadybugDB |
-| `LadybugDirectCopier` | S3 → LadybugDB, bypassing DuckDB |
+| `DuckDBStager` | S3 Parquet → DuckDB (stage 1) |
+| `LadybugMaterializer` | DuckDB → LadybugDB (stage 2) |
 | `SECMetadataLoader` | Filer and report metadata, cached |
+
+The two ingestion stages are decoupled on purpose — a failed LadybugDB
+materialization must not discard hours of DuckDB staging work — and
+`XBRLDuckDBGraphProcessor` subclasses both for callers that run them together.
+There is no path from S3 straight into LadybugDB; staging is always in between.
 
 Supporting modules: `constants.py` (`SHARED_NODE_TABLES`, `QUARTER_END_DAYS`),
 `processing.py` (`process_single_filing_to_memory()`), `consolidation.py`
@@ -118,7 +122,7 @@ In production the `sec_knowledge_artifacts` asset downloads the staging DuckDB
 file from `s3://{user-bucket}/shared-repositories/databases/sec.duckdb`, builds
 the artifacts on the Fargate task, and uploads them to
 `s3://{SHARED_PROCESSED_BUCKET}/sec/artifacts/`. The DuckDB file itself is
-published by `sec_duckdb_s3_publish_job` after staging. Locally, artifacts live
+published by the `sec_duckdb_s3_publish` job after staging. Locally, artifacts live
 in `data/artifacts/`. `SemanticEnricher` checks local disk first and downloads
 from S3 when missing — a fresh environment with no artifacts still enriches, just
 without confidence refinement.

@@ -2,7 +2,7 @@
 Comprehensive tests for SubgraphService.
 
 Tests the critical subgraph service that manages subgraph operations for
-Enterprise and Premium tier graphs, including creation, deletion, and management.
+Large and XLarge tier graphs, including creation, deletion, and management.
 """
 
 from unittest.mock import AsyncMock, Mock, patch

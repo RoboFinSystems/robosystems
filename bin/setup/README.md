@@ -51,9 +51,9 @@ The complete bootstrap process for a fresh deployment:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Deploys cloudformation/bootstrap-oidc.yaml:                                │
 │    - Creates IAM OIDC Provider for GitHub                                   │
-│    - Creates IAM Role for GitHub Actions                                    │
-│    - Trusts: {GitHubOrg}/robosystems (main, release/*, v* tags)             │
-│    - Trusts: {GitHubOrg}/*-app repos (frontend apps)                        │
+│    - Backend role: trusts {GitHubOrg}/{backend repo} only                   │
+│    - Frontend role: trusts the three *-app repos + holon-viewer             │
+│    - Allowed refs (both roles): main, release/*, v* tags                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -72,16 +72,29 @@ The complete bootstrap process for a fresh deployment:
 │  STEP 5: CREATE ECR REPOSITORY                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Creates ECR repository:                                                    │
-│    - Repository name derived from GitHub repo (e.g., robosystems)           │
-│    - Image scanning on push                                                 │
-│    - Lifecycle policy: keep last 20 untagged images                         │
+│    - Repository name is always "robosystems" (fleet-uniform, even on        │
+│      a renamed fork — the deploy role's ECR scope assumes it)               │
+│    - Image scanning on push, AES256 encryption                              │
+│    - Prompts for a lifecycle policy: robust (default) / basic / skip        │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  STEP 6: CHECK GITHUB SECRETS                                               │
+│  STEP 6: SES EMAIL IDENTITY                                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  Checks for optional secrets (not required with OIDC):                      │
+│  Verifies a sending domain for transactional email:                         │
+│    - Prompts for the email domain, stores it as AWS_SES_DOMAIN              │
+│    - Creates the SESv2 domain identity if missing                           │
+│    - Publishes DKIM CNAMEs to Route53 automatically when a hosted           │
+│      zone exists; otherwise prints them for manual DNS entry                │
+│    - Requests SES production access (out of the sandbox)                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 7: CHECK GITHUB SECRETS                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Checks for optional secrets (repo and org level):                          │
 │    - ACTIONS_TOKEN (enables cross-workflow triggers)                        │
 │    - ANTHROPIC_API_KEY (enables AI-powered PR/release notes)                │
 │  Note: AWS credentials NOT needed with OIDC                                 │
@@ -89,7 +102,7 @@ The complete bootstrap process for a fresh deployment:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  STEP 7: OPTIONAL CONFIGURATION (Interactive Prompts)                       │
+│  STEP 8: OPTIONAL CONFIGURATION (Interactive Prompts)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Prompt: "Setup AWS Secrets Manager?" (Y/n)                                 │
 │    └─► Runs aws.sh if yes (creates secrets + SSM parameters)                │
@@ -97,7 +110,7 @@ The complete bootstrap process for a fresh deployment:
 │  Prompt: "Setup GitHub Variables?" (y/N)                                    │
 │    └─► Runs gha.sh if yes                                                   │
 │                                                                             │
-│  Both prompt for environment choice:                                        │
+│  If either is selected, prompts for environment choice:                     │
 │    1) Production only (recommended)                                         │
 │    2) Production + Staging                                                  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -138,21 +151,23 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 
 **What It Creates**:
 
-| Resource             | Description                                                           |
-| -------------------- | --------------------------------------------------------------------- |
-| `.envrc`             | Local direnv config with AWS_PROFILE and AWS_REGION                   |
-| `~/.aws/config`      | SSO profile (if not exists)                                           |
-| CloudFormation Stack | `RoboSystemsGitHubOIDC`                                               |
-| ECR Repository       | `robosystems` (or repo name)                                          |
-| GitHub Variables     | `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_SNS_ALERT_EMAIL` |
-| Secrets Manager      | `robosystems/prod` (credentials)                                      |
-| SSM Parameters       | Feature flags + tuning parameters                                     |
+| Resource             | Description                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `.envrc`             | Local direnv config with AWS_PROFILE and AWS_REGION                                     |
+| `~/.aws/config`      | SSO profile (if not exists)                                                             |
+| CloudFormation Stack | `RoboSystemsGitHubOIDC`                                                                 |
+| ECR Repository       | `robosystems` (fixed name, not derived from the repo)                                   |
+| SES Identity         | Domain identity + DKIM records for transactional email                                  |
+| GitHub Variables     | `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_SNS_ALERT_EMAIL`, `AWS_SES_DOMAIN` |
+| Secrets Manager      | `robosystems/prod` (credentials)                                                        |
+| SSM Parameters       | Feature flags + tuning parameters                                                       |
 
 **Environment Variables Used**:
 | Variable | Source | Description |
 |----------|--------|-------------|
 | `AWS_PROFILE` | Argument or env | SSO profile to use |
 | `AWS_REGION` | Argument or env | AWS region |
+| `ECR_LIFECYCLE_POLICY` | Env | Skips the lifecycle-policy prompt: `robust` (the bundled `ecr-lifecycle-policy.json`), `basic`, or `skip`/`none` |
 
 ---
 
@@ -181,22 +196,34 @@ just setup-aws
 | ---------- | ------------------------------- | ------------------------------ |
 | Secret     | `robosystems/prod`              | Production credentials         |
 | Secret     | `robosystems/staging`           | Staging credentials (optional) |
-| SSM Params | `/robosystems/{env}/features/*` | Feature flags (27 params)      |
-| SSM Params | `/robosystems/{env}/tuning/*`   | Tuning parameters (33 params)  |
+| SSM Params | `/robosystems/{env}/features/*` | Feature flags                  |
+| SSM Params | `/robosystems/{env}/tuning/*`   | Tuning parameters              |
 
-**Secrets Manager** (credentials only):
+The parameter sets live in the `params` arrays in `aws.sh` — read those for the
+current names and seeded values, or `just ssm-list {env} {features,tuning}` for
+what an environment actually has.
+
+**Secrets Manager** (credentials only — placeholders you fill in, except the two
+generated keys). `JWT_ISSUER` / `JWT_AUDIENCE` are only written in `internal`
+access mode:
 
 ```json
 {
-  "JWT_SECRET_KEY": "[generated]",
   "JWT_ISSUER": "localhost",
   "JWT_AUDIENCE": "localhost",
+  "JWT_SECRET_KEY": "[generated]",
   "CONNECTION_CREDENTIALS_KEY": "[generated]",
+  "TURNSTILE_SECRET_KEY": "...",
+  "TURNSTILE_SITE_KEY": "...",
   "INTUIT_CLIENT_ID": "...",
   "INTUIT_CLIENT_SECRET": "...",
-  "STRIPE_SECRET_KEY": "...",
+  "INTUIT_ENVIRONMENT": "production",
+  "INTUIT_REDIRECT_URI": "...",
   "SEC_GOV_USER_AGENT": "...",
-  "TURNSTILE_SECRET_KEY": "..."
+  "OPENFIGI_API_KEY": "...",
+  "STRIPE_SECRET_KEY": "...",
+  "STRIPE_PUBLISHABLE_KEY": "...",
+  "STRIPE_WEBHOOK_SECRET": "..."
 }
 ```
 
@@ -214,6 +241,9 @@ just setup-aws
   circuits/THRESHOLD, circuits/TIMEOUT, ...
   load_shedding/START_PRESSURE, load_shedding/STOP_PRESSURE, ...
   mcp/MAX_RESULT_ROWS, mcp/MAX_RESULT_SIZE_MB, ...
+  workers/MAX_WORKERS, timeouts/GRAPH_HTTP, timeouts/GRAPH_QUERY, ...
+  sse/MAX_CONNECTIONS_PER_USER, sse/QUEUE_SIZE, limits/ORG_GRAPHS_DEFAULT, ...
+  database/POOL_SIZE, database/MAX_OVERFLOW, ...
 ```
 
 **Managing SSM parameters**:
@@ -254,175 +284,67 @@ just setup-gha
 
 **Interactive Prompts**:
 
-1. Environment choice (Production only vs Production + Staging)
+1. Environment choice (Production only vs Production + Staging) — skipped when
+   bootstrap already passed `SETUP_STAGING`
 2. Root domain (optional - leave empty for VPC-only deployment)
 3. GitHub organization name
 4. Repository name
 5. AWS account ID
-6. Alert email (if not already set)
-7. ECR repository name
-8. Optional: RoboLedger/RoboInvestor app URLs
+6. AWS region (defaults to the region bootstrap exported, else `us-east-1`)
+7. Alert email (if not already set)
+8. ECR repository name
+9. Optional: RoboLedger/RoboInvestor app URLs — only offered when a root domain
+   was given
 
-**Variables Set** — run `just gha-list` for the live set.
+**Variables Set** — `gha.sh` is the authoritative list of names and seeded
+defaults; run `just gha-list` for what is live in this repo. The groups it
+configures, in script order:
 
-#### Core Configuration
+| Group                      | Covers                                                                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Core & access              | `AWS_ECR_REPOSITORY`, `AWS_ACCOUNT_ID`, `AWS_REGION`, `ENVIRONMENT_*`, `API_ACCESS_MODE_*`                                             |
+| Domains & app URLs         | `API_DOMAIN_NAME_*`, `ROBOSYSTEMS_{API,APP}_URL_*`, `PUBLIC_DOMAIN_NAME_*`, optional `ROBOLEDGER_APP_URL_*` / `ROBOINVESTOR_APP_URL_*` |
+| API sizing & scaling       | `API_{MIN,MAX}_CAPACITY_*`, `API_CPU_*`, `API_MEMORY_*`, `API_{CPU,MEMORY}_TARGET_*`                                                   |
+| Dagster                    | daemon/webserver CPU + memory, `DAGSTER_WEBSERVER_DESIRED_COUNT_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*`, `DAGSTER_CONTAINER_INSIGHTS_*`    |
+| Background worker          | `WORKER_*` (off by default)                                                                                                            |
+| Fargate capacity providers | `API_FARGATE_SPOT_WEIGHT_*`, `DAGSTER_{DAEMON,WEBSERVER}_FARGATE_SPOT_WEIGHT_*`, the matching `*_FARGATE_BASE_*`                       |
+| Database                   | `DATABASE_*` (instance size, storage, Multi-AZ, Postgres version, Performance Insights), `RDS_PROXY_*`                                 |
+| Valkey                     | `VALKEY_*` (node type, node count, version, encryption, snapshot retention)                                                            |
+| OpenSearch                 | `OPENSEARCH_*` (off by default)                                                                                                        |
+| LadybugDB writers          | `LBUG_{STANDARD,LARGE,XLARGE,SHARED}_*`                                                                                                |
+| Shared replicas            | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*`                                                                                           |
+| Graph AMI                  | `GRAPH_AMI_AUTO_UPDATE`, `GRAPH_AMI_AUTO_DEPLOY`                                                                                       |
+| Compliance & security      | `VPC_FLOW_LOGS_*`, `CLOUDTRAIL_*`, `SECURITY_ENABLED`, `SECURITY_CONFIG_ENABLED`, `AUDIT_*`, `SECRETS_ROTATION_ENABLED_*`              |
+| WAF                        | `WAF_*`                                                                                                                                |
+| Networking                 | `VPC_MAX_AVAILABILITY_ZONES`, `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`                                                                  |
+| Runners & alerting         | `RUNNER_LABELS`, `RUNNER_SCOPE`, `AWS_SNS_ALERT_EMAIL`, `API_TARGET_ERROR_THRESHOLD`                                                   |
+| Observability & publishing | `OBSERVABILITY_ENABLED_*`, `DOCKERHUB_PUBLISHING_ENABLED`                                                                              |
 
-| Variable              | Default       | Description                           |
-| --------------------- | ------------- | ------------------------------------- |
-| `AWS_ECR_REPOSITORY`  | `robosystems` | ECR repository name                   |
-| `AWS_ACCOUNT_ID`      | User input    | AWS account ID                        |
-| `AWS_REGION`          | `$AWS_REGION` | AWS region (falls back to `us-east-1`)|
-| `ENVIRONMENT_PROD`    | `prod`        | Production environment name           |
-| `ENVIRONMENT_STAGING` | `staging`     | Staging environment name (if enabled) |
+**Defaults worth knowing before the first deploy** (everything else is safe as
+shipped):
 
-#### Domain Configuration (optional - skip for VPC-only)
-
-| Variable                   | Example                      | Description              |
-| -------------------------- | ---------------------------- | ------------------------ |
-| `API_DOMAIN_NAME_ROOT`     | `robosystems.ai`             | Root domain              |
-| `API_DOMAIN_NAME_PROD`     | `api.robosystems.ai`         | Production API subdomain |
-| `API_DOMAIN_NAME_STAGING`  | `staging.api.robosystems.ai` | Staging API subdomain    |
-| `ROBOSYSTEMS_API_URL_PROD` | `https://api.robosystems.ai` | Production API URL       |
-| `ROBOSYSTEMS_APP_URL_PROD` | `https://robosystems.ai`     | Production app URL       |
-
-#### API Scaling & Sizing
-
-| Variable                    | Prod Default | Staging Default | Description                            |
-| --------------------------- | ------------ | --------------- | -------------------------------------- |
-| `API_MIN_CAPACITY_*`        | `1`          | `1`             | Min ECS tasks                          |
-| `API_MAX_CAPACITY_*`        | `10`         | `2`             | Max ECS tasks                          |
-| `API_CPU_*`                 | `512`        | `512`           | Fargate CPU units                      |
-| `API_MEMORY_*`              | `1024`       | `1024`          | Fargate memory (MB)                    |
-| `API_CPU_TARGET_*`          | `70`         | `70`            | CPU auto-scaling target                |
-| `API_MEMORY_TARGET_*`       | `80`         | `80`            | Memory auto-scaling target             |
-| `API_FARGATE_SPOT_WEIGHT_*` | `90`         | `90`            | Spot weight (OD derived as 100 - spot) |
-| `API_FARGATE_BASE_*`        | `0`          | `0`             | On-Demand base capacity                |
-
-#### Dagster Configuration
-
-| Variable                                  | Prod Default | Description                                      |
-| ----------------------------------------- | ------------ | ------------------------------------------------ |
-| `DAGSTER_DAEMON_CPU_*`                    | `1024`       | Daemon CPU units                                 |
-| `DAGSTER_DAEMON_MEMORY_*`                 | `2048`       | Daemon memory (MB)                               |
-| `DAGSTER_WEBSERVER_CPU_*`                 | `512`        | Webserver CPU units                              |
-| `DAGSTER_WEBSERVER_MEMORY_*`              | `1024`       | Webserver memory (MB)                            |
-| `DAGSTER_MAX_CONCURRENT_RUNS_*`           | `20`         | Max concurrent runs                              |
-| `DAGSTER_CONTAINER_INSIGHTS_*`            | `disabled`   | Container insights                               |
-| `DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_*`    | `80`         | Daemon Spot weight (OD derived as 100 - spot)    |
-| `DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_*` | `80`         | Webserver Spot weight (OD derived as 100 - spot) |
-| `DAGSTER_DAEMON_FARGATE_BASE_*`           | `0`          | Daemon On-Demand base                            |
-| `DAGSTER_WEBSERVER_FARGATE_BASE_*`        | `0`          | Webserver On-Demand base                         |
-
-#### Database Configuration
-
-| Variable                                | Prod Default   | Description                                  |
-| --------------------------------------- | -------------- | -------------------------------------------- |
-| `DATABASE_INSTANCE_SIZE_*`              | `db.t4g.small` | RDS instance type                            |
-| `DATABASE_ALLOCATED_STORAGE_*`          | `20`           | Initial storage (GB)                         |
-| `DATABASE_MAX_ALLOCATED_STORAGE_*`      | `100`          | Max storage (GB)                             |
-| `DATABASE_MULTI_AZ_ENABLED_*`           | `false`        | Multi-AZ deployment                          |
-| `DATABASE_POSTGRES_VERSION_*`           | `16.11`        | PostgreSQL version                           |
-| `RDS_PROXY_ENABLED_*`                   | `false`        | Enable RDS Proxy for connection pooling      |
-| `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*`   | `100`          | Max % of DB max_connections proxy may use    |
-| `RDS_PROXY_CONNECTION_BORROW_TIMEOUT_*` | `120`          | Seconds client waits for a pooled connection |
-
-#### Valkey Configuration
-
-| Variable                           | Prod Default              | Description        |
-| ---------------------------------- | ------------------------- | ------------------ |
-| `VALKEY_NODE_TYPE_*`               | `cache.t4g.micro`         | Cache node type    |
-| `VALKEY_NUM_NODES_*`               | `1`                       | Number of nodes    |
-| `VALKEY_ENCRYPTION_ENABLED_*`      | `true`                    | Enable encryption  |
-| `VALKEY_SNAPSHOT_RETENTION_DAYS_*` | `7` (prod), `0` (staging) | Snapshot retention |
-| `VALKEY_VERSION_*`                 | `8.1`                     | Valkey version     |
-
-#### LadybugDB Writer Configuration
-
-| Variable                        | Prod Default | Description                              |
-| ------------------------------- | ------------ | ---------------------------------------- |
-| `LBUG_STANDARD_MIN_INSTANCES_*` | `1`          | Min standard instances (always deployed) |
-| `LBUG_STANDARD_MAX_INSTANCES_*` | `10`         | Max standard instances                   |
-| `LBUG_LARGE_ENABLED_*`          | `false`      | Enable large tier                        |
-| `LBUG_LARGE_MIN_INSTANCES_*`    | `0`          | Min large instances                      |
-| `LBUG_LARGE_MAX_INSTANCES_*`    | `20`         | Max large instances                      |
-| `LBUG_XLARGE_ENABLED_*`         | `false`      | Enable xlarge tier                       |
-| `LBUG_XLARGE_MIN_INSTANCES_*`   | `0`          | Min xlarge instances                     |
-| `LBUG_XLARGE_MAX_INSTANCES_*`   | `10`         | Max xlarge instances                     |
-| `LBUG_SHARED_ENABLED_*`         | `false`      | Enable shared tier                       |
-| `LBUG_SHARED_MIN_INSTANCES_*`   | `1`          | Min shared instances                     |
-| `LBUG_SHARED_MAX_INSTANCES_*`   | `1`          | Max shared instances                     |
-
-#### Shared Replicas Configuration
-
-| Variable                                         | Prod Default               | Description                    |
-| ------------------------------------------------ | -------------------------- | ------------------------------ |
-| `SHARED_REPLICAS_ENABLED_*`                      | `false`                    | Enable read-only replica fleet |
-| `SHARED_REPLICAS_MIN_INSTANCES_*`                | `1`                        | Min replica instances          |
-| `SHARED_REPLICAS_MAX_INSTANCES_*`                | `3`                        | Max replica instances          |
-| `SHARED_REPLICAS_DESIRED_CAPACITY_*`             | `1`                        | Initial desired capacity       |
-| `SHARED_REPLICAS_ROOT_VOLUME_SIZE_*`             | `150`                      | Root volume size (GB)          |
-| `SHARED_REPLICAS_CPU_TARGET_*`                   | `70`                       | CPU auto-scaling target        |
-| `SHARED_REPLICAS_MEMORY_TARGET_*`                | `80`                       | Memory auto-scaling target     |
-| `SHARED_REPLICAS_ENABLE_RESPONSE_TIME_SCALING_*` | `false`                    | Response time scaling          |
-| `SHARED_REPLICAS_RESPONSE_TIME_TARGET_*`         | `5`                        | Response time target (s)       |
-| `SHARED_REPLICAS_INSTANCE_WARMUP_*`              | `900`                      | Instance warmup (s)            |
-| `SHARED_REPLICAS_HEALTH_CHECK_GRACE_PERIOD_*`    | `900`                      | Health check grace (s)         |
-| `SHARED_REPOSITORIES_*`                          | `sec`                      | Repos to replicate             |
-| `SHARED_REPLICAS_SPOT_ENABLED_*`                 | `false`                    | Enable Spot instances          |
-| `SHARED_REPLICAS_SPOT_BASE_*`                    | `0`                        | On-Demand base capacity        |
-| `SHARED_REPLICAS_SPOT_WEIGHT_*`                  | `0`                        | Spot weight                    |
-| `SHARED_REPLICAS_SPOT_STRATEGY_*`                | `price-capacity-optimized` | Spot allocation strategy       |
-| `SHARED_REPLICAS_SPOT_REBALANCE_*`               | `true`                     | Enable Spot rebalancing        |
-
-#### Graph Settings
-
-| Variable         | Default       | Description                 |
-| ---------------- | ------------- | --------------------------- |
-| `GRAPH_AMI_ID_*` | Auto-detected | Amazon Linux 2023 ARM64 AMI |
-
-#### Compliance & Security
-
-| Variable                         | Default  | Description                                                                        |
-| -------------------------------- | -------- | ---------------------------------------------------------------------------------- |
-| `VPC_FLOW_LOGS_ENABLED`          | `false`  | Enable VPC flow logs                                                               |
-| `VPC_FLOW_LOGS_RETENTION_DAYS`   | `90`     | Flow log retention                                                                 |
-| `VPC_FLOW_LOGS_TRAFFIC_TYPE`     | `REJECT` | Traffic type to log                                                                |
-| `CLOUDTRAIL_ENABLED`             | `false`  | Enable CloudTrail                                                                  |
-| `CLOUDTRAIL_LOG_RETENTION_DAYS`  | `90`     | CloudTrail retention                                                               |
-| `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false`  | Log S3 data events                                                                 |
-| `SECRETS_ROTATION_ENABLED_*`     | `false`  | Monthly key rotation                                                               |
-| `AUDIT_ENABLED_*`                | `false`  | Retain audit logs to S3                                                            |
-| `AUDIT_RETENTION_DAYS`           | `400`    | Audit S3 retention (days)                                                          |
-| `SECURITY_ENABLED`               | `false`  | Enable the security baseline (GuardDuty, Security Hub, Access Analyzer, Inspector) |
-| `SECURITY_CONFIG_ENABLED`        | `false`  | Also enable the AWS Config recorder (cost scales with resource count)              |
-
-#### WAF Configuration
-
-| Variable                        | Default | Description               |
-| ------------------------------- | ------- | ------------------------- |
-| `WAF_ENABLED_*`                 | `false` | Enable WAF                |
-| `WAF_RATE_LIMIT_PER_IP`         | `3000`  | Requests per 5 min per IP |
-| `WAF_GEO_BLOCKING_ENABLED`      | `false` | Block non-US/CA traffic   |
-| `WAF_AWS_MANAGED_RULES_ENABLED` | `true`  | Use AWS managed rules     |
-
-#### Runner Configuration
-
-| Variable        | Default         | Description                    |
-| --------------- | --------------- | ------------------------------ |
-| `RUNNER_LABELS` | `github-hosted` | Runner labels (or self-hosted) |
-| `RUNNER_SCOPE`  | `both`          | Where to check for runners     |
-
-#### Other
-
-| Variable                       | Default    | Description                          |
-| ------------------------------ | ---------- | ------------------------------------ |
-| `AWS_SNS_ALERT_EMAIL`          | User input | CloudWatch alert email               |
-| `VPC_MAX_AVAILABILITY_ZONES`   | `2`        | Max AZs to use                       |
-| `VPC_ENDPOINT_MODE`            | `minimal`  | VPC endpoints (gateway/minimal/full) |
-| `VPC_SECOND_OCTET`             | `0`        | VPC CIDR second octet (for peering)  |
-| `OBSERVABILITY_ENABLED_*`      | `true`     | Enable observability                 |
-| `DOCKERHUB_PUBLISHING_ENABLED` | `false`    | Publish to Docker Hub                |
-| `PUBLIC_DOMAIN_NAME_*`         | (optional) | Public data domain                   |
+- **Fargate Spot is off in production.** `API_FARGATE_SPOT_WEIGHT_PROD` and both
+  Dagster spot weights seed to `0`; staging seeds them on (`90` for the API,
+  `80` for Dagster). The on-demand weight is not a variable — the deploy
+  workflow derives it as `100 - spot_weight`.
+- **Compliance and security stacks ship off** — VPC flow logs, CloudTrail, the
+  security baseline (GuardDuty, Security Hub, Access Analyzer, Inspector), the
+  AWS Config recorder, audit-log retention, secrets rotation, and WAF. The
+  baseline also needs the deploy-role grants from `bootstrap-oidc`, so re-run
+  bootstrap after enabling it.
+- **Only the standard LadybugDB writer tier deploys by default.** Large, xlarge,
+  shared, the shared-replica fleet, and OpenSearch are all opt-in. Shared-replica
+  Spot is off as well (`SHARED_REPLICAS_SPOT_ENABLED_*=false`, with
+  `SHARED_REPLICAS_OD_BASE_*` and `SHARED_REPLICAS_SPOT_WEIGHT_*` at `0`).
+- **`VPC_ENDPOINT_MODE=minimal`** — `gateway` is free (S3 + DynamoDB only),
+  `minimal` adds the ECR endpoints that keep deployment image pulls off the NAT
+  gateway, `full` costs roughly double `minimal`.
+- **`RUNNER_LABELS=github-hosted`** — set it to e.g. `self-hosted,Linux,X64` to
+  run workflows on your own runners; `RUNNER_SCOPE` (`repo` / `org` / `both`)
+  controls where the workflows look for them.
+- **Staging variables are only written when you pick "Production + Staging".**
+  Choosing production only also *deletes* `ENVIRONMENT_STAGING`, which is what
+  keeps staging deployments from firing accidentally.
 
 ---
 
@@ -546,23 +468,30 @@ Registers a local LadybugDB writer instance:
 
 **Databases Created**:
 
-| Database           | Purpose                                            |
-| ------------------ | -------------------------------------------------- |
-| `robosystems`      | Main application database (IAM, billing, metadata) |
-| `robosystems_test` | Test database for pytest                           |
-| `dagster`          | Dagster metadata database                          |
+| Database           | Purpose                                             |
+| ------------------ | --------------------------------------------------- |
+| `robosystems`      | Platform database (IAM, billing, graph metadata)    |
+| `robosystems_test` | Platform test database for pytest                   |
+| `dagster`          | Dagster metadata database                           |
+| `extensions`       | Extensions OLTP database (roboledger, roboinvestor) |
+| `extensions_test`  | Extensions test database for pytest                 |
+
+`robosystems` itself is created by the Postgres container from `POSTGRES_DB`;
+the script adds the other four. The platform and extensions databases have
+independent Alembic histories — see the migration commands in the root
+[CLAUDE.md](/CLAUDE.md).
 
 ---
 
 ## Environment Files
 
-Bootstrap creates/updates these files:
+| File         | Purpose                                          | Created by                 | Git Ignored |
+| ------------ | ------------------------------------------------ | -------------------------- | ----------- |
+| `.envrc`     | Direnv config (AWS_PROFILE, AWS_REGION)          | `bootstrap.sh`             | Yes         |
+| `.env`       | Docker Compose environment (container hostnames) | `just start` / `just init` | Yes         |
+| `.env.local` | Local development (localhost URLs)               | `just start` / `just init` | Yes         |
 
-| File         | Purpose                                          | Git Ignored |
-| ------------ | ------------------------------------------------ | ----------- |
-| `.envrc`     | Direnv config (AWS_PROFILE, AWS_REGION)          | No          |
-| `.env`       | Docker Compose environment (container hostnames) | Yes         |
-| `.env.local` | Local development (localhost URLs)               | Yes         |
+`bedrock.sh` writes the Bedrock development credentials into `.env`.
 
 ---
 

@@ -91,13 +91,20 @@ class AdmissionDefaults:
   These thresholds determine when to start rejecting new requests
   to protect system stability.
 
-  MEMORY_THRESHOLD is a percentage (0-100) used to *report* memory pressure.
-  It is deliberately not the gate for rejecting graph queries: a LadybugDB
-  buffer pool is a fixed pre-commitment that is supposed to fill, so percent
-  of total memory conflates that constant with the query working set that
-  actually predicts exhaustion. Rejection is gated on MIN_AVAILABLE_MB, an
+  These constants feed two different admission controllers, which use them
+  differently. Read the consumer before reasoning about either.
+
+  graph_api/core/admission_control.py (the LadybugDB query path) reports
+  MEMORY_THRESHOLD but deliberately does not reject on it: a LadybugDB buffer
+  pool is a fixed pre-commitment that is supposed to fill, so percent of total
+  memory conflates that constant with the query working set that actually
+  predicts exhaustion. There, rejection is gated on MIN_AVAILABLE_MB, an
   absolute headroom figure that does not move when the pool or the instance
   size changes.
+
+  middleware/graph/admission_control.py (the routing path) does the opposite:
+  it rejects on MEMORY_THRESHOLD as a straight percentage and never reads
+  MIN_AVAILABLE_MB.
   """
 
   MEMORY_THRESHOLD = 85.0  # Report memory pressure at 85% usage

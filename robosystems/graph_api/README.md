@@ -148,14 +148,17 @@ optimized away.
   database file. Materializations additionally take a per-graph distributed lock
   so two of them can't interleave — see [`core/ladybug/`](core/ladybug/README.md).
 - **Sequential ingestion.** Files are materialized one at a time per database.
-- **Connection pool: 3 per database.** Both the LadybugDB and DuckDB pools are
-  initialized at 3 in `app.py`. Asking for a fourth does not queue — the pool
-  closes the oldest connection to make room. Concurrency comes from more
+- **Connection pool: 3 per database.** Hardcoded, not tier-resolved: the DuckDB
+  pool is initialized at 3 in `app.py`, and the LadybugDB pool takes the
+  `max_connections_per_db=3` default on `LadybugDatabaseManager`, which
+  `LadybugService` never overrides. Asking for a fourth does not queue — the
+  pool closes the oldest connection to make room. Concurrency comes from more
   instances, not a bigger pool.
 - **Admission control rejects before it crashes.** Requests are refused with 503
   when free memory drops below 1 GB (measured as the tighter of host-available
-  and cgroup headroom) or CPU exceeds 95%. A percentage-of-total memory gate
-  would misfire, because a buffer pool is *supposed* to fill.
+  and cgroup headroom) or CPU exceeds 90% — 80% for ingestion, which gets a
+  stricter limit. A percentage-of-total memory gate would misfire, because a
+  buffer pool is *supposed* to fill.
 - **No cross-database queries.** Each query is scoped to one database file.
 - **Memory is a fixed per-database budget** derived from the tier config, not a
   shared heap. Exceeding it is an OOM kill of the container, which is why
@@ -177,11 +180,15 @@ GRAPH_API_KEY=                        # cluster API key
 GRAPH_QUERY_TIMEOUT=30
 ```
 
-Memory, thread counts, chunk sizes, connection-pool size and subgraph caps are
-resolved per tier from [`.github/configs/graph.yml`](/.github/configs/graph.yml)
-using `CLUSTER_TIER`; the `LBUG_MAX_MEMORY_MB` / `LBUG_CHUNK_SIZE` /
-`LBUG_CONNECTION_POOL_SIZE` env vars are only the local-dev fallback when no
-tier block matches.
+Memory, thread counts, chunk sizes and subgraph caps are resolved per tier from
+[`.github/configs/graph.yml`](/.github/configs/graph.yml) using `CLUSTER_TIER`;
+the `LBUG_MAX_MEMORY_MB` / `LBUG_CHUNK_SIZE` env vars are only the local-dev
+fallback when no tier block matches.
+
+Connection-pool size is **not** among them. `graph.yml` carries a
+`connection_pool_size` per tier and `env.get_lbug_tier_config()` surfaces it
+(as does `LBUG_CONNECTION_POOL_SIZE`), but nothing reads either — both pools are
+capped at a hardcoded 3 per database (see Operational limits above).
 
 Client-side behavior (retries, circuit breaker, timeouts) is configured
 separately under the `GRAPH_CLIENT_` prefix — see [`client/`](client/README.md).

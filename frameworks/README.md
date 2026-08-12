@@ -2,9 +2,11 @@
 
 This directory is the **authoritative source** for the JSON-LD taxonomy
 artifacts that every tenant graph copies into its per-tenant schema at
-provision time. Each child directory is a **framework** (fac, rs-gaap,
-…); the Python code that discovers, parses, writes, and pins this
-content lives at `robosystems/taxonomy/`.
+provision time. Each child directory carrying a top-level `v*.json`
+manifest is a **framework** (cm, fac, rs-gaap today) — the sibling
+`ontology/` holds the canonical RDF ontology + SHACL shapes and is
+deliberately _not_ a framework. The Python code that discovers, parses,
+writes, and pins this content lives at `robosystems/taxonomy/`.
 
 The directory name matches the DB tables it seeds: `frameworks`,
 `framework_packages`, `framework_bridges`.
@@ -15,7 +17,7 @@ A **framework** is a named, versioned, addressable bundle that pins
 specific `(package, version)` and `(bridge, version)` tuples and
 optionally `depends_on` other frameworks. The deliverable that says
 "`rs-gaap` v1 = these N packages + these M bridges + everything in
-`fac` v1, at these versions, in this load order."
+`fac` v1 and `cm` v1, at these versions, in this load order."
 
 A tenant graph pins a framework via:
 
@@ -39,7 +41,7 @@ shape:
 | **Upstream authority**            | Publishes a taxonomy nobody edits but everyone files against                         | FASB us-gaap, IASB IFRS, NAIC statutory, FFIEC call report, FERC Form 1, EIA-861, EPA TRI                  |
 | **`rs-` curation**                | Our authored, edited, render-target version of the upstream                          | `rs-gaap` (today); future `rs-ifrs`, `rs-call-report`, `rs-irs`, `rs-ferc`, `rs-statutory`, `rs-tri`       |
 | **Framework manifest**            | Pins packages + bridges + Styles into one composable deliverable                     | `rs-gaap/v1.json`                                                                                          |
-| **Reporting Styles**              | Vertical / filer-profile variants **within** a framework                             | Default, Small Private Company, Banking, Insurance, Mining (defined inside `rs-gaap-reporting-styles/v1/`) |
+| **Reporting Styles**              | Vertical / filer-profile variants **within** a framework                             | Default, Partnership, Limited Liability Company (defined inside `rs-gaap-reporting-styles/v1/`)            |
 | **Bridges**                       | Equivalences between namespaces (curation ↔ upstream for filing, or curation ↔ peer) | `fac-to-rs-gaap`, future `rs-gaap-to-us-gaap` (SEC export), `rs-gaap-to-ifrs`                              |
 | **Tenant CoA → curation mapping** | Per-graph: a customer's chart of accounts → rs-\* leaves                             | LINE_ITEM_RELATES_TO_ELEMENT + Associations (lives in the tenant schema, not here)                         |
 
@@ -53,14 +55,17 @@ without special-casing.
 |                 | Framework                                                                                                                     | Reporting Style                                                                  |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | **What it is**  | A self-contained taxonomy stack with its own concept namespace, presentation, calc, and rules                                 | A vertical / filer-profile composition of named Disclosures _within_ a framework |
-| **Cardinality** | A few (one per regulatory regime: GAAP, IFRS, call report, tax, FERC, …)                                                      | Many per framework (Default, Small Private, Banking, Insurance, Mining, …)       |
+| **Cardinality** | A few (one per regulatory regime: GAAP, IFRS, call report, tax, FERC, …)                                                      | Many per framework (today in `rs-gaap`: Default, Partnership, LLC)               |
 | **Lives at**    | `{name}/{version}.json` (+ shared `packages/` and `bridges/` siblings)                                                        | Rows inside the `*-reporting-styles/v1/` package of a framework                  |
 | **Pinned by**   | Graph for availability (`Graph.taxonomy_pin` controls the tenant copy); Entity for adoption (`EntityTaxonomy` rows per basis) | Entity within a graph (`Entity.reporting_style_id`, extensions DB)               |
-| **Example**     | `rs-gaap@v1` for US GAAP filers                                                                                               | `Banking Style` for an entity in `rs-gaap@v1`                                    |
+| **Example**     | `rs-gaap@v1` for US GAAP filers                                                                                               | `Partnership Style` for an entity in `rs-gaap@v1`                                |
 
-A bank that files a 10-K and a call report is pinned to **two
-frameworks** (`rs-gaap` + `rs-call-report`) and within each one picks
-the **Reporting Style** for its filer profile (Banking Style in rs-gaap).
+A bank that files a 10-K and a call report would be pinned to **two
+frameworks** (`rs-gaap` + a future `rs-call-report`) and within each one
+pick the **Reporting Style** for its filer profile (a future Banking
+Style in rs-gaap). Vertical Styles are deferred; `rs-gaap@v1` ships the
+equity-form family only — Default (corporate), Partnership, and Limited
+Liability Company.
 
 ## Current layout
 
@@ -68,39 +73,67 @@ the **Reporting Style** for its filer profile (Banking Style in rs-gaap).
 frameworks/
 ├── README.md
 │
+├── cm/                         conceptual-model substrate (no depends_on, no bridges)
+│   ├── v1.json                 framework manifest
+│   └── packages/
+│       └── cm/v1/              cm:Debit + cm:Credit posting roles (2 concepts)
+│
 ├── fac/                        universal accounting substrate
 │   ├── v1.json                 framework manifest (flat; v2.json can sit alongside)
 │   └── packages/
-│       ├── fac-traits/v1/      universal trait vocabulary (24 axes; seeds `traits`)
+│       ├── README.md
+│       ├── fac-traits/v1/      universal trait vocabulary (26 axes / 100 members; seeds `traits`)
 │       ├── fac/v1/             FAC concepts (Assets, Liabilities, Equity, …)
 │       ├── fac-presentation/v1/
 │       └── fac-calculations/v1/
 │
-└── rs-gaap/                    US GAAP curation; depends_on fac@v1
-    ├── v1.json                 framework manifest
-    ├── packages/
-    │   ├── README.md
-    │   ├── rs-gaap/v1/                    curated us-gaap leaves
-    │   ├── rs-gaap-traits/v1/             per-element trait bindings (seeds `element_traits`)
-    │   ├── rs-gaap-hierarchy/v1/
-    │   ├── rs-gaap-presentation/v1/
-    │   ├── rs-gaap-calculations/v1/
-    │   ├── rs-gaap-type-subtype/v1/       general-special (type/subtype) arcs
-    │   ├── rs-gaap-references/v1/         ASC citation reference linkbase (attach-by-qname)
-    │   ├── rs-gaap-labels/v1/             supplementary + total-role label linkbase (attach-by-qname)
-    │   ├── rs-gaap-disclosures/v1/
-    │   ├── rs-gaap-disclosure-mechanics/v1/
-    │   ├── rs-gaap-reporting-checklist/v1/
-    │   ├── rs-gaap-reporting-styles/v1/   ★ vertical / filer-profile surface
-    │   ├── rs-gaap-rollup-rules/v1/       L2 rollup-shaped consistency rules
-    │   └── rs-gaap-rules/v1/              L1 cross-tree consistency rules (rs-gaap-targeted; moved from fac)
-    ├── bridges/
-    │   ├── README.md
-    │   ├── fac-to-rs-gaap/v1/
-    │   └── rs-gaap-disclosures-to-rs-gaap-textblocks/v1/
-    └── tenant-exclude/
-        └── v1.json                 per-tenant copy curation (policy, NOT a package)
+├── rs-gaap/                    US GAAP curation; depends_on fac@v1 + cm@v1
+│   ├── v1.json                 framework manifest
+│   ├── packages/
+│   │   ├── README.md
+│   │   ├── rs-gaap/v1/                    curated us-gaap leaves
+│   │   ├── rs-gaap-traits/v1/             per-element trait bindings (seeds `element_traits`)
+│   │   ├── rs-gaap-hierarchy/v1/
+│   │   ├── rs-gaap-presentation/v1/
+│   │   ├── rs-gaap-calculations/v1/
+│   │   ├── rs-gaap-type-subtype/v1/       general-special (type/subtype) arcs
+│   │   ├── rs-gaap-references/v1/         ASC citation reference linkbase (attach-by-qname)
+│   │   ├── rs-gaap-labels/v1/             supplementary + total-role label linkbase (attach-by-qname)
+│   │   ├── rs-gaap-disclosures/v1/
+│   │   ├── rs-gaap-disclosure-mechanics/v1/
+│   │   ├── rs-gaap-reporting-checklist/v1/
+│   │   ├── rs-gaap-reporting-styles/v1/   ★ vertical / filer-profile surface
+│   │   ├── rs-gaap-rollup-rules/v1/       L2 rollup-shaped consistency rules
+│   │   ├── rs-gaap-rules/v1/              L1 cross-tree consistency rules (rs-gaap-targeted; moved from fac)
+│   │   ├── rs-metric/v1/                  metric catalog + Derive rules (standing `metric` block)
+│   │   └── rs-driver/v1/                  forecast lever catalog + Derive rules (reference Structure)
+│   ├── bridges/
+│   │   ├── README.md
+│   │   ├── fac-to-rs-gaap/v1/
+│   │   └── rs-gaap-disclosures-to-rs-gaap-textblocks/v1/
+│   └── tenant-exclude/
+│       └── v1.json                 per-tenant copy curation (policy, NOT a package)
+│
+└── ontology/                   NOT a framework — the canonical RDF ontology
+    └── v1/                     context.jsonld · ontology.ttl · shapes.ttl
 ```
+
+### `cm/` — the conceptual-model substrate (a framework, not a reporting taxonomy)
+
+`cm@v1` is a minimal universal upper-vocabulary forked from Charlie
+Hoffman's Seattle Method [`universal`](https://github.com/seattlemethod/universal)
+conceptual model. v1 is intentionally tiny — two abstract concepts,
+`cm:Debit` and `cm:Credit`. A has-part arc from one of them to a
+Chart-of-Accounts element declares that element as the debit or credit
+leg of a Structure's posting template, which makes double-entry posting
+structure a first-class, queryable atom of an Information Block instead
+of opaque mechanics metadata. It is **not** a reporting taxonomy: it
+owns no presentation, calc, or rules, declares no `depends_on`, and
+ships no bridges (it still carries `framework_type: "reporting"` only
+because that is the sole type in use today). Tenants get it with the
+default pin because `rs-gaap` `depends_on` it. It expands additively
+(Thing, Event, Transaction, LineItem) when event serialization pulls
+those in.
 
 ### `tenant-exclude/` — per-tenant copy curation (a policy, not a package)
 
@@ -148,7 +181,10 @@ A framework manifest lives at `{name}/{version}.json`:
   "title": "RoboSystems rs-gaap Reporting Framework",
   "description": "...",
   "framework_type": "reporting",
-  "depends_on": [{ "framework": "fac", "version": "v1" }],
+  "depends_on": [
+    { "framework": "fac", "version": "v1" },
+    { "framework": "cm", "version": "v1" }
+  ],
   "packages": [
     {
       "standard": "rs-gaap",
@@ -171,7 +207,7 @@ A framework manifest lives at `{name}/{version}.json`:
     {
       "standard": "rs-gaap-reporting-styles",
       "version": "v1",
-      "ordinal": 9,
+      "ordinal": 11,
       "is_required": true
     }
   ],
@@ -195,9 +231,10 @@ Fields:
   reserved for future use.
 - **`depends_on[]`** — frameworks this one builds on. Resolved
   depth-first before this framework's own packages load. Cycles raise
-  `ValueError`. Today only `rs-gaap → fac`; future regulatory frameworks
-  like `rs-call-report` will depend on both `fac` and `rs-gaap` (since
-  call reports map from GAAP numbers with regulatory adjustments).
+  `ValueError`. Today only `rs-gaap → [fac, cm]`; future regulatory
+  frameworks like `rs-call-report` will depend on both `fac` and
+  `rs-gaap` (since call reports map from GAAP numbers with regulatory
+  adjustments).
 - **`packages[]`** — atomic units owned by this framework. Each entry is
   a `(standard, version, ordinal, is_required)` tuple.
   - `ordinal` orders the load: dependencies first, then this framework's
@@ -277,7 +314,7 @@ are intentionally different frameworks projecting from the same ledger.
 The same dynamic applies to call-report-to-GAAP, stat-to-GAAP,
 FERC-to-GAAP.
 
-Today the library ships two frameworks (fac + rs-gaap). The directory
+Today the library ships three frameworks (cm + fac + rs-gaap). The directory
 structure and `depends_on` machinery support adding peer frameworks
 without restructure. Multiple frameworks per graph is already
 mechanically possible at the copy layer — a legacy flat pin can list

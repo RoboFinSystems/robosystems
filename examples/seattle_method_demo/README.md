@@ -24,21 +24,28 @@ is the primary external-facing artifact.
 # Make sure the stack is running
 just start
 
-# Run the demo end-to-end. Provisions a fresh test graph, pulls the
-# mini taxonomy, ingests the 14 JEs, authors rollforwards, runs the
-# mini reconciliation against Charlie's published facts, AND
-# materializes the 4-IB rs-gaap Report — two markdown artifacts land in
-# output/ at the end.
+# Run the demo end-to-end (nine steps). Provisions a fresh test graph,
+# pulls the mini taxonomy, ingests the 14 JEs, authors rollforwards, runs
+# the mini reconciliation against Charlie's published facts, materializes
+# the 4-IB rs-gaap Report, AND exports + validates the bundle artifacts —
+# eight artifacts land in output/ at the end.
 just demo-seattle-method
 
-# Or run a single step
+# Run against an existing graph, or validate without writing
+just demo-seattle-method --graph <graph_id>
+just demo-seattle-method --dry-run
+
+# Or run a single step. `pull` and `provision` stand alone; every other
+# step needs --graph <id> (provision prints one to carry forward).
 just demo-seattle-method --step pull
-just demo-seattle-method --step load
-just demo-seattle-method --step seed-mappings
-just demo-seattle-method --step ingest
-just demo-seattle-method --step author-rollforwards
-just demo-seattle-method --step reconcile        # mini reconciliation only
-just demo-seattle-method --step create-report    # rs-gaap 4-IB Report only
+just demo-seattle-method --step provision
+just demo-seattle-method --graph <id> --step load
+just demo-seattle-method --graph <id> --step seed-mappings
+just demo-seattle-method --graph <id> --step ingest
+just demo-seattle-method --graph <id> --step author-rollforwards
+just demo-seattle-method --graph <id> --step reconcile          # mini reconciliation only
+just demo-seattle-method --graph <id> --step create-report      # rs-gaap 4-IB Report only
+just demo-seattle-method --graph <id> --step download-bundles   # export + validate + DataBook
 
 # Reconcile + create-report can also be run via their dedicated recipes
 # (handy when iterating on the markdown rendering without re-provisioning):
@@ -50,16 +57,15 @@ just demo-seattle-method-create-report <graph_id>
 
 | Step                  | Artifact                                                                                                                                     |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pull`                | `local/taxonomies/mini/` — 30 XBRL artifacts curled from `xbrlsite.azurewebsites.net` AND `local/datasets/seattle_method/GeneralJournal.csv` from Charlie's `seattlemethod/prototypes` GitHub repo (both gitignored — re-fetched on demand) |
+| `pull`                | `local/taxonomies/mini/` — 67 XBRL artifacts curled from `xbrlsite.azurewebsites.net` (the two schemas plus every linkbase the entry point references) AND `local/datasets/seattle_method/GeneralJournal.csv` from Charlie's `seattlemethod/prototypes` GitHub repo (both gitignored — re-fetched on demand) |
 | `provision`           | A dedicated test graph (e.g. `kg_seattle_method_<timestamp>`) — isolated from real customer data                                             |
-| `load`                | 239 mini concepts as Elements + presentation/calculation/definition/formula linkbase arcs as Associations                                    |
-| `seed-mappings`       | ~36 mini→rs-gaap derivation Associations (BS/IS/CF/SE leaves touched by the 14-JE dataset)                                                   |
+| `load`                | 92 mini concepts as Elements + presentation/calculation/definition/formula linkbase arcs as Associations. `mini.xsd` declares 190 elements; only the 92 **monetary** ones become CoA leaves — hypercubes and abstract roll-ups are XBRL structural plumbing, not GL-postable accounts |
+| `seed-mappings`       | 38 mini→rs-gaap derivation Associations (15 BS/IS + 23 flow) covering the BS/IS/CF/SE leaves touched by the 14-JE dataset                    |
 | `ingest`              | 14 Events (one per JournalEntryID), 14 Entries, ~32 LineItems — each LineItem.metadata\_['transaction_description_code'] stamped from CSV    |
 | `author-rollforwards` | 8 rollforward IBs (one per BS leaf with activity) — Cash, Receivables, Inventories, PP&E, AP, Accrued, LTD, PaidInCapital                    |
 | `reconcile`           | `output/seattle-method-case-1.md` — mini-vocab line-by-line comparison vs. Charlie's PoC, classified per the reconciliation categories below |
 | `create-report`       | `output/seattle-method-case-1-four-statements.md` — rs-gaap 4-IB Report (BS / IS / CF / SE) materialized via create-report + reportPackage   |
-| `download-bundles`    | `output/seattle-method-case-1.jsonld` + `output/seattle-method-case-1.zip` — JSON-LD bundle + XBRL 2.1 report package, pulled via the SDK    |
-| `validate`            | Validates the downloaded artifacts **on the host, container-free**: `output/seattle-method-case-1-xbrl-validation.md` (Arelle vs XBRL 2.1 — structural parity) + `output/seattle-method-case-1-shacl-validation.md` (pyshacl vs `frameworks/ontology/v1/shapes.ttl` — semantic parity). Reads the on-disk `.jsonld`/`.zip` we just received — no API/DB. |
+| `download-bundles`    | The aligned artifact set, pulled via the SDK and validated **on the host, container-free** — download, validate and DataBook are one step. Writes `output/seattle-method-case-1.jsonld` (flat JSON-LD bundle), `.holon.jsonld` (native holon — the holon viewer's input), `.zip` (XBRL 2.1 report package), `-shacl-validation.md` (pyshacl vs `frameworks/ontology/v1/shapes.ttl` — semantic parity), `-xbrl-validation.md` (Arelle vs XBRL 2.1 — structural parity), and `.databook.md` (the DataBook, with both verdicts inlined). Validation reads the on-disk artifacts we just received — no API/DB. |
 
 Steps write to `output/` (gitignored — each run stamps fresh graph/report
 IDs, so committing it would churn). Committed reference copies live in
@@ -76,8 +82,15 @@ faithful to his upstream as it evolves.
 | Artifact | Upstream | Local destination (gitignored) |
 | --- | --- | --- |
 | `GeneralJournal.csv` (14 JEs) | [github.com/seattlemethod/prototypes/.../journal-entries-csv](https://github.com/seattlemethod/prototypes/blob/main/record-to-report/journal-entries-csv/GeneralJournal.csv) | `local/datasets/seattle_method/GeneralJournal.csv` |
-| `mini` base taxonomy + linkbases | [xbrlsite.azurewebsites.net/.../mini/base-taxonomy](https://xbrlsite.azurewebsites.net/2026/reporting-framework/mini/base-taxonomy/mini_ModelStructure.html) | `local/taxonomies/mini/` |
+| `mini` base taxonomy + linkbases (**2023** `reporting-scheme`) | [xbrlsite.azurewebsites.net/2023/reporting-scheme/mini/base-taxonomy](https://xbrlsite.azurewebsites.net/2023/reporting-scheme/mini/base-taxonomy/mini-entryPoint.xsd) — authoritative upstream is [github.com/seattlemethod/mini](https://github.com/seattlemethod/mini); we pull from xbrlsite because that is where the entry point's `linkbaseRef` hrefs resolve | `local/taxonomies/mini/` |
 | Record-to-Report `instance.xml` (reconciliation reference) | [xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/report.zip](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/) | `local/datasets/seattle_method/report/instance.xml` |
+
+> **Not to be confused with the 2026 `MINI`.** This demo pulls the
+> **2023** `reporting-scheme` mini (`pull_mini.sh`). The sibling
+> [World Online demo](../seattle_method_world_online/) pulls the **2026**
+> `reporting-framework` MINI (`pull_mini_2026.sh`) for Charlie's
+> 22,288-line GL. Different framework versions, different demos — check
+> which script you are reading before copying a URL between them.
 
 `pull_mini.sh`, `pull_general_journal.sh`, and `pull_expected_report.sh`
 are idempotent (`step_pull` runs all three); re-runs overwrite the

@@ -276,7 +276,7 @@ Common XBRL elements you'll encounter:
 **Solution:** Ensure RoboSystems is running:
 ```bash
 just start
-just logs robosystems-api  # Check API logs
+just logs api  # Check API logs
 ```
 
 **Problem:** "No credentials found"

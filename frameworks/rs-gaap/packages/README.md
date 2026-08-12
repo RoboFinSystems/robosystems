@@ -2,13 +2,17 @@
 
 This directory holds the **packages owned by the `rs-gaap@v1` framework** —
 the curated us-gaap leaves, the presentation/calc/disclosure machinery
-that lives on top of them, and the Reporting Styles surface for
-vertical/filer-profile flavoring.
+that lives on top of them, the Reporting Styles surface for
+vertical/filer-profile flavoring, and the metric / forecast-lever
+catalogs that derive from the same anchors.
 
 Packages owned by the upstream **`fac@v1`** framework (Charlie Hoffman's
 universal accounting-concept substrate) live next door at
-`../../../fac/packages/`. They are inherited via this framework's
-`depends_on: [{framework: fac, version: v1}]` and load first.
+`../../../fac/packages/`, and the **`cm@v1`** conceptual-model substrate
+(the `cm:Debit` / `cm:Credit` posting roles) at `../../../cm/packages/`.
+Both are inherited via this framework's
+`depends_on: [{framework: fac, version: v1}, {framework: cm, version: v1}]`
+and load first.
 
 Each package here is a versioned, self-contained JSON-LD unit;
 migration 0002 walks the framework manifest to load them in
@@ -65,8 +69,8 @@ Each package declares its provenance in its top-level JSON-LD metadata:
 packages/
 ├── rs-gaap/v1/                       forked  — RoboSystems canonical us-gaap (~2,000 leaves)
 ├── rs-gaap-traits/v1/                native  — per-element trait bindings for rs-gaap leaves;
-│                                              seeds `element_traits` junction (binds rs-gaap
-│                                              elements to fac-traits axes)
+│                                               seeds `element_traits` junction (binds rs-gaap
+│                                               elements to fac-traits axes)
 ├── rs-gaap-hierarchy/v1/             forked  — rs-gaap class hierarchy
 ├── rs-gaap-presentation/v1/          native  — rs-gaap presentation hierarchies
 ├── rs-gaap-calculations/v1/          native  — rs-gaap calc DAG (composes with fac-calculations)
@@ -76,11 +80,19 @@ packages/
 ├── rs-gaap-disclosures/v1/           native  — named Disclosures (~30)
 ├── rs-gaap-disclosure-mechanics/v1/  native  — DM rules per Disclosure
 ├── rs-gaap-reporting-checklist/v1/   native  — DR rules per report type
-└── rs-gaap-reporting-styles/v1/      native  — vertical / filer-profile composition surface
-                                                (Default, Small Private, Banking, Insurance, Mining, …)
+├── rs-gaap-reporting-styles/v1/      native  — vertical / filer-profile composition surface
+│                                               (v1 ships Default, Partnership, LLC)
+├── rs-gaap-rollup-rules/v1/          native  — L2 rollup-shaped consistency rules
+├── rs-gaap-rules/v1/                 native  — L1 cross-tree consistency rules (moved from fac)
+├── rs-metric/v1/                     native  — metric catalog: one concept + one Derive rule per
+│                                               metric, plus the standing Key Financial Metrics
+│                                               block (block_type `metric`) compute-metrics fills
+└── rs-driver/v1/                     native  — forecast lever catalog: one concept + one Derive
+                                                rule per lever, plus the Driver Catalog reference
+                                                Structure (block_type `custom`, never rendered)
 ```
 
-The trait vocabulary (`fac-traits/v1`, 99 traits across 26 categories)
+The trait vocabulary (`fac-traits/v1`, 100 traits across 26 categories)
 lives in the upstream `fac` framework and is inherited here via
 `depends_on`. `rs-gaap-traits/v1/` is the rs-gaap-specific binding —
 it declares which trait values apply to which rs-gaap leaves. Future
@@ -110,12 +122,29 @@ the hand-authored source (provenance in git history; the spent
 JSON-LD artifacts are now the source of truth, edit them directly. Both are `tenant_copy: true` —
 tenants get the citations and labels for the concepts they keep.
 
-**`rs-gaap-reporting-styles`** is THE vertical-flavor surface. New
-industries (Mining, Cooperative, B-Corp, etc.) are added
-here as new Reporting Style rows, **not** as new frameworks. The
-framework boundary is regulatory regime (GAAP, IFRS, call report,
+**`rs-gaap-reporting-styles`** is THE vertical-flavor surface. v1 ships
+the equity-form family only — `Default` (corporate), `Partnership`, and
+`LimitedLiabilityCompany`. New industries (Mining, Cooperative, B-Corp,
+etc.) land here as new Reporting Style rows, **not** as new frameworks.
+The framework boundary is regulatory regime (GAAP, IFRS, call report,
 statutory, tax); the Reporting Style boundary is filer profile
 within a regime.
+
+**`rs-metric`** and **`rs-driver`** are catalog packages owned by
+`rs-gaap@v1` but named without the `rs-gaap-` prefix, because each
+declares its own namespace (`…/rs-gaap/metrics/v1/`,
+`…/rs-gaap/drivers/v1/`) rather than adding to the rs-gaap concept
+namespace. Both follow the same shape: one qname-addressable concept per
+metric / lever, one `Derive`-pattern rule per concept, and a container
+node that is _both_ an abstract element and a Structure whose
+presentation arcs enumerate the catalog. They differ in direction: a
+metric's rule computes it from rs-gaap anchor facts
+(`$Metric = f(rs-gaap operands)`) and `compute-metrics` upserts the
+standing `metric` block; a driver's rule states the driven mechanics
+against rs-gaap anchors (`$Anchor = f(prior anchors, lever)`) while the
+lever _values_ are asserted per scenario as facts, and `compute-forecast`
+walks the cascade. The Driver Catalog Structure is `block_type: custom`
+— a reference catalog, never rendered.
 
 **SFAC 6** doesn't have its own package — its content (Assets,
 Liabilities, Equity, Revenues, Expenses, etc.) is encoded as the
@@ -130,10 +159,10 @@ inherit the same axes.
 
 A Reporting Style is a **selection vector** over per-statement
 presentation Structures, identified by a 4-segment code
-`{BS-layout}-{equity-form}-{IS-layout}-{CF-method}` (e.g.
-`BSC-CORP-IS01-CF1`). A preset composes one Network (presentation
-Structure) per statement type; switching a graph's Style re-renders its
-statements against the composed Networks.
+`{BS-layout}-{equity-form}-{IS-layout}-{CF-method}` (the seeded
+`Default` is `BSC-CORP-IS02-CF1`). A preset composes one Network
+(presentation Structure) per statement type; switching an entity's Style
+re-renders its statements against the composed Networks.
 
 Adding a preset is **pure package content** — no migration. On a fresh
 `reset-local`, migration `0008` re-reads this package's declarations and
@@ -156,10 +185,13 @@ composition.
      (`balance_sheet`, `income_statement`, `cash_flow_statement`,
      `equity_statement`). Each `networkRoleUri` is a presentation
      Structure's `roleUri`.
-     A Style with no `reportingStyleNetworks` (e.g. `Banking`) stays a
-     non-selectable placeholder.
-3. `just reset-local`, then `change-reporting-style` to the preset's
-   Structure id (`uuid5(roleUri, "structure")`) and re-render.
+     A Style whose composition is incomplete stays a non-selectable
+     placeholder — `change-reporting-style` rejects any target missing a
+     Network for one of those four statement types. All three seeded
+     Styles are complete today.
+3. `just reset-local`, then `change-reporting-style` (entity-scoped; it
+   flips `entities.reporting_style_id`) to the preset's Structure id
+   (`uuid5(roleUri, "structure")`) and re-render.
 
 ### The equity-form axis (worked example)
 
@@ -180,9 +212,14 @@ leaves`, which already sums `PartnersCapital`/`MembersEquity`), so the
 
 The `Partnership` / `LimitedLiabilityCompany` presets then compose those
 Networks (`BSC-PART-IS02-CF1`, `BSC-LLC-IS02-CF1`) with the shared
-`IS-multistep` + `CashFlow-indirect`. New graphs default to the matching
-Style from the entity's `entity_type` at creation (see
-`operations/graph/reporting_style_defaults.py`).
+`IS-multistep` + `CashFlow-indirect`. A new entity is defaulted to the
+matching Style from its `entity_type` at creation — partnership → PART,
+llc / limited_liability_company → LLC, everything else → the corporate
+Default (see `operations/graph/reporting_style_defaults.py`). The Style
+is pinned on the **entity**, not the graph: `entities.reporting_style_id`
+in the extensions DB (migration `0020`), so heterogeneous entities in one
+graph can each carry their own while resolving to the same canonical
+calc-DAG subtotals.
 
 **Known limit:** auto-derived Retained Earnings is corporate-specific —
 partnerships/LLCs roll undistributed earnings into the capital account, not

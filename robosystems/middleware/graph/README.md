@@ -143,14 +143,36 @@ status = await queue.get_query_status(query_id)
 result = await queue.get_query_result(query_id)
 ```
 
-`admission_control.py` decides whether to accept at all. **Memory rejection is
-not gated on percent used.** `ADMISSION_MEMORY_THRESHOLD` (85%) only *reports*
-memory pressure; rejection uses `MIN_AVAILABLE_MB` (1 GB of absolute headroom).
-The reason is in `config/defaults.py`: a LadybugDB buffer pool is a fixed
+`admission_control.py` decides whether to accept at all. This one is
+**percent-gated on every axis**: `AdmissionController.check_admission()` issues
+`REJECT_MEMORY` as soon as `memory_percent` exceeds
+`ADMISSION_MEMORY_THRESHOLD` (85%) and `REJECT_CPU` above
+`ADMISSION_CPU_THRESHOLD` (90%). Queue capacity (80%) is softer — crossing
+`ADMISSION_QUEUE_THRESHOLD` starts *probabilistic* load shedding (50/70/90%
+rejection as the queue fills, scaled down for high-priority queries), not a hard
+reject, and a combined pressure score over 0.7 sheds on top of that.
+`LOAD_SHEDDING_ENABLED=false` short-circuits the whole gate to accept.
+
+**Two admission controllers exist and they do not behave alike — don't
+generalize from one to the other.**
+
+|                | `middleware/graph/admission_control.py` (this one) | `graph_api/core/admission_control.py` |
+| -------------- | ------------------------------------------------- | ------------------------------------- |
+| Guards | the query queue, in the API process | every Graph API request, on the engine host |
+| Memory gate | percent used > 85% → `REJECT_MEMORY` | absolute headroom < `MIN_AVAILABLE_MB` (1 GB); percent is *reported only* |
+| CPU | > 90%, uniform | > 90% as wired, tightened 10 points for ingestion (the class's own 95 default is overridden by `get_admission_controller`) |
+| Third axis | queue depth (probabilistic shedding) | per-database connection count |
+| Config | `ADMISSION_*` / `admission/` SSM | `LBUG_ADMISSION_*` / `lbug_admission/` SSM |
+
+The absolute-headroom design belongs to the *Graph API* controller and is
+argued in `config/defaults.py`: a LadybugDB buffer pool is a fixed
 pre-commitment that is *supposed* to fill, so percent-of-total conflates that
 constant with the query working set that actually predicts exhaustion, and an
-absolute figure does not move when the pool or the instance size changes. CPU
-(90%) and queue capacity (80%) are percentage-gated.
+absolute figure does not move when the pool or the instance size changes. That
+reasoning applies where the buffer pool lives; the queue gate here runs in the
+API process, which has no buffer pool, so percent-used is a fair proxy there.
+Both read `AdmissionDefaults.MEMORY_THRESHOLD = 85.0` — same number, opposite
+role.
 
 `execution_strategies.py` picks the execution path (direct query vs MCP,
 load-aware). `streaming_wrapper.py` adapts streaming results for Graph API
@@ -248,7 +270,7 @@ Read every one of these through `robosystems.config.env`, never `os.getenv()`.
 LBUG_DATABASE_PATH=./data/lbug-dbs      # database directory
 LBUG_ACCESS_PATTERN=api_auto            # api_auto | api_writer | direct_file
 LBUG_NODE_TYPE=writer
-LBUG_CONNECTION_POOL_SIZE=10
+LBUG_CONNECTION_POOL_SIZE=10            # inert — surfaced but read by nothing; pool is capped at 3
 LBUG_DATABASES_PER_INSTANCE=10
 GRAPH_API_URL=                          # resolved dynamically in prod
 ```
