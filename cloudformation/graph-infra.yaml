@@ -849,6 +849,85 @@ Resources:
   # platform gets a refresh path that is not GitHub Actions — an ops CLI command,
   # a post-image-push hook, or an Operator tool — with the rate-control defaults
   # applied in one place rather than at each caller.
+
+  # The refresh dispatches this stack-owned document rather than the generic
+  # AWS-RunShellScript, for three reasons that are one fact — the document name
+  # is the only environment- or purpose-specific field an SSM invocation event
+  # carries:
+  #   1. The failure rule below filters on it. Matching bare Failed/TimedOut
+  #      invocation events made every failed SSM command in the account page
+  #      BOTH environments' topics, each stamping its own environment name into
+  #      the message.
+  #   2. The Lambda role's SendCommand collapses to this one document: the role
+  #      can trigger a refresh on this environment's fleet, not run arbitrary
+  #      shell on it.
+  #   3. A hand-run refresh gets the same wrapper semantics instead of
+  #      re-typing them.
+  #
+  # Skip normalization: "script not installed" and the script's own exit 3
+  # ("/etc/environment predates the completeness contract") exit 0 here, with
+  # the REFRESH_RESULT stdout marker as the signal the Lambda classifies on.
+  # SSM counts every non-zero exit toward MaxErrors, so a skip that exits
+  # non-zero burns the error budget and terminates the rest of the fleet's
+  # queued invocations — a uniformly not-yet-cycled fleet could never even
+  # report itself. Real failures keep their non-zero exits, so MaxErrors still
+  # halts a bad rollout and the rule below still pages.
+  GraphRefreshDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: !Sub "${AWS::StackName}-graph-refresh"
+      DocumentType: Command
+      UpdateMethod: NewVersion
+      TargetType: /AWS::EC2::Instance
+      Content:
+        schemaVersion: "2.2"
+        description: >-
+          Refresh the graph API container on this instance to the current image.
+          Instances that have not yet cycled onto the refresh script (or whose
+          /etc/environment predates the completeness contract) exit 0 with a
+          REFRESH_RESULT=skipped-* marker rather than consuming the MaxErrors
+          budget.
+        parameters:
+          MaxWaitMinutes:
+            type: String
+            description: Minutes to wait for in-flight destructive operations
+            default: "30"
+            allowedPattern: "^[0-9]{1,4}$"
+          ForceIgnoreBusy:
+            type: String
+            description: Bypass the busy-counter wait (emergency escape hatch)
+            default: "false"
+            allowedValues: ["true", "false"]
+          ForceRestart:
+            type: String
+            description: Restart even when the image digest is unchanged
+            default: "false"
+            allowedValues: ["true", "false"]
+          ExecutionTimeout:
+            type: String
+            description: Per-instance execution timeout in seconds
+            default: "2700"
+            allowedPattern: "^[0-9]{1,6}$"
+        mainSteps:
+          - action: aws:runShellScript
+            name: refreshGraphContainer
+            inputs:
+              timeoutSeconds: "{{ ExecutionTimeout }}"
+              runCommand:
+                - '[ -x /usr/local/bin/refresh-graph-container.sh ] || { echo REFRESH_RESULT=skipped-no-script; exit 0; }'
+                - 'MAX_WAIT_MINUTES={{ MaxWaitMinutes }} FORCE_IGNORE_BUSY={{ ForceIgnoreBusy }} FORCE_RESTART={{ ForceRestart }} /usr/local/bin/refresh-graph-container.sh; rc=$?; [ "$rc" -eq 3 ] && exit 0; exit $rc'
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-graph-refresh"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
   GraphContainerRefreshFunction:
     Type: AWS::Lambda::Function
     DeletionPolicy: Delete
@@ -869,6 +948,7 @@ Resources:
         Variables:
           ENVIRONMENT: !Ref Environment
           ALERT_TOPIC_ARN: !Ref InfraAlertTopic
+          REFRESH_DOCUMENT_NAME: !Ref GraphRefreshDocument
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -905,12 +985,13 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # SendCommand is scoped to the document AND to instances carrying
-              # this environment's Service tag, so this role cannot be used to
-              # run shell on arbitrary instances in the account.
+              # SendCommand is scoped to the stack's own refresh document AND to
+              # instances carrying this environment's Service tag: the role can
+              # trigger a refresh on this environment's fleet, not run arbitrary
+              # shell on it.
               - Effect: Allow
                 Action: ssm:SendCommand
-                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${GraphRefreshDocument}"
               - Effect: Allow
                 Action: ssm:SendCommand
                 Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
@@ -939,6 +1020,13 @@ Resources:
   # Failure notification is push, not poll. Previously a failed refresh surfaced
   # only as a red job in a workflow someone had to be watching; nothing paged.
   # This fires regardless of whether anyone is looking at the run.
+  #
+  # Filtered to this stack's own document — the only environment- or
+  # purpose-specific field an SSM invocation event carries. Unfiltered, this
+  # pattern matched every failed SSM command in the account, so one prod
+  # failure paged BOTH environments' topics with each stamping its own
+  # environment name into the message, and unrelated commands (secrets
+  # rotation, maintenance sweeps) paged as "graph container refresh".
   GraphRefreshFailureRule:
     Type: AWS::Events::Rule
     Properties:
@@ -951,6 +1039,8 @@ Resources:
         detail-type:
           - EC2 Command Invocation Status-change Notification
         detail:
+          document-name:
+            - !Ref GraphRefreshDocument
           status:
             - Failed
             - TimedOut

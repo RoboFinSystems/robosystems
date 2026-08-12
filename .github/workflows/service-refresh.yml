@@ -305,8 +305,11 @@ jobs:
             jq -r '.counts // {} | to_entries[] | "| \(.key) | \(.value) |"' /tmp/status.json
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # `failed` already excludes the skip exit codes (3 = stale
-          # /etc/environment, 4 = script not installed yet). Those mean the
+          # `failed` already excludes the skips (script not installed yet, or
+          # stale /etc/environment). The refresh document normalizes those to
+          # exit 0 — a non-zero exit would consume the SSM MaxErrors budget and
+          # terminate the rest of the fleet's invocations — and the Lambda
+          # classifies them off the REFRESH_RESULT marker. A skip means the
           # instance has not cycled onto the new scripts and its container was
           # deliberately left alone — a transitional state that must not fail a
           # deploy, but must stay visible, which the summary above does.

@@ -4,9 +4,10 @@ Refresh graph API containers across the fleet with one tag-targeted SSM command.
 The per-instance work — wait for in-flight destructive ops, pull, skip on an
 unchanged digest, swap, health-check, prune — lives on the instance in
 `/usr/local/bin/refresh-graph-container.sh`. This function is the *trigger and
-the aggregator, not the worker*: it dispatches one `AWS-RunShellScript` command
-at a tag expression and reports back. No instance enumeration, no per-instance
-job, no runner sleeping through a busy-wait.
+the aggregator, not the worker*: it dispatches the stack's own refresh document
+(graph-infra.yaml `GraphRefreshDocument`, which wraps that script) at a tag
+expression and reports back. No instance enumeration, no per-instance job, no
+runner sleeping through a busy-wait.
 
 Why that matters: `databases_per_instance: 1` on every tier means customer count
 is instance count, so the enumerate-into-a-matrix approach this replaces hit a
@@ -39,7 +40,15 @@ ssm = boto3.client("ssm")
 ENVIRONMENT = os.environ["ENVIRONMENT"]
 ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN", "")
 
-REFRESH_SCRIPT = "/usr/local/bin/refresh-graph-container.sh"
+# The stack-owned SSM document that wraps refresh-graph-container.sh. Dispatching
+# our own document rather than AWS-RunShellScript is what lets the failure-paging
+# EventBridge rule filter on document-name (the only environment- or
+# purpose-specific field an SSM invocation event carries) and lets the role's
+# SendCommand grant collapse to exactly this behavior. The wrapper shell — the
+# presence guard and the skip-exit normalization — lives in the document, next to
+# the rule that depends on it. Required, like ENVIRONMENT: falling back to the
+# generic document would silently un-scope the paging rule.
+REFRESH_DOCUMENT = os.environ["REFRESH_DOCUMENT_NAME"]
 
 # Rate control defaults live here, not only in the caller, so a hand-rolled
 # invocation cannot accidentally hit the fleet at SSM's default concurrency of
@@ -50,9 +59,9 @@ REFRESH_SCRIPT = "/usr/local/bin/refresh-graph-container.sh"
 DEFAULT_MAX_CONCURRENCY = "10%"
 DEFAULT_MAX_ERRORS = "10%"
 
-# The busy-wait ceiling the instance script honors. executionTimeout must always
-# exceed it, and is set explicitly rather than left to AWS-RunShellScript's
-# 3600s default so that raising the wait cannot silently truncate the command.
+# The busy-wait ceiling the instance script honors. The document's
+# ExecutionTimeout parameter must always exceed it, and is passed explicitly on
+# every dispatch so that raising the wait cannot silently truncate the command.
 DEFAULT_MAX_WAIT_MINUTES = 30
 REFRESH_HEADROOM_SECONDS = 900
 
@@ -78,19 +87,22 @@ ALL_GROUPS = ["writer", "shared-replicas"]
 
 TERMINAL_STATUSES = {"Success", "Failed", "Cancelled", "TimedOut", "Cancelling"}
 
-# Exit codes that mean "this instance has not picked up the new deployment yet"
-# rather than "the refresh broke." SSM records any non-zero exit as `Failed`, so
-# without this classification a fleet that has not cycled onto the new scripts
-# fails the caller — which is the opposite of the intent, since the container was
-# deliberately left untouched.
+# REFRESH_RESULT markers that mean "this instance has not picked up the new
+# deployment yet" rather than "the refresh broke":
 #
-#   3 — script present, /etc/environment predates the completeness contract
-#   4 — script not on the instance at all (installed at boot)
+#   skipped-no-script — the refresh script is not on the instance at all
+#                       (scripts install at boot; the instance predates them)
+#   skipped-stale-env — script present, but /etc/environment predates the
+#                       completeness contract (the script's exit 3)
 #
-# These are matched on the script's own explicit exit codes, never inferred from a
-# generic 127: a missing `docker` inside the script also exits 127, and that is a
-# real failure that must not be downgraded.
-SKIP_RESPONSE_CODES = {3: "skipped-stale-env", 4: "skipped-no-script"}
+# The document normalizes both to exit 0, because SSM counts every non-zero exit
+# toward MaxErrors: a skip that exits non-zero burns the error budget and
+# terminates the rest of the fleet's queued invocations, so a uniformly
+# not-yet-cycled fleet could never even report itself. The stdout marker is the
+# signal instead. Real failures keep their non-zero exits — MaxErrors still halts
+# a bad rollout. Markers are matched exactly, never inferred from an exit code: a
+# missing `docker` inside the script exits 127 and must stay a failure.
+SKIP_RESULTS = {"skipped-no-script", "skipped-stale-env"}
 
 
 def _targets_for(group: str, environment: str) -> list[dict[str, Any]]:
@@ -106,25 +118,25 @@ def _targets_for(group: str, environment: str) -> list[dict[str, Any]]:
   ]
 
 
-def _build_commands(
-  max_wait_minutes: int, force_ignore_busy: bool, force_restart: bool
-) -> list[str]:
-  """The two shell lines the fleet runs.
+def _build_parameters(
+  max_wait_minutes: int,
+  force_ignore_busy: bool,
+  force_restart: bool,
+  execution_timeout: int,
+) -> dict[str, list[str]]:
+  """The document parameters that vary per dispatch.
 
-  The first is a presence guard with its own exit code so that "this instance
-  has not picked up the script yet" is reported as itself. It must NOT be
-  inferred from bash's 127 — a missing `docker` inside the script exits 127 too,
-  and that is a real failure that must not be downgraded to a benign skip.
+  The wrapper shell itself — the presence guard and the skip-exit
+  normalization — lives in the document (graph-infra.yaml), not here: the
+  document is the reviewable, IAM-scoped statement of what this function can
+  make an instance do, and the paging rule filters on its name.
   """
-  env_prefix = (
-    f"MAX_WAIT_MINUTES={max_wait_minutes} "
-    f"FORCE_IGNORE_BUSY={'true' if force_ignore_busy else 'false'} "
-    f"FORCE_RESTART={'true' if force_restart else 'false'}"
-  )
-  return [
-    f"[ -x {REFRESH_SCRIPT} ] || {{ echo REFRESH_RESULT=skipped-no-script; exit 4; }}",
-    f"{env_prefix} {REFRESH_SCRIPT}",
-  ]
+  return {
+    "MaxWaitMinutes": [str(max_wait_minutes)],
+    "ForceIgnoreBusy": ["true" if force_ignore_busy else "false"],
+    "ForceRestart": ["true" if force_restart else "false"],
+    "ExecutionTimeout": [str(execution_timeout)],
+  }
 
 
 def start(event: dict[str, Any]) -> dict[str, Any]:
@@ -143,20 +155,19 @@ def start(event: dict[str, Any]) -> dict[str, Any]:
 
   groups = ALL_GROUPS if node_type == "all" else [node_type]
   execution_timeout = max_wait_minutes * 60 + REFRESH_HEADROOM_SECONDS
-  commands = _build_commands(max_wait_minutes, force_ignore_busy, force_restart)
+  parameters = _build_parameters(
+    max_wait_minutes, force_ignore_busy, force_restart, execution_timeout
+  )
 
   dispatched: list[dict[str, Any]] = []
   for group in groups:
     targets = _targets_for(group, environment)
     try:
       response = ssm.send_command(
-        DocumentName="AWS-RunShellScript",
+        DocumentName=REFRESH_DOCUMENT,
         Targets=targets,
         Comment=f"graph container refresh ({environment}/{group})"[:100],
-        Parameters={
-          "commands": commands,
-          "executionTimeout": [str(execution_timeout)],
-        },
+        Parameters=parameters,
         MaxConcurrency=max_concurrency,
         MaxErrors=max_errors,
         TimeoutSeconds=3600,
@@ -225,24 +236,28 @@ def status(event: dict[str, Any]) -> dict[str, Any]:
         counts[inv_status] = counts.get(inv_status, 0) + 1
         overall[inv_status] = overall.get(inv_status, 0) + 1
 
-        response_code = inv.get("ResponseCode")
-        skip_reason = SKIP_RESPONSE_CODES.get(response_code) if response_code else None
-
-        outcome = _refresh_result(inv) or skip_reason
+        outcome = _refresh_result(inv)
         if outcome:
           results[outcome] = results.get(outcome, 0) + 1
 
+        if outcome in SKIP_RESULTS:
+          # Deliberately not a failure, whatever the invocation status says:
+          # the container was left running its current image on purpose. Under
+          # the current document skips arrive as Success (their exits are
+          # normalized to 0); a Failed invocation carrying a skip marker is a
+          # hand-run of the raw script, and gets the same grace.
+          skipped += 1
+          continue
+
         if inv_status in {"Failed", "TimedOut"}:
-          if skip_reason:
-            # Deliberately not a failure: the container was left running its
-            # current image on purpose.
-            skipped += 1
-            continue
           failures.append(
             {
               "instance_id": inv.get("InstanceId", "unknown"),
               "status": inv_status,
-              "response_code": str(response_code if response_code is not None else ""),
+              # Distinguishes "ran and failed" from "Terminated before running"
+              # — the latter means MaxErrors tripped elsewhere in the fleet.
+              "status_details": inv.get("StatusDetails", ""),
+              "response_code": _response_code(inv),
             }
           )
 
@@ -273,6 +288,17 @@ def _refresh_result(invocation: dict[str, Any]) -> str | None:
       if line.startswith("REFRESH_RESULT="):
         return line.split("=", 1)[1]
   return None
+
+
+def _response_code(invocation: dict[str, Any]) -> str:
+  """The shell exit code, from where SSM actually reports it: on the plugin,
+  never on the invocation itself. -1 means the plugin never ran (the invocation
+  was terminated first) and is reported as empty, like a missing plugin."""
+  for plugin in invocation.get("CommandPlugins", []):
+    code = plugin.get("ResponseCode")
+    if code is not None and code != -1:
+      return str(code)
+  return ""
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

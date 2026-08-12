@@ -22,11 +22,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "bin" / "userdata" / "common" / "refresh-graph-container.sh"
 LAMBDA = REPO_ROOT / "bin" / "lambda" / "graph_container_refresh.py"
+TEMPLATE = REPO_ROOT / "cloudformation" / "graph-infra.yaml"
 
-# Exit codes the script uses to mean "this instance has not picked up the new
-# deployment yet." The refresh Lambda classifies these as skips rather than
-# failures, so they are a contract between two files — see
-# TestExitCodeContract at the bottom.
+# The exit code the script uses to mean "this instance has not picked up the new
+# deployment yet." The fleet-refresh document normalizes it to 0 and the Lambda
+# classifies the skip off the REFRESH_RESULT marker, so the skip semantics are a
+# contract across three files — see TestSkipContract at the bottom.
 EXIT_STALE_ENV = 3
 
 REQUIRED_ENV = {
@@ -352,33 +353,44 @@ class TestImageTag:
     assert not any(pull.endswith(":prod") for pull in result.pulls)
 
 
-class TestExitCodeContract:
-  """The skip exit codes are a contract between the script and its aggregator.
+class TestSkipContract:
+  """The skip semantics are a contract across three files.
 
-  SSM records any non-zero exit as `Failed`, so something has to know that 3 and
-  4 mean "this instance has not cycled onto the new scripts yet, and its
-  container was deliberately left alone." If the script's codes drift from the
-  aggregator's classification, an un-cycled fleet goes from a warning back to a
-  failed deploy — the exact regression this pairing exists to prevent, and one
-  nothing else would catch. The aggregator moved from the composite action to the
-  Lambda when the per-instance matrix was retired; the contract did not change.
+  The script exits 3 for a stale /etc/environment, printing a REFRESH_RESULT
+  marker alongside. The fleet-refresh SSM document (graph-infra.yaml) guards for
+  a missing script and normalizes both skip shapes to exit 0 — SSM counts every
+  non-zero exit toward MaxErrors, so a skip that exits non-zero burns the error
+  budget and terminates the rest of the fleet's invocations. The Lambda then
+  classifies skips off the markers, never off an exit code. If any leg drifts, an
+  un-cycled fleet goes from a warning back to a failed deploy (or back to
+  cascade-terminating itself) — regressions nothing else would catch, and the
+  second of which shipped in the document's first fleet-wide prod run.
   """
 
-  def test_lambda_classifies_the_scripts_stale_env_code_as_a_skip(self):
-    script = SCRIPT.read_text()
-    handler = LAMBDA.read_text()
-    assert f"EXIT_STALE_ENV={EXIT_STALE_ENV}" in script
-    assert f'{EXIT_STALE_ENV}: "skipped-stale-env"' in handler
-
-  def test_lambda_guards_for_a_missing_script(self):
+  def test_document_guards_for_a_missing_script_and_exits_zero(self):
     """Instances install common scripts at boot, so an un-cycled instance has no
-    script to run. That must be a distinct exit code rather than an inference
-    from bash's 127, which a missing `docker` would also produce.
+    script to run. The guard's marker must be a distinct signal rather than an
+    inference from bash's 127, which a missing `docker` would also produce —
+    and it must exit 0, or one un-cycled instance terminates the whole rollout.
     """
+    template = TEMPLATE.read_text()
+    assert "REFRESH_RESULT=skipped-no-script; exit 0" in template
+
+  def test_document_normalizes_the_scripts_stale_env_exit(self):
+    script = SCRIPT.read_text()
+    template = TEMPLATE.read_text()
+    assert f"EXIT_STALE_ENV={EXIT_STALE_ENV}" in script
+    assert f'[ "$rc" -eq {EXIT_STALE_ENV} ] && exit 0' in template
+
+  def test_lambda_classifies_skips_off_the_markers(self):
+    """The markers the script and document emit must be exactly the ones the
+    Lambda treats as skips."""
     handler = LAMBDA.read_text()
-    assert "-x {REFRESH_SCRIPT}" in handler or "-x /usr/local/bin" in handler
-    assert "exit 4" in handler
-    assert '4: "skipped-no-script"' in handler
+    script = SCRIPT.read_text()
+    template = TEMPLATE.read_text()
+    assert '"skipped-no-script", "skipped-stale-env"' in handler
+    assert "REFRESH_RESULT=skipped-stale-env" in script
+    assert "REFRESH_RESULT=skipped-no-script" in template
 
   def test_skips_are_excluded_from_the_failure_count(self):
     """`failed` is what the workflow fails on, so skips must not reach it."""
