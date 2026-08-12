@@ -397,3 +397,37 @@ class TestSkipContract:
     handler = LAMBDA.read_text()
     assert '"failed": len(failures)' in handler
     assert '"skipped": skipped' in handler
+
+
+class TestMarkerVisibility:
+  """The REFRESH_RESULT marker must land inside SSM's truncation window.
+
+  ListCommandInvocations truncates each plugin's inline Output after 2500
+  characters, keeping the head. The script prints its marker last — after
+  docker-pull progress — so on a real image refresh the marker fell outside
+  the window and the Lambda classified nothing (empty refresh_results on the
+  document's first fleet-wide prod run; the skip and no-op paths survived only
+  because they exit before the pull). The document therefore captures the
+  script's output to an on-instance log and forwards the marker first,
+  followed by a bounded tail: marker + 2000-byte tail fits the 2500-character
+  window by construction.
+  """
+
+  def test_document_forwards_the_marker_before_the_log_tail(self):
+    template = TEMPLATE.read_text()
+    marker_at = template.find('grep "^REFRESH_RESULT=" "$LOG"')
+    tail_at = template.find('tail -c 2000 "$LOG"')
+    assert marker_at != -1, "document no longer forwards the marker line"
+    assert tail_at != -1, "document no longer forwards a bounded log tail"
+    assert marker_at < tail_at, "marker must precede the tail or truncation eats it"
+
+  def test_document_captures_the_scripts_output_to_the_log(self):
+    """Both streams: on failure the tail is the only inline diagnostic left."""
+    template = TEMPLATE.read_text()
+    assert '>"$LOG" 2>&1' in template
+
+  def test_skip_normalization_still_reads_the_captured_exit_code(self):
+    """The redirect moved the exit-code capture onto its own line; the exit-3
+    normalization must keep consuming that same $rc, not a fresh $?."""
+    template = TEMPLATE.read_text()
+    assert 'refresh-graph-container.sh >"$LOG" 2>&1; rc=$?' in template
