@@ -22,6 +22,7 @@ Organization (mirrors .env file section order):
 import os
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Union
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
   from .valkey_registry import ValkeyDatabase
@@ -130,6 +131,14 @@ def get_bool_env(key: str, default: bool = False) -> bool:
 def get_str_env(key: str, default: str = "") -> str:
   """Get a string env var."""
   return os.getenv(key, default)
+
+
+def _url_origin(url: str) -> str | None:
+  """Reduce a URL to its origin (scheme://netloc); None if it lacks either."""
+  parsed = urlparse((url or "").strip())
+  if not parsed.scheme or not parsed.netloc:
+    return None
+  return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _tuning_env_key(ssm_path: str) -> str:
@@ -375,6 +384,16 @@ class EnvConfig:
   ROBOLEDGER_URL = get_str_env("ROBOLEDGER_URL", "https://roboledger.ai")
   ROBOINVESTOR_URL = get_str_env("ROBOINVESTOR_URL", "https://roboinvestor.ai")
   ROBOSYSTEMS_URL = get_str_env("ROBOSYSTEMS_URL", "https://robosystems.ai")
+  # Holon Viewer origin — a static SPA with no app backend of its own; it
+  # participates in the CORS allowlist only. No CloudFormation plumbing: the
+  # env-aware default matches the managed deployments, and forks can override
+  # or leave it (an RFS-owned origin in a fork's allowlist is inert).
+  HOLON_URL = get_str_env(
+    "HOLON_URL",
+    "https://staging.holon.robosystems.ai"
+    if ENVIRONMENT == "staging"
+    else "https://holon.robosystems.ai",
+  )
   # Which app hosts the interactive auth surface ("login home"). Single-app
   # deployments designate their own app key here.
   LOGIN_HOME_APP = get_str_env("LOGIN_HOME_APP", "robosystems")
@@ -1346,23 +1365,26 @@ class EnvConfig:
 
   @classmethod
   def get_main_cors_origins(cls) -> list[str]:
-    """Get CORS origins for Main API (public-facing)."""
-    if cls.is_production():
-      return [
-        "https://roboledger.ai",
-        "https://roboinvestor.ai",
-        "https://robosystems.ai",
-        # Holon Viewer — static SPA that calls the API client-side with a
-        # user-supplied API key (no app backend of its own).
-        "https://holon.robosystems.ai",
-      ]
-    elif cls.is_staging():
-      return [
-        "https://staging.roboledger.ai",
-        "https://staging.roboinvestor.ai",
-        "https://staging.robosystems.ai",
-        "https://staging.holon.robosystems.ai",
-      ]
+    """Get CORS origins for Main API (public-facing).
+
+    Deployed environments derive the allowlist from the deployment's own app
+    URLs (CloudFormation-fed; the env-var defaults reproduce the managed
+    platform's lists exactly), so a fork serving its own domain allows its
+    own frontends without code changes. Note this list also backs OAuth
+    redirect_uri validation and the MCP remote origin check.
+    """
+    if cls.is_production() or cls.is_staging():
+      origins = []
+      for url in (
+        cls.ROBOLEDGER_URL,
+        cls.ROBOINVESTOR_URL,
+        cls.ROBOSYSTEMS_URL,
+        cls.HOLON_URL,
+      ):
+        origin = _url_origin(url)
+        if origin and origin not in origins:
+          origins.append(origin)
+      return origins
     else:
       # Development
       origins = [
