@@ -641,3 +641,26 @@ class TestScimIpRateLimitDependency:
     scim_ip_rate_limit_dependency(request)
     # Full 300, not the anonymous 30 — the bucket is deliberately IP-keyed.
     assert mock_cache.check_rate_limit.call_args[0][1] == 300
+
+
+class TestScimBucketsFailClosed:
+  """A limiter-backend outage must not silently disable SCIM's throttles."""
+
+  @patch(f"{MODULE}.rate_limit_cache")
+  @patch(f"{MODULE}.get_int_env", return_value=120)
+  def test_both_scim_buckets_pass_fail_closed(self, mock_env, mock_cache):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      scim_ip_rate_limit_dependency,
+      scim_rate_limit_dependency,
+    )
+
+    mock_cache.check_rate_limit.return_value = (True, 1)
+    request = _make_request(
+      headers={"Authorization": "Bearer rfssaaa"}, host="10.0.0.9"
+    )
+
+    scim_rate_limit_dependency(request)
+    assert mock_cache.check_rate_limit.call_args.kwargs["fail_closed"] is True
+
+    scim_ip_rate_limit_dependency(request)
+    assert mock_cache.check_rate_limit.call_args.kwargs["fail_closed"] is True

@@ -856,9 +856,11 @@ class APIKeyCache:
       logger.error(f"Failed to invalidate JWT user data cache for {user_id}: {e}")
       return False
 
-  def invalidate_api_key(self, api_key_hash: str) -> None:
+  def invalidate_api_key(self, api_key_hash: str) -> bool:
     """Drop every cached record for an API key: validation, signature, and
-    per-graph access decisions.
+    per-graph access decisions. Returns True when the deletes took; False
+    means an entry may survive until TTL, which revocation callers must
+    treat as incomplete.
     """
     try:
       api_key_cache_key = self._get_api_key_cache_key(api_key_hash)
@@ -885,6 +887,7 @@ class APIKeyCache:
         },
         risk_level="medium",
       )
+      return True
 
     except Exception as e:
       logger.error(f"Failed to invalidate API key cache: {e}")
@@ -893,6 +896,7 @@ class APIKeyCache:
         details={"action": "cache_invalidation_failed", "error": str(e)},
         risk_level="medium",
       )
+      return False
 
   def cache_jwt_graph_access(
     self, user_id: str, graph_id: str, has_access: bool

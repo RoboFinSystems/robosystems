@@ -246,6 +246,76 @@ class TestDeactivation:
     test_db.refresh(member)
     assert member.is_active is True
 
+  def test_stale_key_cache_fails_deactivation_and_retry_repairs(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """A revoked key whose validation-cache entry survived must fail the
+    deactivation (503), and the retry must sweep that key's cache even
+    though the key row is no longer active — a retry that only looked at
+    active rows would have nothing left to fix."""
+    from robosystems.models.core.user.user_api_key import UserAPIKey
+
+    member = _make_member(test_db, enterprise_org)
+    UserAPIKey.create(user_id=member.id, name="k", session=test_db)
+    deactivate_body = {
+      "Operations": [{"op": "replace", "path": "active", "value": False}]
+    }
+
+    with patch.object(UserAPIKey, "invalidate_cache", return_value=False):
+      resp = client.patch(
+        f"/scim/v2/Users/{member.id}", headers=scim_auth, json=deactivate_body
+      )
+    assert resp.status_code == 503
+
+    # The DB half applied: the key row is already revoked.
+    assert UserAPIKey.get_active_by_user_id(str(member.id), test_db) == []
+
+    with patch.object(
+      UserAPIKey, "invalidate_cache", return_value=True
+    ) as mock_invalidate:
+      resp = client.patch(
+        f"/scim/v2/Users/{member.id}", headers=scim_auth, json=deactivate_body
+      )
+    assert resp.status_code == 200
+    # The now-inactive key's cache entry was swept on the retry.
+    assert mock_invalidate.call_count == 1
+
+  def test_patch_with_no_supported_operation_is_400(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """A PATCH we applied nothing from must not report success — the shape
+    we failed to parse could have been a deactivation."""
+    member = _make_member(test_db, enterprise_org)
+    resp = client.patch(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={"Operations": [{"op": "replace", "path": "displayName", "value": "X"}]},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["scimType"] == "invalidValue"
+    test_db.refresh(member)
+    assert member.is_active is True
+
+  def test_patch_multi_op_with_active_still_applies(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """Unknown ops riding alongside active (the Entra multi-op shape) must
+    not block the one operation that matters."""
+    member = _make_member(test_db, enterprise_org)
+    resp = client.patch(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={
+        "Operations": [
+          {"op": "replace", "path": "displayName", "value": "X"},
+          {"op": "Replace", "path": "active", "value": "False"},
+        ]
+      },
+    )
+    assert resp.status_code == 200
+    test_db.refresh(member)
+    assert member.is_active is False
+
   def test_incomplete_deactivation_is_503_and_retryable(
     self, client, scim_auth, test_db, enterprise_org
   ):

@@ -298,12 +298,17 @@ def create_custom_rate_limit_dependency(
   window_seconds: int = 3600,
   limit_name: str = "custom",
   identifier_fn=None,
+  fail_closed: bool = False,
 ):
   """Create a custom rate limiting dependency with specific limits.
 
   ``identifier_fn`` overrides how the bucket key is derived from the request
   (default: ``get_user_identifier``). Return an ``apikey:``/``jwt:``-prefixed
   string to grant the full limit, anything else for the anonymous 1/10th.
+
+  ``fail_closed=True`` denies when the limiter backend is unavailable
+  instead of waving traffic through — for surfaces whose protection must not
+  silently disappear with Redis (the auth pattern).
   """
   resolve_identifier = identifier_fn or get_user_identifier
 
@@ -328,7 +333,9 @@ def create_custom_rate_limit_dependency(
 
     window = window_seconds
 
-    allowed, remaining = rate_limit_cache.check_rate_limit(cache_key, limit, window)
+    allowed, remaining = rate_limit_cache.check_rate_limit(
+      cache_key, limit, window, fail_closed=fail_closed
+    )
 
     if not allowed:
       current_time = getattr(request.state, "current_time", None) or int(time.time())
@@ -448,10 +455,14 @@ def _scim_rate_limit_identifier(request: Request) -> str:
 
 
 def scim_rate_limit_dependency(request: Request):
-  """Rate limiting for the SCIM provisioning surface (server-to-server)."""
+  """Rate limiting for the SCIM provisioning surface (server-to-server).
+
+  Fails closed: SCIM is an authentication surface, and its throttles must
+  not silently vanish with the limiter backend. The IdP retries a denial.
+  """
   limit = get_int_env("RATE_LIMIT_SCIM", "120")  # 120/minute per token
   return create_custom_rate_limit_dependency(
-    limit, 60, "scim", identifier_fn=_scim_rate_limit_identifier
+    limit, 60, "scim", identifier_fn=_scim_rate_limit_identifier, fail_closed=True
   )(request)
 
 
@@ -473,7 +484,7 @@ def scim_ip_rate_limit_dependency(request: Request):
   """
   limit = get_int_env("RATE_LIMIT_SCIM_IP", "300")  # 300/minute per IP
   return create_custom_rate_limit_dependency(
-    limit, 60, "scim_ip", identifier_fn=_scim_ip_identifier
+    limit, 60, "scim_ip", identifier_fn=_scim_ip_identifier, fail_closed=True
   )(request)
 
 

@@ -19,8 +19,9 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class DeactivationResult:
   """What a deactivation actually accomplished, not what it attempted.
 
-  The DB flag flip always commits (or the whole call raises); the two
-  side effects — auth-cache invalidation and API-key revocation — are
+  The DB flag flip always commits (or the whole call raises); the side
+  effects — auth-cache invalidation and API-key revocation, where each key
+  has its own DB flip *and* its own validation-cache entry — are
   best-effort, and a caller acting as an offboarding kill switch (SCIM)
   must know whether they took so it can fail loud and be retried.
   """
@@ -28,11 +29,19 @@ class DeactivationResult:
   # -1 when the key list could not even be loaded (count unknown).
   keys_found: int
   keys_revoked: int
+  # The user-level JWT/session caches.
   cache_invalidated: bool
+  # The per-key validation caches — a revoked key row with a surviving
+  # cache entry keeps authenticating until the entry's TTL.
+  key_caches_invalidated: bool
 
   @property
   def fully_applied(self) -> bool:
-    return self.cache_invalidated and self.keys_revoked == self.keys_found
+    return (
+      self.cache_invalidated
+      and self.key_caches_invalidated
+      and self.keys_revoked == self.keys_found
+    )
 
 
 class User(Model):
@@ -199,11 +208,12 @@ class User(Model):
       session.commit()
       session.refresh(self)
       cache_invalidated = self._invalidate_auth_cache()
-      keys_revoked, keys_found = self._revoke_api_keys(session)
+      keys_revoked, keys_found, key_caches_invalidated = self._revoke_api_keys(session)
       return DeactivationResult(
         keys_found=keys_found,
         keys_revoked=keys_revoked,
         cache_invalidated=cache_invalidated,
+        key_caches_invalidated=key_caches_invalidated,
       )
     except SQLAlchemyError:
       session.rollback()
@@ -233,39 +243,49 @@ class User(Model):
       session.rollback()
       raise
 
-  def _revoke_api_keys(self, session: Session) -> tuple[int, int]:
-    """Deactivate this user's active API keys and clear their caches.
+  def _revoke_api_keys(self, session: Session) -> tuple[int, int, bool]:
+    """Deactivate this user's API keys and clear their validation caches.
 
-    Returns ``(revoked, found)`` — the number that actually took alongside the
-    number attempted: revocation is best-effort per key, and an incident
-    response that reads "4 keys revoked" when one failed is worse than no
-    number at all. ``found`` is ``-1`` when the key list could not even be
-    loaded, which callers must read as incomplete.
+    Returns ``(revoked, found, caches_cleared)``: the number of active keys
+    that were actually revoked alongside the number found — revocation is
+    best-effort per key, and an incident response that reads "4 keys revoked"
+    when one failed is worse than no number at all — plus whether every key's
+    validation-cache entry was cleared. ``found`` is ``-1`` when the key list
+    could not even be loaded, which callers must read as incomplete.
 
-    Called on deactivate so programmatic access is revoked alongside JWT
-    invalidation. Each key's ``deactivate`` flips ``is_active`` and invalidates
-    that key's validation-cache entry. Failures are logged per-key but never
-    abort the user deactivation; the ``user.is_active`` guard in
-    ``validate_api_key`` is the authoritative backstop if a key is missed, and
-    re-running the deactivation retries whatever did not take.
+    Every key row is swept, not just the active ones: a key revoked on an
+    earlier pass whose cache invalidation failed keeps authenticating from
+    cache until TTL, and it no longer appears in the active list — so a retry
+    that only looked at active rows could never repair it. Failures are
+    logged per-key but never abort the user deactivation; the
+    ``user.is_active`` guard in ``validate_api_key`` is the authoritative
+    backstop if a key is missed, and re-running the deactivation retries
+    whatever did not take.
     """
     from .user_api_key import UserAPIKey
 
     try:
-      active_keys = UserAPIKey.get_active_by_user_id(str(self.id), session)
+      all_keys = UserAPIKey.get_by_user_id(str(self.id), session)
     except Exception as e:
       logger.error(f"Failed to load API keys for deactivated user {self.id}: {e}")
-      return 0, -1
+      return 0, -1, False
+
+    active_keys = [key for key in all_keys if key.is_active]
+    stale_keys = [key for key in all_keys if not key.is_active]
 
     revoked = 0
+    caches_cleared = True
     for key in active_keys:
       try:
-        key.deactivate(session)
+        caches_cleared = key.deactivate(session) and caches_cleared
         revoked += 1
       except Exception as e:
+        caches_cleared = False
         logger.error(
           f"Failed to revoke API key {key.id} for deactivated user {self.id}: {e}"
         )
+    for key in stale_keys:
+      caches_cleared = key.invalidate_cache() and caches_cleared
 
     if revoked != len(active_keys):
       logger.error(
@@ -274,8 +294,14 @@ class User(Model):
         f"table and are refused only by the user.is_active guard. Re-run the "
         f"deactivation."
       )
+    if not caches_cleared:
+      logger.error(
+        f"CRITICAL: validation-cache invalidation incomplete for user "
+        f"{self.id}'s API keys; a revoked key may keep authenticating from "
+        f"cache until TTL. Re-run the deactivation."
+      )
 
-    return revoked, len(active_keys)
+    return revoked, len(active_keys), caches_cleared
 
   def _invalidate_auth_cache(self) -> bool:
     """Invalidate auth caches derived from this user, True when it took.

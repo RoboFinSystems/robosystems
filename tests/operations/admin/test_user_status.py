@@ -158,3 +158,41 @@ class TestRevocationCountIsWhatActuallyHappened:
 
     assert change.api_keys_revoked == 0
     assert change.api_keys_failed == 0
+
+
+class TestFullyApplied:
+  """The response must say whether the kill switch fully took, not just
+  whether the key rows flipped — a surviving cache entry authenticates
+  until its TTL."""
+
+  def test_cache_failure_is_not_fully_applied(self, test_db, test_user, monkeypatch):
+    user = _create_user(test_db, test_user.password_hash)
+    monkeypatch.setattr(User, "_invalidate_auth_cache", lambda self: False)
+
+    change = set_user_active(user.id, False, test_db)
+
+    assert change.fully_applied is False
+    # The key side was clean; the session cache wasn't.
+    assert change.api_keys_failed == 0
+
+  def test_key_cache_failure_is_not_fully_applied(
+    self, test_db, test_user, monkeypatch
+  ):
+    user = _create_user(test_db, test_user.password_hash)
+    UserAPIKey.create(user_id=user.id, name="k", session=test_db)
+    monkeypatch.setattr(UserAPIKey, "invalidate_cache", lambda self: False)
+
+    change = set_user_active(user.id, False, test_db)
+
+    assert change.fully_applied is False
+    # The row itself revoked fine — only its cache entry survived.
+    assert change.api_keys_revoked == 1
+    assert change.api_keys_failed == 0
+
+  def test_clean_deactivation_is_fully_applied(self, test_db, test_user):
+    user = _create_user(test_db, test_user.password_hash)
+    UserAPIKey.create(user_id=user.id, name="k", session=test_db)
+
+    change = set_user_active(user.id, False, test_db)
+
+    assert change.fully_applied is True

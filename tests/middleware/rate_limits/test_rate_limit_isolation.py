@@ -70,7 +70,7 @@ class TestRateLimitIsolation:
     # Mock the rate limit cache to track calls
     check_calls = []
 
-    def mock_check_rate_limit(identifier, limit, window):
+    def mock_check_rate_limit(identifier, limit, window, fail_closed=False):
       check_calls.append((identifier, limit, window))
       # Always allow for this test
       return (True, limit - 1)
@@ -124,7 +124,7 @@ class TestRateLimitIsolation:
     # Track cache calls
     check_calls = []
 
-    def mock_check_rate_limit(identifier, limit, window):
+    def mock_check_rate_limit(identifier, limit, window, fail_closed=False):
       check_calls.append((identifier, limit, window))
       return (True, limit - 1)
 
@@ -169,7 +169,7 @@ class TestRateLimitIsolation:
     # Track rate limit states per key
     rate_limit_states = {}
 
-    def mock_check_rate_limit(identifier, limit, window):
+    def mock_check_rate_limit(identifier, limit, window, fail_closed=False):
       if identifier not in rate_limit_states:
         rate_limit_states[identifier] = {"count": 0, "limit": limit}
 
@@ -233,7 +233,7 @@ class TestRateLimitIsolation:
 
     check_calls = []
 
-    def mock_check_rate_limit(identifier, limit, window):
+    def mock_check_rate_limit(identifier, limit, window, fail_closed=False):
       check_calls.append((identifier, limit, window))
       return (True, limit - 1)
 
@@ -302,7 +302,7 @@ class TestRateLimitIsolation:
     # Track rate limit states per key
     rate_limit_states = {}
 
-    def mock_check_rate_limit(identifier, limit, window):
+    def mock_check_rate_limit(identifier, limit, window, fail_closed=False):
       if identifier not in rate_limit_states:
         rate_limit_states[identifier] = {"count": 0, "limit": limit}
 

@@ -315,8 +315,16 @@ async def patch_user(
     user = _org_user_or_404(org_id, user_id, session)
 
     desired_active = _coerce_active(body)
-    if desired_active is not None:
-      _set_active(user, desired_active, org_id, session)
+    if desired_active is None:
+      # Nothing recognized means nothing applied — say so. A 200 here would
+      # tell the IdP an update (possibly a deactivation in a shape we don't
+      # parse) succeeded when the account is unchanged.
+      raise _scim_error(
+        status.HTTP_400_BAD_REQUEST,
+        "PATCH contained no supported operation (only 'active' is supported)",
+        scim_type="invalidValue",
+      )
+    _set_active(user, desired_active, org_id, session)
 
     session.refresh(user)
     return _to_resource(user)

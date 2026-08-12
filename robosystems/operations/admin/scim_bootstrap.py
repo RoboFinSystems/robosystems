@@ -13,8 +13,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.core import Org, OrgLimits, OrgType, ScimToken
-
-DEFAULT_TOKEN_LIFETIME_DAYS = 365
+from robosystems.models.core.user.scim_token import DEFAULT_TOKEN_LIFETIME_DAYS
 
 
 class ScimBootstrapError(Exception):

@@ -29,6 +29,9 @@ class UserStatusChange:
   changed: bool
   api_keys_revoked: int
   api_keys_failed: int = 0
+  # False when any revocation side effect did not take — a session/key cache
+  # entry may keep authenticating until its TTL. Re-run the deactivation.
+  fully_applied: bool = True
 
 
 def set_user_active(
@@ -63,11 +66,13 @@ def set_user_active(
   if active:
     found = 0
     revoked = 0
+    fully_applied = True
     user.activate(session)
   else:
     result = user.deactivate(session)
     found = result.keys_found
     revoked = result.keys_revoked
+    fully_applied = result.fully_applied
 
   # found == -1 means the key list could not be loaded at all; report one
   # failure rather than a negative count so the operator still sees red.
@@ -81,6 +86,7 @@ def set_user_active(
       "was_active": was_active,
       "api_keys_revoked": revoked,
       "api_keys_failed": failed,
+      "fully_applied": fully_applied,
     },
   )
 
@@ -91,4 +97,5 @@ def set_user_active(
     changed=was_active != active,
     api_keys_revoked=revoked,
     api_keys_failed=failed,
+    fully_applied=fully_applied,
   )
