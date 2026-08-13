@@ -13,13 +13,35 @@ from .auth import AuthResponse
 
 
 class PasskeyRegisterOptionsRequest(BaseModel):
-  """Begin enrollment. mfa_token is the forced-enrollment lane; omitted for
-  an authenticated settings-flow enrollment."""
+  """Begin enrollment.
+
+  Two disjoint lanes: ``mfa_token`` (forced enrollment — the token was minted
+  seconds after a password verify, so it is its own freshness proof) or an
+  authenticated settings-flow enrollment, which must carry a fresh re-auth
+  proof — ``password``, or a ``reauth``-ceremony ``assertion`` when adding a
+  passkey beside an existing one.
+  """
 
   mfa_token: str | None = Field(
     default=None,
     description="Enrollment token from a login that returned mfa_enrollment_required",
   )
+  password: str | None = Field(
+    default=None,
+    description="Current password — settings-lane re-authentication",
+  )
+  assertion: dict[str, Any] | None = Field(
+    default=None,
+    description="Fresh WebAuthn assertion from the re-auth ceremony (settings lane)",
+  )
+
+  @model_validator(mode="after")
+  def _lanes_are_disjoint(self) -> "PasskeyRegisterOptionsRequest":
+    if self.mfa_token and (self.password or self.assertion):
+      raise ValueError("mfa_token and a re-auth proof are mutually exclusive")
+    if bool(self.password) and bool(self.assertion):
+      raise ValueError("Provide at most one of password or assertion")
+    return self
 
 
 class PasskeyRegisterVerifyRequest(BaseModel):

@@ -1,8 +1,10 @@
 """Passkey lifecycle and passwordless login endpoints.
 
-Enrollment accepts two principals: an authenticated session (the settings
-flow) or an ``enroll``-purpose MFA token (the forced-enrollment lane, where
-the login refused to mint a session until a passkey exists). Purpose scoping
+Enrollment accepts two principals: a JWT session plus a fresh re-auth proof
+(the settings flow — API keys are refused, and the session alone is not
+enough to mint a new sign-in credential), or an ``enroll``-purpose MFA token
+(the forced-enrollment lane, where the login refused to mint a session until
+a passkey exists — the token itself is the freshness proof). Purpose scoping
 keeps the lanes disjoint — an enroll token can never satisfy ``/mfa/verify``
 and a login token can never authorize enrollment.
 """
@@ -22,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.dependencies import get_current_user, get_optional_user
+from ...middleware.auth.dependencies import get_current_user, get_optional_jwt_user
 from ...middleware.auth.jwt import create_jwt_token
 from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import (
@@ -54,7 +56,7 @@ from ...security.device_fingerprinting import extract_device_fingerprint
 from .mfa import (
   _apply_login_preamble,
   _authenticated_response,
-  _mark_mfa_token_used,
+  _claim_mfa_token,
   _resolve_mfa_principal,
 )
 from .utils import detect_app_source, require_passkeys_enabled
@@ -96,7 +98,11 @@ def _resolve_enrollment_principal(
   "/passkeys/register/options",
   response_model=CeremonyOptionsResponse,
   summary="Passkey Registration Options",
-  description="Begin a passkey enrollment ceremony.",
+  description=(
+    "Begin a passkey enrollment ceremony. The settings lane requires a fresh "
+    "re-auth proof (password or assertion); the forced lane presents its "
+    "enrollment token."
+  ),
   operation_id="getPasskeyRegistrationOptions",
   responses={
     **COMMON_ERROR_RESPONSES,
@@ -105,12 +111,34 @@ def _resolve_enrollment_principal(
 )
 async def get_registration_options(
   request: PasskeyRegisterOptionsRequest,
+  fastapi_request: Request,
   session: Session = Depends(get_async_db_session),
-  session_user: User | None = Depends(get_optional_user),
+  session_user: User | None = Depends(get_optional_jwt_user),
   rate_limit: None = Depends(mfa_rate_limit_dependency),
   _passkeys: None = Depends(require_passkeys_enabled),
 ) -> CeremonyOptionsResponse:
-  user, _jti = _resolve_enrollment_principal(session_user, request.mfa_token, session)
+  user, jti = _resolve_enrollment_principal(session_user, request.mfa_token, session)
+  if jti is None:
+    # Settings lane: a session alone must not mint a new sign-in credential —
+    # demand a fresh proof, exactly as passkey removal does. The forced lane
+    # needs none; its token was minted seconds after a password verify.
+    try:
+      passkey_ops.verify_reauth(
+        session, user, password=request.password, assertion=request.assertion
+      )
+    except passkey_ops.ReauthInvalidError:
+      client_ip = fastapi_request.client.host if fastapi_request.client else None
+      if client_ip:
+        AdvancedAuthProtection.record_auth_attempt(
+          ip_address=client_ip,
+          success=False,
+          email=str(user.email),
+          user_agent=fastapi_request.headers.get("user-agent"),
+        )
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Re-authentication failed",
+      )
   options = passkey_ops.begin_registration(session, user)
   return CeremonyOptionsResponse(options=json.loads(options.options_json))
 
@@ -138,7 +166,7 @@ async def verify_registration(
   fastapi_request: Request,
   background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
-  session_user: User | None = Depends(get_optional_user),
+  session_user: User | None = Depends(get_optional_jwt_user),
   rate_limit: None = Depends(mfa_rate_limit_dependency),
   _passkeys: None = Depends(require_passkeys_enabled),
 ) -> PasskeyRegisterVerifyResponse:
@@ -194,7 +222,13 @@ async def verify_registration(
 
   auth: AuthResponse | None = None
   if jti is not None:
-    _mark_mfa_token_used(jti)
+    if not _claim_mfa_token(jti):
+      # The passkey enrolled, but this token's one session already minted —
+      # the user signs in again and is challenged with the new credential.
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired MFA token",
+      )
     device_fingerprint = extract_device_fingerprint(fastapi_request)
     jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)
     if client_ip:

@@ -250,6 +250,25 @@ async def get_optional_user(
   return None
 
 
+async def get_optional_jwt_user(request: Request) -> User | None:
+  """Return the JWT-session user, or None — API keys are not accepted.
+
+  For surfaces that manage sign-in credentials themselves (passkey
+  enrollment): a programmatic key must never be able to mint an interactive
+  credential that outlives the key's own revocation.
+  """
+  authorization = request.headers.get("authorization")
+  if not authorization or not authorization.startswith("Bearer "):
+    return None
+
+  device_fingerprint = extract_device_fingerprint(request)
+  verify_result = verify_jwt_claims(authorization[7:], device_fingerprint)
+  if not verify_result:
+    return None
+  user_id, token_session_version = verify_result
+  return _get_user_for_verified_jwt(user_id, token_session_version)
+
+
 async def get_current_user(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),

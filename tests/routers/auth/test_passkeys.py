@@ -52,6 +52,12 @@ class _FakeRedis:
   def expire(self, key, ttl):
     return True
 
+  def set(self, key, value, nx=False, ex=None):
+    if nx and key in self.store:
+      return None
+    self.store[key] = str(value)
+    return True
+
 
 @contextmanager
 def _passkeys_on():
@@ -102,9 +108,11 @@ def _verified_registration(credential_id_b64: str):
 
 
 def _enroll_via_api(client, user, name="My Key"):
-  """Full settings-lane ceremony through the HTTP surface."""
+  """Full settings-lane ceremony through the HTTP surface (password re-auth)."""
   options_resp = client.post(
-    "/v1/auth/passkeys/register/options", json={}, headers=_bearer(user)
+    "/v1/auth/passkeys/register/options",
+    json={"password": PASSWORD},
+    headers=_bearer(user),
   )
   assert options_resp.status_code == 200
   options = options_resp.json()["options"]
@@ -143,14 +151,55 @@ class TestSettingsEnrollment:
 
   def test_anonymous_enrollment_refused(self, client, test_db):
     with _passkeys_on():
-      resp = client.post("/v1/auth/passkeys/register/options", json={})
+      resp = client.post(
+        "/v1/auth/passkeys/register/options", json={"password": PASSWORD}
+      )
+    assert resp.status_code == 401
+
+  def test_session_without_reauth_proof_refused(self, client, test_db):
+    """A live session alone must not begin enrollment — fresh proof required."""
+    user = _create_user(test_db)
+    with _passkeys_on():
+      resp = client.post(
+        "/v1/auth/passkeys/register/options", json={}, headers=_bearer(user)
+      )
+    assert resp.status_code == 401
+
+  def test_wrong_password_refused(self, client, test_db):
+    user = _create_user(test_db)
+    with _passkeys_on():
+      resp = client.post(
+        "/v1/auth/passkeys/register/options",
+        json={"password": "not-the-password"},
+        headers=_bearer(user),
+      )
+    assert resp.status_code == 401
+
+  def test_api_key_cannot_enroll(self, client, test_db):
+    """A programmatic key is not an enrollment principal, even knowing the
+    password — it must never mint an interactive credential that outlives
+    its own revocation."""
+    from robosystems.models.core import UserAPIKey
+
+    user = _create_user(test_db)
+    _row, plaintext = UserAPIKey.create(
+      user_id=str(user.id), name="leaked", session=test_db
+    )
+    with _passkeys_on():
+      resp = client.post(
+        "/v1/auth/passkeys/register/options",
+        json={"password": PASSWORD},
+        headers={"X-API-Key": plaintext},
+      )
     assert resp.status_code == 401
 
   def test_options_carry_rp_and_uv(self, client, test_db):
     user = _create_user(test_db)
     with _passkeys_on():
       resp = client.post(
-        "/v1/auth/passkeys/register/options", json={}, headers=_bearer(user)
+        "/v1/auth/passkeys/register/options",
+        json={"password": PASSWORD},
+        headers=_bearer(user),
       )
     options = resp.json()["options"]
     assert options["rp"]["id"] == "localhost"

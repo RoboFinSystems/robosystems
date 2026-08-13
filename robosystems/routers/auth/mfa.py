@@ -53,47 +53,65 @@ from .utils import require_passkeys_enabled
 
 router = APIRouter()
 
-MFA_MAX_FAILURES = 5
+MFA_MAX_ATTEMPTS = 5
 
 _USED_KEY_PREFIX = "mfa:used:"
-_FAIL_KEY_PREFIX = "mfa:fail:"
+_ATTEMPTS_KEY_PREFIX = "mfa:attempts:"
 
 
 def _mfa_token_burned(jti: str) -> bool:
-  """Whether this token already minted a session or exhausted its retries.
+  """Whether this token already minted a session or exhausted its attempts.
 
-  Fails closed: an unreachable store reads as burned.
+  A cheap read-only pre-check; the authoritative gates are
+  ``_register_mfa_attempt`` (budget) and ``_claim_mfa_token`` (single use),
+  both of which are atomic. Fails closed: an unreachable store reads as
+  burned.
   """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
     if client.get(f"{_USED_KEY_PREFIX}{jti}"):
       return True
-    failures = client.get(f"{_FAIL_KEY_PREFIX}{jti}")
-    return failures is not None and int(failures) >= MFA_MAX_FAILURES
+    attempts = client.get(f"{_ATTEMPTS_KEY_PREFIX}{jti}")
+    return attempts is not None and int(attempts) >= MFA_MAX_ATTEMPTS
   except Exception as exc:
     logger.error(f"Failed to read MFA token state: {exc}")
     return True
 
 
-def _mark_mfa_token_used(jti: str) -> None:
+def _claim_mfa_token(jti: str) -> bool:
+  """Atomically claim this token's one session mint (SET NX).
+
+  Called after factor verification and before the session is minted, so
+  concurrent redemptions of the same token race on the claim, not on the
+  mint. Fails closed: if the store cannot confirm the claim, no session.
+  """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
-    client.setex(f"{_USED_KEY_PREFIX}{jti}", MFA_TOKEN_EXPIRY_SECONDS, "1")
+    return bool(
+      client.set(f"{_USED_KEY_PREFIX}{jti}", "1", nx=True, ex=MFA_TOKEN_EXPIRY_SECONDS)
+    )
   except Exception as exc:
-    # The token still dies at its 5-minute exp; losing single-use narrowing
-    # is logged, not fatal.
-    logger.error(f"Failed to mark MFA token used: {exc}")
+    logger.error(f"Failed to claim MFA token: {exc}")
+    return False
 
 
-def _record_mfa_failure(jti: str) -> None:
+def _register_mfa_attempt(jti: str) -> bool:
+  """Count a verification attempt up front; False once the budget is spent.
+
+  Increment-then-check, so concurrent requests cannot all observe a
+  below-budget counter. Fails closed: an unreachable store refuses the
+  attempt.
+  """
   try:
     client = create_redis_client(ValkeyDatabase.AUTH)
-    key = f"{_FAIL_KEY_PREFIX}{jti}"
+    key = f"{_ATTEMPTS_KEY_PREFIX}{jti}"
     count = client.incr(key)
     if count == 1:
       client.expire(key, MFA_TOKEN_EXPIRY_SECONDS)
+    return int(count) <= MFA_MAX_ATTEMPTS
   except Exception as exc:
-    logger.error(f"Failed to record MFA failure: {exc}")
+    logger.error(f"Failed to record MFA attempt: {exc}")
+    return False
 
 
 def _invalid_mfa_token() -> HTTPException:
@@ -162,13 +180,13 @@ def _apply_login_preamble(
 
 
 def _record_verify_failure(
-  jti: str,
   user: User,
   client_ip: str | None,
   user_agent: str | None,
   reason: str,
 ) -> None:
-  _record_mfa_failure(jti)
+  # The attempt itself was already counted at the top of the handler
+  # (increment-then-check); this records the IP/audit consequences.
   if client_ip:
     AdvancedAuthProtection.record_auth_attempt(
       ip_address=client_ip,
@@ -265,6 +283,8 @@ async def verify_mfa(
     fastapi_request, response, "/v1/auth/mfa/verify"
   )
   user, jti = _resolve_mfa_principal(request.mfa_token, "login", session)
+  if not _register_mfa_attempt(jti):
+    raise _invalid_mfa_token()
 
   if request.assertion is not None:
     auth_method = "password+passkey"
@@ -277,7 +297,7 @@ async def verify_mfa(
         expected_jti=jti,
       )
     except passkey_ops.PasskeyError as exc:
-      _record_verify_failure(jti, user, client_ip, user_agent, type(exc).__name__)
+      _record_verify_failure(user, client_ip, user_agent, type(exc).__name__)
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="MFA verification failed",
@@ -287,7 +307,7 @@ async def verify_mfa(
     try:
       passkey_ops.consume_recovery_code(session, user, request.recovery_code or "")
     except passkey_ops.RecoveryCodeInvalidError:
-      _record_verify_failure(jti, user, client_ip, user_agent, "recovery_code_invalid")
+      _record_verify_failure(user, client_ip, user_agent, "recovery_code_invalid")
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="MFA verification failed",
@@ -303,7 +323,10 @@ async def verify_mfa(
       risk_level="medium",
     )
 
-  _mark_mfa_token_used(jti)
+  if not _claim_mfa_token(jti):
+    # Someone else redeemed this token between our factor verification and
+    # now — one token, one session, whoever claims first.
+    raise _invalid_mfa_token()
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)
 
