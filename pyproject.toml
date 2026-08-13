@@ -113,6 +113,9 @@ dependencies = [
     "requests>=2.34.2,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
+    # Passkey MFA: RP-side WebAuthn ceremony generation/verification
+    # (py_webauthn; cbor2 rides transitively)
+    "webauthn>=2.7.0,<3.0",
     "pyshacl>=0.26,<0.31",
 ]
 

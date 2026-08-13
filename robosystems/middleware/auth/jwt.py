@@ -293,6 +293,66 @@ def create_sso_token(user_id: str, session: Any = None) -> tuple[str, str]:
   return token, token_id
 
 
+MFA_TOKEN_EXPIRY_SECONDS = 300
+
+
+def create_mfa_token(
+  user_id: str, purpose: str, session: Any = None
+) -> tuple[str, str]:
+  """Mint a short-lived MFA challenge token; returns ``(token, jti)``.
+
+  Issued by login after password verification when the flow cannot complete
+  in one step: ``purpose="login"`` authorizes the second-factor handshake
+  (/mfa/options + /mfa/verify), ``purpose="enroll"`` authorizes the forced
+  first-enrollment ceremony. The purposes are mutually exclusive by claim
+  check, and ``type: "mfa"`` means ``verify_jwt_claims`` refuses the token
+  as a session bearer. Carries ``session_version`` so redemption can re-check
+  against the live user row, mirroring the SSO completion path.
+  """
+  if purpose not in ("login", "enroll"):
+    raise ValueError(f"Invalid MFA token purpose: {purpose}")
+  secret_key = JWTConfig.get_jwt_secret()
+
+  jti = str(uuid.uuid4())
+
+  payload = {
+    "user_id": user_id,
+    "jti": jti,
+    "type": "mfa",
+    "purpose": purpose,
+    "session_version": _get_user_session_version(user_id, session=session) or 0,
+    "exp": datetime.now(UTC) + timedelta(seconds=MFA_TOKEN_EXPIRY_SECONDS),
+    "iat": datetime.now(UTC),
+    "iss": env.JWT_ISSUER,
+    "aud": env.JWT_AUDIENCE,
+  }
+  return jwt.encode(payload, secret_key, algorithm="HS256"), jti
+
+
+def decode_mfa_token(token: str, expected_purpose: str) -> dict[str, Any] | None:
+  """Decode and validate an MFA challenge token; None on any mismatch.
+
+  Direct decode (the /sso-exchange pattern) rather than ``verify_jwt_claims``
+  — these tokens are deliberately refused there. Validates signature, expiry,
+  issuer, audience, ``type: "mfa"``, and the purpose scope.
+  """
+  try:
+    payload = jwt.decode(
+      token,
+      JWTConfig.get_jwt_secret(),
+      algorithms=["HS256"],
+      issuer=env.JWT_ISSUER,
+      audience=env.JWT_AUDIENCE,
+    )
+  except jwt.InvalidTokenError:
+    return None
+  if payload.get("type") != "mfa" or payload.get("purpose") != expected_purpose:
+    return None
+  if not payload.get("user_id") or not payload.get("jti"):
+    return None
+  return payload
+
+
 def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
   """Add a token's `jti` to the revocation list until its natural expiry.
 

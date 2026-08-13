@@ -158,12 +158,30 @@ class EnvValidator:
         )
       if "?" in issuer or "#" in issuer:
         errors.append("SSO_OIDC_ISSUER: Must not contain a query or fragment")
-    if not getattr(env_config, "PASSWORD_AUTH_ENABLED", True) and not getattr(
-      env_config, "SSO_OIDC_ENABLED", False
+    if (
+      not getattr(env_config, "PASSWORD_AUTH_ENABLED", True)
+      and not getattr(env_config, "SSO_OIDC_ENABLED", False)
+      and not getattr(env_config, "PASSKEYS_ENABLED", False)
     ):
       errors.append(
-        "PASSWORD_AUTH_ENABLED=false requires SSO_OIDC_ENABLED=true — "
-        "otherwise no one can log in to this deployment"
+        "PASSWORD_AUTH_ENABLED=false requires SSO_OIDC_ENABLED=true or "
+        "PASSKEYS_ENABLED=true — otherwise no one can log in to this deployment"
+      )
+    if getattr(env_config, "MFA_ENFORCEMENT_ENABLED", False) and not getattr(
+      env_config, "PASSKEYS_ENABLED", False
+    ):
+      errors.append(
+        "MFA_ENFORCEMENT_ENABLED=true requires PASSKEYS_ENABLED=true — "
+        "enforcement gates password logins on a factor nobody could enroll"
+      )
+    if (
+      deployed
+      and getattr(env_config, "PASSKEYS_ENABLED", False)
+      and not getattr(env_config, "get_passkey_rp_id", lambda: "")()
+    ):
+      errors.append(
+        "PASSKEYS_ENABLED=true but no WebAuthn RP ID is derivable — set "
+        "ROBOSYSTEMS_URL to the login home's URL or PASSKEY_RP_ID explicitly"
       )
     if getattr(env_config, "SCIM_ENABLED", False):
       default_role = getattr(env_config, "SSO_DEFAULT_ROLE", "member")
@@ -185,12 +203,13 @@ class EnvValidator:
       and (
         getattr(env_config, "SSO_OIDC_ENABLED", False)
         or getattr(env_config, "SCIM_ENABLED", False)
+        or getattr(env_config, "PASSKEYS_ENABLED", False)
       )
       and not getattr(env_config, "RATE_LIMIT_ENABLED", False)
     ):
       errors.append(
-        "RATE_LIMIT_ENABLED: Required when SSO_OIDC_ENABLED or SCIM_ENABLED — "
-        "the OIDC/SCIM rate buckets are no-ops without it"
+        "RATE_LIMIT_ENABLED: Required when SSO_OIDC_ENABLED, SCIM_ENABLED, or "
+        "PASSKEYS_ENABLED — their auth rate buckets are no-ops without it"
       )
 
     # Validate value ranges and formats

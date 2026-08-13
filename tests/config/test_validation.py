@@ -285,6 +285,65 @@ class TestEnvValidator:
       warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
       assert not any("ENTERPRISE_ORG_ID" in msg for msg in warning_calls)
 
+  def test_password_off_with_passkeys_on_passes(self):
+    """Passwordless passkey login is a valid sole entrance (no-login twin)."""
+    env_config = MockEnvConfig()
+    env_config.PASSWORD_AUTH_ENABLED = False
+    env_config.SSO_OIDC_ENABLED = False
+    env_config.PASSKEYS_ENABLED = True
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_mfa_enforcement_without_passkeys_rejected(self):
+    env_config = MockEnvConfig()
+    env_config.MFA_ENFORCEMENT_ENABLED = True
+    env_config.PASSKEYS_ENABLED = False
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_mfa_enforcement_with_passkeys_passes(self):
+    env_config = MockEnvConfig()
+    env_config.MFA_ENFORCEMENT_ENABLED = True
+    env_config.PASSKEYS_ENABLED = True
+
+    with patch("robosystems.config.validation.logger"):
+      EnvValidator.validate_required_vars(env_config)
+
+  def _prod_passkeys_config(self) -> MockEnvConfig:
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_URL = None
+    env_config.PASSKEYS_ENABLED = True
+    env_config.get_passkey_rp_id = lambda: "robosystems.ai"
+    return env_config
+
+  def test_passkeys_deployed_without_rate_limiting_rejected(self):
+    env_config = self._prod_passkeys_config()
+    env_config.RATE_LIMIT_ENABLED = False
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
+  def test_passkeys_deployed_without_rp_id_rejected(self):
+    env_config = self._prod_passkeys_config()
+    env_config.get_passkey_rp_id = lambda: ""
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
+  def test_passkeys_deployed_with_rp_id_and_rate_limiting_passes(self):
+    env_config = self._prod_passkeys_config()
+
+    with (
+      patch("os.getenv", return_value=None),
+      patch("robosystems.config.validation.logger"),
+    ):
+      EnvValidator.validate_required_vars(env_config)
+
   def test_validate_required_vars_prod_no_s3_credentials_ok(self):
     """Test validation passes when S3 credentials are missing in production (uses IAM roles)."""
     env_config = MockEnvConfig()
