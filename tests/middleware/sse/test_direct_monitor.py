@@ -39,7 +39,7 @@ class TestRunGraphProvisioning:
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_get_db.side_effect = lambda: iter([mock_db])
 
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
@@ -93,7 +93,7 @@ class TestRunGraphProvisioning:
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_get_db.side_effect = lambda: iter([mock_db])
 
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
@@ -141,7 +141,7 @@ class TestRunGraphProvisioning:
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_get_db.side_effect = lambda: iter([mock_db])
 
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
@@ -183,7 +183,7 @@ class TestRunUserRepositoryProvisioning:
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_get_db.side_effect = lambda: iter([mock_db])
 
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"
@@ -245,7 +245,7 @@ class TestRunUserRepositoryProvisioning:
 
       with patch("robosystems.database.get_db_session") as mock_get_db:
         mock_db = MagicMock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_get_db.side_effect = lambda: iter([mock_db])
 
         mock_subscription = MagicMock()
         mock_subscription.id = "sub123"

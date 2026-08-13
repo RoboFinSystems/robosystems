@@ -20,6 +20,89 @@ from robosystems.logger import logger
 from robosystems.middleware.sse.operation_manager import get_operation_manager
 
 
+def _finalize_graph_provisioning(
+  subscription_id: str, graph_id: str, user_id: str
+) -> None:
+  """Link the graph to the subscription and activate it, in a fresh session.
+
+  Split out of run_graph_provisioning because the long async graph build
+  detaches any subscription instance / session opened before it: the link commit
+  then persists nothing and activate()'s session.refresh() raises "Instance is
+  not persistent within this Session", stranding the subscription at
+  'provisioning' while the graph is live and paid. Runs synchronously with no
+  awaits so the re-fetched instance stays persistent through both commits.
+  """
+  from robosystems.config.billing import BillingConfig
+  from robosystems.database import get_db_session
+  from robosystems.models.core.billing import (
+    BillingAuditLog,
+    BillingCustomer,
+    BillingEventType,
+    BillingSubscription,
+  )
+  from robosystems.operations.graph.subscription_service import (
+    generate_subscription_invoice,
+  )
+
+  db_gen = get_db_session()
+  db = next(db_gen)
+  try:
+    subscription = (
+      db.query(BillingSubscription)
+      .filter(BillingSubscription.id == subscription_id)
+      .first()
+    )
+    if not subscription:
+      raise ValueError(
+        f"Subscription {subscription_id} not found during provisioning completion"
+      )
+
+    # Link the graph before anything else can fail. The lifecycle sensors join
+    # subscriptions to graphs on resource_id, so a graph created here and
+    # orphaned by a later failure would otherwise be unreachable by the
+    # machinery whose whole job is reclaiming it — running, unbilled, and
+    # invisible. Committing the link also makes the claim's terminal condition
+    # true, so no redelivery can create a second graph.
+    subscription.resource_id = graph_id
+    db.commit()
+
+    subscription.activate(db)
+
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
+      org_id=subscription.org_id,
+      subscription_id=subscription.id,
+      description=f"Activated subscription for graph {graph_id}",
+      actor_type="system",
+      event_data={
+        "current_period_start": subscription.current_period_start.isoformat(),
+        "current_period_end": subscription.current_period_end.isoformat(),
+        "provisioning_method": "checkout",
+      },
+    )
+
+    if not subscription.stripe_subscription_id:
+      customer = BillingCustomer.get_by_user_id(user_id, db)
+      if customer and customer.invoice_billing_enabled:
+        plan_config = BillingConfig.get_subscription_plan(subscription.plan_name)
+        tier_label = (
+          plan_config["display_name"] if plan_config else subscription.plan_name
+        )
+        generate_subscription_invoice(
+          subscription=subscription,
+          customer=customer,
+          description=f"Graph subscription - {tier_label}",
+          session=db,
+        )
+        logger.info(f"Generated invoice for subscription {subscription_id}")
+  finally:
+    try:
+      next(db_gen)
+    except StopIteration:
+      pass
+
+
 async def run_graph_provisioning(
   operation_id: str | None,
   subscription_id: str,
@@ -35,18 +118,10 @@ async def run_graph_provisioning(
   retryable by redelivery until the reaper writes it off.
   """
   from robosystems.database import get_db_session
-  from robosystems.models.core.billing import (
-    BillingAuditLog,
-    BillingCustomer,
-    BillingEventType,
-    BillingSubscription,
-  )
+  from robosystems.models.core.billing import BillingSubscription
   from robosystems.operations.graph.graph_creation_service import (
     GraphCreationConfig,
     GraphCreationService,
-  )
-  from robosystems.operations.graph.subscription_service import (
-    generate_subscription_invoice,
   )
 
   manager = get_operation_manager()
@@ -120,50 +195,17 @@ async def run_graph_provisioning(
       graph_id = creation_result.graph_id
       logger.info(f"Created graph {graph_id} for subscription {subscription_id}")
 
-      # Link the graph before anything else can fail. The lifecycle sensors
-      # join subscriptions to graphs on resource_id, so a graph created here
-      # and orphaned by a later failure would otherwise be unreachable by the
-      # machinery whose whole job is reclaiming it — running, unbilled, and
-      # invisible. Committing the link also makes the claim's terminal
-      # condition true, so no redelivery can create a second graph.
-      subscription.resource_id = graph_id
-      db.commit()
-
       if operation_id:
         await manager.emit_progress(operation_id, "Activating subscription...", 70)
 
-      subscription.activate(db)
-
-      BillingAuditLog.log_event(
-        session=db,
-        event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
-        org_id=subscription.org_id,
-        subscription_id=subscription.id,
-        description=f"Activated subscription for graph {graph_id}",
-        actor_type="system",
-        event_data={
-          "current_period_start": subscription.current_period_start.isoformat(),
-          "current_period_end": subscription.current_period_end.isoformat(),
-          "provisioning_method": "checkout",
-        },
-      )
-
-      if not subscription.stripe_subscription_id:
-        customer = BillingCustomer.get_by_user_id(user_id, db)
-        if customer and customer.invoice_billing_enabled:
-          from robosystems.config.billing import BillingConfig
-
-          plan_config = BillingConfig.get_subscription_plan(subscription.plan_name)
-          tier_label = (
-            plan_config["display_name"] if plan_config else subscription.plan_name
-          )
-          generate_subscription_invoice(
-            subscription=subscription,
-            customer=customer,
-            description=f"Graph subscription - {tier_label}",
-            session=db,
-          )
-          logger.info(f"Generated invoice for subscription {subscription_id}")
+      # Complete in a fresh session. The long async graph build above can
+      # invalidate the session opened before it and detach `subscription`, so
+      # the link commit persists nothing and activate()'s session.refresh()
+      # raises "Instance is not persistent within this Session" — which stranded
+      # the subscription at 'provisioning' with resource_id unset even though the
+      # graph was live and paid. Re-fetch and run the completion writes with no
+      # awaits interleaved so the instance stays persistent through both commits.
+      _finalize_graph_provisioning(subscription_id, graph_id, user_id)
 
       duration_ms = (time.time() - start_time) * 1000
 

@@ -297,6 +297,43 @@ class TestHandleCheckoutCompleted:
       "cs_session_abc"
     )
 
+  async def test_redelivery_keeps_original_checkout_session_id(
+    self, mock_db_session, mock_context, mock_subscription, mock_customer
+  ):
+    """A webhook redelivery must not clobber the preserved checkout session id.
+
+    State as left by the first delivery: metadata already carries the real cs_
+    id and provider_subscription_id has been rewritten to the Stripe sub id. The
+    pre-fix code re-preserved ``provider_subscription_id`` (now sub_…),
+    overwriting the good value — so the checkout-status lookup (which keys on the
+    cs_ id) 404s forever. The value must survive a redelivery unchanged.
+    """
+    mock_subscription.subscription_metadata = {"checkout_session_id": "cs_session_abc"}
+    mock_subscription.provider_subscription_id = "sub_stripe_first"
+    session_data = make_checkout_session(
+      session_id="cs_session_abc",
+      subscription_id="sub_stripe_first",
+    )
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_CUST),
+      patch(PATCH_TRIGGER, new_callable=AsyncMock),
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_customer
+      )
+
+      from robosystems.dagster.jobs.billing import _handle_checkout_completed
+
+      await _handle_checkout_completed(session_data, mock_db_session, mock_context)
+
+    assert (
+      mock_subscription.subscription_metadata.get("checkout_session_id")
+      == "cs_session_abc"
+    )
+
   async def test_subscription_lookup_falls_back_to_metadata(
     self, mock_db_session, mock_context, mock_subscription, mock_customer
   ):
