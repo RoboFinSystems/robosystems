@@ -35,7 +35,6 @@ production:
 
       # Copy operation limits
       copy_operations:
-        max_file_size_gb: 1.0 # Maximum file size per copy operation
         timeout_seconds: 900 # 15 minute timeout for dedicated instance
         concurrent_operations: 1 # One copy operation at a time
         max_files_per_operation: 100 # Maximum files per batch copy
@@ -100,7 +99,6 @@ production:
 
       # Copy operation limits
       copy_operations:
-        max_file_size_gb: 5.0 # Larger files for larger workloads
         timeout_seconds: 1800 # 30 minute timeout for large operations
         concurrent_operations: 3 # Support concurrent operations for team
         max_files_per_operation: 1000 # Higher batch limits
@@ -165,7 +163,6 @@ production:
 
       # Copy operation limits
       copy_operations:
-        max_file_size_gb: 10.0 # Maximum file size for enterprise workloads
         timeout_seconds: 3600 # 1 hour timeout for massive operations
         concurrent_operations: 5 # Maximum concurrency for enterprise
         max_files_per_operation: 10000 # Very high batch limits
@@ -231,7 +228,6 @@ production:
 
       # Copy operation limits (for platform data loading)
       copy_operations:
-        max_file_size_gb: 10.0 # Large files for bulk data loading
         timeout_seconds: 3600 # 1 hour for massive SEC filings
         concurrent_operations: 3 # Moderate concurrency for platform operations
         max_files_per_operation: 10000 # High batch limits for quarterly filings
@@ -326,7 +322,6 @@ staging:
 
       # Copy operation limits
       copy_operations:
-        max_file_size_gb: 1.0
         timeout_seconds: 900
         concurrent_operations: 1
         max_files_per_operation: 100
@@ -378,7 +373,6 @@ staging:
       max_subgraphs: 10
 
       copy_operations:
-        max_file_size_gb: 5.0
         timeout_seconds: 1800
         concurrent_operations: 3
         max_files_per_operation: 1000
@@ -429,7 +423,6 @@ staging:
       max_subgraphs: 25
 
       copy_operations:
-        max_file_size_gb: 10.0
         timeout_seconds: 3600
         concurrent_operations: 5
         max_files_per_operation: 10000
@@ -480,7 +473,6 @@ staging:
       max_subgraphs: 10 # Platform-managed subgraphs only
 
       copy_operations:
-        max_file_size_gb: 10.0
         timeout_seconds: 3600
         concurrent_operations: 3
         max_files_per_operation: 10000
@@ -546,7 +538,6 @@ development:
       max_subgraphs: 3
 
       copy_operations:
-        max_file_size_gb: 1.0
         timeout_seconds: 900
         concurrent_operations: 1
         max_files_per_operation: 100
