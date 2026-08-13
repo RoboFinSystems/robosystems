@@ -187,9 +187,9 @@ def provision(
 ) -> TenantFixture:
   """Provision two independent tenants, each with one entity graph.
 
-  Defaults to roboledger graphs so the extensions command surface and the
-  GraphQL data fields are exercised; pass schema_extensions=[] for plain
-  entity graphs.
+  Defaults to roboledger + roboinvestor graphs so both extensions command
+  surfaces and the GraphQL data fields are exercised; pass schema_extensions=[]
+  for plain entity graphs.
   """
   if schema_extensions is None:
     schema_extensions = ["roboledger", "roboinvestor"]
