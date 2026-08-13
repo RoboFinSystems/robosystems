@@ -483,8 +483,13 @@ def verify_reauth(
   if bool(password) == bool(assertion):
     raise ReauthInvalidError("Provide a password or a passkey assertion")
   if password:
-    if not user.password_hash or not PasswordSecurity.verify_password(
-      password, str(user.password_hash)
+    # Read the live row: the JWT dependency layer may hand back a cache-built
+    # User that deliberately omits password_hash.
+    db_user = User.get_by_id(str(user.id), session)
+    if (
+      db_user is None
+      or not db_user.password_hash
+      or not PasswordSecurity.verify_password(password, str(db_user.password_hash))
     ):
       raise ReauthInvalidError("Re-authentication failed")
     return

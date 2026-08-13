@@ -1,6 +1,7 @@
 """Authentication API models."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, ValidationInfo, field_validator
 
@@ -59,6 +60,24 @@ class AuthResponse(BaseModel):
     description="Organization information (personal org created automatically on registration)",
   )
   message: str = Field(..., description="Success message")
+  # Always present, defaulting to authenticated, so producers that predate
+  # the discriminator (register, SSO completion) keep their contract while
+  # login can signal a second step. New non-authenticated members are
+  # additive for clients: they only ever accompany token=None.
+  status: Literal["authenticated", "mfa_required", "mfa_enrollment_required"] = Field(
+    default="authenticated",
+    description=(
+      "Login flow state: authenticated (token present), or a passkey MFA "
+      "step is required before a session is issued (mfa_token present)"
+    ),
+  )
+  mfa_token: str | None = Field(
+    default=None,
+    description=(
+      "Short-lived token authorizing the MFA second step or forced "
+      "enrollment; present only when status is not 'authenticated'"
+    ),
+  )
   token: str | None = Field(
     default=None,
     description="JWT authentication token (optional for cookie-based auth)",

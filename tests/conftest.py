@@ -54,6 +54,8 @@ def mock_email_dagster_jobs():
   with (
     patch("robosystems.routers.auth.register.run_and_monitor_dagster_job"),
     patch("robosystems.routers.auth.register.build_email_job_config"),
+    patch("robosystems.routers.auth.passkeys.run_and_monitor_dagster_job"),
+    patch("robosystems.routers.auth.passkeys.build_email_job_config"),
     patch("robosystems.routers.user.main.run_and_monitor_dagster_job"),
     patch("robosystems.routers.user.main.build_email_job_config"),
   ):
@@ -118,6 +120,8 @@ def client(test_db):
     connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
     graph_scoped_rate_limit_dependency,
+    mfa_rate_limit_dependency,
+    passkey_management_rate_limit_dependency,
     rate_limit_dependency,
     sensitive_auth_rate_limit_dependency,
     sse_connection_rate_limit_dependency,
@@ -144,6 +148,9 @@ def client(test_db):
   app.dependency_overrides[sso_rate_limit_dependency] = lambda: None
   app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
   app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
+  # Fail-closed passkey/MFA buckets would deny without a limiter backend.
+  app.dependency_overrides[mfa_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[passkey_management_rate_limit_dependency] = lambda: None
 
   from robosystems.middleware.rate_limits import (
     oidc_rate_limit_dependency,
@@ -262,6 +269,8 @@ async def async_client(test_db, test_user):
     connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
     graph_scoped_rate_limit_dependency,
+    mfa_rate_limit_dependency,
+    passkey_management_rate_limit_dependency,
     rate_limit_dependency,
     sensitive_auth_rate_limit_dependency,
     sse_connection_rate_limit_dependency,
@@ -299,6 +308,9 @@ async def async_client(test_db, test_user):
   app.dependency_overrides[sso_rate_limit_dependency] = lambda: None
   app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
   app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
+  # Fail-closed passkey/MFA buckets would deny without a limiter backend.
+  app.dependency_overrides[mfa_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[passkey_management_rate_limit_dependency] = lambda: None
 
   # Override the database session dependency
   from robosystems.database import get_db_session
@@ -340,6 +352,8 @@ async def auth_integration_client(test_db):
     connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
     graph_scoped_rate_limit_dependency,
+    mfa_rate_limit_dependency,
+    passkey_management_rate_limit_dependency,
     rate_limit_dependency,
     sensitive_auth_rate_limit_dependency,
     sse_connection_rate_limit_dependency,
@@ -366,6 +380,9 @@ async def auth_integration_client(test_db):
   app.dependency_overrides[sso_rate_limit_dependency] = lambda: None
   app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
   app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
+  # Fail-closed passkey/MFA buckets would deny without a limiter backend.
+  app.dependency_overrides[mfa_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[passkey_management_rate_limit_dependency] = lambda: None
 
   # Override database session dependencies to use test_db
   def override_get_db():

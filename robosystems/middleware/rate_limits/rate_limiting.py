@@ -435,6 +435,30 @@ def oidc_rate_limit_dependency(request: Request):
   return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
 
 
+def mfa_rate_limit_dependency(request: Request):
+  """Rate limiting for the passkey login/MFA challenge surface.
+
+  Covers the second-factor handshake, passwordless login, and enroll-mode
+  registration — all pre-session, so callers are anonymous and get
+  limit//10 (~12/min per IP; a full handshake spends two requests).
+  Fails closed: this is an authentication surface, and its throttle must
+  not silently vanish with the limiter backend (the SCIM precedent).
+  """
+  limit = get_int_env("RATE_LIMIT_MFA", "120")  # 120/minute (2 per handshake)
+  return create_custom_rate_limit_dependency(limit, 60, "mfa", fail_closed=True)(
+    request
+  )
+
+
+def passkey_management_rate_limit_dependency(request: Request):
+  """Rate limiting for authenticated passkey lifecycle endpoints
+  (list/enroll/remove/recovery-codes)."""
+  limit = get_int_env("RATE_LIMIT_PASSKEY_MANAGEMENT", "60")  # 60/minute
+  return create_custom_rate_limit_dependency(
+    limit, 60, "passkey_management", fail_closed=True
+  )(request)
+
+
 def _scim_rate_limit_identifier(request: Request) -> str:
   """Key the SCIM bucket off the bearer token, not the caller IP.
 

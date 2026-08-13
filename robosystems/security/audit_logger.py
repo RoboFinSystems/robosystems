@@ -55,6 +55,14 @@ class SecurityEventType(Enum):
   SCIM_USER_DEACTIVATED = "scim_user_deactivated"
   SCIM_USER_REACTIVATED = "scim_user_reactivated"
   SCIM_AUTH_FAILURE = "scim_auth_failure"
+  # Passkey MFA lifecycle (operational; only MFA_FAILED alarms — a spike is
+  # the second-factor brute-force / phishing-relay signal)
+  PASSKEY_ENROLLED = "passkey_enrolled"
+  PASSKEY_REMOVED = "passkey_removed"
+  MFA_CHALLENGE_ISSUED = "mfa_challenge_issued"
+  MFA_VERIFIED = "mfa_verified"
+  MFA_FAILED = "mfa_failed"
+  MFA_RECOVERY_USED = "mfa_recovery_used"
   # Subgraph events
   SUBGRAPH_CREATED = "subgraph_created"
   SUBGRAPH_DELETED = "subgraph_deleted"
@@ -80,6 +88,7 @@ _METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
   SecurityEventType.AUTHORIZATION_DENIED: "AuthorizationDenied",
   SecurityEventType.OIDC_LOGIN_DENIED: "AuthorizationDenied",
   SecurityEventType.SCIM_AUTH_FAILURE: "AuthFailure",
+  SecurityEventType.MFA_FAILED: "AuthFailure",
   SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
   SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",

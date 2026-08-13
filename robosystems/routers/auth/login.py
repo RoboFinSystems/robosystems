@@ -11,8 +11,9 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...database import get_async_db_session
-from ...middleware.auth.jwt import create_jwt_token
+from ...middleware.auth.jwt import create_jwt_token, create_mfa_token
 from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, LoginRequest
@@ -169,6 +170,54 @@ async def login(
       status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
     )
 
+  # Passkey MFA interposes exactly here: password verified, session not yet
+  # minted. Enrolled users always get challenged (enrolling opts you in);
+  # unenrolled privileged users are forced through enrollment only when the
+  # enforcement flag is on. Flag off → this block is inert and login is
+  # byte-identical to the pre-passkey behavior. The OIDC lane never passes
+  # through this endpoint, so IdP-governed sessions are never challenged.
+  if env.PASSKEYS_ENABLED:
+    from ...models.core import UserPasskey
+    from ...operations.passkeys import user_requires_mfa_enrollment
+
+    mfa_status_value: str | None = None
+    mfa_purpose = "login"
+    if UserPasskey.count_for_user(str(user.id), session) > 0:
+      mfa_status_value = "mfa_required"
+    elif user_requires_mfa_enrollment(session, user):
+      mfa_status_value = "mfa_enrollment_required"
+      mfa_purpose = "enroll"
+
+    if mfa_status_value is not None:
+      mfa_token, _jti = create_mfa_token(str(user.id), mfa_purpose, session=session)
+      record_auth_metrics(
+        endpoint="/v1/auth/login",
+        method="POST",
+        auth_type="email_password_login",
+        success=True,
+        user_id=user.id,
+      )
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.MFA_CHALLENGE_ISSUED,
+        user_id=str(user.id),
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint="/v1/auth/login",
+        details={"status": mfa_status_value},
+        risk_level="low",
+      )
+      return AuthResponse(
+        user={
+          "id": user.id,
+          "name": user.name,
+          "email": user.email,
+          "email_verified": user.email_verified,
+        },
+        message="Additional verification required",
+        status=mfa_status_value,  # type: ignore[arg-type]
+        mfa_token=mfa_token,
+      )
+
   # Extract device fingerprint for token binding
   device_fingerprint = extract_device_fingerprint(fastapi_request)
 
@@ -192,6 +241,14 @@ async def login(
     AdvancedAuthProtection.record_auth_attempt(
       ip_address=client_ip, success=True, email=sanitized_email, user_agent=user_agent
     )
+
+  # Audit symmetry with the OIDC and passkey lanes, which already log this.
+  SecurityAuditLogger.log_auth_success(
+    user_id=str(user.id),
+    ip_address=client_ip,
+    user_agent=user_agent,
+    auth_method="password",
+  )
 
   # Calculate token expiry and refresh threshold
   from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES

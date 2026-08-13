@@ -17,7 +17,9 @@ logger = get_logger(__name__)
 class SendEmailConfig(Config):
   """Configuration for sending an email."""
 
-  email_type: str  # email_verification, password_reset, welcome, org_invitation
+  email_type: (
+    str  # email_verification, password_reset, welcome, org_invitation, passkey_enrolled
+  )
   to_email: str
   user_name: str
   token: str | None = None  # For verification/reset/invitation emails
@@ -25,6 +27,7 @@ class SendEmailConfig(Config):
   operation_id: str | None = None  # For SSE tracking
   org_name: str | None = None  # For org_invitation emails
   inviter_name: str | None = None  # For org_invitation emails
+  passkey_name: str | None = None  # For passkey_enrolled emails
 
 
 class EmailResult:
@@ -127,6 +130,15 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
           app=config.app,
         )
       )
+    elif config.email_type == "passkey_enrolled":
+      success = loop.run_until_complete(
+        ses_service.send_passkey_enrolled_email(
+          user_email=config.to_email,
+          user_name=config.user_name,
+          passkey_name=config.passkey_name or "a new passkey",
+          app=config.app,
+        )
+      )
     else:
       raise ValueError(f"Unknown email type: {config.email_type}")
 
@@ -213,6 +225,7 @@ def build_email_job_config(
   operation_id: str | None = None,
   org_name: str | None = None,
   inviter_name: str | None = None,
+  passkey_name: str | None = None,
 ) -> dict:
   """Build the Dagster run_config for send_email_job.
 
@@ -243,6 +256,9 @@ def build_email_job_config(
 
   if inviter_name:
     config["inviter_name"] = inviter_name
+
+  if passkey_name:
+    config["passkey_name"] = passkey_name
 
   run_config: dict = {
     "ops": {
