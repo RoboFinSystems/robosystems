@@ -99,6 +99,12 @@ def test_write_validation_error_is_inconclusive():
   assert classify_write(_resp(422, json={"detail": "bad"}))[0] is Verdict.INCONCLUSIVE
 
 
+def test_write_server_error_is_inconclusive():
+  """A 5xx on a cross-tenant write is an anomaly, not a clean deny — must flag."""
+  for sc in (500, 503):
+    assert classify_write(_resp(sc, json={"detail": "boom"}))[0] is Verdict.INCONCLUSIVE
+
+
 # ── graphql ────────────────────────────────────────────────────────────────
 
 

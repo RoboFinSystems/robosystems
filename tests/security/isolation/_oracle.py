@@ -210,4 +210,7 @@ def classify_write(attacker: httpx.Response) -> tuple[Verdict, str]:
     return Verdict.INCONCLUSIVE, f"rejected ({sc}) — confirm authz precedes validation"
   if sc == 429:
     return Verdict.INCONCLUSIVE, "rate-limited (429) — retry pacing"
-  return Verdict.PASS, f"not accepted ({sc})"
+  # Anything else (5xx, 405, …) is not a clean deny. A cross-tenant write that
+  # crashes the endpoint must be flagged for a look, not folded into PASS —
+  # the harness's whole promise is that only a clean deny reads as safe.
+  return Verdict.INCONCLUSIVE, f"unexpected status {sc} — not a clean deny"

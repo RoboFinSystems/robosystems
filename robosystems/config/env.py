@@ -556,12 +556,13 @@ class EnvConfig:
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
   )
-  # Test-support only. When enabled (and NOT in production), the org-invitation
-  # create response includes the raw invite token, so automated authorization
-  # tests can complete the invite -> register -> role-grant flow without email
-  # interception. Structurally forced off in production by
-  # `expose_invite_token_in_response()` — a credential must never leak from a
-  # prod invitation response even if this var is misconfigured.
+  # Test-support only. When enabled in an explicit non-prod env (see
+  # `expose_invite_token_in_response()`), the org-invitation create response
+  # includes the raw invite token, so automated authorization tests can complete
+  # the invite -> register -> role-grant flow without email interception.
+  # Deliberately a plain env var (not SSM/get_parameter_value like its
+  # neighbors): a credential-exposing flag must not be flippable live in a
+  # running deployment — turning it on requires an env change + redeploy.
   AUTH_INVITE_TOKEN_IN_RESPONSE = get_bool_env("AUTH_INVITE_TOKEN_IN_RESPONSE", False)
   # Organization limits (SSM: /tuning/limits/)
   ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
@@ -1167,12 +1168,14 @@ class EnvConfig:
   def expose_invite_token_in_response(cls) -> bool:
     """Whether to return the raw org-invite token in the create response.
 
-    Test-support only, and structurally impossible in production: even with
-    AUTH_INVITE_TOKEN_IN_RESPONSE set, this returns False whenever
-    is_production() is true, so an invite token can never leak from a prod
-    response regardless of misconfiguration.
+    Test-support only, and fail-closed by design: it requires an *explicit*
+    non-prod environment (dev or staging), not merely "not prod". An
+    unrecognized or misconfigured ENVIRONMENT therefore denies rather than
+    leaks — a credential must never surface from a prod-or-unknown response.
     """
-    return cls.AUTH_INVITE_TOKEN_IN_RESPONSE and not cls.is_production()
+    return cls.AUTH_INVITE_TOKEN_IN_RESPONSE and (
+      cls.is_development() or cls.is_staging()
+    )
 
   @classmethod
   def is_development(cls) -> bool:
