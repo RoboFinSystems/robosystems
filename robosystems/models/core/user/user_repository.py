@@ -348,14 +348,23 @@ class UserRepository(Model):
       .all()
     )
 
-  def revoke_access(self, session: Session) -> None:
-    """Revoke repository access and deactivate the paired credit pool."""
+  def revoke_access(self, session: Session, reason: str | None = None) -> None:
+    """Revoke repository access and deactivate the paired credit pool.
+
+    Stamps ``suspended_at``/``suspension_reason`` on the pool alongside
+    ``is_active``. Without them the pool records *that* it was suspended and
+    never *why* or *when*, which is the state an operator actually needs when
+    a customer asks why their credits stopped working.
+    """
+    now = datetime.now(UTC)
     self.is_active = False
-    self.expires_at = datetime.now(UTC)
-    self.updated_at = datetime.now(UTC)
+    self.expires_at = now
+    self.updated_at = now
 
     if self.user_credits:
       self.user_credits.is_active = False
+      self.user_credits.suspended_at = now
+      self.user_credits.suspension_reason = reason or "Repository access revoked"
 
     try:
       session.commit()

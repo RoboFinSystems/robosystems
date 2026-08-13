@@ -87,7 +87,7 @@ def cancel_repository_subscription(
         user_repo.updated_at = subscription.updated_at
         session.commit()
       else:
-        user_repo.revoke_access(session)
+        user_repo.revoke_access(session, reason="Subscription canceled")
 
   BillingAuditLog.log_event(
     session=session,
