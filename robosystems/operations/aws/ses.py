@@ -1,5 +1,6 @@
 """AWS SES adapter for sending transactional emails."""
 
+import html
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -252,11 +253,16 @@ If you didn't request this, no action is needed. Your password will not change.
     app_name: str, user_name: str, data: dict[str, Any]
   ) -> dict[str, str]:
     passkey_name = data.get("passkey_name", "a new passkey")
+    # passkey_name and user_name are user-controlled; this email exists to
+    # catch an attacker enrolling a credential, so its HTML must not be
+    # overridable by the very input that attacker chose.
+    safe_passkey_name = html.escape(str(passkey_name))
+    safe_user_name = html.escape(str(user_name))
 
     content = (
-      _paragraph(f"Hi {user_name},")
+      _paragraph(f"Hi {safe_user_name},")
       + _paragraph(
-        f"A passkey ({passkey_name}) was just added to your {app_name} "
+        f"A passkey ({safe_passkey_name}) was just added to your {app_name} "
         "account. It can now be used to sign in."
       )
       + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'

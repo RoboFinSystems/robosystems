@@ -317,6 +317,7 @@ class TestEnvValidator:
     env_config.GRAPH_API_URL = None
     env_config.PASSKEYS_ENABLED = True
     env_config.get_passkey_rp_id = lambda: "robosystems.ai"
+    env_config.get_passkey_origin = lambda: "https://robosystems.ai"
     return env_config
 
   def test_passkeys_deployed_without_rate_limiting_rejected(self):
@@ -330,6 +331,16 @@ class TestEnvValidator:
   def test_passkeys_deployed_without_rp_id_rejected(self):
     env_config = self._prod_passkeys_config()
     env_config.get_passkey_rp_id = lambda: ""
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
+  def test_passkeys_deployed_without_origin_rejected(self):
+    """RP ID and origin derive together; an explicit PASSKEY_RP_ID without a
+    usable origin must fail at boot, not at first ceremony."""
+    env_config = self._prod_passkeys_config()
+    env_config.get_passkey_origin = lambda: ""
 
     with patch("os.getenv", return_value=None):
       with pytest.raises(ConfigValidationError):

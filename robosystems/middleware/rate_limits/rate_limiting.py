@@ -438,9 +438,11 @@ def oidc_rate_limit_dependency(request: Request):
 def mfa_rate_limit_dependency(request: Request):
   """Rate limiting for the passkey login/MFA challenge surface.
 
-  Covers the second-factor handshake, passwordless login, and enroll-mode
-  registration — all pre-session, so callers are anonymous and get
-  limit//10 (~12/min per IP; a full handshake spends two requests).
+  Covers the second-factor handshake, passwordless login, and both
+  registration lanes. Pre-session callers (the handshake, passwordless,
+  forced enrollment) are anonymous and get limit//10 (~12/min per IP; a
+  full ceremony spends two requests); the authenticated settings-flow
+  enrollment shares the bucket at the full JWT-keyed limit.
   Fails closed: this is an authentication surface, and its throttle must
   not silently vanish with the limiter backend (the SCIM precedent).
   """

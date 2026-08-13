@@ -177,11 +177,15 @@ class EnvValidator:
     if (
       deployed
       and getattr(env_config, "PASSKEYS_ENABLED", False)
-      and not getattr(env_config, "get_passkey_rp_id", lambda: "")()
+      and (
+        not getattr(env_config, "get_passkey_rp_id", lambda: "")()
+        or not getattr(env_config, "get_passkey_origin", lambda: "")()
+      )
     ):
       errors.append(
-        "PASSKEYS_ENABLED=true but no WebAuthn RP ID is derivable — set "
-        "ROBOSYSTEMS_URL to the login home's URL or PASSKEY_RP_ID explicitly"
+        "PASSKEYS_ENABLED=true but no WebAuthn RP ID/origin is derivable — set "
+        "ROBOSYSTEMS_URL to the login home's URL, or PASSKEY_RP_ID and "
+        "PASSKEY_ORIGIN explicitly"
       )
     if getattr(env_config, "SCIM_ENABLED", False):
       default_role = getattr(env_config, "SSO_DEFAULT_ROLE", "member")

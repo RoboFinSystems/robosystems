@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import webauthn
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.exceptions import (
@@ -310,20 +311,25 @@ def complete_registration(
     transports = None
 
   first_passkey = UserPasskey.count_for_user(str(user.id), session) == 0
-  passkey = UserPasskey.create(
-    user_id=str(user.id),
-    credential_id=credential_id,
-    public_key=verified.credential_public_key,
-    session=session,
-    sign_count=verified.sign_count,
-    transports=transports,
-    aaguid=str(verified.aaguid) if verified.aaguid else None,
-    backup_eligible=(
-      verified.credential_device_type == CredentialDeviceType.MULTI_DEVICE
-    ),
-    backup_state=bool(verified.credential_backed_up),
-    name=(name or "Passkey").strip()[:100] or "Passkey",
-  )
+  try:
+    passkey = UserPasskey.create(
+      user_id=str(user.id),
+      credential_id=credential_id,
+      public_key=verified.credential_public_key,
+      session=session,
+      sign_count=verified.sign_count,
+      transports=transports,
+      aaguid=str(verified.aaguid) if verified.aaguid else None,
+      backup_eligible=(
+        verified.credential_device_type == CredentialDeviceType.MULTI_DEVICE
+      ),
+      backup_state=bool(verified.credential_backed_up),
+      name=(name or "Passkey").strip()[:100] or "Passkey",
+    )
+  except IntegrityError as exc:
+    # The pre-insert lookup above races a concurrent enrollment of the same
+    # credential; the unique index is the arbiter — keep the domain error.
+    raise DuplicateCredentialError("This passkey is already registered") from exc
   recovery_codes = (
     UserMfaRecoveryCode.create_set(str(user.id), session) if first_passkey else None
   )
