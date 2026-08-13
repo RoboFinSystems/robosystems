@@ -32,6 +32,8 @@ class DeprovisionResult:
   extensions_schema_dropped: bool = False
   registry_deallocated: bool = False
   records_cleaned: bool = False
+  documents_deleted: int = 0
+  search_purged: bool = False
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -131,6 +133,9 @@ class GraphDeprovisionService:
     # --- 3b. Drop extensions OLTP schema (financial-data removal) ---
     self._drop_extensions_schema(graph_id, result)
 
+    # --- 3c. Purge documents from the shared search index ---
+    self._purge_search_index(graph_id, result)
+
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
@@ -214,6 +219,7 @@ class GraphDeprovisionService:
 
       # Clean subgraph PG records (schemas, files) before marking deprovisioned
       self._clean_pg_records(subgraph.graph_id, session, result)
+      self._purge_search_index(subgraph.graph_id, result)
 
       # Mark subgraph as deprovisioned regardless of DB deletion outcome
       try:
@@ -260,6 +266,31 @@ class GraphDeprovisionService:
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
 
+  def _purge_search_index(self, graph_id: str, result: DeprovisionResult) -> None:
+    """Purge the tenant's documents from the shared OpenSearch index.
+
+    The document index is shared across all tenants (an application-level
+    graph_id filter is the only boundary), so a departed tenant's content
+    persisting in it is real over-retention. Guarded on SEMANTIC_SEARCH_ENABLED
+    so a search-disabled deployment is a clean no-op, and best-effort so an
+    index failure records a warning without stranding the teardown.
+    """
+    from ...config import env
+
+    if not env.SEMANTIC_SEARCH_ENABLED:
+      return
+    try:
+      from ...operations.search.client import OpenSearchClient
+
+      client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
+      client.delete_by_graph_id(graph_id)
+      result.search_purged = True
+      logger.info(f"Purged search index for graph {graph_id}")
+    except Exception as e:
+      error_msg = f"Search index purge failed: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
+
   async def _deallocate_registry(
     self, graph_id: str, result: DeprovisionResult
   ) -> None:
@@ -284,6 +315,7 @@ class GraphDeprovisionService:
     GraphBackup records are intentionally kept for post-deprovisioning hosting.
     """
     try:
+      from ...models.core.document import Document
       from ...models.core.graph.graph_credits import (
         GraphCredits,
         GraphCreditTransaction,
@@ -311,6 +343,16 @@ class GraphDeprovisionService:
       session.query(GraphFile).filter(GraphFile.graph_id == graph_id).delete(
         synchronize_session=False
       )
+
+      # documents.graph_id cascades on the graphs row, but step 7 is a soft
+      # delete so the cascade never fires — delete explicitly here. The shared
+      # OpenSearch content is purged separately in _purge_search_index.
+      documents_deleted = (
+        session.query(Document)
+        .filter(Document.graph_id == graph_id)
+        .delete(synchronize_session=False)
+      )
+      result.documents_deleted += documents_deleted
 
       session.flush()
       result.records_cleaned = True

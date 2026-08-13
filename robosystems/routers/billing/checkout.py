@@ -51,7 +51,7 @@ async def create_checkout_session(
     )
 
   try:
-    from ...models.core import OrgRole, OrgUser
+    from ...models.core import OrgLimits, OrgRole, OrgUser
 
     # Get user's org - they must be an OWNER
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
@@ -69,6 +69,17 @@ async def create_checkout_session(
         status_code=403,
         detail="Only organization owners can manage billing",
       )
+
+    # Gate a graph checkout on the org's graph limit before collecting payment.
+    # The graph-creation route enforces the same limit up front, but in the
+    # checkout lane provisioning happens post-payment via the webhook, so
+    # without this an org at its limit could pay and then be refused the graph
+    # it just bought. Refuse the sale here instead, matching the graph route.
+    if request.resource_type == "graph":
+      org_limits = OrgLimits.get_or_create_for_org(org_id, db)
+      can_create, reason = org_limits.can_create_graph(db)
+      if not can_create:
+        raise HTTPException(status_code=403, detail=reason)
 
     customer = BillingCustomer.get_or_create(org_id, db)
     logger.info(f"Using billing customer for org {org_id}")

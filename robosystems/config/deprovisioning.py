@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 class DeprovisioningConfig:
   """Configuration for graph deprovisioning behavior."""
 
+  # The suspend → auto-deprovision grace window. A canceled subscription
+  # suspends the graph; suspended_graph_deprovisioning_sensor
+  # (dagster/sensors/graph_lifecycle.py) only tears it down once
+  # ends_at < now - retention_days, unless the cancellation was IMMEDIATE.
+  # Load-bearing — not the backup hosting window (that is backup_hosting_days).
   retention_days: int = 7
   require_final_backup: bool = True
   backup_delay_hours: int = 24
