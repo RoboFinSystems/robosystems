@@ -76,6 +76,14 @@ def _patch_infra():
   )
 
 
+@pytest.fixture(autouse=True)
+def _stub_search_purge():
+  """Deprovision runs a best-effort OpenSearch purge, and SEMANTIC_SEARCH_ENABLED
+  is true under test — stub the client so these tests never reach a real cluster."""
+  with patch("robosystems.operations.search.client.OpenSearchClient"):
+    yield
+
+
 class TestDeprovisionService:
   """Tests for GraphDeprovisionService.deprovision_graph."""
 
@@ -362,6 +370,7 @@ class TestDeprovisionService:
     self, service, db_session, test_graph, test_user
   ):
     """Verify PG records are cleaned up."""
+    from robosystems.models.core.document import Document
     from robosystems.models.core.graph.graph_credits import GraphCredits
     from robosystems.models.core.graph.graph_user import GraphUser
 
@@ -380,6 +389,14 @@ class TestDeprovisionService:
     )
     db_session.add(credits)
     db_session.commit()
+
+    Document.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      title="A departed tenant's memo",
+      content="confidential",
+      session=db_session,
+    )
 
     with (
       patch(
@@ -416,6 +433,15 @@ class TestDeprovisionService:
         .count()
       )
       assert remaining_credits == 0
+
+      # The departed tenant's documents must not survive teardown.
+      remaining_documents = (
+        db_session.query(Document)
+        .filter(Document.graph_id == test_graph.graph_id)
+        .count()
+      )
+      assert remaining_documents == 0
+      assert result.documents_deleted >= 1
 
   @pytest.mark.asyncio
   async def test_deprovision_updates_subscription_metadata(
