@@ -51,9 +51,11 @@ to hand the paid gray-box tester as the scope fixture.
   subgraph id — a distinct access path) and **graph-scoped API keys** (a key
   minted for graph A is denied on `graph_a2`, a second graph the *same user*
   owns, proving the denial is the key's scope and not user access).
-- **Vertical** — `test_vertical.py`. Privilege escalation within one org
-  (viewer ≠ write, member ≠ administer, org-admin = implicit graph admin).
-  **Currently provision-skipped** — see the blocker below.
+- **Vertical** — `test_vertical.py`. Privilege escalation within one org: a graph
+  VIEWER can't write (REST or Cypher), a MEMBER can't administer, and an org ADMIN
+  receives implicit graph ADMIN (derived-privilege positive). Runs when the target
+  has both `ORG_MEMBER_INVITATIONS_ENABLED` and `AUTH_INVITE_TOKEN_IN_RESPONSE` on
+  (see provisioning below); otherwise it skips.
 
 ## The oracle (why a status code isn't enough)
 
@@ -83,12 +85,14 @@ HTTPS from the operator's machine (the whole matrix). The **DB leg** is an SSM
 tunnel used *outside* the matrix only, for teardown-disposal verification and
 provisioning fallback. The harness here uses the API leg exclusively.
 
-## Vertical-axis provisioning blocker (spec OQ1)
+## Vertical-axis provisioning (spec OQ1, resolved)
 
-The vertical axis needs a second principal inside one org. The only way to add
-one is an email invitation, and the **raw invite token is neither returned by
-the API nor recoverable from the DB** (stored as `sha256(token)`; the raw token
-is emailed). So a multi-user org can't be provisioned black-box *or* via the DB
-side channel. Activating the vertical axis needs email interception or a
-test-support seam that surfaces the raw token in a non-prod build. The intended
-matrix is written out (behind the skip) in `test_vertical.py`.
+The vertical axis needs a second principal inside one org, added by email
+invitation — and the **raw invite token is neither returned by the API nor
+recoverable from the DB** (stored as `sha256(token)`; the raw token is emailed).
+Rather than intercept email, this is unblocked by a **test-support seam**:
+`AUTH_INVITE_TOKEN_IN_RESPONSE` (default off) returns the raw token in the
+invitation create response, guarded by `env.expose_invite_token_in_response()`
+which forces it off in production regardless of the flag. Turn it on (plus
+`ORG_MEMBER_INVITATIONS_ENABLED`) in a non-prod target and the axis provisions
+invite → register → grant and runs; leave either off and it skips.
