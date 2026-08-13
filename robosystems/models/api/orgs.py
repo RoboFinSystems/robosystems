@@ -104,6 +104,15 @@ class OrgInvitationResponse(BaseModel):
   created_at: datetime
   expires_at: datetime
   is_expired: bool
+  token: str | None = Field(
+    default=None,
+    description=(
+      "Test-support only: the raw invite token. Populated ONLY when "
+      "AUTH_INVITE_TOKEN_IN_RESPONSE is enabled in a non-production environment; "
+      "always null in production. Lets automated authorization tests complete "
+      "the invite -> register flow without email interception."
+    ),
+  )
 
 
 class OrgInvitationListResponse(BaseModel):

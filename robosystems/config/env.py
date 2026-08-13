@@ -556,6 +556,13 @@ class EnvConfig:
     "ORG_MEMBER_INVITATIONS_ENABLED",
     get_parameter_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true",
   )
+  # Test-support only. When enabled (and NOT in production), the org-invitation
+  # create response includes the raw invite token, so automated authorization
+  # tests can complete the invite -> register -> role-grant flow without email
+  # interception. Structurally forced off in production by
+  # `expose_invite_token_in_response()` — a credential must never leak from a
+  # prod invitation response even if this var is misconfigured.
+  AUTH_INVITE_TOKEN_IN_RESPONSE = get_bool_env("AUTH_INVITE_TOKEN_IN_RESPONSE", False)
   # Organization limits (SSM: /tuning/limits/)
   ORG_GRAPHS_DEFAULT_LIMIT = get_tuning_int(
     "ORG_GRAPHS_DEFAULT_LIMIT",
@@ -1155,6 +1162,17 @@ class EnvConfig:
   def is_production(cls) -> bool:
     """Check if running in production environment."""
     return cls.ENVIRONMENT.lower() in ["prod", "production"]
+
+  @classmethod
+  def expose_invite_token_in_response(cls) -> bool:
+    """Whether to return the raw org-invite token in the create response.
+
+    Test-support only, and structurally impossible in production: even with
+    AUTH_INVITE_TOKEN_IN_RESPONSE set, this returns False whenever
+    is_production() is true, so an invite token can never leak from a prod
+    response regardless of misconfiguration.
+    """
+    return cls.AUTH_INVITE_TOKEN_IN_RESPONSE and not cls.is_production()
 
   @classmethod
   def is_development(cls) -> bool:
