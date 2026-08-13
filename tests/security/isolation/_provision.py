@@ -209,6 +209,84 @@ def create_entity_graph(
   raise TimeoutError(f"graph creation for {owner.label} timed out after {timeout}s")
 
 
+def _invite_and_join(
+  client: Client, owner: Principal, org_role: str, label: str
+) -> Principal | None:
+  """Invite a new user to owner's org at `org_role`, register via the token.
+
+  Requires ORG_MEMBER_INVITATIONS_ENABLED and AUTH_INVITE_TOKEN_IN_RESPONSE
+  (test-support) — returns None if either is off (no token in the response).
+  """
+  email = f"{_unique('iso_' + label)}@example.com"
+  r = client.post(
+    f"/v1/orgs/{owner.org_id}/invitations",
+    principal=owner,
+    json={"email": email, "role": org_role},
+  )
+  if r.status_code != 201:
+    return None
+  token = r.json().get("token")
+  if not token:  # AUTH_INVITE_TOKEN_IN_RESPONSE off — can't complete the flow
+    return None
+
+  password = _make_password()
+  rr = client.post(
+    "/v1/auth/register",
+    json={
+      "name": f"iso {label}",
+      "email": email,
+      "password": password,
+      "invite_token": token,
+    },
+  )
+  if rr.status_code not in (200, 201):
+    return None
+  body = rr.json()
+  user_id = (body.get("user") or {}).get("id", "")
+  jwt = body.get("token") or ""
+  if not jwt:
+    lr = client.post("/v1/auth/login", json={"email": email, "password": password})
+    jwt = lr.json().get("token", "") if lr.status_code == 200 else ""
+  if not jwt:
+    return None
+  key = mint_api_key(client, jwt, f"iso {label} key")
+  return Principal(
+    label=label, api_key=key, user_id=user_id, email=email, org_id=owner.org_id, jwt=jwt
+  )
+
+
+def grant_graph_role(
+  client: Client, admin: Principal, graph_id: str, user_id: str, role: str
+) -> bool:
+  r = client.post(
+    f"/v1/graphs/{graph_id}/members",
+    principal=admin,
+    json={"user_id": user_id, "role": role},
+  )
+  return r.status_code in (200, 201)
+
+
+def provision_role_matrix(
+  client: Client, owner: Principal, graph_a: str
+) -> dict[str, Principal]:
+  """Best-effort viewer/member/admin principals inside owner's org.
+
+  Empty dict if org invitations or the test-support token are off.
+  """
+  roles: dict[str, Principal] = {}
+  viewer = _invite_and_join(client, owner, "member", "viewer")
+  if viewer and grant_graph_role(client, owner, graph_a, viewer.user_id, "viewer"):
+    roles["viewer"] = viewer
+  member = _invite_and_join(client, owner, "member", "member")
+  if member and grant_graph_role(client, owner, graph_a, member.user_id, "member"):
+    roles["member"] = member
+  # org admin receives implicit graph ADMIN — no explicit grant
+  admin = _invite_and_join(client, owner, "admin", "gadmin")
+  if admin:
+    roles["admin"] = admin
+  return roles
+
+
 @dataclass
 class TenantFixture:
   """The provisioned world the matrix runs against."""
@@ -269,4 +347,8 @@ def provision(
     )
   except Exception:
     fx.scoped_key_a = None
+  try:
+    fx.roles = provision_role_matrix(client, a, graph_a)
+  except Exception:
+    fx.roles = {}
   return fx
