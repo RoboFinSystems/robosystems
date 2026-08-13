@@ -53,7 +53,7 @@ class TestCreditAllocationLogic:
 
   @pytest.mark.unit
   def test_monthly_job_wires_exactly_the_allocation_ops(self):
-    """The monthly job is allocation + repo allocation + cleanup, and nothing else.
+    """The monthly job is allocation + repo allocation + both retention ops.
 
     Asserted as an exact set rather than a lower bound: the previous version
     (`"get_subscriptions_for_allocation" in op_names or len(op_names) >= 1`)
@@ -66,4 +66,45 @@ class TestCreditAllocationLogic:
       "allocate_monthly_credits",
       "allocate_user_repository_credits",
       "cleanup_old_credit_transactions",
+      "cleanup_old_usage_records",
     }
+
+  @pytest.mark.unit
+  def test_usage_retention_is_wired_and_matches_the_credit_ledger_window(self):
+    """`graph_usage` has a reaper, and it keeps the same window as its sibling.
+
+    The table is the higher-volume of the two and had no retention at all while
+    `graph_credit_transactions` was pruned monthly. Divergent windows would make
+    a period rollup reproducible from one table and not the other.
+    """
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.billing import cleanup_old_usage_records
+
+    session = MagicMock()
+
+    @contextmanager
+    def _session_cm():
+      yield session
+
+    db = MagicMock()
+    db.get_session = _session_cm
+
+    with patch(
+      "robosystems.models.core.graph.graph_usage.GraphUsage.cleanup_old_records",
+      return_value={
+        "deleted_records": 3,
+        "preserved_summaries": 7,
+        "total_processed": 10,
+      },
+    ) as reaper:
+      result = cleanup_old_usage_records(build_op_context(), db, {"prior": "value"})
+
+    reaper.assert_called_once()
+    assert reaper.call_args.kwargs["older_than_days"] == 365
+    assert result["usage_cleanup"]["deleted_records"] == 3
+    # The prior op's result is threaded through — it is the job's sequencing edge.
+    assert result["credit_cleanup"] == {"prior": "value"}

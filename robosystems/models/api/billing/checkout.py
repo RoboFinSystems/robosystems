@@ -51,6 +51,13 @@ class CheckoutStatusResponse(BaseModel):
     "For repositories, this is the repository slug (e.g., 'sec')",
   )
   operation_id: str | None = Field(
-    None, description="SSE operation ID for monitoring provisioning progress"
+    None,
+    description=(
+      "Always null. Webhook-driven provisioning passes no operation id "
+      "(`_trigger_resource_provisioning` calls `run_graph_provisioning` with "
+      "`operation_id=None`), so there is no SSE stream to follow — poll the "
+      "status endpoint instead. Retained rather than removed because it is on "
+      "a published response shape; wiring it is a feature, not a fix."
+    ),
   )
   error: str | None = Field(None, description="Error message if checkout failed")

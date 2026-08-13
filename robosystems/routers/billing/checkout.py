@@ -218,7 +218,12 @@ async def create_checkout_session(
   "/checkout/{session_id}/status",
   response_model=CheckoutStatusResponse,
   summary="Get Checkout Session Status",
-  description="Poll after returning from Stripe Checkout. Status progresses: pending_payment → provisioning → active. When active, resource_id is populated; for graphs, operation_id tracks SSE provisioning progress.",
+  description=(
+    "Poll after returning from Stripe Checkout. Status progresses: "
+    "pending_payment → provisioning → active. When active, resource_id is "
+    "populated. `operation_id` is always null for webhook-driven provisioning "
+    "and cannot be used to follow progress — poll this endpoint instead."
+  ),
   operation_id="getCheckoutStatus",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
