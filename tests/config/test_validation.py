@@ -39,6 +39,7 @@ class MockEnvConfig:
     self.SECURITY_AUDIT_ENABLED = True
     self.EMAIL_VERIFICATION_ENABLED = True
     self.CAPTCHA_ENABLED = False
+    self.BILLING_ENABLED = False
 
 
 class TestConfigValidationError:
@@ -543,6 +544,11 @@ class TestEnvValidator:
     assert summary["ladybug"]["api_key_configured"] is True
     assert summary["security"]["rate_limiting"] is True
     assert summary["security"]["audit_logging"] is True
+    # Billing plan config is validated at startup rather than only on first
+    # checkout, so a malformed plan surfaces before a customer finds it.
+    assert summary["billing"]["config_valid"] is True
+    assert summary["billing"]["issues"] == []
+    assert summary["billing"]["billing_plans"] > 0
 
 
 class TestIntegrationScenarios:

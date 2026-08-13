@@ -85,11 +85,12 @@ provision. **Billing is org-level, not user-level** — a user with no `OrgUser`
 row cannot provision anything, and that is the failure you will see first in a
 misconfigured local environment. The check also respects `BILLING_ENABLED`.
 
-`check_graph_subscription_active(graph_id, session) -> (bool, error)` looks up
-the graph's `BillingSubscription` and maps its status to a specific message
-(pending, paused, canceled, past due, unpaid, upgrading). Two behaviors matter:
-a graph with *no* subscription is allowed through when `BILLING_ENABLED` is
-false, and the `UPGRADING` status permits reads while blocking writes.
+`check_graph_subscription_active(graph_id, session) -> (bool, error)` exists and
+is exported, but **nothing calls it** — it is not a live gate. Its status→message
+table (pending, paused, canceled, past due, unpaid, upgrading) duplicates the one
+inside `require_graph_access`, which is where subscription status is actually
+enforced. Treat it as dead surface pending removal; do not reach for it when
+adding a new gate, or you will add a check that never fires.
 
 `require_graph_access(graph_id, session, require_write=False)` returns the
 `Graph` or raises. This is the billing-side gate; the *authorization* side —
@@ -112,10 +113,15 @@ Key namespaces:
 
 ```
 graph_credit:{graph_id}                # graph credit balance
-shared_credit:{user_id}:{repository}   # shared repository credits
 credit_summary:{graph_id}              # usage summary
-op_cost:{operation_type}               # operation cost
 ```
+
+Two further prefixes are declared in `cache.py` but can never hold anything, and
+are listed here only so you do not go looking for their contents:
+`shared_credit:{user_id}:{repository}` has no setter or getter at all (shared
+repository credits read straight through to the database, uncached), and
+`op_cost:{operation_type}` is written on every `CreditService` construction with
+a table of zeros that nothing reads back.
 
 ```python
 from robosystems.middleware.billing import credit_cache
@@ -135,17 +141,25 @@ credit_cache.invalidate_graph_credit_balance("kg1a2b3c")
 there is no multiplier argument, and no multiplier is stored. The getter returns
 a `(Decimal, str)` tuple or `None` on a miss, not a bare balance.
 
-`update_cached_balance_after_consumption()` adjusts a cached balance in place
-and preserves the remaining TTL, so a consumption does not reset freshness.
+**Consumption invalidates; it does not update in place.** Every consumption path
+in `credit_service.py` calls `invalidate_graph_credit_balance`, dropping the
+balance entry and its summary, so the next read goes to the database.
+`update_cached_balance_after_consumption()` would adjust in place and preserve
+the TTL, but it has no callers — do not reason about cache freshness from it.
 
-TTLs resolve through `TuningConfig` and are SSM-tunable at runtime, except the
-operation-cost TTL, which is a fixed constant because costs rarely change:
+TTLs resolve through `TuningConfig`, which derives its environment-variable name
+from the SSM path. The operation-cost TTL is a fixed constant read directly from
+`CacheDefaults`, so neither its env var nor its SSM path has any effect:
 
-| Setting                           | SSM key                    | Default |
-| --------------------------------- | -------------------------- | ------- |
-| `CREDIT_BALANCE_CACHE_TTL`        | `cache/BALANCE_TTL`        | 300 s   |
-| `CREDIT_SUMMARY_CACHE_TTL`        | `cache/SUMMARY_TTL`        | 600 s   |
-| `CREDIT_OPERATION_COST_CACHE_TTL` | `cache/OPERATION_COST_TTL` | 3600 s  |
+| Setting        | SSM key             | Env override              | Default |
+| -------------- | ------------------- | ------------------------- | ------- |
+| Balance TTL    | `cache/BALANCE_TTL` | `TUNING_CACHE_BALANCE_TTL`| 300 s   |
+| Summary TTL    | `cache/SUMMARY_TTL` | `TUNING_CACHE_SUMMARY_TTL`| 600 s   |
+| Operation cost | *(not tunable)*     | *(not tunable)*           | 3600 s  |
+
+The `CREDIT_BALANCE_CACHE_TTL` / `CREDIT_SUMMARY_CACHE_TTL` /
+`CREDIT_OPERATION_COST_CACHE_TTL` attributes on `env` are read by nothing; set
+the `TUNING_*` names above instead.
 
 `BILLING_ENABLED` gates the enforcement checks; it is off in local development,
 which is why provisioning works there without a subscription.
