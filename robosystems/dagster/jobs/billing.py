@@ -92,12 +92,18 @@ async def _handle_checkout_completed(
 
     if stripe_subscription_id:
       subscription.stripe_subscription_id = stripe_subscription_id
-      # Preserve checkout session ID in metadata before overwriting
-      # Must create a new dict — SQLAlchemy won't detect in-place JSONB mutation
-      if subscription.provider_subscription_id:
+      # Preserve the ORIGINAL checkout session id (from the event) before we
+      # overwrite provider_subscription_id with the Stripe subscription id.
+      # Must create a new dict — SQLAlchemy won't detect in-place JSONB mutation.
+      # Read it from session_id, NOT provider_subscription_id: on a webhook
+      # redelivery that column is already the Stripe sub id, so storing it would
+      # clobber the real cs_… id and break the checkout-status lookup. Guard on
+      # absence so a redelivery stays idempotent.
+      existing_metadata = subscription.subscription_metadata or {}
+      if "checkout_session_id" not in existing_metadata:
         subscription.subscription_metadata = {
-          **(subscription.subscription_metadata or {}),
-          "checkout_session_id": subscription.provider_subscription_id,
+          **existing_metadata,
+          "checkout_session_id": session_id,
         }
       subscription.provider_subscription_id = stripe_subscription_id
 
