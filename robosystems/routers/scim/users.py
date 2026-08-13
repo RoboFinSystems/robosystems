@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...config import env
@@ -289,25 +290,65 @@ async def get_user(request: Request, user_id: str) -> ScimUserResource:
 async def replace_user(
   request: Request, user_id: str, body: ScimUserCreateRequest
 ) -> ScimUserResource:
+  """Replace the profile: name, userName/email, externalId, active.
+
+  An email change in the IdP must propagate here, or a user renamed before
+  their first OIDC sign-in can never link (the binding fallback matches on
+  email). Deliberately narrower than RFC 7644's replace-everything: an
+  attribute *absent* from the payload is left alone rather than cleared —
+  blanking ``external_id`` would erase the SCIM provenance the OIDC binding
+  fallback keys on.
+  """
   org_id = request.state.scim_org_id
   session = next(get_db_session())
   try:
     user = _org_user_or_404(org_id, user_id, session)
 
-    new_name = None
+    updates: dict[str, Any] = {}
+
     if body.name:
       new_name = body.name.formatted or " ".join(
         p for p in [body.name.given_name, body.name.family_name] if p
       )
-    if new_name and new_name != user.name:
-      user.update(session, name=new_name)
+      if new_name and new_name != user.name:
+        updates["name"] = new_name
+
+    new_email = (body.user_name or "").strip().lower()
+    if new_email and new_email != str(user.email).lower():
+      existing = User.get_by_email(new_email, session)
+      if existing is not None and str(existing.id) != str(user.id):
+        raise _scim_error(
+          status.HTTP_409_CONFLICT,
+          "userName is already in use",
+          scim_type="uniqueness",
+        )
+      updates["email"] = new_email
+
+    if body.external_id and body.external_id != user.external_id:
+      updates["external_id"] = body.external_id
+
+    if updates:
+      try:
+        user.update(session, **updates)
+      except IntegrityError:
+        # Pre-checked above; this is the concurrent-writer window.
+        session.rollback()
+        raise _scim_error(
+          status.HTTP_409_CONFLICT,
+          "userName is already in use",
+          scim_type="uniqueness",
+        )
 
     _set_active(user, bool(body.active), org_id, session)
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.SCIM_USER_UPDATED,
       user_id=str(user.id),
-      details={"action": "scim_user_updated", "org_id": org_id},
+      details={
+        "action": "scim_user_updated",
+        "org_id": org_id,
+        "fields": sorted(updates),
+      },
       risk_level="low",
     )
     session.refresh(user)
