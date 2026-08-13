@@ -39,6 +39,17 @@ class TestCreateCheckoutSession:
       resource_config={"tier": "standard"},
     )
 
+  @pytest.fixture(autouse=True)
+  def _allow_graph_limit(self):
+    """A graph checkout now gates on the org graph limit before payment. Default
+    to allow so the existing flow tests exercise the path below it; the refusal
+    case has its own test."""
+    with patch(
+      "robosystems.models.core.OrgLimits.get_or_create_for_org"
+    ) as mock_limits:
+      mock_limits.return_value.can_create_graph.return_value = (True, "")
+      yield mock_limits
+
   @pytest.mark.asyncio
   @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
@@ -367,6 +378,39 @@ class TestCreateCheckoutSession:
 
     assert result.checkout_url == "https://checkout.stripe.com/test"
     mock_get_plan.assert_called_once_with("sec", "starter")
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  async def test_create_checkout_session_refuses_over_graph_limit(
+    self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
+  ):
+    """A graph checkout is refused before payment when the org is at its limit.
+
+    The refusal must land before any Stripe customer/session is created — the
+    whole point of §9.1 is not taking money for a graph we will then refuse.
+    """
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
+    with patch(
+      "robosystems.models.core.OrgLimits.get_or_create_for_org"
+    ) as mock_limits:
+      mock_limits.return_value.can_create_graph.return_value = (
+        False,
+        "Graph limit reached (0 of 0 graphs used)",
+      )
+      with pytest.raises(HTTPException) as exc:
+        await create_checkout_session(checkout_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert "limit" in exc.value.detail.lower()
+    # No payment plumbing should have run.
+    mock_get_customer.assert_not_called()
 
 
 class TestGetCheckoutStatus:
