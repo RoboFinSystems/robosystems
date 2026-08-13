@@ -1175,12 +1175,43 @@ def allocate_user_repository_credits(
   }
 
 
+@op
+def cleanup_old_usage_records(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+  cleanup_result: dict[str, Any],
+) -> dict[str, Any]:
+  """Apply the retention policy to ``graph_usage``.
+
+  ``graph_usage`` is the higher-volume table — a row per AI operation, plus one
+  per active graph per usage-sensor tick — and until now had no reaper at all,
+  while its lower-volume sibling ``graph_credit_transactions`` was pruned every
+  month. `GraphUsage.cleanup_old_records` was written for this and never wired.
+
+  Retention matches that sibling at twelve months, and the default
+  ``keep_monthly_summaries`` drops only the per-call rows: storage snapshots and
+  allocations survive so period rollups stay reproducible.
+  """
+  from robosystems.models.core.graph.graph_usage import GraphUsage
+
+  with db.get_session() as session:
+    result = GraphUsage.cleanup_old_records(session, older_than_days=365)
+
+  context.log.info(
+    f"Usage retention: deleted {result['deleted_records']} records, "
+    f"preserved {result['preserved_summaries']} summaries"
+  )
+
+  return {"usage_cleanup": result, "credit_cleanup": cleanup_result}
+
+
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def monthly_credit_allocation_job():
-  """Monthly credit allocation job."""
+  """Monthly credit allocation and retention job."""
   result = allocate_monthly_credits()
   repo_result = allocate_user_repository_credits(result)
-  cleanup_old_credit_transactions(repo_result)
+  cleanup_result = cleanup_old_credit_transactions(repo_result)
+  cleanup_old_usage_records(cleanup_result)
 
 
 @op
