@@ -16,7 +16,11 @@ Opt-in — it skips unless `TARGET_API_URL` is set, so it is inert in a normal
 `just test` / CI run:
 
 ```bash
-# against the local stack
+# against the local stack (default), or pass a target
+just test-isolation
+just test-isolation https://staging.api.robosystems.ai
+
+# equivalently, by hand
 TARGET_API_URL=http://localhost:8000 uv run pytest tests/security/isolation -m isolation -s
 
 # the oracle's own unit tests run in the normal suite (no live target)
