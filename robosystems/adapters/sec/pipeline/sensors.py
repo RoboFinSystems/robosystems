@@ -8,7 +8,7 @@ Nightly Pipeline (enable all for automated daily updates):
 - Phase 2+3 (Process+Stage): sec_incremental_pipeline_sensor chains
   download → process (batched loop) → stage (DuckDB INSERT)
 - Phase 4 (Materialize): sec_stage_to_materialize_sensor chains stage → materialize
-  (incremental Mon-Thu; full rebuild on the Friday ET run as a weekly reconciliation)
+  (full rebuild nightly; incremental mode is parked — see the sensor docstring)
 - Phase 5 (Publish+Refresh): sec_post_materialize_publish_sensor chains
   materialize → lbug S3 publish → duckdb S3 publish → replica refresh → master sleep
 - Phase 5c (Text Index): sec_post_stage_index_sensor chains
@@ -18,15 +18,12 @@ Backfill Processing (enable for bulk/manual processing):
 - sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
 
 Nightly flow: New data is added to existing DuckDB tables (INSERT with dedup),
-then only the new rows are COPYed into the existing LadybugDB graph (keyset
-anti-join). The Friday ET run instead does a full rebuild from DuckDB to
-reconcile drift. The whole chain wakes the master at the start and sleeps it
-after publish, so reconciliation reuses that lifecycle rather than a separate
-schedule.
+then the LadybugDB graph is fully rebuilt from DuckDB (the staging source of
+truth). The whole chain wakes the master at the start and sleeps it after
+publish.
 """
 
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime
 
 from dagster import (
   DagsterRunStatus,
@@ -543,16 +540,18 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   Part of the nightly pipeline chain:
     process → stage (DuckDB INSERT) → materialize → S3 publish
 
-  Mon-Thu nights materialize **incrementally** - only new rows are COPYed into
-  the existing graph (per-table keyset anti-join), no rebuild. The **Friday** ET
-  run does a **full rebuild** instead: a weekly reconciliation from the same
-  DuckDB staging (source of truth) that erases any incremental drift (partial
-  batch failures, un-refreshed mutable Entity attributes, hash-batch edge cases).
-  Reconciliation rides this same chain — wake → stage → materialize → publish →
-  sleep — rather than a separate schedule, so the master lifecycle and S3 publish
-  are reused for both modes. S3 publishes are handled by
+  Every night does a **full rebuild** from the same DuckDB staging (source of
+  truth): rebuild-from-scratch erases any drift (partial batch failures,
+  un-refreshed mutable Entity attributes), and its streaming COPY into an empty
+  database has a far smaller memory working set than incremental mode, whose
+  keyset-export + anti-join scales with the accumulated graph. Incremental
+  (per-table keyset anti-join, no rebuild) is parked as of 2026-08-13 — at
+  current corpus scale it exceeds the shared master's memory budget and
+  OOM-kills the Graph API mid-run — but remains available for manual runs via
+  SECMaterializeConfig. The chain — wake → stage → materialize → publish →
+  sleep — is unchanged. S3 publishes are handled by
   sec_post_materialize_publish_sensor (which keys off the mode:incremental tag,
-  set for both).
+  set on every nightly run).
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
@@ -580,32 +579,13 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Friday ET run = weekly full-rebuild reconciliation; other nights incremental.
-  et_now = datetime.now(ZoneInfo("America/New_York"))
-  materialize_mode = "full" if et_now.weekday() == 4 else "incremental"
-  if materialize_mode == "full":
-    # Guard against a second full in the same window — e.g. a Thursday chain that
-    # spilled past ET midnight also reads as Friday. One full rebuild per week is
-    # enough; fall back to incremental if one already ran in the last 3 days.
-    try:
-      recent_full = context.instance.get_run_records(
-        filters=RunsFilter(
-          job_name="sec_materialize",
-          statuses=[DagsterRunStatus.SUCCESS],
-          tags={"materialize_mode": "full"},
-        ),
-        limit=1,
-        ascending=False,
-      )
-      if recent_full and (
-        datetime.now(UTC) - recent_full[0].create_timestamp < timedelta(days=3)
-      ):
-        materialize_mode = "incremental"
-        context.log.info("Full rebuild already ran this week — using incremental")
-    except Exception as guard_err:
-      context.log.warning(
-        f"Could not check recent full rebuilds ({guard_err}); proceeding with full"
-      )
+  # Full rebuild every night. Incremental mode is parked (2026-08-13): at
+  # current corpus scale its keyset-export + anti-join phase runs DuckDB and
+  # LadybugDB hot simultaneously and exceeds the shared master's memory budget,
+  # OOM-killing the Graph API mid-run. The machinery remains available for
+  # manual runs via SECMaterializeConfig; revisit when nightly full-rebuild
+  # duration threatens the wake window.
+  materialize_mode = "full"
 
   context.log.info(
     f"DuckDB staging completed (run_id={dagster_run.run_id}), "
@@ -628,7 +608,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
       "pipeline": "sec",
       "phase": "materialize",
       # mode:incremental marks the chain lineage (the publish + sleep sensors key
-      # off it) for BOTH incremental and Friday full-rebuild runs.
+      # off it) for every nightly run regardless of materialize_mode.
       "mode": "incremental",
       "materialize_mode": materialize_mode,
     },

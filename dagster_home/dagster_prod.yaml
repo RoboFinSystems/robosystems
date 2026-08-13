@@ -106,6 +106,19 @@ run_coordinator:
         limit: 1
         value:
           applyLimitPerUniqueValue: true
+      # One materialization per target graph database. sec_materialize carries
+      # materialize_db as a job-level tag, so sensor-fired and manually launched
+      # runs are both covered. Two materialize runs COPYing into the same
+      # LadybugDB database interleave writes, and rel tables have no primary
+      # key — duplicate edges land silently and would publish to replicas as
+      # corrupt data. The stage→materialize sensor's own STARTED/QUEUED guard is
+      # check-then-act and cannot close this race (observed 2026-08-13: a
+      # sensor backlog tick fired 17s behind a manual launch). Queuing the
+      # duplicate makes the worst case a redundant run, never corruption.
+      - key: "materialize_db"
+        limit: 1
+        value:
+          applyLimitPerUniqueValue: true
 
 # Telemetry - disable for privacy
 telemetry:
