@@ -145,6 +145,17 @@ class FileUploadRequest(BaseModel):
     pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
     examples=["Entity", "Fact", "PERSON_WORKS_FOR_COMPANY"],
   )
+  file_size_bytes: int | None = Field(
+    default=None,
+    ge=0,
+    description=(
+      "Size of the file about to be uploaded, in bytes. Optional; when supplied, "
+      "an over-limit file is rejected here instead of after it has been pushed to "
+      "S3 and rejected by ingest-file. Advisory only — the authoritative check "
+      "measures the object after upload."
+    ),
+    examples=[1048576],
+  )
 
   class Config:
     extra = "forbid"

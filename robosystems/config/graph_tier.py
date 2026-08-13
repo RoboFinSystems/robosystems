@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from robosystems.config import env
+from robosystems.config.constants import MAX_FILE_SIZE_MB
 
 
 class GraphTier(str, Enum):
@@ -261,16 +262,29 @@ class GraphTierConfig:
   def get_copy_operation_limits(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get copy operation limits for a tier."""
+    """Get copy operation limits for a tier.
+
+    ``max_file_size_gb`` is **derived from the enforced constant, not read from
+    graph.yml**, and is therefore the same for every tier. Upload size is not a
+    tier-scoped product limit: ``ingest_file_cmd`` reads the whole object into
+    memory to count rows, and it does that in the shared API container, so the
+    ceiling is bounded by that container rather than by the tenant's graph
+    instance. Publishing a per-tier figure here previously advertised up to
+    10 GB against a flat 100 MB rejection.
+
+    Raising this means making the row-count path stream; until then the
+    published number tracks the one the write path actually enforces.
+    """
     tier_config = cls.get_tier_config(tier, environment)
     default_limits = {
-      "max_file_size_gb": 1.0,
       "timeout_seconds": 300,
       "concurrent_operations": 1,
       "max_files_per_operation": 100,
       "daily_copy_operations": 10,
     }
-    return tier_config.get("copy_operations", default_limits)
+    limits = dict(tier_config.get("copy_operations", default_limits))
+    limits["max_file_size_gb"] = MAX_FILE_SIZE_MB / 1024
+    return limits
 
   @classmethod
   def get_backup_limits(
@@ -474,7 +488,10 @@ class GraphTierConfig:
         "limits": {
           "monthly_credits": monthly_credits,
           "max_subgraphs": writer.get("max_subgraphs"),
-          "copy_operations": writer.get("copy_operations", {}),
+          # Through the accessor, not the raw block, so `max_file_size_gb` is
+          # the enforced figure here too — reading `writer` directly is how the
+          # two surfaces drifted apart in the first place.
+          "copy_operations": cls.get_copy_operation_limits(tier_name, environment),
           "backup": writer.get("backup_limits", {}),
           "graph_limits": writer.get("graph_limits", {}),
         },

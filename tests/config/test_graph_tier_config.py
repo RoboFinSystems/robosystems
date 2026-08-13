@@ -135,7 +135,13 @@ def test_accessors_return_configured_values(mock_graph_config):
   assert get_tier_api_rate_multiplier("ladybug-standard") == 1.0
 
   copy_limits = get_tier_copy_operation_limits("ladybug-standard")
-  assert copy_limits["max_file_size_gb"] == 3
+  # Same treatment as api_rate_multiplier above: no longer read from graph.yml.
+  # The published cap is derived from the constant the write path enforces, so
+  # the mocked YAML's `max_file_size_gb: 3` is ignored by design — that is what
+  # stops the published figure drifting from the enforced one again.
+  from robosystems.config.constants import MAX_FILE_SIZE_MB
+
+  assert copy_limits["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024
   assert copy_limits["timeout_seconds"] == 600
   assert copy_limits["daily_copy_operations"] == 20
 
@@ -156,7 +162,11 @@ def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   assert get_tier_api_rate_multiplier("ladybug-large") == 2.0  # derived, 2 vCPU
 
   default_copy = get_tier_copy_operation_limits("ladybug-large")
-  assert default_copy["max_file_size_gb"] == 1.0
+  # Derived rather than defaulted: a tier with no copy_operations block still
+  # publishes the enforced cap, not a placeholder that happens to differ.
+  from robosystems.config.constants import MAX_FILE_SIZE_MB
+
+  assert default_copy["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024
   assert default_copy["concurrent_operations"] == 1
 
   default_backup = get_tier_backup_limits("ladybug-large")
@@ -318,3 +328,51 @@ def test_backup_hosting_days_never_exceed_the_s3_lifecycle():
   for tier, days in config.backup_hosting_days.items():
     assert days <= 90, f"{tier} promises {days}-day backup hosting; S3 deletes at 90"
   assert config.get_backup_hosting_days("unknown-tier") <= 90
+
+
+def test_published_file_size_matches_the_enforced_constant():
+  """The published cap is derived, not a hand-kept copy of the enforced one.
+
+  `/v1/graphs/{g}/limits` and `/v1/graphs/tiers` previously served per-tier
+  figures from graph.yml (1/5/10 GB) while `ingest_file_cmd` rejected anything
+  over a flat `MAX_FILE_SIZE_MB` — a 100x overstatement on the largest tier.
+  The two cannot drift again because there is now one source.
+  """
+  from robosystems.config.constants import MAX_FILE_SIZE_MB
+
+  expected_gb = MAX_FILE_SIZE_MB / 1024
+  for tier in ("ladybug-standard", "ladybug-large", "ladybug-xlarge"):
+    limits = GraphTierConfig.get_copy_operation_limits(tier)
+    assert limits["max_file_size_gb"] == expected_gb, (
+      f"{tier} publishes {limits['max_file_size_gb']} GB but the write path "
+      f"enforces {MAX_FILE_SIZE_MB} MB"
+    )
+
+
+def test_file_size_is_not_tier_scoped():
+  """Upload size is bounded by the shared API container, not the tenant's box.
+
+  `ingest_file_cmd` reads the whole object into memory to count rows, and does
+  so in the API process — so a per-tier ceiling would describe a resource the
+  limit does not consume. Every tier must publish the same number.
+  """
+  published = {
+    GraphTierConfig.get_copy_operation_limits(tier)["max_file_size_gb"]
+    for tier in ("ladybug-standard", "ladybug-large", "ladybug-xlarge")
+  }
+  assert len(published) == 1
+
+
+def test_tiers_listing_reports_the_same_file_size_as_the_limits_endpoint():
+  """Both public surfaces resolve through the accessor.
+
+  `get_available_tiers` used to pass graph.yml's `copy_operations` block
+  through raw, so the two endpoints could disagree even after one was fixed.
+  """
+  from robosystems.config.constants import MAX_FILE_SIZE_MB
+
+  tiers = GraphTierConfig.get_available_tiers(include_disabled=True)
+  assert tiers, "expected at least one tier"
+  for tier in tiers:
+    copy_ops = tier["limits"]["copy_operations"]
+    assert copy_ops["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024

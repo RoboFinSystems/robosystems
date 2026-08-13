@@ -14,7 +14,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.constants import PRESIGNED_URL_EXPIRY_SECONDS
+from robosystems.config.constants import MAX_FILE_SIZE_MB, PRESIGNED_URL_EXPIRY_SECONDS
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.graph import get_universal_repository
@@ -140,6 +140,22 @@ async def create_file_upload_cmd(
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="File name contains invalid characters",
+      )
+
+    # Fail before the upload rather than after it. `ingest-file` measures the
+    # real object and is the authoritative check; this only spares the caller a
+    # push to S3 that is already known to be rejected. Advisory by nature — a
+    # client can under-declare, which is why the post-upload check stays.
+    if (
+      request.file_size_bytes is not None
+      and request.file_size_bytes > MAX_FILE_SIZE_MB * 1024 * 1024
+    ):
+      raise HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail=(
+          f"File size {request.file_size_bytes / (1024 * 1024):.2f} MB exceeds "
+          f"maximum of {MAX_FILE_SIZE_MB} MB"
+        ),
       )
 
     logger.info(
