@@ -327,8 +327,13 @@ class EnvValidator:
         Dict with configuration summary
     """
     from robosystems.config import OperatorConfig
+    from robosystems.config.billing import BillingConfig
 
     operator_validation = OperatorConfig.validate_configuration()
+    # Checks every plan in DEFAULT_GRAPH_BILLING_PLANS carries the fields the
+    # checkout and allocation paths read. Returns a report and logs its own
+    # warnings; it never raises, so it cannot block startup.
+    billing_validation = BillingConfig.validate_configuration()
 
     return {
       "environment": env_config.ENVIRONMENT,
@@ -357,5 +362,11 @@ class EnvValidator:
         "fallback_operator": OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"],
         "available_models": len(OperatorConfig.BEDROCK_MODELS),
         "execution_modes": len(OperatorConfig.EXECUTION_PROFILES),
+      },
+      "billing": {
+        "config_valid": billing_validation["valid"],
+        "issues": billing_validation["issues"],
+        "billing_plans": billing_validation["summary"]["billing_plans"],
+        "enabled": env_config.BILLING_ENABLED,
       },
     }

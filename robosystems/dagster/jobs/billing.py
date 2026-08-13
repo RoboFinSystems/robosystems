@@ -18,7 +18,6 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.core import (
-  Graph,
   GraphCredits,
   GraphCreditTransaction,
   UserRepositoryCredits,
@@ -392,7 +391,9 @@ async def _handle_payment_succeeded(
   provider_subscription_id), this handler creates it.
   """
   from robosystems.models.core.billing import (
+    BillingAuditLog,
     BillingCustomer,
+    BillingEventType,
     BillingInvoice,
   )
 
@@ -442,6 +443,19 @@ async def _handle_payment_succeeded(
       db_session.commit()
       context.log.info(f"Created and marked invoice {invoice.invoice_number} as paid")
 
+  BillingAuditLog.log_event(
+    session=db_session,
+    event_type=BillingEventType.PAYMENT_SUCCEEDED,
+    description=f"Payment succeeded for subscription {subscription.id}",
+    subscription_id=subscription.id,
+    org_id=subscription.org_id,
+    invoice_id=invoice.id if invoice else None,
+    event_data={
+      "stripe_invoice_id": stripe_invoice_id,
+      "amount_paid_cents": invoice_data.get("amount_paid"),
+    },
+  )
+
   if subscription.status in ["pending_payment", "provisioning"]:
     await _trigger_resource_provisioning(subscription, db_session, context)
 
@@ -452,6 +466,8 @@ async def _handle_payment_failed(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
   """Handle invoice.payment_failed event."""
+  from robosystems.models.core.billing import BillingAuditLog, BillingEventType
+
   subscription = _resolve_subscription(invoice_data, db_session, context)
 
   if subscription.status == "pending_payment":
@@ -464,6 +480,23 @@ async def _handle_payment_failed(
 
     db_session.commit()
     subscription._invalidate_access_cache()
+
+  # Logged unconditionally: a failure against an already-active subscription is
+  # the dunning case, and is more consequential than one against a subscription
+  # that never activated.
+  BillingAuditLog.log_event(
+    session=db_session,
+    event_type=BillingEventType.PAYMENT_FAILED,
+    description=f"Payment failed for subscription {subscription.id}",
+    subscription_id=subscription.id,
+    org_id=subscription.org_id,
+    event_data={
+      "stripe_invoice_id": invoice_data.get("id"),
+      "subscription_status": subscription.status,
+      "amount_due_cents": invoice_data.get("amount_due"),
+      "attempt_count": invoice_data.get("attempt_count"),
+    },
+  )
 
   context.log.warning(f"Payment failed for subscription {subscription.id}")
 
@@ -788,9 +821,13 @@ async def _handle_setup_intent_succeeded(
 
   Fired when a customer adds a payment method via the Stripe portal.
   Updates has_payment_method on the BillingCustomer so direct subscription
-  creation knows they can be charged.
+  creation knows they can be charged, and records which payment method it was.
   """
-  from robosystems.models.core.billing import BillingCustomer
+  from robosystems.models.core.billing import (
+    BillingAuditLog,
+    BillingCustomer,
+    BillingEventType,
+  )
 
   customer_id = setup_intent_data.get("customer")
   if not customer_id:
@@ -802,14 +839,48 @@ async def _handle_setup_intent_succeeded(
     context.log.warning(f"Customer not found for setup intent: {customer_id}")
     return
 
+  # Webhook payloads are unexpanded, so `payment_method` is normally the id
+  # string; tolerate an expanded object in case the endpoint is ever configured
+  # to expand it. Recording the id is what makes dunning and support able to say
+  # *which* card, rather than only that one exists.
+  payment_method = setup_intent_data.get("payment_method")
+  if isinstance(payment_method, dict):
+    payment_method = payment_method.get("id")
+  payment_method_id = payment_method if isinstance(payment_method, str) else None
+
+  changed = False
+
   if not customer.has_payment_method:
     customer.has_payment_method = True
-    db_session.commit()
+    changed = True
     context.log.info(
       f"Marked customer {customer.org_id} as having payment method via portal"
     )
   else:
     context.log.info(f"Customer {customer.org_id} already has payment method on file")
+
+  # Always refresh the id — a later setup intent means a newer default card,
+  # even when has_payment_method was already true.
+  if payment_method_id and customer.default_payment_method_id != payment_method_id:
+    customer.default_payment_method_id = payment_method_id
+    changed = True
+    context.log.info(f"Recorded default payment method for org {customer.org_id}")
+
+  if changed:
+    customer.updated_at = datetime.now(UTC)
+    db_session.commit()
+
+    BillingAuditLog.log_event(
+      session=db_session,
+      event_type=BillingEventType.PAYMENT_METHOD_ADDED,
+      description=f"Payment method added via Stripe portal for org {customer.org_id}",
+      org_id=customer.org_id,
+      event_data={
+        "stripe_customer_id": customer_id,
+        "payment_method_id": payment_method_id,
+        "setup_intent_id": setup_intent_data.get("id"),
+      },
+    )
 
 
 def _merge_subscription_metadata(
@@ -987,104 +1058,8 @@ async def _trigger_resource_provisioning(
 
 
 @op
-def get_graphs_with_negative_balance(
-  context: OpExecutionContext, db: DatabaseResource
-) -> list[dict[str, Any]]:
-  """Get all graphs that have negative credit balances (overages)."""
-  with db.get_session() as session:
-    results = (
-      session.query(
-        GraphCredits.graph_id,
-        GraphCredits.user_id,
-        GraphCredits.billing_admin_id,
-        GraphCredits.current_balance,
-        GraphCredits.monthly_allocation,
-        Graph.graph_tier,
-      )
-      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
-      .filter(GraphCredits.current_balance < 0)
-      .all()
-    )
-
-    graphs = [
-      {
-        "graph_id": r.graph_id,
-        "user_id": r.user_id,
-        "billing_admin_id": r.billing_admin_id,
-        "negative_balance": float(r.current_balance),
-        "monthly_allocation": float(r.monthly_allocation),
-        "graph_tier": r.graph_tier,
-        "overage_amount": abs(float(r.current_balance)),
-      }
-      for r in results
-    ]
-
-    context.log.info(f"Found {len(graphs)} graphs with negative balances")
-    return graphs
-
-
-@op
-def process_overage_invoices(
-  context: OpExecutionContext,
-  db: DatabaseResource,
-  graphs_with_negative_balance: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-  """Process overage invoices for graphs with negative balances."""
-  invoices = []
-
-  with db.get_session() as session:
-    for graph_info in graphs_with_negative_balance:
-      try:
-        overage_credits = abs(Decimal(str(graph_info["negative_balance"])))
-        # Billing-off deployments keep the overage *record* (credit quantity)
-        # but dollarize at $0 — the fee is settled off-platform via the MSA.
-        overage_rate = 0.005 if env.BILLING_ENABLED else 0.0
-        usd_amount = float(overage_credits) * overage_rate
-
-        credits_record = GraphCredits.get_by_graph_id(graph_info["graph_id"], session)
-
-        if credits_record:
-          GraphCreditTransaction.create_transaction(
-            graph_credits_id=credits_record.id,
-            transaction_type=CreditTransactionType.ALLOCATION,
-            amount=Decimal("0"),
-            description=f"Monthly overage invoice: {overage_credits} credits (${usd_amount:.2f})",
-            metadata={
-              "invoice_type": "overage",
-              "overage_credits": str(overage_credits),
-              "amount_usd": str(usd_amount),
-              "billing_period_end": datetime.now(UTC).replace(day=1).isoformat(),
-              "graph_tier": str(graph_info["graph_tier"]),
-            },
-            session=session,
-          )
-
-        invoice = {
-          "graph_id": graph_info["graph_id"],
-          "user_id": graph_info["user_id"],
-          "overage_credits": float(overage_credits),
-          "amount_usd": usd_amount,
-          "invoice_date": datetime.now(UTC).isoformat(),
-          "status": "pending_payment",
-        }
-        invoices.append(invoice)
-        context.log.info(
-          f"Generated overage invoice for {graph_info['graph_id']}: ${usd_amount:.2f}"
-        )
-
-      except Exception as e:
-        context.log.error(
-          f"Failed to process overage for {graph_info['graph_id']}: {e}"
-        )
-
-  return invoices
-
-
-@op
 def allocate_monthly_credits(
-  context: OpExecutionContext,
-  db: DatabaseResource,
-  overage_invoices: list[dict[str, Any]],
+  context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
   """Allocate monthly credits to all graphs."""
   with db.get_session() as session:
@@ -1098,7 +1073,6 @@ def allocate_monthly_credits(
 
     return {
       "allocation_result": result,
-      "overage_invoices_count": len(overage_invoices),
       "timestamp": datetime.now(UTC).isoformat(),
     }
 
@@ -1203,10 +1177,8 @@ def allocate_user_repository_credits(
 
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def monthly_credit_allocation_job():
-  """Monthly credit allocation and overage processing job."""
-  graphs = get_graphs_with_negative_balance()
-  invoices = process_overage_invoices(graphs)
-  result = allocate_monthly_credits(invoices)
+  """Monthly credit allocation job."""
+  result = allocate_monthly_credits()
   repo_result = allocate_user_repository_credits(result)
   cleanup_old_credit_transactions(repo_result)
 

@@ -1,7 +1,10 @@
 """Per-event usage records: storage snapshots, credit consumption, API calls.
 
-One append-only table backs storage-overage billing, credit analytics, and
-performance insight. Rows carry pre-split billing_year/month/day/hour columns
+One append-only table backs storage reporting, credit analytics, and
+performance insight. Storage is included in each tier and is **not** metered or
+billed for overage (``config/billing/__init__.py``) — the storage columns here
+feed usage reporting and the tier storage cap, not a per-GB charge. Rows carry
+pre-split billing_year/month/day/hour columns
 so period rollups are index-only scans. Nothing here reads subscription
 pricing — that stays in ``config/billing/``.
 """
@@ -121,7 +124,7 @@ class GraphUsage(Model):
   instance_id = Column(String, nullable=True)  # Infrastructure instance
   region = Column(String, nullable=True)  # AWS region
 
-  # Storage metrics (for storage overage billing)
+  # Storage metrics (usage reporting and the tier storage cap — not billed per GB)
   storage_bytes = Column(BigInteger, nullable=True)  # Total storage size in bytes
   storage_gb = Column(Float, nullable=True)  # Total storage in GB
   storage_delta_gb = Column(

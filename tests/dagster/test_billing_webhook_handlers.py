@@ -192,8 +192,11 @@ def make_subscription_data(
   }
 
 
-def make_setup_intent_data(customer_id="cus_stripe_abc"):
-  return {"customer": customer_id}
+def make_setup_intent_data(customer_id="cus_stripe_abc", payment_method=None):
+  data = {"customer": customer_id, "id": "seti_test_123"}
+  if payment_method is not None:
+    data["payment_method"] = payment_method
+  return data
 
 
 # ---------------------------------------------------------------------------
@@ -846,12 +849,15 @@ class TestHandlePaymentFailed:
   async def test_pending_payment_subscription_set_to_unpaid(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Sets subscription to 'unpaid' and records error in metadata."""
+    """Sets subscription to 'unpaid', records error in metadata, audits the failure."""
     mock_subscription.status = "pending_payment"
     mock_subscription.subscription_metadata = {}
     invoice_data = make_invoice_data()
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingAuditLog") as MockAudit,
+    ):
       MockSub.get_by_provider_subscription_id.return_value = mock_subscription
 
       from robosystems.dagster.jobs.billing import _handle_payment_failed
@@ -863,14 +869,27 @@ class TestHandlePaymentFailed:
     mock_db_session.commit.assert_called_once()
     mock_context.log.warning.assert_called()
 
+    # A payment failure is the event dunning depends on, so it must reach the
+    # audit log and not only the Dagster run log.
+    MockAudit.log_event.assert_called_once()
+    assert MockAudit.log_event.call_args.kwargs["event_type"].value == "payment_failed"
+
   async def test_non_pending_subscription_not_changed(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Does not change status when subscription is already active or unpaid."""
+    """Leaves status alone when already active — but still audits the failure.
+
+    A failed payment against a live subscription is the dunning case: the
+    status deliberately does not move, and the audit row is the only record
+    that it happened.
+    """
     mock_subscription.status = "active"
     invoice_data = make_invoice_data()
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingAuditLog") as MockAudit,
+    ):
       MockSub.get_by_provider_subscription_id.return_value = mock_subscription
 
       from robosystems.dagster.jobs.billing import _handle_payment_failed
@@ -878,7 +897,14 @@ class TestHandlePaymentFailed:
       await _handle_payment_failed(invoice_data, mock_db_session, mock_context)
 
     assert mock_subscription.status == "active"
+    # No status transition to persist — the only write is the audit row, which
+    # log_event commits itself.
     mock_db_session.commit.assert_not_called()
+    MockAudit.log_event.assert_called_once()
+    assert (
+      MockAudit.log_event.call_args.kwargs["event_data"]["subscription_status"]
+      == "active"
+    )
 
   async def test_no_subscription_id_raises_not_found(
     self, mock_db_session, mock_context
@@ -1745,12 +1771,15 @@ class TestHandleSetupIntentSucceeded:
   async def test_marks_customer_as_having_payment_method(
     self, mock_db_session, mock_context, mock_customer
   ):
-    """Sets has_payment_method=True and commits when customer found."""
+    """Sets has_payment_method=True, commits, and audits the addition."""
     mock_customer.has_payment_method = False
     mock_customer.org_id = "org_01ABC123"
     intent_data = make_setup_intent_data()
 
-    with patch(PATCH_BILLING_CUST) as MockCust:
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog") as MockAudit,
+    ):
       MockCust.get_by_stripe_customer_id.return_value = mock_customer
 
       from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
@@ -1762,6 +1791,56 @@ class TestHandleSetupIntentSucceeded:
     mock_context.log.info.assert_called()
     logged = [str(c) for c in mock_context.log.info.call_args_list]
     assert any("Marked" in msg for msg in logged)
+    MockAudit.log_event.assert_called_once()
+    assert (
+      MockAudit.log_event.call_args.kwargs["event_type"].value == "payment_method_added"
+    )
+
+  async def test_records_payment_method_id_from_intent(
+    self, mock_db_session, mock_context, mock_customer
+  ):
+    """Captures the payment method id Stripe supplies, not just the boolean.
+
+    Without this the admin API's `default_payment_method_id` is permanently
+    null, and support cannot tell which card is on file.
+    """
+    mock_customer.has_payment_method = False
+    mock_customer.org_id = "org_01ABC123"
+    mock_customer.default_payment_method_id = None
+    intent_data = make_setup_intent_data(payment_method="pm_test_456")
+
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog"),
+    ):
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+
+      from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
+
+      await _handle_setup_intent_succeeded(intent_data, mock_db_session, mock_context)
+
+    assert mock_customer.default_payment_method_id == "pm_test_456"
+
+  async def test_accepts_expanded_payment_method_object(
+    self, mock_db_session, mock_context, mock_customer
+  ):
+    """Tolerates an expanded payment_method, which an expanded endpoint sends."""
+    mock_customer.has_payment_method = False
+    mock_customer.org_id = "org_01ABC123"
+    mock_customer.default_payment_method_id = None
+    intent_data = make_setup_intent_data(payment_method={"id": "pm_expanded_789"})
+
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog"),
+    ):
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+
+      from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
+
+      await _handle_setup_intent_succeeded(intent_data, mock_db_session, mock_context)
+
+    assert mock_customer.default_payment_method_id == "pm_expanded_789"
 
   async def test_customer_already_has_payment_method_skips_commit(
     self, mock_db_session, mock_context, mock_customer

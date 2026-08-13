@@ -4,7 +4,9 @@ Centralized configuration package for RoboSystems Service.
 This package provides a single source of truth for all configuration settings,
 including rate limits, credits, constants, and external services.
 
-Note: Billing and repository configurations are now model-based (see unified_billing.py and UserRepository model).
+Note: graph tier pricing and credit allocations live in `billing/core.py`
+(`DEFAULT_GRAPH_BILLING_PLANS`); repository plans live in
+`shared_repositories.py` and the `UserRepository` model.
 """
 
 # Core configuration modules
