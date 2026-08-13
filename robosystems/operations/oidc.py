@@ -416,9 +416,11 @@ def resolve_oidc_user(
   account, and it accepted an empty-string ``external_id`` as provenance.
   A missing/empty ``binding_value`` never links.
 
-  When ``ENTERPRISE_ORG_ID`` pins the deployment's org, the fallback further
-  requires the matched user to be a member of that org — identities outside
-  the enterprise boundary never link, whatever their email or ``external_id``.
+  When ``ENTERPRISE_ORG_ID`` pins the deployment's org, membership is
+  required on *every* resolution, not only at link time: an identity linked
+  before the org was pinned, or a user since removed from the pinned org,
+  stops resolving. (The fallback additionally checks membership before
+  writing a link, so a refused resolution never leaves one behind.)
 
   The email-match fallback additionally refuses a claim whose ``email`` the
   IdP marked *unverified* (``email_verified: false``). It does not *require*
@@ -463,6 +465,11 @@ def resolve_oidc_user(
       session=session,
     )
     linked = True
+
+  if env.ENTERPRISE_ORG_ID and (
+    OrgUser.get_by_org_and_user(env.ENTERPRISE_ORG_ID, str(user.id), session) is None
+  ):
+    raise OIDCUserNotProvisionedError("No provisioned user for this identity")
 
   if not user.is_active:
     raise OIDCUserInactiveError("User is deactivated")

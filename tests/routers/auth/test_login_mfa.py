@@ -56,6 +56,12 @@ class _FakeRedis:
   def expire(self, key, ttl):
     return True
 
+  def set(self, key, value, nx=False, ex=None):
+    if nx and key in self.store:
+      return None
+    self.store[key] = str(value)
+    return True
+
 
 @contextmanager
 def _fake_auth_valkey():
@@ -68,6 +74,50 @@ def _fake_auth_valkey():
     ),
   ):
     yield fake
+
+
+class TestAtomicTokenPrimitives:
+  """The two authoritative gates are atomic and fail closed.
+
+  Concurrent redemptions race on SET NX (one winner), and the attempt
+  budget increments before checking, so parallel requests cannot all
+  observe a below-budget counter.
+  """
+
+  def test_claim_is_single_winner(self):
+    from robosystems.routers.auth import mfa as mfa_router
+
+    with _fake_auth_valkey():
+      assert mfa_router._claim_mfa_token("jti-1") is True
+      assert mfa_router._claim_mfa_token("jti-1") is False
+
+  def test_claim_fails_closed_when_store_unreachable(self):
+    from robosystems.routers.auth import mfa as mfa_router
+
+    with patch(
+      "robosystems.routers.auth.mfa.create_redis_client",
+      side_effect=ConnectionError("down"),
+    ):
+      assert mfa_router._claim_mfa_token("jti-2") is False
+
+  def test_attempt_budget_counts_before_checking(self):
+    from robosystems.routers.auth import mfa as mfa_router
+
+    with _fake_auth_valkey():
+      results = [
+        mfa_router._register_mfa_attempt("jti-3")
+        for _ in range(mfa_router.MFA_MAX_ATTEMPTS + 2)
+      ]
+    assert results == [True] * mfa_router.MFA_MAX_ATTEMPTS + [False, False]
+
+  def test_attempt_fails_closed_when_store_unreachable(self):
+    from robosystems.routers.auth import mfa as mfa_router
+
+    with patch(
+      "robosystems.routers.auth.mfa.create_redis_client",
+      side_effect=ConnectionError("down"),
+    ):
+      assert mfa_router._register_mfa_attempt("jti-4") is False
 
 
 def _create_user(session, *, with_org_role=None):

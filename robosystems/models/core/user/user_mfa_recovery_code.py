@@ -86,19 +86,23 @@ class UserMfaRecoveryCode(Model):
   def consume(
     cls, user_id: str, code: str, session: Session, auto_commit: bool = True
   ) -> bool:
-    """Mark a matching unused code as used. Returns False when none matches."""
-    row = (
+    """Mark a matching unused code as used. Returns False when none matches.
+
+    A single conditional UPDATE, not select-then-update: concurrent
+    redemptions of the same code race on the row's ``used_at IS NULL``
+    predicate, so exactly one wins.
+    """
+    updated = (
       session.query(cls)
       .filter(
         cls.user_id == user_id,
         cls.code_hash == _hash_code(code),
         cls.used_at.is_(None),
       )
-      .first()
+      .update({"used_at": datetime.now(UTC)}, synchronize_session=False)
     )
-    if row is None:
+    if not updated:
       return False
-    row.used_at = datetime.now(UTC)
     if auto_commit:
       try:
         session.commit()

@@ -503,9 +503,10 @@ class TestResolveOidcUser:
     assert resolution.user.id == user.id
     assert resolution.linked is True
 
-  def test_org_boundary_ignores_established_identity(self, test_db):
-    """The boundary gates LINKING only: an already-linked identity resolves
-    regardless (SCIM deactivation is the offboarding control there)."""
+  def test_org_boundary_refuses_established_nonmember_identity(self, test_db):
+    """The boundary gates every resolution, not only linking: an identity
+    linked before the org was pinned — or whose user was since removed from
+    the pinned org — stops resolving, whatever SCIM thinks of ``is_active``."""
     org = Org.create(
       name="Pinned Enterprise 3", org_type=OrgType.ENTERPRISE, session=test_db
     )
@@ -519,8 +520,30 @@ class TestResolveOidcUser:
     )
 
     with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
+      with pytest.raises(OIDCUserNotProvisionedError):
+        resolve_oidc_user(
+          test_db, issuer=ISSUER, subject="okta|sub-ob3", email=user.email
+        )
+
+  def test_org_boundary_resolves_established_member_identity(self, test_db):
+    org = Org.create(
+      name="Pinned Enterprise 4", org_type=OrgType.ENTERPRISE, session=test_db
+    )
+    user = _create_user(test_db, external_id="okta|sub-ob4")
+    OrgUser.create(
+      org_id=str(org.id), user_id=str(user.id), role=OrgRole.MEMBER, session=test_db
+    )
+    UserIdentity.create(
+      user_id=str(user.id),
+      issuer=ISSUER,
+      subject="okta|sub-ob4",
+      email_at_link=user.email,
+      session=test_db,
+    )
+
+    with patch.object(env, "ENTERPRISE_ORG_ID", str(org.id)):
       resolution = resolve_oidc_user(
-        test_db, issuer=ISSUER, subject="okta|sub-ob3", email=user.email
+        test_db, issuer=ISSUER, subject="okta|sub-ob4", email=user.email
       )
     assert resolution.user.id == user.id
     assert resolution.linked is False

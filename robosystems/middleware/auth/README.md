@@ -170,8 +170,12 @@ enforcement without passkeys, or that runs OIDC/SCIM/passkeys with
 ### Passkey MFA (WebAuthn)
 
 `PASSKEYS_ENABLED` turns on the passkey surface: enrollment
-(`/v1/auth/passkeys/register/*`, from settings or the forced-enrollment
-lane), passwordless login (`/v1/auth/passkeys/login/*` — a user-verified
+(`/v1/auth/passkeys/register/*` — the settings lane takes a JWT session
+*plus* a fresh re-auth proof, password or `reauth`-ceremony assertion, and
+refuses API keys outright: a programmatic key must never mint an interactive
+credential that outlives its own revocation; the forced-enrollment lane's
+token is its own freshness proof), passwordless login
+(`/v1/auth/passkeys/login/*` — a user-verified
 discoverable credential is two factors in one gesture), the second-factor
 handshake (`/v1/auth/mfa/options` + `/verify`, driven by the short-lived
 purpose-scoped `mfa_token` that `/v1/auth/login` mints once a passkey
@@ -188,12 +192,14 @@ in `operations/passkeys.py`.
 
 All in `dependencies.py`. Every one of them accepts either credential type —
 JWT is tried first when an `Authorization: Bearer` header is present, otherwise
-the `X-API-Key` header is used.
+the `X-API-Key` header is used — except `get_optional_jwt_user`, which is
+deliberately JWT-only for surfaces that manage sign-in credentials themselves.
 
 | Dependency                                      | Returns | Notes                                                                   |
 | ----------------------------------------------- | ------- | ----------------------------------------------------------------------- |
 | `get_current_user`                              | `User`  | 401 if unauthenticated.                                                 |
 | `get_optional_user`                             | `User \| None` | Never raises for missing credentials.                             |
+| `get_optional_jwt_user`                         | `User \| None` | JWT sessions only — API keys read as anonymous. Passkey enrollment. |
 | `get_current_user_with_graph`                   | `User`  | Reads `graph_id` from the path and validates access.                    |
 | `get_current_user_with_graph_or_url_token`      | `User`  | As above, plus the `?token=` door. MCP only.                            |
 | `get_current_user_sse`                          | `User`  | As `get_current_user`, plus the `?token=` JWT door.                     |
