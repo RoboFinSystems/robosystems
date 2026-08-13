@@ -35,9 +35,17 @@ to hand the paid gray-box tester as the scope fixture.
     `/backups`, `/subgraphs`),
   - a Cypher read (`/query/cypher` — the strongest data probe: it reads node
     counts),
-  - REST writes (`update-graph-metadata`, `add-member`),
+  - the `add-member` write, plus the destructive/sensitive **core ops**
+    (`delete-graph`, `materialize`, `change-tier`, `create-backup`,
+    `create-subgraph`, `update-graph-metadata`),
   - MCP (`read-graph-cypher` + `write-graph-cypher` via `/mcp/call-tool`),
-  - GraphQL (`/extensions/{graph_id}/graphql`, flag-gated; access-control probe).
+  - GraphQL (`/extensions/{graph_id}/graphql`): `{ hello }` (access probe) and
+    `{ entity { name } }` (data-leak probe),
+  - the **extensions command surfaces** for both products — roboledger
+    (`build-fact-grid`, `compute-metrics`, `create-event-block`, `create-report`,
+    `close-period`) and roboinvestor (`create-portfolio-block`, `create-security`,
+    `update-portfolio-block`, `delete-security`). Graphs are provisioned with both
+    extensions.
 - **Vertical** — `test_vertical.py`. Privilege escalation within one org
   (viewer ≠ write, member ≠ administer, org-admin = implicit graph admin).
   **Currently provision-skipped** — see the blocker below.

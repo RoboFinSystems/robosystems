@@ -124,6 +124,30 @@ def test_rest_writes_are_isolated(tenants, client: Client, report: Report) -> No
   _assert_clean(found)
 
 
+def test_core_ops_are_isolated(tenants, client: Client, report: Report) -> None:
+  """Destructive/sensitive core graph ops — a non-owner must be turned away."""
+  found: list[Finding] = []
+  for _name, attacker, _victim, graph in _directions(tenants):
+    for op in matrix.CORE_OP_WRITES:
+      path = matrix.CORE_OP_PATH.format(graph_id=graph, op=op)
+      a = client.post(path, principal=attacker, json={})
+      verdict, note = classify_write(a)
+      f = Finding(
+        "horizontal",
+        "core-op",
+        "POST",
+        path,
+        attacker.label,
+        graph,
+        verdict,
+        a.status_code,
+        f"{op}: {note}",
+      )
+      report.add(f)
+      found.append(f)
+  _assert_clean(found)
+
+
 def test_mcp_is_isolated(tenants, client: Client, report: Report) -> None:
   found: list[Finding] = []
   for _name, attacker, victim, graph in _directions(tenants):
@@ -204,19 +228,22 @@ def test_graphql_is_isolated(tenants, client: Client, report: Report) -> None:
 
 
 def test_extensions_ops_are_isolated(tenants, client: Client, report: Report) -> None:
-  """The roboledger command/view surface — a non-owner must be turned away."""
+  """The roboledger + roboinvestor command/view surfaces — non-owner turned away."""
+  first = matrix.EXTENSIONS_OPS[0]
   probe_path = matrix.EXTENSIONS_OP_PATH.format(
-    graph_id=tenants.graph_b, op=matrix.EXTENSIONS_OPS[0]["op"]
+    domain=first["domain"], graph_id=tenants.graph_b, op=first["op"]
   )
   if client.post(probe_path, principal=tenants.tenant_b, json={}).status_code == 404:
     pytest.skip(
-      "roboledger extensions operations not mounted (ROBOLEDGER_ENABLED off, or "
-      "graphs not provisioned with the roboledger extension)"
+      "extensions operations not mounted (ROBOLEDGER/ROBOINVESTOR off, or graphs "
+      "not provisioned with the extension)"
     )
   found: list[Finding] = []
   for _name, attacker, _victim, graph in _directions(tenants):
     for spec in matrix.EXTENSIONS_OPS:
-      path = matrix.EXTENSIONS_OP_PATH.format(graph_id=graph, op=spec["op"])
+      path = matrix.EXTENSIONS_OP_PATH.format(
+        domain=spec["domain"], graph_id=graph, op=spec["op"]
+      )
       a = client.post(path, principal=attacker, json={})
       verdict, note = classify_write(a)
       f = Finding(
@@ -228,7 +255,7 @@ def test_extensions_ops_are_isolated(tenants, client: Client, report: Report) ->
         graph,
         verdict,
         a.status_code,
-        f"{spec['label']}: {note}",
+        f"{spec['domain']}/{spec['op']}: {note}",
       )
       report.add(f)
       found.append(f)

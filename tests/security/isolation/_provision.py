@@ -21,12 +21,28 @@ and per graph:
 from __future__ import annotations
 
 import secrets
+import string
 import time
 from dataclasses import dataclass, field
 
 from ._http import Client, Principal
 
-_PW = "IsoHarness!" + secrets.token_hex(6) + "Aa1"
+_PW_CLASSES = (
+  string.ascii_uppercase,
+  string.ascii_lowercase,
+  string.digits,
+  "!@#$%^&*",
+)
+
+
+def _make_password() -> str:
+  """A random password that structurally passes the platform's policy.
+
+  Rotating character classes guarantees no run of three repeated characters
+  (`(.)\\1{2,}`) and no same-class sequence (`123456` / `abcdef`), which is
+  what a plain hex token trips on intermittently.
+  """
+  return "".join(secrets.choice(_PW_CLASSES[i % len(_PW_CLASSES)]) for i in range(20))
 
 
 def _unique(prefix: str) -> str:
@@ -54,9 +70,10 @@ def register_principal(client: Client, label: str) -> Principal:
   """Register a user, log in, mint an API key. Returns a Principal."""
   email = f"{_unique('iso_' + label)}@example.com"
   name = f"iso-harness {label}"
+  password = _make_password()
 
   r = client.post(
-    "/v1/auth/register", json={"name": name, "email": email, "password": _PW}
+    "/v1/auth/register", json={"name": name, "email": email, "password": password}
   )
   if r.status_code not in (200, 201):
     raise RuntimeError(f"register({label}) -> {r.status_code}: {r.text[:300]}")
@@ -67,7 +84,7 @@ def register_principal(client: Client, label: str) -> Principal:
   # Prefer the token from register; fall back to an explicit login.
   jwt = body.get("token") or ""
   if not jwt:
-    lr = client.post("/v1/auth/login", json={"email": email, "password": _PW})
+    lr = client.post("/v1/auth/login", json={"email": email, "password": password})
     if lr.status_code != 200:
       raise RuntimeError(f"login({label}) -> {lr.status_code}: {lr.text[:300]}")
     jwt = lr.json().get("token") or ""
@@ -175,7 +192,7 @@ def provision(
   entity graphs.
   """
   if schema_extensions is None:
-    schema_extensions = ["roboledger"]
+    schema_extensions = ["roboledger", "roboinvestor"]
   a = register_principal(client, "A")
   b = register_principal(client, "B")
   graph_a = create_entity_graph(client, a, schema_extensions=schema_extensions)
