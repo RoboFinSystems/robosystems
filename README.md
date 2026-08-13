@@ -65,17 +65,21 @@ Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/r
 ### Docker Development Environment
 
 ```bash
-# Install uv and just (jq ships with macOS 15+; install it on older macOS or Linux)
-brew install uv just jq
+# Install uv and just
+brew install uv just
 
-# Start robosystems backend api
+# Start robosystems backend
 just start
 
 # Start frontend apps - robosystems-app, roboledger-app, roboinvestor-app
 just start apps
 
-# Fetch the latest images and recreate anything that changed (after a git pull)
+# Refresh images and recreate the containers that changed (after a git pull)
 just upgrade
+
+# Restart to pick up code changes; rebuild after dependency changes
+just restart
+just rebuild
 ```
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
@@ -120,6 +124,7 @@ just demo-roboledger        # End-to-end RoboLedger demo: bulk OLTP, schedules, 
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 just demo-coffee-roaster    # Synthetic manufacturing scenario
 just demo-saas-startup      # Synthetic SaaS scenario
+just demo-roboinvestor      # Cross-graph traversal from a private holding to its issuer's filed report (run demo-saas-startup first)
 ```
 
 Each demo has a corresponding [Wiki article](https://github.com/RoboFinSystems/robosystems/wiki) with detailed guides.
@@ -135,16 +140,24 @@ just test adapters          # Test specific module
 just test-cov               # Tests with coverage
 ```
 
+### Code Quality
+
+```bash
+just test-code              # Lint, format, and typecheck (what the git hooks run)
+just lint fix               # Auto-fix lint issues
+just typecheck              # Type checking
+```
+
 ### Log Monitoring
 
 ```bash
-just logs api                 # View API logs (last 100 lines)
-just logs graph-api           # View Graph API logs (last 100 lines)
+just logs api                 # View API logs (last 100 lines by default)
+just logs graph-api           # View Graph API logs
 just logs dagster-webserver   # View Dagster Webserver logs
 just logs dagster-daemon      # View Dagster Daemon logs
 ```
 
-**See [justfile](justfile) for 80+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
+**See [justfile](justfile) for 100+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
 
 ### Prerequisites
 
@@ -177,16 +190,16 @@ That openness runs up the stack as well as down: the accounting ontology, report
 
 ### Multi-Tenancy & Isolation
 
-The tenancy model is one rule: **every isolation primitive keys on `graph_id` — never on an organization.** Session `search_path`, cache keys, idempotency keys, rate-limit buckets, and credit accounting all namespace on the graph, or on the user where the thing genuinely belongs to a person. No shared state is ever org-keyed. The consequence worth understanding is that two graphs inside the *same* organization are isolated by the identical mechanism that separates two unrelated customers, rather than by a weaker variant of it — there is no "internal" path that skips the boundary.
+One rule: **every isolation primitive keys on `graph_id`, never on an organization** — session `search_path`, cache keys, idempotency keys, rate-limit buckets, and credit accounting all namespace on the graph. Two graphs inside the same organization are separated by the identical mechanism that separates two unrelated customers; there is no "internal" path that skips the boundary.
 
-- **A dedicated graph database per tenant.** Every tier allocates one LadybugDB database per instance (`databases_per_instance: 1`) — no shared writer, no query contention from a neighbor, and a blast radius of one tenant. Tiers differ by instance size, not by how many tenants share it.
-- **Schema-per-graph OLTP.** The extensions PostgreSQL database gives each graph its own schema, and `SET search_path` is re-stamped on entry to every request rather than assumed from a pooled connection. A CI structural test pins that contract so it can't quietly regress.
-- **Two databases, two migration histories.** Platform state (identity, orgs, billing, graph metadata) is a separate database from extensions OLTP, with independent Alembic histories. A migration to one never touches the other.
-- **The graph is a derived projection.** OLTP rows are the system of record; the analytical graph is rebuilt from them blue-green — built alongside the live graph and swapped only when the build is clean. Nothing in the graph is authoritative, which is what makes a rebuild routine instead of risky.
-- **Subgraphs** are isolated data environments within a tenant — separate databases sharing the parent's credits and permissions — used for AI memory, development, and team workspaces.
-- **Shared repositories** (SEC XBRL) are the one multi-reader surface: a separate read-only tier with its own replicas, queryable *alongside* your own graph, and never writable through it.
+- **One graph database per tenant** — every tier runs `databases_per_instance: 1`, so tiers differ by instance size, not by how many tenants share one.
+- **Schema-per-graph OLTP** — each graph gets its own PostgreSQL schema, with `search_path` re-stamped on every request rather than inherited from a pooled connection. A CI structural test pins the contract.
+- **Two databases, two migration histories** — platform state (identity, orgs, billing) is separate from extensions OLTP; a migration to one never touches the other.
+- **The graph is a derived projection** — OLTP rows are the system of record and the analytical graph is rebuilt from them blue-green, which is what makes a rebuild routine rather than risky.
+- **Subgraphs** are isolated environments inside a tenant, sharing the parent's credits and permissions — AI memory, development, team workspaces.
+- **Shared repositories** (SEC XBRL) are the one multi-reader surface: read-only, separately replicated, queryable alongside your own graph but never writable through it.
 
-Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a single-tenant dedicated deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy).
+Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a dedicated single-tenant deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy).
 
 ### Components
 

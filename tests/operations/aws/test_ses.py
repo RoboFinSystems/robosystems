@@ -494,3 +494,47 @@ class TestAuthLinkTargets:
     html = self._html(mock_ses_client)
     assert "https://roboledger.ai/home" in html
     assert "return_to" not in html
+
+
+class TestPasskeyEnrolledEmail:
+  """The enrollment security notification must not render attacker HTML."""
+
+  def _html(self, mock_ses_client):
+    return mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
+      "Data"
+    ]
+
+  @pytest.mark.asyncio
+  async def test_sends_with_passkey_name(self, ses_service, mock_ses_client):
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-1"}
+
+    result = await ses_service.send_passkey_enrolled_email(
+      user_email="test@example.com",
+      user_name="Test",
+      passkey_name="MacBook Touch ID",
+      app="robosystems",
+    )
+
+    assert result is True
+    html_body = self._html(mock_ses_client)
+    assert "MacBook Touch ID" in html_body
+    assert "didn&#x27;t add this passkey" in html_body or "didn't add" in html_body
+
+  @pytest.mark.asyncio
+  async def test_user_controlled_fields_are_escaped(self, ses_service, mock_ses_client):
+    """passkey_name and user_name are attacker-choosable in the exact
+    scenario this email defends against — HTML must arrive inert."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-1"}
+
+    await ses_service.send_passkey_enrolled_email(
+      user_email="victim@example.com",
+      user_name='<img src=x onerror="x">',
+      passkey_name='</p><a href="https://evil.example">no action needed</a>',
+      app="robosystems",
+    )
+
+    html_body = self._html(mock_ses_client)
+    assert "https://evil.example" not in html_body or "&lt;a href" in html_body
+    assert '<a href="https://evil.example">' not in html_body
+    assert '<img src=x onerror="x">' not in html_body
+    assert "&lt;/p&gt;&lt;a href=" in html_body

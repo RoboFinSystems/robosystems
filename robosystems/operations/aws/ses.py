@@ -1,5 +1,6 @@
 """AWS SES adapter for sending transactional emails."""
 
+import html
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -157,6 +158,9 @@ class SESEmailService:
       "capacity_warning": self._capacity_warning_template(
         app_name, user_name, template_data
       ),
+      "passkey_enrolled": self._passkey_enrolled_template(
+        app_name, user_name, template_data
+      ),
     }
 
     return templates.get(
@@ -240,6 +244,42 @@ Reset your password: {url}
 This link expires in {expiry} hour{"s" if expiry != 1 else ""}.
 
 If you didn't request this, no action is needed. Your password will not change.
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _passkey_enrolled_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    passkey_name = data.get("passkey_name", "a new passkey")
+    # passkey_name and user_name are user-controlled; this email exists to
+    # catch an attacker enrolling a credential, so its HTML must not be
+    # overridable by the very input that attacker chose.
+    safe_passkey_name = html.escape(str(passkey_name))
+    safe_user_name = html.escape(str(user_name))
+
+    content = (
+      _paragraph(f"Hi {safe_user_name},")
+      + _paragraph(
+        f"A passkey ({safe_passkey_name}) was just added to your {app_name} "
+        "account. It can now be used to sign in."
+      )
+      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
+      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
+      "If you didn't add this passkey, reset your password immediately and "
+      "remove it from your account's security settings."
+      "</p></div>"
+    )
+
+    return {
+      "subject": f"A passkey was added to your {app_name} account",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+A passkey ({passkey_name}) was just added to your {app_name} account. It can now be used to sign in.
+
+If you didn't add this passkey, reset your password immediately and remove it from your account's security settings.
 
 {app_name}""",
     }
@@ -527,6 +567,22 @@ View usage details: {url}
     }
 
     return await self.send_email("welcome", user_email, template_data)
+
+  async def send_passkey_enrolled_email(
+    self,
+    user_email: str,
+    user_name: str,
+    passkey_name: str,
+    app: str = "robosystems",
+  ) -> bool:
+    """Security notification: a passkey was added to the account."""
+    template_data = {
+      "user_name": user_name,
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      "passkey_name": passkey_name,
+    }
+
+    return await self.send_email("passkey_enrolled", user_email, template_data)
 
   async def send_org_invitation_email(
     self,

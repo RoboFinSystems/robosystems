@@ -158,11 +158,31 @@ Posture is enforced, not merely advertised: `require_password_auth` in
 `routers/auth/utils.py` guards *every* password-credential endpoint (login,
 registration, reset, change) with a 403 when `PASSWORD_AUTH_ENABLED=false`. A
 login the UI hides but the API still accepts would let a password bypass the
-IdP's MFA and conditional-access policies. `config/validation.py` refuses to
-boot a deployment that disables password auth without enabling OIDC, that
-enables OIDC without a complete connection, that sets a privileged
-`SSO_DEFAULT_ROLE`, or that runs OIDC/SCIM with `RATE_LIMIT_ENABLED=false` —
-the OIDC and SCIM rate buckets are no-ops without it.
+IdP's MFA and conditional-access policies. `require_passkeys_enabled` applies
+the same rule to the passkey/MFA surface (`routers/auth/passkeys.py`,
+`routers/auth/mfa.py`) when `PASSKEYS_ENABLED=false`. `config/validation.py`
+refuses to boot a deployment that disables password auth without another
+login method (OIDC or passkeys), that enables OIDC without a complete
+connection, that sets a privileged `SSO_DEFAULT_ROLE`, that enables MFA
+enforcement without passkeys, or that runs OIDC/SCIM/passkeys with
+`RATE_LIMIT_ENABLED=false` — their auth rate buckets are no-ops without it.
+
+### Passkey MFA (WebAuthn)
+
+`PASSKEYS_ENABLED` turns on the passkey surface: enrollment
+(`/v1/auth/passkeys/register/*`, from settings or the forced-enrollment
+lane), passwordless login (`/v1/auth/passkeys/login/*` — a user-verified
+discoverable credential is two factors in one gesture), the second-factor
+handshake (`/v1/auth/mfa/options` + `/verify`, driven by the short-lived
+purpose-scoped `mfa_token` that `/v1/auth/login` mints once a passkey
+exists), recovery codes, and lifecycle management. `MFA_ENFORCEMENT_ENABLED`
+(requires the former) additionally forces org owner/admin password logins
+without a passkey through enrollment before a session is issued. The WebAuthn
+RP ID/origin derive from `ROBOSYSTEMS_URL` (the login home hosts every
+ceremony); `PASSKEY_RP_ID`/`PASSKEY_ORIGIN` override explicitly. OIDC-minted
+sessions never pass through the login endpoint, so IdP-governed users are
+never challenged here — the IdP owns their MFA policy. Ceremony logic lives
+in `operations/passkeys.py`.
 
 ## Dependencies
 

@@ -88,6 +88,12 @@ class User(Model):
     cascade="all, delete-orphan",
     foreign_keys="UserRepository.user_id",
   )
+  passkeys = relationship(
+    "UserPasskey", back_populates="user", cascade="all, delete-orphan"
+  )
+  mfa_recovery_codes = relationship(
+    "UserMfaRecoveryCode", back_populates="user", cascade="all, delete-orphan"
+  )
 
   def __repr__(self) -> str:
     return f"<User {self.id} {self.email}>"

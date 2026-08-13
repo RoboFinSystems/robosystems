@@ -532,6 +532,18 @@ class EnvConfig:
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",
   )
+  # Hard MFA gate for org owner/admin password logins: without a passkey the
+  # login returns mfa_enrollment_required instead of a session. Flipped after
+  # an adoption window; requires PASSKEYS_ENABLED (boot-validated).
+  MFA_ENFORCEMENT_ENABLED = get_bool_env(
+    "MFA_ENFORCEMENT_ENABLED",
+    get_parameter_value("MFA_ENFORCEMENT_ENABLED", "false").lower() == "true",
+  )
+  # WebAuthn Relying Party overrides. Normally derived from ROBOSYSTEMS_URL
+  # (the login home hosts every ceremony — one RP ID per deployment, the
+  # deployment's root domain); see get_passkey_rp_id/get_passkey_origin.
+  PASSKEY_RP_ID = get_str_env("PASSKEY_RP_ID", "")
+  PASSKEY_ORIGIN = get_str_env("PASSKEY_ORIGIN", "")
   # When enabled, verification/reset/invitation email links target the login
   # home instead of the originating app.
   AUTH_EMAIL_LINKS_TO_LOGIN_HOME = get_bool_env(
@@ -1415,6 +1427,31 @@ class EnvConfig:
       extra = get_secret_list_value("EXTRA_CORS_ORIGINS", "")
       origins.extend(o for o in extra if o not in origins)
       return origins
+
+  @classmethod
+  def get_passkey_rp_id(cls) -> str:
+    """WebAuthn RP ID: one per deployment, the deployment's root domain.
+
+    Derived from ROBOSYSTEMS_URL (the login home hosts every ceremony) so a
+    fork serving its own domain scopes passkeys to itself with no fork-local
+    code — the get_main_cors_origins pattern. Explicit PASSKEY_RP_ID wins.
+    Dev uses ``localhost`` (a WebAuthn secure-context exception) because the
+    dev default of ROBOSYSTEMS_URL is the managed domain, not localhost.
+    """
+    if cls.PASSKEY_RP_ID:
+      return cls.PASSKEY_RP_ID
+    if cls.is_production() or cls.is_staging():
+      return urlparse((cls.ROBOSYSTEMS_URL or "").strip()).hostname or ""
+    return "localhost"
+
+  @classmethod
+  def get_passkey_origin(cls) -> str:
+    """Expected WebAuthn ceremony origin: the login home's origin."""
+    if cls.PASSKEY_ORIGIN:
+      return cls.PASSKEY_ORIGIN
+    if cls.is_production() or cls.is_staging():
+      return _url_origin(cls.ROBOSYSTEMS_URL) or ""
+    return "http://localhost:3000"
 
   @classmethod
   def get_lbug_cors_origins(cls) -> list[str]:

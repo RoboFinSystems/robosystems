@@ -63,6 +63,21 @@ def require_password_auth() -> None:
     )
 
 
+def require_passkeys_enabled() -> None:
+  """Dependency guard for every passkey/MFA endpoint.
+
+  Same posture rule as ``require_password_auth``: the routers mount
+  unconditionally (so the posture-drift test table can prove the 403s) and
+  this runtime guard is what makes ``PASSKEYS_ENABLED=false`` a real off
+  switch rather than an advertisement.
+  """
+  if not env.PASSKEYS_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Passkey authentication is disabled on this deployment",
+    )
+
+
 # Redis clients are now imported from middleware.auth.jwt
 
 

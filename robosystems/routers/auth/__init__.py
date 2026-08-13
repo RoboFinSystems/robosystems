@@ -8,6 +8,8 @@ from .email_verification import router as email_verification_router
 from .invitations import router as invitations_router
 from .login import router as login_router
 from .logout import router as logout_router
+from .mfa import router as mfa_router
+from .passkeys import router as passkeys_router
 from .password import router as password_router
 from .password_reset import router as password_reset_router
 from .providers import router as providers_router
@@ -38,6 +40,12 @@ router.include_router(password_router)
 router.include_router(password_reset_router)
 
 router.include_router(sso_router)
+
+# Passkey MFA — mounted unconditionally with a runtime PASSKEYS_ENABLED guard
+# (403 when off), unlike OIDC's import-time conditional: the posture-drift
+# test table needs the routes to exist to prove they refuse.
+router.include_router(passkeys_router)
+router.include_router(mfa_router)
 
 # Enterprise SSO (OIDC) — flag-gated so the surface doesn't exist unless the
 # deployment opted in (the managed platform never mounts it).
