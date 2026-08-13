@@ -27,6 +27,10 @@ MAIN_API_TAGS = [
     "description": "🌳 Subgraphs - List and inspect subgraph databases",
   },
   {
+    "name": "Graph Members",
+    "description": "🧑‍🤝‍🧑 Graph members - Manage per-graph member access and roles",
+  },
+  {
     "name": "Backup",
     "description": "💾 Backup - List, download, and inspect graph backups",
   },

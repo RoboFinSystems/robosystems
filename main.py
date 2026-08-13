@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -410,6 +411,19 @@ def create_app() -> FastAPI:
   # produce a string-detail response. Two shapes for one status code
   # break SDK response parsers (e.g., openapi-python-client). This handler
   # makes 422 consistently use the `ErrorResponse` shape.
+  def _scim_envelope(detail: Any, status_code: int) -> dict[str, Any]:
+    """RFC 7644 §3.12 error body. A dict that already carries ``schemas``
+    passes through verbatim; anything else is wrapped."""
+    from robosystems.models.api.scim import ERROR_SCHEMA
+
+    if isinstance(detail, dict) and detail.get("schemas"):
+      return detail
+    return {
+      "schemas": [ERROR_SCHEMA],
+      "detail": str(detail),
+      "status": str(status_code),
+    }
+
   @app.exception_handler(RequestValidationError)
   async def request_validation_handler(
     request: Request, exc: RequestValidationError
@@ -422,6 +436,12 @@ def create_app() -> FastAPI:
       msg = err.get("msg", "validation error")
       parts.append(f"{loc}: {msg}" if loc else msg)
     detail = "; ".join(parts) or "Request validation failed"
+    # SCIM clients parse only the RFC 7644 error envelope, and the RFC maps
+    # malformed requests to 400 invalidValue, not FastAPI's 422 shape.
+    if request.url.path.startswith("/scim/v2"):
+      body = _scim_envelope(detail, status.HTTP_400_BAD_REQUEST)
+      body["scimType"] = "invalidValue"
+      return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=body)
     return JSONResponse(
       status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
       content={
@@ -435,12 +455,20 @@ def create_app() -> FastAPI:
   # `{"detail": <whatever-was-passed>}` shape and add `request_id` for
   # correlation. Detail may be a string (most common) or a dict (close-period
   # blockers, graph_limit, etc.); callers parse it as `response["detail"]`
-  # in both cases, so always wrap — never spread.
+  # in both cases, so always wrap — never spread. The one exception is the
+  # SCIM surface: IdPs parse the RFC 7644 envelope at the top level, so
+  # nesting it under "detail" makes every error unreadable to them.
   @app.exception_handler(StarletteHTTPException)
   async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
   ) -> JSONResponse:
     request_id = getattr(request.state, "request_id", None)
+    if request.url.path.startswith("/scim/v2"):
+      return JSONResponse(
+        status_code=exc.status_code,
+        content=_scim_envelope(exc.detail, exc.status_code),
+        headers=getattr(exc, "headers", None),
+      )
     return JSONResponse(
       status_code=exc.status_code,
       content={"detail": exc.detail, "request_id": request_id},

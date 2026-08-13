@@ -56,7 +56,7 @@ class TestScimAuth:
   def test_no_token_is_401_scim_envelope(self, client):
     resp = client.get("/scim/v2/Users")
     assert resp.status_code == 401
-    body = resp.json()["detail"]
+    body = resp.json()
     assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
 
   def test_bogus_token_is_401(self, client):
@@ -126,7 +126,7 @@ class TestUsersCrud:
       json={"userName": f"noext+{uuid.uuid4().hex[:8]}@customer.example"},
     )
     assert resp.status_code == 400
-    body = resp.json()["detail"]
+    body = resp.json()
     assert body["scimType"] == "invalidValue"
     assert "externalId" in body["detail"]
 
@@ -140,7 +140,7 @@ class TestUsersCrud:
       },
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"]["scimType"] == "invalidValue"
+    assert resp.json()["scimType"] == "invalidValue"
 
   def test_duplicate_email_is_409_uniqueness(
     self, client, scim_auth, test_db, enterprise_org
@@ -152,7 +152,7 @@ class TestUsersCrud:
       json={"userName": existing.email, "externalId": "dup"},
     )
     assert resp.status_code == 409
-    assert resp.json()["detail"]["scimType"] == "uniqueness"
+    assert resp.json()["scimType"] == "uniqueness"
 
   def test_filter_by_username_finds_member(
     self, client, scim_auth, test_db, enterprise_org
@@ -182,6 +182,93 @@ class TestUsersCrud:
     resp = client.get(f"/scim/v2/Users/{member.id}", headers=scim_auth)
     assert resp.status_code == 200
     assert resp.json()["id"] == member.id
+
+
+class TestReplaceUser:
+  def test_put_applies_username_email_change(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """An IdP-side email change must propagate, or a user renamed before
+    first OIDC sign-in can never link (the binding fallback matches email)."""
+    member = _make_member(test_db, enterprise_org)
+    new_email = f"renamed+{uuid.uuid4().hex[:8]}@customer.example"
+    resp = client.put(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={"userName": new_email, "externalId": member.external_id, "active": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["userName"] == new_email
+    test_db.refresh(member)
+    assert member.email == new_email
+
+  def test_put_email_conflict_is_409_uniqueness(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    member = _make_member(test_db, enterprise_org)
+    other = _make_member(test_db, enterprise_org, external_id="okta-ext-2")
+    resp = client.put(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={"userName": other.email, "externalId": member.external_id, "active": True},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["scimType"] == "uniqueness"
+    assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
+    test_db.refresh(member)
+    assert member.email != other.email
+
+  def test_put_applies_external_id_change(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    member = _make_member(test_db, enterprise_org)
+    resp = client.put(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={"userName": member.email, "externalId": "okta-rekeyed", "active": True},
+    )
+    assert resp.status_code == 200
+    test_db.refresh(member)
+    assert member.external_id == "okta-rekeyed"
+
+  def test_put_absent_external_id_is_not_cleared(
+    self, client, scim_auth, test_db, enterprise_org
+  ):
+    """Narrower than RFC replace-everything on purpose: blanking external_id
+    would erase the SCIM provenance the OIDC binding fallback keys on."""
+    member = _make_member(test_db, enterprise_org)
+    resp = client.put(
+      f"/scim/v2/Users/{member.id}",
+      headers=scim_auth,
+      json={"userName": member.email, "active": True},
+    )
+    assert resp.status_code == 200
+    test_db.refresh(member)
+    assert member.external_id == "okta-ext"
+
+
+class TestScimErrorEnvelopes:
+  def test_validation_error_is_scim_400_not_fastapi_422(self, client, scim_auth):
+    """A body pydantic rejects must come back as the RFC 7644 envelope —
+    IdPs do not parse FastAPI's 422 shape."""
+    resp = client.post(
+      "/scim/v2/Users", headers=scim_auth, json={"externalId": "no-username"}
+    )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
+    assert body["scimType"] == "invalidValue"
+    assert body["status"] == "400"
+
+  def test_envelope_is_top_level_with_status_string(self, client):
+    resp = client.get("/scim/v2/Users")
+    assert resp.status_code == 401
+    body = resp.json()
+    assert "urn:ietf:params:scim:api:messages:2.0:Error" in body["schemas"]
+    assert body["status"] == "401"
+    assert "detail" in body
+    assert resp.headers.get("www-authenticate") == "Bearer"
 
 
 class TestOrgScoping:
@@ -220,9 +307,7 @@ class TestOrgScoping:
       pinned = client.get("/scim/v2/Users", headers=scim_auth)
 
     assert stray.status_code == 401
-    assert (
-      "urn:ietf:params:scim:api:messages:2.0:Error" in stray.json()["detail"]["schemas"]
-    )
+    assert "urn:ietf:params:scim:api:messages:2.0:Error" in stray.json()["schemas"]
     assert pinned.status_code == 200
 
 
@@ -338,7 +423,7 @@ class TestDeactivation:
       json={"Operations": [{"op": "replace", "path": "displayName", "value": "X"}]},
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"]["scimType"] == "invalidValue"
+    assert resp.json()["scimType"] == "invalidValue"
     test_db.refresh(member)
     assert member.is_active is True
 
