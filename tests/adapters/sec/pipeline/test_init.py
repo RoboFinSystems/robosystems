@@ -63,8 +63,8 @@ class TestGetDagsterComponents:
   def test_expected_number_of_schedules(self):
     """Test that the expected number of schedules are registered."""
     components = get_dagster_components()
-    # Only the incremental download schedule — the weekly full-rebuild
-    # reconciliation rides the nightly chain (Friday full), not a separate schedule.
+    # Only the incremental download schedule — the nightly full rebuild rides
+    # the sensor chain (stage → materialize), not a separate schedule.
     assert len(components["schedules"]) == 1
 
   def test_asset_names_include_core_pipeline(self):

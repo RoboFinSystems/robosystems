@@ -410,6 +410,15 @@ class TestSecStageToMaterializeSensor:
     assert isinstance(result[0], RunRequest)
     assert result[0].tags["mode"] == "incremental"
     assert result[0].tags["phase"] == "materialize"
+    # Incremental materialize_mode is parked — every nightly run is a full
+    # rebuild (see sec_stage_to_materialize_sensor docstring).
+    assert result[0].tags["materialize_mode"] == "full"
+    assert (
+      result[0].run_config["ops"]["sec_graph_materialized"]["config"][
+        "materialize_mode"
+      ]
+      == "full"
+    )
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_materialize_already_running(self, mock_env):

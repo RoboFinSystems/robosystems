@@ -173,6 +173,12 @@ sec_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "materialize",
+    # One writer per target database: paired with the tag_concurrency_limits
+    # entry in dagster_home/dagster_prod.yaml, this queues a duplicate launch
+    # instead of letting it race. Job-level so sensor-fired AND manually
+    # launched runs both carry it. Concurrent COPYs into the same LadybugDB
+    # database silently duplicate rel-table edges (no primary key).
+    "materialize_db": "sec",
     # Light profile: HTTP orchestration to Graph API
     "ecs/cpu": "512",
     "ecs/memory": "2048",

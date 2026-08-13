@@ -77,6 +77,12 @@ run_coordinator:
         limit: 1
         value:
           applyLimitPerUniqueValue: true
+      # Parity with dagster_prod.yaml: one materialization per target graph
+      # database (see the prod file for the full rationale).
+      - key: "materialize_db"
+        limit: 1
+        value:
+          applyLimitPerUniqueValue: true
 
 # Telemetry - disable for privacy
 telemetry:
