@@ -46,6 +46,11 @@ to hand the paid gray-box tester as the scope fixture.
     `close-period`) and roboinvestor (`create-portfolio-block`, `create-security`,
     `update-portfolio-block`, `delete-security`). Graphs are provisioned with both
     extensions.
+- **Scoping** — `test_scoping.py`. Isolation units finer than the user↔graph
+  pair: **subgraph isolation** (tenant B denied on tenant A's `{parent}_{name}`
+  subgraph id — a distinct access path) and **graph-scoped API keys** (a key
+  minted for graph A is denied on `graph_a2`, a second graph the *same user*
+  owns, proving the denial is the key's scope and not user access).
 - **Vertical** — `test_vertical.py`. Privilege escalation within one org
   (viewer ≠ write, member ≠ administer, org-admin = implicit graph admin).
   **Currently provision-skipped** — see the blocker below.

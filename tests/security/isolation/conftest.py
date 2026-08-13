@@ -70,7 +70,10 @@ def tenants(client: Client):
   # Best-effort teardown: delete both graphs as their owners. Full disposal
   # verification (that the rows and OpenSearch content are actually gone) is
   # the runbook's DB-tunnel step, deliberately not automated here.
-  for owner, gid in ((fx.tenant_a, fx.graph_a), (fx.tenant_b, fx.graph_b)):
+  targets = [(fx.tenant_a, fx.graph_a), (fx.tenant_b, fx.graph_b)]
+  if fx.graph_a2:
+    targets.append((fx.tenant_a, fx.graph_a2))
+  for owner, gid in targets:
     try:
       client.post(
         f"/v1/graphs/{gid}/operations/delete-graph",
