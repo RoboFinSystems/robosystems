@@ -187,7 +187,13 @@ async def create_invitation(
     logger.info(
       f"User {current_user.id} invited {email} to org {org_id} as {request.role.value}"
     )
-    return _invitation_response(invitation)
+    response = _invitation_response(invitation)
+    # Test-support only, and never in production (the guard forces it off there):
+    # surface the raw token so automated authorization tests can complete the
+    # invite -> register flow. See env.expose_invite_token_in_response().
+    if env.expose_invite_token_in_response():
+      response.token = raw_token
+    return response
 
   except HTTPException:
     raise
