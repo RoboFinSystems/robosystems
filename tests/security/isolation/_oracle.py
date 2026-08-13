@@ -155,36 +155,45 @@ def classify_read(
 
 
 def classify_graphql(
-  victim: httpx.Response, attacker: httpx.Response
+  victim: httpx.Response, attacker: httpx.Response, *, data_field: bool = False
 ) -> tuple[Verdict, str]:
   """Classify a cross-tenant GraphQL probe.
 
   GraphQL is graph-scoped by URL; `check_graph_access` should run before any
-  resolver. The `{ hello }` probe echoes the *caller's own* email, so the
-  generic read oracle would false-positive (attacker's email != owner's).
-  Here a resolver-level or HTTP denial is PASS; a 200 that still returns
-  data is INCONCLUSIVE — it needs a graph-*data* field to confirm whether
-  the payload is the caller's own echo or the owner's data.
+  resolver, and denials arrive as HTTP 401/403 or as an HTTP-200 body with
+  `data: null` and an errors array. `data_field=True` marks a query over
+  *graph data* (e.g. `{ entity { name } }`): a non-empty `data` payload for a
+  non-owned graph is then a LEAK. `data_field=False` marks a caller-echo probe
+  (`{ hello }`), where a 200 with data only means authz did not gate the field
+  — INCONCLUSIVE, since the payload is the caller's own identity, not graph data.
   """
   if not positive_ok(victim):
     return Verdict.INVALID, f"positive control failed: owner got {victim.status_code}"
+  if data_field:
+    try:
+      owner_data = victim.json().get("data")
+    except Exception:
+      owner_data = None
+    if _is_empty_data(owner_data):
+      return (
+        Verdict.INVALID,
+        "owner's data-field query returned no data — probe cannot detect a leak",
+      )
   sc = attacker.status_code
   if sc in (401, 403):
     return Verdict.PASS, f"denied at HTTP ({sc})"
   if sc // 100 == 2:
     try:
-      body = attacker.json()
+      data = attacker.json().get("data")
     except Exception:
       return Verdict.INCONCLUSIVE, f"200 non-JSON ({sc})"
-    errors = body.get("errors") or []
-    data = body.get("data")
-    if errors and not data:
-      codes = [(e.get("extensions") or {}).get("code", "") for e in errors]
-      return Verdict.PASS, f"denied at resolver ({sc}): {codes or 'error'}"
+    if _is_empty_data(data):
+      return Verdict.PASS, f"no data ({sc}) — denied at resolver"
+    if data_field:
+      return Verdict.LEAK, f"graph data for a non-owned graph ({sc})"
     return (
       Verdict.INCONCLUSIVE,
-      f"200 with data cross-tenant ({sc}) — confirm caller-echo vs owner data "
-      f"with a graph-data field",
+      f"200 with data ({sc}) — caller-echo field; judge with a graph-data field",
     )
   return Verdict.INCONCLUSIVE, f"unexpected status {sc}"
 

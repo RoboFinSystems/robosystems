@@ -166,7 +166,7 @@ def test_mcp_is_isolated(tenants, client: Client, report: Report) -> None:
 
 def _graphql_available(client: Client, victim: Principal, graph: str) -> bool:
   path = matrix.GRAPHQL_PATH.format(graph_id=graph)
-  r = client.post(path, principal=victim, json=matrix.GRAPHQL_BODY)
+  r = client.post(path, principal=victim, json=matrix.GRAPHQL_HELLO_BODY)
   return r.status_code != 404
 
 
@@ -176,23 +176,60 @@ def test_graphql_is_isolated(tenants, client: Client, report: Report) -> None:
       "GraphQL endpoint not mounted (EXTENSIONS_GRAPHQL_ENABLED + a domain flag "
       "off) — enable to cover this surface"
     )
+  probes = [
+    (matrix.GRAPHQL_HELLO_BODY, False),  # access-control probe
+    (matrix.GRAPHQL_DATA_BODY, True),  # data-leak probe (entity)
+  ]
   found: list[Finding] = []
   for _name, attacker, victim, graph in _directions(tenants):
     path = matrix.GRAPHQL_PATH.format(graph_id=graph)
-    v = client.post(path, principal=victim, json=matrix.GRAPHQL_BODY)
-    a = client.post(path, principal=attacker, json=matrix.GRAPHQL_BODY)
-    verdict, note = classify_graphql(v, a)
-    f = Finding(
-      "horizontal",
-      "graphql",
-      "POST",
-      path,
-      attacker.label,
-      graph,
-      verdict,
-      a.status_code,
-      note,
+    for body, is_data in probes:
+      v = client.post(path, principal=victim, json=body)
+      a = client.post(path, principal=attacker, json=body)
+      verdict, note = classify_graphql(v, a, data_field=is_data)
+      f = Finding(
+        "horizontal",
+        "graphql",
+        "POST",
+        path,
+        attacker.label,
+        graph,
+        verdict,
+        a.status_code,
+        f"{'entity' if is_data else 'hello'}: {note}",
+      )
+      report.add(f)
+      found.append(f)
+  _assert_clean(found)
+
+
+def test_extensions_ops_are_isolated(tenants, client: Client, report: Report) -> None:
+  """The roboledger command/view surface — a non-owner must be turned away."""
+  probe_path = matrix.EXTENSIONS_OP_PATH.format(
+    graph_id=tenants.graph_b, op=matrix.EXTENSIONS_OPS[0]["op"]
+  )
+  if client.post(probe_path, principal=tenants.tenant_b, json={}).status_code == 404:
+    pytest.skip(
+      "roboledger extensions operations not mounted (ROBOLEDGER_ENABLED off, or "
+      "graphs not provisioned with the roboledger extension)"
     )
-    report.add(f)
-    found.append(f)
+  found: list[Finding] = []
+  for _name, attacker, _victim, graph in _directions(tenants):
+    for spec in matrix.EXTENSIONS_OPS:
+      path = matrix.EXTENSIONS_OP_PATH.format(graph_id=graph, op=spec["op"])
+      a = client.post(path, principal=attacker, json={})
+      verdict, note = classify_write(a)
+      f = Finding(
+        "horizontal",
+        "extensions-op",
+        "POST",
+        path,
+        attacker.label,
+        graph,
+        verdict,
+        a.status_code,
+        f"{spec['label']}: {note}",
+      )
+      report.add(f)
+      found.append(f)
   _assert_clean(found)

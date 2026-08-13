@@ -92,14 +92,24 @@ def register_principal(client: Client, label: str) -> Principal:
 
 
 def create_entity_graph(
-  client: Client, owner: Principal, *, timeout: float = 180.0, poll: float = 2.0
+  client: Client,
+  owner: Principal,
+  *,
+  schema_extensions: list[str] | None = None,
+  timeout: float = 180.0,
+  poll: float = 2.0,
 ) -> str:
-  """Create an entity graph for `owner` and return its graph_id."""
+  """Create an entity graph for `owner` and return its graph_id.
+
+  `schema_extensions=["roboledger"]` provisions a roboledger tenant so the
+  GraphQL and `/extensions/roboledger/operations/*` surfaces are testable.
+  """
   name = _unique("isograph" + owner.label)
   body = {
     "metadata": {
       "graph_name": name,
       "description": "tenant-isolation harness test graph",
+      "schema_extensions": schema_extensions or [],
       "tags": ["iso-harness", "test"],
     },
     "initial_entity": {
@@ -155,12 +165,21 @@ class TenantFixture:
     return [self.tenant_a, self.tenant_b, *self.roles.values()]
 
 
-def provision(client: Client) -> TenantFixture:
-  """Provision two independent tenants, each with one entity graph."""
+def provision(
+  client: Client, *, schema_extensions: list[str] | None = None
+) -> TenantFixture:
+  """Provision two independent tenants, each with one entity graph.
+
+  Defaults to roboledger graphs so the extensions command surface and the
+  GraphQL data fields are exercised; pass schema_extensions=[] for plain
+  entity graphs.
+  """
+  if schema_extensions is None:
+    schema_extensions = ["roboledger"]
   a = register_principal(client, "A")
   b = register_principal(client, "B")
-  graph_a = create_entity_graph(client, a)
-  graph_b = create_entity_graph(client, b)
+  graph_a = create_entity_graph(client, a, schema_extensions=schema_extensions)
+  graph_b = create_entity_graph(client, b, schema_extensions=schema_extensions)
   a.graph_id = graph_a
   b.graph_id = graph_b
   return TenantFixture(tenant_a=a, tenant_b=b, graph_a=graph_a, graph_b=graph_b)

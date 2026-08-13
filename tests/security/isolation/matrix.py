@@ -56,8 +56,24 @@ MCP_WRITE_BODY = {
   "arguments": {"query": "CREATE (n:IsoHarnessProbe {marker: 1}) RETURN n"},
 }
 
-# GraphQL is flag-gated (EXTENSIONS_GRAPHQL_ENABLED AND a domain flag). The
-# `hello` field is the always-on auth probe; it echoes the caller, so it is an
-# access-control probe, not a data-leak probe (see classify_graphql).
+# GraphQL is flag-gated (EXTENSIONS_GRAPHQL_ENABLED AND a domain flag). Two
+# probes: `hello` echoes the caller (access-control probe), while `entity` reads
+# actual graph data (a real data-leak probe — a cross-tenant entity payload is a
+# leak). On a roboledger graph the entity is the initial_entity created at setup.
 GRAPHQL_PATH = "/extensions/{graph_id}/graphql"
-GRAPHQL_BODY = {"query": "{ hello }"}
+GRAPHQL_HELLO_BODY = {"query": "{ hello }"}
+GRAPHQL_DATA_BODY = {"query": "{ entity { name } }"}
+
+# The roboledger extensions command/view surface (needs a roboledger graph).
+# Any 2xx from a non-owner is a leak; empty bodies suffice for a denial probe —
+# authz (get_current_user_with_graph / require_graph_write_role) should turn a
+# non-owner away before the body ever matters. A 422 instead of 403 is itself a
+# finding (validation ran before authz) and lands as INCONCLUSIVE.
+EXTENSIONS_OPS: list[dict] = [
+  {"label": "build-fact-grid", "op": "build-fact-grid"},  # view / read
+  {"label": "compute-metrics", "op": "compute-metrics"},  # read/compute
+  {"label": "create-event-block", "op": "create-event-block"},  # write
+  {"label": "create-report", "op": "create-report"},  # write
+  {"label": "close-period", "op": "close-period"},  # sensitive write
+]
+EXTENSIONS_OP_PATH = "/extensions/roboledger/{graph_id}/operations/{op}"

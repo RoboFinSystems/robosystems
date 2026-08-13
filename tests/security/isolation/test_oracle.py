@@ -121,3 +121,26 @@ def test_graphql_200_with_data_is_inconclusive():
   victim = _resp(200, json={"data": {"hello": "hello, owner"}})
   attacker = _resp(200, json={"data": {"hello": "hello, attacker"}})
   assert classify_graphql(victim, attacker)[0] is Verdict.INCONCLUSIVE
+
+
+def test_graphql_data_field_leak():
+  """A cross-tenant `{ entity }` payload is real graph data — a leak."""
+  data = {"data": {"entity": {"name": "Victim Corp"}}}
+  victim = _resp(200, json=data)
+  attacker = _resp(200, json=data)
+  assert classify_graphql(victim, attacker, data_field=True)[0] is Verdict.LEAK
+
+
+def test_graphql_data_field_denied_is_pass():
+  victim = _resp(200, json={"data": {"entity": {"name": "Victim Corp"}}})
+  attacker = _resp(
+    200, json={"data": None, "errors": [{"extensions": {"code": "FORBIDDEN"}}]}
+  )
+  assert classify_graphql(victim, attacker, data_field=True)[0] is Verdict.PASS
+
+
+def test_graphql_data_field_owner_empty_is_invalid():
+  """A data-field probe whose owner query returns no data can't detect a leak."""
+  victim = _resp(200, json={"data": {"entity": None}})
+  attacker = _resp(200, json={"data": None})
+  assert classify_graphql(victim, attacker, data_field=True)[0] is Verdict.INVALID
