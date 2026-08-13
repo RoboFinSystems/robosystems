@@ -116,12 +116,13 @@ graph_credit:{graph_id}                # graph credit balance
 credit_summary:{graph_id}              # usage summary
 ```
 
-Two further prefixes are declared in `cache.py` but can never hold anything, and
-are listed here only so you do not go looking for their contents:
+Two further prefixes are declared in `cache.py` but are dead surface, listed
+here only so you do not go looking for their contents:
 `shared_credit:{user_id}:{repository}` has no setter or getter at all (shared
 repository credits read straight through to the database, uncached), and
 `op_cost:{operation_type}` is written on every `CreditService` construction with
-a table of zeros that nothing reads back.
+a table of zeros whose only reader — the module-level `get_operation_cost` in
+`credit_service.py` — is itself uncalled.
 
 ```python
 from robosystems.middleware.billing import credit_cache
