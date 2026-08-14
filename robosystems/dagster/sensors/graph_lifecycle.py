@@ -34,7 +34,7 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   Query: BillingSubscription where:
   - resource_type = "graph"
   - status IN ("canceled", "failed")
-  - ends_at IS NOT NULL AND ends_at < now()
+  - ends_at IS NOT NULL AND (ends_at < now() OR cancellation_type = "immediate")
   - Linked graph status = "active" (not already suspended)
 
   ``failed`` belongs here alongside ``canceled`` for the same reason: both are
@@ -43,10 +43,13 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   """
   from datetime import UTC, datetime
 
+  from sqlalchemy import or_
+
   from robosystems.database import session as db_session_factory
   from robosystems.models.core.billing.subscription import (
     TERMINAL_SUBSCRIPTION_STATUSES,
     BillingSubscription,
+    CancellationType,
   )
   from robosystems.models.core.graph import Graph, GraphStatus
 
@@ -54,7 +57,11 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   try:
     now = datetime.now(UTC)
 
-    # Find expired subscriptions linked to active graphs
+    # Find expired subscriptions linked to active graphs. An IMMEDIATE cancel
+    # suspends regardless of ends_at: the user asked for teardown now, and this
+    # is defense-in-depth against ends_at being pushed into the future by a
+    # downstream event (e.g. the Stripe subscription.deleted handler). Mirrors
+    # the immediate-bypass the deprovision sensor already applies.
     expired_subs = (
       db.query(BillingSubscription)
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
@@ -62,7 +69,10 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
         BillingSubscription.resource_type == "graph",
         BillingSubscription.status.in_(TERMINAL_SUBSCRIPTION_STATUSES),
         BillingSubscription.ends_at.isnot(None),
-        BillingSubscription.ends_at < now,
+        or_(
+          BillingSubscription.ends_at < now,
+          BillingSubscription.cancellation_type == CancellationType.IMMEDIATE.value,
+        ),
         Graph.status == GraphStatus.ACTIVE.value,
       )
       .all()

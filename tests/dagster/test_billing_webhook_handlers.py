@@ -1723,6 +1723,61 @@ class TestHandleSubscriptionDeleted:
     mock_db_session.commit.assert_called_once()
     mock_context.log.info.assert_called_once()
 
+  async def test_immediate_cancel_not_pushed_to_period_end(
+    self, mock_db_session, mock_context, mock_subscription
+  ):
+    """F7 regression: an IMMEDIATE cancel's ends_at must NOT be moved out to the
+    Stripe period end by the deleted-webhook. Otherwise the suspend sensor
+    (ends_at < now) never fires and the graph lingers until period end despite
+    the user asking for immediate teardown."""
+    from robosystems.models.core.billing.subscription import CancellationType
+
+    op_ends_at = datetime.now(UTC) - timedelta(seconds=5)  # set by the immediate cancel
+    future_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
+    mock_subscription.status = "canceled"
+    mock_subscription.cancellation_type = CancellationType.IMMEDIATE.value
+    mock_subscription.ends_at = op_ends_at
+    mock_subscription.canceled_at = op_ends_at
+    sub_data = {"id": "sub_stripe_abc", "current_period_end": future_period_end}
+
+    with patch(PATCH_BILLING_SUB) as MockSub:
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+
+      from robosystems.dagster.jobs.billing import _handle_subscription_deleted
+
+      await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
+
+    # ends_at stays at (or before) now — never the future period end.
+    assert mock_subscription.ends_at == op_ends_at
+    assert mock_subscription.ends_at <= datetime.now(UTC)
+    mock_db_session.commit.assert_called_once()
+
+  async def test_period_end_cancel_still_adopts_stripe_period_end(
+    self, mock_db_session, mock_context, mock_subscription
+  ):
+    """Period-end cancels are unchanged: the deleted-webhook adopts Stripe's
+    current_period_end (the user paid through the current period)."""
+    from robosystems.models.core.billing.subscription import CancellationType
+
+    future_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
+    mock_subscription.status = "canceled"
+    mock_subscription.cancellation_type = CancellationType.PERIOD_END.value
+    mock_subscription.ends_at = None
+    mock_subscription.canceled_at = datetime.now(UTC) - timedelta(seconds=5)
+    sub_data = {"id": "sub_stripe_abc", "current_period_end": future_period_end}
+
+    with patch(PATCH_BILLING_SUB) as MockSub:
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+
+      from robosystems.dagster.jobs.billing import _handle_subscription_deleted
+
+      await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
+
+    assert mock_subscription.ends_at == datetime.fromtimestamp(
+      future_period_end, tz=UTC
+    )
+    mock_db_session.commit.assert_called_once()
+
   async def test_unexpected_deletion_calls_immediate_cancel(
     self, mock_db_session, mock_context, mock_subscription
   ):

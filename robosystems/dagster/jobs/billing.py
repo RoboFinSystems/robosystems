@@ -793,21 +793,32 @@ async def _handle_subscription_deleted(
   )
 
   if subscription.status == "canceled":
-    # Already canceled (via portal updated handler or UI cancel button).
-    # Preserve original canceled_at timestamp. Use Stripe's period end if
-    # the user paid for the current period, otherwise terminate now.
+    # Already canceled (via portal updated handler, UI cancel button, or the
+    # delete-graph op). Preserve the original canceled_at timestamp.
+    from robosystems.models.core.billing.subscription import CancellationType
+
     now = datetime.now(UTC)
-    # Period end may be at item level in newer Stripe API versions
-    period_end_ts = subscription_data.get("current_period_end")
-    if not period_end_ts:
-      items = subscription_data.get("items", {}).get("data", [])
-      if items:
-        period_end_ts = items[0].get("current_period_end")
-    if period_end_ts:
-      period_end = datetime.fromtimestamp(period_end_ts, tz=UTC)
-      subscription.ends_at = period_end if period_end > now else now
+    if subscription.cancellation_type == CancellationType.IMMEDIATE.value:
+      # The cancel was explicitly IMMEDIATE (delete-graph / immediate UI cancel),
+      # so the cancel path already set ends_at<=now on purpose. Do NOT push it out
+      # to the paid-through period end here — that would defeat the immediate
+      # teardown and strand the graph until period end, since the graph-lifecycle
+      # sensors gate suspension on ends_at < now. Keep ends_at no later than now.
+      if subscription.ends_at is None or subscription.ends_at > now:
+        subscription.ends_at = now
     else:
-      subscription.ends_at = now
+      # Period-end cancel: honor Stripe's period end (the user paid for the
+      # current period). Period end may be item-level in newer Stripe APIs.
+      period_end_ts = subscription_data.get("current_period_end")
+      if not period_end_ts:
+        items = subscription_data.get("items", {}).get("data", [])
+        if items:
+          period_end_ts = items[0].get("current_period_end")
+      if period_end_ts:
+        period_end = datetime.fromtimestamp(period_end_ts, tz=UTC)
+        subscription.ends_at = period_end if period_end > now else now
+      else:
+        subscription.ends_at = now
     subscription.updated_at = now
     db_session.commit()
     context.log.info(
