@@ -41,11 +41,13 @@ numbered list of close prompts to try.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -54,10 +56,37 @@ from pathlib import Path
 SOURCE = "native"
 CONNECTION_ID = "demo_cascade"
 CREATED_BY = "demo:cascade"
-CREDENTIALS_FILE = Path(".local/config.json")
 DEMO_NAME = "cascade_demo"
-BASE_URL = "http://localhost:8000"
 COMPANY_NAME = "Cascade Advisory Group LLC"
+
+# The API this demo loads into. Defaults to the local stack; set DEMO_API_URL to
+# point at a deployed environment, in which case every step is ordinary API
+# traffic against an account that already holds a provisioned graph. This
+# mirrors examples/_scenario/runner.py — the off-local guards below are the
+# reason a remote run cannot reach the direct-DB reset (F10).
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"})
+BASE_URL = os.environ.get("DEMO_API_URL", "http://localhost:8000").rstrip("/")
+
+
+def _is_local_target() -> bool:
+  return (urlparse(BASE_URL).hostname or "") in _LOCAL_HOSTS
+
+
+def _credentials_file() -> Path:
+  """Credentials + demo-slot map, kept in a separate file per target.
+
+  Local runs use ``.local/config.json``; a remote target uses
+  ``.local/config.<host>.json`` so a later local run cannot silently reuse a
+  remote graph id from the slot map (and vice versa). Same rationale as
+  ``_scenario.runner._credentials_file``.
+  """
+  if _is_local_target():
+    return Path(".local/config.json")
+  host = (urlparse(BASE_URL).hostname or "remote").replace(".", "-")
+  return Path(f".local/config.{host}.json")
+
+
+CREDENTIALS_FILE = _credentials_file()
 
 # Skeleton mode: creates an empty roboledger graph for manual QB sandbox
 # connect via the UI. Different DEMO_NAME slot so it doesn't collide with
@@ -298,7 +327,24 @@ def reset_demo(graph_id: str) -> None:
   and the library-seeded taxonomy in place, so the graph does not have to be
   re-provisioned between runs. See `_reset.py` for why this is deliberately not
   a product operation.
+
+  **Local targets only (F10).** ``reset_demo_state`` issues raw DELETEs against
+  whatever ``EXTENSIONS_DATABASE_URL`` points at, which is *not* necessarily the
+  same system as ``DEMO_API_URL`` — an SSM tunnel makes a remote database look
+  local, so with tunnels open ``localhost:5432`` can be prod RDS. A remote /
+  integration target has no business reaching Postgres at all, so the reset is
+  simply not run off-local — and ``reset_demo_state`` is imported *inside* the
+  local-only branch so the route is unreachable there, not merely skipped. A
+  graph provisioned on a remote target is empty anyway; pass a freshly
+  provisioned graph and re-running over demo data will duplicate it, not replace
+  it.
   """
+  if not _is_local_target():
+    print(f"  SKIPPED — reset is local-only, and the target is {BASE_URL}")
+    print("  (raw-DB reset never runs against a remote/integration target;")
+    print("  provide a freshly provisioned graph — re-running duplicates data).")
+    return
+
   from ._reset import reset_demo_state
 
   reset_demo_state(graph_id)
