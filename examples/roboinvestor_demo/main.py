@@ -41,7 +41,12 @@ What each phase proves:
 Every write goes through the HTTP API via the SDK facades, the same
 surface the frontends and MCP tools use. The one exception is ``_reset.py``,
 which uses direct DB access so re-runs start clean; that path is
-deliberately not a product operation.
+deliberately not a product operation and runs against local targets only.
+
+Set ``DEMO_API_URL`` to point the run at a deployed environment; credentials
+then come from a per-target ``.local/config.<host>.json``, both graphs must be
+provisioned up front (pass the investor id positionally and ``--issuer``),
+and the reset is skipped entirely.
 
 Prerequisites:
     just start        # Docker stack (API, PostgreSQL, Valkey, LadybugDB)
@@ -62,16 +67,45 @@ invariant fails, so it doubles as a pre-release gate.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from . import data as portfolio_data
 
-CREDENTIALS_FILE = Path(".local/config.json")
-BASE_URL = "http://localhost:8000"
+# The API this demo loads into. Defaults to the local stack; set DEMO_API_URL to
+# point at a deployed environment, in which case every step is ordinary API
+# traffic against an account that already holds provisioned graphs. This
+# mirrors examples/_scenario/runner.py — the off-local guards below are the
+# reason a remote run cannot reach the direct-DB reset (F10).
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"})
+BASE_URL = os.environ.get("DEMO_API_URL", "http://localhost:8000").rstrip("/")
+
+
+def _is_local_target() -> bool:
+  return (urlparse(BASE_URL).hostname or "") in _LOCAL_HOSTS
+
+
+def _credentials_file() -> Path:
+  """Credentials + demo-slot map, kept in a separate file per target.
+
+  Local runs use ``.local/config.json``; a remote target uses
+  ``.local/config.<host>.json`` so a later local run cannot silently reuse a
+  remote graph id from the slot map (and vice versa). Same rationale — and the
+  same file — as ``_scenario.runner``, so an issuer graph loaded remotely by
+  the saas_startup scenario is found under its slot here.
+  """
+  if _is_local_target():
+    return Path(".local/config.json")
+  host = (urlparse(BASE_URL).hostname or "remote").replace(".", "-")
+  return Path(f".local/config.{host}.json")
+
+
+CREDENTIALS_FILE = _credentials_file()
 
 INVESTOR_SLOT = "roboinvestor_demo"
 ISSUER_SLOT = "saas_startup"
@@ -211,6 +245,19 @@ def create_investor_graph() -> str:
     sys.path.insert(0, str(project_root))
 
   from examples._common.config import get_graph_id, now_timestamp, save_graph_id
+
+  existing = get_graph_id(CREDENTIALS_FILE, INVESTOR_SLOT)
+  if existing:
+    print(f"  Reusing investor graph: {existing}")
+    return existing
+
+  if not _is_local_target():
+    print(f"\n  ERROR: {BASE_URL} is not a local target, so this demo will")
+    print("  not register a user or create a graph. Provision the fund graph")
+    print("  the way a customer would (POST /v1/graphs with the roboinvestor +")
+    print("  roboledger extensions) and pass its id as the positional argument.")
+    sys.exit(1)
+
   from examples.credentials.utils import CredentialContext, ensure_user_credentials
 
   context = CredentialContext(
@@ -224,11 +271,6 @@ def create_investor_graph() -> str:
   )
   credentials = ensure_user_credentials(context)
   api_key = credentials["api_key"]
-
-  existing = get_graph_id(CREDENTIALS_FILE, INVESTOR_SLOT)
-  if existing:
-    print(f"  Reusing investor graph: {existing}")
-    return existing
 
   from robosystems_client.api.graphs.create_graph import (
     sync_detailed as api_create_graph,
@@ -851,12 +893,24 @@ def main(argv: list[str] | None = None) -> None:
   _heading("[2/9]", "Investor graph — the fund")
   investor_graph = positional[0] if positional else create_investor_graph()
 
-  print("\n  Resetting prior demo state (the only direct-DB step)...")
-  from ._reset import reset_investor_state, reset_issuer_share_state
+  # Local targets only (F10): the reset issues raw DELETEs against whatever
+  # EXTENSIONS_DATABASE_URL points at, which is *not* necessarily the same
+  # system as DEMO_API_URL — with an SSM tunnel open, localhost:5432 can be a
+  # remote RDS. The import lives inside the local-only branch so the route is
+  # unreachable off-local, not merely skipped. A remote run gets freshly
+  # provisioned graphs, so there is nothing to reset — re-running against the
+  # same remote graphs will duplicate demo state, not replace it.
+  if _is_local_target():
+    print("\n  Resetting prior demo state (the only direct-DB step)...")
+    from ._reset import reset_investor_state, reset_issuer_share_state
 
-  reset_investor_state(investor_graph)
-  reset_issuer_share_state(issuer_graph)
-  print("  Done")
+    reset_investor_state(investor_graph)
+    reset_issuer_share_state(issuer_graph)
+    print("  Done")
+  else:
+    print(f"\n  Reset SKIPPED — reset is local-only, and the target is {BASE_URL}")
+    print("  (raw-DB reset never runs against a remote target; provide freshly")
+    print("  provisioned graphs — re-running over demo data will duplicate it).")
 
   fund_entity = _ledger_client().get_entity(investor_graph)
   fund_entity_id = _field(fund_entity, "id", None) if fund_entity else None
