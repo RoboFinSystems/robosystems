@@ -2098,7 +2098,7 @@ def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date,
 
 
 def generate_annual_report(
-  graph_id: str, scenario: Scenario, output_dir: Path
+  graph_id: str, scenario: Scenario, output_dir: Path, skip_artifacts: bool = False
 ) -> str | None:
   """Create a published, filed annual report for the scenario's report period.
 
@@ -2180,7 +2180,13 @@ def generate_annual_report(
   # tangible artifact on disk that the customer can open immediately.
   # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
   # equivalent. Same Report, same fact set, two serializations.
-  _download_bundles(client, graph_id, report_id, output_dir, scenario)
+  # ``--no-artifacts`` skips this whole serialization/validation pass —
+  # for loop/CI runs whose local files nobody will ever open, the same
+  # bundles export on demand from the report UI.
+  if skip_artifacts:
+    print("  Artifacts:    skipped (--no-artifacts) — export bundles from the report UI")
+  else:
+    _download_bundles(client, graph_id, report_id, output_dir, scenario)
 
   return report_id
 
@@ -2237,6 +2243,7 @@ def run_demo(
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
   with_ai_mapping = "--ai" in argv
+  skip_artifacts = "--no-artifacts" in argv
   entity_type = scenario.entity_type
   args = [a for a in argv[1:] if not a.startswith("--")]
 
@@ -2382,7 +2389,9 @@ def run_demo(
   # Generate + file the annual report — the deliberate publication act
   # (the monthly series comes from the close loop above, not reports).
   print("\nGenerating annual report...")
-  report_id = generate_annual_report(graph_id, scenario, output_dir)
+  report_id = generate_annual_report(
+    graph_id, scenario, output_dir, skip_artifacts=skip_artifacts
+  )
 
   # Fact-driven disclosure proof — the notes render because the report's
   # facts reached their concepts (no style composition involved).
