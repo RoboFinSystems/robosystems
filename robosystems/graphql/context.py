@@ -45,6 +45,7 @@ from robosystems.middleware.auth.dependencies import (
   API_KEY_HEADER,
   get_current_user,
 )
+from robosystems.middleware.auth.utils import validate_api_key_with_graph
 from robosystems.middleware.extensions import load_graph_metadata
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils.subgraph import is_subgraph
@@ -101,11 +102,26 @@ async def get_context(
   try:
     user = await get_current_user(request, api_key or "")
   except HTTPException:
-    if has_credentials:
-      # Bad/expired credentials → real transport-layer auth failure.
+    if not has_credentials:
+      # No credentials at all → anonymous fallthrough for introspection.
+      user = None
+    elif api_key and not request.headers.get("Authorization"):
+      # Pure API-key auth that the account-wide validator rejected. A
+      # graph-scoped key (the `rfsc…` kind the repository / MCP-connector flow
+      # mints) is refused by `get_current_user` by design — without a graph
+      # context it could otherwise reach account-level surfaces. But this
+      # endpoint's URL already scopes us to a single graph, so re-validate the
+      # key against that graph the same way the REST operations and MCP
+      # surfaces do. This is purely additive: account-wide keys never reach
+      # here (they pass `get_current_user`), and JWT/Bearer auth is guarded out
+      # by the Authorization-header check, so neither path changes.
+      user = validate_api_key_with_graph(api_key, graph_id, db)
+      if user is None:
+        # Genuinely invalid, or a key scoped to a different graph → real 401.
+        raise
+    else:
+      # Bad/expired Bearer token → real transport-layer auth failure.
       raise
-    # No credentials at all → anonymous fallthrough for introspection.
-    user = None
 
   # Subgraph guard: a subgraph is a modality container (scratch/knowledge),
   # not an extensions domain target — a `{parent}_{name}` graph_id has no

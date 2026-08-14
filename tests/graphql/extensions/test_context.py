@@ -82,13 +82,20 @@ class TestGetContextAuthContract:
     mock_meta.assert_not_called()
 
   async def test_invalid_api_key_re_raises_401(self):
-    """Case 2a: X-API-Key present but bad → real 401, NOT silent anonymous."""
+    """Case 2a: X-API-Key present but bad → real 401, NOT silent anonymous.
+
+    The account-wide validator rejects it, and the graph-scoped retry (for
+    graph-scoped keys) also comes back None, so the 401 stands.
+    """
     request = _make_request(headers={})
 
-    with patch(
-      f"{MODULE}.get_current_user",
-      new_callable=AsyncMock,
-      side_effect=HTTPException(status_code=401, detail="Invalid API key"),
+    with (
+      patch(
+        f"{MODULE}.get_current_user",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="Invalid API key"),
+      ),
+      patch(f"{MODULE}.validate_api_key_with_graph", return_value=None) as mock_scoped,
     ):
       with pytest.raises(HTTPException) as exc_info:
         await get_context(
@@ -99,6 +106,67 @@ class TestGetContextAuthContract:
         )
 
     assert exc_info.value.status_code == 401
+    # The graph-scoped retry is attempted for a pure API-key request, then fails.
+    mock_scoped.assert_called_once()
+
+  async def test_graph_scoped_key_accepted_via_graph_validation(self):
+    """Case 2a', the F6 fix: a graph-scoped (`rfsc…`) key is refused by the
+    account-wide validator (it has no graph context there) but is valid for
+    its OWN graph. This endpoint's URL scopes us to that graph, so the
+    graph-aware retry authenticates it — matching the REST-operations and MCP
+    surfaces, which already accept these keys."""
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_owner"
+    db = MagicMock()
+
+    with (
+      patch(
+        f"{MODULE}.get_current_user",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="Invalid API key"),
+      ),
+      patch(f"{MODULE}.validate_api_key_with_graph", return_value=user) as mock_scoped,
+      patch(f"{MODULE}.check_graph_access") as mock_check,
+      patch(f"{MODULE}.load_graph_metadata", return_value=_entity_meta()),
+    ):
+      ctx = await get_context(
+        request=request,
+        api_key="rfsc_scoped_to_this_graph",
+        graph_id=GRAPH_ID,
+        db=db,
+      )
+
+    assert ctx["user"] is user
+    # Re-validated against THIS graph (the URL scope), reusing the request db.
+    mock_scoped.assert_called_once_with("rfsc_scoped_to_this_graph", GRAPH_ID, db)
+    # Graph access is still enforced on top of key validation.
+    mock_check.assert_called_once_with(user, GRAPH_ID)
+
+  async def test_bearer_failure_does_not_trigger_graph_scoped_retry(self):
+    """The graph-scoped retry is for pure API-key requests only. A failed
+    Bearer JWT must re-raise as-is and NEVER fall through to it, so JWT auth
+    (the frontends' path) is entirely unchanged."""
+    request = _make_request(headers={"Authorization": "Bearer expired.jwt"})
+
+    with (
+      patch(
+        f"{MODULE}.get_current_user",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="Token expired"),
+      ),
+      patch(f"{MODULE}.validate_api_key_with_graph") as mock_scoped,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_context(
+          request=request,
+          api_key=None,
+          graph_id=GRAPH_ID,
+          db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 401
+    mock_scoped.assert_not_called()
 
   async def test_invalid_jwt_re_raises_401(self):
     """Case 2b: Authorization header present but bad → real 401."""
