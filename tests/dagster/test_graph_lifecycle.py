@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from dagster import build_sensor_context
 
 from robosystems.dagster.sensors.graph_lifecycle import (
+  expired_graph_subscription_sensor,
   suspended_graph_deprovisioning_sensor,
 )
 
@@ -104,6 +105,79 @@ class TestSuspendedGraphDeprovisioningSensor:
       assert "ends_at" in compiled_clauses, (
         "Expected the deprovision query to still include the ends_at "
         "retention-window clause"
+      )
+
+
+class TestExpiredGraphSubscriptionSensor:
+  """Tests for the expired_graph_subscription_sensor (the suspend stage)."""
+
+  def test_finds_expired_subs_on_active_graphs(self):
+    """Yields one suspend run listing active graphs with terminal/expired subs."""
+    mock_sub = MagicMock()
+    mock_sub.resource_id = "kg_expired"
+
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+        mock_sub
+      ]
+
+      context = build_sensor_context()
+      runs = list(expired_graph_subscription_sensor(context))
+
+      assert len(runs) == 1
+      config = runs[0].run_config["ops"]["suspend_expired_graphs"]["config"]
+      assert config["graph_ids"] == ["kg_expired"]
+
+  def test_skips_when_no_matches(self):
+    """Returns nothing when no subscriptions are expired."""
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+
+      context = build_sensor_context()
+      runs = list(expired_graph_subscription_sensor(context))
+
+      assert len(runs) == 0
+
+  def test_session_cleanup(self):
+    """Database session is always cleaned up."""
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+
+      context = build_sensor_context()
+      list(expired_graph_subscription_sensor(context))
+
+      mock_db.remove.assert_called_once()
+
+  def test_query_includes_immediate_cancellation_bypass(self):
+    """F7 defense-in-depth: the suspend query must OR
+    `cancellation_type == 'immediate'` against `ends_at < now`, so an immediate
+    cancel suspends even if a downstream event (e.g. the Stripe
+    subscription.deleted handler) pushed ends_at into the future. Mirrors the
+    deprovision sensor's immediate-bypass."""
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+
+      context = build_sensor_context()
+      list(expired_graph_subscription_sensor(context))
+
+      filter_call = mock_session.query.return_value.join.return_value.filter
+      assert filter_call.called, "filter() was never invoked on the query"
+
+      compiled_clauses = " ".join(str(arg) for arg in filter_call.call_args.args)
+      assert "cancellation_type" in compiled_clauses, (
+        "Expected the suspend query to OR on cancellation_type (immediate "
+        f"bypass); got: {compiled_clauses}"
+      )
+      assert "ends_at" in compiled_clauses, (
+        "Expected the suspend query to still include the ends_at clause"
       )
 
 
