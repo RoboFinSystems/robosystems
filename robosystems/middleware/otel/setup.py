@@ -169,8 +169,9 @@ def setup_telemetry(app: FastAPI) -> None:
     # Configure exporters
     exporters = []
 
-    # Check if traces are explicitly enabled (default to False since only metrics are configured)
-    traces_enabled = getattr(env, "OTEL_TRACES_ENABLED", False)
+    # Span export is its own switch: the collector only carries a traces
+    # pipeline once a backend exists, so this stays off by default.
+    traces_enabled = env.OTEL_TRACES_ENABLED
 
     # Allow localhost endpoint in production/staging when using sidecar pattern (ADOT collector)
     should_export_traces = (

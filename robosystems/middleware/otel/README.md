@@ -6,9 +6,9 @@ and query-queue metrics from application code. `setup.py` wires the OTel SDK to
 FastAPI; `metrics.py` holds every instrument the platform defines.
 
 In production the API task runs an ADOT collector sidecar that remote-writes to
-Amazon Managed Prometheus. **Only metrics are exported.** The application's OTLP
-span exporter is unreachable by configuration (see below), and the deployed
-collector defines no traces pipeline, so nothing lands in X-Ray today.
+Amazon Managed Prometheus. **Only metrics are exported.** Span export is behind
+`OTEL_TRACES_ENABLED` (off), and the deployed collector defines no traces
+pipeline, so nothing lands in a traces backend today.
 
 ## Turning it on
 
@@ -19,19 +19,21 @@ logs and returns — no instruments, no exporters, no overhead.
 | Variable                      | Default                 | Effect                                                        |
 | ----------------------------- | ----------------------- | ------------------------------------------------------------- |
 | `OTEL_ENABLED`                | `false`                 | Master switch. Nothing is instrumented while false.            |
+| `OTEL_TRACES_ENABLED`         | `false`                 | Span export. Off until the collector carries a traces pipeline. |
 | `OTEL_SERVICE_NAME`           | `robosystems`           | `service.name` resource attribute.                             |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Port `4317` is rewritten to `4318`; the exporters are HTTP.    |
 | `OTEL_RESOURCE_ATTRIBUTES`    | `""`                    | `key=value,key=value`; merged over the built-in attributes.    |
 | `OTEL_CONSOLE_EXPORT`         | `false`                 | Dev only — dumps spans to stdout.                              |
 
-**`OTEL_TRACES_ENABLED` is not a working variable.** `setup.py` reads it as
-`getattr(env, "OTEL_TRACES_ENABLED", False)`, but `config/env.py` never defines
-the attribute, so the lookup always falls through to `False` — setting the env
-var or the SSM parameter changes nothing. The OTLP *span* exporter is therefore
-unreachable in every environment. This is consistent with the deployment (the
-collector has no traces pipeline), but it means the flag is a stub, not a
-switch: wiring traces back on takes a code change in `config/env.py`, not
-configuration. Metrics never depended on it.
+**`OTEL_TRACES_ENABLED` is a real switch as of 2026-08-14** (env var or the
+`OTEL_TRACES_ENABLED` SSM parameter; seeded `false` by `bin/setup/aws.sh`).
+Before that it was read via `getattr(env, ...)` against an attribute
+`config/env.py` never defined, so it read as configurable and was permanently
+off. It now gates only the OTLP *span* exporter; metrics never depended on it.
+Turning it on is not enough on its own — the deployed ADOT collector has no
+traces pipeline and there is no traces backend yet, so spans would be exported
+to a collector that drops them. The plan for both is
+`local/RoboSystems/specs/security/observability-tracing.md`.
 
 A tracer provider and span processors are still installed whenever
 `OTEL_ENABLED` is true, so spans are produced and redacted — they just have
