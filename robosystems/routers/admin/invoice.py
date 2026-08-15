@@ -215,7 +215,7 @@ async def mark_invoice_paid(
     if not invoice:
       raise HTTPException(status_code=404, detail="Invoice not found")
 
-    if invoice.status == "PAID":
+    if str(invoice.status).lower() == "paid":
       raise HTTPException(status_code=400, detail="Invoice is already paid")
 
     invoice.mark_paid(
