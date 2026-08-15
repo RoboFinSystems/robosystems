@@ -439,3 +439,105 @@ class TestWriteOffStalledProvisioning:
 
     assert len(results) == 2, "both threads must complete"
     assert sum(results.values()) == 1, f"exactly one side must win, got {results}"
+
+
+class TestOneCreditPoolPerGraph:
+  """The stated blast radius of a double provisioning was *two instances and
+  two credit pools*. The claim tests above prove the first half; this pins
+  the second: the pool is created downstream of the gate, and the database
+  itself refuses a second pool for the same graph even if a caller got past
+  it."""
+
+  def test_second_pool_for_the_same_graph_is_refused_by_the_database(
+    self, db_session: Session, test_org_id: str
+  ):
+    from decimal import Decimal
+
+    from sqlalchemy.exc import IntegrityError
+
+    from robosystems.models.core import Graph, OrgUser
+    from robosystems.models.core.graph.graph_credits import GraphCredits
+
+    owner_id = (
+      db_session.query(OrgUser.user_id).filter(OrgUser.org_id == test_org_id).scalar()
+    )
+    graph = Graph.create(
+      graph_id=f"kg{uuid.uuid4().hex[:16]}",
+      org_id=test_org_id,
+      graph_name="Claimed Graph",
+      graph_type="generic",
+      graph_tier="ladybug-standard",
+      session=db_session,
+    )
+
+    GraphCredits.create_for_graph(
+      graph_id=graph.graph_id,
+      user_id=owner_id,
+      billing_admin_id=owner_id,
+      monthly_allocation=Decimal("1000"),
+      session=db_session,
+    )
+    assert (
+      db_session.query(GraphCredits).filter_by(graph_id=graph.graph_id).count() == 1
+    )
+
+    with pytest.raises(IntegrityError):
+      GraphCredits.create_for_graph(
+        graph_id=graph.graph_id,
+        user_id=owner_id,
+        billing_admin_id=owner_id,
+        monthly_allocation=Decimal("1000"),
+        session=db_session,
+      )
+    db_session.rollback()
+
+    assert (
+      db_session.query(GraphCredits).filter_by(graph_id=graph.graph_id).count() == 1
+    )
+
+  def test_losing_claimant_provisions_nothing_so_no_second_pool_exists(
+    self, db_session: Session, test_org_id: str
+  ):
+    """End to end on the claim: the winner provisions a graph with a pool and
+    records the resource; the loser's claim is refused at the terminal
+    condition, so no second graph and no second pool can be created."""
+    from decimal import Decimal
+
+    from robosystems.models.core import Graph, OrgUser
+    from robosystems.models.core.graph.graph_credits import GraphCredits
+
+    owner_id = (
+      db_session.query(OrgUser.user_id).filter(OrgUser.org_id == test_org_id).scalar()
+    )
+    subscription = _make_subscription(db_session, test_org_id)
+
+    assert subscription.claim_for_provisioning(db_session) is True
+    graph = Graph.create(
+      graph_id=f"kg{uuid.uuid4().hex[:16]}",
+      org_id=test_org_id,
+      graph_name="Winner's Graph",
+      graph_type="generic",
+      graph_tier="ladybug-standard",
+      session=db_session,
+    )
+    GraphCredits.create_for_graph(
+      graph_id=graph.graph_id,
+      user_id=owner_id,
+      billing_admin_id=owner_id,
+      monthly_allocation=Decimal("1000"),
+      session=db_session,
+    )
+    subscription.resource_id = graph.graph_id
+    subscription.status = SubscriptionStatus.ACTIVE.value
+    db_session.commit()
+
+    # A redelivered event arrives after the winner finished
+    assert subscription.claim_for_provisioning(db_session) is False
+
+    pools = (
+      db_session.query(GraphCredits)
+      .join(Graph, Graph.graph_id == GraphCredits.graph_id)
+      .filter(Graph.org_id == test_org_id)
+      .count()
+    )
+    assert pools == 1

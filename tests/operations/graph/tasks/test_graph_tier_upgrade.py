@@ -335,7 +335,12 @@ class TestGraphTierUpgradeTask:
     assert rollback_kwargs["volume_detached"] is False
 
   async def test_rollback_on_reattachment_timeout(self, mock_dynamodb):
-    """Rollback is triggered when volume is not reattached in time."""
+    """The compensator actually runs on a reattachment timeout — this is the
+    one test in the file that executes ``_rollback`` rather than asserting a
+    mock of it was called. Post-conditions: the volume is re-attached to the
+    old instance, its registry tier reverted, the graph registry taken off
+    ``migrating``, and the subscription taken off ``upgrading`` at the old
+    plan and price."""
     graph_table, volume_table, instance_table = mock_dynamodb
     snapshot_response, detach_response = _make_lambda_responses()
 
@@ -352,8 +357,17 @@ class TestGraphTierUpgradeTask:
       "Item": {"volume_id": "vol-abc123", "status": "available"}
     }
 
+    attach_response = MagicMock()
+    attach_response_payload = MagicMock()
+    attach_response_payload.read.return_value = json.dumps({"statusCode": 200}).encode()
+    attach_response = {"Payload": attach_response_payload}
+
     mock_lambda = MagicMock()
-    mock_lambda.invoke.side_effect = [snapshot_response, detach_response]
+    mock_lambda.invoke.side_effect = [
+      snapshot_response,
+      detach_response,
+      attach_response,
+    ]
 
     mock_asg = MagicMock()
     mock_asg.describe_auto_scaling_groups.return_value = {
@@ -364,6 +378,19 @@ class TestGraphTierUpgradeTask:
 
     dynamodb_resource = MagicMock()
     dynamodb_resource.Table.side_effect = [graph_table, volume_table, instance_table]
+
+    # PostgreSQL side of the rollback: a subscription mid-upgrade, the graph
+    # row, and its credit pool.
+    subscription = MagicMock()
+    subscription.status = "upgrading"
+    subscription.stripe_subscription_id = None
+    graph_row = MagicMock()
+    graph_credits = MagicMock()
+    db = MagicMock()
+    db.query.return_value.filter_by.return_value.first.return_value = subscription
+
+    def _db_gen():
+      yield db
 
     task = _make_task()
 
@@ -379,7 +406,17 @@ class TestGraphTierUpgradeTask:
       patch(f"{TASK_MODULE}.REATTACH_TIMEOUT_SECONDS", 0),
       patch(f"{TASK_MODULE}.REATTACH_POLL_INTERVAL_SECONDS", 0),
       patch.object(task, "_drain_instance", new_callable=AsyncMock),
-      patch.object(task, "_rollback", new_callable=AsyncMock) as mock_rollback,
+      patch("robosystems.database.get_db_session", side_effect=_db_gen),
+      patch("robosystems.models.core.graph.Graph.get_by_id", return_value=graph_row),
+      patch(
+        "robosystems.models.core.graph.graph_credits.GraphCredits.get_by_graph_id",
+        return_value=graph_credits,
+      ),
+      patch(
+        "robosystems.config.billing.BillingConfig.get_subscription_plan",
+        return_value={"base_price_cents": 4900},
+      ),
+      patch("robosystems.config.billing.get_tier_credit_allocation", return_value=1000),
     ):
       mock_env.GRAPH_REGISTRY_TABLE = "test-graph-registry"
       mock_env.VOLUME_REGISTRY_TABLE = "test-volume-registry"
@@ -389,9 +426,32 @@ class TestGraphTierUpgradeTask:
       with pytest.raises(TimeoutError, match="not reattached"):
         await task.execute()
 
-    mock_rollback.assert_called_once()
-    rollback_kwargs = mock_rollback.call_args[1]
-    assert rollback_kwargs["volume_detached"] is True
+    # Volume re-attached to the OLD instance
+    attach_call = json.loads(mock_lambda.invoke.call_args_list[-1].kwargs["Payload"])
+    assert attach_call == {
+      "action": "attach_volume",
+      "volume_id": "vol-abc123",
+      "instance_id": "i-old123",
+    }
+    # Volume registry tier reverted
+    tier_reverts = [
+      c.kwargs
+      for c in volume_table.update_item.call_args_list
+      if c.kwargs.get("ExpressionAttributeValues", {}).get(":tier")
+      == "ladybug-standard"
+    ]
+    assert tier_reverts, "volume registry tier was not reverted"
+    # Graph registry back to active, migration markers removed
+    graph_revert = graph_table.update_item.call_args_list[-1].kwargs
+    assert graph_revert["ExpressionAttributeValues"][":status"] == "active"
+    assert "REMOVE migration_required" in graph_revert["UpdateExpression"]
+    # Subscription off `upgrading` at the old plan and price; graph + pool reverted
+    assert subscription.status == "active"
+    assert subscription.plan_name == "ladybug-standard"
+    assert subscription.base_price_cents == 4900
+    assert graph_row.graph_tier == "ladybug-standard"
+    assert graph_credits.monthly_allocation == 1000
+    db.commit.assert_called_once()
 
   async def test_graph_not_found_raises_error(self, mock_dynamodb):
     """Raises error when graph is not in DynamoDB registry."""
