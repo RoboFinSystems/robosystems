@@ -15,6 +15,14 @@ from robosystems.dagster.sensors.usage_monitor import (
 RECIPIENTS = "robosystems.dagster.sensors.usage_monitor._capacity_alert_recipients"
 
 
+def _admin(user_id, email):
+  user = MagicMock()
+  user.id = user_id
+  user.email = email
+  user.name = email.split("@")[0]
+  return user
+
+
 def _make_graph(graph_id="kg_test123", tier="ladybug-standard"):
   """Create a mock Graph object."""
   graph = MagicMock()
@@ -110,12 +118,10 @@ class TestGraphUsageMonitorSensor:
     mock_db.query.return_value.filter.return_value.all.return_value = [graph]
 
     # Two admins resolve for the graph (one explicit, one implicit via org role)
-    admin_a = MagicMock()
-    admin_a.email = "a@example.com"
-    admin_a.name = "Admin A"
-    admin_b = MagicMock()
-    admin_b.email = "b@example.com"
-    admin_b.name = "Admin B"
+    admin_a, admin_b = (
+      _admin("usr_a", "a@example.com"),
+      _admin("usr_b", "b@example.com"),
+    )
 
     # Storage check returns approaching
     mock_check_storage.return_value = {
@@ -138,16 +144,20 @@ class TestGraphUsageMonitorSensor:
     with patch(RECIPIENTS, return_value=[admin_a, admin_b]):
       graph_usage_monitor_sensor(context)
 
-    # Every admin is emailed, and the dedup key is set once for the graph+status
+    # Every admin is emailed, and a dedup key is set per delivered recipient
     sent_to = [
       c.kwargs["user_email"]
       for c in mock_ses.send_capacity_warning_email.call_args_list
     ]
     assert sent_to == ["a@example.com", "b@example.com"]
-    mock_redis.setex.assert_called_once()
-    dedup_call = mock_redis.setex.call_args
-    assert dedup_call[0][0] == "usage_alert:kg_test123:approaching"
-    assert dedup_call[0][1] == _ALERT_DEDUP_TTL_SECONDS
+    dedup_keys = [c[0][0] for c in mock_redis.setex.call_args_list]
+    assert dedup_keys == [
+      "usage_alert:kg_test123:approaching:usr_a",
+      "usage_alert:kg_test123:approaching:usr_b",
+    ]
+    assert all(
+      c[0][1] == _ALERT_DEDUP_TTL_SECONDS for c in mock_redis.setex.call_args_list
+    )
 
     # The snapshot is attributed to the monitor, not to a member
     added = [
@@ -218,17 +228,84 @@ class TestGraphUsageMonitorSensor:
       "databases": [],
     }
 
-    # Valkey: already alerted
+    # Valkey: already alerted (for the one admin who exists)
     mock_redis = MagicMock()
     mock_redis_factory.return_value = mock_redis
     mock_redis.exists.return_value = True
 
     context = build_sensor_context()
-    graph_usage_monitor_sensor(context)
+    with (
+      patch(RECIPIENTS, return_value=[_admin("usr_a", "a@example.com")]),
+      patch("robosystems.operations.aws.ses.ses_service") as mock_ses,
+    ):
+      mock_ses.send_capacity_warning_email = AsyncMock(return_value=True)
+      graph_usage_monitor_sensor(context)
 
-    # No email sent — dedup key exists
+    # No email sent — this admin's dedup key exists
+    mock_ses.send_capacity_warning_email.assert_not_called()
     mock_redis.setex.assert_not_called()
     mock_db.close.assert_called_once()
+
+  @patch("robosystems.operations.aws.ses.ses_service")
+  @patch("robosystems.config.valkey_registry.create_redis_client")
+  @patch(
+    "robosystems.middleware.graph.ingestion_limits.IngestionLimitChecker.check_instance_storage"
+  )
+  @patch("robosystems.database.session")
+  def test_partial_delivery_retries_only_the_failed_admin(
+    self,
+    mock_session_factory,
+    mock_check_storage,
+    mock_redis_factory,
+    mock_ses,
+  ):
+    """One admin's send fails: only the delivered admin gets a dedup key, so
+    the next tick skips them and retries the failed one — instead of a
+    single graph-level key silencing the failed admin for the whole TTL."""
+    mock_db = MagicMock()
+    mock_session_factory.return_value = mock_db
+    mock_db.query.return_value.filter.return_value.all.return_value = [_make_graph()]
+    mock_check_storage.return_value = {
+      "total_storage_gb": 17.0,
+      "limit_gb": 20.0,
+      "usage_percentage": 85.0,
+      "status": "approaching",
+      "databases": [],
+    }
+    admin_a, admin_b = (
+      _admin("usr_a", "a@example.com"),
+      _admin("usr_b", "b@example.com"),
+    )
+
+    # Tick 1: nobody alerted yet; delivery to B fails.
+    mock_redis = MagicMock()
+    mock_redis_factory.return_value = mock_redis
+    mock_redis.exists.return_value = False
+    mock_ses.send_capacity_warning_email = AsyncMock(side_effect=[True, False])
+
+    with patch(RECIPIENTS, return_value=[admin_a, admin_b]):
+      graph_usage_monitor_sensor(build_sensor_context())
+
+    assert [c[0][0] for c in mock_redis.setex.call_args_list] == [
+      "usage_alert:kg_test123:approaching:usr_a"
+    ]
+
+    # Tick 2: A's key exists, B's does not — only B is emailed.
+    mock_redis.reset_mock()
+    mock_redis.exists.side_effect = lambda key: key.endswith(":usr_a")
+    mock_ses.send_capacity_warning_email = AsyncMock(return_value=True)
+
+    with patch(RECIPIENTS, return_value=[admin_a, admin_b]):
+      graph_usage_monitor_sensor(build_sensor_context())
+
+    sent_to = [
+      c.kwargs["user_email"]
+      for c in mock_ses.send_capacity_warning_email.call_args_list
+    ]
+    assert sent_to == ["b@example.com"]
+    assert [c[0][0] for c in mock_redis.setex.call_args_list] == [
+      "usage_alert:kg_test123:approaching:usr_b"
+    ]
 
   @patch("robosystems.config.valkey_registry.create_redis_client")
   @patch(

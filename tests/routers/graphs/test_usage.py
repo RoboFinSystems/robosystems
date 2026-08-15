@@ -410,6 +410,44 @@ class TestGetGraphUsageAnalytics:
     assert result.recent_events == []
 
   @pytest.mark.asyncio
+  async def test_recent_events_include_graph_storage_snapshots(self):
+    """Storage snapshots are recorded under the usage monitor's system
+    principal, not a member — so the events query must admit them by event
+    type alongside the caller's own rows, or no user ever sees one."""
+    mock_db = Mock()
+    mock_query = Mock()
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = []
+    mock_db.query.return_value = mock_query
+
+    cb_patch, tc_patch, ol_patch, rm_patch = _patch_robustness()
+
+    with cb_patch, tc_patch, ol_patch, rm_patch:
+      result = await get_graph_usage(
+        graph_id="kg01234567890abcdef",
+        time_range="30d",
+        include_storage=False,
+        include_credits=False,
+        include_performance=False,
+        include_events=True,
+        current_user=_make_mock_user(),
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result.recent_events == []
+    clauses = [
+      str(c.compile(compile_kwargs={"literal_binds": True}))
+      for c in mock_query.filter.call_args[0]
+    ]
+    or_clauses = [c for c in clauses if " OR " in c]
+    assert len(or_clauses) == 1, clauses
+    assert "user_id" in or_clauses[0]
+    assert "storage_snapshot" in or_clauses[0]
+
+  @pytest.mark.asyncio
   async def test_timeout_returns_504(self):
     """Test timeout handling in usage analytics."""
     cb_patch, tc_patch, ol_patch, rm_patch = _patch_robustness()
