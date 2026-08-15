@@ -328,10 +328,40 @@ class TestHasOpaqueStatementCall:
       assert analyzer.is_admin_operation(q) is False
       assert analyzer.has_opaque_statement_call(q) is True
 
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL `GQL`('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')",
+      "CALL `gql`('INSTALL httpfs')",
+      "call `Gql` ('COPY Evil FROM \"/etc/passwd\"') RETURN *",
+      # Any quoted target, not just the known opaque names: the analyzer
+      # cannot see through the mask, so it must not vouch for the name.
+      "CALL `show_tables`() RETURN *",
+      "MATCH (n) RETURN n; CALL `whatever`('x')",
+    ],
+  )
+  def test_quoted_call_targets_are_refused(self, analyzer, query):
+    """The engine resolves a backtick-quoted procedure name to the same
+    procedure as the bare name, but the classifier masks quoted identifiers
+    before it looks at the CALL target — so a name-based deny would be
+    evadable by quoting. Refuse the shape outright."""
+    assert analyzer.has_opaque_statement_call(query) is True
+
+  def test_quoted_identifiers_elsewhere_are_not_call_targets(self, analyzer):
+    """Quoting is only a problem *as the CALL target*. Backtick identifiers
+    in patterns, property access, and aliases stay ordinary."""
+    for q in [
+      "MATCH (n:`Fact`) RETURN n.`value` AS `v`",
+      "CALL show_tables() RETURN `name`",
+      "MATCH (`n`) WHERE `n`.x = 1 RETURN `n`",
+    ]:
+      assert analyzer.has_opaque_statement_call(q) is False
+
   def test_module_level_wrapper(self):
     from robosystems.security.cypher_analyzer import has_opaque_statement_call
 
     assert has_opaque_statement_call("CALL GQL('MATCH (n) RETURN n')") is True
+    assert has_opaque_statement_call("CALL `GQL`('MATCH (n) RETURN n')") is True
     assert has_opaque_statement_call("MATCH (n) RETURN n") is False
 
 

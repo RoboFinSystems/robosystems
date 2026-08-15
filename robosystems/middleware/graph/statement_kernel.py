@@ -91,8 +91,9 @@ class StatementKernel:
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Procedures that execute a statement passed as a string "
-        "(e.g. CALL GQL(...)) are not allowed through the query endpoints. "
-        "Submit the statement directly so it can be authorized.",
+        "(e.g. CALL GQL(...)), and CALLs whose procedure name is quoted, are "
+        "not allowed through the query endpoints. Submit the statement "
+        "directly, with an unquoted procedure name, so it can be authorized.",
       )
 
     # Analyze query

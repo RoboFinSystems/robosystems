@@ -86,7 +86,8 @@ def _validate_write_query(query: str) -> str | None:
   if has_opaque_statement_call(query):
     return (
       "Blocked operation detected. Procedures that execute a statement passed "
-      "as a string (e.g. CALL GQL) are not allowed; submit the statement directly."
+      "as a string (e.g. CALL GQL), and CALLs with a quoted procedure name, are "
+      "not allowed; submit the statement directly with an unquoted name."
     )
 
   # Block DDL / bulk / admin — the same dangerous categories the kernel and the

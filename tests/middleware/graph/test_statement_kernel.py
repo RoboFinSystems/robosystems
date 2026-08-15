@@ -158,6 +158,39 @@ def test_opaque_statement_call_blocked_on_main_graph_read():
   assert "passed as a string" in e.value.detail
 
 
+def test_quoted_procedure_name_blocked_end_to_end_for_subgraph_writer():
+  """Unmocked analyzer: ``CALL `GQL`(...)`` must be refused for the one
+  caller every other gate lets through — a subgraph member with write
+  access. The engine resolves the quoted name to the same procedure, and
+  the analyzer masks it before any name check, so only a refuse-the-shape
+  rule closes this; the test pins that the kernel actually gets it."""
+  with (
+    patch(f"{MOD}.parse_subgraph_id", return_value=object()),
+    patch(
+      f"{MOD}.MultiTenantUtils.is_shared_repository_or_subgraph",
+      return_value=False,
+    ),
+    patch(
+      "robosystems.models.core.graph.graph_user.GraphUser.user_has_write_access",
+      return_value=True,
+    ),
+  ):
+    with pytest.raises(HTTPException) as e:
+      _authorize(
+        "kg1234567890abcdef_dev",
+        "CALL `GQL`('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')",
+      )
+    # And the bare, unquoted form is refused the same way.
+    with pytest.raises(HTTPException) as e2:
+      _authorize(
+        "kg1234567890abcdef_dev",
+        "CALL GQL('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')",
+      )
+  assert e.value.status_code == 403
+  assert "quoted" in e.value.detail
+  assert e2.value.status_code == 403
+
+
 def _authorize_sql(graph_id, statement="SELECT 1"):
   return statement_kernel.authorize(
     engine=StatementEngine.SQL,
