@@ -1069,6 +1069,38 @@ Resources:
         - !Ref DagsterAlertTopic
       TreatMissingData: notBreaching
 
+  # The stalled-provisioning reaper writes off a subscription whose
+  # provisioning never finished. That row is a customer who paid and has no
+  # working resource, and the reaper's log line was the only place it was
+  # ever recorded — this makes it a page.
+  StalledProvisioningWriteOffMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref DagsterLogGroup
+      FilterPattern: '"STALLED PROVISIONING WRITTEN OFF"'
+      MetricTransformations:
+        - MetricName: StalledProvisioningWriteOff
+          MetricNamespace: !Sub RoboSystems/Dagster/${Environment}
+          MetricValue: "1"
+          Unit: Count
+
+  StalledProvisioningWriteOffAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmName: !Sub robosystems-dagster-${Environment}-stalled-provisioning-write-off
+      AlarmDescription: A paid subscription was written off after provisioning stalled - the customer has no resource and needs an operator
+      MetricName: StalledProvisioningWriteOff
+      Namespace: !Sub RoboSystems/Dagster/${Environment}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref DagsterAlertTopic
+      TreatMissingData: notBreaching
+
 
 Outputs:
   ClusterName:
