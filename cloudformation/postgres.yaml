@@ -199,19 +199,29 @@ Mappings:
   # FreeableMemory alarm thresholds (~6% of instance RAM, in bytes). Postgres
   # plus OS overhead legitimately consumes most of a small instance's memory,
   # so a flat threshold pins the alarm on micro-class instances.
+  #
+  # ConnectionsHighCount is ~60% of each class's default max_connections
+  # (RDS formula: LEAST(DBInstanceClassMemory/9531392, 5000)), so the alarm
+  # fires with headroom left to act and stays correct across resizes.
   InstanceClassAlarmThresholds:
     db.t4g.micro:
       MemoryLowBytes: 67108864 # 64 MB of 1 GB
+      ConnectionsHighCount: 67 # 60% of ~112
     db.t4g.small:
       MemoryLowBytes: 134217728 # 128 MB of 2 GB
+      ConnectionsHighCount: 135 # 60% of ~225
     db.t4g.medium:
       MemoryLowBytes: 268435456 # 256 MB of 4 GB
+      ConnectionsHighCount: 270 # 60% of ~450
     db.r7g.large:
       MemoryLowBytes: 1073741824 # 1 GB of 16 GB
+      ConnectionsHighCount: 1080 # 60% of ~1800
     db.r7g.xlarge:
       MemoryLowBytes: 2147483648 # 2 GB of 32 GB
+      ConnectionsHighCount: 2160 # 60% of ~3600
     db.r7g.2xlarge:
       MemoryLowBytes: 4294967296 # 4 GB of 64 GB
+      ConnectionsHighCount: 3000 # 60% of the 5000 formula cap
 
 Resources:
   # Common IAM policy for EC2 instances
@@ -715,6 +725,33 @@ Resources:
       Period: 300
       EvaluationPeriods: 3
       Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+
+  # Fires at ~60% of the instance class's default max_connections — the
+  # tripwire for the connection-scaling levers (pool tuning, resize, proxy),
+  # sized per class so it survives resizes without template edits.
+  RDSConnectionsHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-connections-high
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBInstanceIdentifier
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: !FindInMap
+        - InstanceClassAlarmThresholds
+        - !Ref DBInstanceClass
+        - ConnectionsHighCount
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
