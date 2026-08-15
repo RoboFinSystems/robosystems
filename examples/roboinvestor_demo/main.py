@@ -219,7 +219,9 @@ def _published_report_id(graph_id: str) -> str | None:
     reports = _ledger_client().list_reports(graph_id)
   except Exception:
     return None
-  published = [r for r in reports or [] if getattr(r, "generation_status", None) == "published"]
+  published = [
+    r for r in reports or [] if getattr(r, "generation_status", None) == "published"
+  ]
   if not published:
     return None
   return published[-1].id
@@ -546,7 +548,9 @@ def _print_block(block: Any) -> None:
   owner = _field(block, "owner", None)
   print(f"    Active positions: {active}")
   print(f"    Cost basis:       ${cost:,.2f}")
-  print(f"    Current value:    {f'${value:,.2f}' if value is not None else '(unmarked)'}")
+  print(
+    f"    Current value:    {f'${value:,.2f}' if value is not None else '(unmarked)'}"
+  )
   if owner:
     print(f"    Owner:            {_field(owner, 'name')}")
 
@@ -838,9 +842,7 @@ def _field(obj: Any, name: str, default: Any = _MISSING) -> Any:
   else:
     value = getattr(obj, name, _MISSING)
 
-  if value is _MISSING or (
-    value is not None and "Unset" in type(value).__name__
-  ):
+  if value is _MISSING or (value is not None and "Unset" in type(value).__name__):
     if default is _MISSING:
       raise KeyError(f"{type(obj).__name__} has no field {name!r}")
     return default
@@ -897,9 +899,12 @@ def main(argv: list[str] | None = None) -> None:
   # EXTENSIONS_DATABASE_URL points at, which is *not* necessarily the same
   # system as DEMO_API_URL — with an SSM tunnel open, localhost:5432 can be a
   # remote RDS. The import lives inside the local-only branch so the route is
-  # unreachable off-local, not merely skipped. A remote run gets freshly
-  # provisioned graphs, so there is nothing to reset — re-running against the
-  # same remote graphs will duplicate demo state, not replace it.
+  # unreachable off-local, not merely skipped; and because the API host proves
+  # nothing about the database, the reset itself re-checks on the DB side
+  # (``examples/_common/local_db.py``: local host + not-RDS) before deleting.
+  # A remote run gets freshly provisioned graphs, so there is nothing to
+  # reset — re-running against the same remote graphs will duplicate demo
+  # state, not replace it.
   if _is_local_target():
     print("\n  Resetting prior demo state (the only direct-DB step)...")
     from ._reset import reset_investor_state, reset_issuer_share_state
