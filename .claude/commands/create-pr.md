@@ -76,15 +76,22 @@ gh pr create \
 
 Print the resulting PR URL.
 
-### 5. Optional Claude review
+### 5. Request the Claude review — always
 
-Only if the user explicitly asks (e.g. passes `review` / `--review` in arguments), request a review:
+Every pull request gets a `@claude` review. This is a change-management control, not a convenience: this is a single-maintainer repository where GitHub forbids self-approval, so an automated second reader on every change is the compensating control that stands in for independent human review. Skipping it on a given PR puts a hole in the control.
 
 ```bash
 gh pr comment <number> --body "@claude please review this PR"
 ```
 
-Otherwise leave it off — the description is now accurate, and the user can run `/pr-review` locally (full context) or `@claude` manually when ready. Do not request review by default.
+Post it unconditionally, immediately after creating the PR. Do not ask first, and do not skip it for small or mechanical changes — a control that only runs on changes deemed interesting is not a control.
+
+Two things this is **not**:
+
+- **Not an approval.** The review posts as a comment from `claude[bot]`, not as an approving review, and it must stay that way. An unconditional bot approval on every PR is a rubber stamp, and it would be worse evidence than the documented exception it replaced. The reviewer's job is to find problems, not to sign off.
+- **Not a substitute for `/pr-review`.** That command runs locally with full session context and is the deeper pass. This is the standing automatic one.
+
+If the workflow does not fire (it is gated to `OWNER`/`MEMBER`/`COLLABORATOR` authors, so fork PRs are excluded by design), say so in the output rather than silently moving on.
 
 ## Output
 
@@ -93,14 +100,15 @@ After creating the PR, report:
 1. The PR URL.
 2. A one-line summary of the title.
 3. Target ← source branches.
-4. Whether a Claude review was requested.
+4. Confirmation that the `@claude` review was requested — or, if it wasn't, why.
 
 ## Arguments
 
 `$ARGUMENTS` may contain:
 
 - A target branch (default `main`).
-- `review` / `--review` to auto-request a `@claude` review.
 - Freeform guidance on what to emphasize in the description.
+
+`review` / `--review` is accepted and ignored — the review is now unconditional (§5).
 
 $ARGUMENTS
