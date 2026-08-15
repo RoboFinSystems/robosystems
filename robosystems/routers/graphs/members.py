@@ -23,11 +23,16 @@ from robosystems.models.api.graphs.members import (
   UpdateGraphMemberRoleRequest,
 )
 from robosystems.models.core import Graph, GraphRole, GraphUser, OrgRole, OrgUser, User
-from robosystems.security import SecurityAuditLogger
+from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/members", tags=["Graph Members"])
+
+
+def _role_value(role: str | GraphRole) -> str:
+  """``GraphUser.role`` is a plain string column; normalize for audit details."""
+  return role.value if isinstance(role, GraphRole) else str(role)
 
 
 def _load_managed_graph(graph_id: str, db: Session) -> Graph:
@@ -173,8 +178,17 @@ async def add_graph_member(
   )
   _invalidate_target_caches(target.id)
 
-  logger.info(
-    f"User {current_user.id} granted {target.id} role {request.role.value} on graph {graph_id}"
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.GRAPH_MEMBER_ADDED,
+    user_id=current_user.id,
+    details={
+      "action": "graph_member_added",
+      "graph_id": graph_id,
+      "org_id": graph.org_id,
+      "target_user_id": target.id,
+      "new_role": request.role.value,
+    },
+    risk_level="low",
   )
   return _explicit_member_response(row, target)
 
@@ -210,11 +224,21 @@ async def update_graph_member_role(
       ),
     )
 
+  previous_role = row.role
   row.update_role(request.role, db)
   _invalidate_target_caches(user_id)
 
-  logger.info(
-    f"User {current_user.id} set {user_id} role to {request.role.value} on graph {graph_id}"
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.GRAPH_MEMBER_ROLE_CHANGED,
+    user_id=current_user.id,
+    details={
+      "action": "graph_member_role_changed",
+      "graph_id": graph_id,
+      "target_user_id": user_id,
+      "previous_role": _role_value(previous_role),
+      "new_role": request.role.value,
+    },
+    risk_level="low",
   )
   return _explicit_member_response(row, row.user)
 
@@ -246,7 +270,18 @@ async def remove_graph_member(
       detail="User has no explicit grant on this graph",
     )
 
+  removed_role = row.role
   row.delete(db)
   _invalidate_target_caches(user_id)
 
-  logger.info(f"User {current_user.id} revoked {user_id} access to graph {graph_id}")
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.GRAPH_MEMBER_REMOVED,
+    user_id=current_user.id,
+    details={
+      "action": "graph_member_removed",
+      "graph_id": graph_id,
+      "target_user_id": user_id,
+      "previous_role": _role_value(removed_role),
+    },
+    risk_level="low",
+  )

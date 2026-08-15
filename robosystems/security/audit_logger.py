@@ -55,6 +55,18 @@ class SecurityEventType(Enum):
   SCIM_USER_DEACTIVATED = "scim_user_deactivated"
   SCIM_USER_REACTIVATED = "scim_user_reactivated"
   SCIM_AUTH_FAILURE = "scim_auth_failure"
+  # Membership lifecycle — privileged access changes made through our own
+  # API (SOC 2 CC6.x: access granted, modified and removed through an
+  # authorized process, with a record). Evidence, not alerts: no metric,
+  # like the SCIM lifecycle events. ``user_id`` on the event is the actor;
+  # ``details`` carries the target, the scope (org_id / graph_id) and the
+  # prior and new role.
+  ORG_MEMBER_ADDED = "org_member_added"
+  ORG_MEMBER_ROLE_CHANGED = "org_member_role_changed"
+  ORG_MEMBER_REMOVED = "org_member_removed"
+  GRAPH_MEMBER_ADDED = "graph_member_added"
+  GRAPH_MEMBER_ROLE_CHANGED = "graph_member_role_changed"
+  GRAPH_MEMBER_REMOVED = "graph_member_removed"
   # Passkey MFA lifecycle (operational; only MFA_FAILED alarms — a spike is
   # the second-factor brute-force / phishing-relay signal)
   PASSKEY_ENROLLED = "passkey_enrolled"

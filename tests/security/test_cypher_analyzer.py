@@ -276,6 +276,65 @@ class TestIsNonReadCall:
     assert is_non_read_call("MATCH (n) RETURN n") is False
 
 
+class TestHasOpaqueStatementCall:
+  """`has_opaque_statement_call` names the procedures whose payload is a
+  statement in a string. The analyzer masks string literals by design, so
+  the family gates cannot see what such a call would run — the predicate
+  exists so the kernel can refuse the shape outright, on every graph and
+  regardless of role."""
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "CALL GQL('MATCH (n) RETURN n')",
+      "CALL gql('INSERT (:X {id: 1})')",
+      "call Gql('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))') RETURN *",
+      "MATCH (n) RETURN n; CALL GQL('COPY Evil FROM \"/etc/passwd\"')",
+    ],
+  )
+  def test_opaque_calls_are_flagged(self, analyzer, query):
+    assert analyzer.has_opaque_statement_call(query) is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "MATCH (n) RETURN n",
+      "CALL show_tables() RETURN *",
+      "CALL CREATE_VECTOR_INDEX('Fact','x','embedding')",
+      "MATCH (n:Fact) WHERE n.name = 'CALL GQL(x)' RETURN n",
+      "MATCH (n:Fact) WHERE n.name = 'gql' RETURN n",
+      "MATCH (n:Gql) RETURN n",
+    ],
+  )
+  def test_other_forms_are_not_flagged(self, analyzer, query):
+    """Ordinary reads/writes, allowlisted and non-allowlisted CALLs, and the
+    procedure name appearing only as data or as a label are all clean —
+    the predicate is about the CALL target, nothing else."""
+    assert analyzer.has_opaque_statement_call(query) is False
+
+  def test_family_gates_are_blind_to_the_payload(self, analyzer):
+    """The reason the predicate exists: DDL, bulk and admin verbs inside the
+    string are invisible to every family gate, and the write gate alone does
+    not stop a caller who legitimately holds write access."""
+    payloads = [
+      "CALL GQL('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')",
+      "CALL GQL('COPY Evil FROM \"/etc/passwd\"')",
+      "CALL GQL('INSTALL httpfs')",
+      "CALL GQL('ATTACH \"s3://x\" AS y')",
+    ]
+    for q in payloads:
+      assert analyzer.is_schema_ddl(q) is False
+      assert analyzer.is_bulk_operation(q) is False
+      assert analyzer.is_admin_operation(q) is False
+      assert analyzer.has_opaque_statement_call(q) is True
+
+  def test_module_level_wrapper(self):
+    from robosystems.security.cypher_analyzer import has_opaque_statement_call
+
+    assert has_opaque_statement_call("CALL GQL('MATCH (n) RETURN n')") is True
+    assert has_opaque_statement_call("MATCH (n) RETURN n") is False
+
+
 class TestQuerySecurityValidation:
   """Tests for query security validation."""
 

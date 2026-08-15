@@ -73,11 +73,21 @@ def _validate_write_query(query: str) -> str | None:
   guard — which also protects the Operator path — can't diverge from the kernel.
   """
   from robosystems.security.cypher_analyzer import (
+    has_opaque_statement_call,
     is_admin_operation,
     is_bulk_operation,
     is_schema_ddl,
     is_write_operation,
   )
+
+  # A procedure that executes a string payload (CALL GQL('...')) classifies
+  # as a write, so it would pass the write requirement below — and the family
+  # gates cannot see inside the string. Refuse the shape, as the kernel does.
+  if has_opaque_statement_call(query):
+    return (
+      "Blocked operation detected. Procedures that execute a statement passed "
+      "as a string (e.g. CALL GQL) are not allowed; submit the statement directly."
+    )
 
   # Block DDL / bulk / admin — the same dangerous categories the kernel and the
   # read tool reject (DROP/ALTER/TABLE/INDEX, LOAD CSV/COPY, CALL DB./APOC.).

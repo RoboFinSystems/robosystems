@@ -1,6 +1,6 @@
 """Unit tests for StatementKernel — the extracted statement authorization gauntlet.
 
-The four cypher-analyzer predicates are patched per-test so each policy tier is
+The five cypher-analyzer predicates are patched per-test so each policy tier is
 isolated deterministically (the analyzers have their own coverage). Topology
 helpers (subgraph detection, shared-repo, role) are patched to place the graph.
 """
@@ -32,6 +32,7 @@ def _topology(
   is_bulk=False,
   is_admin=False,
   is_ddl=False,
+  is_opaque_call=False,
   is_subgraph=False,
   is_shared=False,
   has_write_access=True,
@@ -42,6 +43,7 @@ def _topology(
     patch(f"{MOD}.is_bulk_operation", return_value=is_bulk),
     patch(f"{MOD}.is_admin_operation", return_value=is_admin),
     patch(f"{MOD}.is_schema_ddl", return_value=is_ddl),
+    patch(f"{MOD}.has_opaque_statement_call", return_value=is_opaque_call),
     patch(f"{MOD}.parse_subgraph_id", return_value=(object() if is_subgraph else None)),
     patch(
       f"{MOD}.MultiTenantUtils.is_shared_repository_or_subgraph",
@@ -128,6 +130,32 @@ def test_schema_ddl_blocked():
       _authorize("kg1234567890abcdef", "DROP TABLE foo")
   assert e.value.status_code == 403
   assert "Schema DDL" in e.value.detail
+
+
+def test_opaque_statement_call_blocked_on_subgraph_for_writer():
+  """The case no other gate catches: a subgraph member with write access,
+  where the write gate would allow the CALL and the family gates cannot see
+  the payload. The deny must fire before any of them."""
+  with _topology(
+    is_write=True, is_subgraph=True, has_write_access=True, is_opaque_call=True
+  ):
+    with pytest.raises(HTTPException) as e:
+      _authorize(
+        "kg1234567890abcdef_dev",
+        "CALL GQL('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')",
+      )
+  assert e.value.status_code == 403
+  assert "CALL GQL" in e.value.detail
+
+
+def test_opaque_statement_call_blocked_on_main_graph_read():
+  """Refused with the specific message even when the analyzer would have
+  called it a read, so the caller learns the actual rule."""
+  with _topology(is_write=False, is_opaque_call=True):
+    with pytest.raises(HTTPException) as e:
+      _authorize("kg1234567890abcdef", "CALL GQL('MATCH (n) RETURN n')")
+  assert e.value.status_code == 403
+  assert "passed as a string" in e.value.detail
 
 
 def _authorize_sql(graph_id, statement="SELECT 1"):

@@ -106,6 +106,19 @@ class CypherSecurityAnalyzer:
     "query_fts_index",
   }
 
+  # Procedures that execute a *statement supplied as a string argument*.
+  # Static analysis classifies the CALL, never the payload: `_clean_query`
+  # masks string literals precisely so keyword detection sees code and not
+  # data, which means every family gate (bulk / admin / DDL) is blind to
+  # what such a procedure will run. The write gate already fails closed on
+  # any CALL outside READ_ONLY_PROCEDURES, but a caller who legitimately
+  # holds write access (a subgraph member) passes that gate — so these are
+  # refused outright on every surface, regardless of role. Names are
+  # matched case-insensitively against the CALL target.
+  OPAQUE_STATEMENT_PROCEDURES = {
+    "gql",
+  }
+
   # Read-only keywords that should never trigger write detection
   READ_KEYWORDS = {
     "MATCH",
@@ -257,6 +270,21 @@ class CypherSecurityAnalyzer:
       logger.warning(f"System call analysis failed: {e}")
       # Default to false for system calls
       return False
+
+  def has_opaque_statement_call(self, query: str) -> bool:
+    """Check whether a query calls a procedure in OPAQUE_STATEMENT_PROCEDURES.
+
+    Fails closed: if analysis raises, the query is treated as containing one.
+    """
+    try:
+      cleaned_query = self._clean_query(query)
+      for match in self.call_pattern.finditer(cleaned_query):
+        if match.group(1).lower() in self.OPAQUE_STATEMENT_PROCEDURES:
+          return True
+      return False
+    except Exception as e:
+      logger.warning(f"Opaque-statement call analysis failed: {e}")
+      return True
 
   def _validate_query_security(self, query: str) -> None:
     """
@@ -628,6 +656,18 @@ def is_non_read_call(query: str) -> bool:
 def has_system_calls(query: str) -> bool:
   """Determine whether a Cypher query calls a system procedure."""
   return cypher_analyzer.has_system_calls(query)
+
+
+def has_opaque_statement_call(query: str) -> bool:
+  """
+  Determine whether a Cypher query calls a procedure that executes a
+  statement supplied as a string (e.g. ``CALL GQL('...')``).
+
+  Such calls defeat static authorization by construction — the payload is a
+  string literal the analyzer deliberately does not read — so callers refuse
+  them outright rather than classifying them.
+  """
+  return cypher_analyzer.has_opaque_statement_call(query)
 
 
 def is_schema_ddl(query: str) -> bool:
