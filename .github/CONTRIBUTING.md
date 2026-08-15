@@ -106,7 +106,7 @@ We ask for this once per pull request rather than as a `Signed-off-by` trailer o
 
 ### Commit signing
 
-Merges into `main` are performed by a maintainer and land as signed merge commits, so every change reaching the default branch carries a verified signature and an identified approver.
+Merges into `main` are performed by a maintainer and land as signed merge commits, so every change reaching the default branch carries a verified signature and identifies the maintainer who merged it.
 
 Signing your own commits is welcome but not required. If you want them to show as Verified, register your signing key on your GitHub account — see [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification).
 
@@ -222,9 +222,15 @@ A first-time contributor's workflow runs need maintainer approval before they st
 - Documentation is updated alongside behavior changes
 - One feature or fix per PR
 - The certification checkbox is ticked — see [Licensing and Certification](#licensing-and-certification)
-- At least one maintainer approval before merge, and a maintainer performs the merge
+- Every pull request is reviewed before merge, and a maintainer performs the merge
 
 Address review feedback with new commits rather than force-pushing, so reviewers can follow what changed.
+
+**What "reviewed" means here.** If you are contributing from outside the maintainer team, a maintainer reads your pull request and merges it — independent human review, in the ordinary sense.
+
+RoboSystems is currently maintained by a single engineer, and GitHub does not let the author of a pull request approve their own. Maintainer-authored changes therefore carry an automated review rather than a second human approval: every pull request opened here triggers a Claude review that reads the diff and posts its findings, the branch ruleset requires a pull request with a passing CI check, and merges land as signed, attributable commits. That combination is a documented compensating control, and it is replaced by mandatory independent approval on the first engineering hire.
+
+We would rather state this plainly than claim a review requirement the repository configuration does not enforce.
 
 ## CloudFormation
 
