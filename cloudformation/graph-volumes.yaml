@@ -619,21 +619,23 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-warning"
-      AlarmDescription: Disk usage exceeded 70% on any graph database instance at /mnt/ladybug-data
+      AlarmDescription: Disk usage exceeded 70% on any graph database instance (writers and shared master at /mnt/ladybug-data, shared replicas at /)
+      # Metrics Insights, not a MetricStat with a partial dimension set. The CloudWatch
+      # agent publishes DISK_USED_PERCENT with six dimensions (path, InstanceId,
+      # AutoScalingGroupName, InstanceType, device, fstype); a MetricStat must match the
+      # dimension set *exactly*, so the previous `Dimensions: [path=/mnt/ladybug-data]`
+      # matched nothing anywhere in the fleet and sat OK on "no datapoints received"
+      # for the life of the stack. An Insights query aggregates across dimension sets.
+      # No path filter: only / (replicas) and /mnt/ladybug-data (writers, shared master)
+      # publish this metric, and both are the volume holding the database. Metrics
+      # Insights rejects OR in WHERE, and an alarm allows only one Insights query, so
+      # filtering to both paths is not expressible — omitting the filter is the fix,
+      # not a shortcut. Verified live against prod before commit.
       Metrics:
-        - Id: m1
-          ReturnData: false
-          MetricStat:
-            Metric:
-              MetricName: DISK_USED_PERCENT
-              Namespace: !Sub "RoboSystems/Graph/${Environment}"
-              Dimensions:
-                - Name: path
-                  Value: /mnt/ladybug-data
-            Stat: Maximum
-            Period: 300
-        - Id: max_across_all
-          Expression: "MAX(METRICS())"
+        - Id: worst_disk
+          Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}"'
+          Period: 300
+          ReturnData: true
       EvaluationPeriods: 2 # 10 minutes of sustained high usage
       Threshold: 70
       ComparisonOperator: GreaterThanThreshold
@@ -644,21 +646,13 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-critical"
-      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any graph database instance at /mnt/ladybug-data
+      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any graph database instance (writers and shared master at /mnt/ladybug-data, shared replicas at /)
+      # See DiskUsageWarningAlarm for why this is a Metrics Insights query.
       Metrics:
-        - Id: m1
-          ReturnData: false
-          MetricStat:
-            Metric:
-              MetricName: DISK_USED_PERCENT
-              Namespace: !Sub "RoboSystems/Graph/${Environment}"
-              Dimensions:
-                - Name: path
-                  Value: /mnt/ladybug-data
-            Stat: Maximum
-            Period: 300
-        - Id: max_across_all
-          Expression: "MAX(METRICS())"
+        - Id: worst_disk
+          Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}"'
+          Period: 300
+          ReturnData: true
       EvaluationPeriods: 1 # Trigger immediately at critical level
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
@@ -672,21 +666,13 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-emergency"
-      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any graph database instance at /mnt/ladybug-data - Database operations at risk!
+      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any graph database instance (writers and shared master at /mnt/ladybug-data, shared replicas at /) - Database operations at risk!
+      # See DiskUsageWarningAlarm for why this is a Metrics Insights query.
       Metrics:
-        - Id: m1
-          ReturnData: false
-          MetricStat:
-            Metric:
-              MetricName: DISK_USED_PERCENT
-              Namespace: !Sub "RoboSystems/Graph/${Environment}"
-              Dimensions:
-                - Name: path
-                  Value: /mnt/ladybug-data
-            Stat: Maximum
-            Period: 60
-        - Id: max_across_all
-          Expression: "MAX(METRICS())"
+        - Id: worst_disk
+          Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}"'
+          Period: 60
+          ReturnData: true
       EvaluationPeriods: 1 # Trigger immediately
       Threshold: 95
       ComparisonOperator: GreaterThanThreshold
@@ -701,20 +687,18 @@ Resources:
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-rapid-disk-growth"
       AlarmDescription: Disk usage growing rapidly (>10% in 30 minutes)
+      # See DiskUsageWarningAlarm. Math over a Metrics Insights query is allowed;
+      # what an alarm cannot have is more than one Insights query, which is why
+      # the two publishing paths are covered by omitting the filter rather than
+      # by a second query.
       Metrics:
         - Id: growth_rate
           Expression: "RATE(disk_usage)"
+          ReturnData: true
         - Id: disk_usage
+          Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}"'
+          Period: 1800 # 30 minutes
           ReturnData: false
-          MetricStat:
-            Metric:
-              MetricName: DISK_USED_PERCENT
-              Namespace: !Sub "RoboSystems/Graph/${Environment}"
-              Dimensions:
-                - Name: path
-                  Value: /mnt/ladybug-data
-            Period: 1800 # 30 minutes
-            Stat: Average
       EvaluationPeriods: 1
       Threshold: 0.33 # 10% growth in 30 minutes = 0.33% per minute
       ComparisonOperator: GreaterThanThreshold
