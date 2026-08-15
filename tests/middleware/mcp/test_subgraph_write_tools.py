@@ -127,6 +127,18 @@ class TestValidateWriteQuery:
     assert "Blocked" in result
 
   @pytest.mark.unit
+  def test_opaque_statement_call_blocked(self):
+    """CALL GQL('...') classifies as a write, so it would satisfy the
+    write requirement — and the DDL/bulk/admin gates cannot see inside the
+    string. The tool refuses the shape itself rather than relying on the
+    engine-side validator."""
+    result = _validate_write_query(
+      "CALL GQL('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')"
+    )
+    assert result is not None
+    assert "CALL GQL" in result
+
+  @pytest.mark.unit
   def test_load_csv_blocked(self):
     result = _validate_write_query("LOAD CSV FROM 'file.csv' AS row CREATE (n:Foo)")
     assert result is not None

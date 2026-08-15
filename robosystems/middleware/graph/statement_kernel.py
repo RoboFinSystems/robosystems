@@ -23,6 +23,7 @@ from starlette import status as http_status
 from robosystems.middleware.graph.utils import MultiTenantUtils, parse_subgraph_id
 from robosystems.models.core import User
 from robosystems.security.cypher_analyzer import (
+  has_opaque_statement_call,
   is_admin_operation,
   is_bulk_operation,
   is_schema_ddl,
@@ -78,6 +79,22 @@ class StatementKernel:
   def _authorize_cypher(
     self, graph_id: str, statement: str, user: User, session: Session
   ) -> StatementAuthorization:
+    # Refuse procedures that execute a string payload (CALL GQL('...')) before
+    # any classification or role check. The analyzer masks string literals so
+    # it cannot see what the payload would do, and a subgraph member holds
+    # write access legitimately — so this is not a write-policy question, it
+    # is a "the gauntlet cannot run on this shape" question, on every graph.
+    if has_opaque_statement_call(statement):
+      logger.warning(
+        f"User {user.id} attempted an opaque statement call on {graph_id}: {statement[:100]}"
+      )
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="Procedures that execute a statement passed as a string "
+        "(e.g. CALL GQL(...)) are not allowed through the query endpoints. "
+        "Submit the statement directly so it can be authorized.",
+      )
+
     # Analyze query
     is_write = is_write_operation(statement)
     access_type = "write" if is_write else "read"
