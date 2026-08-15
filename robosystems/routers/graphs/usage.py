@@ -19,6 +19,7 @@ from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
@@ -74,6 +75,22 @@ async def get_graph_metrics(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphMetricsResponse:
+  # Metrics are per-label/per-type COUNTs — a full scan each — issued against
+  # the graph's WRITE node. On a shared repository that is the shared master
+  # (asleep most of the day, and the corpus is hundreds of millions of rows),
+  # so the call either times out or lands a fleet of full scans on the node
+  # that materializes. Shared repositories are platform-managed; their size is
+  # published elsewhere. Refuse up front, before the circuit breaker records
+  # a failure against the graph.
+  if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id.lower()):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        f"Metrics are not available for shared repository '{graph_id}'. "
+        "Repository sizes are platform-managed and published with the repository."
+      ),
+    )
+
   circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()

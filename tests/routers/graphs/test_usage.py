@@ -175,6 +175,27 @@ class TestGetGraphMetrics:
     assert result.graph_id == "kg01234567890abcdef"
 
   @pytest.mark.asyncio
+  async def test_shared_repository_is_refused_before_any_scan(self):
+    """A shared repository's metrics would be a fleet of full-scan COUNTs on
+    the shared master; the endpoint refuses up front and never reaches the
+    metrics service or the circuit breaker."""
+    mock_service = AsyncMock()
+    mock_service.collect_metrics_for_graph_async = AsyncMock()
+
+    with patch("robosystems.routers.graphs.usage.graph_metrics_service", mock_service):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_graph_metrics(
+          graph_id="sec",
+          current_user=_make_mock_user(),
+          db=Mock(),
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "shared repository" in exc_info.value.detail
+    mock_service.collect_metrics_for_graph_async.assert_not_awaited()
+
+  @pytest.mark.asyncio
   async def test_returns_404_when_no_metrics(self):
     """Test 404 when metrics not available."""
     mock_service = AsyncMock()
