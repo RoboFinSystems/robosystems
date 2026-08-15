@@ -223,6 +223,7 @@ function create_ssm_feature_flags() {
         "MCP_WORKSPACE_ENABLED=false"
         "ORG_MEMBER_INVITATIONS_ENABLED=false"
         "OTEL_ENABLED=false"
+        "OTEL_TRACES_ENABLED=false"
         "RATE_LIMIT_ENABLED=false"
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
