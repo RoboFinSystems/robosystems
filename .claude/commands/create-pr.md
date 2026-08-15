@@ -93,6 +93,10 @@ Two things this is **not**:
 
 If the workflow does not fire (it is gated to `OWNER`/`MEMBER`/`COLLABORATOR` authors, so fork PRs are excluded by design), say so in the output rather than silently moving on.
 
+**One expected exception — a PR that edits `.github/workflows/claude.yml` will not be reviewed.** `claude-code-action` refuses to run whenever the workflow file on the PR branch differs from the version on the default branch. That is an anti-tampering guard: without it, a pull request could rewrite the reviewer to exfiltrate secrets. The run still completes green and posts nothing, logging `Workflow validation failed... your workflow will begin working once you merge your PR`.
+
+This is normal, not a fault. Do not report it as a broken review, and do not go hunting for a misconfiguration — check whether the PR touches `claude.yml` first. It also means a change to the review workflow itself can never be validated by its own PR; it has to be merged and then exercised by the next unrelated PR.
+
 ## Output
 
 After creating the PR, report:
