@@ -1,6 +1,6 @@
 """Tests for billing checkout endpoints."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -49,6 +49,16 @@ class TestCreateCheckoutSession:
     ) as mock_limits:
       mock_limits.return_value.can_create_graph.return_value = (True, "")
       yield mock_limits
+
+  @pytest.fixture(autouse=True)
+  def _tier_has_capacity(self):
+    """A graph checkout also gates on writer capacity for the tier before
+    payment. Default to a free slot; the refusal case has its own test."""
+    with patch(
+      "robosystems.routers.billing.checkout._tier_capacity_status",
+      new=AsyncMock(return_value="ready"),
+    ) as mock_capacity:
+      yield mock_capacity
 
   @pytest.mark.asyncio
   @patch("robosystems.models.core.OrgUser.get_user_orgs")
@@ -411,6 +421,79 @@ class TestCreateCheckoutSession:
     assert "limit" in exc.value.detail.lower()
     # No payment plumbing should have run.
     mock_get_customer.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_create_checkout_session_refuses_when_tier_has_no_capacity(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    mock_db,
+    checkout_request,
+  ):
+    """A graph checkout is refused before payment when no writer for the tier
+    has a free slot. Provisioning runs post-payment, so a sale that completes
+    against a full fleet is money taken for a graph that cannot be delivered.
+    The refusal lands before any Stripe session or subscription row exists."""
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
+    mock_customer = Mock(spec=BillingCustomer)
+    mock_customer.invoice_billing_enabled = False
+    mock_customer.has_payment_method = False
+    mock_get_customer.return_value = mock_customer
+    mock_get_plan.return_value = {"base_price_cents": 2999}
+
+    with patch(
+      "robosystems.routers.billing.checkout._tier_capacity_status",
+      new=AsyncMock(return_value="at_capacity"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await create_checkout_session(checkout_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 409
+    assert "capacity" in exc.value.detail.lower()
+    mock_create_sub.assert_not_called()
+    mock_get_provider.assert_not_called()
+
+
+class TestTierCapacityStatus:
+  """The checkout gate's capacity probe fails closed and treats a scalable-but-
+  empty tier as at capacity, since nothing on the create path scales."""
+
+  @pytest.mark.asyncio
+  async def test_ready_only_when_a_slot_is_free(self):
+    from robosystems.routers.billing.checkout import _tier_capacity_status
+
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+    ) as manager_cls:
+      manager_cls.return_value.check_tier_capacity = AsyncMock(return_value="ready")
+      assert await _tier_capacity_status("ladybug-standard") == "ready"
+      manager_cls.return_value.check_tier_capacity = AsyncMock(return_value="scalable")
+      assert await _tier_capacity_status("ladybug-standard") == "at_capacity"
+
+  @pytest.mark.asyncio
+  async def test_probe_failure_reads_as_at_capacity(self):
+    from robosystems.routers.billing.checkout import _tier_capacity_status
+
+    with patch(
+      "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager",
+      side_effect=RuntimeError("registry unreachable"),
+    ):
+      assert await _tier_capacity_status("ladybug-standard") == "at_capacity"
 
 
 class TestGetCheckoutStatus:
