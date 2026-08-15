@@ -388,6 +388,38 @@ class TestCleanupStaleGraphs:
     assert metric["MetricData"][0]["Value"] == 1
 
   @pytest.mark.unit
+  def test_instance_registry_scan_is_paginated(self, monitor):
+    """An instance on the second page of the instance scan is still valid.
+    Without pagination every graph on a later-page instance would be stamped
+    orphaned and the sweep would raise the very alarm it feeds."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {"graph_id": "kg_p2", "status": "active", "instance_id": "i-onpagetwo000001"},
+      ]
+    )
+    instance_table = MagicMock()
+    instance_table.scan.side_effect = [
+      {"Items": [{"instance_id": "i-onpageone000001"}], "LastEvaluatedKey": {"k": 1}},
+      {"Items": [{"instance_id": "i-onpagetwo000001"}]},
+    ]
+
+    def table_router(name):
+      if name == "test-graph":
+        return graph_table
+      if name == "test-instance":
+        return instance_table
+      return _make_dynamo_table()
+
+    monitor._dynamodb.Table.side_effect = table_router
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert instance_table.scan.call_count == 2
+    assert instance_table.scan.call_args_list[1].kwargs["ExclusiveStartKey"] == {"k": 1}
+    assert result.orphaned_count == 0
+    graph_table.update_item.assert_not_called()
+
+  @pytest.mark.unit
   def test_already_marked_orphan_is_counted_not_restamped(self, monitor):
     graph_table = _make_dynamo_table(
       items=[
