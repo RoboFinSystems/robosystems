@@ -301,13 +301,9 @@ class TestCapacityAlertRecipients:
 
   @staticmethod
   def _user(session, email, active=True):
-    from uuid import uuid4
-
     from robosystems.models.core import User
 
     u = User(email=email, name=email.split("@")[0], password_hash="x", is_active=active)
-    if not active:
-      u.id = f"user_inactive_{uuid4().hex[:6]}"
     session.add(u)
     session.commit()
     session.refresh(u)
