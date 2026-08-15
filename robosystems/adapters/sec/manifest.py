@@ -18,7 +18,6 @@ SEC_MANIFEST = SharedRepositoryManifest(
   sync_frequency="daily",
   schema_extensions=("roboledger",),
   has_semantic_enrichment=True,
-  sibling_subgraphs=("historical",),  # sec_historical subgraph
   agent_instructions=(
     "Connected to the SEC EDGAR knowledge graph (`sec`) — a curated, READ-ONLY "
     "repository of public-company XBRL financial filings. There is no general "

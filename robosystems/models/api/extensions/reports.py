@@ -622,6 +622,7 @@ class AnalyticalStatementFactRow(BaseModel):
   qname: str
   name: str
   value: float | None = None
+  start_date: str | None = None
   end_date: str | None = None
   period_type: str | None = None
   duration_type: str | None = None

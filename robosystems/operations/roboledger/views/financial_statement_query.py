@@ -122,8 +122,8 @@ async def query_financial_statement(
     f"WHERE {' AND '.join(where_clauses)} "
     "RETURN DISTINCT e.canonical_concept AS canonical_concept, e.qname AS qname, "
     "e.name AS name, f.numeric_value AS value, "
-    "p.end_date AS end_date, p.period_type AS period_type, "
-    "p.duration_type AS duration_type "
+    "p.start_date AS start_date, p.end_date AS end_date, "
+    "p.period_type AS period_type, p.duration_type AS duration_type "
     "ORDER BY end_date DESC "
     "LIMIT $limit"
   )
@@ -138,23 +138,29 @@ async def query_financial_statement(
 
 
 def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Deduplicate facts by ``(qname, end_date, period_type, duration_type)``.
+  """Deduplicate facts by the full period identity:
+  ``(qname, start_date, end_date, period_type, duration_type)``.
 
-  ``duration_type`` is load-bearing and was missing from the key until
-  2026-08-14: an annual and a quarterly fact legitimately share a ``qname``
-  and an ``end_date`` (Q4 and FY both end on the fiscal year end), so keying
-  on the pair alone silently collapsed them into whichever row the engine
-  happened to return first. ``ORDER BY end_date DESC`` does not break that
-  tie, so the survivor was not merely arbitrary but *unstable* between
-  otherwise identical calls — a wrong number rather than an error, on the
-  public SEC surface. The sibling path ``fact_query.deduplicate_facts``
-  already keys on the full period identity; this is the same fix.
+  An XBRL duration fact is identified by *(start, end)*, not by end alone.
+  The key was ``(qname, end_date)`` until 2026-08-14, when ``duration_type``
+  was added because Q4 and FY share a ``qname`` and an ``end_date`` and were
+  collapsing into whichever row the engine returned first — ``ORDER BY
+  end_date DESC`` does not break the tie, so the survivor was *unstable*
+  between identical calls, a wrong number rather than an error on the public
+  SEC surface. ``duration_type`` alone is still only a coarse bucket
+  (``quarterly`` / ``annual`` / ``other`` …): two ``other``-length stubs
+  ending on the same day, or a 52- and a 53-week year with one end date,
+  share every field but ``start_date``. Keying on both ends closes the class
+  rather than the instance; the sibling ``fact_query._deduplicate_fact_rows``
+  keys the same way. ``start_date`` is NULL for instants, which is fine —
+  an instant's identity is its ``end_date``.
   """
-  seen: set[tuple[str, str, str, str]] = set()
+  seen: set[tuple[str, str, str, str, str]] = set()
   deduped: list[dict[str, Any]] = []
   for row in rows:
     key = (
       row.get("qname", "") or "",
+      row.get("start_date", "") or "",
       row.get("end_date", "") or "",
       row.get("period_type", "") or "",
       row.get("duration_type", "") or "",

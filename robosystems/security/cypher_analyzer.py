@@ -13,6 +13,11 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# What `_clean_query` substitutes for a backtick-quoted identifier. Named so
+# the CALL-target checks can recognise "the name was quoted" without ever
+# reading the raw (unmasked) query.
+_IDENTIFIER_PLACEHOLDER = "IDENTIFIER"
+
 
 class CypherOperationType(Enum):
   """Types of Cypher operations."""
@@ -274,12 +279,22 @@ class CypherSecurityAnalyzer:
   def has_opaque_statement_call(self, query: str) -> bool:
     """Check whether a query calls a procedure in OPAQUE_STATEMENT_PROCEDURES.
 
+    A backtick-quoted CALL target counts too. The engine resolves
+    ``CALL `GQL`(...)`` to the same procedure as ``CALL GQL(...)``, but
+    ``_clean_query`` has already masked the quoted name to a placeholder by
+    the time it is inspected here — so a name-based check cannot see it.
+    Nothing legitimate quotes a procedure name; refusing the shape closes
+    the evasion without weakening the masking the classifier depends on.
+
     Fails closed: if analysis raises, the query is treated as containing one.
     """
     try:
       cleaned_query = self._clean_query(query)
       for match in self.call_pattern.finditer(cleaned_query):
-        if match.group(1).lower() in self.OPAQUE_STATEMENT_PROCEDURES:
+        name = match.group(1)
+        if name == _IDENTIFIER_PLACEHOLDER:
+          return True
+        if name.lower() in self.OPAQUE_STATEMENT_PROCEDURES:
           return True
       return False
     except Exception as e:
@@ -387,7 +402,7 @@ class CypherSecurityAnalyzer:
           i += 1
           if c == "`":
             break
-        out.append(" IDENTIFIER ")
+        out.append(f" {_IDENTIFIER_PLACEHOLDER} ")
         continue
 
       out.append(ch)

@@ -46,7 +46,10 @@ def reset_demo_state(graph_id: str) -> None:
   transactions, tenant associations, facts, schedules, fiscal calendar)
   is removed.
   """
+  from examples._common.local_db import assert_local_extensions_db
   from robosystems.db.extensions import extensions_session
+
+  assert_local_extensions_db()
 
   with extensions_session(graph_id) as session:
     # 1-3. All entries + line items + transactions (tenant-generated;

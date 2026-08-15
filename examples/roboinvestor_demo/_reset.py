@@ -35,7 +35,10 @@ def reset_investor_state(graph_id: str) -> None:
   its library-seeded taxonomy survive, so the graph never needs
   re-provisioning between runs.
   """
+  from examples._common.local_db import assert_local_extensions_db
   from robosystems.db.extensions import extensions_session
+
+  assert_local_extensions_db()
 
   with extensions_session(graph_id) as session:
     # Positions FK both portfolios and securities, so they go first.
@@ -97,7 +100,10 @@ def reset_issuer_share_state(graph_id: str) -> None:
   create publish lists, so anything here came from a prior run of *this*
   demo.
   """
+  from examples._common.local_db import assert_local_extensions_db
   from robosystems.db.extensions import extensions_session
+
+  assert_local_extensions_db()
 
   with extensions_session(graph_id) as session:
     session.execute(text("DELETE FROM report_shares"))

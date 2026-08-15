@@ -47,6 +47,13 @@ _ALERTS_ENABLED_FLAG = "GRAPH_USAGE_ALERTS_ENABLED"
 USAGE_MONITOR_PRINCIPAL = "system:usage-monitor"
 
 
+def _alert_dedup_key(graph_id: str, instance_status: str, user_id: str) -> str:
+  """Valkey key recording that *this* admin was told about *this* graph at
+  *this* status. Per recipient so a failed delivery is retried without
+  re-emailing the admins who already received it."""
+  return f"usage_alert:{graph_id}:{instance_status}:{user_id}"
+
+
 def _capacity_alert_recipients(db, graph) -> list:
   """Everyone who administers the graph: explicit ``GraphUser`` admins plus
   the owning org's owners and admins, who hold implicit graph admin with no
@@ -181,14 +188,6 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
       if instance_status not in _ALERT_STATUSES:
         continue
 
-      # Dedup: check if we already alerted for this graph at this status
-      dedup_key = f"usage_alert:{graph.graph_id}:{instance_status}"
-      if redis_client.exists(dedup_key):
-        context.log.debug(
-          f"Skipping alert for {graph.graph_id} ({instance_status}) — already alerted"
-        )
-        continue
-
       recipients = _capacity_alert_recipients(db, graph)
       if not recipients:
         context.log.warning(
@@ -196,10 +195,27 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
         )
         continue
 
-      # Send the capacity warning to every admin; the dedup key covers the
-      # graph+status, set once any delivery succeeded.
+      # Dedup per recipient, not per graph: the key is set only for a user
+      # whose delivery succeeded, so an admin whose send failed is retried on
+      # the next tick while the ones already told are not emailed again. A
+      # single graph-level key set on "any delivery succeeded" silenced the
+      # failed recipients for the whole TTL.
+      pending = [
+        user
+        for user in recipients
+        if not redis_client.exists(
+          _alert_dedup_key(graph.graph_id, instance_status, user.id)
+        )
+      ]
+      if not pending:
+        context.log.debug(
+          f"Skipping alert for {graph.graph_id} ({instance_status}) — all "
+          f"{len(recipients)} admin(s) already alerted"
+        )
+        continue
+
       delivered = 0
-      for user in recipients:
+      for user in pending:
         try:
           from robosystems.operations.aws.ses import ses_service
 
@@ -218,6 +234,11 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
           )
           if sent:
             delivered += 1
+            redis_client.setex(
+              _alert_dedup_key(graph.graph_id, instance_status, user.id),
+              _ALERT_DEDUP_TTL_SECONDS,
+              "1",
+            )
           else:
             context.log.warning(
               f"Failed to send capacity alert for {graph.graph_id} to {user.email}"
@@ -228,11 +249,10 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
           )
 
       if delivered:
-        redis_client.setex(dedup_key, _ALERT_DEDUP_TTL_SECONDS, "1")
         alerts_sent += 1
         context.log.info(
           f"Sent {instance_status} alert for {graph.graph_id} to {delivered} of "
-          f"{len(recipients)} admin(s) ({storage_check['usage_percentage']:.0f}%)"
+          f"{len(pending)} pending admin(s) ({storage_check['usage_percentage']:.0f}%)"
         )
 
     context.log.info(

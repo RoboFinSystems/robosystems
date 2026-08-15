@@ -284,6 +284,7 @@ async def financial_statement_analysis_op(
         qname=row.get("qname", ""),
         name=row.get("name", ""),
         value=row.get("value"),
+        start_date=row.get("start_date"),
         end_date=row.get("end_date"),
         period_type=row.get("period_type"),
         duration_type=row.get("duration_type"),

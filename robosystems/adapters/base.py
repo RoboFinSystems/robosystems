@@ -39,7 +39,6 @@ class SharedRepositoryManifest:
 
   # MCP Capabilities
   has_semantic_enrichment: bool = False
-  sibling_subgraphs: tuple[str, ...] = ()  # ("historical",) → graph_id_historical
 
   # Agent-facing routing guidance handed to MCP clients via the server's
   # `instructions` handshake field. Authored per-repo (shared repos have a

@@ -139,6 +139,17 @@ class TestValidateWriteQuery:
     assert "CALL GQL" in result
 
   @pytest.mark.unit
+  def test_quoted_procedure_name_blocked(self):
+    """A backtick-quoted CALL target resolves to the same procedure in the
+    engine but is masked before the analyzer reads the name — the tool
+    refuses the quoted shape rather than trusting a name it cannot see."""
+    result = _validate_write_query(
+      "CALL `GQL`('CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))')"
+    )
+    assert result is not None
+    assert "quoted procedure name" in result
+
+  @pytest.mark.unit
   def test_load_csv_blocked(self):
     result = _validate_write_query("LOAD CSV FROM 'file.csv' AS row CREATE (n:Foo)")
     assert result is not None

@@ -13,6 +13,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
@@ -44,6 +45,7 @@ from robosystems.models.api.graphs.metrics import (
   StorageSummary,
 )
 from robosystems.models.core import GraphUsage, User
+from robosystems.models.core.graph.graph_usage import UsageEventType
 from robosystems.operations.graph.metrics_service import GraphMetricsService
 
 router = APIRouter(tags=["Usage"])
@@ -407,13 +409,21 @@ async def get_graph_usage(
         )
 
     if include_events:
+      # The caller's own activity on this graph, plus the graph's storage
+      # snapshots. Snapshots are recorded by the usage monitor under a system
+      # principal (they measure the graph, not a member), so a user-only filter
+      # would hide them from every caller — and the caller has already passed
+      # the graph-access check, so a graph-scoped storage row is theirs to see.
       cutoff_date = now - timedelta(days=_get_days_from_time_range(time_range))
       events = (
         db.query(GraphUsage)
         .filter(
-          GraphUsage.user_id == current_user.id,
           GraphUsage.graph_id == graph_id,
           GraphUsage.recorded_at >= cutoff_date,
+          or_(
+            GraphUsage.user_id == current_user.id,
+            GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+          ),
         )
         .order_by(GraphUsage.recorded_at.desc())
         .limit(50)

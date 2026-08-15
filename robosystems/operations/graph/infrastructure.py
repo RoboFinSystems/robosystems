@@ -423,10 +423,19 @@ class InstanceMonitor:
         response = graph_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
+      # Paginate the instance scan too: a truncated first page would make every
+      # instance on a later page look missing, and every graph on those
+      # instances would be stamped orphaned and page — the sweep would create
+      # the condition it alarms on.
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
-      valid_instances = {
-        item["instance_id"] for item in instance_response.get("Items", [])
-      }
+      instance_items = instance_response.get("Items", [])
+      while "LastEvaluatedKey" in instance_response:
+        instance_response = instance_table.scan(
+          ProjectionExpression="instance_id",
+          ExclusiveStartKey=instance_response["LastEvaluatedKey"],
+        )
+        instance_items.extend(instance_response.get("Items", []))
+      valid_instances = {item["instance_id"] for item in instance_items}
 
       now_iso = datetime.now(UTC).isoformat()
 
@@ -550,10 +559,19 @@ class InstanceMonitor:
         response = volume_table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
         items.extend(response.get("Items", []))
 
+      # Paginate the instance scan too: a truncated first page would make every
+      # instance on a later page look missing, and every graph on those
+      # instances would be stamped orphaned and page — the sweep would create
+      # the condition it alarms on.
       instance_response = instance_table.scan(ProjectionExpression="instance_id")
-      valid_instances = {
-        item["instance_id"] for item in instance_response.get("Items", [])
-      }
+      instance_items = instance_response.get("Items", [])
+      while "LastEvaluatedKey" in instance_response:
+        instance_response = instance_table.scan(
+          ProjectionExpression="instance_id",
+          ExclusiveStartKey=instance_response["LastEvaluatedKey"],
+        )
+        instance_items.extend(instance_response.get("Items", []))
+      valid_instances = {item["instance_id"] for item in instance_items}
 
       for item in items:
         volume_id = item.get("volume_id")

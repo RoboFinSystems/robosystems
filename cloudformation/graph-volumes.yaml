@@ -686,19 +686,25 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-rapid-disk-growth"
-      AlarmDescription: Disk usage growing rapidly (>10% in 30 minutes)
+      AlarmDescription: Disk usage growing rapidly (>10 percentage points in 30 minutes)
       # See DiskUsageWarningAlarm. Math over a single Metrics Insights query is
       # allowed; what an alarm cannot carry is a second Insights query.
+      #
+      # DIFF() is the difference between consecutive datapoints, and with a
+      # 30-minute period each datapoint is one 30-minute bucket, so the value
+      # is directly "percentage points grown in the last 30 minutes". Do not
+      # swap in RATE(): it is per *second*, so a per-minute threshold against
+      # it can never be crossed (a full 0-to-100 jump in 30 min is only 0.056).
       Metrics:
-        - Id: growth_rate
-          Expression: "RATE(disk_usage)"
+        - Id: growth
+          Expression: "DIFF(disk_usage)"
           ReturnData: true
         - Id: disk_usage
           Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}" WHERE path = ''/mnt/ladybug-data'''
           Period: 1800 # 30 minutes
           ReturnData: false
       EvaluationPeriods: 1
-      Threshold: 0.33 # 10% growth in 30 minutes = 0.33% per minute
+      Threshold: 10 # percentage points of disk_used_percent per 30-minute period
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:

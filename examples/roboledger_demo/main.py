@@ -334,10 +334,12 @@ def reset_demo(graph_id: str) -> None:
   local, so with tunnels open ``localhost:5432`` can be prod RDS. A remote /
   integration target has no business reaching Postgres at all, so the reset is
   simply not run off-local — and ``reset_demo_state`` is imported *inside* the
-  local-only branch so the route is unreachable there, not merely skipped. A
-  graph provisioned on a remote target is empty anyway; pass a freshly
-  provisioned graph and re-running over demo data will duplicate it, not replace
-  it.
+  local-only branch so the route is unreachable there, not merely skipped. The
+  API host proves nothing about the database, though, so ``reset_demo_state``
+  also re-checks on the DB side (``examples/_common/local_db.py``: local host
+  + not-RDS) before it deletes anything. A graph provisioned on a remote target
+  is empty anyway; pass a freshly provisioned graph and re-running over demo
+  data will duplicate it, not replace it.
   """
   if not _is_local_target():
     print(f"  SKIPPED — reset is local-only, and the target is {BASE_URL}")
