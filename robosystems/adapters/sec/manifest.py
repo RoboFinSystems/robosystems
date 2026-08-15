@@ -42,8 +42,10 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "`read-graph-cypher`.\n"
     "\n"
     "NOTES\n"
-    "- Deeper historical filings live in the `sec_historical` subgraph — switch "
-    "to its connector URL (see `list-subgraphs`) for older periods.\n"
+    # The `sec_historical` subgraph was advertised here until 2026-08-14 and is
+    # not served: the replica stack carries `sec` only, master reads are off,
+    # and the master is parked at desired 0, so every read for it fails. Do not
+    # restore this line until a read actually succeeds against that graph.
     "- This is shared public data: period close, chart-of-accounts mapping, and "
     "all write operations are unavailable here."
   ),

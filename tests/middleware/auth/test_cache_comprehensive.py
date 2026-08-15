@@ -853,3 +853,89 @@ class TestCachePerformance:
     encrypted_large = cache._encrypt_cache_data(large_data)
     decrypted_large = cache._decrypt_cache_data(encrypted_large)
     assert decrypted_large == large_data
+
+
+class TestInvalidateUserData:
+  """Regression cover for ``invalidate_user_data``.
+
+  This method had four production callers and no test. It read cache entries
+  with ``json.loads`` while the write path stores them via
+  ``_encrypt_cache_data`` (base64 of a Fernet token), so every iteration
+  raised and was swallowed by the surrounding ``except``: no API-key or JWT
+  entry was ever evicted on member removal, role change, or grant revoke.
+  Both tests below fail against that original code.
+  """
+
+  @pytest.fixture
+  def cache(self):
+    """APIKeyCache with a Mock injected at ``_redis``.
+
+    The ``redis`` attribute is a lazy property, so the mock goes on the
+    backing field rather than on the property itself.
+    """
+    with patch("robosystems.middleware.auth.cache.redis.Redis"):
+      cache = APIKeyCache()
+      cache._redis = Mock()
+      if not hasattr(cache, "_validation_failures"):
+        cache._validation_failures = 0
+      return cache
+
+  def _entry(self, cache, user_id):
+    """An entry in exactly the shape the write path produces."""
+    return cache._encrypt_cache_data(
+      {
+        "user_data": {"id": user_id, "email": f"{user_id}@example.com"},
+        "is_active": True,
+        "cached_at": datetime.now(UTC).isoformat(),
+        "cache_version": cache.CACHE_VERSION,
+      }
+    )
+
+  def test_invalidates_encrypted_api_key_and_jwt_entries(self, cache):
+    """Entries belonging to the user are deleted; others are left alone."""
+    target, other = "user_target", "user_other"
+    api_key = f"{cache.CACHE_KEY_PREFIX}hash_target"
+    api_key_other = f"{cache.CACHE_KEY_PREFIX}hash_other"
+    jwt_key = f"{cache.JWT_CACHE_KEY_PREFIX}jwt_target"
+
+    store = {
+      api_key: self._entry(cache, target),
+      api_key_other: self._entry(cache, other),
+      jwt_key: self._entry(cache, target),
+    }
+
+    cache.redis.keys.side_effect = lambda pattern: [
+      k for k in store if k.startswith(pattern.rstrip("*"))
+    ]
+    cache.redis.get.side_effect = store.get
+
+    deleted: list[str] = []
+    cache.redis.delete.side_effect = lambda *keys: deleted.extend(keys)
+
+    cache.invalidate_user_data(target)
+
+    # The two entries owned by the target user are evicted...
+    assert api_key in deleted, "encrypted API-key entry was not invalidated"
+    assert jwt_key in deleted, "encrypted JWT entry was not invalidated"
+    # ...and the unrelated user's entry survives.
+    assert api_key_other not in deleted
+
+  def test_undecryptable_entry_is_skipped_not_fatal(self, cache):
+    """A corrupt entry must not abort the sweep for the remaining keys."""
+    target = "user_target"
+    corrupt = f"{cache.CACHE_KEY_PREFIX}corrupt"
+    good = f"{cache.CACHE_KEY_PREFIX}good"
+
+    store = {corrupt: "not-a-fernet-token", good: self._entry(cache, target)}
+
+    cache.redis.keys.side_effect = lambda pattern: [
+      k for k in store if k.startswith(pattern.rstrip("*"))
+    ]
+    cache.redis.get.side_effect = store.get
+
+    deleted: list[str] = []
+    cache.redis.delete.side_effect = lambda *keys: deleted.extend(keys)
+
+    cache.invalidate_user_data(target)
+
+    assert good in deleted, "a corrupt sibling entry aborted the sweep"

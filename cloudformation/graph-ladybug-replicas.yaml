@@ -841,6 +841,35 @@ Resources:
           MetricValue: "1"
           Unit: Count
 
+  # Replicas hold the database on the ROOT volume: it is a launch-template device
+  # with DeleteOnTermination and no autoscaling, and it is not in the volume
+  # registry — so the graph-volumes expansion ladder cannot help here and this
+  # alarm is deliberately notify-only. One threshold, not a ladder: the remedy is
+  # raising SHARED_REPLICAS_ROOT_VOLUME_SIZE_<ENV> and cycling the fleet, which is
+  # a deploy, so a warning tier would only page twice for the same action.
+  #
+  # Sizing matters because the download happens at boot: a replica s3 cp's the
+  # whole sec.lbug before it can serve, so once the file no longer fits, every
+  # instance that cycles fails to come up and the daily refresh cycles all of them.
+  # The failure is a cliff, not a slope. Metrics Insights for the same reason as
+  # graph-volumes.yaml — a MetricStat cannot match a partial dimension set.
+  ReplicaRootDiskUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-root-disk-usage
+      AlarmDescription: Shared replica root volume exceeded 90% - the database no longer has room to grow and a cycling instance may fail to download it
+      Metrics:
+        - Id: worst_root_disk
+          Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}" WHERE path = ''/'''
+          Period: 300
+          ReturnData: true
+      EvaluationPeriods: 2 # 10 minutes sustained; the value is flat, so this only debounces gaps
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
   ReplicaContainerStartAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
