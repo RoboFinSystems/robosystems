@@ -459,10 +459,13 @@ class TestInvoicesCommands:
       ],
     )
     assert result.exit_code == 0
+    # The endpoint declares these as QUERY parameters; the previous version of
+    # this test asserted a JSON body, which is why the command never worked
+    # against a real API (422: query.payment_method field required).
     mock_make_request.assert_called_once_with(
       "PATCH",
       "/admin/v1/invoices/inv-1/mark-paid",
-      data={"payment_method": "bank_transfer", "payment_reference": "TXN-123"},
+      params={"payment_method": "bank_transfer", "payment_reference": "TXN-123"},
     )
     assert "Marked invoice INV-001 as paid" in result.output
 
