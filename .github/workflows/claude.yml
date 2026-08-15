@@ -1,6 +1,8 @@
 name: Claude Code Review
 
 on:
+  pull_request:
+    types: [opened, ready_for_review]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -9,6 +11,12 @@ on:
     types: [opened, assigned]
   pull_request_review:
     types: [submitted]
+
+# One review per PR at a time. A rapid draft→ready→draft toggle would otherwise
+# stack runs and burn Claude usage on states nobody is waiting for.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   check-runner-availability:
@@ -37,7 +45,20 @@ jobs:
     # only run when the triggering actor is a repo OWNER/MEMBER/COLLABORATOR, so a
     # drive-by comment/issue from an outside account cannot invoke Claude with
     # repo secrets in scope (this repo is public).
+    #
+    # The pull_request arm runs a review automatically on every PR opened by an
+    # org member — the compensating control for CC8.1, since a sole maintainer
+    # cannot approve their own PR (see the change management control evidence).
+    # It is gated twice against outside contributors draining Claude usage: the
+    # head-repo check rejects every fork PR outright, and author_association
+    # rejects CONTRIBUTOR/NONE. This is `pull_request`, never
+    # `pull_request_target`, so a fork PR carries no secrets even if it ran.
     if: |
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      ) ||
       (
         github.event_name == 'issue_comment' &&
         contains(github.event.comment.body, '@claude') &&
@@ -83,8 +104,15 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # On the automatic pull_request trigger there is no comment to act on,
+          # so supply the review brief. Left empty for comment-driven events so
+          # Claude follows the instructions in the comment that tagged it.
+          #
+          # Deliberately does NOT approve: org policy sets
+          # can_approve_pull_request_reviews=false, and an unconditional bot
+          # approval on every PR is a rubber stamp — worse audit evidence than
+          # the documented exception it would replace.
+          prompt: ${{ github.event_name == 'pull_request' && 'Review this pull request. This repository is public and is maintained by a single engineer who cannot approve their own PRs, so this review is the compensating change-management control — be substantive rather than cursory. Focus on correctness bugs, multi-tenancy (graph operations must stay scoped to graph_id), security of any auth or write path, and whether the PR description matches the diff. Post your findings as a comment. Do not approve the pull request.' || '' }}
 
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
