@@ -675,9 +675,10 @@ class EnvConfig:
   # --- Connection Providers ---
   # CONNECTIONS_ENABLED controls whether the /connections router is included.
   # Code defaults to TRUE — the fully-featured platform exposes connection
-  # providers. Prod and staging currently override to `false` via SSM during
-  # the staged rollout (flipped at the same time as the extensions). Individual
-  # provider flags below require CONNECTIONS_ENABLED=true to function.
+  # providers. Deployed environments may override it via SSM; the live value
+  # is whatever the parameter says (`just ssm-get <env> features/CONNECTIONS_ENABLED`),
+  # not this comment. Individual provider flags below require
+  # CONNECTIONS_ENABLED=true to function.
   CONNECTIONS_ENABLED = get_bool_env(
     "CONNECTIONS_ENABLED",
     get_parameter_value("CONNECTIONS_ENABLED", "true").lower() == "true",

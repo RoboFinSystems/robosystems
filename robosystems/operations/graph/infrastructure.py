@@ -77,6 +77,7 @@ class CleanupResult:
   timestamp: str
   removed_count: int = 0
   updated_count: int = 0
+  orphaned_count: int = 0
   errors: int = 0
   error_message: str | None = None
 
@@ -391,10 +392,19 @@ class InstanceMonitor:
       logger.warning(f"Failed to update volumes for instance {instance_id}: {e}")
 
   def cleanup_stale_graphs(self) -> CleanupResult:
-    """Drop graph-registry rows that are deleted or point nowhere.
+    """Drop long-deleted graph-registry rows; mark, never delete, orphaned ones.
 
-    Removes entries deleted more than ``STALE_GRAPH_DAYS`` ago, and any entry
-    whose ``instance_id`` is absent from the instance registry.
+    Removes entries deleted more than ``STALE_GRAPH_DAYS`` ago. An entry whose
+    ``instance_id`` is absent from the instance registry is **not** removed:
+    the row is a live graph's routing, and the instance registry drifts on
+    ASG cycling (a slow volume re-attach, a terminated writer awaiting
+    replacement). Deleting the row turned a transient drift into a permanent
+    orphan — user graphs have no boot-time re-registration and the repair
+    path can only ``UPDATE`` a row that still exists. Instead the row is
+    stamped ``instance_missing_since`` (once), the count is published as
+    ``OrphanedGraphRegistrations`` so it can alarm, and the stamp is cleared
+    when the instance reappears. Reconciling from on-disk truth is the
+    follow-up, not this sweep.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -418,6 +428,8 @@ class InstanceMonitor:
         item["instance_id"] for item in instance_response.get("Items", [])
       }
 
+      now_iso = datetime.now(UTC).isoformat()
+
       for item in items:
         graph_id = item.get("graph_id")
         status = item.get("status")
@@ -436,12 +448,6 @@ class InstanceMonitor:
           except Exception:
             pass
 
-        if instance_id and instance_id not in valid_instances:
-          should_remove = True
-          logger.info(
-            f"Removing graph {graph_id}: instance {instance_id} doesn't exist"
-          )
-
         if should_remove:
           try:
             graph_table.delete_item(Key={"graph_id": graph_id})
@@ -449,9 +455,49 @@ class InstanceMonitor:
           except Exception as e:
             logger.error(f"Failed to remove graph {graph_id}: {e}")
             result.errors += 1
+          continue
+
+        instance_missing = bool(instance_id) and instance_id not in valid_instances
+        already_marked = item.get("instance_missing_since") is not None
+
+        if instance_missing:
+          result.orphaned_count += 1
+          if not already_marked:
+            logger.warning(
+              f"Graph {graph_id} points at instance {instance_id}, which is "
+              "absent from the instance registry; marking, not removing"
+            )
+            try:
+              graph_table.update_item(
+                Key={"graph_id": graph_id},
+                UpdateExpression="SET instance_missing_since = :ts",
+                ConditionExpression="attribute_not_exists(instance_missing_since)",
+                ExpressionAttributeValues={":ts": now_iso},
+              )
+              result.updated_count += 1
+            except Exception as e:
+              logger.error(f"Failed to mark graph {graph_id} as orphaned: {e}")
+              result.errors += 1
+        elif already_marked:
+          logger.info(
+            f"Graph {graph_id}: instance {instance_id} is back in the registry; "
+            "clearing the orphan marker"
+          )
+          try:
+            graph_table.update_item(
+              Key={"graph_id": graph_id},
+              UpdateExpression="REMOVE instance_missing_since",
+            )
+            result.updated_count += 1
+          except Exception as e:
+            logger.error(f"Failed to clear orphan marker on graph {graph_id}: {e}")
+            result.errors += 1
+
+      self._publish_orphaned_graph_metric(result.orphaned_count)
 
       logger.info(
-        f"Graph registry cleanup completed: {result.removed_count} entries removed"
+        f"Graph registry cleanup completed: {result.removed_count} entries removed, "
+        f"{result.orphaned_count} pointing at missing instances"
       )
 
     except Exception as e:
@@ -459,6 +505,26 @@ class InstanceMonitor:
       result.error_message = str(e)
 
     return result
+
+  def _publish_orphaned_graph_metric(self, count: int) -> None:
+    """Publish the orphaned-registration count so an alarm can watch it.
+
+    Published on every sweep, zero included, so the alarm sees a real
+    datapoint rather than reading OK on missing data.
+    """
+    try:
+      self.cloudwatch.put_metric_data(
+        Namespace=f"RoboSystems/Graph/{self.environment}",
+        MetricData=[
+          {
+            "MetricName": "OrphanedGraphRegistrations",
+            "Value": count,
+            "Unit": "Count",
+          }
+        ],
+      )
+    except Exception as e:
+      logger.warning(f"Could not publish OrphanedGraphRegistrations metric: {e}")
 
   def cleanup_stale_volumes(self) -> CleanupResult:
     """Correct or drop volume-registry rows that no longer reflect reality.

@@ -348,8 +348,10 @@ class TestCleanupStaleGraphs:
     assert result.error_message is None
 
   @pytest.mark.unit
-  def test_removes_graph_with_invalid_instance_id(self, monitor):
-    """Graph referencing non-existent instance is removed."""
+  def test_marks_graph_with_missing_instance_instead_of_removing(self, monitor):
+    """A live graph whose instance is absent from the instance registry is
+    marked and counted, never deleted — the row is its routing, and the
+    instance registry drifts on ASG cycling."""
     graph_table = _make_dynamo_table(
       items=[
         {
@@ -359,7 +361,6 @@ class TestCleanupStaleGraphs:
         },
       ]
     )
-    # Instance table is empty -> instance_id is invalid
     instance_table = _make_dynamo_table(items=[])
 
     def table_router(name):
@@ -373,8 +374,68 @@ class TestCleanupStaleGraphs:
 
     result = monitor.cleanup_stale_graphs()
 
-    assert result.removed_count == 1
-    graph_table.delete_item.assert_called_once_with(Key={"graph_id": "kg_orphan"})
+    assert result.removed_count == 0
+    assert result.orphaned_count == 1
+    assert result.updated_count == 1
+    graph_table.delete_item.assert_not_called()
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "kg_orphan"}
+    assert "SET instance_missing_since" in update["UpdateExpression"]
+    assert "attribute_not_exists" in update["ConditionExpression"]
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["Namespace"] == "RoboSystems/Graph/test"
+    assert metric["MetricData"][0]["MetricName"] == "OrphanedGraphRegistrations"
+    assert metric["MetricData"][0]["Value"] == 1
+
+  @pytest.mark.unit
+  def test_already_marked_orphan_is_counted_not_restamped(self, monitor):
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "kg_orphan",
+          "status": "active",
+          "instance_id": "i-doesnotexist00001",
+          "instance_missing_since": "2026-08-01T00:00:00+00:00",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 1
+    assert result.updated_count == 0
+    graph_table.update_item.assert_not_called()
+    graph_table.delete_item.assert_not_called()
+
+  @pytest.mark.unit
+  def test_marker_is_cleared_when_instance_returns(self, monitor):
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "kg_back",
+          "status": "active",
+          "instance_id": "i-1234567890abcdef0",
+          "instance_missing_since": "2026-08-01T00:00:00+00:00",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[{"instance_id": "i-1234567890abcdef0"}])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.updated_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["UpdateExpression"] == "REMOVE instance_missing_since"
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["Value"] == 0
 
   @pytest.mark.unit
   def test_exception_sets_error_message(self, monitor):

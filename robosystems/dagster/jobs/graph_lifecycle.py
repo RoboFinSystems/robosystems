@@ -194,8 +194,11 @@ def reap_stalled_provisioning(
         continue
 
       reaped.append(subscription_id)
+      # The marker is what the CloudWatch metric filter matches
+      # (cloudformation/dagster.yaml, StalledProvisioningWriteOff): this is a
+      # paid customer with no resource, and detection here is the only page.
       context.log.error(
-        f"Wrote off stalled provisioning for subscription {subscription_id} "
+        f"STALLED PROVISIONING WRITTEN OFF: subscription {subscription_id} "
         f"(org={subscription.org_id}, resource_type={subscription.resource_type}, "
         f"resource_id={subscription.resource_id}). The customer paid and has no "
         "working resource — this needs an operator."

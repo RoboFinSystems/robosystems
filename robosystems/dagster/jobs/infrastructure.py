@@ -282,22 +282,27 @@ def instance_metrics_collection_job():
 
 @op
 def cleanup_stale_registry_entries(context: OpExecutionContext) -> dict[str, Any]:
-  """Clean up stale entries from instance registry.
+  """Sweep the graph registry.
 
-  Removes:
-  - Entries marked as deleted older than 7 days
-  - Entries with missing instance_id references
+  Removes entries marked deleted more than 7 days ago. Entries whose
+  instance_id is missing from the instance registry are marked and counted
+  (``OrphanedGraphRegistrations``), never removed — the row is a live graph's
+  routing and the instance registry drifts on ASG cycling.
   """
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
   monitor = InstanceMonitor()
   result = monitor.cleanup_stale_graphs()
 
-  context.log.info(f"Instance registry cleanup: {result.removed_count} entries removed")
+  context.log.info(
+    f"Instance registry cleanup: {result.removed_count} entries removed, "
+    f"{result.orphaned_count} graphs pointing at missing instances"
+  )
 
   return {
     "timestamp": result.timestamp,
     "removed_count": result.removed_count,
+    "orphaned_count": result.orphaned_count,
     "errors": result.errors,
   }
 
@@ -382,8 +387,12 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
   instance_cleanup_result = monitor.cleanup_stale_graphs()
   results["instance_cleanup"] = {
     "removed_count": instance_cleanup_result.removed_count,
+    "orphaned_count": instance_cleanup_result.orphaned_count,
   }
-  context.log.info(f"Instance cleanup: {instance_cleanup_result.removed_count} removed")
+  context.log.info(
+    f"Instance cleanup: {instance_cleanup_result.removed_count} removed, "
+    f"{instance_cleanup_result.orphaned_count} orphaned"
+  )
 
   # Volume cleanup
   volume_cleanup_result = monitor.cleanup_stale_volumes()

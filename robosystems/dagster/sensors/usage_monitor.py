@@ -39,6 +39,49 @@ _SENSOR_STATUS = DefaultSensorStatus.RUNNING
 # Defaults on — an alerting sensor should fail toward telling you.
 _ALERTS_ENABLED_FLAG = "GRAPH_USAGE_ALERTS_ENABLED"
 
+# Storage is a property of the graph, not of whoever happened to be its first
+# explicit admin: snapshots are recorded under this principal so the row is
+# attributable to the measurement, not to a member who may later leave. Every
+# reader of STORAGE_SNAPSHOT rows keys by graph_id; ``GraphUsage.user_id`` has
+# no foreign key, so a non-user principal is safe.
+USAGE_MONITOR_PRINCIPAL = "system:usage-monitor"
+
+
+def _capacity_alert_recipients(db, graph) -> list:
+  """Everyone who administers the graph: explicit ``GraphUser`` admins plus
+  the owning org's owners and admins, who hold implicit graph admin with no
+  ``GraphUser`` row at all. Deduplicated; only active users with an email.
+
+  The previous ``.filter(role == "admin").first()`` picked one arbitrary
+  explicit admin, so an org-owned graph whose only admins were implicit got
+  no capacity email — exactly where multi-member orgs live.
+  """
+  from robosystems.models.core.graph.graph_user import GraphUser
+  from robosystems.models.core.org import OrgRole, OrgUser
+  from robosystems.models.core.user import User
+
+  user_ids: list[str] = [
+    row.user_id
+    for row in db.query(GraphUser.user_id)
+    .filter(GraphUser.graph_id == graph.graph_id, GraphUser.role == "admin")
+    .all()
+  ]
+  if graph.org_id:
+    user_ids.extend(
+      row.user_id
+      for row in db.query(OrgUser.user_id)
+      .filter(
+        OrgUser.org_id == graph.org_id,
+        OrgUser.role.in_([OrgRole.OWNER, OrgRole.ADMIN]),
+      )
+      .all()
+    )
+  if not user_ids:
+    return []
+  unique_ids = list(dict.fromkeys(user_ids))
+  users = db.query(User).filter(User.id.in_(unique_ids), User.is_active.is_(True)).all()
+  return [u for u in users if u.email]
+
 
 @sensor(
   minimum_interval_seconds=21600,  # 6 hours
@@ -68,8 +111,6 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
   from robosystems.database import session as db_session_factory
   from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
   from robosystems.models.core.graph import Graph
-  from robosystems.models.core.graph.graph_user import GraphUser
-  from robosystems.models.core.user import User
 
   # Read per tick rather than at import, so flipping the flag takes effect on the
   # next evaluation instead of the next deploy.
@@ -115,26 +156,17 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
       instance_status = storage_check["status"]
 
-      # One admin lookup serves both the snapshot row and any alert below.
-      graph_user = (
-        db.query(GraphUser)
-        .filter(
-          GraphUser.graph_id == graph.graph_id,
-          GraphUser.role == "admin",
-        )
-        .first()
-      )
-
       # Persist the measurement as a STORAGE_SNAPSHOT row — this sensor is the
       # only writer, and the admin and org usage surfaces read those rows.
       # Recorded for every measured status, not just alert-worthy ones; skipped
-      # when the check returned "unknown" (nothing was measured).
-      if storage_check.get("total_storage_gb") is not None and graph_user:
+      # when the check returned "unknown" (nothing was measured). Attributed to
+      # the monitor itself, never to a member (see USAGE_MONITOR_PRINCIPAL).
+      if storage_check.get("total_storage_gb") is not None:
         try:
           from robosystems.models.core.graph.graph_usage import GraphUsage
 
           GraphUsage.record_storage_usage(
-            user_id=graph_user.user_id,
+            user_id=USAGE_MONITOR_PRINCIPAL,
             graph_id=graph.graph_id,
             graph_tier=graph_tier,
             storage_bytes=storage_check["total_storage_gb"] * (1024**3),
@@ -157,44 +189,51 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
         )
         continue
 
-      # Owner already looked up above for the snapshot row
-      if not graph_user:
-        continue
-
-      user = db.query(User).filter(User.id == graph_user.user_id).first()
-      if not user or not user.email:
-        continue
-
-      # Send capacity warning email
-      try:
-        from robosystems.operations.aws.ses import ses_service
-
-        sent = asyncio.run(
-          ses_service.send_capacity_warning_email(
-            user_email=user.email,
-            user_name=user.name or "there",
-            graph_id=graph.graph_id,
-            tier=graph_tier,
-            usage_percentage=storage_check["usage_percentage"],
-            used_gb=storage_check["total_storage_gb"],
-            limit_gb=storage_check["limit_gb"],
-            instance_status=instance_status,
-            databases=storage_check["databases"],
-          )
+      recipients = _capacity_alert_recipients(db, graph)
+      if not recipients:
+        context.log.warning(
+          f"No admin with an email for {graph.graph_id}; capacity alert not sent"
         )
+        continue
 
-        if sent:
-          # Set dedup key with TTL
-          redis_client.setex(dedup_key, _ALERT_DEDUP_TTL_SECONDS, "1")
-          alerts_sent += 1
-          context.log.info(
-            f"Sent {instance_status} alert for {graph.graph_id} to {user.email} "
-            f"({storage_check['usage_percentage']:.0f}%)"
+      # Send the capacity warning to every admin; the dedup key covers the
+      # graph+status, set once any delivery succeeded.
+      delivered = 0
+      for user in recipients:
+        try:
+          from robosystems.operations.aws.ses import ses_service
+
+          sent = asyncio.run(
+            ses_service.send_capacity_warning_email(
+              user_email=user.email,
+              user_name=user.name or "there",
+              graph_id=graph.graph_id,
+              tier=graph_tier,
+              usage_percentage=storage_check["usage_percentage"],
+              used_gb=storage_check["total_storage_gb"],
+              limit_gb=storage_check["limit_gb"],
+              instance_status=instance_status,
+              databases=storage_check["databases"],
+            )
           )
-        else:
-          context.log.warning(f"Failed to send capacity alert for {graph.graph_id}")
-      except Exception as e:
-        context.log.error(f"Error sending capacity alert for {graph.graph_id}: {e}")
+          if sent:
+            delivered += 1
+          else:
+            context.log.warning(
+              f"Failed to send capacity alert for {graph.graph_id} to {user.email}"
+            )
+        except Exception as e:
+          context.log.error(
+            f"Error sending capacity alert for {graph.graph_id} to {user.email}: {e}"
+          )
+
+      if delivered:
+        redis_client.setex(dedup_key, _ALERT_DEDUP_TTL_SECONDS, "1")
+        alerts_sent += 1
+        context.log.info(
+          f"Sent {instance_status} alert for {graph.graph_id} to {delivered} of "
+          f"{len(recipients)} admin(s) ({storage_check['usage_percentage']:.0f}%)"
+        )
 
     context.log.info(
       f"Usage monitor complete: checked {len(parent_graphs)} graphs, "

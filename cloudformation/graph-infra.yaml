@@ -528,6 +528,30 @@ Resources:
       AlarmActions:
         - !Ref InfraAlertTopic
 
+  # A graph-registry row pointing at an instance the instance registry no
+  # longer knows. Published (zero included) by the daily registry sweep, which
+  # marks such rows rather than deleting them; any non-zero value is a live
+  # graph whose routing is stale and needs reconciling from on-disk truth.
+  OrphanedGraphRegistrationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-orphaned-graph-registrations
+      AlarmDescription: A graph-registry row points at an instance absent from the instance registry (routing drift, marked by the daily sweep)
+      MetricName: OrphanedGraphRegistrations
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+      OKActions:
+        - !Ref InfraAlertTopic
+
   # Registry table throttle alarms (tables are on-demand; throttles signal
   # burst beyond adaptive capacity or a hot key)
   InstanceRegistryReadThrottleAlarm:
