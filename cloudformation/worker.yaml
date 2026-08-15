@@ -309,13 +309,30 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/worker:*"
               # CloudWatch Metrics
+              #
+              # Two namespaces, and the second one is load-bearing. Graph
+              # allocation runs in the worker, and its failure metric publishes
+              # to RoboSystems/Graph/${Environment} (allocation_manager.py's
+              # _publish_failure_metric) because that is the namespace the
+              # AllocationFailures alarms in graph-ladybug.yaml watch. With only
+              # the Worker namespace allowed, every publish returned AccessDenied
+              # into a logger.error and the alarms sat OK on "no datapoints
+              # received" -- in BOTH environments -- since February.
+              #
+              # Proven 2026-08-15 by inducing a real no_capacity failure in
+              # staging: the allocation failed in 17s, the metric never
+              # published, and the worker log carried the AccessDenied. The
+              # 2026-08-09 dimension fix was correct and could never have taken
+              # effect underneath this.
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: "*"
                 Condition:
                   StringEquals:
-                    "cloudwatch:namespace": !Sub "RoboSystems/Worker/${Environment}"
+                    "cloudwatch:namespace":
+                      - !Sub "RoboSystems/Worker/${Environment}"
+                      - !Sub "RoboSystems/Graph/${Environment}"
               # OpenSearch (conditional)
               - !If
                 - HasOpenSearch
