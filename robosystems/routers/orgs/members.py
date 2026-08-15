@@ -21,6 +21,7 @@ from ...operations.billing import (
   ProviderCancellationError,
   cancel_user_repository_subscriptions,
 )
+from ...security import SecurityAuditLogger, SecurityEventType
 
 logger = get_logger(__name__)
 
@@ -165,6 +166,7 @@ async def update_member_role(
         )
 
     # Update the role
+    previous_role = target_membership.role
     target_membership.role = request.role
     db.commit()
     db.refresh(target_membership)
@@ -176,8 +178,17 @@ async def update_member_role(
 
     target_user = target_membership.user
 
-    logger.info(
-      f"User {current_user.id} updated role for user {user_id} in org {org_id} to {request.role}"
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.ORG_MEMBER_ROLE_CHANGED,
+      user_id=current_user.id,
+      details={
+        "action": "org_member_role_changed",
+        "org_id": org_id,
+        "target_user_id": user_id,
+        "previous_role": previous_role.value,
+        "new_role": request.role.value,
+      },
+      risk_level="low",
     )
 
     return OrgMemberResponse(
@@ -315,13 +326,27 @@ async def remove_member(
         GraphUser.graph_id.in_(org_graph_ids),
       ).delete(synchronize_session=False)
 
+    removed_role = target_membership.role
     db.delete(target_membership)
     db.commit()
 
     api_key_cache.invalidate_user_jwt_graph_access(user_id)
     api_key_cache.invalidate_user_data(user_id)
 
-    logger.info(f"User {user_id} removed from org {org_id} by user {current_user.id}")
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.ORG_MEMBER_REMOVED,
+      user_id=current_user.id,
+      details={
+        "action": "org_member_removed",
+        "org_id": org_id,
+        "target_user_id": user_id,
+        "previous_role": removed_role.value,
+        "self_removal": user_id == current_user.id,
+        "org_graph_grants_revoked": len(org_graph_ids),
+        "repository_subscriptions_canceled": len(canceled),
+      },
+      risk_level="low",
+    )
 
   except HTTPException:
     raise

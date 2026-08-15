@@ -8,6 +8,7 @@ parent-graph-only rule.
 
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -22,6 +23,7 @@ from robosystems.models.core import (
   OrgUser,
   User,
 )
+from robosystems.security import SecurityEventType
 
 pytestmark = pytest.mark.asyncio
 
@@ -293,3 +295,92 @@ class TestRemoveGraphMember:
     )
 
     assert response.status_code == 404
+
+
+class TestGraphMembershipAuditEvents:
+  """Grant, role change and revoke on a graph are privileged access changes
+  and each must leave a structured security-audit record (SOC 2 CC6.x). This
+  router previously audited only refusals."""
+
+  def _org_graph_with_teammate(self, test_db, test_user, grant: GraphRole | None):
+    org, graph = _setup_org_graph(test_db, test_user.id)
+    teammate = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=teammate.id, role=OrgRole.MEMBER, session=test_db
+    )
+    if grant is not None:
+      GraphUser.create(
+        user_id=teammate.id, graph_id=graph.graph_id, role=grant, session=test_db
+      )
+    return org, graph, teammate
+
+  async def test_grant_is_audited(self, async_client, test_db, test_user):
+    org, graph, teammate = self._org_graph_with_teammate(test_db, test_user, None)
+
+    with patch("robosystems.routers.graphs.members.SecurityAuditLogger") as audit:
+      response = await async_client.post(
+        f"/v1/graphs/{graph.graph_id}/members",
+        json={"user_id": teammate.id, "role": "viewer"},
+      )
+
+    assert response.status_code == 201
+    kwargs = audit.log_security_event.call_args.kwargs
+    assert kwargs["event_type"] is SecurityEventType.GRAPH_MEMBER_ADDED
+    assert kwargs["user_id"] == test_user.id
+    assert kwargs["details"] == {
+      "action": "graph_member_added",
+      "graph_id": graph.graph_id,
+      "org_id": org.id,
+      "target_user_id": teammate.id,
+      "new_role": "viewer",
+    }
+
+  async def test_role_change_is_audited(self, async_client, test_db, test_user):
+    _, graph, teammate = self._org_graph_with_teammate(
+      test_db, test_user, GraphRole.VIEWER
+    )
+
+    with patch("robosystems.routers.graphs.members.SecurityAuditLogger") as audit:
+      response = await async_client.put(
+        f"/v1/graphs/{graph.graph_id}/members/{teammate.id}",
+        json={"role": "member"},
+      )
+
+    assert response.status_code == 200
+    kwargs = audit.log_security_event.call_args.kwargs
+    assert kwargs["event_type"] is SecurityEventType.GRAPH_MEMBER_ROLE_CHANGED
+    assert kwargs["details"]["previous_role"] == "viewer"
+    assert kwargs["details"]["new_role"] == "member"
+    assert kwargs["details"]["target_user_id"] == teammate.id
+
+  async def test_revoke_is_audited(self, async_client, test_db, test_user):
+    _, graph, teammate = self._org_graph_with_teammate(
+      test_db, test_user, GraphRole.MEMBER
+    )
+
+    with patch("robosystems.routers.graphs.members.SecurityAuditLogger") as audit:
+      response = await async_client.delete(
+        f"/v1/graphs/{graph.graph_id}/members/{teammate.id}"
+      )
+
+    assert response.status_code == 204
+    kwargs = audit.log_security_event.call_args.kwargs
+    assert kwargs["event_type"] is SecurityEventType.GRAPH_MEMBER_REMOVED
+    assert kwargs["details"]["previous_role"] == "member"
+    assert kwargs["details"]["graph_id"] == graph.graph_id
+
+  async def test_conflicting_grant_leaves_no_record(
+    self, async_client, test_db, test_user
+  ):
+    _, graph, teammate = self._org_graph_with_teammate(
+      test_db, test_user, GraphRole.VIEWER
+    )
+
+    with patch("robosystems.routers.graphs.members.SecurityAuditLogger") as audit:
+      response = await async_client.post(
+        f"/v1/graphs/{graph.graph_id}/members",
+        json={"user_id": teammate.id, "role": "viewer"},
+      )
+
+    assert response.status_code == 409
+    audit.log_security_event.assert_not_called()

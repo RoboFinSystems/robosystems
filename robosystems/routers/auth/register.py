@@ -362,13 +362,25 @@ async def register(
     logger.info(f"Email automatically verified for development user: {sanitized_email}")
 
   if invitation is not None:
-    logger.info(
-      f"User {sanitized_email} joined org {org.id} via invitation {invitation.id}",
-      extra={
-        "user_id": user.id,
+    # The org-side "member added" record for the invited-registration path.
+    # The joiner is the actor (they accepted); the inviter is carried so the
+    # grant chain is reconstructible from this one line.
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.ORG_MEMBER_ADDED,
+      user_id=user.id,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint="/v1/auth/register",
+      details={
+        "action": "org_member_added",
         "org_id": org.id,
-        "org_role": invitation.role.value,
+        "target_user_id": user.id,
+        "new_role": invitation.role.value,
+        "via": "invitation",
+        "invitation_id": invitation.id,
+        "invited_by": invitation.invited_by,
       },
+      risk_level="low",
     )
   else:
     logger.info(

@@ -7,11 +7,13 @@ and removal flows to protect billing-linked org resources.
 
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
 from robosystems.models.core import Org, OrgRole, OrgType, OrgUser, User
+from robosystems.security import SecurityEventType
 
 pytestmark = pytest.mark.asyncio
 
@@ -417,3 +419,117 @@ class TestOrgMembersRouter:
     test_db.refresh(access)
     assert subscription.status == "canceled"
     assert access.is_active is False
+
+
+class TestOrgMembershipAuditEvents:
+  """Every membership change made through the API is a privileged access
+  change and must leave a structured security-audit record (SOC 2 CC6.x) —
+  actor, target, scope, prior and new role. Refusals were already audited;
+  these cover the grants."""
+
+  def _org_with_owner_and_member(self, test_db, test_user):
+    org = Org.create(
+      name=f"Audit Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    member = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+    return org, member
+
+  async def test_role_change_is_audited(self, async_client, test_db, test_user):
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
+      response = await async_client.put(
+        f"/v1/orgs/{org.id}/members/{member.id}",
+        json={"role": OrgRole.ADMIN.value},
+      )
+
+    assert response.status_code == 200
+    kwargs = audit.log_security_event.call_args.kwargs
+    assert kwargs["event_type"] is SecurityEventType.ORG_MEMBER_ROLE_CHANGED
+    assert kwargs["user_id"] == test_user.id
+    assert kwargs["details"] == {
+      "action": "org_member_role_changed",
+      "org_id": org.id,
+      "target_user_id": member.id,
+      "previous_role": "member",
+      "new_role": "admin",
+    }
+
+  async def test_removal_is_audited(self, async_client, test_db, test_user):
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    kwargs = audit.log_security_event.call_args.kwargs
+    assert kwargs["event_type"] is SecurityEventType.ORG_MEMBER_REMOVED
+    assert kwargs["user_id"] == test_user.id
+    details = kwargs["details"]
+    assert details["org_id"] == org.id
+    assert details["target_user_id"] == member.id
+    assert details["previous_role"] == "member"
+    assert details["self_removal"] is False
+    assert details["repository_subscriptions_canceled"] == 0
+
+  async def test_refused_change_leaves_no_grant_record(
+    self, async_client, test_db, test_user
+  ):
+    """A refusal is not a membership change: the denied path emits nothing
+    from these sites (the authorization-denied record, where one exists, is a
+    different event)."""
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+    outsider = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=outsider.id, role=OrgRole.MEMBER, session=test_db
+    )
+    # A plain member may not change roles.
+    from main import app
+    from robosystems.middleware.auth.dependencies import get_current_user
+
+    previous = app.dependency_overrides.get(get_current_user)
+    app.dependency_overrides[get_current_user] = lambda: outsider
+    try:
+      with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
+        response = await async_client.put(
+          f"/v1/orgs/{org.id}/members/{member.id}",
+          json={"role": OrgRole.ADMIN.value},
+        )
+    finally:
+      if previous is not None:
+        app.dependency_overrides[get_current_user] = previous
+      else:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 403
+    audit.log_security_event.assert_not_called()
+
+  async def test_provider_refusal_aborts_before_any_record(
+    self, async_client, test_db, test_user
+  ):
+    """Removal cancels repository subscriptions first; if the provider refuses,
+    nothing was removed and nothing may be recorded as removed."""
+    from robosystems.operations.billing import ProviderCancellationError
+
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with (
+      patch(
+        "robosystems.routers.orgs.members.cancel_user_repository_subscriptions",
+        side_effect=ProviderCancellationError("stripe said no"),
+      ),
+      patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit,
+    ):
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 502
+    audit.log_security_event.assert_not_called()
+    assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is not None

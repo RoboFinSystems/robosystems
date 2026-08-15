@@ -552,6 +552,54 @@ class TestInvitedRegistration:
     True,
   )
   @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
+  def test_register_with_invitation_audits_the_org_join(
+    self, client: TestClient, test_db, test_user
+  ):
+    """The invited join is the org-side "member added" — a privileged access
+    change that must leave a structured record carrying the inviter."""
+    from robosystems.models.core import OrgRole
+    from robosystems.security import SecurityEventType
+
+    org, invitation, raw_token = self._make_invitation(
+      test_db, test_user, "audited-invitee@example.com", role=OrgRole.MEMBER
+    )
+
+    with patch("robosystems.routers.auth.register.SecurityAuditLogger") as audit:
+      response = client.post(
+        "/v1/auth/register",
+        json={
+          "name": "Audited Invitee",
+          "email": "audited-invitee@example.com",
+          "password": "S3cur3P@ssw0rd!2024",
+          "invite_token": raw_token,
+        },
+      )
+
+    assert response.status_code == 201
+    joined = [
+      c.kwargs
+      for c in audit.log_security_event.call_args_list
+      if c.kwargs["event_type"] is SecurityEventType.ORG_MEMBER_ADDED
+    ]
+    assert len(joined) == 1
+    new_user = User.get_by_email("audited-invitee@example.com", test_db)
+    assert joined[0]["user_id"] == new_user.id
+    assert joined[0]["details"] == {
+      "action": "org_member_added",
+      "org_id": org.id,
+      "target_user_id": new_user.id,
+      "new_role": "member",
+      "via": "invitation",
+      "invitation_id": invitation.id,
+      "invited_by": test_user.id,
+    }
+
+  @patch.object(
+    __import__("robosystems.config", fromlist=["env"]).env,
+    "USER_REGISTRATION_ENABLED",
+    True,
+  )
+  @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
   def test_register_with_invitation_email_mismatch(
     self, client: TestClient, test_db, test_user
   ):
