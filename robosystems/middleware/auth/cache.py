@@ -1042,7 +1042,14 @@ class APIKeyCache:
         try:
           cached_data = cast(str | None, self.redis.get(key))
           if cached_data:
-            data = json.loads(cached_data)
+            # Entries are written through _encrypt_cache_data, so they are
+            # base64(fernet(json)) — a plain json.loads raised on every entry
+            # and the except below swallowed it, which meant no API-key entry
+            # was ever evicted. Decrypt through the same helper the read path
+            # uses; it returns the inner payload, so user_data is at the top.
+            data = self._decrypt_cache_data(cached_data)
+            if data is None:
+              continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:
               self.redis.delete(key)
@@ -1057,7 +1064,11 @@ class APIKeyCache:
         try:
           cached_data = cast(str | None, self.redis.get(key))
           if cached_data:
-            data = json.loads(cached_data)
+            # Same defect as the API-key loop above: JWT entries are written
+            # encrypted too, so json.loads never succeeded here either.
+            data = self._decrypt_cache_data(cached_data)
+            if data is None:
+              continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:
               self.redis.delete(key)
