@@ -7,8 +7,12 @@ from dagster import build_sensor_context
 from robosystems.dagster.sensors.usage_monitor import (
   _ALERT_DEDUP_TTL_SECONDS,
   _ALERTS_ENABLED_FLAG,
+  USAGE_MONITOR_PRINCIPAL,
+  _capacity_alert_recipients,
   graph_usage_monitor_sensor,
 )
+
+RECIPIENTS = "robosystems.dagster.sensors.usage_monitor._capacity_alert_recipients"
 
 
 def _make_graph(graph_id="kg_test123", tier="ladybug-standard"):
@@ -105,17 +109,13 @@ class TestGraphUsageMonitorSensor:
     graph = _make_graph()
     mock_db.query.return_value.filter.return_value.all.return_value = [graph]
 
-    # Graph user and user lookups
-    mock_graph_user = MagicMock()
-    mock_graph_user.user_id = "user_123"
-    mock_graph_user.role = "admin"
-    mock_user = MagicMock()
-    mock_user.email = "user@example.com"
-    mock_user.name = "Test User"
-    mock_db.query.return_value.filter.return_value.first.side_effect = [
-      mock_graph_user,
-      mock_user,
-    ]
+    # Two admins resolve for the graph (one explicit, one implicit via org role)
+    admin_a = MagicMock()
+    admin_a.email = "a@example.com"
+    admin_a.name = "Admin A"
+    admin_b = MagicMock()
+    admin_b.email = "b@example.com"
+    admin_b.name = "Admin B"
 
     # Storage check returns approaching
     mock_check_storage.return_value = {
@@ -135,15 +135,64 @@ class TestGraphUsageMonitorSensor:
     mock_ses.send_capacity_warning_email = AsyncMock(return_value=True)
 
     context = build_sensor_context()
-    graph_usage_monitor_sensor(context)
+    with patch(RECIPIENTS, return_value=[admin_a, admin_b]):
+      graph_usage_monitor_sensor(context)
 
-    # Verify dedup key was set
+    # Every admin is emailed, and the dedup key is set once for the graph+status
+    sent_to = [
+      c.kwargs["user_email"]
+      for c in mock_ses.send_capacity_warning_email.call_args_list
+    ]
+    assert sent_to == ["a@example.com", "b@example.com"]
     mock_redis.setex.assert_called_once()
     dedup_call = mock_redis.setex.call_args
     assert dedup_call[0][0] == "usage_alert:kg_test123:approaching"
     assert dedup_call[0][1] == _ALERT_DEDUP_TTL_SECONDS
 
+    # The snapshot is attributed to the monitor, not to a member
+    added = [
+      a.args[0] for a in mock_db.add.call_args_list if hasattr(a.args[0], "user_id")
+    ]
+    assert added and all(r.user_id == USAGE_MONITOR_PRINCIPAL for r in added)
+
     mock_db.close.assert_called_once()
+
+  @patch("robosystems.operations.aws.ses.ses_service")
+  @patch("robosystems.config.valkey_registry.create_redis_client")
+  @patch(
+    "robosystems.middleware.graph.ingestion_limits.IngestionLimitChecker.check_instance_storage"
+  )
+  @patch("robosystems.database.session")
+  def test_no_recipient_records_snapshot_but_sends_nothing(
+    self,
+    mock_session_factory,
+    mock_check_storage,
+    mock_redis_factory,
+    mock_ses,
+  ):
+    """A graph with no reachable admin still gets its snapshot row (the usage
+    surfaces read it), but no email and no dedup key — the next tick retries."""
+    mock_db = MagicMock()
+    mock_session_factory.return_value = mock_db
+    mock_db.query.return_value.filter.return_value.all.return_value = [_make_graph()]
+    mock_check_storage.return_value = {
+      "total_storage_gb": 17.0,
+      "limit_gb": 20.0,
+      "usage_percentage": 85.0,
+      "status": "approaching",
+      "databases": [],
+    }
+    mock_redis = MagicMock()
+    mock_redis_factory.return_value = mock_redis
+    mock_redis.exists.return_value = False
+    mock_ses.send_capacity_warning_email = AsyncMock(return_value=True)
+
+    with patch(RECIPIENTS, return_value=[]):
+      graph_usage_monitor_sensor(build_sensor_context())
+
+    mock_ses.send_capacity_warning_email.assert_not_called()
+    mock_redis.setex.assert_not_called()
+    assert mock_db.add.called
 
   @patch("robosystems.config.valkey_registry.create_redis_client")
   @patch(
@@ -242,3 +291,98 @@ class TestGraphUsageMonitorSensor:
     graph_usage_monitor_sensor(context)
 
     mock_db.close.assert_called_once()
+
+
+class TestCapacityAlertRecipients:
+  """The recipient set is every graph admin — explicit rows AND the owning
+  org's owners/admins, who hold implicit graph admin with no GraphUser row.
+  The old lookup took one arbitrary explicit admin, so an org-owned graph with
+  only implicit admins got no email at all."""
+
+  @staticmethod
+  def _user(session, email, active=True):
+    from uuid import uuid4
+
+    from robosystems.models.core import User
+
+    u = User(email=email, name=email.split("@")[0], password_hash="x", is_active=active)
+    if not active:
+      u.id = f"user_inactive_{uuid4().hex[:6]}"
+    session.add(u)
+    session.commit()
+    session.refresh(u)
+    return u
+
+  def test_implicit_org_admins_are_recipients_without_a_graph_user_row(self, test_db):
+    from uuid import uuid4
+
+    from robosystems.models.core import (
+      Graph,
+      GraphRole,
+      GraphUser,
+      Org,
+      OrgRole,
+      OrgType,
+      OrgUser,
+    )
+
+    org = Org.create(name="Cap Org", org_type=OrgType.TEAM, session=test_db)
+    owner = self._user(test_db, f"owner+{uuid4().hex[:6]}@example.com")
+    org_admin = self._user(test_db, f"orgadmin+{uuid4().hex[:6]}@example.com")
+    member = self._user(test_db, f"member+{uuid4().hex[:6]}@example.com")
+    explicit = self._user(test_db, f"explicit+{uuid4().hex[:6]}@example.com")
+    viewer = self._user(test_db, f"viewer+{uuid4().hex[:6]}@example.com")
+    for u, r in (
+      (owner, OrgRole.OWNER),
+      (org_admin, OrgRole.ADMIN),
+      (member, OrgRole.MEMBER),
+      (explicit, OrgRole.MEMBER),
+      (viewer, OrgRole.MEMBER),
+    ):
+      OrgUser.create(org_id=org.id, user_id=u.id, role=r, session=test_db)
+    graph = Graph.create(
+      graph_id=f"kg{uuid4().hex[:16]}",
+      org_id=org.id,
+      graph_name="Cap Graph",
+      graph_type="generic",
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=explicit.id,
+      graph_id=graph.graph_id,
+      role=GraphRole.ADMIN,
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=viewer.id, graph_id=graph.graph_id, role=GraphRole.VIEWER, session=test_db
+    )
+    # The owner also holds an explicit admin row: must not be emailed twice
+    GraphUser.create(
+      user_id=owner.id, graph_id=graph.graph_id, role=GraphRole.ADMIN, session=test_db
+    )
+
+    recipients = _capacity_alert_recipients(test_db, graph)
+
+    emails = sorted(u.email for u in recipients)
+    assert emails == sorted([owner.email, org_admin.email, explicit.email])
+    assert len(recipients) == 3
+
+  def test_inactive_and_emailless_admins_are_skipped(self, test_db):
+    from uuid import uuid4
+
+    from robosystems.models.core import Graph, Org, OrgRole, OrgType, OrgUser
+
+    org = Org.create(name="Cap Org 2", org_type=OrgType.TEAM, session=test_db)
+    inactive = self._user(test_db, f"gone+{uuid4().hex[:6]}@example.com", active=False)
+    OrgUser.create(
+      org_id=org.id, user_id=inactive.id, role=OrgRole.OWNER, session=test_db
+    )
+    graph = Graph.create(
+      graph_id=f"kg{uuid4().hex[:16]}",
+      org_id=org.id,
+      graph_name="Cap Graph 2",
+      graph_type="generic",
+      session=test_db,
+    )
+
+    assert _capacity_alert_recipients(test_db, graph) == []
