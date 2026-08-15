@@ -138,16 +138,27 @@ async def query_financial_statement(
 
 
 def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Deduplicate facts by ``(qname, end_date)``, keeping the first occurrence.
+  """Deduplicate facts by ``(qname, end_date, period_type, duration_type)``.
 
-  Results are ordered by ``end_date`` DESC at the query level, so the
-  first occurrence for each ``(qname, end_date)`` pair comes from the
-  most recent filing.
+  ``duration_type`` is load-bearing and was missing from the key until
+  2026-08-14: an annual and a quarterly fact legitimately share a ``qname``
+  and an ``end_date`` (Q4 and FY both end on the fiscal year end), so keying
+  on the pair alone silently collapsed them into whichever row the engine
+  happened to return first. ``ORDER BY end_date DESC`` does not break that
+  tie, so the survivor was not merely arbitrary but *unstable* between
+  otherwise identical calls — a wrong number rather than an error, on the
+  public SEC surface. The sibling path ``fact_query.deduplicate_facts``
+  already keys on the full period identity; this is the same fix.
   """
-  seen: set[tuple[str, str]] = set()
+  seen: set[tuple[str, str, str, str]] = set()
   deduped: list[dict[str, Any]] = []
   for row in rows:
-    key = (row.get("qname", "") or "", row.get("end_date", "") or "")
+    key = (
+      row.get("qname", "") or "",
+      row.get("end_date", "") or "",
+      row.get("period_type", "") or "",
+      row.get("duration_type", "") or "",
+    )
     if key not in seen:
       seen.add(key)
       deduped.append(row)
