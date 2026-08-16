@@ -204,16 +204,27 @@ Resources:
         Status: Enabled
       LifecycleConfiguration:
         Rules:
-          # User staging data expires after 7 days
-          - Id: ExpireStagingData
+          # Pre-ingestion uploads expire after 30 days. The prefix is
+          # user-staging/, not staging/: S3 prefix matching is literal, so the
+          # two rules this replaces (staging/ 7d and exports/ 30d) matched no
+          # object that has ever existed in this bucket, and source files sat
+          # here indefinitely — including a departed customer's, since
+          # deprovisioning does not touch S3. The objects are ingestion input,
+          # not a system of record; the graph holds the result. 30 days rather
+          # than the old rule's 7 because that number was written against a
+          # prefix nothing wrote to, so it was never sized against a real
+          # upload-to-ingest gap. Note GraphFile rows outlive the object and
+          # still report s3_key, so expiry leaves that metadata dangling.
+          - Id: ExpireUserStagingData
             Status: Enabled
-            Prefix: staging/
-            ExpirationInDays: 7
-          # User exports expire after 30 days
-          - Id: ExpireExports
-            Status: Enabled
-            Prefix: exports/
+            Prefix: user-staging/
             ExpirationInDays: 30
+          # report-bundles/ deliberately has no expiration rule. Those objects
+          # are live report publications, deleted explicitly when a report is
+          # withdrawn (delete_report_artifacts in the roboledger reports
+          # commands). A time-based rule here would destroy the published
+          # artifact of a report whose row still exists. Absence of coverage
+          # is the correct state — do not "fix" it.
           # Graph backups expire after 90 days (max tier retention)
           - Id: ExpireGraphBackups
             Status: Enabled
