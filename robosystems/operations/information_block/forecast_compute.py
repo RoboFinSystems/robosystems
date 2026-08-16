@@ -141,6 +141,8 @@ def _actual_set_at(
   entity_id: str,
   period_start: date,
   period_end: date,
+  *,
+  canonical_only: bool = False,
 ) -> FactSet | None:
   """The newest actual report set for a structure at exactly one month.
 
@@ -153,34 +155,49 @@ def _actual_set_at(
   publication snapshots, same contract as the envelope loaders: a Report
   published later for the base month must not seed the forecast off a
   frozen snapshot that may have been regenerated with a different style.
+
+  ``canonical_only`` drops the publication fallback entirely, which is a
+  different question from "which set is better": **the existence of a
+  canonical set is what makes a month closed.** ``create_report`` consults
+  no fiscal calendar — it takes whatever window the caller passes — so a
+  report generated for an open or future month leaves a perfectly valid
+  publication snapshot behind it. And reopening retracts only canonical
+  sets (`statement_sets._canonical_set_ids_in_window`), deliberately
+  leaving snapshots in place. Preferring canonical is right when seeding
+  from a month already known to be closed; it is not enough when the
+  question *is* whether the month is closed.
   """
+  stmt = select(FactSet).where(
+    FactSet.structure_id == structure_id,
+    FactSet.factset_type == "report",
+    FactSet.scenario_id.is_(None),
+    FactSet.entity_id == entity_id,
+    FactSet.period_end == period_end,
+    FactSet.period_start >= period_start,
+  )
+  if canonical_only:
+    stmt = stmt.where(FactSet.report_id.is_(None))
   return session.execute(
-    select(FactSet)
-    .where(
-      FactSet.structure_id == structure_id,
-      FactSet.factset_type == "report",
-      FactSet.scenario_id.is_(None),
-      FactSet.entity_id == entity_id,
-      FactSet.period_end == period_end,
-      FactSet.period_start >= period_start,
-    )
-    .order_by(
+    stmt.order_by(
       FactSet.report_id.isnot(None).asc(),
       FactSet.created_at.desc(),
-    )
-    .limit(1)
+    ).limit(1)
   ).scalar_one_or_none()
 
 
 def _newest_actual_month(
   session: Session, structure_id: str, entity_id: str
 ) -> str | None:
-  """Newest month carrying any actual report set for a structure.
+  """Newest month carrying a canonical (close-stamped) set for a structure.
 
   An upper bound for the anchor scan, kept separate from
   :func:`_actual_set_at` because it deliberately does *not* apply that
   function's monthly-window guard — it may well land on the annual
   comparative set. Bounding is all it is for.
+
+  Canonical-only for the same reason the scan is: a publication snapshot
+  can exist for a month that is open or has been reopened, so it says
+  nothing about where the books are closed through.
   """
   newest = session.execute(
     select(FactSet.period_end)
@@ -188,6 +205,7 @@ def _newest_actual_month(
       FactSet.structure_id == structure_id,
       FactSet.factset_type == "report",
       FactSet.scenario_id.is_(None),
+      FactSet.report_id.is_(None),
       FactSet.entity_id == entity_id,
     )
     .order_by(FactSet.period_end.desc())
@@ -218,10 +236,22 @@ def _resolve_anchor_period(
 
   So the anchor advances with the close. Candidates are the months
   strictly after ``base_period`` and inside the authored horizon, newest
-  first; the first one carrying a **monthly** actual income statement (and
-  balance sheet, when the graph has one) wins. Scanning back from the
+  first; the first one carrying a **monthly, canonical** income statement
+  (and balance sheet, when the graph has one) wins. Scanning back from the
   horizon end rather than forward from the base means a gap in the middle
   of the closed history can't strand the anchor behind it.
+
+  **Canonical is the whole point of the predicate, not a preference.** The
+  anchor is a claim that the books are closed through a month, and it has
+  teeth: the walk seeds its opening balances there and
+  :func:`_invalidate_superseded_head` deletes every scenario month at or
+  before it. A publication snapshot proves nothing about closure —
+  ``create_report`` never consults the fiscal calendar, so one can exist
+  for an open or even future month, and reopening a month retracts only
+  the canonical set and deliberately leaves the snapshot. Anchoring on a
+  snapshot would seed the walk from an incomplete month and discard real
+  forecast months to do it. Close-stamping is the only thing that means
+  closed, and it tracks reopen for free.
 
   One query establishes where that scan can start, because otherwise its
   cheapest case is also its most expensive one: a scenario whose base is
@@ -247,12 +277,26 @@ def _resolve_anchor_period(
       continue
     month_start, month_end = period_date_range(month)
     if (
-      _actual_set_at(session, is_structure_id, entity_id, month_start, month_end)
+      _actual_set_at(
+        session,
+        is_structure_id,
+        entity_id,
+        month_start,
+        month_end,
+        canonical_only=True,
+      )
       is None
     ):
       continue
     if bs_structure_id is not None and (
-      _actual_set_at(session, bs_structure_id, entity_id, month_start, month_end)
+      _actual_set_at(
+        session,
+        bs_structure_id,
+        entity_id,
+        month_start,
+        month_end,
+        canonical_only=True,
+      )
       is None
     ):
       # An income statement without the matching balance sheet cannot seed
@@ -589,10 +633,54 @@ def cmd_compute_forecast(
     months.append(month)
 
   if not months:
-    raise ValueError(
+    # Fully overtaken: the close has passed the end of the authored window,
+    # so every month this scenario ever computed is now a closed month.
+    #
+    # This used to raise, which read as the loud answer and was the quiet
+    # one. The exception rolls the session back, so the superseded months
+    # survived it — the precise stale state `_invalidate_superseded_head`
+    # exists to remove, left behind by the one case where *all* of them
+    # qualify. A partially-overtaken scenario cleaned up after itself while
+    # a fully-overtaken one did not, which is the limit case behaving
+    # opposite to the trend.
+    #
+    # So it cleans up and returns instead, with no computed months and a
+    # diagnostic that leads with the condition. Only DERIVED months go; the
+    # authored lever set is excluded from the sweep exactly as it is
+    # everywhere else, so the scenario keeps its identity and can be
+    # forecast again the moment its horizon is extended.
+    cleared = _invalidate_superseded_head(
+      session,
+      scenario_id=scenario_id,
+      entity_id=entity_id,
+      through_period_end=base_end,
+    )
+    diagnostics.append(
       f"Forecast {scenario_id!r} has no forward months left: its horizon "
       f"ends {window_end} and the books are closed through {anchor_period}. "
-      "Extend horizon_months, or re-create the scenario on a later base."
+      f"Nothing was computed. "
+      + (
+        f"Its {cleared} previously computed fact set(s) were all months "
+        "that have since closed, and have been cleared. "
+        if cleared
+        else ""
+      )
+      + "Extend horizon_months to forecast from the current close, or "
+      "re-create the scenario on a later base. The authored levers are "
+      "untouched."
+    )
+    session.flush()
+    return ComputeForecastResponse(
+      structure_id=structure.id,
+      scenario_id=scenario_id,
+      entity_id=entity_id,
+      base_period=mechanics.base_period,
+      anchor_period=anchor_period,
+      months=months_n,
+      months_computed=[],
+      halted_at=None,
+      skipped=skipped,
+      diagnostics=diagnostics,
     )
 
   if anchor_period != mechanics.base_period:

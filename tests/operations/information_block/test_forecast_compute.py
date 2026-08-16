@@ -294,6 +294,7 @@ def _run(
   verify: Any = None,
   closed_months: set[str] | None = None,
   bs_closed_months: set[str] | None = None,
+  published_months: set[str] | None = None,
 ):
   """``verify`` controls ``_verify_month_sets``.
 
@@ -302,15 +303,20 @@ def _run(
   makes the stop-the-walk behaviour testable at all; the fixed stub is
   precisely why it never was.
 
-  ``closed_months`` names the months carrying actual statement sets —
-  ``{"2026-06"}`` (the base alone) by default, which is where the books
-  stood when each of these scenarios was authored. Widen it to move the
-  seam and watch the walk re-anchor. ``bs_closed_months`` narrows the
-  balance-sheet half independently, for the month that closed its income
-  statement but not its balance sheet.
+  ``closed_months`` names the months carrying **canonical** (close-stamped)
+  statement sets — ``{"2026-06"}`` (the base alone) by default, which is
+  where the books stood when each of these scenarios was authored. Widen it
+  to move the seam and watch the walk re-anchor. ``bs_closed_months``
+  narrows the balance-sheet half independently, for the month that closed
+  its income statement but not its balance sheet.
+
+  ``published_months`` names months carrying only a **publication
+  snapshot** — a report was generated for them, but they are open, or were
+  reopened. They are visible to a non-canonical read and must never anchor.
   """
   closed = closed_months if closed_months is not None else {"2026-06"}
   bs_closed = bs_closed_months if bs_closed_months is not None else closed
+  published = published_months or set()
   structure = _structure(mechanics)
   recorder = _Recorder()
 
@@ -332,19 +338,27 @@ def _run(
     entity_id: Any = None,
     period_start: Any = None,
     period_end: Any = None,
+    *,
+    canonical_only: bool = False,
   ) -> Any:
     # Which months are closed has to be modelled rather than assumed now
     # that the walk asks, in order to resolve its anchor. A stub answering
     # "yes" for every month would report the whole horizon as closed.
+    #
+    # And closed is not the same question as "a set exists": a publication
+    # snapshot can sit on an open or reopened month, so `canonical_only`
+    # has to be honoured here or the tests can't tell the two apart.
     month = (
       None if period_end is None else f"{period_end.year:04d}-{period_end.month:02d}"
     )
+    visible = closed if canonical_only else closed | published
+    bs_visible = bs_closed if canonical_only else bs_closed | published
     if sid == "struct_is":
-      if month is not None and month not in closed:
+      if month is not None and month not in visible:
         return None
       return SimpleNamespace(id="fs_base_is")
     if sid == "struct_bs" and schedule_projection is not None:
-      if month is not None and month not in bs_closed:
+      if month is not None and month not in bs_visible:
         return None
       # A BS base set exists so the walk builds an articulation context
       # (patched below to the bare schedule-only shape).
@@ -357,7 +371,7 @@ def _run(
     # The anchor scan's upper bound. Reads from the same `closed_months`
     # model as `_actual_set_at` so the two can't disagree about where the
     # books stand — a bound below the seam would skip a valid anchor.
-    patch.object(fc, "_newest_actual_month", return_value=max(closed)),
+    patch.object(fc, "_newest_actual_month", return_value=max(closed)),  # canonical
     patch.object(
       fc,
       "load_articulation_context",
@@ -1451,19 +1465,111 @@ class TestSeamAnchoredRoll:
     assert len(response.months_computed) < response.months
 
   def test_a_fully_overtaken_scenario_says_so(self) -> None:
-    """An expired scenario is an author-actionable condition, not a no-op.
+    """An expired scenario is an author-actionable condition, not a no-op."""
+    response, _ = _run(
+      _seam_mechanics(horizon=3),
+      SEAM_RULES,
+      _levers_for(3),
+      months=3,
+      closed_months={"2026-06", "2026-07", "2026-08", "2026-09"},
+    )
 
-    Returning "0 months computed" with a green response would read as
-    success to every caller.
+    assert response.months_computed == []
+    assert response.halted_at is None
+    assert any("no forward months left" in d for d in response.diagnostics)
+    assert any("horizon_months" in d for d in response.diagnostics), (
+      "the diagnostic has to name the way out, not just the condition"
+    )
+
+  def test_a_fully_overtaken_scenario_still_cleans_up(self) -> None:
+    """The limit case must not behave opposite to the trend.
+
+    This used to raise, which read as the loud answer and was the quiet
+    one: the exception rolled the session back, so every superseded month
+    survived it — and a fully-overtaken scenario is precisely the case
+    where *all* of them qualify for the sweep. A partially-overtaken
+    scenario cleaned up after itself while a fully-overtaken one did not.
     """
-    with pytest.raises(ValueError, match="no forward months left"):
-      _run(
+    with patch.object(fc, "_invalidate_superseded_head", return_value=3) as head:
+      response, _ = _run(
         _seam_mechanics(horizon=3),
         SEAM_RULES,
         _levers_for(3),
         months=3,
         closed_months={"2026-06", "2026-07", "2026-08", "2026-09"},
       )
+
+    head.assert_called_once()
+    assert head.call_args.kwargs["scenario_id"] == "struct_budget"
+    assert head.call_args.kwargs["through_period_end"] == date(2026, 9, 30)
+    assert any("have been cleared" in d for d in response.diagnostics)
+
+  def test_a_publication_snapshot_is_not_a_closed_month(self) -> None:
+    """An anchor is a claim that the books are closed through a month.
+
+    `create_report` consults no fiscal calendar, so a report generated for
+    an open — or future — month leaves a valid publication snapshot behind
+    it. Anchoring there would seed the walk from an incomplete month and
+    delete real forecast months to do it.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06"},
+      published_months={"2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert next(m.period for m in response.months_computed) == "2026-07"
+
+  def test_the_scan_below_the_bound_still_demands_canonical(self) -> None:
+    """The bound is canonical, so it usually hides a non-canonical scan —
+    the first month probed is the bound itself, which is closed by
+    definition. It stops hiding it the moment the scan walks DOWN: the
+    newest closed month can carry an income statement without a balance
+    sheet, and the month below it can be one that was reopened. Then the
+    scan is the only thing standing between the walk and a month nobody
+    closed.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      # 2026-08 closed its income statement but not its balance sheet, so
+      # the scan can't anchor there and keeps walking back.
+      closed_months={"2026-06", "2026-08"},
+      bs_closed_months={"2026-06"},
+      # 2026-07 was reopened: canonical retracted, snapshot left behind.
+      published_months={"2026-07"},
+      schedule_projection=ScheduleProjection(),
+    )
+
+    assert response.anchor_period == "2026-06", (
+      "the scan walked past the bound into a reopened month and treated "
+      "its leftover publication snapshot as a close"
+    )
+
+  def test_a_reopened_month_stops_anchoring(self) -> None:
+    """Reopening retracts the canonical set and leaves the snapshot.
+
+    So the same publication row that never proved closure in the first
+    place is exactly what is left behind when a month stops being closed.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      # 2026-08 was closed and has been reopened: canonical gone, snapshot
+      # left. 2026-07 is still genuinely closed.
+      closed_months={"2026-06", "2026-07"},
+      published_months={"2026-08"},
+    )
+
+    assert response.anchor_period == "2026-07"
 
   def test_a_month_without_a_balance_sheet_cannot_anchor(self) -> None:
     """Anchoring half-blind would silently drop the balance-sheet roll."""
@@ -1525,7 +1631,7 @@ class TestAnchorScanBound:
   def _resolve(newest: str | None, closed: set[str], horizon: int = 12):
     probed: list[str] = []
 
-    def _at(session, sid, entity_id, period_start, period_end):
+    def _at(session, sid, entity_id, period_start, period_end, *, canonical_only=False):
       month = f"{period_end.year:04d}-{period_end.month:02d}"
       probed.append(month)
       return SimpleNamespace(id="fs") if month in closed else None
