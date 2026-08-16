@@ -856,6 +856,26 @@ class APIKeyCache:
       logger.error(f"Failed to invalidate JWT user data cache for {user_id}: {e}")
       return False
 
+  def _api_key_cache_keys(self, api_key_hash: str) -> list[str]:
+    """Every Redis key holding state for one API key: the validation entry,
+    its signature, and each cached per-graph access decision.
+
+    Revocation must drop all of them together. The per-graph entries are the
+    ones a partial sweep misses: ``validate_api_key_with_graph`` short-circuits
+    on a cached allow, so a surviving ``apikey_graph:`` entry keeps a revoked
+    key inside the graph until TTL even after the validation entry is gone.
+    """
+    api_key_cache_key = self._get_api_key_cache_key(api_key_hash)
+    signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
+
+    pattern = f"{self.GRAPH_CACHE_KEY_PREFIX}{api_key_hash}:*"
+    graph_keys = cast(list[str], self.redis.keys(pattern))
+
+    signature_pattern = f"{self.CACHE_SIGNATURE_PREFIX}graph_{api_key_hash}:*"
+    signature_keys = cast(list[str], self.redis.keys(signature_pattern))
+
+    return [api_key_cache_key, signature_key, *graph_keys, *signature_keys]
+
   def invalidate_api_key(self, api_key_hash: str) -> bool:
     """Drop every cached record for an API key: validation, signature, and
     per-graph access decisions. Returns True when the deletes took; False
@@ -863,16 +883,7 @@ class APIKeyCache:
     treat as incomplete.
     """
     try:
-      api_key_cache_key = self._get_api_key_cache_key(api_key_hash)
-      signature_key = f"{self.CACHE_SIGNATURE_PREFIX}{api_key_hash}"
-
-      pattern = f"{self.GRAPH_CACHE_KEY_PREFIX}{api_key_hash}:*"
-      graph_keys = cast(list[str], self.redis.keys(pattern))
-
-      signature_pattern = f"{self.CACHE_SIGNATURE_PREFIX}graph_{api_key_hash}:*"
-      signature_keys = cast(list[str], self.redis.keys(signature_pattern))
-
-      keys_to_delete = [api_key_cache_key, signature_key, *graph_keys, *signature_keys]
+      keys_to_delete = self._api_key_cache_keys(api_key_hash)
       if keys_to_delete:
         self.redis.delete(*keys_to_delete)
 
@@ -1021,11 +1032,12 @@ class APIKeyCache:
       logger.error(f"Failed to invalidate user graph access cache: {e}")
 
   def invalidate_user_data(self, user_id: str) -> None:
-    """Drop every cache entry embedding this user's profile.
+    """Drop every cache entry embedding this user's profile or grants.
 
     Covers the user-keyed JWT cache, any API key or JWT entry whose payload
-    names this user, and their JWT graph access. Call after a profile change
-    so no surface keeps serving the old record.
+    names this user (each API key's per-graph access decisions go with it),
+    and their JWT graph access. Call after a profile change or a grant
+    revocation so no surface keeps serving the old record.
     """
     try:
       invalidated_count = 0
@@ -1052,7 +1064,11 @@ class APIKeyCache:
               continue
             user_data = data.get("user_data", {})
             if user_data.get("id") == user_id:
-              self.redis.delete(key)
+              # Drop the key's per-graph access decisions along with the
+              # validation entry: a revoked grant is what brought us here,
+              # and a cached allow on that graph would outlive it.
+              api_key_hash = key[len(self.CACHE_KEY_PREFIX) :]
+              self.redis.delete(*self._api_key_cache_keys(api_key_hash))
               invalidated_count += 1
         except Exception as e:
           logger.error(f"Failed to check/invalidate API key cache {key}: {e}")

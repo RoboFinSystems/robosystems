@@ -128,11 +128,19 @@ def cancel_user_repository_subscriptions(
   actor_user_id: str,
   reason: str = "org_offboarding",
 ) -> list[str]:
-  """Cancel every repository subscription a user still holds, immediately.
+  """Cancel every repository subscription a user still holds, immediately,
+  and revoke every repository grant they still hold — whether or not a live
+  subscription stands behind it.
 
   Used when a member is removed from the org: the org paid for that access
   because of the membership, so it ends with the membership rather than
   running to the period end on someone else's card.
+
+  The second sweep exists because a period-end cancellation moves the billing
+  row to a terminal status at once while deliberately leaving the grant alive
+  until ``expires_at``. Authorization reads the grant, not the billing row, so
+  a sweep keyed on live subscriptions alone would off-board the member and
+  leave them inside the repository until the period closed.
 
   Raises ProviderCancellationError if the provider refuses — the caller must
   abort rather than off-board a member the org keeps paying for.
@@ -151,5 +159,18 @@ def cancel_user_repository_subscriptions(
       reason=reason,
     )
     canceled.append(subscription.id)
+
+  for grant in UserRepository.get_user_repositories(user_id, session):
+    grant.revoke_access(session, reason=reason)
+    logger.info(
+      f"Revoked repository grant {grant.repository_name} for user {user_id} "
+      f"with no live subscription behind it",
+      extra={
+        "user_id": user_id,
+        "repository": grant.repository_name,
+        "actor_user_id": actor_user_id,
+        "reason": reason,
+      },
+    )
 
   return canceled

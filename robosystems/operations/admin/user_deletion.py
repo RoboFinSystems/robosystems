@@ -245,6 +245,43 @@ def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
   )
 
 
+def _invalidate_auth_caches(user_id: str, api_key_fingerprints: list[str]) -> None:
+  """Evict everything that could still authenticate the deleted account.
+
+  A JWT is refused once its user row is gone, and an API key once its row is
+  gone — but only when the check reaches the database. Both paths are fronted
+  by a cache with a TTL of minutes, so without this sweep a deleted account
+  keeps authenticating from cache. Best-effort: a Redis failure is logged at
+  CRITICAL rather than raised, because the deletion has already committed and
+  the entries lapse on TTL.
+  """
+  import importlib
+
+  try:
+    cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+    api_key_cache = cache_module.api_key_cache
+  except Exception as e:
+    logger.error(
+      f"CRITICAL: auth cache module unavailable after deleting user {user_id}; "
+      f"cached credentials survive until TTL: {e}"
+    )
+    return
+
+  cleared = True
+  for fingerprint in api_key_fingerprints:
+    cleared = bool(api_key_cache.invalidate_api_key(fingerprint)) and cleared
+  cleared = bool(api_key_cache.invalidate_jwt_user_data(user_id)) and cleared
+  cleared = bool(api_key_cache.invalidate_user_jwt_graph_access(user_id)) and cleared
+  # Catches any key entry the fingerprints could not address.
+  api_key_cache.invalidate_user_data(user_id)
+
+  if not cleared:
+    logger.error(
+      f"CRITICAL: auth cache invalidation incomplete after deleting user "
+      f"{user_id}; a cached credential may keep authenticating until TTL."
+    )
+
+
 def execute_user_deletion(
   user_id: str, session: Session, actor: str = "admin"
 ) -> UserDeletionPlan:
@@ -260,6 +297,19 @@ def execute_user_deletion(
   user = User.get_by_id(user_id, session)
   if not user:
     raise UserNotFound(f"User {user_id} not found")
+
+  # The bulk delete below bypasses UserAPIKey.delete(), which is where a key
+  # normally clears its own cache entry — and the fingerprint that addresses
+  # that entry dies with the row. Capture it now; the caches are purged after
+  # the commit so a request racing the deletion cannot re-populate them from
+  # a row that still exists.
+  api_key_fingerprints = [
+    row.key_fingerprint
+    for row in session.query(UserAPIKey.key_fingerprint)
+    .filter_by(user_id=user_id)
+    .all()
+    if row.key_fingerprint
+  ]
 
   # Audit and billing history survive the account — the actor is de-referenced,
   # never deleted, because retention is itself a compliance requirement.
@@ -328,6 +378,8 @@ def execute_user_deletion(
   except Exception:
     session.rollback()
     raise
+
+  _invalidate_auth_caches(user_id, api_key_fingerprints)
 
   logger.info(
     f"Deleted user {user_id} ({plan.email}) by {actor}",

@@ -140,6 +140,31 @@ class TestCancelAllForUser:
     assert subscription.status == "canceled"
     assert access.is_active is False
 
+  def test_offboarding_revokes_a_grant_left_by_a_period_end_cancel(
+    self, test_db, subscribed_member, test_user
+  ):
+    """A period-end cancel makes the billing row terminal at once but leaves
+    the grant alive to ``expires_at``. Off-boarding sweeps by live
+    subscription, so without a second pass the removed member kept access."""
+    member, subscription, access = subscribed_member
+
+    with patch(PROVIDER, return_value=MagicMock()):
+      cancel_repository_subscription(
+        subscription, session=test_db, actor_user_id=member.id
+      )
+    test_db.refresh(access)
+    assert access.is_active is True, "precondition"
+
+    with patch(PROVIDER, return_value=MagicMock()):
+      canceled = cancel_user_repository_subscriptions(
+        member.id, session=test_db, actor_user_id=test_user.id
+      )
+
+    assert canceled == [], "the billing row was already terminal"
+    test_db.refresh(access)
+    assert access.is_active is False
+    assert not UserRepository.user_has_access(member.id, "sec", test_db)
+
   def test_no_subscriptions_is_a_no_op(self, test_db, test_user):
     assert (
       cancel_user_repository_subscriptions(
