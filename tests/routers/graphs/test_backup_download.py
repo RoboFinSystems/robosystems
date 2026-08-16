@@ -376,10 +376,13 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  @patch(
+    "robosystems.routers.graphs.backups.utils.GraphUser.user_has_admin_access",
+    return_value=True,
+  )
   def test_download_allowed_for_user_graph_under_limit(
     self,
-    mock_get_by_user_id,
+    mock_admin_access,
     mock_is_shared,
     mock_get_graph,
     mock_check_graph_limit,
@@ -398,11 +401,6 @@ class TestBackupDownloadEndpoint:
 
     try:
       mock_is_shared.return_value = False
-
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "kg0123456789abcdef"
-      mock_user_graph.role = "admin"
-      mock_get_by_user_id.return_value = [mock_user_graph]
 
       # Graph has standard tier
       mock_graph_record = MagicMock()
@@ -442,10 +440,13 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  @patch(
+    "robosystems.routers.graphs.backups.utils.GraphUser.user_has_admin_access",
+    return_value=True,
+  )
   def test_download_rate_limit_exceeded_for_user_graph(
     self,
-    mock_get_by_user_id,
+    mock_admin_access,
     mock_is_shared,
     mock_get_graph,
     mock_check_graph_limit,
@@ -463,11 +464,6 @@ class TestBackupDownloadEndpoint:
 
     try:
       mock_is_shared.return_value = False
-
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "kg0123456789abcdef"
-      mock_user_graph.role = "admin"
-      mock_get_by_user_id.return_value = [mock_user_graph]
 
       # Graph has standard tier (2 downloads/month)
       mock_graph_record = MagicMock()
@@ -502,10 +498,13 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  @patch(
+    "robosystems.routers.graphs.backups.utils.GraphUser.user_has_admin_access",
+    return_value=True,
+  )
   def test_download_allowed_for_xlarge_tier(
     self,
-    mock_get_by_user_id,
+    mock_admin_access,
     mock_is_shared,
     mock_get_graph,
     mock_check_graph_limit,
@@ -524,11 +523,6 @@ class TestBackupDownloadEndpoint:
 
     try:
       mock_is_shared.return_value = False
-
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "kg0123456789abcdef"
-      mock_user_graph.role = "admin"
-      mock_get_by_user_id.return_value = [mock_user_graph]
 
       # Graph has xlarge tier (10 downloads/month)
       mock_graph_record = MagicMock()
@@ -566,10 +560,13 @@ class TestBackupDownloadEndpoint:
   )
   @patch("robosystems.routers.graphs.backups.download.Graph.get_by_id")
   @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  @patch(
+    "robosystems.routers.graphs.backups.utils.GraphUser.user_has_admin_access",
+    return_value=True,
+  )
   def test_download_returns_404_when_backup_not_found(
     self,
-    mock_get_by_user_id,
+    mock_admin_access,
     mock_is_shared,
     mock_get_graph,
     mock_check_graph_limit,
@@ -587,11 +584,6 @@ class TestBackupDownloadEndpoint:
 
     try:
       mock_is_shared.return_value = False
-
-      mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "kg0123456789abcdef"
-      mock_user_graph.role = "admin"
-      mock_get_by_user_id.return_value = [mock_user_graph]
 
       # Graph with xlarge tier (10 downloads/month)
       mock_graph_record = MagicMock()

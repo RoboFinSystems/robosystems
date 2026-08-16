@@ -30,7 +30,7 @@ from robosystems.middleware.rate_limits import (
 from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
 from robosystems.models.core import Graph, User, UserRepository
 
-from .utils import get_backup_manager
+from .utils import get_backup_manager, verify_admin_access
 
 # Create router
 router = APIRouter()
@@ -53,7 +53,12 @@ router = APIRouter()
   status_code=status.HTTP_200_OK,
   responses={
     200: {"description": "Download URL generated successfully"},
-    403: {"description": "Access denied"},
+    403: {
+      "description": (
+        "Access denied — admin role on the graph, or an eligible repository "
+        "subscription, is required"
+      )
+    },
     404: {"description": "Backup not found"},
     500: {"description": "Failed to generate download URL"},
   },
@@ -81,6 +86,8 @@ async def get_backup_download_url(
   of compressed .lbug backup files without going through the API.
 
   Requirements:
+  - Admin role on the graph (dedicated graphs), or a repository subscription
+    whose plan includes downloads (shared repositories)
   - Backup must be in full_dump format (complete .lbug file)
   - File will be compressed
 
@@ -156,6 +163,13 @@ async def get_backup_download_url(
           },
         )
     else:
+      # A dedicated graph's backup is the whole database, unencrypted, behind
+      # a URL that lives up to a day. Creating and restoring one already
+      # require admin on the graph; taking one out does too. Shared
+      # repositories are gated by subscription plan above instead — there is
+      # no per-graph role there.
+      verify_admin_access(current_user, graph_id, session)
+
       # Dedicated graph: check tier-based download limits
       graph_record = Graph.get_by_id(graph_id, session)
       if not graph_record:
