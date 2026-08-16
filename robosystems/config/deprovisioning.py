@@ -17,11 +17,16 @@ class DeprovisioningConfig:
   backup_delay_hours: int = 24
   # 90 days for every tier: the S3 lifecycle rule (cloudformation/s3.yaml,
   # ExpireGraphBackups: 90) deletes the object then regardless of what is
-  # promised here, and the final backup creates no GraphBackup row, so the
-  # tier-aware cleanup job cannot extend it either. This table once promised
-  # 180/365 days to Large/XLarge — hosting the infrastructure could not
-  # deliver. Extending it for real means exempting final backups from the
-  # lifecycle rule and tracking them in GraphBackup.
+  # promised here. This table once promised 180/365 days to Large/XLarge —
+  # hosting the infrastructure could not deliver.
+  #
+  # The final backup is now tracked in GraphBackup (DeprovisionService's
+  # _register_final_backup), which is what makes it retrievable during the
+  # published export window and moves its expiry onto the tier-aware cleanup
+  # job. That job reads the value below, so differentiating this table by tier
+  # would now take effect — but only up to the lifecycle rule's 90-day
+  # ceiling, which still deletes the object regardless. Extending it for real
+  # means raising or exempting that rule too.
   backup_hosting_days: dict[str, int] = field(
     default_factory=lambda: {
       "ladybug-standard": 90,

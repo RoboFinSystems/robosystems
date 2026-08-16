@@ -221,6 +221,77 @@ class TestDeprovisionService:
       assert 88 <= days <= 90, days
 
   @pytest.mark.asyncio
+  async def test_failed_backup_registration_does_not_wedge_the_teardown(
+    self, service, db_session, test_graph, test_user
+  ):
+    """A failed registration must not take the rest of the teardown with it.
+
+    Registering the backup is the first database write in deprovisioning, and
+    on PostgreSQL a failed statement aborts the entire transaction — so
+    without a SAVEPOINT every later step would fail against a dead session,
+    and in the batch job every graph after this one in the same run would too.
+    Here the write fails on a NOT NULL bucket; steps 2-7 must still complete.
+    """
+    from robosystems.models.core.document import Document
+    from robosystems.models.core.graph.graph_backup import GraphBackup
+
+    Document.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      title="Survives the failed registration",
+      content="confidential",
+      session=db_session,
+    )
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
+      ) as mock_backup_cls,
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      mock_backup = AsyncMock()
+      # s3_bucket is NOT NULL, so the insert fails inside the savepoint.
+      mock_backup.s3_adapter.bucket_name = None
+      mock_backup.create_backup.return_value = _final_backup_metadata()
+      mock_backup_cls.return_value = mock_backup
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=True
+      )
+
+      assert result.backup_registered is False
+      assert result.errors
+
+      # The teardown continued: PG cleanup ran and the graph reached its
+      # terminal state. Both would fail on a transaction poisoned at step 1.
+      assert result.records_cleaned is True
+      assert result.documents_deleted >= 1
+      assert (
+        db_session.query(Document)
+        .filter(Document.graph_id == test_graph.graph_id)
+        .count()
+        == 0
+      )
+      assert (
+        db_session.query(GraphBackup)
+        .filter(GraphBackup.graph_id == test_graph.graph_id)
+        .count()
+        == 0
+      )
+
+      db_session.refresh(test_graph)
+      assert test_graph.status == GraphStatus.DEPROVISIONED.value
+
+  @pytest.mark.asyncio
   async def test_deprovision_not_found(self, service, db_session):
     """Returns not_found for nonexistent graph."""
     result = await service.deprovision_graph("kg_nonexistent", db_session)

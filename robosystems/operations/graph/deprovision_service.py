@@ -236,6 +236,20 @@ class GraphDeprovisionService:
     ``complete_backup``: those commit, and this runs inside a best-effort step
     of a caller-owned transaction, where an early commit would persist a
     partial teardown if a later step failed.
+
+    The write goes inside a SAVEPOINT because it is the *first* database
+    statement of the teardown, and on PostgreSQL a failed statement aborts the
+    whole transaction — every later step would then fail against a dead
+    session, turning one best-effort miss into total failure and breaking this
+    module's contract that steps do not block each other.
+
+    A plain ``session.rollback()`` would be worse than the problem. The batch
+    job (``dagster/jobs/graph_lifecycle.py``) runs every graph through one
+    session that commits only after the loop, so rolling back here would
+    discard the completed teardowns of every graph already processed in that
+    run — graphs whose databases, extensions schemas and registry slots are
+    already gone, leaving their records looking live. The savepoint contains
+    the failure to this row alone.
     """
     from ...models.core.graph.graph_backup import (
       BackupInitiator,
@@ -254,32 +268,32 @@ class GraphDeprovisionService:
     if metadata.payload_delta:
       backup_metadata["payload_delta"] = metadata.payload_delta
 
-    session.add(
-      GraphBackup(
-        graph_id=graph.graph_id,
-        database_name=graph.graph_id,
-        backup_type=BackupType.FULL.value,
-        initiated_by=BackupInitiator.FINAL.value,
-        status=BackupStatus.COMPLETED.value,
-        s3_bucket=s3_bucket,
-        s3_key=metadata.s3_key or "",
-        s3_metadata_key=metadata.s3_metadata_key,
-        original_size_bytes=metadata.original_size,
-        compressed_size_bytes=metadata.compressed_size,
-        compression_ratio=metadata.compression_ratio,
-        node_count=metadata.node_count,
-        relationship_count=metadata.relationship_count,
-        database_version=metadata.database_version,
-        backup_duration_seconds=metadata.backup_duration_seconds,
-        checksum=metadata.checksum,
-        compression_enabled=True,
-        backup_metadata=backup_metadata,
-        started_at=metadata.timestamp,
-        completed_at=now,
-        expires_at=now + timedelta(days=retention_days),
+    with session.begin_nested():
+      session.add(
+        GraphBackup(
+          graph_id=graph.graph_id,
+          database_name=graph.graph_id,
+          backup_type=BackupType.FULL.value,
+          initiated_by=BackupInitiator.FINAL.value,
+          status=BackupStatus.COMPLETED.value,
+          s3_bucket=s3_bucket,
+          s3_key=metadata.s3_key or "",
+          s3_metadata_key=metadata.s3_metadata_key,
+          original_size_bytes=metadata.original_size,
+          compressed_size_bytes=metadata.compressed_size,
+          compression_ratio=metadata.compression_ratio,
+          node_count=metadata.node_count,
+          relationship_count=metadata.relationship_count,
+          database_version=metadata.database_version,
+          backup_duration_seconds=metadata.backup_duration_seconds,
+          checksum=metadata.checksum,
+          compression_enabled=True,
+          backup_metadata=backup_metadata,
+          started_at=metadata.timestamp,
+          completed_at=now,
+          expires_at=now + timedelta(days=retention_days),
+        )
       )
-    )
-    session.flush()
     result.backup_registered = True
 
   async def _delete_subgraphs(
