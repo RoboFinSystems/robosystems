@@ -258,10 +258,12 @@ class TestGraphCreationEndpoint:
 
               assert response.status_code == 202
 
-  async def test_create_graph_user_limits_not_found(
+  async def test_create_graph_refuses_a_user_with_no_organization(
     self, async_client: AsyncClient, sample_graph_request
   ):
-    """Test graph creation when user has no organization."""
+    """A caller with no org is refused, not errored. Removal from a last org
+    leaves exactly this state, so it is an ordinary authorization outcome —
+    a 500 would file it as a server fault and count against the error rate."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
       with patch("robosystems.models.core.OrgUser.get_user_orgs") as mock_get_user_orgs:
         mock_db = Mock()
@@ -275,10 +277,10 @@ class TestGraphCreationEndpoint:
           json=sample_graph_request.model_dump(),
         )
 
-        assert response.status_code == 500
+        assert response.status_code == 403
         data = response.json()
         assert data["detail"]["error"]["code"] == "org_not_found"
-        assert "User organization not found" in data["detail"]["error"]["message"]
+        assert "not a member of any organization" in data["detail"]["error"]["message"]
 
   async def test_create_graph_limit_reached(
     self, async_client: AsyncClient, sample_graph_request
