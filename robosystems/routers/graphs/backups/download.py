@@ -170,8 +170,15 @@ async def get_backup_download_url(
       # no per-graph role there.
       verify_admin_access(current_user, graph_id, session)
 
-      # Dedicated graph: check tier-based download limits
-      graph_record = Graph.get_by_id(graph_id, session)
+      # Dedicated graph: check tier-based download limits.
+      # Deprovisioned graphs are included deliberately. The final backup is
+      # taken precisely so a departing customer can retrieve their data during
+      # the published export grace period, and the default lookup skips
+      # deprovisioned rows — which 404'd the one download that window exists
+      # for. Access is unchanged: verify_admin_access above still gates this
+      # on graph admin, which after teardown only the org's owners and admins
+      # still hold.
+      graph_record = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
       if not graph_record:
         logger.warning(
           f"Graph record not found for {graph_id} during download limit check"

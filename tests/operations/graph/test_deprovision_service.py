@@ -1,7 +1,7 @@
 """Tests for GraphDeprovisionService."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +14,31 @@ from robosystems.operations.graph.deprovision_service import (
 )
 
 SERVICE_MODULE = "robosystems.operations.graph.deprovision_service"
+
+
+def _final_backup_metadata(s3_key: str = "backups/test/final.lbug.zip"):
+  """A BackupMetadata stand-in with values a DB column will actually accept.
+
+  A bare MagicMock passes every attribute access and then fails at flush, which
+  the best-effort backup step swallows into result.errors — so the registration
+  would look tested while never running.
+  """
+  metadata = MagicMock()
+  metadata.s3_key = s3_key
+  metadata.s3_metadata_key = f"{s3_key}.metadata.json"
+  metadata.original_size = 2048
+  metadata.compressed_size = 512
+  metadata.compression_ratio = 0.75
+  metadata.node_count = 12
+  metadata.relationship_count = 7
+  metadata.database_version = "1.0"
+  metadata.backup_duration_seconds = 1.5
+  metadata.checksum = "abc123"
+  metadata.backup_format = "full_dump"
+  metadata.timestamp = datetime(2026, 8, 15, 12, 0, 0)
+  metadata.memory = None
+  metadata.payload_delta = None
+  return metadata
 
 
 @pytest.fixture
@@ -109,8 +134,8 @@ class TestDeprovisionService:
       mock_alloc_cls.return_value = mock_alloc
 
       mock_backup = AsyncMock()
-      mock_backup_metadata = MagicMock()
-      mock_backup_metadata.s3_key = "backups/test/final.dump"
+      mock_backup.s3_adapter.bucket_name = "test-backup-bucket"
+      mock_backup_metadata = _final_backup_metadata("backups/test/final.dump")
       mock_backup.create_backup.return_value = mock_backup_metadata
       mock_backup_cls.return_value = mock_backup
 
@@ -127,6 +152,144 @@ class TestDeprovisionService:
       db_session.refresh(test_graph)
       assert test_graph.status == GraphStatus.DEPROVISIONED.value
       assert test_graph.deleted_at is not None
+
+  @pytest.mark.asyncio
+  async def test_final_backup_is_registered_for_retrieval(
+    self, service, db_session, test_graph
+  ):
+    """The final backup must be reachable, not just present in S3.
+
+    Both the listing and the download URL resolve through GraphBackup, so an
+    unregistered final backup is invisible to the customer whose export grace
+    period it exists to serve.
+    """
+    from robosystems.models.core.graph.graph_backup import (
+      BackupInitiator,
+      BackupStatus,
+      GraphBackup,
+    )
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
+      ) as mock_backup_cls,
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      mock_backup = AsyncMock()
+      mock_backup.s3_adapter.bucket_name = "test-backup-bucket"
+      mock_backup.create_backup.return_value = _final_backup_metadata()
+      mock_backup_cls.return_value = mock_backup
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=True
+      )
+
+      assert result.backup_created is True
+      assert result.backup_registered is True, result.errors
+
+      row = (
+        db_session.query(GraphBackup)
+        .filter(GraphBackup.graph_id == test_graph.graph_id)
+        .one()
+      )
+      assert row.status == BackupStatus.COMPLETED.value
+      assert row.s3_key == "backups/test/final.lbug.zip"
+      assert row.s3_bucket == "test-backup-bucket"
+
+      # Not SYSTEM: that initiator is filtered out of the customer listing,
+      # which would leave the export invisible for a second reason.
+      assert row.initiated_by == BackupInitiator.FINAL.value
+      assert row.initiated_by != BackupInitiator.SYSTEM.value
+
+      # Expiry tracks the tier's backup hosting window, not the shorter export
+      # window — a 30-day expiry here would delete the archive early.
+      assert row.expires_at is not None
+      # The column is naive; the value written was UTC. Compare like for like.
+      expires_at = row.expires_at
+      if expires_at.tzinfo is not None:
+        expires_at = expires_at.astimezone(UTC).replace(tzinfo=None)
+      days = (expires_at - datetime.now(UTC).replace(tzinfo=None)).days
+      assert 88 <= days <= 90, days
+
+  @pytest.mark.asyncio
+  async def test_failed_backup_registration_does_not_wedge_the_teardown(
+    self, service, db_session, test_graph, test_user
+  ):
+    """A failed registration must not take the rest of the teardown with it.
+
+    Registering the backup is the first database write in deprovisioning, and
+    on PostgreSQL a failed statement aborts the entire transaction — so
+    without a SAVEPOINT every later step would fail against a dead session,
+    and in the batch job every graph after this one in the same run would too.
+    Here the write fails on a NOT NULL bucket; steps 2-7 must still complete.
+    """
+    from robosystems.models.core.document import Document
+    from robosystems.models.core.graph.graph_backup import GraphBackup
+
+    Document.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      title="Survives the failed registration",
+      content="confidential",
+      session=db_session,
+    )
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
+      ) as mock_backup_cls,
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      mock_backup = AsyncMock()
+      # s3_bucket is NOT NULL, so the insert fails inside the savepoint.
+      mock_backup.s3_adapter.bucket_name = None
+      mock_backup.create_backup.return_value = _final_backup_metadata()
+      mock_backup_cls.return_value = mock_backup
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=True
+      )
+
+      assert result.backup_registered is False
+      assert result.errors
+
+      # The teardown continued: PG cleanup ran and the graph reached its
+      # terminal state. Both would fail on a transaction poisoned at step 1.
+      assert result.records_cleaned is True
+      assert result.documents_deleted >= 1
+      assert (
+        db_session.query(Document)
+        .filter(Document.graph_id == test_graph.graph_id)
+        .count()
+        == 0
+      )
+      assert (
+        db_session.query(GraphBackup)
+        .filter(GraphBackup.graph_id == test_graph.graph_id)
+        .count()
+        == 0
+      )
+
+      db_session.refresh(test_graph)
+      assert test_graph.status == GraphStatus.DEPROVISIONED.value
 
   @pytest.mark.asyncio
   async def test_deprovision_not_found(self, service, db_session):
@@ -370,6 +533,10 @@ class TestDeprovisionService:
     self, service, db_session, test_graph, test_user
   ):
     """Verify PG records are cleaned up."""
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
     from robosystems.models.core.document import Document
     from robosystems.models.core.graph.graph_credits import GraphCredits
     from robosystems.models.core.graph.graph_user import GraphUser
@@ -397,6 +564,27 @@ class TestDeprovisionService:
       content="confidential",
       session=db_session,
     )
+
+    connection = Connection.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      provider="quickbooks",
+      session=db_session,
+      realm_id="realm-departed",
+    )
+    # Built directly rather than through create(): that path encrypts, which
+    # needs a real Fernet key, and what is under test is that the row is
+    # removed — not how its contents were sealed.
+    db_session.add(
+      ConnectionCredentials(
+        connection_id=connection.id,
+        provider="quickbooks",
+        user_id=test_user.id,
+        encrypted_credentials="ciphertext-standing-in-for-a-refresh-token",
+      )
+    )
+    db_session.commit()
+    connection_id = connection.id
 
     with (
       patch(
@@ -442,6 +630,24 @@ class TestDeprovisionService:
       )
       assert remaining_documents == 0
       assert result.documents_deleted >= 1
+
+      # Neither the connection nor — critically — the encrypted OAuth token
+      # behind it may outlive the graph. connection_credentials carries no FK,
+      # so nothing else in the tree would ever reach it.
+      remaining_connections = (
+        db_session.query(Connection)
+        .filter(Connection.graph_id == test_graph.graph_id)
+        .count()
+      )
+      assert remaining_connections == 0
+      assert result.connections_deleted >= 1
+
+      remaining_credentials = (
+        db_session.query(ConnectionCredentials)
+        .filter(ConnectionCredentials.connection_id == connection_id)
+        .count()
+      )
+      assert remaining_credentials == 0
 
   @pytest.mark.asyncio
   async def test_deprovision_updates_subscription_metadata(
