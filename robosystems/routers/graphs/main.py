@@ -144,8 +144,16 @@ async def get_graphs(
     member_graphs = 0
     repository_count = 0
 
+    listed_graph_ids: set[str] = set()
+
     # Add user graphs
     for user_graph in user_graphs:
+      # A subgraph carries no grant of its own — access is the parent's grant
+      # at the parent's role — so any row on a subgraph id predates that rule
+      # and is ignored; the subgraph is listed under its parent below.
+      if user_graph.graph.is_subgraph:
+        continue
+
       # Skip deprovisioned graphs
       graph_status = user_graph.graph.status or "active"
       if graph_status == "deprovisioned":
@@ -160,6 +168,7 @@ async def get_graphs(
       else:
         member_graphs += 1
 
+      listed_graph_ids.add(user_graph.graph_id)
       description, tags = _label_fields(user_graph.graph)
       graphs.append(
         GraphInfo(
@@ -173,16 +182,44 @@ async def get_graphs(
           isRepository=False,
           repositoryType=None,
           schemaExtensions=user_graph.graph.schema_extensions or [],
-          isSubgraph=user_graph.graph.is_subgraph or False,
-          parentGraphId=user_graph.graph.parent_graph_id,
+          isSubgraph=False,
+          parentGraphId=None,
           graphType=user_graph.graph.graph_type,
           status=graph_status,
         )
       )
 
+      for subgraph in Graph.get_subgraphs(user_graph.graph_id, session):
+        subgraph_status = subgraph.status or "active"
+        if subgraph_status == "deprovisioned":
+          continue
+        if user_graph.role == "admin":
+          admin_graphs += 1
+        else:
+          member_graphs += 1
+        listed_graph_ids.add(subgraph.graph_id)
+        description, tags = _label_fields(subgraph)
+        graphs.append(
+          GraphInfo(
+            graphId=subgraph.graph_id,
+            graphName=subgraph.graph_name,
+            description=description,
+            tags=tags,
+            role=user_graph.role,
+            isSelected=False,
+            createdAt=subgraph.created_at.isoformat(),
+            isRepository=False,
+            repositoryType=None,
+            schemaExtensions=subgraph.schema_extensions or [],
+            isSubgraph=True,
+            parentGraphId=subgraph.parent_graph_id,
+            graphType=subgraph.graph_type,
+            status=subgraph_status,
+          )
+        )
+
     # Add org-owned graphs the user holds implicitly as org owner/admin
     # (no explicit GraphUser row — access derives from the org role).
-    explicit_graph_ids = {ug.graph_id for ug in user_graphs}
     admin_org_ids = [
       ou.org_id
       for ou in OrgUser.get_user_orgs(current_user.id, session)
@@ -193,8 +230,8 @@ async def get_graphs(
         session.query(Graph)
         .filter(
           Graph.org_id.in_(admin_org_ids),
-          Graph.graph_id.notin_(explicit_graph_ids)
-          if explicit_graph_ids
+          Graph.graph_id.notin_(listed_graph_ids)
+          if listed_graph_ids
           else Graph.graph_id.isnot(None),
         )
         .all()

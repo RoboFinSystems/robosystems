@@ -263,7 +263,10 @@ class SubgraphService:
     fork_options: dict[str, Any] | None = None,
     platform_managed: bool = False,
   ) -> dict[str, Any]:
-    """Create a subgraph end to end: database, schema, metadata, and access.
+    """Create a subgraph end to end: database, schema, and metadata.
+
+    Access needs no row of its own — a subgraph is reachable by whoever holds
+    a grant on the parent, at the parent's role.
 
     ``subgraph_type`` selects the schema: "knowledge" installs the knowledge
     extension without the base schema, "empty" installs nothing at all, and
@@ -276,7 +279,6 @@ class SubgraphService:
     """
     from ...database import get_db_session
     from ...models.core.graph import Graph
-    from ...models.core.graph.graph_user import GraphUser
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
@@ -352,20 +354,18 @@ class SubgraphService:
       )
       db.add(subgraph)
 
-      graph_user = GraphUser(
-        user_id=user.id,
-        graph_id=subgraph_id,
-        role="admin",
-        created_at=now,
-        updated_at=now,
-      )
-      db.add(graph_user)
+      # No GraphUser row for the subgraph: access to a subgraph is the
+      # parent's grant (GraphUser.get_effective_role resolves subgraphs to
+      # the parent), so a subgraph-scoped row would never be read for
+      # authorization and would outlive the parent grant when a member is
+      # removed.
 
       db.commit()
       db.refresh(subgraph)
 
       logger.info(
-        f"Created subgraph {subgraph_id} (index {next_index}) for parent {parent_graph.graph_id}"
+        f"Created subgraph {subgraph_id} (index {next_index}) for parent "
+        f"{parent_graph.graph_id} by user {user.id}"
       )
 
       fork_status = None

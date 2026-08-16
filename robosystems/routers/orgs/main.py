@@ -1,6 +1,7 @@
 """Organization management endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
@@ -44,7 +45,11 @@ def _visible_org_graphs(
   if not granted:
     return []
 
-  return query.filter(Graph.graph_id.in_(granted)).all()
+  # A grant on a parent reaches its subgraphs (subgraphs carry no row of
+  # their own), so they are visible alongside it.
+  return query.filter(
+    or_(Graph.graph_id.in_(granted), Graph.parent_graph_id.in_(granted))
+  ).all()
 
 
 @router.get(

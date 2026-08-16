@@ -141,7 +141,7 @@ async def get_subscription(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphSubscriptionResponse:
   try:
-    from ...models.core import OrgUser
+    from ...models.core import GraphUser
 
     customer = BillingCustomer.get_by_user_id(current_user.id, db)
     if not customer:
@@ -164,17 +164,16 @@ async def get_subscription(
         resource_type="graph", resource_id=graph_id, session=db
       )
 
-      if subscription:
-        membership = OrgUser.get_by_org_and_user(
-          org_id=subscription.org_id,
-          user_id=current_user.id,
-          session=db,
+      # Org membership alone grants no graph access — a plain member needs an
+      # explicit grant, and owners/admins are implicit admins on every org
+      # graph. Resolve the graph role, the same rule the graph surface and
+      # the org graph listing apply, so a member cannot read the tier and
+      # billing period of a graph they cannot otherwise reach.
+      if subscription and not GraphUser.user_has_access(current_user.id, graph_id, db):
+        raise HTTPException(
+          status_code=403,
+          detail="You do not have access to this graph subscription",
         )
-        if not membership:
-          raise HTTPException(
-            status_code=403,
-            detail="You do not have access to this graph subscription",
-          )
 
     if not subscription:
       raise HTTPException(
