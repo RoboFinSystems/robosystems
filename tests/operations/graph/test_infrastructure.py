@@ -470,6 +470,90 @@ class TestCleanupStaleGraphs:
     assert metric["MetricData"][0]["Value"] == 0
 
   @pytest.mark.unit
+  def test_shared_repository_with_parked_master_is_not_orphaned(self, monitor):
+    """A shared repo's row is bookkeeping, not routing, and its master is
+    parked to zero between ingestion runs — so a missing instance is the
+    normal resting state, not drift. Uses the real registry ids so the
+    exemption cannot drift from the predicate the router uses."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {"graph_id": "sec", "status": "active", "instance_id": "i-parkedmaster0001"},
+        {
+          "graph_id": "sec_historical",
+          "status": "active",
+          "instance_id": "i-parkedmaster0001",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.updated_count == 0
+    graph_table.update_item.assert_not_called()
+    graph_table.delete_item.assert_not_called()
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["Value"] == 0
+
+  @pytest.mark.unit
+  def test_shared_repository_marker_from_before_the_exemption_is_cleared(self, monitor):
+    """A row stamped by a sweep that predates the exemption self-heals rather
+    than carrying the stale marker forever."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {
+          "graph_id": "sec",
+          "status": "active",
+          "instance_id": "i-parkedmaster0001",
+          "instance_missing_since": "2026-08-16T02:01:26+00:00",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 0
+    assert result.updated_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "sec"}
+    assert update["UpdateExpression"] == "REMOVE instance_missing_since"
+
+  @pytest.mark.unit
+  def test_user_graph_is_still_orphaned_when_a_shared_repo_is_present(self, monitor):
+    """The exemption is scoped to shared repos — a user graph on the same
+    sweep is still marked and counted."""
+    graph_table = _make_dynamo_table(
+      items=[
+        {"graph_id": "sec", "status": "active", "instance_id": "i-parkedmaster0001"},
+        {
+          "graph_id": "kg_orphan",
+          "status": "active",
+          "instance_id": "i-doesnotexist00001",
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+    monitor._dynamodb.Table.side_effect = lambda name: (
+      graph_table if name == "test-graph" else instance_table
+    )
+
+    result = monitor.cleanup_stale_graphs()
+
+    assert result.orphaned_count == 1
+    update = graph_table.update_item.call_args.kwargs
+    assert update["Key"] == {"graph_id": "kg_orphan"}
+    metric = monitor._cloudwatch.put_metric_data.call_args.kwargs
+    assert metric["MetricData"][0]["Value"] == 1
+
+  @pytest.mark.unit
   def test_exception_sets_error_message(self, monitor):
     """Top-level exception is captured in error_message."""
     monitor._dynamodb.Table.side_effect = Exception("scan failed")
