@@ -51,7 +51,12 @@ async def list_users(
   """List all users with optional filters."""
   session = next(get_db_session())
   try:
-    query = session.query(User).join(OrgUser, User.id == OrgUser.user_id)
+    # Outer join: a user with no org membership is exactly who support needs
+    # to find here — removal from a last org deactivates the account and
+    # leaves the email squatted, and freeing it means resolving this email to
+    # an id. An inner join hid precisely that population (the row builder
+    # below already handles a missing membership).
+    query = session.query(User).outerjoin(OrgUser, User.id == OrgUser.user_id)
 
     if email:
       query = query.filter(User.email.ilike(f"%{email}%"))
@@ -72,6 +77,7 @@ async def list_users(
           email=user.email,
           name=user.name,
           email_verified=user.email_verified,
+          is_active=user.is_active,
           org_id=org_user.org_id if org_user else "",
           org_role=org_user.role if org_user else "MEMBER",
           created_at=user.created_at,
@@ -126,6 +132,7 @@ async def get_user(request: Request, user_id: str):
       email=user.email,
       name=user.name,
       email_verified=user.email_verified,
+      is_active=user.is_active,
       org_id=org_user.org_id if org_user else "",
       org_role=org_user.role if org_user else "MEMBER",
       created_at=user.created_at,
