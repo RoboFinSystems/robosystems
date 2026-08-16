@@ -651,3 +651,28 @@ class TestRemovalFromLastOrgDeactivates:
     assert response.status_code == 204
     details = audit.log_security_event.call_args.kwargs["details"]
     assert details["org_graph_grants_revoked"] == 1
+
+  async def test_a_failed_deactivation_still_completes_and_records_the_removal(
+    self, async_client, test_db, test_user
+  ):
+    """The removal commits before deactivation, so a failure there must not
+    fail the request: raising would report a completed removal as a 500, send
+    a retry into a 404, and skip the audit record for a privileged access
+    change that really happened."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with (
+      patch(
+        "robosystems.models.core.User.deactivate",
+        side_effect=SQLAlchemyError("commit failed"),
+      ),
+      patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit,
+    ):
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is None
+    details = audit.log_security_event.call_args.kwargs["details"]
+    assert details["user_deactivated"] is False

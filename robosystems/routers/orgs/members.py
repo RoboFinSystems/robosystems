@@ -346,16 +346,33 @@ async def remove_member(
     # revokes API keys, so no credential outlives the membership that
     # justified it. Reversible by an admin (`activate`) if the removal was a
     # mistake; freeing the email for a fresh signup is still a deletion.
+    #
+    # Best-effort by construction: the removal is already committed above, so
+    # a failure here must not fail the request. Letting it raise would report
+    # a completed removal as a 500 (the rollback is a no-op on an already
+    # committed transaction), send the caller to retry into a 404, and skip
+    # the audit record below — leaving a privileged access change with no
+    # evidence, which is the gap this surface just closed. Log loudly instead:
+    # the account is live when it should not be, which is the state this
+    # branch exists to prevent, and it is repaired by `users deactivate`.
     deactivated_user = False
     if not OrgUser.get_user_orgs(user_id, db):
       removed_user = User.get_by_id(user_id, db)
       if removed_user is not None and removed_user.is_active:
-        removed_user.deactivate(db)
-        deactivated_user = True
-        logger.info(
-          f"Deactivated user {user_id}: removal from org {org_id} left them "
-          f"with no organization"
-        )
+        try:
+          removed_user.deactivate(db)
+          deactivated_user = True
+          logger.info(
+            f"Deactivated user {user_id}: removal from org {org_id} left them "
+            f"with no organization"
+          )
+        except Exception as exc:
+          logger.critical(
+            f"Removed user {user_id} from org {org_id} but could not deactivate "
+            f"the account, which now has no organization and is still active: "
+            f"{exc!s}. Repair with: admin users deactivate {user_id}",
+            exc_info=True,
+          )
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.ORG_MEMBER_REMOVED,
