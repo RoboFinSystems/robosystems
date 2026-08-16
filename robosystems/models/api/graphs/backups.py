@@ -56,7 +56,8 @@ class BackupResponse(BaseModel):
     description=(
       "Who started this backup. 'user' is one you requested and it counts "
       "against the tier's daily backup limit; 'scheduled' is taken nightly on "
-      "your behalf and does not."
+      "your behalf and does not; 'final' is the copy taken when a graph is "
+      "deprovisioned, so you can still retrieve your data afterwards."
     ),
   )
   memory_included: bool | None = Field(
