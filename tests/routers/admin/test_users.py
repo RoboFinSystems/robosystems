@@ -110,3 +110,69 @@ class TestDeleteUser:
     response = client.delete("/admin/v1/users/user_missing", headers=ADMIN_HEADERS)
 
     assert response.status_code == 404
+
+
+@pytest.fixture
+def orgless_user(db_session: Session):
+  """The state removal now leaves behind: deactivated, no org, email still
+  taken. This is exactly who support is asked to find."""
+  unique_id = str(uuid.uuid4())[:8]
+  user = User(
+    id=f"test_user_{unique_id}",
+    email=f"orgless+{unique_id}@example.com",
+    name="Orgless",
+    password_hash="test_hash",
+    is_active=False,
+  )
+  db_session.add(user)
+  db_session.commit()
+  return user
+
+
+class TestListingFindsOrglessUsers:
+  """Freeing a squatted email starts by resolving it to a user id. An inner
+  join on membership hid the one population that ever needs freeing."""
+
+  def test_listing_includes_a_user_with_no_org(
+    self, client, mock_admin_auth, orgless_user
+  ):
+    response = client.get(
+      "/admin/v1/users",
+      params={"email": orgless_user.email},
+      headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    emails = [u["email"] for u in response.json()]
+    assert orgless_user.email in emails
+
+  def test_orgless_row_reports_empty_org_and_inactive_status(
+    self, client, mock_admin_auth, orgless_user
+  ):
+    response = client.get(
+      "/admin/v1/users",
+      params={"email": orgless_user.email},
+      headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    row = next(u for u in response.json() if u["email"] == orgless_user.email)
+    assert row["org_id"] == ""
+    assert row["is_active"] is False
+
+  def test_a_user_with_an_org_is_still_listed_once(
+    self, client, mock_admin_auth, deletable_user
+  ):
+    """The outer join must not duplicate rows for users who do have a
+    membership."""
+    response = client.get(
+      "/admin/v1/users",
+      params={"email": deletable_user.email},
+      headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    rows = [u for u in response.json() if u["email"] == deletable_user.email]
+    assert len(rows) == 1
+    assert rows[0]["org_id"] != ""
+    assert rows[0]["is_active"] is True

@@ -533,3 +533,146 @@ class TestOrgMembershipAuditEvents:
     assert response.status_code == 502
     audit.log_security_event.assert_not_called()
     assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is not None
+
+
+class TestRemovalFromLastOrgDeactivates:
+  """A user belongs to exactly one org, so losing their last membership
+  leaves an account that authenticates but reaches nothing. Removal
+  deactivates it rather than leaving that state live."""
+
+  def _org_with_owner_and_member(self, test_db, test_user):
+    org = Org.create(
+      name=f"Offboard Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=org.id, user_id=test_user.id, role=OrgRole.OWNER, session=test_db
+    )
+    member = _create_user(test_db, test_user.password_hash)
+    OrgUser.create(
+      org_id=org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+    return org, member
+
+  async def test_last_membership_removal_deactivates_the_account(
+    self, async_client, test_db, test_user
+  ):
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+    assert member.is_active is True
+
+    response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    test_db.refresh(member)
+    assert member.is_active is False
+
+  async def test_deactivation_is_recorded_on_the_removal_event(
+    self, async_client, test_db, test_user
+  ):
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    details = audit.log_security_event.call_args.kwargs["details"]
+    assert details["user_deactivated"] is True
+
+  async def test_a_remaining_membership_leaves_the_account_active(
+    self, async_client, test_db, test_user
+  ):
+    """The trigger is *no org left*, not *an org was left*. A user who still
+    holds another membership keeps their account."""
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+    second_org = Org.create(
+      name=f"Second Org {uuid4().hex[:6]}",
+      org_type=OrgType.TEAM,
+      session=test_db,
+    )
+    OrgUser.create(
+      org_id=second_org.id, user_id=member.id, role=OrgRole.MEMBER, session=test_db
+    )
+
+    response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    test_db.refresh(member)
+    assert member.is_active is True
+
+  async def test_deactivation_revokes_the_removed_member_api_keys(
+    self, async_client, test_db, test_user
+  ):
+    """The point of routing through ``User.deactivate`` rather than setting
+    the flag: API keys carry no session version, so they must be revoked
+    explicitly or the removed member keeps programmatic access."""
+    from robosystems.models.core import UserAPIKey
+
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+    _key, _plain = UserAPIKey.create(
+      user_id=member.id, name="offboarding probe", session=test_db
+    )
+    assert UserAPIKey.get_active_by_user_id(member.id, test_db)
+
+    response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    assert UserAPIKey.get_active_by_user_id(member.id, test_db) == []
+
+  async def test_grant_count_reports_rows_deleted_not_graphs_swept(
+    self, async_client, test_db, test_user
+  ):
+    """The audited count is evidence: it must be the grants actually revoked,
+    not the org's graph count."""
+    from robosystems.models.core import Graph, GraphUser
+
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+    granted = Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Granted",
+      graph_type="generic",
+      session=test_db,
+    )
+    Graph.create(
+      graph_id=f"graph_{uuid4().hex[:8]}",
+      org_id=org.id,
+      graph_name="Not Granted",
+      graph_type="generic",
+      session=test_db,
+    )
+    GraphUser.create(
+      user_id=member.id, graph_id=granted.graph_id, role="member", session=test_db
+    )
+
+    with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    details = audit.log_security_event.call_args.kwargs["details"]
+    assert details["org_graph_grants_revoked"] == 1
+
+  async def test_a_failed_deactivation_still_completes_and_records_the_removal(
+    self, async_client, test_db, test_user
+  ):
+    """The removal commits before deactivation, so a failure there must not
+    fail the request: raising would report a completed removal as a 500, send
+    a retry into a 404, and skip the audit record for a privileged access
+    change that really happened."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    org, member = self._org_with_owner_and_member(test_db, test_user)
+
+    with (
+      patch(
+        "robosystems.models.core.User.deactivate",
+        side_effect=SQLAlchemyError("commit failed"),
+      ),
+      patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit,
+    ):
+      response = await async_client.delete(f"/v1/orgs/{org.id}/members/{member.id}")
+
+    assert response.status_code == 204
+    assert OrgUser.get_by_org_and_user(org.id, member.id, test_db) is None
+    details = audit.log_security_event.call_args.kwargs["details"]
+    assert details["user_deactivated"] is False

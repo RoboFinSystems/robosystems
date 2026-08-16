@@ -13,7 +13,18 @@ class UserResponse(BaseModel):
   email: str
   name: str | None
   email_verified: bool
-  org_id: str
+  is_active: bool = Field(
+    default=True,
+    description=(
+      "Whether the account can authenticate. Removal from a last organization "
+      "deactivates the account, so an inactive user with no org is the shape "
+      "support sees when asked to free an email."
+    ),
+  )
+  org_id: str = Field(
+    default="",
+    description="Empty when the user belongs to no organization.",
+  )
   org_role: str
   created_at: datetime
   updated_at: datetime

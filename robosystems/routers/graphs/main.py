@@ -368,10 +368,17 @@ async def create_graph(
     # Check org's graph limits
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
     if not user_orgs:
+      # Reachable, not exceptional: removal from a last org leaves an account
+      # with no membership, and every other org-resolving surface answers 403
+      # here. A 500 would file an ordinary authorization outcome as a server
+      # fault and count against the API's error rate.
       _raise_http_exception(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        status_code=status.HTTP_403_FORBIDDEN,
         error_code="org_not_found",
-        message="User organization not found. Please contact support.",
+        message=(
+          "You are not a member of any organization, so there is nothing to "
+          "bill a new graph to. Please contact support."
+        ),
       )
 
     membership = user_orgs[0]
