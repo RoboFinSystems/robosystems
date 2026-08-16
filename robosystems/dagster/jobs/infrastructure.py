@@ -1,12 +1,12 @@
 """Dagster infrastructure jobs.
 
 These jobs handle system maintenance:
-- Auth cleanup (expired API keys, tokens)
+- Auth cleanup (expired and long-revoked API keys)
 - Health checks (credit allocation, graph credits)
 - Graph instance monitoring
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dagster import (
@@ -16,6 +16,7 @@ from dagster import (
   job,
   op,
 )
+from sqlalchemy import and_, or_
 
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
@@ -38,31 +39,67 @@ INSTANCE_SCHEDULE_STATUS = (
 # Auth Cleanup Job
 # ============================================================================
 
+# Revoked keys are held briefly rather than dropped on revocation, so an
+# accidental revocation can still be traced and so the row outlives the
+# validation cache entry it must invalidate. Past that, the row is only
+# clutter — nothing can reactivate a key from the user-facing surface.
+REVOKED_KEY_RETENTION_DAYS = 30
+
 
 @op
-def cleanup_expired_api_keys(context: OpExecutionContext, db: DatabaseResource) -> dict:
-  """Clean up expired API keys from the database."""
+def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) -> dict:
+  """Delete API keys that are past their expiry or long revoked.
+
+  A key that lapsed by date is cleared from the validation cache before its
+  row is dropped: the cache is keyed on the row's fingerprint, so once the
+  row is gone a surviving entry can never be targeted and would keep the key
+  authenticating until its TTL with nothing left to revoke. A key whose cache
+  clear fails is left in place for the next run rather than deleted blind.
+  """
   with db.get_session() as session:
     now = datetime.now(UTC)
+    revoked_cutoff = now - timedelta(days=REVOKED_KEY_RETENTION_DAYS)
 
-    expired_keys = (
+    stale_keys = (
       session.query(UserAPIKey)
       .filter(
-        UserAPIKey.expires_at.isnot(None),
-        UserAPIKey.expires_at < now,
+        or_(
+          and_(
+            UserAPIKey.expires_at.isnot(None),
+            UserAPIKey.expires_at < now,
+          ),
+          and_(
+            UserAPIKey.is_active.is_(False),
+            UserAPIKey.updated_at < revoked_cutoff,
+          ),
+        )
       )
       .all()
     )
 
-    deleted_count = len(expired_keys)
+    deleted_count = 0
+    deferred_count = 0
 
-    for key in expired_keys:
+    for key in stale_keys:
+      # A key revoked long ago has no cache entry left to strand: the
+      # validation cache lives for minutes against a retention window of
+      # days, and clearing it costs two keyspace scans against the shared
+      # cache — not worth spending where it cannot pay. Only a key still
+      # active at the point it lapsed by date can hold a live entry.
+      if key.is_active and not key.invalidate_cache():
+        deferred_count += 1
+        continue
       session.delete(key)
+      deleted_count += 1
 
-    context.log.info(f"Cleaned up {deleted_count} expired API keys")
+    context.log.info(
+      f"API key cleanup: {deleted_count} deleted, "
+      f"{deferred_count} deferred (cache entry still live)"
+    )
 
     return {
       "deleted_count": deleted_count,
+      "deferred_count": deferred_count,
       "timestamp": now.isoformat(),
     }
 
@@ -70,7 +107,7 @@ def cleanup_expired_api_keys(context: OpExecutionContext, db: DatabaseResource) 
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def hourly_auth_cleanup_job():
   """Hourly auth cleanup job."""
-  cleanup_expired_api_keys()
+  cleanup_stale_api_keys()
 
 
 # ============================================================================

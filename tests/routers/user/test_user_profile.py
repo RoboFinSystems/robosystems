@@ -568,13 +568,13 @@ class TestUserAPIKeys:
     # Cleanup
     app.dependency_overrides = {}
 
-  @patch("robosystems.models.core.UserAPIKey.get_by_user_id")
+  @patch("robosystems.models.core.UserAPIKey.get_active_by_user_id")
   def test_list_api_keys_success(
-    self, mock_get_by_user_id, client_with_api_keys: TestClient
+    self, mock_get_active_by_user_id, client_with_api_keys: TestClient
   ):
     """Test successful API key listing."""
-    # Mock the database query to return the user's API keys
-    mock_get_by_user_id.return_value = client_with_api_keys.mock_user.api_keys
+    # The listing is active-only; revoked keys are excluded at the query.
+    mock_get_active_by_user_id.return_value = client_with_api_keys.mock_user.api_keys
 
     response = client_with_api_keys.get("/v1/user/api-keys")
 

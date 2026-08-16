@@ -48,3 +48,26 @@ class TestRevocationCompleteness:
     resp = client.delete(f"/v1/user/api-keys/{key_id}", headers=_auth(test_user))
     assert resp.status_code == 200
     assert _is_active(test_db, key_id) is False
+
+
+class TestRevokedKeysLeaveTheList:
+  """Revocation is permanent, so the listing drops the key rather than
+  carrying it forever as a row the user can take no action on."""
+
+  def test_list_returns_active_keys_only(self, client, test_user, test_db):
+    kept, _plain = UserAPIKey.create(user_id=test_user.id, name="kept", session=test_db)
+    doomed, _plain = UserAPIKey.create(
+      user_id=test_user.id, name="doomed", session=test_db
+    )
+    kept_id, doomed_id = str(kept.id), str(doomed.id)
+
+    resp = client.delete(f"/v1/user/api-keys/{doomed_id}", headers=_auth(test_user))
+    assert resp.status_code == 200
+
+    resp = client.get("/v1/user/api-keys", headers=_auth(test_user))
+    assert resp.status_code == 200
+    assert {key["id"] for key in resp.json()["api_keys"]} == {kept_id}
+
+    # The row itself stays put for the hourly sweep to retire on its own
+    # schedule — the listing hides it, revocation does not delete it.
+    assert _is_active(test_db, doomed_id) is False
