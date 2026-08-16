@@ -260,6 +260,8 @@ class UserRepository(Model):
       session.rollback()
       raise
 
+    access.invalidate_access_cache()
+
     return access
 
   @classmethod
@@ -371,6 +373,31 @@ class UserRepository(Model):
     except SQLAlchemyError:
       session.rollback()
       raise
+
+    self.invalidate_access_cache()
+
+  def invalidate_access_cache(self) -> None:
+    """Drop the user's cached access decisions after this grant changes.
+
+    Both auth paths cache the allow/deny answer per graph for the TTL, so the
+    grant row is only authoritative once those entries are gone: a denial
+    recorded before the subscription existed would keep refusing a paying
+    subscriber, and an allow recorded before a revocation would keep admitting
+    a former one — the endpoint's ``immediate=true`` promise is only as good
+    as this call. Sweeps every entry the user owns rather than the one
+    repository, because a subgraph of the repository is cached under its own
+    id. Best-effort: the row has committed and the entries lapse on TTL.
+    """
+    try:
+      import importlib
+
+      cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+      cache_module.api_key_cache.invalidate_user_data(str(self.user_id))
+    except Exception as e:
+      logger.warning(
+        f"Failed to invalidate access cache for user {self.user_id}, "
+        f"repository {self.repository_name}: {e}"
+      )
 
   def upgrade_tier(
     self,

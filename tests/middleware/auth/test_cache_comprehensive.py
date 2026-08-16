@@ -939,3 +939,43 @@ class TestInvalidateUserData:
     cache.invalidate_user_data(target)
 
     assert good in deleted, "a corrupt sibling entry aborted the sweep"
+
+  def test_purges_the_keys_per_graph_decisions_with_it(self, cache):
+    """A matched API-key entry takes its ``apikey_graph:`` decisions along.
+
+    ``validate_api_key_with_graph`` short-circuits on a cached allow, so a
+    surviving per-graph entry would keep a revoked key inside the graph for
+    the TTL after the validation entry was gone.
+    """
+    import fnmatch
+
+    target, other = "user_target", "user_other"
+    api_key = f"{cache.CACHE_KEY_PREFIX}hash_target"
+    api_key_other = f"{cache.CACHE_KEY_PREFIX}hash_other"
+    graph_target = f"{cache.GRAPH_CACHE_KEY_PREFIX}hash_target:kg1"
+    graph_target_2 = f"{cache.GRAPH_CACHE_KEY_PREFIX}hash_target:sec"
+    graph_other = f"{cache.GRAPH_CACHE_KEY_PREFIX}hash_other:kg1"
+
+    store = {
+      api_key: self._entry(cache, target),
+      api_key_other: self._entry(cache, other),
+      graph_target: '{"has_access": true}',
+      graph_target_2: '{"has_access": true}',
+      graph_other: '{"has_access": true}',
+    }
+
+    cache.redis.keys.side_effect = lambda pattern: [
+      k for k in store if fnmatch.fnmatchcase(k, pattern)
+    ]
+    cache.redis.get.side_effect = store.get
+
+    deleted: list[str] = []
+    cache.redis.delete.side_effect = lambda *keys: deleted.extend(keys)
+
+    cache.invalidate_user_data(target)
+
+    assert api_key in deleted
+    assert graph_target in deleted, "per-graph decision survived the sweep"
+    assert graph_target_2 in deleted, "per-graph decision survived the sweep"
+    assert api_key_other not in deleted
+    assert graph_other not in deleted
