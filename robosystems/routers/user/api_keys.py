@@ -37,6 +37,7 @@ router = APIRouter(tags=["User"])
   "/user/api-keys",
   response_model=APIKeysResponse,
   summary="List API Keys",
+  description="Lists active keys only. Revoked keys are omitted — revocation is permanent, so a revoked key never returns to this list.",
   operation_id="listUserAPIKeys",
   responses={**AUTHENTICATED_ERROR_RESPONSES},
 )
@@ -51,18 +52,14 @@ async def list_api_keys(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    api_keys = UserAPIKey.get_by_user_id(current_user.id, db)
+    # Active only: a revoked key can never be reactivated from this surface,
+    # so listing it forever leaves the user's key list growing without bound
+    # and offers no action they can take on the row.
+    api_keys = UserAPIKey.get_active_by_user_id(current_user.id, db)
 
     api_key_infos = []
-    active_keys = 0
-    inactive_keys = 0
 
     for api_key in api_keys:
-      if api_key.is_active:
-        active_keys += 1
-      else:
-        inactive_keys += 1
-
       api_key_infos.append(
         APIKeyInfo(
           id=api_key.id,
@@ -86,9 +83,7 @@ async def list_api_keys(
       event_type="api_keys_listed",
       event_data={
         "user_id": user_id,
-        "total_keys": len(api_keys),
-        "active_keys": active_keys,
-        "inactive_keys": inactive_keys,
+        "active_keys": len(api_keys),
       },
       user_id=user_id,
     )
