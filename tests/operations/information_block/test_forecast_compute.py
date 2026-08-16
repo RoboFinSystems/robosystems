@@ -1270,3 +1270,311 @@ class TestStaleTailInvalidation:
       mock_inv.call_args.kwargs["through_period_end"]
       == response.months_computed[-1].period_end
     )
+
+
+# ── The real verifier ─────────────────────────────────────────────────────
+#
+# Everything above stubs `_verify_month_sets`. That makes the walk's
+# *response* to a verdict testable, which is what `TestStopTheWalk` proves.
+# It cannot prove the harder half: that the real verifier reaches the right
+# verdict on a wrong forecast. The classes below run the real one against a
+# real schema, because every one of the five correctness defects in this arm
+# was found by hand and none by CI — and the reason is structural. The BS
+# roll closes on a balancing cash plug, so `A = L + E` holds *by
+# construction* no matter how wrong the walk is; the accounting equation is
+# exactly the assertion that cannot fail. A month has to be balanced and
+# wrong for the suite to mean anything.
+
+
+@pytest.fixture()
+def ext_session():
+  """Extensions schema in the test Postgres DB, one throwaway schema per test."""
+  import os
+  import uuid
+
+  from sqlalchemy import create_engine, text
+  from sqlalchemy.orm import sessionmaker
+
+  import robosystems.models.extensions  # noqa: F401  (register models)
+  from robosystems.db.extensions import ExtensionsBase
+
+  database_url = os.environ.get("TEST_DATABASE_URL")
+  if not database_url:
+    pytest.skip("TEST_DATABASE_URL not configured")
+
+  schema = f"ext_fcverify_{uuid.uuid4().hex[:12]}"
+  engine = create_engine(database_url)
+  with engine.begin() as conn:
+    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+  session = sessionmaker(bind=engine)()
+  session.execute(text(f'SET search_path TO "{schema}"'))
+  ExtensionsBase.metadata.create_all(bind=session.connection())
+  session.commit()
+  session.execute(text(f'SET search_path TO "{schema}"'))
+
+  try:
+    yield session
+  finally:
+    session.rollback()
+    session.close()
+    with engine.begin() as conn:
+      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+    engine.dispose()
+
+
+VERIFY_START = date(2026, 7, 1)
+VERIFY_END = date(2026, 7, 31)
+
+
+def _seed_scenario_month(
+  session,
+  *,
+  assets: float,
+  cash: float,
+  ppe: float,
+  liabilities: float,
+  equity: float,
+) -> tuple[str, str]:
+  """One scenario balance-sheet month, with the corpus that gates actuals.
+
+  Two rules, both structure-scoped, both drawn from the shapes the real
+  corpus carries:
+
+  * ``EqualTo`` — the accounting equation. The BS roll's cash plug makes
+    this hold whatever else is wrong, which is why it is the control, not
+    the check.
+  * ``RollUp`` — the subtotal foots its calculation children. This is
+    articulation: it is what a PP&E line drifting away from its own
+    depreciation actually breaks.
+
+  Returns ``(structure_id, fact_set_id)``.
+  """
+  from robosystems.models.extensions import (
+    Association,
+    Element,
+    Rule,
+    Structure,
+    Taxonomy,
+  )
+  from robosystems.models.extensions.roboledger import Fact, FactSet
+
+  taxonomy = Taxonomy(name="rs-gaap", taxonomy_type="reporting_extension")
+  session.add(taxonomy)
+  session.flush()
+
+  structure = Structure(
+    name="Balance Sheet", block_type="balance_sheet", taxonomy_id=taxonomy.id
+  )
+  scenario = Structure(name="Plan", block_type="forecast", taxonomy_id=taxonomy.id)
+  session.add_all([structure, scenario])
+  session.flush()
+
+  def _el(qname: str, balance_type: str) -> Element:
+    element = Element(
+      name=qname.split(":")[-1],
+      qname=qname,
+      balance_type=balance_type,
+      period_type="instant",
+      taxonomy_id=taxonomy.id,
+    )
+    session.add(element)
+    return element
+
+  el_assets = _el("rs-gaap:Assets", "debit")
+  el_cash = _el("rs-gaap:CashAndCashEquivalentsAtCarryingValue", "debit")
+  el_ppe = _el("rs-gaap:PropertyPlantAndEquipmentNet", "debit")
+  el_liabilities = _el("rs-gaap:Liabilities", "credit")
+  el_equity = _el("rs-gaap:StockholdersEquity", "credit")
+  session.flush()
+
+  # Assets = Cash + PP&E, as calculation arcs. The RollUp evaluator derives
+  # its children from these live arcs rather than the rule's frozen list.
+  for order, child in enumerate((el_cash, el_ppe)):
+    session.add(
+      Association(
+        structure_id=structure.id,
+        from_element_id=el_assets.id,
+        to_element_id=child.id,
+        association_type="calculation",
+        order_value=float(order),
+        weight=1.0,
+      )
+    )
+
+  session.add(
+    Rule(
+      taxonomy_id=taxonomy.id,
+      rule_category="FundamentalAccountingConceptRelation",
+      rule_pattern="EqualTo",
+      rule_expression="$Assets = ($Liabilities + $Equity)",
+      target_kind="structure",
+      target_structure_id=structure.id,
+      rule_variables=[
+        {"variable_name": "Assets", "variable_qname": el_assets.qname},
+        {"variable_name": "Liabilities", "variable_qname": el_liabilities.qname},
+        {"variable_name": "Equity", "variable_qname": el_equity.qname},
+      ],
+    )
+  )
+  session.add(
+    Rule(
+      taxonomy_id=taxonomy.id,
+      rule_category="FundamentalAccountingConceptRelation",
+      rule_pattern="RollUp",
+      rule_expression="$Assets = ($Cash + $PPE)",
+      target_kind="structure",
+      target_structure_id=structure.id,
+      rule_variables=[
+        {"variable_name": "Assets", "variable_qname": el_assets.qname},
+        {"variable_name": "Cash", "variable_qname": el_cash.qname},
+        {"variable_name": "PPE", "variable_qname": el_ppe.qname},
+      ],
+    )
+  )
+
+  fact_set = FactSet(
+    structure_id=structure.id,
+    period_start=VERIFY_START,
+    period_end=VERIFY_END,
+    factset_type="report",
+    entity_id="ent_1",
+    scenario_id=scenario.id,
+  )
+  fact_set.provenance = {
+    "origin": "forecast",
+    "scenario_structure_id": scenario.id,
+    "base_period": "2026-06",
+    "month_index": 1,
+    "drivers": [],
+  }
+  session.add(fact_set)
+  session.flush()
+
+  for element, value in (
+    (el_assets, assets),
+    (el_cash, cash),
+    (el_ppe, ppe),
+    (el_liabilities, liabilities),
+    (el_equity, equity),
+  ):
+    session.add(
+      Fact(
+        element_id=element.id,
+        value=value,
+        fact_type="Numeric",
+        period_start=VERIFY_START,
+        period_end=VERIFY_END,
+        period_type="instant",
+        entity_id="ent_1",
+        structure_id=structure.id,
+        fact_set_id=fact_set.id,
+      )
+    )
+  session.flush()
+  return structure.id, fact_set.id
+
+
+def _verify(session, structure_id: str, fact_set_id: str):
+  return fc._verify_month_sets(
+    session,
+    sets=((structure_id, fact_set_id),),
+    period_end=VERIFY_END,
+    created_by="usr_test",
+    global_calculations={},
+  )
+
+
+class TestTheRealVerifier:
+  """`_verify_month_sets` itself, unstubbed, over a month that is wrong.
+
+  The month is deliberately *balanced*: Assets 200 = Liabilities 80 +
+  Equity 120, so the accounting equation passes. Its subtotal does not
+  foot — Cash 100 + PP&E 50 is 150, not 200 — so articulation is broken.
+  This is the shape of the PP&E defect that held `A = L + E` throughout
+  and shipped anyway.
+  """
+
+  def test_a_balanced_but_unarticulated_month_fails(self, ext_session) -> None:
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+
+    passed, failures = _verify(ext_session, structure_id, fact_set_id)
+
+    assert passed is False, (
+      "the real verifier returned a pass (or an absence) for a month whose "
+      "subtotal is off by 50.00"
+    )
+    assert failures
+    assert any("rollup" in f.lower() for f in failures), failures
+
+  def test_the_accounting_equation_is_what_passes(self, ext_session) -> None:
+    """The control: the failing month is failing for the right reason.
+
+    Without this, a verifier that failed everything — a broken binder, a
+    corpus that never loads — would satisfy the test above and prove
+    nothing. The equation must pass on the same facts that fail the rollup.
+    """
+    from robosystems.models.extensions import VerificationResult
+
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+    _verify(ext_session, structure_id, fact_set_id)
+
+    from sqlalchemy import select
+
+    from robosystems.models.extensions import Rule
+
+    status_by_pattern = {
+      pattern: status
+      for status, pattern in ext_session.execute(
+        select(VerificationResult.status, Rule.rule_pattern).join(
+          Rule, Rule.id == VerificationResult.rule_id
+        )
+      ).all()
+    }
+
+    assert status_by_pattern["EqualTo"] == "pass"
+    assert status_by_pattern["RollUp"] == "fail"
+
+  def test_a_correct_month_passes(self, ext_session) -> None:
+    """And the verifier is not simply always-False on this corpus."""
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=150.0, cash=100.0, ppe=50.0, liabilities=60.0, equity=90.0
+    )
+
+    passed, failures = _verify(ext_session, structure_id, fact_set_id)
+
+    assert passed is True, failures
+    assert failures == []
+
+  def test_the_walk_halts_on_the_real_verdict(self, ext_session) -> None:
+    """The two halves, joined: real verdict in, explained halt out.
+
+    `TestStopTheWalk` feeds the walk a hand-written verdict; this feeds it
+    the one the real verifier produced, and checks the real failure message
+    survives all the way into the caller's diagnostics.
+    """
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+    verdict = _verify(ext_session, structure_id, fact_set_id)
+    assert verdict[0] is False
+
+    response, _ = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=6,
+      verify=lambda *a, **k: verdict,
+    )
+
+    assert response.halted_at == "2026-07"
+    assert len(response.months_computed) == 1
+    assert response.months_computed[0].verification_passed is False
+    assert any("halted at 2026-07" in d for d in response.diagnostics)
+    assert any("rollup" in d.lower() for d in response.diagnostics), (
+      "the real verifier's reason has to reach the caller, not just the verdict"
+    )
