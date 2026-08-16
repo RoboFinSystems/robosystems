@@ -28,6 +28,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from robosystems.config import env
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import logger
 
 if TYPE_CHECKING:
@@ -405,6 +406,11 @@ class InstanceMonitor:
     ``OrphanedGraphRegistrations`` so it can alarm, and the stamp is cleared
     when the instance reappears. Reconciling from on-disk truth is the
     follow-up, not this sweep.
+
+    Shared repositories are exempt from the orphan check — their rows are
+    bookkeeping, not routing, and their master is deliberately parked to zero
+    between ingestion runs. An exempt row that still carries a stamp from
+    before this rule is cleared on the next sweep.
     """
     logger.info("Starting graph registry cleanup")
 
@@ -466,7 +472,20 @@ class InstanceMonitor:
             result.errors += 1
           continue
 
-        instance_missing = bool(instance_id) and instance_id not in valid_instances
+        # A shared repository is exempt: its row is not a routing pointer.
+        # ``GraphClientFactory._create_shared_repository_client`` branches
+        # before any graph-registry lookup — reads go to the replica ALB,
+        # writes resolve the master from the *instance* registry by
+        # ``node_type=shared_master``. The shared master is also parked to
+        # zero between ingestion runs, so the instance its row names is
+        # legitimately absent most of the day; counting that as drift pages
+        # every night for a healthy fleet. Same predicate the router uses, so
+        # the two can never disagree about which graphs this applies to.
+        instance_missing = (
+          bool(instance_id)
+          and instance_id not in valid_instances
+          and not is_shared_repository_or_subgraph(graph_id)
+        )
         already_marked = item.get("instance_missing_since") is not None
 
         if instance_missing:
@@ -489,8 +508,8 @@ class InstanceMonitor:
               result.errors += 1
         elif already_marked:
           logger.info(
-            f"Graph {graph_id}: instance {instance_id} is back in the registry; "
-            "clearing the orphan marker"
+            f"Graph {graph_id} no longer counts as orphaned "
+            f"(instance {instance_id}); clearing the marker"
           )
           try:
             graph_table.update_item(

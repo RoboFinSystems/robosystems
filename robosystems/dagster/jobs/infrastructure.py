@@ -287,7 +287,9 @@ def cleanup_stale_registry_entries(context: OpExecutionContext) -> dict[str, Any
   Removes entries marked deleted more than 7 days ago. Entries whose
   instance_id is missing from the instance registry are marked and counted
   (``OrphanedGraphRegistrations``), never removed — the row is a live graph's
-  routing and the instance registry drifts on ASG cycling.
+  routing and the instance registry drifts on ASG cycling. Shared
+  repositories are exempt: they route via ALB, not via their registry row,
+  and their master is parked to zero between ingestion runs.
   """
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
