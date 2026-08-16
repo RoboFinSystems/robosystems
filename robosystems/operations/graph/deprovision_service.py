@@ -33,6 +33,7 @@ class DeprovisionResult:
   registry_deallocated: bool = False
   records_cleaned: bool = False
   documents_deleted: int = 0
+  connections_deleted: int = 0
   search_purged: bool = False
   errors: list[str] = field(default_factory=list)
 
@@ -160,6 +161,9 @@ class GraphDeprovisionService:
         "backup_created": result.backup_created,
         "subgraphs_deleted": result.subgraphs_deleted,
         "database_deleted": result.database_deleted,
+        "documents_deleted": result.documents_deleted,
+        "connections_deleted": result.connections_deleted,
+        "search_purged": result.search_purged,
         "errors": result.errors,
       },
     )
@@ -315,6 +319,10 @@ class GraphDeprovisionService:
     GraphBackup records are intentionally kept for post-deprovisioning hosting.
     """
     try:
+      from ...models.core.connection.connection import Connection
+      from ...models.core.connection.connection_credentials import (
+        ConnectionCredentials,
+      )
       from ...models.core.document import Document
       from ...models.core.graph.graph_credits import (
         GraphCredits,
@@ -353,6 +361,31 @@ class GraphDeprovisionService:
         .delete(synchronize_session=False)
       )
       result.documents_deleted += documents_deleted
+
+      # Connections are a graph asset, not the creating member's: graph_id is
+      # the scoping FK and the delete endpoint gates on graph admin rather than
+      # the creator. So the graph's teardown is what removes them — nothing
+      # else does. Credentials go first and by id, because
+      # connection_credentials.connection_id carries no foreign key, so no
+      # cascade can ever reach it; dropping the connection rows first would
+      # strand a live encrypted OAuth token with no row left to find it by.
+      # Soft-deleted connections are included — deleted_at is unset here on
+      # purpose, since the graph is going away either way.
+      connection_ids = [
+        row.id
+        for row in session.query(Connection.id).filter(Connection.graph_id == graph_id)
+      ]
+      if connection_ids:
+        session.query(ConnectionCredentials).filter(
+          ConnectionCredentials.connection_id.in_(connection_ids)
+        ).delete(synchronize_session=False)
+
+      connections_deleted = (
+        session.query(Connection)
+        .filter(Connection.graph_id == graph_id)
+        .delete(synchronize_session=False)
+      )
+      result.connections_deleted += connections_deleted
 
       session.flush()
       result.records_cleaned = True

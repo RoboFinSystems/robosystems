@@ -354,6 +354,15 @@ def execute_user_deletion(
   session.query(OrgInvitation).filter_by(invited_by=user_id).delete(
     synchronize_session=False
   )
+  # Documents and connections are graph assets that happen to record their
+  # creator, so the graph's teardown owns their removal (deprovision_service
+  # deletes both by graph_id). These two lines are a backstop for rows whose
+  # graph predates that cleanup: the org_has_live_graphs blocker above means
+  # every graph the user could reach is already DEPROVISIONED by the time we
+  # get here, so they cannot take a live org integration down with them.
+  # Do not relax that blocker without re-pointing these at the graph — by
+  # creator, this would delete the org's QuickBooks connection and its CDC
+  # watermark because a departing member happened to wire it up.
   session.query(Document).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(Connection).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(GraphUser).filter_by(user_id=user_id).delete(synchronize_session=False)

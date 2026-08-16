@@ -370,6 +370,10 @@ class TestDeprovisionService:
     self, service, db_session, test_graph, test_user
   ):
     """Verify PG records are cleaned up."""
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
     from robosystems.models.core.document import Document
     from robosystems.models.core.graph.graph_credits import GraphCredits
     from robosystems.models.core.graph.graph_user import GraphUser
@@ -397,6 +401,27 @@ class TestDeprovisionService:
       content="confidential",
       session=db_session,
     )
+
+    connection = Connection.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      provider="quickbooks",
+      session=db_session,
+      realm_id="realm-departed",
+    )
+    # Built directly rather than through create(): that path encrypts, which
+    # needs a real Fernet key, and what is under test is that the row is
+    # removed — not how its contents were sealed.
+    db_session.add(
+      ConnectionCredentials(
+        connection_id=connection.id,
+        provider="quickbooks",
+        user_id=test_user.id,
+        encrypted_credentials="ciphertext-standing-in-for-a-refresh-token",
+      )
+    )
+    db_session.commit()
+    connection_id = connection.id
 
     with (
       patch(
@@ -442,6 +467,24 @@ class TestDeprovisionService:
       )
       assert remaining_documents == 0
       assert result.documents_deleted >= 1
+
+      # Neither the connection nor — critically — the encrypted OAuth token
+      # behind it may outlive the graph. connection_credentials carries no FK,
+      # so nothing else in the tree would ever reach it.
+      remaining_connections = (
+        db_session.query(Connection)
+        .filter(Connection.graph_id == test_graph.graph_id)
+        .count()
+      )
+      assert remaining_connections == 0
+      assert result.connections_deleted >= 1
+
+      remaining_credentials = (
+        db_session.query(ConnectionCredentials)
+        .filter(ConnectionCredentials.connection_id == connection_id)
+        .count()
+      )
+      assert remaining_credentials == 0
 
   @pytest.mark.asyncio
   async def test_deprovision_updates_subscription_metadata(
