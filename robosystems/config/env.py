@@ -551,12 +551,6 @@ class EnvConfig:
   # deployment's root domain); see get_passkey_rp_id/get_passkey_origin.
   PASSKEY_RP_ID = get_str_env("PASSKEY_RP_ID", "")
   PASSKEY_ORIGIN = get_str_env("PASSKEY_ORIGIN", "")
-  # When enabled, verification/reset/invitation email links target the login
-  # home instead of the originating app.
-  AUTH_EMAIL_LINKS_TO_LOGIN_HOME = get_bool_env(
-    "AUTH_EMAIL_LINKS_TO_LOGIN_HOME",
-    get_parameter_value("AUTH_EMAIL_LINKS_TO_LOGIN_HOME", "false").lower() == "true",
-  )
 
   # --- Organization ---
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
