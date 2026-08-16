@@ -132,7 +132,9 @@ class TestNonnumericFactStaging:
 
   def test_fact_value_coalesces_string_value(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
-    assert "COALESCE(string_value, CAST(value AS VARCHAR))" in sql
+    # Columns are `f.`-qualified since the projection became a join (the
+    # dimension count), so match on the shape rather than the prefix.
+    assert "COALESCE(f.string_value, CAST(f.value AS VARCHAR))" in sql
 
   def test_fact_type_and_value_type_pass_through(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
@@ -147,8 +149,8 @@ class TestNonnumericFactStaging:
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
     # Legacy '-2' preserved for numeric rows with unspecified decimals;
     # Nonnumeric rows pass NULL through (no @decimals in XBRL).
-    assert "CASE WHEN fact_type = 'Numeric'" in sql
-    assert "COALESCE(decimals, '-2')" in sql
+    assert "CASE WHEN f.fact_type = 'Numeric'" in sql
+    assert "COALESCE(f.decimals, '-2')" in sql
 
   def test_unit_table_derives_from_fact_units(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Unit"]
@@ -803,6 +805,26 @@ class TestScenarioExclusion:
     assert sql.count("fs.scenario_id IS NULL") == 2, (
       "FACT_HAS_ENTITY has two UNION branches; both must filter scenarios"
     )
+
+  def test_has_dimensions_is_derived_not_hardcoded(self):
+    """The flag four graph read paths filter consolidated totals on.
+
+    It read `false` / `0` for every fact, so the "consolidated totals only"
+    contract was being upheld by the scenario exclusion upstream rather
+    than by the flag itself — a filter that passes everything the moment
+    anything dimensioned reaches the graph. Nothing dimensioned does today
+    (only scenario facts carry a junction row, and those are excluded), so
+    deriving it changes no output; it changes what happens when that stops
+    being true.
+    """
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
+    assert "false                           AS has_dimensions" not in sql
+    assert "0::BIGINT                       AS dimension_count" not in sql
+    assert "fact_dimensions" in sql, (
+      "has_dimensions must come from the junction, not a literal"
+    )
+    assert "COALESCE(fd.n, 0) > 0" in sql
+    assert "COALESCE(fd.n, 0)::BIGINT" in sql
 
   def test_no_unguarded_facts_scan_anywhere(self):
     """Completeness sweep: any projection reading facts or fact_sets must

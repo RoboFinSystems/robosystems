@@ -61,6 +61,28 @@ from robosystems.operations.information_block.rules.expressions import (
 )
 
 
+def _actual_set_ids(structure_id: str):
+  """The structure's FactSets that are actuals — the undimensioned scenario.
+
+  Every unpinned fact read in this module goes through here. Scoping by
+  ``structure_id`` alone reads as "this statement" and means "this
+  statement, in every scenario": scenario month sets are deliberately
+  stamped with the *statement* structure's id, because that is how a
+  scenario column renders through the same structure as its actuals.
+
+  The consequence is worse than a widened scope, because the unpinned
+  binder takes the newest fact per element. The newest fact on a graph
+  carrying a forecast is a month that has not happened, so a check of the
+  books would answer about the plan — and write the verdict onto the
+  books. Invisible until a graph has its first forecast, which is why it
+  survived the engine's whole life.
+  """
+  return select(FactSet.id).where(
+    FactSet.structure_id == structure_id,
+    FactSet.scenario_id.is_(None),
+  )
+
+
 def _bind_variables(
   session: Session,
   rule: Rule,
@@ -114,7 +136,10 @@ def _bind_variables(
     if fact_set_id is not None:
       stmt = base_stmt.where(Fact.fact_set_id == fact_set_id)
     else:
-      stmt = base_stmt.where(Fact.structure_id == structure_id)
+      stmt = base_stmt.where(
+        Fact.structure_id == structure_id,
+        Fact.fact_set_id.in_(_actual_set_ids(structure_id)),
+      )
     bindings[name] = session.execute(stmt).scalar()
 
   return bindings
@@ -155,12 +180,19 @@ def _bind_sum_variables(
     # failures. Schedule facts aren't replicated into GL line items,
     # so summing historical periods here doesn't double-count
     # anything that landed in opening balances.
+    # Scenario months are excluded for the same reason as every other
+    # unpinned read here (see `_actual_set_ids`). A schedule structure
+    # carries no scenario sets today, so this is inert — and it is the
+    # third unpinned read in this module, which is exactly how many
+    # places the invariant has to hold in for it to be one.
     row = session.execute(
       text(
-        "SELECT ROUND(SUM(value)::numeric, 2) AS total "
-        "FROM facts "
-        "WHERE element_id = :eid AND structure_id = :sid "
-        "AND period_type = 'duration' AND fact_type = 'Numeric'"
+        "SELECT ROUND(SUM(f.value)::numeric, 2) AS total "
+        "FROM facts f "
+        "JOIN fact_sets fs ON fs.id = f.fact_set_id "
+        "WHERE f.element_id = :eid AND f.structure_id = :sid "
+        "AND f.period_type = 'duration' AND f.fact_type = 'Numeric' "
+        "AND fs.scenario_id IS NULL"
       ),
       {"eid": element_id, "sid": structure_id},
     ).fetchone()
@@ -209,8 +241,18 @@ def _load_period_balances(
   if fact_set_id is not None:
     stmt = stmt.where(Fact.fact_set_id == fact_set_id)
   else:
-    # No FactSet exists for this structure (never reported) — no balances.
-    stmt = stmt.where(Fact.structure_id == structure_id)
+    # No ACTUAL FactSet exists for this structure (never reported) — no
+    # balances. The comment here used to say exactly that while the code
+    # scoped by `structure_id`, which is not the same thing the moment a
+    # scenario exists: the walk stamps its balance-sheet sets on the
+    # statement structure even when no actual balance sheet does (the
+    # degraded, rule-driven branch), so "never reported" and "carries only
+    # forecast months" are the same state to this query. Summing those
+    # would foot the plan and stamp the verdict on the books.
+    stmt = stmt.where(
+      Fact.structure_id == structure_id,
+      Fact.fact_set_id.in_(_actual_set_ids(structure_id)),
+    )
   if period_end is not None:
     stmt = stmt.where(Fact.period_end <= period_end)
   if period_start is not None:

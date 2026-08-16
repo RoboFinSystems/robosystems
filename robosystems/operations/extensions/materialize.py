@@ -1022,19 +1022,32 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   tables["Fact"] = f"""
     CREATE OR REPLACE TABLE Fact AS
     SELECT
-      id                              AS identifier,
+      f.id                            AS identifier,
       NULL::VARCHAR                   AS uri,
-      COALESCE(string_value, CAST(value AS VARCHAR)) AS value,
-      value                           AS numeric_value,
-      fact_type                       AS fact_type,
-      CASE WHEN fact_type = 'Numeric'
-           THEN COALESCE(decimals, '-2')
-           ELSE decimals END          AS decimals,
-      value_type                      AS value_type,
-      content_type                    AS content_type,
-      false                           AS has_dimensions,
-      0::BIGINT                       AS dimension_count
+      COALESCE(f.string_value, CAST(f.value AS VARCHAR)) AS value,
+      f.value                         AS numeric_value,
+      f.fact_type                     AS fact_type,
+      CASE WHEN f.fact_type = 'Numeric'
+           THEN COALESCE(f.decimals, '-2')
+           ELSE f.decimals END        AS decimals,
+      f.value_type                    AS value_type,
+      f.content_type                  AS content_type,
+      -- Derived, not hardcoded. It read `false` / `0` for every fact while
+      -- four graph read paths filter consolidated totals on exactly this
+      -- column, so the contract they rely on was being satisfied by the
+      -- scenario exclusion upstream rather than by the flag itself. Nothing
+      -- is dimensioned in OLTP today except scenario facts, which the
+      -- exclusion drops — so this changes no output. It changes what
+      -- happens when something dimensioned does reach the graph: the
+      -- filters start working instead of silently passing everything.
+      COALESCE(fd.n, 0) > 0           AS has_dimensions,
+      COALESCE(fd.n, 0)::BIGINT       AS dimension_count
     FROM {actual_facts} f
+    LEFT JOIN (
+      SELECT fact_id, COUNT(*) AS n
+      FROM postgres_scan('{c}', '{s}', 'fact_dimensions')
+      GROUP BY fact_id
+    ) fd ON fd.fact_id = f.id
   """
 
   tables["FactSet"] = f"""
