@@ -354,6 +354,10 @@ def _run(
   with (
     patch.object(fc, "newest_actual_structure_id", side_effect=_structures),
     patch.object(fc, "_actual_set_at", side_effect=_base_set),
+    # The anchor scan's upper bound. Reads from the same `closed_months`
+    # model as `_actual_set_at` so the two can't disagree about where the
+    # books stand — a bound below the seam would skip a valid anchor.
+    patch.object(fc, "_newest_actual_month", return_value=max(closed)),
     patch.object(
       fc,
       "load_articulation_context",
@@ -1504,6 +1508,115 @@ class TestSeamAnchoredRoll:
       _run(_seam_mechanics(horizon=3), SEAM_RULES, _levers_for(3), months=3)
 
     head.assert_not_called()
+
+
+class TestAnchorScanBound:
+  """The anchor scan asks one question before it starts walking.
+
+  Its cheapest case was also its most expensive: a scenario whose base is
+  still the seam — every scenario at creation, and most of them most of
+  the time — finds nothing, and finding nothing meant having probed every
+  month of the horizon to prove it. One query for the newest actual month
+  bounds that. The bound is only ever an upper bound, so the risk worth
+  testing is a bound that comes back too LOW and skips a valid anchor.
+  """
+
+  @staticmethod
+  def _resolve(newest: str | None, closed: set[str], horizon: int = 12):
+    probed: list[str] = []
+
+    def _at(session, sid, entity_id, period_start, period_end):
+      month = f"{period_end.year:04d}-{period_end.month:02d}"
+      probed.append(month)
+      return SimpleNamespace(id="fs") if month in closed else None
+
+    with (
+      patch.object(fc, "_newest_actual_month", return_value=newest),
+      patch.object(fc, "_actual_set_at", side_effect=_at),
+    ):
+      anchor = fc._resolve_anchor_period(
+        MagicMock(),
+        base_period="2026-06",
+        horizon_months=horizon,
+        is_structure_id="struct_is",
+        bs_structure_id=None,
+        entity_id="ent_1",
+      )
+    return anchor, probed
+
+  def test_an_unmoved_seam_probes_nothing(self) -> None:
+    """The common case: the books are still at the base."""
+    anchor, probed = self._resolve("2026-06", {"2026-06"})
+
+    assert anchor == "2026-06"
+    assert probed == [], (
+      "walking a 12-month horizon to conclude nothing has closed is the "
+      f"case this bound exists to remove; probed {probed}"
+    )
+
+  def test_the_scan_starts_at_the_bound(self) -> None:
+    anchor, probed = self._resolve("2026-08", {"2026-06", "2026-07", "2026-08"})
+
+    assert anchor == "2026-08"
+    assert probed == ["2026-08"]
+
+  def test_a_bound_past_the_horizon_still_stops_at_the_horizon(self) -> None:
+    """The annual comparative set can push the bound past the window."""
+    anchor, probed = self._resolve("2027-12", {"2026-06", "2026-07"}, horizon=3)
+
+    assert anchor == "2026-07"
+    assert probed == ["2026-09", "2026-08", "2026-07"]
+
+  def test_a_gap_below_the_bound_is_walked_through(self) -> None:
+    """The bound narrows the scan; it does not replace it.
+
+    A month can carry the newest actuals while an intervening one has no
+    monthly set — scanning down from the bound is what keeps a gap from
+    stranding the anchor.
+    """
+    anchor, probed = self._resolve("2026-09", {"2026-06", "2026-07"})
+
+    assert anchor == "2026-07"
+    assert probed == ["2026-09", "2026-08", "2026-07"]
+
+  def test_no_actuals_at_all_is_the_base(self) -> None:
+    anchor, probed = self._resolve(None, set())
+
+    assert anchor == "2026-06"
+    assert probed == []
+
+
+class TestNewestActualMonth:
+  """The bound query itself — deliberately without the monthly-window guard."""
+
+  def test_returns_the_month_of_the_newest_actual_set(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = date(2026, 12, 31)
+
+    assert fc._newest_actual_month(session, "struct_is", "ent_1") == "2026-12"
+
+  def test_no_actual_sets_is_none(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = None
+
+    assert fc._newest_actual_month(session, "struct_is", "ent_1") is None
+
+  def test_it_excludes_scenario_sets(self) -> None:
+    """Or the bound would sit at the end of the forecast horizon, which is
+    every month the scan is supposed to rule out."""
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = date(2026, 6, 30)
+
+    fc._newest_actual_month(session, "struct_is", "ent_1")
+
+    predicate = " ".join(
+      str(
+        session.execute.call_args.args[0].whereclause.compile(
+          compile_kwargs={"literal_binds": True}
+        )
+      ).split()
+    )
+    assert "scenario_id IS NULL" in predicate, predicate
 
 
 # ── The real verifier ─────────────────────────────────────────────────────

@@ -172,6 +172,30 @@ def _actual_set_at(
   ).scalar_one_or_none()
 
 
+def _newest_actual_month(
+  session: Session, structure_id: str, entity_id: str
+) -> str | None:
+  """Newest month carrying any actual report set for a structure.
+
+  An upper bound for the anchor scan, kept separate from
+  :func:`_actual_set_at` because it deliberately does *not* apply that
+  function's monthly-window guard — it may well land on the annual
+  comparative set. Bounding is all it is for.
+  """
+  newest = session.execute(
+    select(FactSet.period_end)
+    .where(
+      FactSet.structure_id == structure_id,
+      FactSet.factset_type == "report",
+      FactSet.scenario_id.is_(None),
+      FactSet.entity_id == entity_id,
+    )
+    .order_by(FactSet.period_end.desc())
+    .limit(1)
+  ).scalar()
+  return None if newest is None else period_from_date(newest)
+
+
 def _resolve_anchor_period(
   session: Session,
   *,
@@ -199,11 +223,28 @@ def _resolve_anchor_period(
   horizon end rather than forward from the base means a gap in the middle
   of the closed history can't strand the anchor behind it.
 
-  Returns ``base_period`` when nothing later qualifies — a scenario whose
-  base is still the seam, which is every scenario at creation time.
+  One query establishes where that scan can start, because otherwise its
+  cheapest case is also its most expensive one: a scenario whose base is
+  still the seam — every scenario at creation, and most of them most of
+  the time — finds nothing, and finding nothing means having walked the
+  entire horizon to prove it. The newest actual ``period_end`` on the
+  income-statement structure bounds any month that could qualify. It is a
+  bound, not an answer: the newest set may be the ANNUAL comparative one,
+  whose ``period_end`` coincides with a monthly one at the fiscal year
+  end and which :func:`_actual_set_at` deliberately refuses. Too high is
+  harmless (the scan walks down); too low would skip a valid anchor, and
+  it cannot be, since every monthly set is included in the maximum.
+
+  Returns ``base_period`` when nothing later qualifies.
   """
+  newest_actual_month = _newest_actual_month(session, is_structure_id, entity_id)
+  if newest_actual_month is None:
+    return base_period
+
   for offset in range(horizon_months, 0, -1):
     month = add_months(base_period, offset)
+    if month > newest_actual_month:
+      continue
     month_start, month_end = period_date_range(month)
     if (
       _actual_set_at(session, is_structure_id, entity_id, month_start, month_end)
