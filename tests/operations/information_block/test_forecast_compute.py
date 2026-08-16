@@ -292,6 +292,8 @@ def _run(
   base_is_facts: list[Any] | None = None,
   schedule_projection: ScheduleProjection | None = None,
   verify: Any = None,
+  closed_months: set[str] | None = None,
+  bs_closed_months: set[str] | None = None,
 ):
   """``verify`` controls ``_verify_month_sets``.
 
@@ -299,7 +301,16 @@ def _run(
   rules ran. Pass a callable to vary the result per month, which is what
   makes the stop-the-walk behaviour testable at all; the fixed stub is
   precisely why it never was.
+
+  ``closed_months`` names the months carrying actual statement sets —
+  ``{"2026-06"}`` (the base alone) by default, which is where the books
+  stood when each of these scenarios was authored. Widen it to move the
+  seam and watch the walk re-anchor. ``bs_closed_months`` narrows the
+  balance-sheet half independently, for the month that closed its income
+  statement but not its balance sheet.
   """
+  closed = closed_months if closed_months is not None else {"2026-06"}
+  bs_closed = bs_closed_months if bs_closed_months is not None else closed
   structure = _structure(mechanics)
   recorder = _Recorder()
 
@@ -315,10 +326,26 @@ def _run(
     "fs_lever": authored_facts,
   }
 
-  def _base_set(session: Any, sid: str, *a: Any, **k: Any) -> Any:
+  def _base_set(
+    session: Any,
+    sid: str,
+    entity_id: Any = None,
+    period_start: Any = None,
+    period_end: Any = None,
+  ) -> Any:
+    # Which months are closed has to be modelled rather than assumed now
+    # that the walk asks, in order to resolve its anchor. A stub answering
+    # "yes" for every month would report the whole horizon as closed.
+    month = (
+      None if period_end is None else f"{period_end.year:04d}-{period_end.month:02d}"
+    )
     if sid == "struct_is":
+      if month is not None and month not in closed:
+        return None
       return SimpleNamespace(id="fs_base_is")
     if sid == "struct_bs" and schedule_projection is not None:
+      if month is not None and month not in bs_closed:
+        return None
       # A BS base set exists so the walk builds an articulation context
       # (patched below to the bare schedule-only shape).
       return SimpleNamespace(id="fs_base_bs")
@@ -1270,6 +1297,213 @@ class TestStaleTailInvalidation:
       mock_inv.call_args.kwargs["through_period_end"]
       == response.months_computed[-1].period_end
     )
+
+
+def _seam_mechanics(horizon: int = 6, anchor: str = "seam") -> dict:
+  m = _mechanics(
+    _levers_for(horizon),
+    horizon=horizon,
+  )
+  m["base_anchor"] = anchor
+  return m
+
+
+def _levers_for(horizon: int) -> list[LeverAssertionLite]:
+  months = [
+    f"2026-{6 + i:02d}" if 6 + i <= 12 else f"2027-{6 + i - 12:02d}"
+    for i in range(1, horizon + 1)
+  ]
+  return [
+    _lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, months),
+    _lever("rs-driver:CostOfRevenueRate", "el_rate", 0.62, months),
+  ]
+
+
+SEAM_RULES = [GROWTH_RULE, COGS_RULE]
+
+
+class TestSeamAnchoredRoll:
+  """The walk re-anchors on the newest closed month, and the base holds still.
+
+  Before this, `base_period` did two jobs at once: it was the origin of the
+  authored lever window AND the month the walk took its opening balances
+  from. Advancing it to keep the balances current meant restating every
+  lever onto a shifted month window, which the update path rejects without
+  a full re-supply — so in practice a close meant deleting the scenario and
+  rebuilding it, and the close playbook carried a step saying exactly that.
+  Left un-advanced, the forward months opened on balances several closes
+  old, and the plan grid showed a cash line stepping from the last actual
+  into a figure the scenario's own cash-flow statement could not explain.
+
+  Splitting the two jobs fixes both ends: the authored window stays where it
+  was written, and the anchor moves on its own.
+  """
+
+  def test_reanchors_to_the_newest_closed_month(self) -> None:
+    response, rec = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-08"
+    assert response.base_period == "2026-06"
+    # The closed months are not re-forecast; the walk starts after them.
+    assert [m.period for m in response.months_computed] == [
+      "2026-09",
+      "2026-10",
+      "2026-11",
+      "2026-12",
+    ]
+    assert rec.month("struct_is", date(2026, 7, 31)) is None
+
+  def test_the_horizon_end_holds_still(self) -> None:
+    """A re-anchored walk computes FEWER months, never later ones.
+
+    Otherwise a scenario quietly grows a longer horizon every time a month
+    closes under it, projecting into months its author never asserted a
+    lever for.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.months_computed[-1].period == "2026-12"
+    assert len(response.months_computed) == 4
+
+  def test_levers_keep_their_authored_months(self) -> None:
+    """The point of the whole change: nothing has to be restated.
+
+    The levers were written against `base_period + 1 … + horizon`. The walk
+    now starts in the middle of that window and must still bind them —
+    which is what makes a scenario survive a close without being rebuilt.
+    """
+    response, rec = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.skipped == []
+    # 3% growth off the anchor month's actual revenue of 100.
+    assert rec.value("struct_is", date(2026, 9, 30), "el_rev") == pytest.approx(103.0)
+    assert rec.value("struct_is", date(2026, 10, 31), "el_rev") == pytest.approx(106.09)
+
+  def test_fixed_anchor_pins_the_walk_to_the_base(self) -> None:
+    """The counterfactual stays available, and stays deliberate.
+
+    "If we had restarted consulting last July" is a real question; its
+    balances are supposed to diverge from actuals. It just has to be asked
+    on purpose rather than fallen into by a scenario nobody re-based.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6, anchor="fixed"),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert [m.period for m in response.months_computed][:2] == ["2026-07", "2026-08"]
+    assert len(response.months_computed) == 6
+
+  def test_an_unclosed_horizon_is_unchanged(self) -> None:
+    """The overwhelmingly common case: base is still the seam."""
+    response, _ = _run(
+      _seam_mechanics(horizon=3),
+      SEAM_RULES,
+      _levers_for(3),
+      months=3,
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert [m.period for m in response.months_computed] == ALL_MONTHS
+    assert not any("re-anchored" in d for d in response.diagnostics)
+
+  def test_reanchoring_is_explained(self) -> None:
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    explanation = " ".join(response.diagnostics)
+    assert "re-anchored" in explanation
+    assert "2026-06" in explanation and "2026-08" in explanation
+    # Shorter-than-requested without a halt is a new shape; it has to say so
+    # rather than leave the caller to spot a length mismatch.
+    assert response.halted_at is None
+    assert len(response.months_computed) < response.months
+
+  def test_a_fully_overtaken_scenario_says_so(self) -> None:
+    """An expired scenario is an author-actionable condition, not a no-op.
+
+    Returning "0 months computed" with a green response would read as
+    success to every caller.
+    """
+    with pytest.raises(ValueError, match="no forward months left"):
+      _run(
+        _seam_mechanics(horizon=3),
+        SEAM_RULES,
+        _levers_for(3),
+        months=3,
+        closed_months={"2026-06", "2026-07", "2026-08", "2026-09"},
+      )
+
+  def test_a_month_without_a_balance_sheet_cannot_anchor(self) -> None:
+    """Anchoring half-blind would silently drop the balance-sheet roll."""
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+      bs_closed_months={"2026-06", "2026-07"},
+      schedule_projection=ScheduleProjection(),
+    )
+
+    assert response.anchor_period == "2026-07"
+
+  def test_superseded_head_is_swept(self) -> None:
+    """Months an earlier run computed that have since closed must go.
+
+    Every read prefers actuals at an overlap, so they are invisible on the
+    plan grid — which is precisely why they would sit there indefinitely,
+    still visible to anything reading the scenario directly, still carrying
+    their own passing verification results.
+    """
+    with (
+      patch.object(fc, "_invalidate_superseded_head", return_value=2) as head,
+      patch.object(fc, "_invalidate_stale_tail", return_value=0),
+    ):
+      response, _ = _run(
+        _seam_mechanics(horizon=6),
+        SEAM_RULES,
+        _levers_for(6),
+        months=6,
+        closed_months={"2026-06", "2026-07", "2026-08"},
+      )
+
+    assert head.call_args.kwargs["scenario_id"] == "struct_budget"
+    assert head.call_args.kwargs["through_period_end"] == date(2026, 8, 31)
+    assert any("at or before 2026-08" in d for d in response.diagnostics)
+
+  def test_nothing_is_swept_when_the_anchor_did_not_move(self) -> None:
+    with patch.object(fc, "_invalidate_superseded_head") as head:
+      _run(_seam_mechanics(horizon=3), SEAM_RULES, _levers_for(3), months=3)
+
+    head.assert_not_called()
 
 
 # ── The real verifier ─────────────────────────────────────────────────────

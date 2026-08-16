@@ -2,8 +2,17 @@
 
 :mod:`.forecast` holds the authored surface (scenario identity, lever
 assertions, line assertions, growth rates); this module derives everything
-downstream, one forward month at a time from the block's ``base_period``.
-Per month, in order:
+downstream, one forward month at a time from the walk's **anchor**.
+
+The anchor is not the block's ``base_period``. ``base_period`` is the origin
+of the authored window — every lever is keyed to a month inside it, so moving
+it means restating all of them, which is why advancing a scenario's base by
+hand meant deleting and rebuilding it. The anchor is derived instead: with
+``base_anchor='seam'`` (the default) it advances to the newest closed month
+inside the horizon, so a scenario survives a period close untouched and its
+first forward month opens on real balances rather than on a base several
+closes old. ``base_anchor='fixed'`` pins the walk to ``base_period`` for the
+deliberate counterfactual. Per month, in order:
 
 1. **Carry-forward** — every income-statement leaf that carried a fact in the
    base month's actual report and isn't rule-driven repeats its prior value.
@@ -113,6 +122,7 @@ if TYPE_CHECKING:
   from datetime import date
 
   from sqlalchemy.orm import Session
+  from sqlalchemy.sql.elements import ColumnElement
 
 
 @dataclass
@@ -160,6 +170,55 @@ def _actual_set_at(
     )
     .limit(1)
   ).scalar_one_or_none()
+
+
+def _resolve_anchor_period(
+  session: Session,
+  *,
+  base_period: str,
+  horizon_months: int,
+  is_structure_id: str,
+  bs_structure_id: str | None,
+  entity_id: str,
+) -> str:
+  """The newest month inside the horizon that can seed the walk.
+
+  A scenario is authored against a base month and then the books move on.
+  Left pinned to that base, the walk keeps opening every recompute from
+  balances that are now many closes old: the forward months carry a
+  balance sheet that never saw what actually happened, so the plan grid
+  shows a cash line stepping from the last actual straight into a figure
+  the scenario's own cash-flow statement cannot explain. The transition
+  isn't wrong arithmetic — the walk foots to the penny against its own
+  base — it is anchored to a month nobody is looking at any more.
+
+  So the anchor advances with the close. Candidates are the months
+  strictly after ``base_period`` and inside the authored horizon, newest
+  first; the first one carrying a **monthly** actual income statement (and
+  balance sheet, when the graph has one) wins. Scanning back from the
+  horizon end rather than forward from the base means a gap in the middle
+  of the closed history can't strand the anchor behind it.
+
+  Returns ``base_period`` when nothing later qualifies — a scenario whose
+  base is still the seam, which is every scenario at creation time.
+  """
+  for offset in range(horizon_months, 0, -1):
+    month = add_months(base_period, offset)
+    month_start, month_end = period_date_range(month)
+    if (
+      _actual_set_at(session, is_structure_id, entity_id, month_start, month_end)
+      is None
+    ):
+      continue
+    if bs_structure_id is not None and (
+      _actual_set_at(session, bs_structure_id, entity_id, month_start, month_end)
+      is None
+    ):
+      # An income statement without the matching balance sheet cannot seed
+      # the roll; keep walking back rather than anchoring half-blind.
+      continue
+    return month
+  return base_period
 
 
 def _local_calc_arcs(
@@ -267,14 +326,41 @@ def cmd_compute_forecast(
     )
   bs_structure_id = newest_actual_structure_id(session, "balance_sheet")
 
-  base_start, base_end = period_date_range(mechanics.base_period)
+  # The authored window never moves — every lever is keyed to a month in
+  # `base_period + 1 … base_period + horizon`, so advancing the base would
+  # force the author to restate all of them (which is exactly why advancing
+  # it by hand meant deleting and rebuilding the scenario). The *anchor*
+  # moves instead: it is derived, it needs nothing restated, and it is what
+  # the opening balances come from.
+  anchor_period = mechanics.base_period
+  if mechanics.base_anchor == "seam":
+    # Whether the anchor must also carry a balance sheet is decided by what
+    # the BASE month carries, not by whether the graph has a balance-sheet
+    # structure at all. A scenario that rolls a balance sheet must not
+    # re-anchor onto a month that would silently drop the roll; one that
+    # never had a base balance sheet was already running IS-only and
+    # shouldn't be held back by a requirement it never met.
+    base_window = period_date_range(mechanics.base_period)
+    rolls_balance_sheet = bs_structure_id is not None and (
+      _actual_set_at(session, bs_structure_id, entity_id, *base_window) is not None
+    )
+    anchor_period = _resolve_anchor_period(
+      session,
+      base_period=mechanics.base_period,
+      horizon_months=mechanics.horizon_months,
+      is_structure_id=is_structure_id,
+      bs_structure_id=bs_structure_id if rolls_balance_sheet else None,
+      entity_id=entity_id,
+    )
+
+  base_start, base_end = period_date_range(anchor_period)
   base_is_set = _actual_set_at(
     session, is_structure_id, entity_id, base_start, base_end
   )
   if base_is_set is None:
     raise ValueError(
       f"No actual income statement at the base period "
-      f"{mechanics.base_period} (a monthly set whose window starts "
+      f"{anchor_period} (a monthly set whose window starts "
       f"{base_start} and ends {base_end}). Close the months through the "
       "base period (closing stamps each month's statement sets), or set "
       "base_period to a month that has one."
@@ -343,7 +429,7 @@ def cmd_compute_forecast(
         SkippedForecastLite(
           rule_id=rule.id,
           element_qname=None,
-          period=mechanics.base_period,
+          period=anchor_period,
           reason="rule has no resolvable target element",
         )
       )
@@ -446,10 +532,42 @@ def cmd_compute_forecast(
         break
   cf_structure_id = newest_actual_structure_id(session, "cash_flow_statement")
 
-  ctx: ArticulationContext | None = None
   diagnostics: list[str] = []
+
+  # The months to walk. The authored window's END is fixed — a scenario
+  # doesn't silently grow a longer horizon because months closed under it —
+  # so a re-anchored walk computes fewer months, not later ones. The months
+  # between the base and the anchor are actuals now; the moving seam already
+  # preferred actuals over them on every read.
+  window_end = add_months(mechanics.base_period, mechanics.horizon_months)
+  months = []
+  for offset in range(1, months_n + 1):
+    month = add_months(anchor_period, offset)
+    if month > window_end:
+      break
+    months.append(month)
+
+  if not months:
+    raise ValueError(
+      f"Forecast {scenario_id!r} has no forward months left: its horizon "
+      f"ends {window_end} and the books are closed through {anchor_period}. "
+      "Extend horizon_months, or re-create the scenario on a later base."
+    )
+
+  if anchor_period != mechanics.base_period:
+    diagnostics.append(
+      f"Walk re-anchored from base {mechanics.base_period} to {anchor_period}, "
+      f"the newest closed month inside the horizon: opening balances come "
+      f"from that month's actuals, so the first forward month rolls off real "
+      f"figures. {len(months)} of the horizon's {mechanics.horizon_months} "
+      f"months remain forward-looking (the rest have closed). Levers keep "
+      f"their authored months — nothing needs restating. Set "
+      f"base_anchor='fixed' to pin the walk to the base instead."
+    )
+
+  ctx: ArticulationContext | None = None
   if bs_structure_id is not None and base_bs_set is not None:
-    horizon_end = period_date_range(add_months(mechanics.base_period, months_n))[1]
+    horizon_end = period_date_range(months[-1])[1]
     ctx = load_articulation_context(
       session,
       bs_structure_id=bs_structure_id,
@@ -497,13 +615,12 @@ def cmd_compute_forecast(
   months_computed: list[ForecastMonthLite] = []
   halted_at: str | None = None
   unverified_months: list[str] = []
-  months = [add_months(mechanics.base_period, i) for i in range(1, months_n + 1)]
   active_instant_ids = {
     ar.target.id for ar in ordered_active if ar.target.period_type == "instant"
   }
   prior_bs = dict(bs_prior)
   prev_period_end = base_end
-  prev_month = mechanics.base_period
+  prev_month = anchor_period
 
   for month_index, month in enumerate(months, start=1):
     month_start, month_end = period_date_range(month)
@@ -767,9 +884,12 @@ def cmd_compute_forecast(
     resolved = resolve_calc_dag(current, set(current), calculations, calc_order)
 
     # (d) Upsert the month's scenario sets.
+    # `base_period` on the provenance is the month this walk actually
+    # seeded from and `month_index` counts forward from it — both describe
+    # the run, not the authoring, so a re-anchored run stamps the anchor.
     provenance = ForecastProvenance(
       scenario_structure_id=scenario_id,
-      base_period=mechanics.base_period,
+      base_period=anchor_period,
       month_index=month_index,
       drivers=active_driver_qnames,
     )
@@ -1009,12 +1129,32 @@ def cmd_compute_forecast(
         f"left over from a longer previous run."
       )
 
+    # And the other end of the window: months a previous run computed that
+    # the anchor has since moved past. They are closed months now, so every
+    # read prefers the actuals over them — which is exactly why they would
+    # sit there indefinitely, invisible on the plan grid and still present
+    # to anything reading the scenario directly.
+    if anchor_period != mechanics.base_period:
+      superseded = _invalidate_superseded_head(
+        session,
+        scenario_id=scenario_id,
+        entity_id=entity_id,
+        through_period_end=base_end,
+      )
+      if superseded:
+        diagnostics.append(
+          f"Dropped {superseded} scenario fact set(s) at or before "
+          f"{anchor_period}, computed by an earlier run for months that "
+          f"have since closed."
+        )
+
   session.flush()
   return ComputeForecastResponse(
     structure_id=structure.id,
     scenario_id=scenario_id,
     entity_id=entity_id,
     base_period=mechanics.base_period,
+    anchor_period=anchor_period,
     months=months_n,
     months_computed=months_computed,
     halted_at=halted_at,
@@ -1254,12 +1394,67 @@ def _invalidate_stale_tail(
   ``VerificationResult.fact_set_id`` carries no FK, so those rows go
   explicitly — the same sweep ``delete_scenario`` does.
   """
+  return _sweep_scenario_sets(
+    session,
+    scenario_id=scenario_id,
+    entity_id=entity_id,
+    period_bound=FactSet.period_end > through_period_end,
+  )
+
+
+def _invalidate_superseded_head(
+  session: Session,
+  *,
+  scenario_id: str,
+  entity_id: str,
+  through_period_end: date,
+) -> int:
+  """Delete scenario sets at or before the month the walk re-anchored to.
+
+  The head counterpart of :func:`_invalidate_stale_tail`, and it exists for
+  the same reason. When the anchor advances past months a previous run
+  computed, those months are now closed: actuals exist for them, and every
+  read prefers actuals at an overlap, so they are invisible on the plan
+  grid. Invisible is not gone. They are scenario facts describing months
+  the scenario no longer forecasts, chained off an anchor the walk has
+  abandoned, and they still carry their own passing verification results —
+  the same "reads as current" failure the tail sweep was written for, at
+  the other end of the window. Anything reading the scenario directly
+  (a graph query, a fact grid) sees them as forecast.
+
+  Same lever-set exclusion, and for the same reason: the authored lever
+  FactSet carries this ``scenario_id`` with a period envelope spanning the
+  full horizon, so its ``period_end`` sits past the anchor and is safe here
+  — but only by accident of the envelope, and a sweep that relied on that
+  would break the first time the envelope shape changed.
+  """
+  return _sweep_scenario_sets(
+    session,
+    scenario_id=scenario_id,
+    entity_id=entity_id,
+    period_bound=FactSet.period_end <= through_period_end,
+  )
+
+
+def _sweep_scenario_sets(
+  session: Session,
+  *,
+  scenario_id: str,
+  entity_id: str,
+  period_bound: ColumnElement[bool],
+) -> int:
+  """Delete the scenario's computed sets matching ``period_bound``.
+
+  One implementation for both sweeps so the lever-set exclusion — the
+  sharp edge of making the scenario id the forecast Structure's own id —
+  is written once and cannot drift between them.
+  """
   stale = (
     session.execute(
       select(FactSet).where(
         FactSet.scenario_id == scenario_id,
         FactSet.entity_id == entity_id,
-        FactSet.period_end > through_period_end,
+        period_bound,
         not_(
           and_(
             FactSet.structure_id == scenario_id,
