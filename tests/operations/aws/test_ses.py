@@ -413,7 +413,7 @@ class TestCapacityWarningEmail:
 
 
 class TestAuthLinkTargets:
-  """Auth action links honor AUTH_EMAIL_LINKS_TO_LOGIN_HOME."""
+  """Auth action links always target the login home."""
 
   def _html(self, mock_ses_client):
     return mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
@@ -421,28 +421,10 @@ class TestAuthLinkTargets:
     ]
 
   @pytest.mark.asyncio
-  async def test_links_target_app_when_flag_off(self, ses_service, mock_ses_client):
-    mock_ses_client.send_email.return_value = {"MessageId": "msg-1"}
-
-    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", False):
-      await ses_service.send_verification_email(
-        user_email="test@example.com",
-        user_name="Test",
-        token="tok1",
-        app="roboledger",
-      )
-
-    html = self._html(mock_ses_client)
-    assert "https://roboledger.ai/auth/verify-email?token=tok1" in html
-    assert "return_to" not in html
-
-  @pytest.mark.asyncio
-  async def test_auth_links_target_login_home_when_flag_on(
-    self, ses_service, mock_ses_client
-  ):
+  async def test_auth_links_target_login_home(self, ses_service, mock_ses_client):
     mock_ses_client.send_email.return_value = {"MessageId": "msg-2"}
 
-    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", True):
+    with patch.object(env, "LOGIN_HOME_APP", "robosystems"):
       await ses_service.send_verification_email(
         user_email="test@example.com",
         user_name="Test",
@@ -481,15 +463,36 @@ class TestAuthLinkTargets:
       assert "return_to=roboledger" in html
 
   @pytest.mark.asyncio
-  async def test_welcome_link_unaffected_by_flag(self, ses_service, mock_ses_client):
-    mock_ses_client.send_email.return_value = {"MessageId": "msg-5"}
+  async def test_login_home_link_carries_no_return_to(
+    self, ses_service, mock_ses_client
+  ):
+    """A single-app deployment is its own login home — no bridge hop to add."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-1"}
 
-    with patch.object(env, "AUTH_EMAIL_LINKS_TO_LOGIN_HOME", True):
-      await ses_service.send_welcome_email(
+    with patch.object(env, "LOGIN_HOME_APP", "robosystems"):
+      await ses_service.send_verification_email(
         user_email="test@example.com",
         user_name="Test",
-        app="roboledger",
+        token="tok1",
+        app="robosystems",
       )
+
+    html = self._html(mock_ses_client)
+    assert "https://robosystems.ai/auth/verify-email?token=tok1" in html
+    assert "return_to" not in html
+
+  @pytest.mark.asyncio
+  async def test_welcome_link_targets_the_originating_app(
+    self, ses_service, mock_ses_client
+  ):
+    """Welcome is not an auth action — it lands in the app the user signed up for."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-5"}
+
+    await ses_service.send_welcome_email(
+      user_email="test@example.com",
+      user_name="Test",
+      app="roboledger",
+    )
 
     html = self._html(mock_ses_client)
     assert "https://roboledger.ai/home" in html
