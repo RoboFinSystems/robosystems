@@ -320,11 +320,16 @@ async def remove_member(
       row.graph_id
       for row in db.query(Graph.graph_id).filter(Graph.org_id == org_id).all()
     ]
+    graph_grants_revoked = 0
     if org_graph_ids:
-      db.query(GraphUser).filter(
-        GraphUser.user_id == user_id,
-        GraphUser.graph_id.in_(org_graph_ids),
-      ).delete(synchronize_session=False)
+      graph_grants_revoked = (
+        db.query(GraphUser)
+        .filter(
+          GraphUser.user_id == user_id,
+          GraphUser.graph_id.in_(org_graph_ids),
+        )
+        .delete(synchronize_session=False)
+      )
 
     removed_role = target_membership.role
     db.delete(target_membership)
@@ -332,6 +337,25 @@ async def remove_member(
 
     api_key_cache.invalidate_user_jwt_graph_access(user_id)
     api_key_cache.invalidate_user_data(user_id)
+
+    # A user belongs to exactly one org, so removing their last membership
+    # leaves an account that can authenticate but reach nothing: every
+    # org-scoped surface resolves the caller's first membership and there is
+    # no way to create or join an org from the outside. Deactivating makes
+    # that state honest — the kill switch also bumps `session_version` and
+    # revokes API keys, so no credential outlives the membership that
+    # justified it. Reversible by an admin (`activate`) if the removal was a
+    # mistake; freeing the email for a fresh signup is still a deletion.
+    deactivated_user = False
+    if not OrgUser.get_user_orgs(user_id, db):
+      removed_user = User.get_by_id(user_id, db)
+      if removed_user is not None and removed_user.is_active:
+        removed_user.deactivate(db)
+        deactivated_user = True
+        logger.info(
+          f"Deactivated user {user_id}: removal from org {org_id} left them "
+          f"with no organization"
+        )
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.ORG_MEMBER_REMOVED,
@@ -342,8 +366,9 @@ async def remove_member(
         "target_user_id": user_id,
         "previous_role": removed_role.value,
         "self_removal": user_id == current_user.id,
-        "org_graph_grants_revoked": len(org_graph_ids),
+        "org_graph_grants_revoked": graph_grants_revoked,
         "repository_subscriptions_canceled": len(canceled),
+        "user_deactivated": deactivated_user,
       },
       risk_level="low",
     )
