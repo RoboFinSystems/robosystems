@@ -50,11 +50,11 @@ REVOKED_KEY_RETENTION_DAYS = 30
 def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) -> dict:
   """Delete API keys that are past their expiry or long revoked.
 
-  Each key's cached validation entry is cleared before its row is dropped:
-  the cache is keyed on the row's fingerprint, so once the row is gone a
-  surviving entry can never be targeted and would keep the key authenticating
-  until its TTL with nothing left to revoke. A key whose cache clear fails is
-  left in place for the next run rather than deleted blind.
+  A key that lapsed by date is cleared from the validation cache before its
+  row is dropped: the cache is keyed on the row's fingerprint, so once the
+  row is gone a surviving entry can never be targeted and would keep the key
+  authenticating until its TTL with nothing left to revoke. A key whose cache
+  clear fails is left in place for the next run rather than deleted blind.
   """
   with db.get_session() as session:
     now = datetime.now(UTC)
@@ -81,7 +81,12 @@ def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) ->
     deferred_count = 0
 
     for key in stale_keys:
-      if not key.invalidate_cache():
+      # A key revoked long ago has no cache entry left to strand: the
+      # validation cache lives for minutes against a retention window of
+      # days, and clearing it costs two keyspace scans against the shared
+      # cache — not worth spending where it cannot pay. Only a key still
+      # active at the point it lapsed by date can hold a live entry.
+      if key.is_active and not key.invalidate_cache():
         deferred_count += 1
         continue
       session.delete(key)

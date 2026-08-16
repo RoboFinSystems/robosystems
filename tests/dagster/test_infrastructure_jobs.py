@@ -117,8 +117,10 @@ class TestStaleApiKeyCleanup:
     until TTL.
     """
     stuck = MagicMock()
+    stuck.is_active = True
     stuck.invalidate_cache.return_value = False
     clean = MagicMock()
+    clean.is_active = True
     clean.invalidate_cache.return_value = True
 
     mock_session.query.return_value.filter.return_value.all.return_value = [
@@ -133,10 +135,27 @@ class TestStaleApiKeyCleanup:
     assert result["deferred_count"] == 1
 
   @pytest.mark.unit
+  def test_long_revoked_key_is_dropped_without_a_cache_scan(self, mock_session):
+    """Clearing the cache costs two keyspace scans and can find nothing this
+    long after revocation — the entry outlived its TTL weeks ago."""
+    revoked = MagicMock()
+    revoked.is_active = False
+
+    mock_session.query.return_value.filter.return_value.all.return_value = [revoked]
+
+    result = cleanup_stale_api_keys(build_op_context(), _db(mock_session))
+
+    revoked.invalidate_cache.assert_not_called()
+    mock_session.delete.assert_called_once_with(revoked)
+    assert result["deleted_count"] == 1
+    assert result["deferred_count"] == 0
+
+  @pytest.mark.unit
   def test_cache_is_cleared_before_the_row_is_dropped(self, mock_session):
     calls = []
 
     key = MagicMock()
+    key.is_active = True
     key.invalidate_cache.side_effect = lambda: calls.append("invalidate") or True
     mock_session.delete.side_effect = lambda _row: calls.append("delete")
     mock_session.query.return_value.filter.return_value.all.return_value = [key]
