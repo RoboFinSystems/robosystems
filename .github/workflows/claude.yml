@@ -82,9 +82,15 @@ jobs:
     runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
     timeout-minutes: 15
     permissions:
+      # contents stays READ on purpose: the reviewer reads the diff and comments.
+      # It must not be able to push commits or open branches on a public repo.
       contents: read
-      pull-requests: read
-      issues: read
+      # pull-requests + issues must be WRITE, not read: posting the review IS a
+      # write. With read the run completes green, burns tokens, and silently
+      # posts nothing (permission_denials_count > 0 in the execution result) —
+      # a control that looks healthy and produces no evidence.
+      pull-requests: write
+      issues: write
       actions: read # Required for Claude to read CI results on PRs
       id-token: write # Required: claude-code-action mints a GitHub OIDC token to
         # authenticate to GitHub (setupGitHubToken → getOidcToken), independent of
