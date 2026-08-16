@@ -85,10 +85,13 @@ _RECURRING_SEQUENCE: list[str] = [
   "the new closed_through. Nothing needs re-basing — the walk re-anchors on "
   "the newest closed month by itself and reports the move in its "
   "diagnostics, so the scenario's levers stay as authored. Read "
-  "anchor_period on the response to confirm it advanced; a scenario the "
-  "close has overtaken entirely fails loudly and needs its horizon "
-  "extended. Scenarios deliberately built on a counterfactual base carry "
-  "base_anchor='fixed' and stay put.",
+  "anchor_period on the response to confirm it advanced. A scenario whose "
+  "horizon the close has passed entirely computes no months and says so in "
+  "its diagnostics — its stale months are cleared and its levers kept, so "
+  "extending horizon_months and re-running is all it needs. Scenarios "
+  "deliberately built on a counterfactual base carry base_anchor='fixed' "
+  "and stay put. Note the anchor only ever advances onto a month the close "
+  "stamped: a report published for an open month does not move it.",
 ]
 
 _INITIATE_SEQUENCE: list[str] = [
