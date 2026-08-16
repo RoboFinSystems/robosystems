@@ -64,6 +64,15 @@ class BackupInitiator(str, Enum):
   SCHEDULED = "scheduled"
   """Taken by the nightly platform job. Listed, downloadable, quota-exempt."""
 
+  FINAL = "final"
+  """Taken at deprovisioning, as the departing customer's export copy.
+
+  Listed and downloadable like a scheduled backup — it is the one artifact a
+  customer most needs to reach, and the published export grace period is a
+  promise about exactly this row. Not SYSTEM: this is the opposite of an
+  artifact the customer cannot act on. Quota is irrelevant; the graph is gone.
+  """
+
   SYSTEM = "system"
   """Internal artifact — a pre-restore snapshot or a migration export.
 

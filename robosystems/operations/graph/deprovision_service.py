@@ -8,7 +8,7 @@ and do not block the overall deprovisioning flow.
 """
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ class DeprovisionResult:
   graph_id: str
   previous_status: str = ""
   backup_created: bool = False
+  backup_registered: bool = False
   backup_path: str | None = None
   subgraphs_deleted: int = 0
   database_deleted: bool = False
@@ -123,7 +124,7 @@ class GraphDeprovisionService:
 
     # --- 1. Create final backup ---
     if create_backup and not skip_backup_check:
-      await self._create_final_backup(graph, result)
+      await self._create_final_backup(graph, session, result)
 
     # --- 2. Delete subgraphs ---
     await self._delete_subgraphs(graph_id, session, result)
@@ -170,8 +171,10 @@ class GraphDeprovisionService:
 
     return result
 
-  async def _create_final_backup(self, graph, result: DeprovisionResult) -> None:
-    """Create a final backup before teardown."""
+  async def _create_final_backup(
+    self, graph, session: Session, result: DeprovisionResult
+  ) -> None:
+    """Create a final backup before teardown, and register it for retrieval."""
     try:
       from .engine.backup_manager import (
         BackupFormat,
@@ -192,11 +195,92 @@ class GraphDeprovisionService:
       metadata = await backup_manager.create_backup(backup_job)
       result.backup_created = True
       result.backup_path = metadata.s3_key if metadata else None
+      if metadata:
+        self._register_final_backup(
+          graph,
+          session,
+          metadata,
+          backup_manager.s3_adapter.bucket_name,
+          retention_days,
+          result,
+        )
       logger.info(f"Final backup created for graph {graph.graph_id}")
     except Exception as e:
       error_msg = f"Backup creation failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph.graph_id})
+
+  def _register_final_backup(
+    self,
+    graph,
+    session: Session,
+    metadata,
+    s3_bucket: str,
+    retention_days: int,
+    result: DeprovisionResult,
+  ) -> None:
+    """Record the final backup as a GraphBackup row.
+
+    Without a row the object is unreachable: both the listing and the download
+    URL resolve through GraphBackup, so a final backup that exists only in S3
+    is invisible to the customer it was taken for — which is the export grace
+    period the privacy policy publishes. Only the user-initiated path created
+    rows, and deprovisioning does not go through it.
+
+    ``expires_at`` matches the tier's backup hosting window rather than the
+    shorter export window, so the retention sweep keeps treating this object
+    exactly as long as it did while untracked. Shortening it here would delete
+    the archive early, which is a different promise from the export one.
+
+    Built and flushed rather than going through ``GraphBackup.create`` /
+    ``complete_backup``: those commit, and this runs inside a best-effort step
+    of a caller-owned transaction, where an early commit would persist a
+    partial teardown if a later step failed.
+    """
+    from ...models.core.graph.graph_backup import (
+      BackupInitiator,
+      BackupStatus,
+      BackupType,
+      GraphBackup,
+    )
+
+    now = datetime.now(UTC)
+    backup_metadata: dict = {
+      "backup_format": metadata.backup_format,
+      "compression_ratio": metadata.compression_ratio,
+    }
+    if metadata.memory:
+      backup_metadata["memory"] = metadata.memory
+    if metadata.payload_delta:
+      backup_metadata["payload_delta"] = metadata.payload_delta
+
+    session.add(
+      GraphBackup(
+        graph_id=graph.graph_id,
+        database_name=graph.graph_id,
+        backup_type=BackupType.FULL.value,
+        initiated_by=BackupInitiator.FINAL.value,
+        status=BackupStatus.COMPLETED.value,
+        s3_bucket=s3_bucket,
+        s3_key=metadata.s3_key or "",
+        s3_metadata_key=metadata.s3_metadata_key,
+        original_size_bytes=metadata.original_size,
+        compressed_size_bytes=metadata.compressed_size,
+        compression_ratio=metadata.compression_ratio,
+        node_count=metadata.node_count,
+        relationship_count=metadata.relationship_count,
+        database_version=metadata.database_version,
+        backup_duration_seconds=metadata.backup_duration_seconds,
+        checksum=metadata.checksum,
+        compression_enabled=True,
+        backup_metadata=backup_metadata,
+        started_at=metadata.timestamp,
+        completed_at=now,
+        expires_at=now + timedelta(days=retention_days),
+      )
+    )
+    session.flush()
+    result.backup_registered = True
 
   async def _delete_subgraphs(
     self, graph_id: str, session: Session, result: DeprovisionResult
