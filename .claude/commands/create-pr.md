@@ -76,15 +76,13 @@ gh pr create \
 
 Print the resulting PR URL.
 
-### 5. Request the Claude review — always
+### 5. The Claude review — automatic, do not request it
 
-Every pull request gets a `@claude` review. This is a change-management control, not a convenience: this is a single-maintainer repository where GitHub forbids self-approval, so an automated second reader on every change is the compensating control that stands in for independent human review. Skipping it on a given PR puts a hole in the control.
+Every pull request gets a `@claude` review. This is a change-management control, not a convenience: this is a single-maintainer repository where GitHub forbids self-approval, so an automated second reader on every change is the compensating control that stands in for independent human review.
 
-```bash
-gh pr comment <number> --body "@claude please review this PR"
-```
+**It fires on its own.** `.github/workflows/claude.yml` triggers on `pull_request` for `[opened, ready_for_review]`, so opening the PR is all it takes.
 
-Post it unconditionally, immediately after creating the PR. Do not ask first, and do not skip it for small or mechanical changes — a control that only runs on changes deemed interesting is not a control.
+**Do not post `@claude please review this PR`.** That was the old flow, and doing it now triggers a *second, independent* review on the `issue_comment` arm — two runs, two comments, twice the cost, for one PR. If a review is genuinely needed again (say after substantial new commits, since the workflow deliberately does not fire on `synchronize`), then post the comment — but as a considered re-review, never as routine.
 
 Two things this is **not**:
 
@@ -104,7 +102,7 @@ After creating the PR, report:
 1. The PR URL.
 2. A one-line summary of the title.
 3. Target ← source branches.
-4. Confirmation that the `@claude` review was requested — or, if it wasn't, why.
+4. That the automatic `@claude` review was triggered — or, if the PR edits `.github/workflows/claude.yml`, that it is expected not to run on this one (§5).
 
 ## Arguments
 
