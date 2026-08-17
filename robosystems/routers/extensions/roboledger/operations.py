@@ -1256,6 +1256,9 @@ update_information_block_op = _registrar.register(
       ValueError: 422,
       NotImplementedError: 501,
       ScheduleNotFoundError: 404,
+      # A schedule template change supersedes its pending obligations, which
+      # the promotion sweep may be holding. Retryable.
+      EventLockedError: 409,
     },
     mark_stale_reason="information_block_updated",
   )

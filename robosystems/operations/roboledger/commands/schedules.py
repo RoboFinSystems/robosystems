@@ -390,11 +390,23 @@ def update_schedule(
   # impossible: either the new template + new pending events both land,
   # or neither does.
   if template_changed:
-    ScheduleService().supersede_pending_obligations(
-      session,
-      structure=structure,
-      created_by=updated_by,
+    from robosystems.operations.event_block.locking import (
+      bounded_lock_wait as _bounded_lock_wait,
     )
+
+    # Request-facing, and it contends with the promotion sweep over the same
+    # pending obligations — bound the wait rather than hold this request for
+    # the length of a background tick.
+    with _bounded_lock_wait(
+      session,
+      "This schedule's pending obligations are being written by another "
+      "process. Retry in a moment.",
+    ):
+      ScheduleService().supersede_pending_obligations(
+        session,
+        structure=structure,
+        created_by=updated_by,
+      )
 
   # Re-run rule engine when the template changes, since the underlying
   # fact shape may have moved. No-op when the template was unchanged
