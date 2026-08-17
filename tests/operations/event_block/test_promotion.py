@@ -72,6 +72,10 @@ def _session_returning(
     }
   event_query = MagicMock()
   event_query.filter.return_value = event_query
+  # The candidate load takes `FOR UPDATE` — everything the sweep does after it
+  # is read-decide-write against these rows. Self-returning like `.filter` so
+  # the chain stays position-independent.
+  event_query.with_for_update.return_value = event_query
   event_query.all.return_value = events
   entry_query = MagicMock()
   entry_query.filter.return_value = entry_query
@@ -126,6 +130,30 @@ class TestCoPilotMode:
     bulk_update_call.assert_called_once_with(
       {"status": "classified"}, synchronize_session="fetch"
     )
+
+  def test_classify_update_is_guarded_on_pending(self) -> None:
+    """The bulk UPDATE carries `status = 'pending'` alongside the id list.
+
+    Without it the statement writes `classified` over whatever the row now
+    holds, so an obligation voided or committed since the candidate read would
+    be silently reverted — a lost update, not a redundant write.
+
+    The candidate read's `FOR UPDATE` is what makes that race unreachable, so
+    this cannot be provoked end-to-end; it is pinned here instead, at the
+    statement that relies on it, against a refactor that moves the read.
+    """
+    session = _session_returning([_pending_event("evt_1", period_end="2026-01-31")])
+
+    promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    predicates = [
+      str(arg)
+      for call in session.event_query.filter.call_args_list
+      for arg in call.args
+    ]
+    assert any("events.status = " in p for p in predicates), predicates
 
   def test_does_not_call_handler_dispatch(self) -> None:
     e1 = _pending_event("evt_1")

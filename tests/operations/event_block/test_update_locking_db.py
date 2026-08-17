@@ -29,12 +29,16 @@ import robosystems.models.extensions  # noqa: F401  (register models on the Base
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.event_block import UpdateEventBlockRequest
+from robosystems.models.api.extensions.schedules import PromoteObligationsRequest
+from robosystems.models.extensions import Structure, Taxonomy
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.commands import (
-  EventLockedError,
   InvalidEventTransitionError,
   update_event_block,
 )
+from robosystems.operations.event_block.locking import EventLockedError
+from robosystems.operations.event_block.promotion import promote_pending_obligations
+from robosystems.operations.roboledger.commands.schedules import promote_obligations
 
 pytestmark = pytest.mark.integration
 
@@ -194,3 +198,90 @@ def test_approval_that_waits_out_a_lock_sees_the_committed_row(tenant):
 
   assert not failure, f"winner thread failed: {failure[0]!r}"
   assert hold_released.is_set()
+
+
+class TestObligationSweepLock:
+  """The promotion sweep is the same read-decide-write shape as an approval,
+  and it runs on a Dagster sensor every few minutes on every graph — so it
+  races the on-demand op, an inbox approval, and its own next tick. Its
+  candidate load takes the lock; the request-facing caller bounds the wait.
+
+  The obligation here is **classified and stranded**, not pending, and that is
+  load-bearing: a pending obligation would be flipped by the co-pilot bulk
+  UPDATE, whose own row lock would block a second caller whether or not the
+  read is locked — so the test would pass with the fix removed. A stranded
+  classified obligation makes the sweep write *nothing*, leaving the read's
+  `FOR UPDATE` as the only thing that can block.
+  """
+
+  OBLIGATION_ID = "evt_oblig_0001"
+  SCHEDULE_ID = "struct_sched_0001"
+  TAXONOMY_ID = "tax_sched_0001"
+
+  @pytest.fixture(autouse=True)
+  def stranded_obligation(self, tenant):
+    with extensions_session(GRAPH) as session:
+      session.execute(text("DELETE FROM events"))
+      session.execute(text("DELETE FROM structures"))
+      session.execute(text("DELETE FROM taxonomies"))
+      session.add(
+        Taxonomy(
+          id=self.TAXONOMY_ID,
+          name="Schedules",
+          taxonomy_type="schedule",
+          created_by="usr_seed",
+        )
+      )
+      session.flush()
+      # The schedule must exist, or the orphan guard voids the obligation —
+      # a write, which would reintroduce the lock the test is trying to isolate.
+      session.add(
+        Structure(
+          id=self.SCHEDULE_ID,
+          taxonomy_id=self.TAXONOMY_ID,
+          name="Depreciation",
+          block_type="schedule",
+          created_by="usr_seed",
+        )
+      )
+      session.add(
+        Event(
+          id=self.OBLIGATION_ID,
+          event_type="schedule_entry_due",
+          event_category="adjustment",
+          event_class="economic",
+          status="classified",
+          occurred_at=datetime(2026, 1, 31, tzinfo=UTC),
+          source="schedule",
+          currency="USD",
+          metadata_={
+            "schedule_id": self.SCHEDULE_ID,
+            "period_start": "2026-01-01",
+            "period_end": "2026-01-31",
+          },
+          created_by="usr_seed",
+        )
+      )
+    yield
+
+  def test_sweep_lock_blocks_the_on_demand_promotion(self, tenant):
+    with extensions_session(GRAPH) as sensor_session:
+      result = promote_pending_obligations(
+        sensor_session,
+        graph_id="(sensor)",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=False,
+      )
+      # Nothing was written — no flip, no orphan void. Any blocking below is
+      # the candidate read's lock and nothing else.
+      assert result.classified_event_ids == []
+      assert result.voided_orphan_event_ids == []
+      assert result.stranded_event_ids == [self.OBLIGATION_ID]
+
+      with extensions_session(GRAPH) as request_session:
+        with pytest.raises(EventLockedError, match="background sweep"):
+          promote_obligations(
+            request_session,
+            PromoteObligationsRequest(dispatch_handlers=False),
+            created_by="usr_operator",
+          )

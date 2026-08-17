@@ -265,15 +265,25 @@ def promote_obligations(
   sweep is idempotent (re-running skips already-classified rows and
   reconciles to existing drafts).
   """
+  from robosystems.operations.event_block.locking import bounded_lock_wait
   from robosystems.operations.event_block.promotion import promote_pending_obligations
 
-  result = promote_pending_obligations(
+  # Request-facing, so the wait is bounded: the sweep locks its whole candidate
+  # set, and the Dagster sensor runs the same function every few minutes. An
+  # unbounded wait here would hold this request and its pooled connection until
+  # a background tick finished.
+  with bounded_lock_wait(
     session,
-    graph_id="(on-demand)",  # logging-only; data scope is the session search_path
-    as_of=datetime.now(UTC),
-    dispatch_handlers=body.dispatch_handlers,
-    created_by=created_by,
-  )
+    "Obligations are being promoted by another process (the background sweep). "
+    "Retry in a moment.",
+  ):
+    result = promote_pending_obligations(
+      session,
+      graph_id="(on-demand)",  # logging-only; data scope is the session search_path
+      as_of=datetime.now(UTC),
+      dispatch_handlers=body.dispatch_handlers,
+      created_by=created_by,
+    )
   session.commit()
   return PromoteObligationsResponse(
     classified_count=result.classified_count,

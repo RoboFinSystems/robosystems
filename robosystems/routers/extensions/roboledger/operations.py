@@ -1761,7 +1761,9 @@ promote_obligations_op = _registrar.register(
     command=cmd_promote_obligations,
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
-    error_map={ValueError: 422},
+    # The background sweep holds the candidate set's row locks. Retryable,
+    # same as the approval path's conflict.
+    error_map={ValueError: 422, EventLockedError: 409},
     mark_stale_reason="obligations_promoted",
   )
 )

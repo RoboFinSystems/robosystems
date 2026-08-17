@@ -11,12 +11,12 @@ from sqlalchemy.exc import OperationalError
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
-  EventLockedError,
   EventNotFoundError,
   HandlerMetadataValidationError,
   InvalidEventTransitionError,
   update_event_block,
 )
+from robosystems.operations.event_block.locking import EventLockedError
 
 
 def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
