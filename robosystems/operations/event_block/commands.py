@@ -365,7 +365,15 @@ def update_event_block(
   Handler errors roll back the entire update, including the status
   change — a failed commit leaves the event in its pre-approval state.
   """
-  event = session.get(Event, body.event_id)
+  # Lock the row for the life of the transaction. The transition check below
+  # is read-decide-write, and the decision is only sound if nothing else can
+  # move the event in between. The live race is an inbox approval against the
+  # sync's auto-commit pass (`extensions/loader.py`): both read `captured`,
+  # both fire the handler, and the event ends up with two sets of GL rows —
+  # a ledger that still foots and is still wrong. Under READ COMMITTED the
+  # blocked reader re-reads the committed row once the lock releases, sees
+  # the new status, and raises InvalidEventTransitionError as it should.
+  event = session.get(Event, body.event_id, with_for_update=True)
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
 

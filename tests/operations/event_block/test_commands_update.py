@@ -52,7 +52,7 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   """MagicMock session whose .get(Event, id) returns the matching event."""
   by_id = {e.id: e for e in events}
   session = MagicMock()
-  session.get.side_effect = lambda _cls, eid: by_id.get(eid)
+  session.get.side_effect = lambda _cls, eid, **_kwargs: by_id.get(eid)
   # _load_dimension_ids issues a select via session.execute → return [].
   session.execute.return_value.scalars.return_value.all.return_value = []
   return session
@@ -340,3 +340,20 @@ class TestApproveFiresHandler:
     fake_handler.dispatch.assert_not_called()
     # Caller's transaction must roll back — we never reached commit.
     session.commit.assert_not_called()
+
+
+class TestTransitionRowLock:
+  """The status check is read-decide-write, so the row must be locked for
+  the life of the transaction. Without the lock an inbox approval racing
+  the sync's auto-commit pass fires the same handler twice and leaves one
+  event with two sets of GL rows — books that still foot and are wrong."""
+
+  def test_event_is_loaded_for_update(self) -> None:
+    event = _event("evt_a", status="classified")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
+    update_event_block(session, body, created_by="usr_test")
+
+    _args, kwargs = session.get.call_args
+    assert kwargs.get("with_for_update") is True
