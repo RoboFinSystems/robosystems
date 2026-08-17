@@ -36,6 +36,7 @@ class DeprovisionResult:
   documents_deleted: int = 0
   connections_deleted: int = 0
   search_purged: bool = False
+  report_bundles_deleted: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -138,6 +139,9 @@ class GraphDeprovisionService:
     # --- 3c. Purge documents from the shared search index ---
     self._purge_search_index(graph_id, result)
 
+    # --- 3d. Purge published report artifacts from object storage ---
+    self._purge_report_bundles(graph_id, result)
+
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
@@ -165,6 +169,7 @@ class GraphDeprovisionService:
         "documents_deleted": result.documents_deleted,
         "connections_deleted": result.connections_deleted,
         "search_purged": result.search_purged,
+        "report_bundles_deleted": result.report_bundles_deleted,
         "errors": result.errors,
       },
     )
@@ -390,6 +395,63 @@ class GraphDeprovisionService:
       logger.info(f"Purged search index for graph {graph_id}")
     except Exception as e:
       error_msg = f"Search index purge failed: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  def _purge_report_bundles(self, graph_id: str, result: DeprovisionResult) -> None:
+    """Delete the tenant's published report artifacts from object storage.
+
+    Report bundles are the serialized publications of a customer's reports —
+    financial statements in JSON-LD and XBRL — and they were the last customer
+    data store teardown never reached. Their prefix deliberately carries no
+    lifecycle rule: a clock there would destroy the artifact of a live report
+    whose row still exists, which is why `delete_report_artifacts` deletes them
+    on withdrawal instead. Absence of a clock was correct; absence of a teardown
+    delete was not, and it left a departed tenant's statements in the bucket
+    indefinitely.
+
+    Deletes the whole `report-bundles/{graph_id}/` prefix, so every report,
+    generation and flavor goes together. The final backup lives under a
+    different prefix and is untouched.
+
+    Best-effort like its siblings — a storage failure records a warning rather
+    than stranding the capacity release — but an object that fails to delete is
+    recorded as an error, because incomplete disposal is the one outcome this
+    step exists to prevent.
+    """
+    try:
+      from ...config import env
+      from ...config.storage.graph import get_report_bundle_prefix
+      from ..aws.s3 import S3Client
+
+      bucket = env.USER_DATA_BUCKET
+      prefix = get_report_bundle_prefix(graph_id)
+      s3 = S3Client()
+
+      deleted = 0
+      failed = 0
+      for key in s3.list_objects(bucket, prefix=prefix):
+        if s3.delete_object(bucket, key):
+          deleted += 1
+        else:
+          failed += 1
+          logger.warning(
+            f"Failed to delete report artifact s3://{bucket}/{key}",
+            extra={"graph_id": graph_id},
+          )
+
+      result.report_bundles_deleted = deleted
+      if failed:
+        result.errors.append(
+          f"Report bundle purge incomplete: {failed} object(s) not deleted"
+        )
+      elif deleted:
+        logger.info(
+          f"Purged {deleted} report artifact(s) for graph {graph_id}",
+          extra={"graph_id": graph_id},
+        )
+    except Exception as e:
+      error_msg = f"Report bundle purge failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
 

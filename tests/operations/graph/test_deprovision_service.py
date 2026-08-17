@@ -109,6 +109,19 @@ def _stub_search_purge():
     yield
 
 
+@pytest.fixture(autouse=True)
+def stub_bundle_purge():
+  """Deprovision purges the graph's report artifacts from object storage — stub
+  the S3 client so these tests never reach a real bucket. Yields the class mock
+  so the tests that care about the purge can drive it."""
+  with patch("robosystems.operations.aws.s3.S3Client") as cls:
+    client = MagicMock()
+    client.list_objects.return_value = []
+    client.delete_object.return_value = True
+    cls.return_value = client
+    yield client
+
+
 class TestDeprovisionService:
   """Tests for GraphDeprovisionService.deprovision_graph."""
 
@@ -717,3 +730,99 @@ class TestDeprovisionService:
       db_session.refresh(test_graph)
       assert test_graph.deleted_at is not None
       assert isinstance(test_graph.deleted_at, datetime)
+
+
+class TestReportBundlePurge:
+  """Published report artifacts must not outlive the tenant.
+
+  Report bundles were the last customer data store teardown did not reach.
+  Their prefix carries no lifecycle rule by design — a clock there would destroy
+  a live report's publication — so teardown is the only thing that can remove
+  them, and these tests are what keep that true.
+  """
+
+  @pytest.mark.asyncio
+  async def test_bundles_are_deleted_under_the_graph_prefix(
+    self, service, db_session, test_graph, stub_bundle_purge
+  ):
+    """Every artifact under report-bundles/{graph_id}/ goes, and the count is
+    reported so the operator log states what actually happened."""
+    keys = [
+      f"report-bundles/{test_graph.graph_id}/rpt_a/g1.jsonld",
+      f"report-bundles/{test_graph.graph_id}/rpt_a/g1.holon.jsonld",
+      f"report-bundles/{test_graph.graph_id}/rpt_b/g2.zip",
+    ]
+    stub_bundle_purge.list_objects.return_value = keys
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ),
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    # Scoped to this graph's prefix — never the whole bucket.
+    _, kwargs = stub_bundle_purge.list_objects.call_args
+    assert kwargs["prefix"] == f"report-bundles/{test_graph.graph_id}/"
+
+    assert stub_bundle_purge.delete_object.call_count == 3
+    assert result.report_bundles_deleted == 3
+    assert not [e for e in result.errors if "Report bundle" in e]
+
+  @pytest.mark.asyncio
+  async def test_an_object_that_will_not_delete_is_recorded_as_an_error(
+    self, service, db_session, test_graph, stub_bundle_purge
+  ):
+    """Incomplete disposal is the one outcome this step exists to prevent, so a
+    surviving object degrades the teardown to `partial` rather than passing
+    quietly. This is deliberately stricter than the sibling purges."""
+    stub_bundle_purge.list_objects.return_value = [
+      f"report-bundles/{test_graph.graph_id}/rpt_a/g1.jsonld",
+      f"report-bundles/{test_graph.graph_id}/rpt_b/g1.jsonld",
+    ]
+    stub_bundle_purge.delete_object.side_effect = [True, False]
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ),
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert result.report_bundles_deleted == 1
+    assert any("Report bundle purge incomplete" in e for e in result.errors)
+    assert result.status == "partial"
+
+  @pytest.mark.asyncio
+  async def test_storage_failure_does_not_strand_the_teardown(
+    self, service, db_session, test_graph, stub_bundle_purge
+  ):
+    """Best-effort like its siblings: object storage being unreachable must not
+    hold the graph in a half-torn-down state or block the capacity release."""
+    stub_bundle_purge.list_objects.side_effect = RuntimeError("s3 unreachable")
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ),
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert any("Report bundle purge failed" in e for e in result.errors)
+
+    # The graph is still torn down and the row still soft-deleted.
+    db_session.refresh(test_graph)
+    assert test_graph.status == GraphStatus.DEPROVISIONED.value
+    assert test_graph.deleted_at is not None
