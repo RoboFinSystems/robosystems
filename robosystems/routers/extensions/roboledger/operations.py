@@ -1608,6 +1608,9 @@ execute_event_block_op = _registrar.register(
       # QBClient itself; 401 signals to the UI that the operator must
       # reconnect via OAuth.
       QBAuthFailedError: 401,
+      # Another writer holds the event's row lock. Retryable, and the publish
+      # deliberately did not reach QuickBooks.
+      EventLockedError: 409,
       ValueError: 422,
     },
     mark_stale_reason="event_published",

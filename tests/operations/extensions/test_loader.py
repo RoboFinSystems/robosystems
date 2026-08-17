@@ -8,13 +8,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-def _stub_event_lookup(session, rows):
-  """Stub the loader's existing-events lookup on a MagicMock session.
+def _stub_existing_lookup(session, rows):
+  """Stub a `query(...).filter(...)[.with_for_update()].all()` load on a mock session.
 
-  The lookup is ``session.query(Event).filter(...).with_for_update().all()`` —
-  it takes a row lock so a concurrent inbox approval cannot commit between that
-  read and the handler dispatch below it. Both the locked and unlocked chains
-  are stubbed so a test can never accidentally assert against the wrong one.
+  Named for its main subject, the loader's existing-**events** lookup, which
+  takes a row lock so a concurrent inbox approval cannot commit between that
+  read and the handler dispatch below it — but the `MagicMock` chain is not
+  type-differentiated, so the same helper serves the Element and Agent loads
+  in this file. Both the locked and unlocked chains are stubbed, so a test can
+  never accidentally assert against whichever one production stopped using.
   """
   filtered = session.query.return_value.filter.return_value
   filtered.all.return_value = rows
@@ -403,7 +405,7 @@ class TestOLTPLoader:
     mock_duckdb_connect.return_value = _make_duckdb_mock({"line_items": orphan_lines})
 
     mock_session = MagicMock()
-    _stub_event_lookup(mock_session, [])
+    _stub_existing_lookup(mock_session, [])
     mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
     mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -503,7 +505,7 @@ class TestCaptureTransactionsAsEvents:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     _capture_result = loader._capture_transactions_as_events(
@@ -544,7 +546,7 @@ class TestCaptureTransactionsAsEvents:
     existing_event.id = "evt_existing"
 
     session = MagicMock()
-    _stub_event_lookup(session, [existing_event])
+    _stub_existing_lookup(session, [existing_event])
 
     loader = OLTPLoader()
     _capture_result = loader._capture_transactions_as_events(
@@ -591,7 +593,7 @@ class TestCaptureTransactionsAsEvents:
     committed_event.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [committed_event])
+    _stub_existing_lookup(session, [committed_event])
 
     loader = OLTPLoader()
     _capture_result = loader._capture_transactions_as_events(
@@ -660,7 +662,7 @@ class TestCaptureTransactionsAsEvents:
     }
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     _capture_result = loader._capture_transactions_as_events(
@@ -736,7 +738,7 @@ class TestCaptureAutoCommit:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
 
@@ -769,7 +771,7 @@ class TestCaptureAutoCommit:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     def fire_sets_fulfilled(_session, evt, _created_by):
       # Mimics the journal_entry_recorded handler when metadata.status='posted'.
@@ -804,7 +806,7 @@ class TestCaptureAutoCommit:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
 
@@ -868,7 +870,7 @@ class TestCaptureAutoCommit:
     prior_event.metadata_ = {"dispatch_attempts": 1, "dispatch_error": "unknown_error"}
 
     session = MagicMock()
-    _stub_event_lookup(session, [prior_event])
+    _stub_existing_lookup(session, [prior_event])
 
     loader = OLTPLoader()
     with patch(
@@ -895,7 +897,7 @@ class TestCaptureAutoCommit:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     dbt = self._dbt_data()
@@ -938,7 +940,7 @@ class TestCaptureAutoCommit:
     existing_event.external_id = "JE_100"
     existing_event.status = "captured"
     existing_event.event_type = "journal_entry_recorded"
-    _stub_event_lookup(session, [existing_event])
+    _stub_existing_lookup(session, [existing_event])
 
     loader = OLTPLoader()
 
@@ -1378,7 +1380,7 @@ class TestCaptureHardening:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
     loader = OLTPLoader()
     cap = loader._capture_transactions_as_events(
       session,
@@ -1533,7 +1535,7 @@ class TestCaptureAgentsFromQB:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     out = loader._capture_agents_from_qb(
@@ -1561,7 +1563,7 @@ class TestCaptureAgentsFromQB:
     existing.id = "agt_existing"
 
     session = MagicMock()
-    _stub_event_lookup(session, [existing])
+    _stub_existing_lookup(session, [existing])
 
     loader = OLTPLoader()
     dbt = {
@@ -1623,7 +1625,7 @@ class TestCaptureAgentsFromQB:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     loader._capture_agents_from_qb(
@@ -1645,7 +1647,7 @@ class TestCaptureAgentsFromQB:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     dbt = {
       "agents": [
@@ -1689,7 +1691,7 @@ class TestCaptureAgentsFromQB:
     existing.metadata_ = {"qb_sync_token": "5", "custom_field": "preserved"}
 
     session = MagicMock()
-    _stub_event_lookup(session, [existing])
+    _stub_existing_lookup(session, [existing])
 
     dbt = {
       "agents": [
@@ -1733,7 +1735,7 @@ class TestCaptureAgentsFromQB:
     existing.metadata_ = {"qb_sync_token": "5"}
 
     session = MagicMock()
-    _stub_event_lookup(session, [existing])
+    _stub_existing_lookup(session, [existing])
 
     dbt = {
       "agents": [
@@ -1831,7 +1833,7 @@ class TestCaptureWithEventTypeAndAgent:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     loader._capture_transactions_as_events(
@@ -1857,7 +1859,7 @@ class TestCaptureWithEventTypeAndAgent:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     loader._capture_transactions_as_events(
@@ -1887,7 +1889,7 @@ class TestCaptureWithEventTypeAndAgent:
     dbt["transactions"][0].pop("agent_external_id", None)
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     loader._capture_transactions_as_events(

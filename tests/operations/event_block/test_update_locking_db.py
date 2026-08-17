@@ -20,6 +20,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -28,12 +29,16 @@ from sqlalchemy.exc import OperationalError
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
-from robosystems.models.api.event_block import UpdateEventBlockRequest
+from robosystems.models.api.event_block import (
+  ExecuteEventBlockRequest,
+  UpdateEventBlockRequest,
+)
 from robosystems.models.api.extensions.schedules import PromoteObligationsRequest
 from robosystems.models.extensions import Structure, Taxonomy
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.commands import (
   InvalidEventTransitionError,
+  execute_event_block,
   update_event_block,
 )
 from robosystems.operations.event_block.locking import EventLockedError
@@ -279,9 +284,58 @@ class TestObligationSweepLock:
       assert result.stranded_event_ids == [self.OBLIGATION_ID]
 
       with extensions_session(GRAPH) as request_session:
-        with pytest.raises(EventLockedError, match="background sweep"):
+        with pytest.raises(EventLockedError, match="written by another process"):
           promote_obligations(
             request_session,
             PromoteObligationsRequest(dispatch_handlers=False),
             created_by="usr_operator",
           )
+
+
+class TestPublishLock:
+  """`execute_event_block` posts to QuickBooks between its read and its status
+  write, so a lost update there means an event that was voided got published
+  anyway. QB's `request_id` dedup covers a repeated post; it does not cover
+  that. The lock has to hold *before* the external call."""
+
+  @pytest.fixture(autouse=True)
+  def committed_event(self, tenant):
+    with extensions_session(GRAPH) as session:
+      session.execute(text("DELETE FROM events"))
+      session.add(
+        Event(
+          id=EVENT_ID,
+          event_type="journal_entry_recorded",
+          event_category="adjustment",
+          event_class="economic",
+          status="committed",
+          occurred_at=datetime(2026, 3, 1, tzinfo=UTC),
+          source=SOURCE,
+          external_id=EXTERNAL_ID,
+          currency="USD",
+          metadata_={"connection_id": "conn_qb_1"},
+          created_by="usr_seed",
+        )
+      )
+    yield
+
+  def test_a_locked_event_is_never_published(self, tenant):
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM events WHERE id = :id FOR UPDATE"), {"id": EVENT_ID}
+      )
+
+      with extensions_session(GRAPH) as publish_session:
+        with patch(
+          "robosystems.operations.event_block.qb_writeback.post_event_to_qb"
+        ) as post:
+          with pytest.raises(EventLockedError, match=EVENT_ID):
+            execute_event_block(
+              publish_session,
+              ExecuteEventBlockRequest(event_id=EVENT_ID),
+              created_by="usr_operator",
+            )
+      post.assert_not_called()
+
+    with extensions_session(GRAPH) as check:
+      assert check.get(Event, EVENT_ID).status == "committed"

@@ -272,9 +272,13 @@ def promote_obligations(
   # set, and the Dagster sensor runs the same function every few minutes. An
   # unbounded wait here would hold this request and its pooled connection until
   # a background tick finished.
+  # The wrap covers the whole sweep, not just its locked candidate load — the
+  # lock is taken inside. Autopilot dispatch also writes GL rows, so a wait
+  # here is *usually* the background sweep holding the obligations but need not
+  # be; the message says what is true rather than naming a cause it cannot know.
   with bounded_lock_wait(
     session,
-    "Obligations are being promoted by another process (the background sweep). "
+    "Obligations for this graph are being written by another process. "
     "Retry in a moment.",
   ):
     result = promote_pending_obligations(

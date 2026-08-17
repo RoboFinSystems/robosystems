@@ -21,13 +21,15 @@ from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 
-def _stub_event_lookup(session, rows):
-  """Stub the loader's existing-events lookup on a MagicMock session.
+def _stub_existing_lookup(session, rows):
+  """Stub a `query(...).filter(...)[.with_for_update()].all()` load on a mock session.
 
-  The lookup is ``session.query(Event).filter(...).with_for_update().all()`` —
-  it takes a row lock so a concurrent inbox approval cannot commit between that
-  read and the handler dispatch below it. Both the locked and unlocked chains
-  are stubbed so a test can never accidentally assert against the wrong one.
+  Named for its main subject, the loader's existing-**events** lookup, which
+  takes a row lock so a concurrent inbox approval cannot commit between that
+  read and the handler dispatch below it — but the `MagicMock` chain is not
+  type-differentiated, so the same helper serves the Element and Agent loads
+  in this file. Both the locked and unlocked chains are stubbed, so a test can
+  never accidentally assert against whichever one production stopped using.
   """
   filtered = session.query.return_value.filter.return_value
   filtered.all.return_value = rows
@@ -114,7 +116,7 @@ class TestVoidedEventSurvivesResync:
     voided_event.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [voided_event])
+    _stub_existing_lookup(session, [voided_event])
 
     loader = OLTPLoader()
     result = loader._capture_transactions_as_events(
@@ -313,7 +315,7 @@ class TestElementUpsertPreservesUlid:
 
     session = MagicMock()
     # The element-lookup query returns the existing row.
-    _stub_event_lookup(session, [existing_element])
+    _stub_existing_lookup(session, [existing_element])
     mock_ext_session.return_value.__enter__ = MagicMock(return_value=session)
     mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -368,7 +370,7 @@ class TestSyncTokenCapture:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
-    _stub_event_lookup(session, [])
+    _stub_existing_lookup(session, [])
 
     loader = OLTPLoader()
     loader._capture_transactions_as_events(
@@ -399,7 +401,7 @@ class TestSyncTokenCapture:
     captured.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     loader = OLTPLoader()
     loader._capture_transactions_as_events(
@@ -436,7 +438,7 @@ class TestSyncTokenCapture:
     # metadata_blob shape looks like at this code revision; reuse it
     # for the live payload so the diff is exactly the sync_token field.
     capture_session = MagicMock()
-    _stub_event_lookup(capture_session, [])
+    _stub_existing_lookup(capture_session, [])
     OLTPLoader()._capture_transactions_as_events(
       capture_session,
       self._dbt_data_with_sync_token("3"),
@@ -455,7 +457,7 @@ class TestSyncTokenCapture:
 
     # Now re-sync with a bumped SyncToken; no other field changed.
     drift_session = MagicMock()
-    _stub_event_lookup(drift_session, [committed])
+    _stub_existing_lookup(drift_session, [committed])
 
     result = OLTPLoader()._capture_transactions_as_events(
       drift_session,
@@ -488,7 +490,7 @@ class TestSyncTokenCapture:
     committed.payload_drift = False
 
     capture_session = MagicMock()
-    _stub_event_lookup(capture_session, [])
+    _stub_existing_lookup(capture_session, [])
     OLTPLoader()._capture_transactions_as_events(
       capture_session,
       self._dbt_data_with_sync_token(None),
@@ -505,7 +507,7 @@ class TestSyncTokenCapture:
 
     # Re-sync the identical payload under a new connection id.
     drift_session = MagicMock()
-    _stub_event_lookup(drift_session, [committed])
+    _stub_existing_lookup(drift_session, [committed])
     result = OLTPLoader()._capture_transactions_as_events(
       drift_session,
       self._dbt_data_with_sync_token(None),
@@ -551,7 +553,7 @@ class TestSyncTokenGate:
     captured.event_type = "ORIGINAL_TYPE"
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -582,7 +584,7 @@ class TestSyncTokenGate:
     captured.event_type = "ORIGINAL_TYPE"
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -610,7 +612,7 @@ class TestSyncTokenGate:
     captured.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -640,7 +642,7 @@ class TestSyncTokenGate:
     captured.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -666,7 +668,7 @@ class TestSyncTokenGate:
     # First, build what a normal capture's metadata would look like for
     # SyncToken='3'.
     capture_session = MagicMock()
-    _stub_event_lookup(capture_session, [])
+    _stub_existing_lookup(capture_session, [])
     OLTPLoader()._capture_transactions_as_events(
       capture_session,
       self._dbt_data_with_sync_token("3"),
@@ -688,7 +690,7 @@ class TestSyncTokenGate:
     committed.payload_drift = False
 
     session = MagicMock()
-    _stub_event_lookup(session, [committed])
+    _stub_existing_lookup(session, [committed])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -771,7 +773,7 @@ class TestIdempotentReingest:
     captured = self._make_existing_event(status="captured", sync_token="5")
     pre_meta = dict(captured.metadata_)
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -799,7 +801,7 @@ class TestIdempotentReingest:
     captured.event_type = pre_event_type
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured])
+    _stub_existing_lookup(session, [captured])
 
     result = OLTPLoader()._capture_transactions_as_events(
       session,
@@ -854,7 +856,7 @@ class TestIdempotentReingest:
     }
 
     session = MagicMock()
-    _stub_event_lookup(session, [captured_blob])
+    _stub_existing_lookup(session, [captured_blob])
 
     # Bumped SyncToken + payload diff (loader will compute a different
     # qb_doc_number from the fixture's "number" field = "500").
@@ -903,7 +905,7 @@ class TestIdempotentReingest:
 
     # First sync: new event inserted with sync_token='4'.
     first_session = MagicMock()
-    _stub_event_lookup(first_session, [])
+    _stub_existing_lookup(first_session, [])
 
     loader = OLTPLoader()
     first_result = loader._capture_transactions_as_events(
@@ -924,7 +926,7 @@ class TestIdempotentReingest:
 
     # Second sync: same dbt row; gate flags 'same' and short-circuits.
     second_session = MagicMock()
-    _stub_event_lookup(second_session, [new_event])
+    _stub_existing_lookup(second_session, [new_event])
 
     second_result = loader._capture_transactions_as_events(
       second_session,

@@ -314,6 +314,10 @@ def promote_pending_obligations(
       session.query(Event).filter(
         Event.id.in_(candidate_ids), Event.status == "pending"
       ).update({"status": "classified"}, synchronize_session="fetch")
+      # Accurate because the candidate read is locked: the UPDATE's guard
+      # cannot filter any of these out, so every id did in fact flip. If that
+      # read ever loses its lock, this list has to come from the statement's
+      # rowcount instead of being assumed.
       result.classified_event_ids.extend(candidate_ids)
     logger.info(
       "promote_pending_obligations[%s]: classified=%s stranded=%s (co-pilot mode)",
