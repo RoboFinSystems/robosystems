@@ -710,10 +710,25 @@ class ForecastMechanics(BaseModel):
   base_period: str = Field(
     ...,
     description=(
-      "Seed month (``YYYY-MM``) the walk projects forward from — "
+      "Origin month (``YYYY-MM``) of the authored horizon window — "
       "resolved at create time (request → fiscal calendar "
       "closed-through → newest actual report month) and stored so "
-      "recompute is deterministic."
+      "recompute is deterministic. Every lever, line assertion and "
+      "growth rate is keyed to a month in ``base_period + 1 … "
+      "base_period + horizon_months``, so this never moves on its own; "
+      "``base_anchor`` decides whether the *walk* still seeds here."
+    ),
+  )
+  base_anchor: Literal["seam", "fixed"] = Field(
+    "seam",
+    description=(
+      "Where the walk takes its opening balances. ``seam`` (default) "
+      "re-anchors on the newest closed month at or after "
+      "``base_period``, so a scenario survives a period close without "
+      "being rebuilt and its first forward month rolls off real "
+      "balances. ``fixed`` pins the walk to ``base_period`` — the "
+      "deliberate counterfactual (“if we had restarted in July”), "
+      "whose balances diverge from actuals on purpose."
     ),
   )
   levers: list[LeverAssertionLite] = Field(
@@ -2085,7 +2100,24 @@ class ComputeForecastResponse(BaseModel):
     ),
   )
   entity_id: str
-  base_period: str = Field(..., description="Seed month the walk projected from.")
+  base_period: str = Field(
+    ...,
+    description=(
+      "Origin month of the block's authored horizon window — where its "
+      "levers are keyed from. Equal to ``anchor_period`` unless the walk "
+      "re-anchored at the seam."
+    ),
+  )
+  anchor_period: str = Field(
+    ...,
+    description=(
+      "Month the walk actually seeded its opening balances from. With "
+      "``base_anchor='seam'`` this advances to the newest closed month "
+      "as periods close, so the first forward month rolls off real "
+      "balances instead of a stale base; with ``'fixed'`` it always "
+      "equals ``base_period``."
+    ),
+  )
   months: int = Field(..., description="Forward months requested.")
   months_computed: list[ForecastMonthLite] = Field(default_factory=list)
   halted_at: str | None = Field(

@@ -595,6 +595,7 @@ def create(
     scenario_kind=payload.scenario_kind,
     horizon_months=payload.horizon_months,
     base_period=base_period,
+    base_anchor=payload.base_anchor,
     levers=levers,
     line_assertions=line_assertions,
     line_growth=line_growth,
@@ -640,7 +641,8 @@ def update(
 ) -> str:
   """Update a forecast block in place.
 
-  Mutable: name, scenario_kind, horizon_months, base_period, levers.
+  Mutable: name, scenario_kind, horizon_months, base_period, base_anchor,
+  levers.
   Changing ``horizon_months`` or ``base_period`` requires re-supplying
   ``levers`` — the persisted expansion can't be re-derived (the
   uniform-vs-override distinction is gone), so re-expansion needs the
@@ -701,6 +703,7 @@ def update(
     scenario_kind=scenario_kind,
     horizon_months=horizon_months,
     base_period=base_period,
+    base_anchor=payload.base_anchor or current.base_anchor,
     levers=levers,
     line_assertions=line_assertions,
     line_growth=line_growth,

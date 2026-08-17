@@ -292,6 +292,9 @@ def _run(
   base_is_facts: list[Any] | None = None,
   schedule_projection: ScheduleProjection | None = None,
   verify: Any = None,
+  closed_months: set[str] | None = None,
+  bs_closed_months: set[str] | None = None,
+  published_months: set[str] | None = None,
 ):
   """``verify`` controls ``_verify_month_sets``.
 
@@ -299,7 +302,21 @@ def _run(
   rules ran. Pass a callable to vary the result per month, which is what
   makes the stop-the-walk behaviour testable at all; the fixed stub is
   precisely why it never was.
+
+  ``closed_months`` names the months carrying **canonical** (close-stamped)
+  statement sets — ``{"2026-06"}`` (the base alone) by default, which is
+  where the books stood when each of these scenarios was authored. Widen it
+  to move the seam and watch the walk re-anchor. ``bs_closed_months``
+  narrows the balance-sheet half independently, for the month that closed
+  its income statement but not its balance sheet.
+
+  ``published_months`` names months carrying only a **publication
+  snapshot** — a report was generated for them, but they are open, or were
+  reopened. They are visible to a non-canonical read and must never anchor.
   """
+  closed = closed_months if closed_months is not None else {"2026-06"}
+  bs_closed = bs_closed_months if bs_closed_months is not None else closed
+  published = published_months or set()
   structure = _structure(mechanics)
   recorder = _Recorder()
 
@@ -315,10 +332,34 @@ def _run(
     "fs_lever": authored_facts,
   }
 
-  def _base_set(session: Any, sid: str, *a: Any, **k: Any) -> Any:
+  def _base_set(
+    session: Any,
+    sid: str,
+    entity_id: Any = None,
+    period_start: Any = None,
+    period_end: Any = None,
+    *,
+    canonical_only: bool = False,
+  ) -> Any:
+    # Which months are closed has to be modelled rather than assumed now
+    # that the walk asks, in order to resolve its anchor. A stub answering
+    # "yes" for every month would report the whole horizon as closed.
+    #
+    # And closed is not the same question as "a set exists": a publication
+    # snapshot can sit on an open or reopened month, so `canonical_only`
+    # has to be honoured here or the tests can't tell the two apart.
+    month = (
+      None if period_end is None else f"{period_end.year:04d}-{period_end.month:02d}"
+    )
+    visible = closed if canonical_only else closed | published
+    bs_visible = bs_closed if canonical_only else bs_closed | published
     if sid == "struct_is":
+      if month is not None and month not in visible:
+        return None
       return SimpleNamespace(id="fs_base_is")
     if sid == "struct_bs" and schedule_projection is not None:
+      if month is not None and month not in bs_visible:
+        return None
       # A BS base set exists so the walk builds an articulation context
       # (patched below to the bare schedule-only shape).
       return SimpleNamespace(id="fs_base_bs")
@@ -327,6 +368,10 @@ def _run(
   with (
     patch.object(fc, "newest_actual_structure_id", side_effect=_structures),
     patch.object(fc, "_actual_set_at", side_effect=_base_set),
+    # The anchor scan's upper bound. Reads from the same `closed_months`
+    # model as `_actual_set_at` so the two can't disagree about where the
+    # books stand — a bound below the seam would skip a valid anchor.
+    patch.object(fc, "_newest_actual_month", return_value=max(closed)),  # canonical
     patch.object(
       fc,
       "load_articulation_context",
@@ -1269,4 +1314,720 @@ class TestStaleTailInvalidation:
     assert (
       mock_inv.call_args.kwargs["through_period_end"]
       == response.months_computed[-1].period_end
+    )
+
+
+def _seam_mechanics(horizon: int = 6, anchor: str = "seam") -> dict:
+  m = _mechanics(
+    _levers_for(horizon),
+    horizon=horizon,
+  )
+  m["base_anchor"] = anchor
+  return m
+
+
+def _levers_for(horizon: int) -> list[LeverAssertionLite]:
+  months = [
+    f"2026-{6 + i:02d}" if 6 + i <= 12 else f"2027-{6 + i - 12:02d}"
+    for i in range(1, horizon + 1)
+  ]
+  return [
+    _lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, months),
+    _lever("rs-driver:CostOfRevenueRate", "el_rate", 0.62, months),
+  ]
+
+
+SEAM_RULES = [GROWTH_RULE, COGS_RULE]
+
+
+class TestSeamAnchoredRoll:
+  """The walk re-anchors on the newest closed month, and the base holds still.
+
+  Before this, `base_period` did two jobs at once: it was the origin of the
+  authored lever window AND the month the walk took its opening balances
+  from. Advancing it to keep the balances current meant restating every
+  lever onto a shifted month window, which the update path rejects without
+  a full re-supply — so in practice a close meant deleting the scenario and
+  rebuilding it, and the close playbook carried a step saying exactly that.
+  Left un-advanced, the forward months opened on balances several closes
+  old, and the plan grid showed a cash line stepping from the last actual
+  into a figure the scenario's own cash-flow statement could not explain.
+
+  Splitting the two jobs fixes both ends: the authored window stays where it
+  was written, and the anchor moves on its own.
+  """
+
+  def test_reanchors_to_the_newest_closed_month(self) -> None:
+    response, rec = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-08"
+    assert response.base_period == "2026-06"
+    # The closed months are not re-forecast; the walk starts after them.
+    assert [m.period for m in response.months_computed] == [
+      "2026-09",
+      "2026-10",
+      "2026-11",
+      "2026-12",
+    ]
+    assert rec.month("struct_is", date(2026, 7, 31)) is None
+
+  def test_the_horizon_end_holds_still(self) -> None:
+    """A re-anchored walk computes FEWER months, never later ones.
+
+    Otherwise a scenario quietly grows a longer horizon every time a month
+    closes under it, projecting into months its author never asserted a
+    lever for.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.months_computed[-1].period == "2026-12"
+    assert len(response.months_computed) == 4
+
+  def test_levers_keep_their_authored_months(self) -> None:
+    """The point of the whole change: nothing has to be restated.
+
+    The levers were written against `base_period + 1 … + horizon`. The walk
+    now starts in the middle of that window and must still bind them —
+    which is what makes a scenario survive a close without being rebuilt.
+    """
+    response, rec = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.skipped == []
+    # 3% growth off the anchor month's actual revenue of 100.
+    assert rec.value("struct_is", date(2026, 9, 30), "el_rev") == pytest.approx(103.0)
+    assert rec.value("struct_is", date(2026, 10, 31), "el_rev") == pytest.approx(106.09)
+
+  def test_fixed_anchor_pins_the_walk_to_the_base(self) -> None:
+    """The counterfactual stays available, and stays deliberate.
+
+    "If we had restarted consulting last July" is a real question; its
+    balances are supposed to diverge from actuals. It just has to be asked
+    on purpose rather than fallen into by a scenario nobody re-based.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6, anchor="fixed"),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert [m.period for m in response.months_computed][:2] == ["2026-07", "2026-08"]
+    assert len(response.months_computed) == 6
+
+  def test_an_unclosed_horizon_is_unchanged(self) -> None:
+    """The overwhelmingly common case: base is still the seam."""
+    response, _ = _run(
+      _seam_mechanics(horizon=3),
+      SEAM_RULES,
+      _levers_for(3),
+      months=3,
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert [m.period for m in response.months_computed] == ALL_MONTHS
+    assert not any("re-anchored" in d for d in response.diagnostics)
+
+  def test_reanchoring_is_explained(self) -> None:
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+    )
+
+    explanation = " ".join(response.diagnostics)
+    assert "re-anchored" in explanation
+    assert "2026-06" in explanation and "2026-08" in explanation
+    # Shorter-than-requested without a halt is a new shape; it has to say so
+    # rather than leave the caller to spot a length mismatch.
+    assert response.halted_at is None
+    assert len(response.months_computed) < response.months
+
+  def test_a_fully_overtaken_scenario_says_so(self) -> None:
+    """An expired scenario is an author-actionable condition, not a no-op."""
+    response, _ = _run(
+      _seam_mechanics(horizon=3),
+      SEAM_RULES,
+      _levers_for(3),
+      months=3,
+      closed_months={"2026-06", "2026-07", "2026-08", "2026-09"},
+    )
+
+    assert response.months_computed == []
+    assert response.halted_at is None
+    assert any("no forward months left" in d for d in response.diagnostics)
+    assert any("horizon_months" in d for d in response.diagnostics), (
+      "the diagnostic has to name the way out, not just the condition"
+    )
+
+  def test_a_fully_overtaken_scenario_still_cleans_up(self) -> None:
+    """The limit case must not behave opposite to the trend.
+
+    This used to raise, which read as the loud answer and was the quiet
+    one: the exception rolled the session back, so every superseded month
+    survived it — and a fully-overtaken scenario is precisely the case
+    where *all* of them qualify for the sweep. A partially-overtaken
+    scenario cleaned up after itself while a fully-overtaken one did not.
+    """
+    with patch.object(fc, "_invalidate_superseded_head", return_value=3) as head:
+      response, _ = _run(
+        _seam_mechanics(horizon=3),
+        SEAM_RULES,
+        _levers_for(3),
+        months=3,
+        closed_months={"2026-06", "2026-07", "2026-08", "2026-09"},
+      )
+
+    head.assert_called_once()
+    assert head.call_args.kwargs["scenario_id"] == "struct_budget"
+    assert head.call_args.kwargs["through_period_end"] == date(2026, 9, 30)
+    assert any("have been cleared" in d for d in response.diagnostics)
+
+  def test_a_publication_snapshot_is_not_a_closed_month(self) -> None:
+    """An anchor is a claim that the books are closed through a month.
+
+    `create_report` consults no fiscal calendar, so a report generated for
+    an open — or future — month leaves a valid publication snapshot behind
+    it. Anchoring there would seed the walk from an incomplete month and
+    delete real forecast months to do it.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06"},
+      published_months={"2026-07", "2026-08"},
+    )
+
+    assert response.anchor_period == "2026-06"
+    assert next(m.period for m in response.months_computed) == "2026-07"
+
+  def test_the_scan_below_the_bound_still_demands_canonical(self) -> None:
+    """The bound is canonical, so it usually hides a non-canonical scan —
+    the first month probed is the bound itself, which is closed by
+    definition. It stops hiding it the moment the scan walks DOWN: the
+    newest closed month can carry an income statement without a balance
+    sheet, and the month below it can be one that was reopened. Then the
+    scan is the only thing standing between the walk and a month nobody
+    closed.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      # 2026-08 closed its income statement but not its balance sheet, so
+      # the scan can't anchor there and keeps walking back.
+      closed_months={"2026-06", "2026-08"},
+      bs_closed_months={"2026-06"},
+      # 2026-07 was reopened: canonical retracted, snapshot left behind.
+      published_months={"2026-07"},
+      schedule_projection=ScheduleProjection(),
+    )
+
+    assert response.anchor_period == "2026-06", (
+      "the scan walked past the bound into a reopened month and treated "
+      "its leftover publication snapshot as a close"
+    )
+
+  def test_a_reopened_month_stops_anchoring(self) -> None:
+    """Reopening retracts the canonical set and leaves the snapshot.
+
+    So the same publication row that never proved closure in the first
+    place is exactly what is left behind when a month stops being closed.
+    """
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      # 2026-08 was closed and has been reopened: canonical gone, snapshot
+      # left. 2026-07 is still genuinely closed.
+      closed_months={"2026-06", "2026-07"},
+      published_months={"2026-08"},
+    )
+
+    assert response.anchor_period == "2026-07"
+
+  def test_a_month_without_a_balance_sheet_cannot_anchor(self) -> None:
+    """Anchoring half-blind would silently drop the balance-sheet roll."""
+    response, _ = _run(
+      _seam_mechanics(horizon=6),
+      SEAM_RULES,
+      _levers_for(6),
+      months=6,
+      closed_months={"2026-06", "2026-07", "2026-08"},
+      bs_closed_months={"2026-06", "2026-07"},
+      schedule_projection=ScheduleProjection(),
+    )
+
+    assert response.anchor_period == "2026-07"
+
+  def test_superseded_head_is_swept(self) -> None:
+    """Months an earlier run computed that have since closed must go.
+
+    Every read prefers actuals at an overlap, so they are invisible on the
+    plan grid — which is precisely why they would sit there indefinitely,
+    still visible to anything reading the scenario directly, still carrying
+    their own passing verification results.
+    """
+    with (
+      patch.object(fc, "_invalidate_superseded_head", return_value=2) as head,
+      patch.object(fc, "_invalidate_stale_tail", return_value=0),
+    ):
+      response, _ = _run(
+        _seam_mechanics(horizon=6),
+        SEAM_RULES,
+        _levers_for(6),
+        months=6,
+        closed_months={"2026-06", "2026-07", "2026-08"},
+      )
+
+    assert head.call_args.kwargs["scenario_id"] == "struct_budget"
+    assert head.call_args.kwargs["through_period_end"] == date(2026, 8, 31)
+    assert any("at or before 2026-08" in d for d in response.diagnostics)
+
+  def test_nothing_is_swept_when_the_anchor_did_not_move(self) -> None:
+    with patch.object(fc, "_invalidate_superseded_head") as head:
+      _run(_seam_mechanics(horizon=3), SEAM_RULES, _levers_for(3), months=3)
+
+    head.assert_not_called()
+
+
+class TestAnchorScanBound:
+  """The anchor scan asks one question before it starts walking.
+
+  Its cheapest case was also its most expensive: a scenario whose base is
+  still the seam — every scenario at creation, and most of them most of
+  the time — finds nothing, and finding nothing meant having probed every
+  month of the horizon to prove it. One query for the newest actual month
+  bounds that. The bound is only ever an upper bound, so the risk worth
+  testing is a bound that comes back too LOW and skips a valid anchor.
+  """
+
+  @staticmethod
+  def _resolve(newest: str | None, closed: set[str], horizon: int = 12):
+    probed: list[str] = []
+
+    def _at(session, sid, entity_id, period_start, period_end, *, canonical_only=False):
+      month = f"{period_end.year:04d}-{period_end.month:02d}"
+      probed.append(month)
+      return SimpleNamespace(id="fs") if month in closed else None
+
+    with (
+      patch.object(fc, "_newest_actual_month", return_value=newest),
+      patch.object(fc, "_actual_set_at", side_effect=_at),
+    ):
+      anchor = fc._resolve_anchor_period(
+        MagicMock(),
+        base_period="2026-06",
+        horizon_months=horizon,
+        is_structure_id="struct_is",
+        bs_structure_id=None,
+        entity_id="ent_1",
+      )
+    return anchor, probed
+
+  def test_an_unmoved_seam_probes_nothing(self) -> None:
+    """The common case: the books are still at the base."""
+    anchor, probed = self._resolve("2026-06", {"2026-06"})
+
+    assert anchor == "2026-06"
+    assert probed == [], (
+      "walking a 12-month horizon to conclude nothing has closed is the "
+      f"case this bound exists to remove; probed {probed}"
+    )
+
+  def test_the_scan_starts_at_the_bound(self) -> None:
+    anchor, probed = self._resolve("2026-08", {"2026-06", "2026-07", "2026-08"})
+
+    assert anchor == "2026-08"
+    assert probed == ["2026-08"]
+
+  def test_a_bound_past_the_horizon_still_stops_at_the_horizon(self) -> None:
+    """The annual comparative set can push the bound past the window."""
+    anchor, probed = self._resolve("2027-12", {"2026-06", "2026-07"}, horizon=3)
+
+    assert anchor == "2026-07"
+    assert probed == ["2026-09", "2026-08", "2026-07"]
+
+  def test_a_gap_below_the_bound_is_walked_through(self) -> None:
+    """The bound narrows the scan; it does not replace it.
+
+    A month can carry the newest actuals while an intervening one has no
+    monthly set — scanning down from the bound is what keeps a gap from
+    stranding the anchor.
+    """
+    anchor, probed = self._resolve("2026-09", {"2026-06", "2026-07"})
+
+    assert anchor == "2026-07"
+    assert probed == ["2026-09", "2026-08", "2026-07"]
+
+  def test_no_actuals_at_all_is_the_base(self) -> None:
+    anchor, probed = self._resolve(None, set())
+
+    assert anchor == "2026-06"
+    assert probed == []
+
+
+class TestNewestActualMonth:
+  """The bound query itself — deliberately without the monthly-window guard."""
+
+  def test_returns_the_month_of_the_newest_actual_set(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = date(2026, 12, 31)
+
+    assert fc._newest_actual_month(session, "struct_is", "ent_1") == "2026-12"
+
+  def test_no_actual_sets_is_none(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = None
+
+    assert fc._newest_actual_month(session, "struct_is", "ent_1") is None
+
+  def test_it_excludes_scenario_sets(self) -> None:
+    """Or the bound would sit at the end of the forecast horizon, which is
+    every month the scan is supposed to rule out."""
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = date(2026, 6, 30)
+
+    fc._newest_actual_month(session, "struct_is", "ent_1")
+
+    predicate = " ".join(
+      str(
+        session.execute.call_args.args[0].whereclause.compile(
+          compile_kwargs={"literal_binds": True}
+        )
+      ).split()
+    )
+    assert "scenario_id IS NULL" in predicate, predicate
+
+
+# ── The real verifier ─────────────────────────────────────────────────────
+#
+# Everything above stubs `_verify_month_sets`. That makes the walk's
+# *response* to a verdict testable, which is what `TestStopTheWalk` proves.
+# It cannot prove the harder half: that the real verifier reaches the right
+# verdict on a wrong forecast. The classes below run the real one against a
+# real schema, because every one of the five correctness defects in this arm
+# was found by hand and none by CI — and the reason is structural. The BS
+# roll closes on a balancing cash plug, so `A = L + E` holds *by
+# construction* no matter how wrong the walk is; the accounting equation is
+# exactly the assertion that cannot fail. A month has to be balanced and
+# wrong for the suite to mean anything.
+
+
+@pytest.fixture()
+def ext_session():
+  """Extensions schema in the test Postgres DB, one throwaway schema per test."""
+  import os
+  import uuid
+
+  from sqlalchemy import create_engine, text
+  from sqlalchemy.orm import sessionmaker
+
+  import robosystems.models.extensions  # noqa: F401  (register models)
+  from robosystems.db.extensions import ExtensionsBase
+
+  database_url = os.environ.get("TEST_DATABASE_URL")
+  if not database_url:
+    pytest.skip("TEST_DATABASE_URL not configured")
+
+  schema = f"ext_fcverify_{uuid.uuid4().hex[:12]}"
+  engine = create_engine(database_url)
+  with engine.begin() as conn:
+    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+  session = sessionmaker(bind=engine)()
+  session.execute(text(f'SET search_path TO "{schema}"'))
+  ExtensionsBase.metadata.create_all(bind=session.connection())
+  session.commit()
+  session.execute(text(f'SET search_path TO "{schema}"'))
+
+  try:
+    yield session
+  finally:
+    session.rollback()
+    session.close()
+    with engine.begin() as conn:
+      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+    engine.dispose()
+
+
+VERIFY_START = date(2026, 7, 1)
+VERIFY_END = date(2026, 7, 31)
+
+
+def _seed_scenario_month(
+  session,
+  *,
+  assets: float,
+  cash: float,
+  ppe: float,
+  liabilities: float,
+  equity: float,
+) -> tuple[str, str]:
+  """One scenario balance-sheet month, with the corpus that gates actuals.
+
+  Two rules, both structure-scoped, both drawn from the shapes the real
+  corpus carries:
+
+  * ``EqualTo`` — the accounting equation. The BS roll's cash plug makes
+    this hold whatever else is wrong, which is why it is the control, not
+    the check.
+  * ``RollUp`` — the subtotal foots its calculation children. This is
+    articulation: it is what a PP&E line drifting away from its own
+    depreciation actually breaks.
+
+  Returns ``(structure_id, fact_set_id)``.
+  """
+  from robosystems.models.extensions import (
+    Association,
+    Element,
+    Rule,
+    Structure,
+    Taxonomy,
+  )
+  from robosystems.models.extensions.roboledger import Fact, FactSet
+
+  taxonomy = Taxonomy(name="rs-gaap", taxonomy_type="reporting_extension")
+  session.add(taxonomy)
+  session.flush()
+
+  structure = Structure(
+    name="Balance Sheet", block_type="balance_sheet", taxonomy_id=taxonomy.id
+  )
+  scenario = Structure(name="Plan", block_type="forecast", taxonomy_id=taxonomy.id)
+  session.add_all([structure, scenario])
+  session.flush()
+
+  def _el(qname: str, balance_type: str) -> Element:
+    element = Element(
+      name=qname.split(":")[-1],
+      qname=qname,
+      balance_type=balance_type,
+      period_type="instant",
+      taxonomy_id=taxonomy.id,
+    )
+    session.add(element)
+    return element
+
+  el_assets = _el("rs-gaap:Assets", "debit")
+  el_cash = _el("rs-gaap:CashAndCashEquivalentsAtCarryingValue", "debit")
+  el_ppe = _el("rs-gaap:PropertyPlantAndEquipmentNet", "debit")
+  el_liabilities = _el("rs-gaap:Liabilities", "credit")
+  el_equity = _el("rs-gaap:StockholdersEquity", "credit")
+  session.flush()
+
+  # Assets = Cash + PP&E, as calculation arcs. The RollUp evaluator derives
+  # its children from these live arcs rather than the rule's frozen list.
+  for order, child in enumerate((el_cash, el_ppe)):
+    session.add(
+      Association(
+        structure_id=structure.id,
+        from_element_id=el_assets.id,
+        to_element_id=child.id,
+        association_type="calculation",
+        order_value=float(order),
+        weight=1.0,
+      )
+    )
+
+  session.add(
+    Rule(
+      taxonomy_id=taxonomy.id,
+      rule_category="FundamentalAccountingConceptRelation",
+      rule_pattern="EqualTo",
+      rule_expression="$Assets = ($Liabilities + $Equity)",
+      target_kind="structure",
+      target_structure_id=structure.id,
+      rule_variables=[
+        {"variable_name": "Assets", "variable_qname": el_assets.qname},
+        {"variable_name": "Liabilities", "variable_qname": el_liabilities.qname},
+        {"variable_name": "Equity", "variable_qname": el_equity.qname},
+      ],
+    )
+  )
+  session.add(
+    Rule(
+      taxonomy_id=taxonomy.id,
+      rule_category="FundamentalAccountingConceptRelation",
+      rule_pattern="RollUp",
+      rule_expression="$Assets = ($Cash + $PPE)",
+      target_kind="structure",
+      target_structure_id=structure.id,
+      rule_variables=[
+        {"variable_name": "Assets", "variable_qname": el_assets.qname},
+        {"variable_name": "Cash", "variable_qname": el_cash.qname},
+        {"variable_name": "PPE", "variable_qname": el_ppe.qname},
+      ],
+    )
+  )
+
+  fact_set = FactSet(
+    structure_id=structure.id,
+    period_start=VERIFY_START,
+    period_end=VERIFY_END,
+    factset_type="report",
+    entity_id="ent_1",
+    scenario_id=scenario.id,
+  )
+  fact_set.provenance = {
+    "origin": "forecast",
+    "scenario_structure_id": scenario.id,
+    "base_period": "2026-06",
+    "month_index": 1,
+    "drivers": [],
+  }
+  session.add(fact_set)
+  session.flush()
+
+  for element, value in (
+    (el_assets, assets),
+    (el_cash, cash),
+    (el_ppe, ppe),
+    (el_liabilities, liabilities),
+    (el_equity, equity),
+  ):
+    session.add(
+      Fact(
+        element_id=element.id,
+        value=value,
+        fact_type="Numeric",
+        period_start=VERIFY_START,
+        period_end=VERIFY_END,
+        period_type="instant",
+        entity_id="ent_1",
+        structure_id=structure.id,
+        fact_set_id=fact_set.id,
+      )
+    )
+  session.flush()
+  return structure.id, fact_set.id
+
+
+def _verify(session, structure_id: str, fact_set_id: str):
+  return fc._verify_month_sets(
+    session,
+    sets=((structure_id, fact_set_id),),
+    period_end=VERIFY_END,
+    created_by="usr_test",
+    global_calculations={},
+  )
+
+
+class TestTheRealVerifier:
+  """`_verify_month_sets` itself, unstubbed, over a month that is wrong.
+
+  The month is deliberately *balanced*: Assets 200 = Liabilities 80 +
+  Equity 120, so the accounting equation passes. Its subtotal does not
+  foot — Cash 100 + PP&E 50 is 150, not 200 — so articulation is broken.
+  This is the shape of the PP&E defect that held `A = L + E` throughout
+  and shipped anyway.
+  """
+
+  def test_a_balanced_but_unarticulated_month_fails(self, ext_session) -> None:
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+
+    passed, failures = _verify(ext_session, structure_id, fact_set_id)
+
+    assert passed is False, (
+      "the real verifier returned a pass (or an absence) for a month whose "
+      "subtotal is off by 50.00"
+    )
+    assert failures
+    assert any("rollup" in f.lower() for f in failures), failures
+
+  def test_the_accounting_equation_is_what_passes(self, ext_session) -> None:
+    """The control: the failing month is failing for the right reason.
+
+    Without this, a verifier that failed everything — a broken binder, a
+    corpus that never loads — would satisfy the test above and prove
+    nothing. The equation must pass on the same facts that fail the rollup.
+    """
+    from robosystems.models.extensions import VerificationResult
+
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+    _verify(ext_session, structure_id, fact_set_id)
+
+    from sqlalchemy import select
+
+    from robosystems.models.extensions import Rule
+
+    status_by_pattern = {
+      pattern: status
+      for status, pattern in ext_session.execute(
+        select(VerificationResult.status, Rule.rule_pattern).join(
+          Rule, Rule.id == VerificationResult.rule_id
+        )
+      ).all()
+    }
+
+    assert status_by_pattern["EqualTo"] == "pass"
+    assert status_by_pattern["RollUp"] == "fail"
+
+  def test_a_correct_month_passes(self, ext_session) -> None:
+    """And the verifier is not simply always-False on this corpus."""
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=150.0, cash=100.0, ppe=50.0, liabilities=60.0, equity=90.0
+    )
+
+    passed, failures = _verify(ext_session, structure_id, fact_set_id)
+
+    assert passed is True, failures
+    assert failures == []
+
+  def test_the_walk_halts_on_the_real_verdict(self, ext_session) -> None:
+    """The two halves, joined: real verdict in, explained halt out.
+
+    `TestStopTheWalk` feeds the walk a hand-written verdict; this feeds it
+    the one the real verifier produced, and checks the real failure message
+    survives all the way into the caller's diagnostics.
+    """
+    structure_id, fact_set_id = _seed_scenario_month(
+      ext_session, assets=200.0, cash=100.0, ppe=50.0, liabilities=80.0, equity=120.0
+    )
+    verdict = _verify(ext_session, structure_id, fact_set_id)
+    assert verdict[0] is False
+
+    response, _ = _run(
+      _mechanics(FULL_LEVERS, horizon=6),
+      FULL_RULES,
+      FULL_LEVERS,
+      months=6,
+      verify=lambda *a, **k: verdict,
+    )
+
+    assert response.halted_at == "2026-07"
+    assert len(response.months_computed) == 1
+    assert response.months_computed[0].verification_passed is False
+    assert any("halted at 2026-07" in d for d in response.diagnostics)
+    assert any("rollup" in d.lower() for d in response.diagnostics), (
+      "the real verifier's reason has to reach the caller, not just the verdict"
     )

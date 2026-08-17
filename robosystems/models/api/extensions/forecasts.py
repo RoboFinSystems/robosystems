@@ -244,7 +244,21 @@ class CreateForecastRequest(BaseModel):
       "Seed month (``YYYY-MM``) the walk projects forward from. "
       "Defaults to the fiscal calendar's closed-through period, else "
       "the newest actual report month. Resolved and stored at create "
-      "time."
+      "time, and it never moves afterwards — every lever is keyed to a "
+      "month inside ``base_period + 1 … + horizon_months``, so moving it "
+      "would mean restating all of them. ``base_anchor`` decides whether "
+      "the walk still *seeds* here once months close under it."
+    ),
+  )
+  base_anchor: Literal["seam", "fixed"] = Field(
+    "seam",
+    description=(
+      "Where the walk takes its opening balances as periods close. "
+      "``seam`` (default) re-anchors on the newest closed month inside "
+      "the horizon, so the scenario survives a close untouched and its "
+      "first forward month rolls off real balances. ``fixed`` pins the "
+      "walk to ``base_period`` — the deliberate counterfactual, whose "
+      "balances are meant to diverge from actuals."
     ),
   )
   levers: list[LeverAssertionRequest] = Field(
@@ -295,6 +309,14 @@ class UpdateForecastRequest(BaseModel):
   scenario_kind: Literal["budget", "forecast", "projection"] | None = None
   horizon_months: int | None = Field(None, ge=1, le=36)
   base_period: str | None = Field(None, pattern=_PERIOD_PATTERN)
+  base_anchor: Literal["seam", "fixed"] | None = Field(
+    None,
+    description=(
+      "Switch the walk between seam-anchored (default) and pinned to "
+      "``base_period``. Changes nothing about the authored window, so "
+      "unlike ``base_period`` it needs no levers re-supplied."
+    ),
+  )
   levers: list[LeverAssertionRequest] | None = Field(
     None,
     min_length=1,
