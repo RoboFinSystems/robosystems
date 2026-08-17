@@ -55,6 +55,15 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
+      # Object Lock (governance mode, 400 days) is enabled on the existing bucket
+      # via the S3 API, not here: CloudFormation's ObjectLockEnabled property
+      # requires bucket replacement, which a retained, name-pinned bucket cannot
+      # do. Adding it to this template fails the stack update rather than
+      # codifying the live state. Redeploys do not disturb it — CloudFormation
+      # only calls the sub-APIs for properties present in the template, so
+      # PutObjectLockConfiguration is never issued. Retention matches
+      # RetentionDays below and the treatment already applied to the CloudTrail
+      # bucket; it applies to objects written after it was set (2026-08-17).
       LifecycleConfiguration:
         Rules:
           - Id: AuditRetention
