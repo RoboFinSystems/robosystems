@@ -200,6 +200,7 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.core import User
 from robosystems.operations.event_block import (
   DuplicateEventError,
+  EventLockedError,
   EventNotFoundError,
   InvalidEventTransitionError,
 )
@@ -1565,6 +1566,9 @@ update_event_block_op = _registrar.register(
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+      # A running sync holds the event's row lock. Retryable, and the only
+      # error here the caller should try again rather than fix.
+      EventLockedError: 409,
     },
     mark_stale_reason="event_block_updated",
   )

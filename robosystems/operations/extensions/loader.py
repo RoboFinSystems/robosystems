@@ -1403,7 +1403,24 @@ class OLTPLoader:
     out = _CaptureResult()
     new_events = []
 
-    # 2) Look up existing events for the (source, external_id) pairs
+    # 2) Look up existing events for the (source, external_id) pairs.
+    #
+    # Locked, because the auto-commit pass below dispatches handlers for the
+    # rows this returns. Without the lock an inbox approval (`update_event_block`,
+    # which takes the matching row lock) can commit between this read and that
+    # dispatch, and the handler fires on both sides — one event, two sets of GL
+    # rows, and a ledger that still foots and is still wrong. Most of these rows
+    # get write-locked by the UPSERT below anyway; the gap this closes is the
+    # re-sync whose payload is unchanged, which issues no UPDATE and so would
+    # take no lock.
+    #
+    # Locking here rather than just before dispatch is deliberate: a row lock is
+    # held to transaction end either way, so acquiring it at the top costs one
+    # query instead of one per event, and covers the UPSERT decisions too.
+    #
+    # Deliberately unbounded (no `lock_timeout`): a sync is a background job and
+    # should wait for a conflicting approval rather than fail the batch. The
+    # approval side is the one that bounds its wait.
     existing: dict[str, Event] = {
       e.external_id: e
       for e in session.query(Event)
@@ -1411,6 +1428,7 @@ class OLTPLoader:
         Event.source == source,
         Event.external_id.in_(list(txns_by_ext.keys())),
       )
+      .with_for_update()
       .all()
     }
 

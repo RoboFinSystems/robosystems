@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -56,6 +58,14 @@ from .template import (
   interpolate,
 )
 
+# How long an approval waits for a conflicting writer before giving up. Long
+# enough to absorb another approval or a short write — those resolve in
+# milliseconds — and short enough that a multi-minute sync returns an error
+# instead of holding the connection. Postgres raises SQLSTATE 55P03 on expiry,
+# the same code `NOWAIT` raises, so one handler covers both if we ever switch.
+_LOCK_TIMEOUT_MS = 3000
+_LOCK_NOT_AVAILABLE = "55P03"
+
 
 class EventNotFoundError(Exception):
   pass
@@ -63,6 +73,17 @@ class EventNotFoundError(Exception):
 
 class InvalidEventTransitionError(Exception):
   pass
+
+
+class EventLockedError(Exception):
+  """Raised when the event row is held by a concurrent writer.
+
+  In practice that writer is a running sync: `_capture_transactions_as_events`
+  locks its whole batch for the life of the sync transaction, which can be
+  minutes. Waiting it out would pin an HTTP request and its pooled connection
+  for that whole time, and enough concurrent approvals would exhaust the
+  extensions pool. Failing fast with a retryable error is the better trade.
+  """
 
 
 class DuplicateEventError(Exception):
@@ -368,12 +389,25 @@ def update_event_block(
   # Lock the row for the life of the transaction. The transition check below
   # is read-decide-write, and the decision is only sound if nothing else can
   # move the event in between. The live race is an inbox approval against the
-  # sync's auto-commit pass (`extensions/loader.py`): both read `captured`,
-  # both fire the handler, and the event ends up with two sets of GL rows —
-  # a ledger that still foots and is still wrong. Under READ COMMITTED the
-  # blocked reader re-reads the committed row once the lock releases, sees
-  # the new status, and raises InvalidEventTransitionError as it should.
-  event = session.get(Event, body.event_id, with_for_update=True)
+  # sync's auto-commit pass (`extensions/loader.py`, which locks its batch for
+  # the same reason): both read `captured`, both fire the handler, and the
+  # event ends up with two sets of GL rows — a ledger that still foots and is
+  # still wrong. Under READ COMMITTED the blocked reader re-reads the committed
+  # row once the lock releases, sees the new status, and raises
+  # InvalidEventTransitionError as it should.
+  #
+  # Bounded, because the conflicting writer is usually a sync that runs for
+  # minutes — see EventLockedError. `SET LOCAL` reverts at transaction end.
+  session.execute(text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT_MS}ms'"))
+  try:
+    event = session.get(Event, body.event_id, with_for_update=True)
+  except OperationalError as exc:
+    if getattr(exc.orig, "pgcode", None) == _LOCK_NOT_AVAILABLE:
+      raise EventLockedError(
+        f"Event {body.event_id} is being written by another process "
+        "(most likely a running sync). Retry in a moment."
+      ) from exc
+    raise
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
 

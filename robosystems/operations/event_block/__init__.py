@@ -6,6 +6,7 @@ path regardless of internal layout.
 
 from .commands import (
   DuplicateEventError,
+  EventLockedError,
   EventNotFoundError,
   InvalidEventTransitionError,
   create_event_block,
@@ -16,6 +17,7 @@ from .commands import (
 
 __all__ = [
   "DuplicateEventError",
+  "EventLockedError",
   "EventNotFoundError",
   "InvalidEventTransitionError",
   "create_event_block",

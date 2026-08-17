@@ -7,9 +7,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
+  EventLockedError,
   EventNotFoundError,
   HandlerMetadataValidationError,
   InvalidEventTransitionError,
@@ -357,3 +359,45 @@ class TestTransitionRowLock:
 
     _args, kwargs = session.get.call_args
     assert kwargs.get("with_for_update") is True
+
+
+class TestLockContention:
+  """The lock is bounded. A sync holds the batch for the life of its
+  transaction (minutes), so an approval that waited would pin an HTTP
+  request and its pooled connection for that whole time — enough of them
+  exhaust the extensions pool. Postgres raises 55P03 when lock_timeout
+  expires; that becomes a retryable 409, not a 500."""
+
+  def test_lock_timeout_is_set_before_the_locking_read(self) -> None:
+    event = _event("evt_a", status="classified")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
+    update_event_block(session, body, created_by="usr_test")
+
+    statements = [str(c.args[0]) for c in session.execute.call_args_list if c.args]
+    assert any("lock_timeout" in s for s in statements)
+
+  def test_lock_not_available_becomes_event_locked_error(self) -> None:
+    session = _session_with_events(_event("evt_a"))
+    session.get.side_effect = OperationalError(
+      "SELECT ...", {}, SimpleNamespace(pgcode="55P03")
+    )
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
+    with pytest.raises(EventLockedError, match="evt_a"):
+      update_event_block(session, body, created_by="usr_test")
+
+    session.commit.assert_not_called()
+
+  def test_other_operational_errors_are_not_swallowed(self) -> None:
+    """Only 55P03 is a lock conflict. A connection fault must keep its
+    identity rather than surfacing to the inbox as 'retry in a moment'."""
+    session = _session_with_events(_event("evt_a"))
+    session.get.side_effect = OperationalError(
+      "SELECT ...", {}, SimpleNamespace(pgcode="08006")
+    )
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
+    with pytest.raises(OperationalError):
+      update_event_block(session, body, created_by="usr_test")
