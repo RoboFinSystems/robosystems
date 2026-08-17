@@ -176,6 +176,9 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(row=structure),
+    # The template-change branch bounds its wait for the pending obligations
+    # before superseding them, so a `SET LOCAL lock_timeout` lands here.
+    _exec_result(),
     _exec_result(fetchone_row=MagicMock(cnt=12)),
     _exec_result(fetchone_row=MagicMock(cnt=12)),
   ]

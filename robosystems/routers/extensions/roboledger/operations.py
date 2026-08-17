@@ -200,6 +200,7 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.core import User
 from robosystems.operations.event_block import (
   DuplicateEventError,
+  EventLockedError,
   EventNotFoundError,
   InvalidEventTransitionError,
 )
@@ -1255,6 +1256,9 @@ update_information_block_op = _registrar.register(
       ValueError: 422,
       NotImplementedError: 501,
       ScheduleNotFoundError: 404,
+      # A schedule template change supersedes its pending obligations, which
+      # the promotion sweep may be holding. Retryable.
+      EventLockedError: 409,
     },
     mark_stale_reason="information_block_updated",
   )
@@ -1565,6 +1569,9 @@ update_event_block_op = _registrar.register(
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+      # A running sync holds the event's row lock. Retryable, and the only
+      # error here the caller should try again rather than fix.
+      EventLockedError: 409,
     },
     mark_stale_reason="event_block_updated",
   )
@@ -1604,6 +1611,9 @@ execute_event_block_op = _registrar.register(
       # QBClient itself; 401 signals to the UI that the operator must
       # reconnect via OAuth.
       QBAuthFailedError: 401,
+      # Another writer holds the event's row lock. Retryable, and the publish
+      # deliberately did not reach QuickBooks.
+      EventLockedError: 409,
       ValueError: 422,
     },
     mark_stale_reason="event_published",
@@ -1757,7 +1767,9 @@ promote_obligations_op = _registrar.register(
     command=cmd_promote_obligations,
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
-    error_map={ValueError: 422},
+    # The background sweep holds the candidate set's row locks. Retryable,
+    # same as the approval path's conflict.
+    error_map={ValueError: 422, EventLockedError: 409},
     mark_stale_reason="obligations_promoted",
   )
 )

@@ -220,6 +220,13 @@ def promote_pending_obligations(
   row can't poison the sweep: those events stay at ``classified`` (the flip
   already happened) and surface in ``result.errors``.
   """
+  # Locked: everything below is read-decide-write against these rows — the
+  # co-pilot flip, the orphan void, and the autopilot dispatch all act on the
+  # status this read observed. The sensor runs every few minutes on every
+  # graph, so it races an on-demand `promote-obligations`, an inbox approval,
+  # and (if a tick overruns) its own successor. See `locking` for the
+  # bounded-vs-unbounded split: this function is called from both a Dagster
+  # sweep and a request handler, and it is the *caller* that bounds the wait.
   candidates = (
     session.query(Event)
     .filter(
@@ -227,6 +234,7 @@ def promote_pending_obligations(
       Event.status.in_(("pending", "classified")),
       Event.occurred_at <= as_of,
     )
+    .with_for_update()
     .all()
   )
   pending = [evt for evt in candidates if evt.status == "pending"]
@@ -297,9 +305,19 @@ def promote_pending_obligations(
     # them; they ride out on result.stranded_event_ids instead.
     if pending:
       candidate_ids = [evt.id for evt in pending]
-      session.query(Event).filter(Event.id.in_(candidate_ids)).update(
-        {"status": "classified"}, synchronize_session="fetch"
-      )
+      # The status predicate is not redundant with the lock above — it is the
+      # invariant stated where it is relied on. Without it this UPDATE would
+      # write `classified` over whatever the row now holds, so a concurrently
+      # voided or committed obligation would be silently reverted to an earlier
+      # state. That is a lost update, not just a redundant one, and it is the
+      # same guard the orphan void a few lines up already carries.
+      session.query(Event).filter(
+        Event.id.in_(candidate_ids), Event.status == "pending"
+      ).update({"status": "classified"}, synchronize_session="fetch")
+      # Accurate because the candidate read is locked: the UPDATE's guard
+      # cannot filter any of these out, so every id did in fact flip. If that
+      # read ever loses its lock, this list has to come from the statement's
+      # rowcount instead of being assumed.
       result.classified_event_ids.extend(candidate_ids)
     logger.info(
       "promote_pending_obligations[%s]: classified=%s stranded=%s (co-pilot mode)",

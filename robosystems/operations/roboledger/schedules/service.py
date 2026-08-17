@@ -928,12 +928,20 @@ class ScheduleService:
     if not schedule_created_event_id:
       return 0
 
+    # Locked: this reads `pending` obligations and voids them, and the
+    # promotion sweep reads the same rows to classify and draft their closing
+    # entries. Unlocked, both can proceed from the same snapshot — the sweep
+    # drafts a GL entry for an obligation this call is voiding, and the
+    # schedule ends up with a closing entry for a period it no longer has an
+    # obligation for. Whichever gets the lock first wins; the other re-reads.
     existing_pending = list(
       session.execute(
-        select(Event).where(
+        select(Event)
+        .where(
           Event.obligated_by_event_id == schedule_created_event_id,
           Event.status == "pending",
         )
+        .with_for_update()
       ).scalars()
     )
     if not existing_pending:

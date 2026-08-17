@@ -43,6 +43,7 @@ from robosystems.operations.roboledger.reads.event_block import (
 )
 
 from .engine import EngineValidationError, apply_handler
+from .locking import bounded_lock_wait
 from .python_handlers import get_python_handler
 from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (
@@ -365,7 +366,31 @@ def update_event_block(
   Handler errors roll back the entire update, including the status
   change — a failed commit leaves the event in its pre-approval state.
   """
-  event = session.get(Event, body.event_id)
+  # Lock the row for the life of the transaction. The transition check below
+  # is read-decide-write, and the decision is only sound if nothing else can
+  # move the event in between. The live race is an inbox approval against the
+  # sync's auto-commit pass (`extensions/loader.py`, which locks its batch for
+  # the same reason): both read `captured`, both fire the handler, and the
+  # event ends up with two sets of GL rows — a ledger that still foots and is
+  # still wrong. Under READ COMMITTED the blocked reader re-reads the committed
+  # row once the lock releases, sees the new status, and raises
+  # InvalidEventTransitionError as it should.
+  #
+  # Bounded, because the conflicting writer is usually a sync or a promotion
+  # sweep that runs long — see `locking.bounded_lock_wait`.
+  with bounded_lock_wait(
+    session,
+    f"Event {body.event_id} is being written by another process "
+    "(most likely a running sync). Retry in a moment.",
+  ):
+    # `populate_existing` for the same reason as `execute_event_block`: every
+    # production caller opens a fresh session per request, so the identity map
+    # is empty today, but a caller that reused a session would otherwise get
+    # the lock and a stale status — the one combination this guard exists to
+    # prevent.
+    event = session.get(
+      Event, body.event_id, with_for_update=True, populate_existing=True
+    )
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
 
@@ -649,7 +674,27 @@ def execute_event_block(
 
   from .qb_writeback import QBWritebackError, post_event_to_qb
 
-  event = session.query(Event).filter(Event.id == body.event_id).first()
+  # Locked, and for a sharper reason than the other paths: between this read
+  # and the status write below sits a POST to QuickBooks. A concurrent void or
+  # supersede would otherwise be clobbered by the `fulfilled`/`pending` stamp
+  # *after* the external write already happened — QB's request_id dedup covers
+  # a repeated post, not an event that was voided and published anyway.
+  #
+  # `populate_existing` is load-bearing, not belt-and-braces: close_service's
+  # QB pre-publish loop calls this on a **shared** session that already loaded
+  # these events, so without it the lock would be taken while `event.status`
+  # kept the value it held before blocking.
+  with bounded_lock_wait(
+    session,
+    f"Event {body.event_id} is being written by another process. Retry in a moment.",
+  ):
+    event = (
+      session.query(Event)
+      .filter(Event.id == body.event_id)
+      .populate_existing()
+      .with_for_update()
+      .first()
+    )
   if event is None:
     raise EventNotFoundError(f"Event {body.event_id} not found")
 

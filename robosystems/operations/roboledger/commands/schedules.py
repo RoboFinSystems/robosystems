@@ -265,15 +265,29 @@ def promote_obligations(
   sweep is idempotent (re-running skips already-classified rows and
   reconciles to existing drafts).
   """
+  from robosystems.operations.event_block.locking import bounded_lock_wait
   from robosystems.operations.event_block.promotion import promote_pending_obligations
 
-  result = promote_pending_obligations(
+  # Request-facing, so the wait is bounded: the sweep locks its whole candidate
+  # set, and the Dagster sensor runs the same function every few minutes. An
+  # unbounded wait here would hold this request and its pooled connection until
+  # a background tick finished.
+  # The wrap covers the whole sweep, not just its locked candidate load — the
+  # lock is taken inside. Autopilot dispatch also writes GL rows, so a wait
+  # here is *usually* the background sweep holding the obligations but need not
+  # be; the message says what is true rather than naming a cause it cannot know.
+  with bounded_lock_wait(
     session,
-    graph_id="(on-demand)",  # logging-only; data scope is the session search_path
-    as_of=datetime.now(UTC),
-    dispatch_handlers=body.dispatch_handlers,
-    created_by=created_by,
-  )
+    "Obligations for this graph are being written by another process. "
+    "Retry in a moment.",
+  ):
+    result = promote_pending_obligations(
+      session,
+      graph_id="(on-demand)",  # logging-only; data scope is the session search_path
+      as_of=datetime.now(UTC),
+      dispatch_handlers=body.dispatch_handlers,
+      created_by=created_by,
+    )
   session.commit()
   return PromoteObligationsResponse(
     classified_count=result.classified_count,
@@ -376,11 +390,23 @@ def update_schedule(
   # impossible: either the new template + new pending events both land,
   # or neither does.
   if template_changed:
-    ScheduleService().supersede_pending_obligations(
-      session,
-      structure=structure,
-      created_by=updated_by,
+    from robosystems.operations.event_block.locking import (
+      bounded_lock_wait as _bounded_lock_wait,
     )
+
+    # Request-facing, and it contends with the promotion sweep over the same
+    # pending obligations — bound the wait rather than hold this request for
+    # the length of a background tick.
+    with _bounded_lock_wait(
+      session,
+      "This schedule's pending obligations are being written by another "
+      "process. Retry in a moment.",
+    ):
+      ScheduleService().supersede_pending_obligations(
+        session,
+        structure=structure,
+        created_by=updated_by,
+      )
 
   # Re-run rule engine when the template changes, since the underlying
   # fact shape may have moved. No-op when the template was unchanged

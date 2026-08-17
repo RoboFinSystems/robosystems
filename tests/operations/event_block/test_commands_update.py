@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
@@ -15,6 +16,7 @@ from robosystems.operations.event_block.commands import (
   InvalidEventTransitionError,
   update_event_block,
 )
+from robosystems.operations.event_block.locking import EventLockedError
 
 
 def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
@@ -52,7 +54,7 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   """MagicMock session whose .get(Event, id) returns the matching event."""
   by_id = {e.id: e for e in events}
   session = MagicMock()
-  session.get.side_effect = lambda _cls, eid: by_id.get(eid)
+  session.get.side_effect = lambda _cls, eid, **_kwargs: by_id.get(eid)
   # _load_dimension_ids issues a select via session.execute → return [].
   session.execute.return_value.scalars.return_value.all.return_value = []
   return session
@@ -340,3 +342,62 @@ class TestApproveFiresHandler:
     fake_handler.dispatch.assert_not_called()
     # Caller's transaction must roll back — we never reached commit.
     session.commit.assert_not_called()
+
+
+class TestTransitionRowLock:
+  """The status check is read-decide-write, so the row must be locked for
+  the life of the transaction. Without the lock an inbox approval racing
+  the sync's auto-commit pass fires the same handler twice and leaves one
+  event with two sets of GL rows — books that still foot and are wrong."""
+
+  def test_event_is_loaded_for_update(self) -> None:
+    event = _event("evt_a", status="classified")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
+    update_event_block(session, body, created_by="usr_test")
+
+    _args, kwargs = session.get.call_args
+    assert kwargs.get("with_for_update") is True
+
+
+class TestLockContention:
+  """The lock is bounded. A sync holds the batch for the life of its
+  transaction (minutes), so an approval that waited would pin an HTTP
+  request and its pooled connection for that whole time — enough of them
+  exhaust the extensions pool. Postgres raises 55P03 when lock_timeout
+  expires; that becomes a retryable 409, not a 500."""
+
+  def test_lock_timeout_is_set_before_the_locking_read(self) -> None:
+    event = _event("evt_a", status="classified")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
+    update_event_block(session, body, created_by="usr_test")
+
+    statements = [str(c.args[0]) for c in session.execute.call_args_list if c.args]
+    assert any("lock_timeout" in s for s in statements)
+
+  def test_lock_not_available_becomes_event_locked_error(self) -> None:
+    session = _session_with_events(_event("evt_a"))
+    session.get.side_effect = OperationalError(
+      "SELECT ...", {}, SimpleNamespace(pgcode="55P03")
+    )
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
+    with pytest.raises(EventLockedError, match="evt_a"):
+      update_event_block(session, body, created_by="usr_test")
+
+    session.commit.assert_not_called()
+
+  def test_other_operational_errors_are_not_swallowed(self) -> None:
+    """Only 55P03 is a lock conflict. A connection fault must keep its
+    identity rather than surfacing to the inbox as 'retry in a moment'."""
+    session = _session_with_events(_event("evt_a"))
+    session.get.side_effect = OperationalError(
+      "SELECT ...", {}, SimpleNamespace(pgcode="08006")
+    )
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
+    with pytest.raises(OperationalError):
+      update_event_block(session, body, created_by="usr_test")

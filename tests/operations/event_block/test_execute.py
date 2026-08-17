@@ -43,9 +43,16 @@ def _make_event(
 
 
 def _make_session(event: MagicMock) -> MagicMock:
-  """Extensions session that returns `event` for any Event.query."""
+  """Extensions session that returns `event` for any Event.query.
+
+  The read is locked and refreshed — `.populate_existing().with_for_update()`
+  — so the chain is stubbed self-returning rather than pinned to a position.
+  """
   session = MagicMock()
-  session.query.return_value.filter.return_value.first.return_value = event
+  filtered = session.query.return_value.filter.return_value
+  filtered.populate_existing.return_value = filtered
+  filtered.with_for_update.return_value = filtered
+  filtered.first.return_value = event
   return session
 
 
@@ -111,8 +118,7 @@ class TestExecuteEventBlockNativeFastPath:
       execute_event_block,
     )
 
-    session = MagicMock()
-    session.query.return_value.filter.return_value.first.return_value = None
+    session = _make_session(None)
 
     with pytest.raises(EventNotFoundError):
       execute_event_block(
