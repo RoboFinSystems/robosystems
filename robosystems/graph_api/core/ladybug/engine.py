@@ -18,6 +18,26 @@ from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperatio
 from robosystems.logger import log_app_error, log_db_query, logger
 
 
+def describe_param_shape(params: dict[str, Any] | None) -> dict[str, str]:
+  """Describe bound query parameters without their values.
+
+  Cypher parameter values are customer data by construction — entity names,
+  email addresses, account identifiers, amounts — so there is no safe subset to
+  allowlist and no value belongs in a log line. Deliberately *not* built on
+  ``SENSITIVE_QUERY_PARAMS``: that set is sixteen credential names matched
+  against URL query strings, correctly scoped to what it does, and growing it
+  into a PII list would produce something that looks like protection and is
+  not.
+
+  What actually diagnoses a failed query is which parameters were bound and
+  what types they carried — a missing key, an unexpected ``None``, a string
+  where a number was expected. That is what this returns.
+  """
+  if not params:
+    return {}
+  return {key: type(value).__name__ for key, value in params.items()}
+
+
 class ConnectionError(Exception):
   """Raised when database connection fails."""
 
@@ -154,7 +174,7 @@ class Engine(GraphEngineInterface):
         error_category="database",
         metadata={
           "query": cypher[:200],
-          "params": params,
+          "param_shape": describe_param_shape(params),
           "duration_ms": duration_ms,
           "database": str(self.database_path),
         },
