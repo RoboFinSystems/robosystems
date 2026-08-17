@@ -8,7 +8,6 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
-from robosystems.config import env
 from robosystems.config.tuning import TuningConfig
 from robosystems.database import Model
 
@@ -27,7 +26,14 @@ class OrgLimits(Model):
   )
   org_id = Column(String, ForeignKey("orgs.id"), nullable=False, unique=True)
 
-  max_graphs = Column(Integer, nullable=False, default=env.ORG_GRAPHS_DEFAULT_LIMIT)
+  # Resolved per-insert, not at import: the same runtime source
+  # `create_default_limits` uses, so an insert that omits max_graphs cannot
+  # disagree with one that sets it explicitly.
+  max_graphs = Column(
+    Integer,
+    nullable=False,
+    default=lambda: TuningConfig.get_org_graphs_default_limit(),
+  )
 
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
