@@ -79,6 +79,7 @@ def _session_returning(
   # locks. Self-returning like `.filter` so the chain stays
   # position-independent.
   event_query.order_by.return_value = event_query
+  event_query.populate_existing.return_value = event_query
   event_query.with_for_update.return_value = event_query
   event_query.all.return_value = events
   entry_query = MagicMock()
@@ -127,9 +128,10 @@ class TestCoPilotMode:
 
     assert set(result.classified_event_ids) == {"evt_1", "evt_2"}
     assert result.dispatched_count == 0  # co-pilot — no dispatch
-    # Three .query() calls now: load candidates, the orphan-guard structure
-    # existence check, and the bulk classify-update by id.
-    assert session.query.call_count == 3
+    # Four .query() calls: the unlocked write-set preview, the locked read of
+    # exactly those ids, the orphan-guard structure existence check, and the
+    # bulk classify-update by id.
+    assert session.query.call_count == 4
     bulk_update_call = session.event_query.filter.return_value.update
     bulk_update_call.assert_called_once_with(
       {"status": "classified"}, synchronize_session="fetch"

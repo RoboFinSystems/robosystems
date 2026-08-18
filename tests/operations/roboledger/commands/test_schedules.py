@@ -61,6 +61,9 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(row=structure),
+    # The pending-obligation void bounds its wait, so a `SET LOCAL
+    # lock_timeout` lands here.
+    _exec_result(),
     _exec_result(scalars_all=["assoc_1", "assoc_2"]),
     _exec_result(scalars_all=["rule_1"]),
   ]
@@ -100,6 +103,7 @@ def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(row=structure),
+    _exec_result(),  # SET LOCAL lock_timeout around the void
     _exec_result(scalars_all=[]),
     _exec_result(scalars_all=[]),
   ]
@@ -392,11 +396,12 @@ def _rebuild_session(
   execute call order:
     1. _load_schedule_or_404 → scalar_one_or_none → structure
     2. posted-entry guard → fetchone → MagicMock(c=posted_count)
-    3. select(Rule.id) for cascade delete → scalars().all()
-    4. DELETE line_items (draft sweep) → execute (result unused)
-    5. DELETE entries (draft sweep) → execute (result unused)
-    6. count facts → fetchone
-    7. count distinct periods → fetchone
+    3. SET LOCAL lock_timeout (bounded wait around the obligation void)
+    4. select(Rule.id) for cascade delete → scalars().all()
+    5. DELETE line_items (draft sweep) → execute (result unused)
+    6. DELETE entries (draft sweep) → execute (result unused)
+    7. count facts → fetchone
+    8. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
   _calendar_closed_through_date uses session.query(FiscalCalendar).first().
   session.get(Event, ...) returns ``old_event`` (the supersede path).
@@ -406,6 +411,9 @@ def _rebuild_session(
   session.execute.side_effect = [
     _exec_result(row=structure),  # _load_schedule_or_404
     _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
+    # The void of the old obligation chain bounds its wait for the rows the
+    # promotion sweep may hold, so a `SET LOCAL lock_timeout` lands here.
+    _exec_result(),
     _exec_result(scalars_all=["rule_old_1"]),  # select(Rule.id)
     _exec_result(),  # DELETE line_items (draft sweep)
     _exec_result(),  # DELETE entries (draft sweep)

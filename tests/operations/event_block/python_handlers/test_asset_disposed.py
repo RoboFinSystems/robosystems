@@ -293,8 +293,10 @@ class TestVoidPendingObligationsForSchedule:
 
     session = MagicMock()
     session.get.return_value = self._structure_with_event("evt_schedule_created")
+    locked = MagicMock()
+    locked.scalars.return_value = iter([f"evt_due_{i}" for i in range(11)])
     update_result = MagicMock(rowcount=11)
-    session.execute.return_value = update_result
+    session.execute.side_effect = [locked, update_result]
 
     voided = _void_pending_obligations_for_schedule(
       session,
@@ -303,10 +305,16 @@ class TestVoidPendingObligationsForSchedule:
     )
 
     assert voided == 11
-    # The execute call carries the right WHERE clause + SET values.
-    update_stmt = session.execute.call_args.args[0]
+    # The locking select targets pending events on the schedule's originator
+    # chain, in the shared lock order; the UPDATE then goes by id.
+    lock_stmt = session.execute.call_args_list[0].args[0]
+    lock_sql = str(lock_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "events.obligated_by_event_id = 'evt_schedule_created'" in lock_sql
+    assert "events.status = 'pending'" in lock_sql
+    assert "FOR UPDATE" in lock_sql and "ORDER BY events.id" in lock_sql
+    update_stmt = session.execute.call_args_list[1].args[0]
     rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "events.obligated_by_event_id = 'evt_schedule_created'" in rendered
+    assert "events.id IN (" in rendered
     assert "events.status = 'pending'" in rendered
     assert "status='voided'" in rendered.replace(" = ", "=")
     assert "replaced_by_event_id='evt_disposal'" in rendered.replace(" = ", "=")

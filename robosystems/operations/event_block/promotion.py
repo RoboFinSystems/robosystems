@@ -202,31 +202,34 @@ def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Even
   return filter_stranded_obligations(session, classified)
 
 
-def _fence_autopilot_write_set(
+def _preview_write_set(
   session: Session, candidate_filter: list
-) -> list[tuple[str, str]]:
-  """Take the shared period fence for every obligation autopilot will write.
+) -> tuple[list[Event], list[Event]]:
+  """Unlocked read of what this sweep will write: the ``pending`` candidates
+  and the stranded ``classified`` ones.
 
-  The write set is the ``pending`` candidates plus the stranded ``classified``
-  ones — not every classified obligation. Dispatched obligations stay
-  ``classified`` for good (see ``schedule_entry_due``), so fencing the whole
-  candidate set would fence every period that ever held a schedule and fail
-  the sweep on the first one that has since closed.
+  Dispatched obligations rest at ``classified`` for good (see
+  ``schedule_entry_due``), so the classified candidate set is the schedule's
+  whole history. Only the stranded subset is written; the rest is neither
+  fenced nor locked — locking it would hold every historical obligation for
+  the length of the sweep and fail close's publish against them, and fencing
+  it would fence every period that ever held a schedule.
+  """
+  preview = session.query(Event).filter(*candidate_filter).all()
+  pending = [evt for evt in preview if evt.status == "pending"]
+  classified = [evt for evt in preview if evt.status == "classified"]
+  stranded = filter_stranded_obligations(session, classified) if classified else []
+  return pending, stranded
+
+
+def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str, str]]:
+  """Take the shared period fence for every obligation autopilot will write.
 
   Returns ``(event_id, reason)`` for obligations whose period is closed, so
   the caller can leave them out and report them. A fence that cannot be
   taken because a closer holds the exclusive side propagates as
   ``RowLockedError`` — that one is retryable and does apply to the sweep.
   """
-  preview = session.query(Event).filter(*candidate_filter).all()
-  pending = [evt for evt in preview if evt.status == "pending"]
-  classified = [evt for evt in preview if evt.status == "classified"]
-  write_set = pending + (
-    filter_stranded_obligations(session, classified) if classified else []
-  )
-  if not write_set:
-    return []
-
   by_date: dict[date, list[Event]] = {}
   for evt in write_set:
     posting_date = posting_date_for_event(
@@ -284,26 +287,53 @@ def promote_pending_obligations(
     Event.occurred_at <= as_of,
   ]
   result = PromotionResult(graph_id=graph_id)
+  # Unlocked preview of the write set, then lock exactly that — not the whole
+  # candidate set. See `_preview_write_set` for why the classified history
+  # stays out of both the fence and the lock.
+  preview_pending, preview_stranded = _preview_write_set(session, candidate_filter)
+  write_set = preview_pending + preview_stranded
   # Autopilot writes GL, so the period fence has to come *before* the
   # event row locks. Close takes exclusive fence then event locks;
   # locking first and fencing in the handler was the inversion that
   # failed close mid-publish. An obligation whose period is already
   # closed is left out of the sweep and reported, not fatal to it.
-  if dispatch_handlers:
-    closed = _fence_autopilot_write_set(session, candidate_filter)
+  if dispatch_handlers and write_set:
+    closed = _fence_write_set(session, write_set)
     if closed:
       result.errors.extend(closed)
-      candidate_filter.append(Event.id.notin_([evt_id for evt_id, _ in closed]))
+      closed_ids = {evt_id for evt_id, _ in closed}
+      write_set = [evt for evt in write_set if evt.id not in closed_ids]
+  if not write_set:
+    return result
+
+  # The preview above put these rows in the identity map, so the locked
+  # read must `populate_existing` — otherwise it takes the lock and hands
+  # back the status the preview saw, and a void or approval that committed
+  # in between is acted on as if it never happened. Flush first: this
+  # factory is `autoflush=False`, and a refresh would otherwise discard an
+  # in-flight change without a word (nothing is pending here today; this
+  # keeps it a property of the read rather than of its callers).
+  session.flush()
   candidates = (
     session.query(Event)
-    .filter(*candidate_filter)
-    # Ordered so this and `supersede_pending_obligations` — whose row sets
-    # overlap on pending obligations — can never acquire in opposing orders.
-    # See `locking.ordered_lock_column`.
+    .filter(
+      Event.id.in_([evt.id for evt in write_set]),
+      # Re-checked under the lock: a row that left the candidate set while
+      # we waited is not returned at all — the same guard the bulk updates
+      # below carry, and independent of the refresh.
+      Event.status.in_(("pending", "classified")),
+    )
+    # Ordered so this and `supersede_pending_obligations` / the schedule
+    # void — whose row sets overlap on pending obligations — can never
+    # acquire in opposing orders. See `locking.ordered_lock_column`.
     .order_by(ordered_lock_column())
+    .populate_existing()
     .with_for_update()
     .all()
   )
+  # Re-derived from the locked rows: status is decided here, not by the
+  # preview. A row that moved between the two reads (voided, approved,
+  # drafted) drops out on its own.
   pending = [evt for evt in candidates if evt.status == "pending"]
   classified = [evt for evt in candidates if evt.status == "classified"]
 
