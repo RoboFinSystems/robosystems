@@ -33,6 +33,7 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
+from robosystems.operations.taxonomy_block.immutability import assert_facts_deletable
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
@@ -356,14 +357,38 @@ def apply_elements_to_remove(
     .values(parent_id=None)
   )
 
-  session.execute(
-    delete(Association).where(
-      or_(
-        Association.from_element_id.in_(element_ids),
-        Association.to_element_id.in_(element_ids),
+  # Rules targeting the removed elements (or the associations that go with
+  # them) and the classification rows on those associations FK them with no
+  # ON DELETE — the same dependents `cascade_delete_taxonomy` clears; without
+  # this the element DELETE dies on the constraint.
+  association_ids = (
+    session.execute(
+      select(Association.id).where(
+        or_(
+          Association.from_element_id.in_(element_ids),
+          Association.to_element_id.in_(element_ids),
+        )
       )
     )
+    .scalars()
+    .all()
   )
+  rule_filters = [Rule.target_element_id.in_(element_ids)]
+  if association_ids:
+    rule_filters.append(Rule.target_association_id.in_(association_ids))
+  rule_ids = session.execute(select(Rule.id).where(or_(*rule_filters))).scalars().all()
+  if rule_ids:
+    session.execute(
+      delete(VerificationResult).where(VerificationResult.rule_id.in_(rule_ids))
+    )
+    session.execute(delete(Rule).where(Rule.id.in_(rule_ids)))
+  if association_ids:
+    session.execute(
+      delete(AssociationClassification).where(
+        AssociationClassification.association_id.in_(association_ids)
+      )
+    )
+    session.execute(delete(Association).where(Association.id.in_(association_ids)))
 
   session.execute(delete(ElementTrait).where(ElementTrait.element_id.in_(element_ids)))
   session.execute(delete(ElementLabel).where(ElementLabel.element_id.in_(element_ids)))
@@ -428,6 +453,9 @@ def apply_structures_to_remove(
     return
 
   ids = list(payload.structures_to_remove)
+  # Filed snapshots and closed-month canonical sets are immutable against
+  # curation; the validator reports the same condition, this is the backstop.
+  assert_facts_deletable(session, structure_ids=ids)
   association_ids = (
     session.execute(select(Association.id).where(Association.structure_id.in_(ids)))
     .scalars()

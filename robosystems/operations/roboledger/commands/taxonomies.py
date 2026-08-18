@@ -43,12 +43,12 @@ from robosystems.models.extensions import (
   Taxonomy,
   VerificationResult,
 )
-from robosystems.models.extensions.entity import Entity
 from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
   assert_tenant_taxonomy,
 )
+from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
@@ -557,7 +557,7 @@ def link_entity_taxonomy(
   Raises `EntityNotFoundError` if no entity exists in the graph, or
   `TaxonomyNotFoundError` if the taxonomy doesn't exist.
   """
-  entity = session.execute(select(Entity).limit(1)).scalar_one_or_none()
+  entity = resolve_parent_entity(session)
   if entity is None:
     raise EntityNotFoundError("No entity found in this graph")
 

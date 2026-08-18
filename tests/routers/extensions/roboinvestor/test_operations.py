@@ -241,7 +241,85 @@ class TestCreatePortfolioBlockOp:
 
     with patch(
       SESSION_FACTORY,
-      side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
+      side_effect=ProgrammingError(
+        "stmt", {}, Exception('relation "portfolios" does not exist')
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await create_portfolio_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          _ext=_entity_meta(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 404
+    assert "not initialized" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_other_programming_errors_surface(self) -> None:
+    """Only a missing schema/relation is "not initialized". A migration that
+    has not reached this tenant, or a SQL fault, must not hide behind the
+    friendly 404 — it surfaces (500) and is logged."""
+    from sqlalchemy.exc import ProgrammingError
+
+    body = CreatePortfolioBlockRequest(
+      portfolio=PortfolioBlockPortfolioFields(name="X"),
+    )
+    fault = ProgrammingError(
+      "stmt", {}, Exception("column portfolios.tags does not exist")
+    )
+    with (
+      patch(f"{PORTFOLIO_BLOCK}.create_portfolio_block", side_effect=fault),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      with pytest.raises(ProgrammingError):
+        await create_portfolio_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          _ext=_entity_meta(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+  @pytest.mark.asyncio
+  async def test_unmapped_value_error_is_a_422_not_a_404(self) -> None:
+    """A domain refusal the error_map did not name is a validation failure
+    with its own message, not "not initialized"."""
+    body = CreatePortfolioBlockRequest(
+      portfolio=PortfolioBlockPortfolioFields(name="X"),
+    )
+    with (
+      patch(
+        f"{PORTFOLIO_BLOCK}.create_portfolio_block",
+        side_effect=ValueError("quantity must be positive"),
+      ),
+      patch(SESSION_FACTORY, return_value=_mock_session_ctx()[0]),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await create_portfolio_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          _ext=_entity_meta(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "quantity must be positive"
+
+  @pytest.mark.asyncio
+  async def test_graph_id_the_factory_rejects_is_a_404(self) -> None:
+    """The session factory refuses ids that are not tenant-schema ids; that
+    is still the "not initialized" answer, told apart from a command's own
+    ValueError by whether the session was ever bound."""
+    body = CreatePortfolioBlockRequest(
+      portfolio=PortfolioBlockPortfolioFields(name="X"),
+    )
+    with patch(
+      SESSION_FACTORY, side_effect=ValueError("Invalid graph_id for schema name")
     ):
       with pytest.raises(HTTPException) as exc:
         await create_portfolio_block_op(

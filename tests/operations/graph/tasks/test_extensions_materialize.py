@@ -124,4 +124,8 @@ class TestPartialBuildNotMarkedFresh:
       result = await task.execute()
 
     assert result["status"] == "success"
-    graph.mark_fresh.assert_called_once_with(session=db)
+    graph.mark_fresh.assert_called_once()
+    assert graph.mark_fresh.call_args.kwargs["session"] is db
+    # Compare-and-clear anchor: the snapshot time travels with the call so a
+    # write that landed during the build keeps the graph stale.
+    assert graph.mark_fresh.call_args.kwargs["started_at"] is not None

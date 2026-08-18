@@ -425,14 +425,18 @@ class TestApplyElementsToRemove:
     )
 
     session = MagicMock()
+    # No associations touch the removed elements and no rules target them.
+    session.execute.return_value.scalars.return_value.all.return_value = []
     taxonomy = _fake_taxonomy("custom_ontology")
     payload = UpdateTaxonomyBlockRequest(
       taxonomy_id="tax_42", elements_to_remove=["x:A", "x:B"]
     )
     apply_elements_to_remove(session, taxonomy, payload, {"x:A": "e_a", "x:B": "e_b"})
 
-    # 1 UPDATE + 5 DELETEs (associations + 3 side tables + elements) = 6 calls
-    assert session.execute.call_count == 6
+    # 1 UPDATE (parent unlink) + 2 SELECTs (associations, rules targeting the
+    # removed elements — dependents that FK them with no ON DELETE) + 3 side
+    # tables + elements = 7 calls; nothing to sweep, so no dependent DELETEs.
+    assert session.execute.call_count == 7
     session.flush.assert_called_once()
 
   def test_noop_when_nothing_to_remove(self) -> None:

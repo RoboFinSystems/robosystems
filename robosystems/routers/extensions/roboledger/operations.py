@@ -73,6 +73,7 @@ from robosystems.middleware.extensions import (
   GraphExtensionContext,
   OperationRegistrar,
   OperationSpec,
+  is_schema_missing,
   require_graph_extension,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -526,9 +527,9 @@ def _ledger_404() -> HTTPException:
   )
 
 
-def _is_schema_missing(exc: ProgrammingError) -> bool:
-  msg = str(exc)
-  return "does not exist" in msg and ("schema" in msg or "relation" in msg)
+# Shared with the registrar (`middleware/extensions.py`) so both registration
+# styles translate the same, and only the, schema-missing case to 404.
+_is_schema_missing = is_schema_missing
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -998,6 +999,8 @@ update_taxonomy_block_op = _registrar.register(
     result_type=TaxonomyBlockEnvelope,
     error_map={
       TaxonomyAuthoringDisabledError: 403,
+      # Another update holds the taxonomy row; retryable.
+      RowLockedError: 409,
       ValueError: 422,
       NotImplementedError: 501,
     },
@@ -1590,6 +1593,15 @@ update_event_block_op = _registrar.register(
       # A running sync holds the event's row lock. Retryable, and the only
       # error here the caller should try again rather than fix.
       RowLockedError: 409,
+      # The rest of what the handler fired on approve can raise — the same
+      # set create-event-block maps, since it fires the same handler over the
+      # captured metadata: a reversal naming an entry that is not posted (or
+      # gone), a disposal whose schedule is gone, and the handlers' own
+      # bare-ValueError validation.
+      DisposalScheduleNotFoundError: 404,
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotPostedError: 422,
+      ValueError: 422,
     },
     mark_stale_reason="event_block_updated",
   )
@@ -1895,6 +1907,9 @@ async def set_close_target_op(
       raise HTTPException(status_code=422, detail=str(e))
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
+    except RowLockedError as e:
+      # A close in flight holds the calendar row; retryable, like its siblings.
+      raise HTTPException(status_code=409, detail=str(e))
     except ProgrammingError as e:
       if _is_schema_missing(e):
         raise _ledger_404()

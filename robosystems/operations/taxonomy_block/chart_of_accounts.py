@@ -24,12 +24,12 @@ from robosystems.models.extensions import (
   Association,
   Element,
   ElementTrait,
-  Entity,
   EntityTaxonomy,
   Structure,
   Taxonomy,
   Trait,
 )
+from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
 from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import (
   emit_auto_rules,
@@ -138,7 +138,7 @@ def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
   one — only one primary CoA per entity at a time. If the link already
   exists but is non-primary, promotes it rather than returning early.
   """
-  entity = session.execute(select(Entity).limit(1)).scalar_one_or_none()
+  entity = resolve_parent_entity(session)
   if entity is None:
     return
 

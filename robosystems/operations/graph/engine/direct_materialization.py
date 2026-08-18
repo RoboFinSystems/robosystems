@@ -11,6 +11,7 @@ the worker's request lifetime is the binding constraint.
 """
 
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -47,6 +48,9 @@ async def materialize_graph_directly(
   from .chunked_materialization import materialize_table_chunked
 
   start_time = time.time()
+  # Compare-and-clear anchor for mark_fresh: a write stamped after this
+  # point is not in this build and must keep the graph stale.
+  started_at = datetime.now(UTC)
   manager = get_operation_manager()
 
   logger.info(
@@ -273,7 +277,10 @@ async def materialize_graph_directly(
       logger.info("[95%] Marking graph as fresh")
       if operation_id:
         await manager.emit_progress(operation_id, "Marking graph as fresh...", 95)
-      graph_record.mark_fresh(session=db)
+      if not graph_record.mark_fresh(session=db, started_at=started_at):
+        logger.info(
+          f"{graph_id} was written during the materialization; leaving it stale"
+        )
 
       # Update graph metadata if rebuild was performed
       if rebuild:

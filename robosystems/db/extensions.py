@@ -388,10 +388,35 @@ def _widen_library_checks(conn, schema: str) -> None:
   )
 
 
+class TenantDeprovisionedError(RuntimeError):
+  """The graph is torn down; nothing may create or write its tenant schema."""
+
+  def __init__(self, graph_id: str) -> None:
+    self.graph_id = graph_id
+    super().__init__(f"Graph {graph_id} is deprovisioned; refusing to provision")
+
+
+def ensure_tenant_schema(graph_id: str) -> bool:
+  """Provision the tenant schema only if it does not exist yet.
+
+  ``provision_tenant_schema`` is idempotent but not free: its CHECK and
+  trigger installs take AccessExclusive locks on every tenant table, so a
+  caller that runs on every sync (the OLTP loader) must not re-run it
+  against a schema that is already there — a concurrent report build or
+  GraphQL read deadlocks against it and either the read or the whole load
+  is aborted. Returns True when a schema was provisioned.
+  """
+  if tenant_schema_exists(graph_id):
+    return False
+  provision_tenant_schema(graph_id)
+  return True
+
+
 def provision_tenant_schema(graph_id: str) -> None:
   """Create all tenant tables in a new PostgreSQL schema for this graph_id.
 
-  Called lazily on first extension access for a graph. Creates the schema
+  Called at graph creation (and by ``ensure_tenant_schema`` when a schema is
+  missing). Creates the schema
   and all tenant-scoped tables (elements, transactions, entries, etc.)
   using ExtensionsBase metadata, then copies the canonical taxonomy
   library from ``public.*`` into the tenant schema per the graph's pin
@@ -420,12 +445,17 @@ def provision_tenant_schema(graph_id: str) -> None:
   # before opening the extensions transaction, since they're separate
   # databases.
   from robosystems.database import platform_session
-  from robosystems.models.core.graph.graph import Graph
+  from robosystems.models.core.graph.graph import Graph, GraphStatus
   from robosystems.taxonomy.pins import resolve_pin
   from robosystems.taxonomy.writer import copy_library_into_tenant
 
   with platform_session() as pdb:
     graph = pdb.get(Graph, graph_id)
+    if graph is not None and graph.status == GraphStatus.DEPROVISIONED.value:
+      # Teardown drops the schema before it deletes the graph's connections,
+      # so a sync still in flight would otherwise re-create the schema and
+      # write ledger rows into a tenant the platform no longer knows about.
+      raise TenantDeprovisionedError(graph_id)
     pin = resolve_pin(graph)
 
   with engine.connect() as conn:

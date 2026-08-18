@@ -8,8 +8,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
-from robosystems.models.extensions import Entity
-from robosystems.operations.roboledger.reads.entity import entity_to_response
+from robosystems.operations.roboledger.reads.entity import (
+  entity_to_response,
+  resolve_parent_entity,
+)
 
 
 def update_parent_entity(
@@ -21,11 +23,7 @@ def update_parent_entity(
   for the ledger. The caller is expected to have already validated that
   `updates` is non-empty — this function commits whatever it is given.
   """
-  entity = (
-    session.query(Entity)
-    .filter(Entity.is_parent.is_(True), Entity.source != "linked")
-    .first()
-  )
+  entity = resolve_parent_entity(session)
   if entity is None:
     return None
 

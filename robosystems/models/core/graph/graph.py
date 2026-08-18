@@ -24,6 +24,8 @@ from sqlalchemy import (
   Integer,
   String,
   UniqueConstraint,
+  or_,
+  update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
@@ -633,16 +635,21 @@ class Graph(Model):
     self.graph_stale_at = datetime.now(UTC)
     session.commit()
 
-  def mark_fresh(self, session: Session) -> None:
-    """Mark the graph fresh after materializing from DuckDB.
+  def mark_fresh(self, session: Session, *, started_at: datetime | None = None) -> bool:
+    """Record a completed materialization; clear staleness only if nothing
+    was written after the materialization began.
 
-    Stamps ``last_materialized_at`` and bumps ``materialization_count`` in
-    ``graph_metadata``.
+    ``started_at`` is the moment the materialization snapshotted its source
+    (before staging). A write that lands after that stamps a later
+    ``graph_stale_at`` and is not in the graph, so clearing the flag would
+    lose it until an unrelated later write — the compare-and-clear is done
+    in SQL so a stale identity map cannot mask a newer stamp. Without
+    ``started_at`` the clear is unconditional (legacy callers).
+
+    Always stamps ``last_materialized_at`` and bumps
+    ``materialization_count`` in ``graph_metadata``. Returns True when the
+    staleness flag was cleared.
     """
-    self.graph_stale = False
-    self.graph_stale_reason = None
-    self.graph_stale_at = None
-
     metadata = {**self.graph_metadata} if self.graph_metadata else {}
     metadata["last_materialized_at"] = datetime.now(UTC).isoformat()
 
@@ -652,4 +659,21 @@ class Graph(Model):
       metadata["materialization_count"] = 1
 
     self.graph_metadata = metadata
+    session.flush()
+
+    clear = (
+      update(Graph)
+      .where(Graph.graph_id == self.graph_id)
+      .values(graph_stale=False, graph_stale_reason=None, graph_stale_at=None)
+      .execution_options(synchronize_session=False)
+    )
+    if started_at is not None:
+      clear = clear.where(
+        or_(Graph.graph_stale_at.is_(None), Graph.graph_stale_at <= started_at)
+      )
+    cleared = (session.execute(clear).rowcount or 0) > 0
     session.commit()
+    # The commit expires the instance, so callers reading the stale fields
+    # afterwards see the row as the UPDATE left it, not the pre-clear values.
+    session.refresh(self)
+    return cleared
