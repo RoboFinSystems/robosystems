@@ -16,6 +16,7 @@ from ...models.api.admin import (
   GraphInfrastructureResponse,
   GraphResponse,
   GraphStorageResponse,
+  OrphanTenantSchemasResponse,
 )
 from ...models.core import Graph, User
 from ...models.core.graph.graph_backup import GraphBackup
@@ -251,6 +252,46 @@ async def get_graph_analytics(
     session.close()
 
 
+@router.get("/orphan-schemas", response_model=OrphanTenantSchemasResponse)
+@require_admin(permissions=["graphs:read"])
+async def list_orphan_tenant_schemas(request: Request):
+  """Extensions tenant schemas with no live graph — what a partial teardown
+  left behind. Read-only; POST to the same path to drop them."""
+  from ...operations.graph.deprovision_service import find_orphan_tenant_schemas
+
+  session = next(get_db_session())
+  try:
+    return OrphanTenantSchemasResponse(
+      orphan_schemas=find_orphan_tenant_schemas(session)
+    )
+  finally:
+    session.close()
+
+
+@router.post("/orphan-schemas", response_model=OrphanTenantSchemasResponse)
+@require_admin(permissions=["graphs:write"])
+async def purge_orphan_tenant_schemas(request: Request):
+  """Drop every orphan tenant schema (see GET). Irreversible."""
+  from ...operations.graph.deprovision_service import (
+    find_orphan_tenant_schemas,
+  )
+  from ...operations.graph.deprovision_service import (
+    purge_orphan_tenant_schemas as _purge,
+  )
+
+  session = next(get_db_session())
+  try:
+    orphans = find_orphan_tenant_schemas(session)
+    dropped = _purge(session)
+    logger.info(
+      f"Admin purged {len(dropped)} orphan extensions schema(s)",
+      extra={"admin_key_id": request.state.admin_key_id, "dropped": dropped},
+    )
+    return OrphanTenantSchemasResponse(orphan_schemas=orphans, dropped=dropped)
+  finally:
+    session.close()
+
+
 @router.get("/{graph_id}", response_model=GraphResponse)
 @require_admin(permissions=["graphs:read"])
 async def get_graph(request: Request, graph_id: str):
@@ -346,12 +387,6 @@ async def deprovision_graph(
         detail=f"Graph {graph_id} not found",
       )
 
-    if result.status == "already_deprovisioned":
-      raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail=f"Graph {graph_id} is already deprovisioned",
-      )
-
     if result.status == "rejected":
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -368,9 +403,18 @@ async def deprovision_graph(
       },
     )
 
+    # An already-deprovisioned graph is not an error: the call re-ran the
+    # idempotent data-disposal steps (extensions schema, search index, report
+    # bundles), which is how a partial teardown gets finished. The message
+    # says what, if anything, was still there.
     return GraphDeprovisionResponse(
       graph_id=graph_id,
       previous_status=result.previous_status,
+      status=(
+        "already_deprovisioned"
+        if result.status == "already_deprovisioned"
+        else "deprovisioned"
+      ),
       database_deleted=result.database_deleted,
       backup_created=result.backup_created,
       subgraphs_deleted=result.subgraphs_deleted,

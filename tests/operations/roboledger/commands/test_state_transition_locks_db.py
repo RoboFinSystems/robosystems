@@ -475,7 +475,9 @@ class TestFileReportLock:
       )
       with extensions_session(GRAPH) as other:
         with pytest.raises(RowLockedError, match=self.REPORT_ID):
-          transition_filing_status(other, self.REPORT_ID, "under_review")
+          transition_filing_status(
+            other, self.REPORT_ID, "under_review", acting_user_id="usr_seed"
+          )
 
   def test_a_locked_report_cannot_be_deleted(self, tenant):
     from robosystems.operations.roboledger.commands.reports import delete_report

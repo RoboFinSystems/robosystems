@@ -700,10 +700,12 @@ class _FakeReport:
     *,
     created_by: str = "usr_test",
     filing_status: str = "draft",
+    source_graph_id: str | None = None,
   ) -> None:
     self.id = report_id
     self.created_by = created_by
     self.filing_status = filing_status
+    self.source_graph_id = source_graph_id
 
 
 def _session_with_report(report: _FakeReport | None) -> MagicMock:
@@ -725,6 +727,19 @@ def test_regenerate_report_raises_not_authorized_when_owner_mismatch() -> None:
   body = MagicMock()
   with pytest.raises(NotAuthorizedError):
     regenerate_report(session, "kg_demo", "rpt_01", body, "usr_other")
+
+
+def test_regenerate_report_refuses_a_shared_in_copy_even_for_its_sender() -> None:
+  """A copy shared in from another graph carries the sender's user id in
+  `created_by`; a sender who is also a member here could otherwise regenerate
+  the copy from this graph's ledger and replace their own snapshot."""
+  report = _FakeReport(
+    "rpt_copy", created_by="usr_sender", filing_status="draft", source_graph_id="kg_src"
+  )
+  session = _session_with_report(report)
+  with pytest.raises(NotAuthorizedError) as exc:
+    regenerate_report(session, "kg_demo", "rpt_copy", MagicMock(), "usr_sender")
+  assert "shared in" in str(exc.value)
 
 
 def test_regenerate_report_raises_on_filed_report() -> None:

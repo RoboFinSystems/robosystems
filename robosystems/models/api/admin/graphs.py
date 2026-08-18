@@ -76,6 +76,13 @@ class GraphDeprovisionResponse(BaseModel):
   warnings: list[str] | None = None
 
 
+class OrphanTenantSchemasResponse(BaseModel):
+  """Extensions tenant schemas that no live graph owns."""
+
+  orphan_schemas: list[str]
+  dropped: list[str] = []
+
+
 class GraphAnalyticsResponse(BaseModel):
   """Response with cross-graph analytics."""
 

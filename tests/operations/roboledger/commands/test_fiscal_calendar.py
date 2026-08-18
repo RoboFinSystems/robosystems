@@ -290,7 +290,7 @@ class TestBackfillPlanHistory:
     stamped_windows=frozenset(),
     close_side_effect=None,
   ):
-    """Run the backfill with the reopen/close commands patched out.
+    """Run the backfill with the restamp/close commands patched out.
 
     ``stamped_windows`` holds YYYY-MM months that already have canonical
     sets (the idempotency skip).
@@ -309,10 +309,13 @@ class TestBackfillPlanHistory:
       "error": 0,
       "skipped": 0,
     }
+    # A closed month goes through `_restamp_closed_period` (reopen + re-close
+    # as one fenced transaction); an open/`closing` month through
+    # `close_period`. Both stand in here with the same result/side effect.
     close_mock = MagicMock(return_value=close_result, side_effect=close_side_effect)
-    reopen_mock = MagicMock()
+    restamp_mock = MagicMock(return_value=close_result, side_effect=close_side_effect)
     with (
-      patch(f"{_MOD}.reopen_period", reopen_mock),
+      patch(f"{_MOD}._restamp_closed_period", restamp_mock),
       patch(f"{_MOD}.close_period", close_mock),
       patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
       patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
@@ -331,7 +334,7 @@ class TestBackfillPlanHistory:
         service=service,
         close_service=MagicMock(),
       )
-    return response, reopen_mock, close_mock
+    return response, restamp_mock, close_mock
 
   def test_nothing_closed_raises(self):
     with pytest.raises(BackfillPreconditionError) as exc_info:
@@ -373,7 +376,7 @@ class TestBackfillPlanHistory:
 
   def test_already_stamped_months_untouched(self):
     session = self._session(draft_counts=[0, 0], fp_statuses=["closed", "closed"])
-    response, reopen_mock, close_mock = self._run(
+    response, restamp_mock, close_mock = self._run(
       session,
       self._service(),
       stamped_windows={"2025-11", "2025-12"},
@@ -382,15 +385,15 @@ class TestBackfillPlanHistory:
     assert attempted == ["2026-01", "2026-02"]
     assert all(o.status == "stamped" for o in response.processed)
     assert response.remaining_periods == []
-    assert reopen_mock.call_count == 2
-    assert close_mock.call_count == 2
+    assert restamp_mock.call_count == 2
+    close_mock.assert_not_called()
 
   def test_restamp_re_derives_already_stamped_months(self):
     """restamp=true widens the walk to every month in range — the
     healing pass after an engine improvement changes what a stamp
     produces (e.g. the two-period CF derivation)."""
     session = self._session(draft_counts=[0] * 4, fp_statuses=["closed"] * 4)
-    response, reopen_mock, close_mock = self._run(
+    response, restamp_mock, close_mock = self._run(
       session,
       self._service(),
       body=BackfillPlanHistoryRequest(restamp=True),
@@ -399,12 +402,12 @@ class TestBackfillPlanHistory:
     attempted = [outcome.period for outcome in response.processed]
     assert attempted == ["2025-11", "2025-12", "2026-01", "2026-02"]
     assert all(o.status == "stamped" for o in response.processed)
-    assert reopen_mock.call_count == 4
-    assert close_mock.call_count == 4
+    assert restamp_mock.call_count == 4
+    close_mock.assert_not_called()
 
   def test_chunking_respects_max_periods(self):
     session = self._session(draft_counts=[0, 0], fp_statuses=["closed", "closed"])
-    response, _, close_mock = self._run(
+    response, restamp_mock, _ = self._run(
       session,
       self._service(),
       body=BackfillPlanHistoryRequest(max_periods=2),
@@ -412,14 +415,14 @@ class TestBackfillPlanHistory:
     attempted = [outcome.period for outcome in response.processed]
     assert attempted == ["2025-11", "2025-12"]
     assert response.remaining_periods == ["2026-01", "2026-02"]
-    assert close_mock.call_count == 2
+    assert restamp_mock.call_count == 2
 
   def test_draft_months_skipped_never_posted(self):
     session = self._session(
       draft_counts=[2, 0, 0, 0],
       fp_statuses=["closed", "closed", "closed"],
     )
-    response, _, close_mock = self._run(session, self._service())
+    response, restamp_mock, _ = self._run(session, self._service())
     assert response.processed[0].period == "2025-11"
     assert response.processed[0].status == "skipped_drafts"
     assert [o.period for o in response.processed if o.status == "stamped"] == [
@@ -427,7 +430,7 @@ class TestBackfillPlanHistory:
       "2026-01",
       "2026-02",
     ]
-    assert close_mock.call_count == 3
+    assert restamp_mock.call_count == 3
     assert response.remaining_periods == []
 
   def test_failure_halts_and_reports_remaining(self):
@@ -448,13 +451,13 @@ class TestBackfillPlanHistory:
       draft_counts=[0],
       fp_statuses=["closing"],
     )
-    response, reopen_mock, close_mock = self._run(
+    response, restamp_mock, close_mock = self._run(
       session,
       self._service(),
       body=BackfillPlanHistoryRequest(max_periods=1),
     )
     assert response.processed[0].status == "stamped"
-    reopen_mock.assert_not_called()
+    restamp_mock.assert_not_called()
     close_mock.assert_called_once()
 
   def test_stamp_outcome_fields_ride_through(self):
@@ -472,3 +475,54 @@ class TestBackfillPlanHistory:
       "error": 0,
       "skipped": 0,
     }
+
+
+class TestRestampClosedPeriod:
+  """The backfill's reopen + re-close is one transaction under one fence: a
+  failing re-close leaves nothing of the reopen behind."""
+
+  def _run(self, close_side_effect=None, session=None):
+    from robosystems.operations.roboledger.commands.fiscal_calendar import (
+      _restamp_closed_period,
+    )
+
+    session = session if session is not None else MagicMock()
+    close_service = MagicMock()
+    if close_side_effect is not None:
+      close_service.close.side_effect = close_side_effect
+    else:
+      close_service.close.return_value = _close_result()
+    with (
+      patch(f"{_MOD}._reopen_under_fence") as reopen_body,
+      patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
+      patch(f"{_MOD}.exclusive_period_fence") as fence,
+    ):
+      result = _restamp_closed_period(
+        session,
+        MagicMock(),
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        note=None,
+        service=MagicMock(),
+        close_service=close_service,
+        actor_type="user",
+        allow_stale_sync=False,
+        allow_stranded_obligations=False,
+      )
+    return result, session, reopen_body, close_service, fence
+
+  def test_reopen_and_close_share_one_fence_and_one_commit(self):
+    result, session, reopen_body, close_service, fence = self._run()
+    fence.assert_called_once()
+    reopen_body.assert_called_once()
+    close_service.close.assert_called_once()
+    session.commit.assert_called_once()
+    assert result.period == "2026-01"
+
+  def test_a_failing_reclose_commits_nothing(self):
+    session = MagicMock()
+    with pytest.raises(UnbalancedLedgerError):
+      self._run(close_side_effect=UnbalancedLedgerError(100, 90), session=session)
+    session.commit.assert_not_called()

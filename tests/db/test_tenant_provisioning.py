@@ -71,6 +71,24 @@ class TestProvisionRefusesDeprovisionedGraph:
     assert excinfo.value.graph_id == GRAPH
     engine.connect.assert_not_called()
 
+  def test_raises_while_teardown_is_in_flight(self):
+    """Teardown stamps `deleted_at` (committed) before it drops anything and
+    flips the status only at the end; a sync in that window must not
+    re-create the schema."""
+    from datetime import UTC, datetime
+
+    graph = MagicMock()
+    graph.status = GraphStatus.ACTIVE.value
+    graph.deleted_at = datetime.now(UTC)
+    engine = MagicMock()
+    with (
+      patch.object(ext, "_get_engine", return_value=engine),
+      patch("robosystems.database.platform_session", self._platform_with(graph)),
+    ):
+      with pytest.raises(TenantDeprovisionedError):
+        provision_tenant_schema(GRAPH)
+    engine.connect.assert_not_called()
+
   def test_missing_graph_row_still_provisions(self):
     """Scripts provision without a platform row (framework_validate); only a
     row that says *deprovisioned* refuses."""

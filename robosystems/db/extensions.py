@@ -458,10 +458,15 @@ def provision_tenant_schema(graph_id: str) -> None:
 
   with platform_session() as pdb:
     graph = pdb.get(Graph, graph_id)
-    if graph is not None and graph.status == GraphStatus.DEPROVISIONED.value:
+    if graph is not None and (
+      graph.status == GraphStatus.DEPROVISIONED.value or graph.deleted_at is not None
+    ):
       # Teardown drops the schema before it deletes the graph's connections,
       # so a sync still in flight would otherwise re-create the schema and
       # write ledger rows into a tenant the platform no longer knows about.
+      # `deleted_at` is stamped (and committed) at the start of teardown,
+      # before any data is dropped, so the window between the drop and the
+      # final status flip is covered too.
       raise TenantDeprovisionedError(graph_id)
     pin = resolve_pin(graph)
 
@@ -498,6 +503,26 @@ def provision_tenant_schema(graph_id: str) -> None:
     _install_library_immutability_triggers(conn, schema)
 
     conn.commit()
+
+
+def list_tenant_schemas() -> list[str]:
+  """Every tenant schema present in the extensions database.
+
+  Schemas whose name matches the tenant grammar (``kg`` + hex). Used by the
+  orphan sweep — a schema with no live platform ``Graph`` row is a ghost a
+  partial teardown left behind. Empty when no extension domain is enabled.
+  """
+  if not env.EXTENSIONS_ENABLED:
+    return []
+  engine = _get_engine()
+  with engine.connect() as conn:
+    rows = conn.execute(
+      text(
+        "SELECT schema_name FROM information_schema.schemata "
+        "WHERE schema_name ~ '^kg[0-9a-f]{16,}$' ORDER BY schema_name"
+      )
+    ).all()
+  return [row[0] for row in rows]
 
 
 def tenant_schema_exists(graph_id: str) -> bool:

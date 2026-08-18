@@ -126,6 +126,30 @@ def deprovision_graph(client, graph_id, force, skip_backup):
       click.echo(f"    - {warning}")
 
 
+@graphs.command("orphan-schemas")
+@click.option("--drop", is_flag=True, help="Drop the orphan schemas (irreversible)")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_obj
+def orphan_schemas(client, drop, force):
+  """List (or drop) extensions tenant schemas that no live graph owns."""
+  if drop and not force:
+    click.confirm(
+      "This will DROP every extensions tenant schema with no live graph. Continue?",
+      abort=True,
+    )
+  result = client._make_request(
+    "POST" if drop else "GET", "/admin/v1/graphs/orphan-schemas"
+  )
+  orphans = result.get("orphan_schemas") or []
+  if not orphans:
+    click.echo("No orphan tenant schemas.")
+    return
+  click.echo(f"Orphan tenant schemas ({len(orphans)}):")
+  for schema in orphans:
+    marker = " (dropped)" if schema in (result.get("dropped") or []) else ""
+    click.echo(f"  {schema}{marker}")
+
+
 @graphs.command("analytics")
 @click.option("--tier", help="Filter by tier")
 @click.pass_obj

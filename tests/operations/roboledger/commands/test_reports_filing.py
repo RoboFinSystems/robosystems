@@ -27,6 +27,7 @@ def _make_report_def(
   """A MagicMock that mimics a Report ORM row well enough for these tests."""
   r = MagicMock()
   r.id = "rpt_01"
+  r.created_by = "user_01"
   r.name = "Q1 2026 Statements"
   r.taxonomy_id = "tax_usgaap_reporting"
   r.generation_status = "complete"
@@ -164,7 +165,9 @@ def test_transition_draft_to_under_review() -> None:
   session.get.return_value = _make_report_def(filing_status="draft")
 
   with _patch_response_helpers():
-    result = transition_filing_status(session, "rpt_01", "under_review")
+    result = transition_filing_status(
+      session, "rpt_01", "under_review", acting_user_id="user_01"
+    )
 
   assert result.filing_status == "under_review"
 
@@ -174,7 +177,9 @@ def test_transition_under_review_back_to_draft() -> None:
   session.get.return_value = _make_report_def(filing_status="under_review")
 
   with _patch_response_helpers():
-    result = transition_filing_status(session, "rpt_01", "draft")
+    result = transition_filing_status(
+      session, "rpt_01", "draft", acting_user_id="user_01"
+    )
 
   assert result.filing_status == "draft"
 
@@ -188,7 +193,9 @@ def test_transition_filed_to_archived() -> None:
   )
 
   with _patch_response_helpers():
-    result = transition_filing_status(session, "rpt_01", "archived")
+    result = transition_filing_status(
+      session, "rpt_01", "archived", acting_user_id="user_01"
+    )
 
   assert result.filing_status == "archived"
 
@@ -199,7 +206,7 @@ def test_transition_rejects_filing_via_generic_path() -> None:
   session.get.return_value = _make_report_def(filing_status="under_review")
 
   with pytest.raises(InvalidFilingTransitionError):
-    transition_filing_status(session, "rpt_01", "filed")
+    transition_filing_status(session, "rpt_01", "filed", acting_user_id="user_01")
 
 
 def test_transition_rejects_archive_from_draft() -> None:
@@ -208,7 +215,7 @@ def test_transition_rejects_archive_from_draft() -> None:
   session.get.return_value = _make_report_def(filing_status="draft")
 
   with pytest.raises(InvalidFilingTransitionError):
-    transition_filing_status(session, "rpt_01", "archived")
+    transition_filing_status(session, "rpt_01", "archived", acting_user_id="user_01")
 
 
 def test_transition_raises_when_report_missing() -> None:
@@ -216,10 +223,43 @@ def test_transition_raises_when_report_missing() -> None:
   session.get.return_value = None
 
   with pytest.raises(ReportNotFoundError):
-    transition_filing_status(session, "rpt_missing", "under_review")
+    transition_filing_status(
+      session, "rpt_missing", "under_review", acting_user_id="user_01"
+    )
 
 
 # ─── delete_report — filing-status immutability guard ───────────────────────
+
+
+def test_file_report_requires_the_author() -> None:
+  report = _make_report_def(filing_status="draft")
+  session = MagicMock()
+  session.get.return_value = report
+  with pytest.raises(NotAuthorizedError):
+    file_report(session, "rpt_01", filed_by="user_other")
+  assert report.filing_status == "draft"
+
+
+def test_file_report_refuses_a_shared_in_copy() -> None:
+  """A recipient filing a copy shared in from another graph would lock a
+  snapshot it did not author — and its own delete then refuses it as filed."""
+  report = _make_report_def(filing_status="draft")
+  report.source_graph_id = "kg_sender"
+  session = MagicMock()
+  session.get.return_value = report
+  with pytest.raises(NotAuthorizedError):
+    file_report(session, "rpt_01", filed_by="user_01")
+
+
+def test_transition_requires_the_author() -> None:
+  report = _make_report_def(filing_status="draft")
+  session = MagicMock()
+  session.get.return_value = report
+  with pytest.raises(NotAuthorizedError):
+    transition_filing_status(
+      session, "rpt_01", "under_review", acting_user_id="user_other"
+    )
+  assert report.filing_status == "draft"
 
 
 def test_delete_report_blocks_filed_status() -> None:

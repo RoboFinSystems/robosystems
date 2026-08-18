@@ -191,6 +191,8 @@ def _clean_tenants(two_tenants):
       session.execute(text("DELETE FROM reports"))
       session.execute(text("DELETE FROM blocked_source_graphs"))
       session.execute(text("DELETE FROM report_shares"))
+      session.execute(text("DELETE FROM publish_list_members"))
+      session.execute(text("DELETE FROM publish_lists"))
       # Elements and structures before taxonomies: both carry a real FK to
       # `taxonomies.id`.
       session.execute(text("DELETE FROM elements"))
@@ -851,3 +853,165 @@ def test_revoke_survives_a_recipient_whose_schema_was_dropped() -> None:
   # And with no active share left, the sender can delete their own report.
   with extensions_session(SOURCE_GRAPH) as session:
     assert delete_report(session, _REPORT_SNAPSHOT["id"], acting_user_id=_SENDER)
+
+
+# ── share_report holds the source report for the whole share ─────────────────
+
+
+def _seed_publishable_report() -> str:
+  """A published report in the source schema, with a fact set and a publish
+  list pointing at the target. Returns the publish list id."""
+  from robosystems.models.api.fact_provenance import PivotProvenance
+  from robosystems.models.extensions.roboledger.fact import Fact
+  from robosystems.models.extensions.roboledger.publish_list import (
+    PublishList,
+    PublishListMember,
+  )
+  from robosystems.operations.roboledger.fact_set import create_fact_set
+
+  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
+  _seed_taxonomy(TARGET_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
+  _seed_structure(SOURCE_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
+  _seed_structure(TARGET_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
+  with extensions_session(SOURCE_GRAPH) as session:
+    session.add(
+      Report(
+        id=_REPORT_SNAPSHOT["id"],
+        name=_REPORT_SNAPSHOT["name"],
+        taxonomy_id=_REPORT_SNAPSHOT["taxonomy_id"],
+        period_type="quarterly",
+        period_start=_REPORT_SNAPSHOT["period_start"],
+        period_end=_REPORT_SNAPSHOT["period_end"],
+        comparative=False,
+        generation_status="published",
+        filing_status="draft",
+        created_by=_SENDER,
+      )
+    )
+    create_fact_set(
+      session,
+      id="fs_src_0001",
+      report_id=_REPORT_SNAPSHOT["id"],
+      structure_id=_LIBRARY_STRUCTURE_ID,
+      factset_type="report",
+      period_start=_REPORT_SNAPSHOT["period_start"],
+      period_end=_REPORT_SNAPSHOT["period_end"],
+      entity_id=_ENTITY_ID,
+      provenance=PivotProvenance(mapping_id="map_1", period="2026-01-01/2026-03-31"),
+      created_by=_SENDER,
+    )
+    session.flush()
+    session.add(
+      Fact(
+        id="fact_src_0001",
+        fact_set_id="fs_src_0001",
+        element_id="rs-gaap:Revenues",
+        value=100,
+        fact_type="Numeric",
+        value_type="inline",
+        period_start=_REPORT_SNAPSHOT["period_start"],
+        period_end=_REPORT_SNAPSHOT["period_end"],
+        period_type="duration",
+        unit="USD",
+        entity_id=_ENTITY_ID,
+      )
+    )
+    session.add(PublishList(id="plist_0001", name="Investors", created_by=_SENDER))
+    session.flush()
+    session.add(
+      PublishListMember(
+        id="plm_0001",
+        publish_list_id="plist_0001",
+        target_graph_id=TARGET_GRAPH,
+        added_by=_SENDER,
+      )
+    )
+  return "plist_0001"
+
+
+def test_share_report_records_the_share_in_the_same_transaction() -> None:
+  from robosystems.models.api.extensions.reports import ShareReportRequest
+  from robosystems.operations.roboledger.commands.reports import share_report
+
+  list_id = _seed_publishable_report()
+  with (
+    _patch_platform_graph_lookup(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
+      return_value={},
+    ),
+  ):
+    response = share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+
+  assert [r.status for r in response.results] == ["shared"]
+  with extensions_session(SOURCE_GRAPH) as session:
+    shares = session.execute(text("SELECT target_graph_id FROM report_shares")).all()
+  assert [row[0] for row in shares] == [TARGET_GRAPH]
+  assert _counts(TARGET_GRAPH)[0] == 1
+
+
+def test_a_delete_cannot_slip_between_the_snapshot_and_the_share_rows() -> None:
+  """Before the report was locked for the share, `delete_report` could run
+  between the snapshot read and the `ReportShare` insert: it saw no active
+  shares, removed the source, and the recipient kept a copy nobody could
+  revoke. Now the delete waits on the row and gives up with a retryable error."""
+  import threading
+
+  from robosystems.models.api.extensions.reports import ShareReportRequest
+  from robosystems.operations.locking import RowLockedError
+  from robosystems.operations.roboledger.commands import reports as reports_module
+  from robosystems.operations.roboledger.commands.reports import share_report
+
+  list_id = _seed_publishable_report()
+  real_share_to_target = reports_module._share_to_target
+  copying = threading.Event()
+  release = threading.Event()
+
+  def _paused_share_to_target(**kwargs):
+    copying.set()
+    release.wait(timeout=10)
+    return real_share_to_target(**kwargs)
+
+  outcome: dict[str, object] = {}
+
+  def _run_share():
+    with (
+      _patch_platform_graph_lookup(),
+      patch(
+        "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
+        return_value={},
+      ),
+      patch(
+        "robosystems.operations.roboledger.commands.reports._share_to_target",
+        side_effect=_paused_share_to_target,
+      ),
+    ):
+      outcome["response"] = share_report(
+        SOURCE_GRAPH,
+        _REPORT_SNAPSHOT["id"],
+        ShareReportRequest(publish_list_id=list_id),
+        acting_user_id=_SENDER,
+      )
+
+  worker = threading.Thread(target=_run_share)
+  worker.start()
+  try:
+    assert copying.wait(timeout=10), "share never reached the copy step"
+    with extensions_session(SOURCE_GRAPH) as session:
+      with pytest.raises(RowLockedError, match=_REPORT_SNAPSHOT["id"]):
+        delete_report(session, _REPORT_SNAPSHOT["id"], acting_user_id=_SENDER)
+  finally:
+    release.set()
+    worker.join(timeout=30)
+
+  response = outcome["response"]
+  assert [r.status for r in response.results] == ["shared"]  # type: ignore[attr-defined]
+  # After the share commits, the delete is refused for the honest reason.
+  with extensions_session(SOURCE_GRAPH) as session:
+    with pytest.raises(ReportHasActiveSharesError):
+      delete_report(session, _REPORT_SNAPSHOT["id"], acting_user_id=_SENDER)

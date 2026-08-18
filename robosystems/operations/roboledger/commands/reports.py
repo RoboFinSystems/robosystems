@@ -477,6 +477,27 @@ def create_report(
   return resp
 
 
+def _assert_report_mutable_by(
+  report_def: Report, acting_user_id: str, verb: str
+) -> None:
+  """The one rule for who may change a report's content or lifecycle.
+
+  A report is mutable by its author. A copy shared in from another graph
+  (``source_graph_id`` set) is a read-only snapshot in this graph for
+  everyone — including the sender, who may be a member here too and whose
+  ``created_by`` the copy carries; the way to change it is to re-share from
+  the source. Removing a shared-in copy is the recipient graph admin's call
+  and is widened separately in ``delete_report``.
+  """
+  if report_def.source_graph_id is not None:
+    raise NotAuthorizedError(
+      f"Report '{report_def.id}' is a copy shared in from another graph and "
+      f"cannot be changed here; re-share it from the source graph instead."
+    )
+  if report_def.created_by != acting_user_id:
+    raise NotAuthorizedError(f"Not authorized to {verb} this report.")
+
+
 def regenerate_report(
   session: Session,
   graph_id: str,
@@ -521,8 +542,7 @@ def regenerate_report(
   )
   if report_def is None:
     raise ReportNotFoundError(report_id)
-  if report_def.created_by != acting_user_id:
-    raise NotAuthorizedError("Not authorized to modify this report.")
+  _assert_report_mutable_by(report_def, acting_user_id, "modify")
   if report_def.filing_status in {"filed", "archived"}:
     raise InvalidFilingTransitionError(
       f"Report '{report_id}' is in '{report_def.filing_status}'; "
@@ -656,8 +676,10 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
   Allowed from ``draft`` or ``under_review`` and only when generation
   has reached ``published``. Stamps ``filed_at`` and ``filed_by`` for
   audit. Raises :class:`ReportNotFoundError` when the Report doesn't
-  exist and :class:`InvalidFilingTransitionError` when the current
-  filing or generation status isn't a legal source for filing.
+  exist, :class:`NotAuthorizedError` when ``filed_by`` is not the report's
+  author (or the report is a shared-in copy), and
+  :class:`InvalidFilingTransitionError` when the current filing or
+  generation status isn't a legal source for filing.
 
   ``filing_status`` and ``generation_status`` are orthogonal axes, but
   filing an in-progress or failed report would lock an empty / partial
@@ -685,6 +707,7 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
   )
   if report_def is None:
     raise ReportNotFoundError(report_id)
+  _assert_report_mutable_by(report_def, filed_by, "file")
 
   if report_def.filing_status not in {"draft", "under_review"}:
     raise InvalidFilingTransitionError(
@@ -713,13 +736,14 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
 
 
 def transition_filing_status(
-  session: Session, report_id: str, target_status: str
+  session: Session, report_id: str, target_status: str, acting_user_id: str
 ) -> ReportResponse:
   """Move a Report along the non-file legs of the filing lifecycle.
 
   Use :func:`file_report` to reach ``filed`` (so audit fields land).
   Other transitions (submit for review, withdraw, archive) are routed
-  through here so the legal-transition graph stays in one place.
+  through here so the legal-transition graph stays in one place. Same
+  actor rule as filing: the report's author, never a shared-in copy.
   """
   # Locked with the rest of the report lifecycle. Unlocked, this reads a status,
   # waits behind a concurrent file, and then writes its own over the top —
@@ -739,6 +763,7 @@ def transition_filing_status(
   )
   if report_def is None:
     raise ReportNotFoundError(report_id)
+  _assert_report_mutable_by(report_def, acting_user_id, "change the status of")
 
   legal_targets = _LEGAL_NON_FILE_TRANSITIONS.get(report_def.filing_status, set())
   if target_status not in legal_targets:
@@ -846,10 +871,22 @@ def share_report(
   sessions (source graph + each target graph + platform DB) as the
   share workflow requires. Raises `PublishListNotFoundError`,
   `PublishListEmptyError`, `ReportNotFoundError`,
-  `NotAuthorizedError`, or `ReportNotPublishedError` — caller
-  translates to appropriate HTTP status codes.
+  `NotAuthorizedError`, `ReportNotPublishedError`, or `RowLockedError`
+  — caller translates to appropriate HTTP status codes.
+
+  The source report stays row-locked for the whole share — snapshot,
+  copies into every recipient, and the ``ReportShare`` rows — in one
+  source transaction. That is what keeps the seam consistent: a
+  concurrent ``delete_report`` / ``regenerate_report`` / ``file_report``
+  waits (bounded) instead of removing or rewriting the report between the
+  snapshot and the share rows, a second share of the same report cannot
+  interleave its copies with this one, and the two snapshot reads see one
+  version of the facts. The lock is held across the S3 read and the
+  recipient writes deliberately; a share is seconds, and the alternative was
+  recipients holding copies the sender could no longer revoke.
   """
   from robosystems.db.extensions import extensions_session
+  from robosystems.operations.locking import lock_by_id
 
   results: list[ShareResultItem] = []
 
@@ -874,7 +911,12 @@ def share_report(
 
     target_graph_ids = [m.target_graph_id for m in members]
 
-    report_def = source_session.get(Report, report_id)
+    report_def = lock_by_id(
+      source_session,
+      Report,
+      report_id,
+      f"Report {report_id} is being written by another process. Retry in a moment.",
+    )
     if report_def is None:
       raise ReportNotFoundError(report_id)
     # Strict ownership, deliberately — NOT the graph-admin widening that
@@ -937,29 +979,26 @@ def share_report(
     ).fetchall()
     source_facts = [row._asdict() for row in fact_rows]
 
-  # Read once, after the sender's session closes — S3 round-trips have no
-  # business holding a database connection open — and reused for every target,
-  # since each gets the same bytes.
-  publication_artifacts = _load_publication_artifacts(
-    graph_id, report_id, int(report_snapshot["generation_count"])
-  )
-
-  for target_graph_id in target_graph_ids:
-    result = _share_to_target(
-      source_graph_id=graph_id,
-      report_snapshot=report_snapshot,
-      source_fact_sets=source_fact_sets,
-      source_facts=source_facts,
-      publication_artifacts=publication_artifacts,
-      target_graph_id=target_graph_id,
-      shared_by=acting_user_id,
+    # Read once and reused for every target, since each gets the same bytes.
+    publication_artifacts = _load_publication_artifacts(
+      graph_id, report_id, int(report_snapshot["generation_count"])
     )
-    results.append(result)
 
-  successful = [r for r in results if r.status == "shared"]
-  if successful:
-    now = datetime.now(UTC)
-    with extensions_session(graph_id) as source_session:
+    for target_graph_id in target_graph_ids:
+      result = _share_to_target(
+        source_graph_id=graph_id,
+        report_snapshot=report_snapshot,
+        source_fact_sets=source_fact_sets,
+        source_facts=source_facts,
+        publication_artifacts=publication_artifacts,
+        target_graph_id=target_graph_id,
+        shared_by=acting_user_id,
+      )
+      results.append(result)
+
+    successful = [r for r in results if r.status == "shared"]
+    if successful:
+      now = datetime.now(UTC)
       for result in successful:
         # One active share row per (report, recipient). A re-share replaces
         # the recipient's copy rather than adding a second, so the record of
@@ -992,7 +1031,7 @@ def share_report(
               fact_count=result.fact_count,
             )
           )
-      source_session.commit()
+    source_session.commit()
 
   return ShareReportResponse(report_id=report_id, results=results)
 
@@ -1550,6 +1589,16 @@ def _share_to_target(
 
       _ensure_linked_entity(target_session, source_graph_id, shared_by)
 
+      # Checked again at the end of the copy: a block that committed while
+      # this copy was being written must still win, or the recipient's purge
+      # (which ran after their block) leaves this copy behind.
+      if is_source_blocked(target_session, source_graph_id):
+        target_session.rollback()
+        return ShareResultItem(
+          target_graph_id=target_graph_id,
+          status="error",
+          error="Recipient has blocked shares from this graph.",
+        )
       target_session.commit()
 
     # After the commit, and only for the ids the replace actually removed — the

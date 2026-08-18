@@ -2481,6 +2481,9 @@ async def share_report_op(
       raise HTTPException(
         status_code=422, detail="Only published reports can be shared."
       )
+    except RowLockedError as e:
+      # Another lifecycle write (or another share) holds the report.
+      raise HTTPException(status_code=409, detail=str(e))
 
   def _mark_recipients_stale(envelope) -> None:
     # A share writes rows into each recipient's OLTP schema, but their
@@ -2613,6 +2616,8 @@ async def file_report_op(
         raise HTTPException(
           status_code=404, detail=f"Report '{body.report_id}' not found."
         )
+      except NotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
       except InvalidFilingTransitionError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -2656,11 +2661,15 @@ async def transition_filing_status_op(
   def _runner():
     with extensions_session(graph_id) as session:
       try:
-        return cmd_transition_filing_status(session, body.report_id, body.target_status)
+        return cmd_transition_filing_status(
+          session, body.report_id, body.target_status, acting_user_id=str(user.id)
+        )
       except ReportNotFoundError:
         raise HTTPException(
           status_code=404, detail=f"Report '{body.report_id}' not found."
         )
+      except NotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
       except InvalidFilingTransitionError as e:
         raise HTTPException(status_code=422, detail=str(e))
       except RowLockedError as e:
@@ -2856,6 +2865,8 @@ async def add_publish_list_members_op(
         )
       except PublishListNotFoundError:
         raise HTTPException(status_code=404, detail="Publish list not found.")
+      except PublishListNotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
       except TargetGraphsNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
       except TargetGraphMissingExtensionError as e:
@@ -2902,7 +2913,12 @@ async def remove_publish_list_member_op(
 
   def _runner():
     with extensions_session(graph_id) as session:
-      deleted = cmd_remove_publish_list_member(session, body.list_id, body.member_id)
+      try:
+        deleted = cmd_remove_publish_list_member(
+          session, body.list_id, body.member_id, acting_user_id=str(user.id)
+        )
+      except PublishListNotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not deleted:
       raise HTTPException(status_code=404, detail="Member not found in this list.")
     return DeleteResult(deleted=True)

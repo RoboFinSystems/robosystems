@@ -24,6 +24,7 @@ from .graphs import (
   GraphInfrastructureResponse,
   GraphResponse,
   GraphStorageResponse,
+  OrphanTenantSchemasResponse,
 )
 from .invoice import InvoiceLineItemResponse, InvoiceResponse
 from .orgs import OrgGraphInfo, OrgResponse, OrgUpdateRequest, OrgUserInfo
@@ -72,6 +73,7 @@ __all__ = [
   "OrgResponse",
   "OrgUpdateRequest",
   "OrgUserInfo",
+  "OrphanTenantSchemasResponse",
   "RepositoryCreditPoolResponse",
   "ResetCreditPoolRequest",
   "ScimBootstrapRequest",
