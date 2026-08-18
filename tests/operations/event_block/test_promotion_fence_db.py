@@ -306,3 +306,69 @@ class TestSweepLocksOnlyTheWriteSet:
     handler.dispatch.assert_not_called()
     ext_session.expire_all()
     assert ext_session.get(Event, june.id).status == "voided"
+
+
+class TestDispatchRunsUnderASavepoint:
+  """A database-level failure inside one handler must not abort the sweep's
+  transaction: the other obligations still dispatch and the caller's commit
+  succeeds. A lock wait is not a per-event error and propagates."""
+
+  def test_a_poison_obligation_does_not_abort_the_others(self, ext_session):
+    from sqlalchemy.exc import IntegrityError
+
+    _seed_calendar(ext_session, may_status="open")
+    may = _obligation(ext_session, status="pending", period_end=date(2026, 5, 31))
+    june = _obligation(ext_session, status="pending", period_end=date(2026, 6, 30))
+    ext_session.commit()
+
+    handler = MagicMock()
+    handler.metadata_schema.model_validate.side_effect = lambda m: m
+
+    def _dispatch(session, event, _typed, _created_by):
+      if event.id == may.id:
+        # A constraint violation from inside the handler — the class of
+        # failure that aborts a Postgres transaction until rollback.
+        session.execute(
+          text("INSERT INTO events (id, event_type) VALUES (:id, NULL)"),
+          {"id": "evt_poison"},
+        )
+        raise AssertionError("unreachable: the INSERT raises")
+
+    handler.dispatch.side_effect = _dispatch
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        ext_session, GRAPH_ID, as_of=SWEEP_AS_OF, dispatch_handlers=True
+      )
+
+    assert result.dispatched_event_ids == [june.id]
+    assert [eid for eid, _ in result.errors] == [may.id]
+    assert IntegrityError.__name__ in result.errors[0][1]
+    # The transaction is still live: the caller's commit lands.
+    ext_session.commit()
+    ext_session.expire_all()
+    assert ext_session.get(Event, june.id).status == "classified"
+    assert ext_session.get(Event, may.id).status == "classified"
+
+  def test_a_lock_wait_propagates_instead_of_becoming_an_error_line(self, ext_session):
+    from robosystems.operations.locking import RowLockedError
+
+    _seed_calendar(ext_session, may_status="open")
+    _obligation(ext_session, status="pending", period_end=date(2026, 6, 30))
+    ext_session.commit()
+
+    handler = MagicMock()
+    handler.metadata_schema.model_validate.side_effect = lambda m: m
+    handler.dispatch.side_effect = RowLockedError("a closer holds the fence")
+    with (
+      patch(
+        "robosystems.operations.event_block.promotion.get_python_handler",
+        return_value=handler,
+      ),
+      pytest.raises(RowLockedError),
+    ):
+      promote_pending_obligations(
+        ext_session, GRAPH_ID, as_of=SWEEP_AS_OF, dispatch_handlers=True
+      )

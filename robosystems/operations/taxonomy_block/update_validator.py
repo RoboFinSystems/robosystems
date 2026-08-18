@@ -34,6 +34,10 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.operations.taxonomy_block.immutability import (
+  ProtectedFactsError,
+  find_protected_fact_sets,
+)
 from robosystems.operations.taxonomy_block.validators import (
   ValidationIssue,
   validate_create_envelope,
@@ -634,6 +638,30 @@ def _validate_structures_to_remove(
             f"cannot be removed."
           ),
           context={"structure_id": sid},
+        )
+      )
+
+  # Removing a structure cascades its FactSets. A filed report's snapshot
+  # and a closed month's canonical sets are immutable against curation.
+  in_scope = [s for s in payload.structures_to_remove if s in taxonomy_structure_ids]
+  if in_scope:
+    protected = find_protected_fact_sets(session, structure_ids=in_scope)
+    if protected.any:
+      issues.append(
+        ValidationIssue(
+          phase="delta_validation",
+          code="protected_facts",
+          message=str(
+            ProtectedFactsError(
+              filed_report_count=len(protected.filed_report_fact_set_ids),
+              closed_period_count=len(protected.closed_period_fact_set_ids),
+            )
+          ),
+          context={
+            "structure_ids": in_scope,
+            "filed_report_fact_set_ids": list(protected.filed_report_fact_set_ids),
+            "closed_period_fact_set_ids": list(protected.closed_period_fact_set_ids),
+          },
         )
       )
 

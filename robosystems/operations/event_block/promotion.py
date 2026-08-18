@@ -64,6 +64,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -75,7 +76,7 @@ from robosystems.operations.event_block.python_handlers import get_python_handle
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
 )
-from robosystems.operations.locking import ordered_lock_column
+from robosystems.operations.locking import RowLockedError, ordered_lock_column
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
@@ -447,10 +448,22 @@ def promote_pending_obligations(
       continue
 
     try:
-      handler.dispatch(session, event, typed_metadata, created_by)
+      # Each dispatch runs under its own savepoint: a database-level failure
+      # inside one handler (a constraint violation, say) would otherwise abort
+      # the whole transaction, every later dispatch would fail with "current
+      # transaction is aborted" and be collected as if it were its own error,
+      # and the caller's commit would fail — one poison obligation blocking
+      # every other one on the graph, every tick.
+      with session.begin_nested():
+        handler.dispatch(session, event, typed_metadata, created_by)
       result.dispatched_event_ids.append(event.id)
     except HandlerMetadataValidationError as e:
       result.errors.append((event.id, f"handler validation failed: {e}"))
+    except (RowLockedError, OperationalError):
+      # A lock wait or a connection fault is not "one bad event" — it is the
+      # sweep's own condition, and the caller's bounded wait / retry policy
+      # must see it rather than a per-event error line.
+      raise
     except Exception as e:
       # Catch-all so one bad event doesn't sink the sweep. The status
       # change above stays in the session — caller decides whether to

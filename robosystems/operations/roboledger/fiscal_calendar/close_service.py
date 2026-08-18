@@ -721,13 +721,19 @@ class PeriodCloseService:
     tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
     for sid in structure_ids:
       try:
-        rows = evaluate_rules_for_structure(
-          session,
-          sid,
-          period_start=period_start,
-          period_end=period_end,
-          created_by=actor_id,
-        )
+        # Under a savepoint: rule evaluation writes VerificationResult rows,
+        # and a database-level failure there would otherwise abort the close's
+        # transaction after the QB markers committed — the final commit then
+        # fails on flush pointing at the wrong thing, deterministically, with
+        # QuickBooks already holding the entries.
+        with session.begin_nested():
+          rows = evaluate_rules_for_structure(
+            session,
+            sid,
+            period_start=period_start,
+            period_end=period_end,
+            created_by=actor_id,
+          )
       except Exception as exc:
         logger.warning(f"Rule eval failed for structure {sid} during close: {exc}")
         continue

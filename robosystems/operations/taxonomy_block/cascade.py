@@ -26,6 +26,7 @@ from robosystems.models.extensions import (
   ElementLabel,
   ElementReference,
   ElementTrait,
+  EntityTaxonomy,
   FactSet,
   Rule,
   Structure,
@@ -34,6 +35,7 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.operations.taxonomy_block.immutability import assert_facts_deletable
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,11 @@ def cascade_delete_taxonomy(
       .all()
     )
 
+  # Curation never destroys a filed report's snapshot or a closed month's
+  # canonical statement sets — no flag reaches them. Checked before the
+  # first delete so a refusal leaves nothing half-done.
+  assert_facts_deletable(session, structure_ids=structure_ids, element_ids=element_ids)
+
   facts_deleted = 0
   if cascade_facts:
     if element_ids:
@@ -244,6 +251,14 @@ def cascade_delete_taxonomy(
   # Structures.
   if structure_ids:
     session.execute(delete(Structure).where(Structure.id.in_(structure_ids)))
+
+  # The entity's adoption of this taxonomy (a chart of accounts is linked to
+  # the parent entity at creation; `entity_taxonomies.taxonomy_id` is
+  # RESTRICT) — without this the taxonomy DELETE dies on the constraint and
+  # a CoA can never be deleted through the API.
+  session.execute(
+    delete(EntityTaxonomy).where(EntityTaxonomy.taxonomy_id == taxonomy_id)
+  )
 
   # Taxonomy row itself.
   session.execute(delete(Taxonomy).where(Taxonomy.id == taxonomy_id))

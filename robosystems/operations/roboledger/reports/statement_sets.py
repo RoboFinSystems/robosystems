@@ -630,15 +630,19 @@ def stamp_canonical_statement_sets(
 
   rule_summary: dict[str, int] | None = None
   try:
-    rule_summary = _evaluate_report_structures(
-      session,
-      facts,
-      element_to_structures,
-      structure_to_factset,
-      period_start,
-      period_end,
-      actor_id,
-    )
+    # Under a savepoint: the evaluation writes VerificationResult rows, and a
+    # database-level failure there must not abort the close's transaction
+    # (the stamp above is already flushed; the close still has to commit).
+    with session.begin_nested():
+      rule_summary = _evaluate_report_structures(
+        session,
+        facts,
+        element_to_structures,
+        structure_to_factset,
+        period_start,
+        period_end,
+        actor_id,
+      )
   except Exception as exc:
     logger.warning(
       f"Statement-rule evaluation failed after close stamp for "

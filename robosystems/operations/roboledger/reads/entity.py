@@ -52,17 +52,31 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
   )
 
 
+def resolve_parent_entity(session: Session) -> Entity | None:
+  """The ledger's own entity — the row every writer that says "the entity"
+  must mean.
+
+  A tenant that has received a shared report also holds the sender's
+  entity as a ``source='linked'``, ``is_parent=False`` row, and ``entities``
+  has no ordering guarantee, so an unfiltered ``LIMIT 1`` can hand back the
+  counterparty (heap order after updates). Resolved by predicate, ordered by
+  creation so two parents (which should not exist) still resolve stably.
+  """
+  return (
+    session.query(Entity)
+    .filter(Entity.is_parent.is_(True), Entity.source != "linked")
+    .order_by(Entity.created_at.asc())
+    .first()
+  )
+
+
 def get_parent_entity(session: Session) -> LedgerEntityResponse | None:
   """Return the parent (non-linked) entity for this ledger, or None.
 
   Returns `None` when the ledger is initialized but has no entity yet — the
   caller decides whether that's a 404.
   """
-  entity = (
-    session.query(Entity)
-    .filter(Entity.is_parent.is_(True), Entity.source != "linked")
-    .first()
-  )
+  entity = resolve_parent_entity(session)
   if entity is None:
     return None
   return entity_to_response(entity)

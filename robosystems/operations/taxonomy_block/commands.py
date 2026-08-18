@@ -104,8 +104,19 @@ def update_taxonomy_block(
   → HTTP 501.
   """
   from robosystems.models.extensions import Taxonomy
+  from robosystems.operations.locking import lock_by_id
 
-  taxonomy = session.get(Taxonomy, body.taxonomy_id)
+  # One envelope update per taxonomy at a time. The apply steps are
+  # delete-then-recreate over the taxonomy's rows (auto rules, associations)
+  # and check-then-insert over unique keys (element qnames); two concurrent
+  # updates under READ COMMITTED each miss the other's rows and leave
+  # duplicated rules or die on the qname index.
+  taxonomy = lock_by_id(
+    session,
+    Taxonomy,
+    body.taxonomy_id,
+    detail=f"taxonomy {body.taxonomy_id!r} is being updated by another request",
+  )
   if taxonomy is None:
     raise ValueError(f"taxonomy_id {body.taxonomy_id!r} not found")
 
