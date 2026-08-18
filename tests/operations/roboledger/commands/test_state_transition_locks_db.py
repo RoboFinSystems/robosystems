@@ -23,13 +23,17 @@ import robosystems.models.extensions  # noqa: F401  (register models on the Base
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.journal_entries import (
+  DeleteJournalEntryRequest,
   ReverseJournalEntryRequest,
+  UpdateJournalEntryRequest,
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.journal_entries import (
+  delete_journal_entry,
   reverse_journal_entry,
+  update_journal_entry,
 )
 
 pytestmark = pytest.mark.integration
@@ -177,6 +181,50 @@ class TestReversalLock:
         ).scalar()
         >= 3
       )
+
+
+class TestDraftEntryLock:
+  """Update and delete must lock the entry after the period fence so a
+  concurrent post cannot leave them mutating a posted row."""
+
+  DRAFT_ID = "je_draft_0001"
+
+  @pytest.fixture(autouse=True)
+  def draft_entry(self, tenant):
+    with extensions_session(GRAPH) as session:
+      session.add(
+        Entry(
+          id=self.DRAFT_ID,
+          type="standard",
+          status="draft",
+          posting_date=date(2026, 1, 20),
+          memo="Draft",
+          created_by="usr_seed",
+        )
+      )
+    yield
+
+  def test_a_locked_entry_cannot_be_updated(self, tenant):
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM entries WHERE id = :id FOR UPDATE"),
+        {"id": self.DRAFT_ID},
+      )
+      with extensions_session(GRAPH) as other:
+        with pytest.raises(RowLockedError, match=self.DRAFT_ID):
+          update_journal_entry(
+            other, UpdateJournalEntryRequest(entry_id=self.DRAFT_ID, memo="x")
+          )
+
+  def test_a_locked_entry_cannot_be_deleted(self, tenant):
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM entries WHERE id = :id FOR UPDATE"),
+        {"id": self.DRAFT_ID},
+      )
+      with extensions_session(GRAPH) as other:
+        with pytest.raises(RowLockedError, match=self.DRAFT_ID):
+          delete_journal_entry(other, DeleteJournalEntryRequest(entry_id=self.DRAFT_ID))
 
 
 class TestPeriodTransitionLock:

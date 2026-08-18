@@ -1725,6 +1725,7 @@ update_journal_entry_op = _registrar.register(
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
       ClosedPeriodError: 422,
+      RowLockedError: 409,
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
@@ -1747,6 +1748,8 @@ delete_journal_entry_op = _registrar.register(
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
+      ClosedPeriodError: 422,
+      RowLockedError: 409,
     },
     requires_created_by=False,
     mark_stale_reason="journal_entry_deleted",

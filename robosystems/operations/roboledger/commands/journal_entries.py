@@ -389,20 +389,35 @@ def update_journal_entry(
   Raises:
     `JournalEntryNotFoundError` (404) if the entry does not exist.
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
-    `ClosedPeriodError` (422) if the new `posting_date` falls in a closed
-      period.
+    `ClosedPeriodError` (422) if the existing or new `posting_date`
+      falls in a closed period.
+    `RowLockedError` (409) if another writer holds the entry.
     `UnbalancedJournalEntryError` (422) if replacement line items don't
       balance.
   """
-  entry = _load_entry_or_404(session, body.entry_id)
-  # Fence before the draft check. Close holds the exclusive side across
-  # its bulk draft→posted update; taking the shared side first means we
-  # either wait for that close (and then refuse the now-closed period)
-  # or hold it so the close cannot finish underneath this write.
-  dates = [entry.posting_date]
+  # Peek dates, fence, then lock and refresh. An unlocked load that we
+  # then trust for `status` can mutate a posted entry: another request
+  # posts it while we wait on the fence. Capture the peeked date as a
+  # value — after `lock_by_id` the peeked instance is the same identity
+  # and `populate_existing` would make `peek.posting_date` lie.
+  peek = _load_entry_or_404(session, body.entry_id)
+  peeked_date = peek.posting_date
+  dates = [peeked_date]
   if body.posting_date is not None:
     dates.append(body.posting_date)
   assert_period_not_closed(session, *dates)
+
+  entry = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if entry is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  if entry.posting_date != peeked_date:
+    assert_period_not_closed(session, entry.posting_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
@@ -459,11 +474,25 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   Raises:
     `JournalEntryNotFoundError` (404) if the entry does not exist.
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
+    `ClosedPeriodError` (422) if the entry's posting_date is in a closed
+      period.
+    `RowLockedError` (409) if another writer holds the entry.
   """
-  entry = _load_entry_or_404(session, body.entry_id)
-  # Same fence as create/update: deleting a draft in a period that is
-  # being closed would drop an entry the close is about to post.
-  assert_period_not_closed(session, entry.posting_date)
+  peek = _load_entry_or_404(session, body.entry_id)
+  peeked_date = peek.posting_date
+  assert_period_not_closed(session, peeked_date)
+
+  entry = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if entry is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  if entry.posting_date != peeked_date:
+    assert_period_not_closed(session, entry.posting_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 

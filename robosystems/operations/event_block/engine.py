@@ -17,6 +17,9 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from robosystems.operations.roboledger.commands._guards import (
+  assert_period_not_closed,
+)
 
 from .template import (
   TemplateInterpolationError,
@@ -28,6 +31,23 @@ from .template import (
 
 class EngineValidationError(Exception):
   """Template produced invalid or unbalanced GL entries."""
+
+
+def posting_date_for_event(
+  *,
+  effective_at: datetime | None,
+  occurred_at: datetime | None,
+) -> date:
+  """The posting date a DSL handler uses for the entries it creates.
+
+  Shared by ``apply_handler`` and the DSL preview so they cannot disagree
+  about which period is being written.
+  """
+  if effective_at is not None:
+    return effective_at.date()
+  if occurred_at is not None:
+    return occurred_at.date()
+  return date.today()
 
 
 def _resolve_amount(expr: str, context: dict) -> int:
@@ -84,11 +104,13 @@ def apply_handler(
     "handler": build_handler_context(handler),
   }
 
-  posting_date = (
-    event.effective_at.date()
-    if event.effective_at
-    else (event.occurred_at.date() if event.occurred_at else date.today())
+  posting_date = posting_date_for_event(
+    effective_at=event.effective_at,
+    occurred_at=event.occurred_at,
   )
+  # Same fence journal-entry commands take. Without it a DSL handler can
+  # mint a draft while close is publishing, or after statements are stamped.
+  assert_period_not_closed(session, posting_date)
 
   # One timestamp per handler invocation keeps the audit trail coherent —
   # Transaction, Entry, and every LineItem share the same created_at/updated_at.
