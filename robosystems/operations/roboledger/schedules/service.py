@@ -34,6 +34,9 @@ from robosystems.models.extensions.roboledger import (
 )
 from robosystems.models.extensions.rule import Rule
 from robosystems.models.extensions.trait import Trait
+from robosystems.operations.roboledger.commands._guards import (
+  assert_period_not_closed,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -1154,6 +1157,17 @@ class ScheduleService:
     debit_element_id = template["debit_element_id"]
     credit_element_id = template["credit_element_id"]
 
+    # Same fence the journal writers take. A schedule draft created after
+    # close has selected its batch is either omitted from QB publish or
+    # swept into posted without review; both are wrong.
+    fence_dates = [posting_date]
+    if template.get("auto_reverse", False):
+      if period_end.month == 12:
+        fence_dates.append(date(period_end.year + 1, 1, 1))
+      else:
+        fence_dates.append(date(period_end.year, period_end.month + 1, 1))
+    assert_period_not_closed(session, *fence_dates)
+
     # ── Look up the existing entry (if any) for this structure + period ──
     existing_row = session.execute(
       text("""
@@ -1678,33 +1692,12 @@ class ScheduleService:
     }
 
   def _assert_period_not_closed(self, session: Session, posting_date: date) -> None:
-    """Raise ValueError if a FiscalPeriod containing `posting_date` is closed.
+    """Raise ClosedPeriodError if a FiscalPeriod containing `posting_date` is closed.
 
-    Used to prevent manual entries from being drafted into closed periods —
-    such drafts would be orphaned because close-period refuses to re-close a
-    closed month. If an adjustment is needed in a closed period, the user
-    must explicitly reopen the period first.
-
-    If no FiscalPeriod row covers the posting_date (e.g., demo or fresh
-    tenant without period rows seeded), this is a no-op: the caller's free
-    to create the entry and the period-state machine will handle it later.
+    Delegates to the shared guard so schedule-derived writes take the same
+    period fence as journal-entry commands and close.
     """
-    row = session.execute(
-      text("""
-        SELECT name, status
-        FROM fiscal_periods
-        WHERE start_date <= :posting_date AND end_date >= :posting_date
-        LIMIT 1
-      """),
-      {"posting_date": posting_date},
-    ).fetchone()
-
-    if row is not None and row.status == "closed":
-      raise ValueError(
-        f"Cannot draft manual entry in closed period {row.name!r} "
-        f"(posting_date={posting_date}). "
-        "Reopen the period first if the adjustment is needed there."
-      )
+    assert_period_not_closed(session, posting_date)
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
     """Delete an entry and its line items (must be status='draft')."""

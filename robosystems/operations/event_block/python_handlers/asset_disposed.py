@@ -216,6 +216,7 @@ def dispatch_preview(
   ``would_succeed=True`` cannot still 422 at dispatch time on a
   closed-period or balance violation.
   """
+  from robosystems.operations.locking import RowLockedError
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,
     assert_period_not_closed,
@@ -234,7 +235,7 @@ def dispatch_preview(
     # the disposal date. ``dispatch`` will refuse the post if that period
     # is closed; surface the same blocker here.
     assert_period_not_closed(session, body.occurred_at.date())
-  except (ValueError, ClosedPeriodError, ScheduleNotFoundError) as e:
+  except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(
       would_succeed=False,
       planned_entries=[],

@@ -431,6 +431,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
   FiscalCalendarService,
+  PeriodAlreadyClosedError,
   PeriodNotFoundError,
   UnbalancedLedgerError,
   parse_period,
@@ -2001,6 +2002,10 @@ async def close_period_op(
       raise HTTPException(status_code=422, detail=detail)
     except PeriodNotFoundError as e:
       raise HTTPException(status_code=404, detail=str(e))
+    except PeriodAlreadyClosedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
+    except RowLockedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
     except UnbalancedLedgerError as e:
       raise HTTPException(
         status_code=422,
@@ -2396,6 +2401,8 @@ async def delete_report_op(
           raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFiledError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except RowLockedError as e:
+          raise HTTPException(status_code=409, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
     if not deleted:
@@ -2667,6 +2674,8 @@ async def transition_filing_status_op(
           )
         except InvalidFilingTransitionError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except RowLockedError as e:
+          raise HTTPException(status_code=409, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 

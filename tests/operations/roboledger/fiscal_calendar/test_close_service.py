@@ -21,6 +21,7 @@ import pytest
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarService,
+  PeriodAlreadyClosedError,
   PeriodCloseService,
   PeriodNotFoundError,
   UnbalancedLedgerError,
@@ -100,9 +101,12 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
   entry_query = MagicMock()
   entry_query.filter.return_value.update.return_value = updated
 
-  # FiscalPeriod.first() path
+  # FiscalPeriod path: filter → populate_existing → with_for_update → one_or_none
   fp_query = MagicMock()
-  fp_query.filter.return_value.one_or_none.return_value = fp
+  locked = fp_query.filter.return_value
+  locked.populate_existing.return_value = locked
+  locked.with_for_update.return_value = locked
+  locked.one_or_none.return_value = fp
 
   # Route session.query to the right mock based on model. Our service calls:
   # session.query(Entry).filter(...).update(...)
@@ -356,6 +360,27 @@ class TestPeriodNotFound:
       )
 
 
+class TestAlreadyClosedRevalidation:
+  def test_closed_status_after_publish_is_rejected(self):
+    """Post-publish row lock + revalidation: a loser must not stamp again."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    session = _mock_session_with_fp(_fp(status="closed"))
+
+    with pytest.raises(PeriodAlreadyClosedError):
+      svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+    fcs.advance_closed_through.assert_not_called()
+    fcs.record_reclose.assert_not_called()
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Re-close routing
 # ────────────────────────────────────────────────────────────────────────────
@@ -502,7 +527,9 @@ class TestCloseAutoRunsRules:
     bs_exec.fetchone.return_value = bs_row
     schedules_exec = MagicMock()
     schedules_exec.scalars.return_value.all.return_value = schedule_ids
-    session.execute.side_effect = [bs_exec, schedules_exec]
+    # BS preflight, then SET LOCAL lock_timeout for the post-publish
+    # FiscalPeriod row lock, then the schedule-id query.
+    session.execute.side_effect = [bs_exec, MagicMock(), schedules_exec]
 
     eval_patcher = patch(
       "robosystems.operations.information_block.rules.engine."
@@ -576,7 +603,9 @@ class TestCloseAutoRunsRules:
     bs_exec.fetchone.return_value = bs_row
     schedules_exec = MagicMock()
     schedules_exec.scalars.return_value.all.return_value = ["struct_ok", "struct_bad"]
-    session.execute.side_effect = [bs_exec, schedules_exec]
+    # BS preflight, then SET LOCAL lock_timeout for the post-publish
+    # FiscalPeriod row lock, then the schedule-id query.
+    session.execute.side_effect = [bs_exec, MagicMock(), schedules_exec]
 
     from unittest.mock import patch
 
@@ -683,8 +712,8 @@ class TestCloseStampsStatementSets:
 
   def test_stamp_runs_after_post_and_before_schedule_rules(self):
     """At stamp time the FiscalPeriod is already closed (drafts posted)
-    and only the BS-preflight execute has run — the schedule-rule query
-    (the second session.execute) hasn't happened yet."""
+    and only the BS-preflight execute plus the post-publish lock_timeout
+    SET have run — the schedule-rule query hasn't happened yet."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
     fp = _fp(status="open")
     observed = {}
@@ -707,7 +736,7 @@ class TestCloseStampsStatementSets:
     )
 
     assert observed["fp_status"] == "closed"
-    assert observed["execute_calls"] == 1
+    assert observed["execute_calls"] == 2
 
   def test_stamper_receives_period_window_and_actor(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))

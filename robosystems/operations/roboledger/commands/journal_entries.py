@@ -26,9 +26,10 @@ Design notes:
   forever — the audit trail shows original + reversal side by side.
 
 - **Closed-period gate.** Enforced via `assert_period_not_closed()` from
-  `_guards.py`. Rejects writes whose `posting_date` falls in a closed
-  fiscal period. Applied to create, update (when posting_date changes),
-  and reverse (on the reversal's posting_date).
+  `_guards.py`. That guard takes the shared period fence, so a write
+  cannot land after close has finished. Applied to create, update
+  (existing date and any new date), delete, and reverse (original and
+  reversal dates).
 """
 
 from __future__ import annotations
@@ -394,13 +395,16 @@ def update_journal_entry(
       balance.
   """
   entry = _load_entry_or_404(session, body.entry_id)
+  # Fence before the draft check. Close holds the exclusive side across
+  # its bulk draft→posted update; taking the shared side first means we
+  # either wait for that close (and then refuse the now-closed period)
+  # or hold it so the close cannot finish underneath this write.
+  dates = [entry.posting_date]
+  if body.posting_date is not None:
+    dates.append(body.posting_date)
+  assert_period_not_closed(session, *dates)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
-
-  # If the caller is changing posting_date, check the new date
-  # isn't in a closed period.
-  if body.posting_date is not None:
-    assert_period_not_closed(session, body.posting_date)
 
   # Scalar field updates (only mutate what the caller explicitly set).
   updates = body.model_dump(exclude_unset=True)
@@ -457,6 +461,9 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
   """
   entry = _load_entry_or_404(session, body.entry_id)
+  # Same fence as create/update: deleting a draft in a period that is
+  # being closed would drop an entry the close is about to post.
+  assert_period_not_closed(session, entry.posting_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
@@ -489,12 +496,21 @@ def reverse_journal_entry(
     `ClosedPeriodError` (422) if the reversal's posting_date falls in
       a closed period.
   """
+  # Period fence first, then the entry row. Close takes the exclusive
+  # fence and then bulk-updates entries; a reversal that locked the
+  # entry first and the fence second would deadlock with that order.
+  peek = session.get(Entry, body.entry_id)
+  if peek is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  posting_date = body.posting_date or datetime.now(UTC).date()
+  assert_period_not_closed(session, peek.posting_date, posting_date)
+
   # Locked, because everything below decides from `original.status`. Two
   # concurrent reversals of the same entry both read 'posted', both pass the
   # guard, and both write a full reversing entry — the entry gets reversed
   # twice. Each reversing entry is internally balanced, so the trial balance
   # stays happy while the books sit a full entry off in the other direction.
-  # `ck_entries_one_reversal_per_original` is the database's half of this;
+  # `uq_entries_one_reversal_per_original` is the database's half of this;
   # the lock is what turns a would-be IntegrityError into a clean 409.
   original = lock_by_id(
     session,
@@ -521,9 +537,6 @@ def reverse_journal_entry(
   original_lines = _load_line_items(session, original.id)
   if not original_lines:
     raise ValueError(f"Journal entry {original.id} has no line items to reverse")
-
-  posting_date = body.posting_date or datetime.now(UTC).date()
-  assert_period_not_closed(session, posting_date)
   memo = body.memo or f"Reversal of journal entry {original.id}"
   now = datetime.now(UTC)
 

@@ -495,19 +495,18 @@ class TestUpdateJournalEntry:
     update_journal_entry(
       session, UpdateJournalEntryRequest(entry_id="entry_01", posting_date=new_date)
     )
-    mock_guard.assert_called_once_with(session, new_date)
+    mock_guard.assert_called_once_with(session, _DATE, new_date)
 
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_no_posting_date_change_skips_period_gate(self, mock_load):
+  def test_memo_only_update_still_fences_the_existing_period(self, mock_load):
     entry = _mock_entry(status="draft")
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = entry
-    # Updating memo only — no posting_date in body
     with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
       update_journal_entry(
         session, UpdateJournalEntryRequest(entry_id="entry_01", memo="Updated")
       )
-      mock_guard.assert_not_called()
+      mock_guard.assert_called_once_with(session, entry.posting_date)
 
   @patch(f"{MODULE}._load_line_items", return_value=[])
   def test_line_item_replacement_calls_delete(self, mock_load):
@@ -574,9 +573,11 @@ class TestDeleteJournalEntry:
     entry = _mock_entry(status="draft")
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = entry
-    result = delete_journal_entry(
-      session, DeleteJournalEntryRequest(entry_id="entry_01")
-    )
+    with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
+      result = delete_journal_entry(
+        session, DeleteJournalEntryRequest(entry_id="entry_01")
+      )
+    mock_guard.assert_called_once_with(session, entry.posting_date)
     assert result == {"deleted": True}
     session.delete.assert_called_once_with(entry)
     session.flush.assert_called()

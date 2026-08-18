@@ -6,6 +6,7 @@ closed, which is the next target, what's required to close the next one.
 
 from .close_service import (
   CloseGateFailed,
+  PeriodAlreadyClosedError,
   PeriodCloseError,
   PeriodCloseResult,
   PeriodCloseService,
@@ -33,6 +34,7 @@ __all__ = [
   "CloseableGateResult",
   "FiscalCalendarError",
   "FiscalCalendarService",
+  "PeriodAlreadyClosedError",
   "PeriodCloseError",
   "PeriodCloseResult",
   "PeriodCloseService",

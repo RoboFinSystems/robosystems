@@ -14,6 +14,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.operations.locking import acquire_shared_period_fence
+
 _LIBRARY_SEEDER = "library-seeder"
 
 
@@ -106,24 +108,63 @@ class ClosedPeriodError(ValueError):
     self.posting_date = posting_date
 
 
-def assert_period_not_closed(session: Session, posting_date: date) -> None:
-  """Raise `ClosedPeriodError` if the fiscal period containing
-  `posting_date` is closed.
+_PERIOD_COVERING_DATE = """
+  SELECT graph_id, name, status
+  FROM fiscal_periods
+  WHERE start_date <= :posting_date AND end_date >= :posting_date
+  LIMIT 1
+"""
 
-  No-op if no `FiscalPeriod` row covers the date (e.g., fresh tenant
-  without periods seeded). This matches `ScheduleService._assert_period_not_closed`
-  but is a standalone function so journal entry commands and any
-  future write ops can use it without coupling to the schedule layer.
-  """
-  row = session.execute(
-    text("""
-      SELECT name, status
-      FROM fiscal_periods
-      WHERE start_date <= :posting_date AND end_date >= :posting_date
-      LIMIT 1
-    """),
+
+def _period_covering(session: Session, posting_date: date):
+  return session.execute(
+    text(_PERIOD_COVERING_DATE),
     {"posting_date": posting_date},
   ).fetchone()
 
-  if row is not None and row.status == "closed":
-    raise ClosedPeriodError(row.name, posting_date)
+
+def assert_period_not_closed(session: Session, *posting_dates: date) -> None:
+  """Raise `ClosedPeriodError` if any fiscal period covering the given
+  dates is closed.
+
+  Takes the shared period fence on each distinct period (sorted, so two
+  writers that touch overlapping months cannot deadlock) and re-reads
+  status under that fence. Close holds the exclusive side of the same
+  fence across its QuickBooks publish and the database close, so a
+  writer cannot observe `open` and then commit after the close has
+  finished.
+
+  No-op if no `FiscalPeriod` row covers a date (e.g., fresh tenant
+  without periods seeded). The shared fence is transaction-scoped and
+  released when the caller's session commits or rolls back.
+  """
+  dates = [d for d in posting_dates if d is not None]
+  if not dates:
+    return
+
+  found: list[tuple[tuple[str, str], date]] = []
+  seen: set[tuple[str, str]] = set()
+  for posting_date in dates:
+    row = _period_covering(session, posting_date)
+    if row is None:
+      continue
+    key = (row.graph_id, row.name)
+    if key in seen:
+      continue
+    seen.add(key)
+    found.append((key, posting_date))
+
+  found.sort(key=lambda item: item[0])
+  for (graph_id, name), posting_date in found:
+    acquire_shared_period_fence(
+      session,
+      graph_id,
+      name,
+      detail=(
+        f"Period {name} is being closed or reopened by another process. "
+        "Retry in a moment."
+      ),
+    )
+    row = _period_covering(session, posting_date)
+    if row is not None and row.status == "closed":
+      raise ClosedPeriodError(row.name, posting_date)

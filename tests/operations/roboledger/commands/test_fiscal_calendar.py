@@ -39,6 +39,13 @@ GRAPH_ID = "kg01234567890abcdef"
 _MOD = "robosystems.operations.roboledger.commands.fiscal_calendar"
 
 
+@pytest.fixture(autouse=True)
+def _noop_exclusive_period_fence():
+  """Unit tests here mock the session; the exclusive fence talks to Postgres."""
+  with patch(f"{_MOD}.exclusive_period_fence") as fence:
+    yield fence
+
+
 def _fc_response() -> FiscalCalendarResponse:
   return FiscalCalendarResponse(graph_id=GRAPH_ID, fiscal_year_start_month=1)
 
@@ -139,6 +146,13 @@ class TestClosePeriodResponseMapping:
       self._run(_close_result())
     mark_stale.assert_called_once_with(GRAPH_ID, "period_closed")
 
+  def test_close_holds_the_exclusive_period_fence(self, _noop_exclusive_period_fence):
+    """The fence must wrap close() *and* the commit, or a writer can
+    land between them."""
+    self._run(_close_result())
+    _noop_exclusive_period_fence.assert_called_once()
+    assert _noop_exclusive_period_fence.call_args.args[:2] == (GRAPH_ID, "2026-01")
+
 
 class TestReopenRetractsCanonicalSets:
   def _run(self, fp_status="closed", retracted=("fs_a", "fs_b")):
@@ -173,12 +187,14 @@ class TestReopenRetractsCanonicalSets:
       )
     return result, retract, fp
 
-  def test_returns_result_with_retraction_count(self):
+  def test_returns_result_with_retraction_count(self, _noop_exclusive_period_fence):
     result, retract, fp = self._run()
     assert isinstance(result, ReopenPeriodResult)
     assert result.statement_sets_retracted == 2
     assert isinstance(result.fiscal_calendar, FiscalCalendarResponse)
     assert fp.status == "closing"
+    _noop_exclusive_period_fence.assert_called()
+    assert _noop_exclusive_period_fence.call_args.args[:2] == (GRAPH_ID, "2026-01")
 
   def test_retraction_keyed_by_month_window(self):
     _, retract, _ = self._run()

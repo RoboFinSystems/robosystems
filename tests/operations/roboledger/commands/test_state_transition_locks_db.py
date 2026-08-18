@@ -180,12 +180,8 @@ class TestReversalLock:
 
 
 class TestPeriodTransitionLock:
-  """Two concurrent reopens cannot both retract the same month's statements.
-
-  This does **not** cover reopen-vs-close: `close_period` cannot hold a
-  transaction-scoped lock, because its QB pre-publish commits mid-close. That
-  gap is recorded in the close's own comment and in the spec, not papered over
-  with a test that would imply otherwise.
+  """Reopen still row-locks the FiscalPeriod; close and writers share the
+  advisory period fence that survives the close's mid-flow commit.
   """
 
   @pytest.fixture(autouse=True)
@@ -238,6 +234,88 @@ class TestPeriodTransitionLock:
       )
       assert row.status == "closed"
       assert row.closed_at is not None
+
+
+class TestPeriodWriteFence:
+  """Close/reopen take an exclusive session-scoped fence; writers take
+  the shared transaction-scoped side. The two must block each other.
+  """
+
+  @pytest.fixture(autouse=True)
+  def open_period(self, tenant):
+    with extensions_session(GRAPH) as session:
+      session.execute(
+        text("DELETE FROM fiscal_periods WHERE graph_id = :g"), {"g": GRAPH}
+      )
+      session.add(
+        FiscalPeriod(
+          graph_id=GRAPH,
+          name=PERIOD,
+          start_date=date(2026, 1, 1),
+          end_date=date(2026, 1, 31),
+          period_type="monthly",
+          status="open",
+        )
+      )
+    yield
+
+  def test_exclusive_fence_blocks_a_second_closer(self, tenant):
+    from robosystems.operations.locking import exclusive_period_fence
+
+    with exclusive_period_fence(
+      GRAPH, PERIOD, detail=f"Period {PERIOD} is being closed"
+    ):
+      with pytest.raises(RowLockedError, match=PERIOD):
+        with exclusive_period_fence(
+          GRAPH, PERIOD, detail=f"Period {PERIOD} is being closed"
+        ):
+          pass
+
+  def test_exclusive_fence_blocks_a_writer(self, tenant):
+    from robosystems.operations.locking import exclusive_period_fence
+    from robosystems.operations.roboledger.commands._guards import (
+      assert_period_not_closed,
+    )
+
+    with exclusive_period_fence(
+      GRAPH, PERIOD, detail=f"Period {PERIOD} is being closed"
+    ):
+      with extensions_session(GRAPH) as writer:
+        with pytest.raises(RowLockedError, match=PERIOD):
+          assert_period_not_closed(writer, date(2026, 1, 15))
+
+  def test_shared_writer_fence_blocks_close(self, tenant):
+    from robosystems.operations.locking import exclusive_period_fence
+    from robosystems.operations.roboledger.commands._guards import (
+      assert_period_not_closed,
+    )
+
+    with extensions_session(GRAPH) as writer:
+      assert_period_not_closed(writer, date(2026, 1, 15))
+      with pytest.raises(RowLockedError, match=PERIOD):
+        with exclusive_period_fence(
+          GRAPH, PERIOD, detail=f"Period {PERIOD} is being closed"
+        ):
+          pass
+
+  def test_writer_sees_closed_after_status_flip(self, tenant):
+    from robosystems.operations.roboledger.commands._guards import (
+      ClosedPeriodError,
+      assert_period_not_closed,
+    )
+
+    with extensions_session(GRAPH) as session:
+      session.execute(
+        text(
+          "UPDATE fiscal_periods SET status = 'closed' "
+          "WHERE graph_id = :g AND name = :n"
+        ),
+        {"g": GRAPH, "n": PERIOD},
+      )
+
+    with extensions_session(GRAPH) as writer:
+      with pytest.raises(ClosedPeriodError):
+        assert_period_not_closed(writer, date(2026, 1, 15))
 
 
 class TestAlreadyReversed:
@@ -336,3 +414,29 @@ class TestFileReportLock:
       row = check.get(Report, self.REPORT_ID)
       assert row.filing_status == "draft"
       assert row.filed_at is None
+
+  def test_a_locked_report_cannot_change_filing_status(self, tenant):
+    from robosystems.operations.roboledger.commands.reports import (
+      transition_filing_status,
+    )
+
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM reports WHERE id = :id FOR UPDATE"),
+        {"id": self.REPORT_ID},
+      )
+      with extensions_session(GRAPH) as other:
+        with pytest.raises(RowLockedError, match=self.REPORT_ID):
+          transition_filing_status(other, self.REPORT_ID, "under_review")
+
+  def test_a_locked_report_cannot_be_deleted(self, tenant):
+    from robosystems.operations.roboledger.commands.reports import delete_report
+
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM reports WHERE id = :id FOR UPDATE"),
+        {"id": self.REPORT_ID},
+      )
+      with extensions_session(GRAPH) as other:
+        with pytest.raises(RowLockedError, match=self.REPORT_ID):
+          delete_report(other, self.REPORT_ID, "usr_seed")

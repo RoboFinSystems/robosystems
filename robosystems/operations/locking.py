@@ -142,9 +142,110 @@ def lock_by_id(session: Session, entity, ident, detail: str):
     return session.get(entity, ident, with_for_update=True, populate_existing=True)
 
 
+# ── Period write fence ───────────────────────────────────────────────────
+#
+# Close publishes to QuickBooks and commits those markers mid-flow, so a
+# transaction-scoped lock (FOR UPDATE, pg_advisory_xact_lock) cannot span
+# the whole operation. Writers and close still have to share one barrier:
+# otherwise a writer observes `open`, pauses, and commits after statements
+# are stamped.
+#
+# The barrier is a PostgreSQL advisory lock keyed on (graph, period):
+#
+# - Close and reopen take it **exclusive** and **session-scoped**, on a
+#   dedicated connection that outlives the mid-close commit.
+# - Period-affecting writers take it **shared** and **transaction-scoped**
+#   on their own session; commit/rollback releases it.
+#
+# Shared lockers do not block each other. Exclusive waits for them and
+# blocks new ones. Lock order is always the fence first, then any row
+# locks, so a writer that already holds an entry row cannot deadlock
+# with a close that holds the fence and is about to update that entry.
+
+# Two-key advisory-lock class for the period fence. Arbitrary but stable —
+# changing it would let in-flight lockers on the old class miss lockers
+# on the new one.
+_PERIOD_FENCE_CLASS = 872401
+
+
+def period_fence_ident(graph_id: str, period: str) -> str:
+  """Stable identity string hashed in SQL as the fence's second key."""
+  return f"{graph_id}:{period}"
+
+
+def acquire_shared_period_fence(
+  session: Session, graph_id: str, period: str, *, detail: str
+) -> None:
+  """Take a transaction-scoped shared fence on ``(graph_id, period)``.
+
+  Released automatically when this session commits or rolls back. Does
+  not block other shared lockers. Waits up to the request lock timeout
+  for an exclusive closer, then raises :class:`RowLockedError`.
+  """
+  with bounded_lock_wait(session, detail):
+    session.execute(
+      text("SELECT pg_advisory_xact_lock_shared(:classid, hashtext(:ident))"),
+      {
+        "classid": _PERIOD_FENCE_CLASS,
+        "ident": period_fence_ident(graph_id, period),
+      },
+    )
+
+
+@contextmanager
+def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
+  """Hold a session-scoped exclusive fence on ``(graph_id, period)``.
+
+  Uses a dedicated connection, not the caller's ``Session``. The close
+  commits mid-flow to persist QuickBooks dedupe markers; that commit
+  would return the session's connection to the pool and drop any lock
+  taken on it. A session-scoped advisory lock on a connection we hold
+  ourselves survives that commit.
+
+  Unlock (or invalidate the connection, so the pool discards it) before
+  returning the connection — a pooled connection still holding this
+  lock would block every later closer of the same period.
+  """
+  from robosystems.db.extensions import get_extensions_engine
+
+  ident = period_fence_ident(graph_id, period)
+  params = {"classid": _PERIOD_FENCE_CLASS, "ident": ident}
+  conn = get_extensions_engine().connect()
+  acquired = False
+  try:
+    conn.execute(text(f"SET lock_timeout = '{_LOCK_TIMEOUT_MS}ms'"))
+    try:
+      conn.execute(
+        text("SELECT pg_advisory_lock(:classid, hashtext(:ident))"),
+        params,
+      )
+      acquired = True
+    except OperationalError as exc:
+      if getattr(exc.orig, "pgcode", None) in _RETRYABLE_LOCK_STATES:
+        raise RowLockedError(detail) from exc
+      raise
+    conn.execute(text("SET lock_timeout = 0"))
+    conn.commit()
+    yield
+  finally:
+    if acquired:
+      try:
+        conn.execute(
+          text("SELECT pg_advisory_unlock(:classid, hashtext(:ident))"),
+          params,
+        )
+        conn.commit()
+      except Exception:
+        conn.invalidate()
+    conn.close()
+
+
 __all__ = [
   "RowLockedError",
+  "acquire_shared_period_fence",
   "bounded_lock_wait",
+  "exclusive_period_fence",
   "lock_by_id",
   "ordered_lock_column",
+  "period_fence_ident",
 ]

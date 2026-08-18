@@ -30,6 +30,7 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
@@ -154,7 +155,7 @@ def dispatch_preview(
   posting_date = metadata.posting_date or body.occurred_at.date()
   try:
     assert_period_not_closed(session, posting_date)
-  except ClosedPeriodError as e:
+  except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 
   if errors:

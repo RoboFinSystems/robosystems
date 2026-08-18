@@ -87,6 +87,19 @@ def _get_engine():
   return _engine
 
 
+def get_extensions_engine():
+  """The shared extensions engine.
+
+  Session-scoped advisory locks that must survive ``Session.commit()``
+  cannot ride the session's connection — commit returns that connection
+  to the pool, and a pooled checkout of a connection still holding
+  ``pg_advisory_lock`` would leak the lock to the next borrower. Those
+  lockers check out a dedicated connection from this engine and unlock
+  (or invalidate) before returning it.
+  """
+  return _get_engine()
+
+
 def _get_session_factory():
   global _session_factory
   if _session_factory is None:
