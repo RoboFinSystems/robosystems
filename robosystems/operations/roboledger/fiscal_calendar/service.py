@@ -167,6 +167,41 @@ class FiscalCalendarService:
       )
     return calendar
 
+  def require_locked(self, session: Session, graph_id: str) -> FiscalCalendar:
+    """`require`, with the calendar row locked for the write that follows.
+
+    The pointer writers — set-close-target, close's advance, reopen's
+    retreat — are read-decide-write over ``closed_through_period`` /
+    ``close_target_period``. Close and reopen already run under the
+    exclusive period fence and the FiscalPeriod row lock, but
+    set-close-target takes neither, so an operator moving the target while
+    a close auto-advances it was a lost update on whichever wrote second.
+    Locking the calendar row serializes the three; taken after the
+    FiscalPeriod row where both are held, so the order is one-directional.
+    Bounded, because every caller is request-facing.
+    """
+    from robosystems.operations.locking import bounded_lock_wait
+
+    session.flush()
+    with bounded_lock_wait(
+      session,
+      f"The fiscal calendar for graph {graph_id} is being written by another "
+      "process. Retry in a moment.",
+    ):
+      calendar = (
+        session.query(FiscalCalendar)
+        .filter(FiscalCalendar.graph_id == graph_id)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+      )
+    if calendar is None:
+      raise FiscalCalendarError(
+        f"Fiscal calendar not initialized for graph {graph_id}. "
+        "Call POST /extensions/roboledger/{graph_id}/operations/initialize first."
+      )
+    return calendar
+
   # ── Create / initialize ─────────────────────────────────────────────────
 
   def get_or_create(
@@ -307,7 +342,7 @@ class FiscalCalendarService:
     except ValueError as e:
       raise InvalidCloseTargetError(str(e)) from e
 
-    calendar = self.require(session, graph_id)
+    calendar = self.require_locked(session, graph_id)
 
     last_valid = last_completed_period()
     if period > last_valid:
@@ -425,7 +460,7 @@ class FiscalCalendarService:
     Raises ``AdvanceSequenceError`` if `period` is not the next sequential
     period.
     """
-    calendar = self.require(session, graph_id)
+    calendar = self.require_locked(session, graph_id)
 
     if calendar.closed_through_period:
       expected: str | None = next_period(calendar.closed_through_period)
@@ -506,7 +541,7 @@ class FiscalCalendarService:
     shouldn't shift it either. We just bump `last_close_at` and emit a
     `period_closed` event for the audit trail.
     """
-    calendar = self.require(session, graph_id)
+    calendar = self.require_locked(session, graph_id)
     calendar.last_close_at = datetime.now(UTC)
     calendar.updated_by = actor_id
     session.flush()
@@ -554,7 +589,7 @@ class FiscalCalendarService:
     if not reason:
       raise FiscalCalendarError("reopen requires a non-empty reason")
 
-    calendar = self.require(session, graph_id)
+    calendar = self.require_locked(session, graph_id)
     previous_closed_through = calendar.closed_through_period
 
     if calendar.closed_through_period == reopened_period:

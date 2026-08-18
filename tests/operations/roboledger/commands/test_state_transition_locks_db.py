@@ -488,3 +488,48 @@ class TestFileReportLock:
       with extensions_session(GRAPH) as other:
         with pytest.raises(RowLockedError, match=self.REPORT_ID):
           delete_report(other, self.REPORT_ID, "usr_seed")
+
+
+class TestCalendarPointerLock:
+  """The calendar's pointers are read-decide-write: set-close-target, close's
+  advance and reopen's retreat all load the row, check it, and write it.
+  Close and reopen ran under the exclusive fence and the FiscalPeriod row
+  lock; set-close-target took neither, so an operator moving the target
+  while a close auto-advanced it was a lost update. All three now lock the
+  calendar row.
+  """
+
+  @pytest.fixture(autouse=True)
+  def calendar(self, tenant):
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      FiscalCalendarService,
+    )
+
+    with extensions_session(GRAPH) as session:
+      FiscalCalendarService().initialize(
+        session, GRAPH, closed_through="2025-12", actor_id="usr_seed"
+      )
+    yield
+
+  def test_set_close_target_waits_behind_a_held_calendar_row(self, tenant):
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      FiscalCalendarService,
+    )
+
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM fiscal_calendar WHERE graph_id = :g FOR UPDATE"),
+        {"g": GRAPH},
+      )
+      with extensions_session(GRAPH) as setter:
+        with pytest.raises(RowLockedError, match="fiscal calendar"):
+          FiscalCalendarService().set_close_target(
+            setter, GRAPH, "2026-01", actor_id="usr_op"
+          )
+
+    # Released → the same call goes through.
+    with extensions_session(GRAPH) as setter:
+      calendar = FiscalCalendarService().set_close_target(
+        setter, GRAPH, "2026-01", actor_id="usr_op"
+      )
+      assert calendar.close_target_period == "2026-01"

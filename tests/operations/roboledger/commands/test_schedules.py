@@ -389,19 +389,27 @@ def _rebuild_structure() -> MagicMock:
 
 
 def _rebuild_session(
-  structure: MagicMock, *, posted_count: int = 0, old_event=None
+  structure: MagicMock,
+  *,
+  posted_count: int = 0,
+  old_event=None,
+  originator_changes: bool = False,
 ) -> tuple[MagicMock, list[type]]:
   """Wire a MagicMock session for the rebuild orchestration.
 
   execute call order:
     1. _load_schedule_or_404 → scalar_one_or_none → structure
     2. posted-entry guard → fetchone → MagicMock(c=posted_count)
-    3. SET LOCAL lock_timeout (bounded wait around the obligation void)
-    4. select(Rule.id) for cascade delete → scalars().all()
-    5. DELETE line_items (draft sweep) → execute (result unused)
-    6. DELETE entries (draft sweep) → execute (result unused)
-    7. count facts → fetchone
-    8. count distinct periods → fetchone
+    3. draft posting dates for the period fence → scalars().all() (empty)
+    4. SET LOCAL lock_timeout (bounded wait around the obligation void)
+    5. select(Rule.id) for cascade delete → scalars().all()
+    6. DELETE line_items (draft sweep) → execute (result unused)
+    7. DELETE entries (draft sweep) → execute (result unused)
+    8. SET LOCAL lock_timeout (bounded wait around the originator lock) —
+       only when ``originator_changes`` (the regenerated chain stamped a new
+       ``schedule_created_event_id``, so the old originator is voided)
+    9. count facts → fetchone
+    10. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
   _calendar_closed_through_date uses session.query(FiscalCalendar).first().
   session.get(Event, ...) returns ``old_event`` (the supersede path).
@@ -411,12 +419,17 @@ def _rebuild_session(
   session.execute.side_effect = [
     _exec_result(row=structure),  # _load_schedule_or_404
     _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
+    # Draft posting dates for the period fence, taken before any row lock.
+    # Empty → no fence statement follows.
+    _exec_result(scalars_all=[]),
     # The void of the old obligation chain bounds its wait for the rows the
     # promotion sweep may hold, so a `SET LOCAL lock_timeout` lands here.
     _exec_result(),
     _exec_result(scalars_all=["rule_old_1"]),  # select(Rule.id)
     _exec_result(),  # DELETE line_items (draft sweep)
     _exec_result(),  # DELETE entries (draft sweep)
+    # The originator void locks its row (`lock_by_id`) — another bounded wait.
+    *([_exec_result()] if originator_changes else []),
     _exec_result(fetchone_row=MagicMock(cnt=6)),  # count facts
     _exec_result(fetchone_row=MagicMock(cnt=3)),  # count distinct periods
   ]
@@ -650,7 +663,7 @@ def test_rebuild_schedule_supersedes_old_originator() -> None:
   old_evt.id = "evt_old_origin"
   old_evt.status = "committed"
   old_evt.replaced_by_event_id = None
-  session, _ = _rebuild_session(structure, old_event=old_evt)
+  session, _ = _rebuild_session(structure, old_event=old_evt, originator_changes=True)
 
   # create_schedule re-stamps the originator on the in-place structure. Mutate
   # metadata inside the mock so the OLD id is still readable when rebuild_schedule
@@ -687,7 +700,11 @@ def test_rebuild_schedule_supersedes_old_originator() -> None:
   # Old originator loaded by id, voided, and linked to its replacement.
   from robosystems.models.extensions.roboledger.event import Event
 
-  session.get.assert_called_once_with(Event, "evt_old_origin")
+  # Locked and refreshed — a status write off a read, like every other event
+  # transition.
+  session.get.assert_called_once_with(
+    Event, "evt_old_origin", with_for_update=True, populate_existing=True
+  )
   assert old_evt.status == "voided"
   assert old_evt.replaced_by_event_id == "evt_new_origin"
 

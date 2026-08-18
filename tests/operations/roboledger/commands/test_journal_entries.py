@@ -78,6 +78,9 @@ def _mock_entry(
   e.provenance = "manual_entry"
   e.reversal_of = None
   e.posted_at = None
+  # A standalone draft (no owning event) unless a test says otherwise; the
+  # owned-by-event paths build their own owner.
+  e.triggered_by_event_id = None
   return e
 
 
@@ -628,6 +631,63 @@ class TestDeleteJournalEntry:
     kwargs = session.get.call_args.kwargs
     assert kwargs.get("with_for_update") is True
     assert kwargs.get("populate_existing") is True
+
+  def _owned(self, *, owner_status: str, siblings: int):
+    """A draft owned by an event, with ``siblings`` ledger rows on that event.
+    ``session.get`` serves the event lock first (event → entry order), then
+    the entry lock; the sibling count rides ``execute(...).scalar_one()``."""
+    entry = _mock_entry(status="draft")
+    entry.triggered_by_event_id = "evt_owner"
+    owner = MagicMock()
+    owner.id = "evt_owner"
+    owner.status = owner_status
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = entry
+    session.execute.return_value.scalar_one.return_value = siblings
+    session.get.side_effect = lambda model, ident, **_k: (
+      owner if ident == "evt_owner" else entry
+    )
+    return session, entry, owner
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_last_draft_of_a_live_event_is_refused(self, mock_guard):
+    """The event is the record; its retraction happens on the event. Deleting
+    the last draft would leave a committed event `execute` still publishes,
+    with nothing behind it in the books."""
+    from robosystems.operations.roboledger.commands.journal_entries import (
+      JournalEntryOwnedByEventError,
+    )
+
+    session, _entry, _owner = self._owned(owner_status="committed", siblings=1)
+    with pytest.raises(JournalEntryOwnedByEventError, match="evt_owner"):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    session.delete.assert_not_called()
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_one_of_several_drafts_may_be_deleted(self, mock_guard):
+    session, entry, _owner = self._owned(owner_status="committed", siblings=3)
+    delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    session.delete.assert_called_once_with(entry)
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_retracted_events_leftover_draft_may_be_deleted(self, mock_guard):
+    """Void or supersede first, then the leftover draft is deletable — the
+    same drafts close leaves alone."""
+    for status in ("voided", "superseded"):
+      session, entry, _owner = self._owned(owner_status=status, siblings=1)
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+      session.delete.assert_called_once_with(entry)
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_owning_event_is_locked_before_the_entry(self, mock_guard):
+    """Event, then entry — the order `execute` and close use."""
+    session, _entry, _owner = self._owned(owner_status="committed", siblings=2)
+    delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    idents = [c.args[1] for c in session.get.call_args_list]
+    assert idents == ["evt_owner", "entry_01"], idents
+    for c in session.get.call_args_list:
+      assert c.kwargs.get("with_for_update") is True
+      assert c.kwargs.get("populate_existing") is True
 
   @patch(f"{MODULE}.assert_period_not_closed")
   def test_moved_posting_date_is_retryable_not_refenced(self, mock_guard):

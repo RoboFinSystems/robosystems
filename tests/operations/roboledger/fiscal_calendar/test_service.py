@@ -42,12 +42,19 @@ class _InMemorySession:
   def __init__(self):
     self._objects: dict[type, list] = {}
     self.flush_count = 0
+    self.executed: list = []
 
   def add(self, obj) -> None:
     self._objects.setdefault(type(obj), []).append(obj)
 
   def flush(self) -> None:
     self.flush_count += 1
+
+  def execute(self, *args, **kwargs):
+    # `require_locked` bounds its wait with `SET LOCAL lock_timeout`; the
+    # statement is recorded and otherwise inert here.
+    self.executed.append(args[0] if args else None)
+    return None
 
   def query(self, model):
     return _Query(self, model)
@@ -120,6 +127,14 @@ class _Query:
     return len(self._apply_filters(list(self._session._objects.get(self._model, []))))
 
   def order_by(self, *args):
+    return self
+
+  # `require_locked` reads the calendar row `FOR UPDATE`, refreshed; both are
+  # no-ops on the in-memory rows.
+  def populate_existing(self):
+    return self
+
+  def with_for_update(self, *args, **kwargs):
     return self
 
   def limit(self, n):
