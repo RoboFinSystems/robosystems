@@ -28,6 +28,7 @@ from robosystems.middleware.extensions import (
   GraphExtensionContext,
   load_graph_metadata,
 )
+from robosystems.middleware.graph.utils.subgraph import is_subgraph
 
 if TYPE_CHECKING:
   from sqlalchemy.orm import Session
@@ -89,6 +90,19 @@ def require_graph_extension_mcp(
   Raises:
       MCPExtensionGateError: repo write, missing extension, or access denied.
   """
+  # A subgraph is a modality container with no tenant schema; refuse it here
+  # (the same answer the REST extension dependency and the GraphQL endpoint
+  # give) instead of letting the session factory reject the id inside the
+  # tool as a 404 or a 500.
+  if is_subgraph(graph_id):
+    raise MCPExtensionGateError(
+      code="subgraph_not_addressable",
+      message=(
+        f"Subgraph '{graph_id}' is not addressable via {extension} tools; "
+        "target the parent graph."
+      ),
+    )
+
   if meta is None:
     try:
       meta = _load_with_short_lived_session(graph_id)

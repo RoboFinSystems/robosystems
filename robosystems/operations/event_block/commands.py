@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.logger import logger
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
@@ -176,7 +177,7 @@ def _flush_new_event(
   try:
     session.flush()
   except IntegrityError as exc:
-    if body.external_id and "external_id" in str(exc.orig):
+    if body.external_id and violates(exc, "idx_events_source_external"):
       raise DuplicateEventError(body.source, body.external_id) from exc
     raise
 

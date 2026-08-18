@@ -17,6 +17,7 @@ SSE endpoint accepts.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -809,83 +810,119 @@ async def execute_operation(
       # treat it like the in-progress case rather than looping.
       raise IdempotencyInProgressError(ctx.operation_name)
 
-  # HTTPException and bare Exception are caught separately: the former
-  # propagates with its original status/detail, the latter still produces a
-  # failed audit line before re-raising, so a buggy command can never 500
-  # with no audit record. Either way the reservation is released so the
-  # caller's retry can run.
-  start = time.monotonic()
-  try:
-    result = await run_off_loop(runner)
-  except HTTPException as exc:
-    if use_idempotency:
-      await idempotency_cache.release(
-        ctx.user_id, ctx.graph_id, ctx.operation_name, ctx.idempotency_key
-      )
-    duration_ms = (time.monotonic() - start) * 1000
-    log_operation_audit(
-      operation_name=ctx.operation_name,
-      operation_id=generate_operation_id(),
-      user_id=ctx.user_id,
-      graph_id=ctx.graph_id,
-      duration_ms=duration_ms,
-      status="failed",
-      idempotency_key=ctx.idempotency_key,
-      error=str(exc.detail),
-    )
-    raise
-  except Exception as exc:
-    if use_idempotency:
-      await idempotency_cache.release(
-        ctx.user_id, ctx.graph_id, ctx.operation_name, ctx.idempotency_key
-      )
-    duration_ms = (time.monotonic() - start) * 1000
-    log_operation_audit(
-      operation_name=ctx.operation_name,
-      operation_id=generate_operation_id(),
-      user_id=ctx.user_id,
-      graph_id=ctx.graph_id,
-      duration_ms=duration_ms,
-      status="failed",
-      idempotency_key=ctx.idempotency_key,
-      error=f"{type(exc).__name__}: {exc}",
-    )
-    raise
-
-  duration_ms = (time.monotonic() - start) * 1000
-
-  # The hook runs before caching: if it raises, the failure aborts the
-  # request without poisoning the idempotency cache with a stuck envelope
-  # (the reservation is released for the same reason).
-  envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
-  if on_fresh_success is not None:
+  async def _run_and_record() -> OperationEnvelope:
+    # HTTPException and bare Exception are caught separately: the former
+    # propagates with its original status/detail, the latter still produces a
+    # failed audit line before re-raising, so a buggy command can never 500
+    # with no audit record. The reservation is released on every exit that
+    # did not store the envelope — including a hook failure and a
+    # cancellation — so the caller's retry can run.
+    start = time.monotonic()
+    recorded = False
     try:
-      await run_off_loop(on_fresh_success, envelope)
-    except Exception:
+      try:
+        result = await run_off_loop(runner)
+      except HTTPException as exc:
+        log_operation_audit(
+          operation_name=ctx.operation_name,
+          operation_id=generate_operation_id(),
+          user_id=ctx.user_id,
+          graph_id=ctx.graph_id,
+          duration_ms=(time.monotonic() - start) * 1000,
+          status="failed",
+          idempotency_key=ctx.idempotency_key,
+          error=str(exc.detail),
+        )
+        raise
+      except Exception as exc:
+        log_operation_audit(
+          operation_name=ctx.operation_name,
+          operation_id=generate_operation_id(),
+          user_id=ctx.user_id,
+          graph_id=ctx.graph_id,
+          duration_ms=(time.monotonic() - start) * 1000,
+          status="failed",
+          idempotency_key=ctx.idempotency_key,
+          error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+      duration_ms = (time.monotonic() - start) * 1000
+
+      # The hook runs before caching: if it raises, the failure aborts the
+      # request without poisoning the idempotency cache with a stuck
+      # envelope. A write whose command succeeded but whose post-hook failed
+      # is still audited, as failed, so it never reaches the client as a 500
+      # with no record.
+      envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
+      if on_fresh_success is not None:
+        try:
+          await run_off_loop(on_fresh_success, envelope)
+        except Exception as exc:
+          log_operation_audit(
+            operation_name=ctx.operation_name,
+            operation_id=envelope.operation_id,
+            user_id=ctx.user_id,
+            graph_id=ctx.graph_id,
+            duration_ms=(time.monotonic() - start) * 1000,
+            status="failed",
+            idempotency_key=ctx.idempotency_key,
+            error=f"on_fresh_success: {type(exc).__name__}: {exc}",
+          )
+          raise
       if use_idempotency:
+        await idempotency_cache.put(
+          ctx.user_id,
+          ctx.graph_id,
+          ctx.operation_name,
+          ctx.idempotency_key,
+          envelope,
+          ctx.body_fingerprint,
+        )
+      recorded = True
+      log_operation_audit(
+        operation_name=ctx.operation_name,
+        operation_id=envelope.operation_id,
+        user_id=ctx.user_id,
+        graph_id=ctx.graph_id,
+        duration_ms=duration_ms,
+        status="completed",
+        idempotency_key=ctx.idempotency_key,
+      )
+      return envelope
+    finally:
+      if use_idempotency and not recorded:
         await idempotency_cache.release(
           ctx.user_id, ctx.graph_id, ctx.operation_name, ctx.idempotency_key
         )
-      raise
-  if use_idempotency:
-    await idempotency_cache.put(
-      ctx.user_id,
-      ctx.graph_id,
-      ctx.operation_name,
-      ctx.idempotency_key,
-      envelope,
-      ctx.body_fingerprint,
+
+  # Shielded from cancellation. The runner's write commits in its worker
+  # thread whether or not the request is still connected (a disconnected
+  # client cannot un-commit it), so the recording half — hook, cache, audit
+  # — must finish too: otherwise a client that dropped mid-write leaves a
+  # committed operation with no cached envelope, and its retry with the same
+  # key either re-executes the write or is refused as in progress. The
+  # cancellation is honored the moment the shielded work completes.
+  work = asyncio.ensure_future(_run_and_record())
+  try:
+    return await asyncio.shield(work)
+  except asyncio.CancelledError:
+    # Nothing awaits `work` any more; retrieve its outcome when it lands so
+    # a late failure is logged rather than reported as never retrieved.
+    work.add_done_callback(_log_abandoned_outcome)
+    raise
+
+
+def _log_abandoned_outcome(task: asyncio.Future) -> None:
+  if task.cancelled():
+    return
+  exc = task.exception()
+  if exc is not None:
+    logger.warning(
+      "operation finished after its request was cancelled and failed: %s: %s",
+      type(exc).__name__,
+      exc,
     )
-  log_operation_audit(
-    operation_name=ctx.operation_name,
-    operation_id=envelope.operation_id,
-    user_id=ctx.user_id,
-    graph_id=ctx.graph_id,
-    duration_ms=duration_ms,
-    status="completed",
-    idempotency_key=ctx.idempotency_key,
-  )
-  return envelope
 
 
 __all__ = [

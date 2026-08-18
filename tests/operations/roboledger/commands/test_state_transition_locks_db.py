@@ -535,3 +535,47 @@ class TestCalendarPointerLock:
         setter, GRAPH, "2026-01", actor_id="usr_op"
       )
       assert calendar.close_target_period == "2026-01"
+
+
+class TestFenceLeavesTheConnectionClean:
+  """A fence that fails to acquire must not hand a connection back to the pool
+  still carrying its 3s `lock_timeout` — the next borrower would inherit it."""
+
+  def test_lock_timeout_is_reset_when_acquisition_times_out(self, tenant):
+    from sqlalchemy import text as sql_text
+
+    from robosystems.db.extensions import get_extensions_engine
+    from robosystems.operations.locking import (
+      exclusive_period_fence,
+      period_fence_ident,
+    )
+
+    engine = get_extensions_engine()
+    period = "2031-01"
+    holder = engine.connect()
+    try:
+      holder.execute(
+        sql_text("SELECT pg_advisory_lock(872401, hashtext(:ident))"),
+        {"ident": period_fence_ident(GRAPH, period)},
+      )
+      with pytest.raises(RowLockedError):
+        with exclusive_period_fence(GRAPH, period, detail="held"):
+          pass
+    finally:
+      holder.execute(
+        sql_text("SELECT pg_advisory_unlock(872401, hashtext(:ident))"),
+        {"ident": period_fence_ident(GRAPH, period)},
+      )
+      holder.commit()
+      holder.close()
+
+    # Drain the pool's idle connections and check what each carries.
+    seen = []
+    conns = [engine.connect() for _ in range(engine.pool.size() + 1)]
+    try:
+      for conn in conns:
+        seen.append(conn.execute(sql_text("SHOW lock_timeout")).scalar_one())
+    finally:
+      for conn in conns:
+        conn.close()
+    assert all(value == "0" for value in seen), seen

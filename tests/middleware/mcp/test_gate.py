@@ -58,6 +58,22 @@ class TestRequireGraphExtensionMCP:
     assert result.graph_type == "entity"
     assert "roboledger" in result.schema_extensions
 
+  def test_rejects_subgraph_ids_before_loading_metadata(self) -> None:
+    """A subgraph has no tenant schema. The REST extension dependency and the
+    GraphQL endpoint refuse it up front; the MCP gate must too, or a write
+    tool called with a subgraph id fails inside the tool as a 404 or a 500."""
+    with patch(
+      "robosystems.middleware.mcp.tools._gate._load_with_short_lived_session"
+    ) as loader:
+      with pytest.raises(MCPExtensionGateError) as exc:
+        require_graph_extension_mcp(
+          extension="roboledger",
+          graph_id="kg0123456789abcdef01_dev",
+        )
+    assert exc.value.code == "subgraph_not_addressable"
+    assert "target the parent graph" in exc.value.message
+    loader.assert_not_called()
+
   def test_rejects_repository_graph(self) -> None:
     with pytest.raises(MCPExtensionGateError) as exc:
       require_graph_extension_mcp(

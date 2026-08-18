@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.extensions.publish_lists import (
   AddMembersRequest,
   CreatePublishListRequest,
@@ -223,6 +224,8 @@ def add_publish_list_members(
   except IntegrityError as exc:
     # A concurrent add of the same recipient slipped between the check above
     # and this insert; the unique key says so. Same answer as the check.
+    if not violates(exc, "uq_publish_list_members_pair"):
+      raise
     raise MembersAlreadyPresentError(list(body.target_graph_ids)) from exc
 
   return enrich_members(added)

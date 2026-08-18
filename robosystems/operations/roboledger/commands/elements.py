@@ -22,6 +22,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.extensions.taxonomies import (
   CreateElementRequest,
   DeleteElementRequest,
@@ -268,7 +269,7 @@ def create_element(
     # Partial unique index `idx_elements_qname` fires when two CamelCased
     # account names collapse to the same qname. Translate to a domain
     # exception so the API layer can return 409 instead of 500.
-    if "idx_elements_qname" in str(exc.orig):
+    if violates(exc, "idx_elements_qname"):
       raise ElementQNameConflictError(resolved_qname) from exc
     raise
 

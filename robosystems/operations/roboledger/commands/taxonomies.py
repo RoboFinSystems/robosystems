@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.common import DeleteResult
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
@@ -285,7 +286,10 @@ def create_mapping_association(
     session.flush()
   except IntegrityError as exc:
     # The pre-check above lost a race with a concurrent identical insert; the
-    # unique key is the truth. Same answer as the check.
+    # unique key is the truth. Same answer as the check. Any other constraint
+    # is a real fault and keeps its identity.
+    if not violates(exc, "uq_association_structure_elements_type"):
+      raise
     raise MappingAssociationExistsError(
       body.mapping_id, body.from_element_id, body.to_element_id
     ) from exc
@@ -622,6 +626,8 @@ def link_entity_taxonomy(
     # Concurrent identical adoption, or a concurrent primary for the same
     # basis (`idx_entity_taxonomies_primary`) landing between the clear above
     # and this insert. Both are "already linked", not a fault.
+    if not violates(exc, "uq_entity_taxonomy_combo", "idx_entity_taxonomies_primary"):
+      raise
     raise EntityTaxonomyConflictError(
       f"Entity {entity.id} already has a {body.basis!r} link to taxonomy "
       f"{body.taxonomy_id!r} (or another primary for that basis landed "

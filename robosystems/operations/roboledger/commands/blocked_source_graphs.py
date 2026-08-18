@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockedSourceGraphResponse,
   BlockSourceGraphRequest,
@@ -100,7 +101,9 @@ def block_source_graph(
       with session.begin_nested():
         session.add(existing)
         session.flush()
-    except IntegrityError:
+    except IntegrityError as exc:
+      if not violates(exc, "uq_blocked_source_graphs_source"):
+        raise
       existing = session.execute(
         select(BlockedSourceGraph).where(
           BlockedSourceGraph.source_graph_id == body.source_graph_id

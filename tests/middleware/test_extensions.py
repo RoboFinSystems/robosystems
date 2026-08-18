@@ -935,6 +935,51 @@ class TestExecuteOperationReservation:
     assert cache.pending == {}
     assert cache.store == {}
 
+  @pytest.mark.asyncio
+  async def test_cancelled_request_still_records_and_releases(self) -> None:
+    """The runner's write commits in its worker thread whether or not the
+    client is still there. Before shielding, a disconnect mid-run skipped
+    both `except` arms: the envelope was never cached and the reservation
+    stayed pending for its whole TTL, so the client's retry got 409 for a
+    write that had already landed."""
+    import asyncio
+    import threading
+
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k4", body_fingerprint="fp4")
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def _slow_runner():
+      nonlocal calls
+      calls += 1
+      started.set()
+      release.wait(timeout=5)
+      return {"n": calls}
+
+    with patch.object(middleware_module.logger, "info"):
+      request = asyncio.ensure_future(
+        execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      )
+      while not started.is_set():
+        await asyncio.sleep(0.005)
+      request.cancel()
+      with pytest.raises(asyncio.CancelledError):
+        await request
+      # The client is gone; the work finishes anyway and is recorded.
+      release.set()
+      for _ in range(200):
+        if cache.store:
+          break
+        await asyncio.sleep(0.01)
+      assert cache.pending == {}
+      assert len(cache.store) == 1
+      # The retry replays instead of re-executing or being refused.
+      replay = await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+    assert replay.idempotent_replay is True
+    assert calls == 1
+
 
 class TestExecuteOperationIdempotency:
   @pytest.mark.asyncio

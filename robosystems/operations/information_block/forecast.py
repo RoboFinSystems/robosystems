@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.api.information_block import (
   ArtifactResponse,
@@ -480,13 +481,18 @@ def _ensure_scenario_dimension(session: Session, scenario_id: str, name: str) ->
     with session.begin_nested():
       session.add(dimension)
       session.flush()
-  except IntegrityError:
-    return session.execute(
+  except IntegrityError as exc:
+    if not violates(exc, "uq_dimension_type_value"):
+      raise
+    winner = session.execute(
       select(Dimension.id).where(
         Dimension.dimension_type == "scenario",
         Dimension.value == scenario_id,
       )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    if winner is None:
+      raise
+    return winner
   return dimension.id
 
 
