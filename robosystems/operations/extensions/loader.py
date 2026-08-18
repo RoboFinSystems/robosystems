@@ -1428,6 +1428,11 @@ class OLTPLoader:
         Event.source == source,
         Event.external_id.in_(list(txns_by_ext.keys())),
       )
+      # Ordered for the same reason as the other batch locks, though this
+      # one's rows are disjoint from theirs by `source`. Uniform discipline:
+      # the day a predicate widens, the ordering is already there.
+      # See `locking.ORDERED_LOCK_KEY`.
+      .order_by(Event.id)
       .with_for_update()
       .all()
     }

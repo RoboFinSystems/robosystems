@@ -167,6 +167,13 @@ def test_approval_that_waits_out_a_lock_sees_the_committed_row(tenant):
   correctly rejects — rather than acting on the snapshot it took before it
   blocked. (A fresh session matters: ``Session.get`` would otherwise serve an
   identity-map hit and never re-read.)"""
+  # The winner signals *after* it holds the lock rather than the loser sleeping
+  # and hoping. A fixed sleep is a race in its own right: on a loaded runner the
+  # winner may not have acquired by the time it elapses, the loser takes the
+  # lock first, its transition succeeds, and the assertion below fails on a
+  # system that is working correctly.
+  lock_held = threading.Event()
+  release = threading.Event()
   hold_released = threading.Event()
   failure: list[BaseException] = []
 
@@ -176,22 +183,28 @@ def test_approval_that_waits_out_a_lock_sees_the_committed_row(tenant):
         session.execute(
           text("SELECT id FROM events WHERE id = :id FOR UPDATE"), {"id": EVENT_ID}
         )
-        time.sleep(1.0)
+        lock_held.set()
+        release.wait(timeout=10)
         session.execute(
           text("UPDATE events SET status = 'voided' WHERE id = :id"), {"id": EVENT_ID}
         )
       hold_released.set()
     except BaseException as exc:  # surfaced in the main thread below
       failure.append(exc)
+      lock_held.set()
       hold_released.set()
 
   t = threading.Thread(target=winner)
   t.start()
   try:
-    time.sleep(0.2)  # let the winner take the lock first
+    assert lock_held.wait(timeout=10), "winner never acquired the lock"
+    # Hand the lock back on a timer the loser starts only once it is genuinely
+    # blocked, so the wait is bounded by the handoff and not by wall clock.
+    threading.Timer(0.5, release.set).start()
     with extensions_session(GRAPH) as approval_session:
-      # Blocks ~0.8s, well inside the 3s lock_timeout, then re-reads 'voided'
-      # — a terminal state with no outbound transitions.
+      # Blocks until the winner commits (~0.5s, well inside the 3s
+      # lock_timeout), then re-reads 'voided' — terminal, no outbound
+      # transitions.
       with pytest.raises(InvalidEventTransitionError, match="terminal"):
         update_event_block(
           approval_session,
@@ -339,3 +352,83 @@ class TestPublishLock:
 
     with extensions_session(GRAPH) as check:
       assert check.get(Event, EVENT_ID).status == "committed"
+
+
+class TestSharedSessionRefresh:
+  """`execute_event_block` calls `populate_existing()` on its locked read, and
+  `close_service`'s QB pre-publish loop calls it on a **shared** session that
+  already loaded these events. That combination has to do two things at once:
+  pick up what another transaction committed, and not discard what this one has
+  in flight. This was asserted from SQLAlchemy's autoflush semantics when the
+  lock landed; it is the close path, so it gets a test rather than an argument.
+  """
+
+  def test_refresh_picks_up_a_committed_change(self, tenant):
+    with extensions_session(GRAPH) as session:
+      stale = session.get(Event, EVENT_ID)
+      assert stale.status == "captured"
+
+      # Another transaction moves it underneath us.
+      with extensions_session(GRAPH) as other:
+        other.execute(
+          text("UPDATE events SET status = 'classified' WHERE id = :id"),
+          {"id": EVENT_ID},
+        )
+
+      refreshed = (
+        session.query(Event)
+        .filter(Event.id == EVENT_ID)
+        .populate_existing()
+        .with_for_update()
+        .first()
+      )
+      assert refreshed is stale, "identity map should hand back the same object"
+      assert refreshed.status == "classified", "populate_existing must re-read"
+
+  def test_populate_existing_alone_discards_a_pending_write(self, tenant):
+    """Why `execute_event_block` flushes before its locked read.
+
+    This factory is `autoflush=False` (`db/extensions.py`), so
+    `populate_existing()` on its own overwrites an unflushed in-session change
+    with the database's value — silently, since the discarded value simply
+    stops existing. Pinned as the reason the flush is there, because the flush
+    looks removable without it.
+    """
+    with extensions_session(GRAPH) as session:
+      event = session.get(Event, EVENT_ID)
+      event.description = "in flight"
+
+      refreshed = (
+        session.query(Event)
+        .filter(Event.id == EVENT_ID)
+        .populate_existing()
+        .with_for_update()
+        .first()
+      )
+      assert refreshed.description is None  # the edit is gone
+      session.rollback()
+
+  def test_the_command_keeps_a_pending_write(self, tenant):
+    """The property that matters: going through `execute_event_block`, an
+    in-flight edit on a shared session survives its locked re-read."""
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    with extensions_session(GRAPH) as session:
+      event = session.get(Event, EVENT_ID)
+      event.description = "set by the close loop, not yet committed"
+
+      # Native fast-path (no connection_id) — reaches the locked read and
+      # returns without a QB round-trip.
+      execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id=EVENT_ID),
+        created_by="usr_operator",
+      )
+
+      assert event.description == "set by the close loop, not yet committed"
+
+    with extensions_session(GRAPH) as check:
+      assert (
+        check.get(Event, EVENT_ID).description
+        == "set by the close loop, not yet committed"
+      )

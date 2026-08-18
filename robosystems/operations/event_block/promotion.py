@@ -234,6 +234,10 @@ def promote_pending_obligations(
       Event.status.in_(("pending", "classified")),
       Event.occurred_at <= as_of,
     )
+    # Ordered so this and `supersede_pending_obligations` — whose row sets
+    # overlap on pending obligations — can never acquire in opposing orders.
+    # See `locking.ORDERED_LOCK_KEY`.
+    .order_by(Event.id)
     .with_for_update()
     .all()
   )

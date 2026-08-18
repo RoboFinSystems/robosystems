@@ -378,6 +378,7 @@ def update_event_block(
   #
   # Bounded, because the conflicting writer is usually a sync or a promotion
   # sweep that runs long — see `locking.bounded_lock_wait`.
+  session.flush()  # pairs with populate_existing below; autoflush is off here
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -387,7 +388,7 @@ def update_event_block(
     # production caller opens a fresh session per request, so the identity map
     # is empty today, but a caller that reused a session would otherwise get
     # the lock and a stale status — the one combination this guard exists to
-    # prevent.
+    # prevent. The flush that pairs with it is there too, one line up.
     event = session.get(
       Event, body.event_id, with_for_update=True, populate_existing=True
     )
@@ -684,6 +685,16 @@ def execute_event_block(
   # QB pre-publish loop calls this on a **shared** session that already loaded
   # these events, so without it the lock would be taken while `event.status`
   # kept the value it held before blocking.
+  #
+  # The flush pairs with it and is not optional. This factory is
+  # `autoflush=False` (`db/extensions.py`), so a re-read would otherwise
+  # overwrite any in-flight change to this row that the caller had not yet
+  # written — silently, since the discarded value simply stops existing. Flush
+  # first and the re-read returns our own pending write along with anything
+  # another transaction committed. No caller has pending event writes here
+  # today; this makes that a property of the function rather than of its
+  # callers.
+  session.flush()
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process. Retry in a moment.",

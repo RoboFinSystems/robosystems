@@ -941,6 +941,9 @@ class ScheduleService:
           Event.obligated_by_event_id == schedule_created_event_id,
           Event.status == "pending",
         )
+        # Same order as the promotion sweep's candidate load — the two overlap
+        # on exactly these rows. See `locking.ORDERED_LOCK_KEY`.
+        .order_by(Event.id)
         .with_for_update()
       ).scalars()
     )
