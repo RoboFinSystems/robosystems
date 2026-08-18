@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -229,7 +230,14 @@ class FiscalCalendarService:
       updated_by=created_by,
     )
     session.add(calendar)
-    session.flush()
+    try:
+      session.flush()
+    except IntegrityError as exc:
+      # Two initializations racing past the `get` above: the second one
+      # trips `uq_fiscal_calendar_graph`. Say what happened instead of 500.
+      raise CalendarAlreadyInitializedError(
+        f"Fiscal calendar for graph {graph_id} was initialized concurrently."
+      ) from exc
     logger.info(
       f"Created fiscal calendar for graph {graph_id} "
       f"(fiscal_year_start_month={fiscal_year_start_month})"

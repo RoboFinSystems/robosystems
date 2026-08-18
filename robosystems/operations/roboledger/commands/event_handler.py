@@ -91,7 +91,17 @@ def update_event_handler(
   body: UpdateEventHandlerRequest,
   created_by: str,
 ) -> EventHandlerResponse:
-  handler = session.get(EventHandler, body.event_handler_id)
+  # Locked: `metadata_patch` merges into the JSON blob read here, and the
+  # approve/template fields are decided from the row as read.
+  from robosystems.operations.locking import lock_by_id
+
+  handler = lock_by_id(
+    session,
+    EventHandler,
+    body.event_handler_id,
+    f"Event handler {body.event_handler_id} is being written by another "
+    "process. Retry in a moment.",
+  )
   if handler is None:
     raise EventHandlerNotFoundError(body.event_handler_id)
 

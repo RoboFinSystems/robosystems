@@ -183,14 +183,11 @@ def update_portfolio_block(
   for field, value in portfolio_patch.items():
     setattr(portfolio, field, value)
 
-  for spec in body.positions.add:
-    _add_position(session, body.portfolio_id, spec, created_by)
-
-  for patch in body.positions.update:
-    row = position_map[patch.id]
-    for field, value in patch.model_dump(exclude_unset=True, exclude={"id"}).items():
-      setattr(row, field, value)
-
+  # Disposals and patches first, adds last. `_add_position` flushes each add
+  # so a duplicate active position surfaces as its typed error — and the
+  # partial unique index is on *active* positions, so disposing a security's
+  # current position and re-adding it in the same call is legitimate only if
+  # the disposal has reached the database before the add is flushed.
   for spec in body.positions.dispose:
     row = position_map[spec.id]
     row.status = "disposed"
@@ -199,6 +196,16 @@ def update_portfolio_block(
       meta = dict(row.metadata_) if isinstance(row.metadata_, dict) else {}
       meta["disposition_reason"] = spec.disposition_reason
       row.metadata_ = meta
+
+  for patch in body.positions.update:
+    row = position_map[patch.id]
+    for field, value in patch.model_dump(exclude_unset=True, exclude={"id"}).items():
+      setattr(row, field, value)
+
+  session.flush()
+
+  for spec in body.positions.add:
+    _add_position(session, body.portfolio_id, spec, created_by)
 
   # Bump updated_at on the portfolio so the envelope reflects this write
   # even when only positions changed.

@@ -13,6 +13,7 @@ all delegate here.
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.common import DeleteResult
@@ -112,6 +113,10 @@ class ElementNotFoundError(LookupError):
     super().__init__(f"{side} element not found: {element_id}")
     self.side = side  # "source" or "target"
     self.element_id = element_id
+
+
+class EntityTaxonomyConflictError(ValueError):
+  """An entity↔taxonomy adoption collided with a concurrent identical link."""
 
 
 class MappingAssociationExistsError(ValueError):
@@ -276,7 +281,14 @@ def create_mapping_association(
     created_by=created_by,
   )
   session.add(assoc)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # The pre-check above lost a race with a concurrent identical insert; the
+    # unique key is the truth. Same answer as the check.
+    raise MappingAssociationExistsError(
+      body.mapping_id, body.from_element_id, body.to_element_id
+    ) from exc
 
   return AssociationResponse(
     id=assoc.id,
@@ -604,7 +616,17 @@ def link_entity_taxonomy(
     adoption_context=body.adoption_context,
   )
   session.add(adoption)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # Concurrent identical adoption, or a concurrent primary for the same
+    # basis (`idx_entity_taxonomies_primary`) landing between the clear above
+    # and this insert. Both are "already linked", not a fault.
+    raise EntityTaxonomyConflictError(
+      f"Entity {entity.id} already has a {body.basis!r} link to taxonomy "
+      f"{body.taxonomy_id!r} (or another primary for that basis landed "
+      "concurrently). Retry to read the current state."
+    ) from exc
 
   return EntityTaxonomyResponse(
     entity_id=adoption.entity_id,

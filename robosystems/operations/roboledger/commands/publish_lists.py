@@ -218,7 +218,12 @@ def add_publish_list_members(
     )
     session.add(member)
     added.append(member)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # A concurrent add of the same recipient slipped between the check above
+    # and this insert; the unique key says so. Same answer as the check.
+    raise MembersAlreadyPresentError(list(body.target_graph_ids)) from exc
 
   return enrich_members(added)
 

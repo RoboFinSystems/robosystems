@@ -10,10 +10,11 @@ from __future__ import annotations
 import importlib.util as _util
 from pathlib import Path
 
+import pytest
 from sqlalchemy import CheckConstraint
 
 from robosystems.db import extensions as extensions_db
-from robosystems.models.extensions import Structure
+from robosystems.models.extensions import Association, Element, Structure, Taxonomy
 from robosystems.taxonomy.writer import _ELEMENT_COLS
 
 _MIGRATION_PATH = (
@@ -94,4 +95,42 @@ class TestMetricTypeInStructureCheck:
     )
     assert any("associations" in s and "'has-part'" in s for s in statements), (
       "check_association_type widener must admit association_type='has-part'"
+    )
+
+
+class TestModelChecksMatchTheWidener:
+  """The model CHECKs and the provisioning widener now derive from the same
+  vocabulary tuples; a `create_all` tenant and a widened tenant carry
+  identical constraints. Guards the single-sourcing itself."""
+
+  @pytest.mark.parametrize(
+    ("model", "check_name", "column"),
+    [
+      (Structure, "check_block_type", "block_type"),
+      (Element, "check_element_source", "source"),
+      (Association, "check_association_type", "association_type"),
+      (Taxonomy, "check_taxonomy_type", "taxonomy_type"),
+    ],
+  )
+  def test_widener_installs_exactly_the_model_check(
+    self, model, check_name: str, column: str
+  ) -> None:
+    [check] = [
+      c
+      for c in model.__table__.constraints
+      if isinstance(c, CheckConstraint) and c.name == check_name
+    ]
+    model_clause = str(check.sqltext)
+
+    statements: list[str] = []
+
+    class FakeConn:
+      def execute(self, statement):
+        statements.append(str(statement))
+
+    extensions_db._widen_library_checks(FakeConn(), "kg0123456789abcdef")
+    [installed] = [s for s in statements if f"ADD CONSTRAINT {check_name}" in s]
+    assert model_clause in installed, (
+      f"{check_name}: the model CHECK and the widener disagree — edit the "
+      f"{column} vocabulary tuple on the model, not either CHECK"
     )

@@ -31,6 +31,7 @@ from sqlalchemy import (
   DateTime,
   Index,
   String,
+  text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -110,6 +111,17 @@ class Event(ExtensionsBase):
       "external_id",
       unique=True,
       postgresql_where="external_id IS NOT NULL",
+    ),
+    # QuickBooks writeback marker lookups (`loader.py`, `qb_writeback.py`)
+    # filter on `metadata->>'qb_external_id'`. Migration 0014 fanned this
+    # index out to the tenants that existed then (under a schema-prefixed
+    # name); tenants provisioned by `create_all` afterwards had no index at
+    # all — every marker lookup was a sequential scan of `events`. Declared
+    # here so a fresh tenant gets it; 0033 backfills the ones in between.
+    Index(
+      "idx_events_qb_external_id",
+      text("(metadata->>'qb_external_id')"),
+      postgresql_where=text("metadata->>'qb_external_id' IS NOT NULL"),
     ),
     CheckConstraint(
       "status IN ('captured', 'classified', 'committed', 'pending', 'fulfilled', 'voided', 'superseded')",

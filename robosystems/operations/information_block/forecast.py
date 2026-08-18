@@ -34,6 +34,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.api.information_block import (
@@ -473,8 +474,19 @@ def _ensure_scenario_dimension(session: Session, scenario_id: str, name: str) ->
     name=name,
     value=scenario_id,
   )
-  session.add(dimension)
-  session.flush()
+  try:
+    # Savepoint: the get-or-create is racy across two concurrent first
+    # writers of the same scenario; the loser reads the row that won.
+    with session.begin_nested():
+      session.add(dimension)
+      session.flush()
+  except IntegrityError:
+    return session.execute(
+      select(Dimension.id).where(
+        Dimension.dimension_type == "scenario",
+        Dimension.value == scenario_id,
+      )
+    ).scalar_one()
   return dimension.id
 
 
@@ -626,7 +638,18 @@ def create(
 
 
 def _load_forecast_or_404(session: Session, structure_id: str) -> Structure:
-  structure = session.get(Structure, structure_id)
+  # Locked: `update` merges into the `artifact_mechanics` JSON read here, so
+  # two concurrent updates on an unlocked row would each write the version
+  # they read. `delete` decides from the same read. `RowLockedError` on
+  # contention, mapped to 409 by the surface.
+  from robosystems.operations.locking import lock_by_id
+
+  structure = lock_by_id(
+    session,
+    Structure,
+    structure_id,
+    f"Forecast {structure_id} is being written by another process. Retry in a moment.",
+  )
   if structure is None or structure.block_type != FORECAST_BLOCK_TYPE:
     raise ValueError(
       f"Forecast structure_id={structure_id!r} not found (or wrong block_type)."

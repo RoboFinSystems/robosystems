@@ -210,13 +210,14 @@ def create_element(
 ) -> ElementResponse:
   """Create a new element within a taxonomy.
 
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
-  invoked indirectly by those operations.
+  Internal primitive, not mounted on any surface. Tenant element writes go
+  through the taxonomy block surface (``create-taxonomy-block`` /
+  ``update-taxonomy-block``), which has its own element path; this stays as
+  the single-element primitive for scripts and future callers.
 
   Raises `TaxonomyNotFoundError` if `body.taxonomy_id` does not exist,
-  or `ElementNotFoundError` if `body.parent_id` is set but the parent
-  does not exist.
+  `ElementNotFoundError` if `body.parent_id` is set but the parent does not
+  exist, or `ElementQNameConflictError` when the derived qname is taken.
   """
   taxonomy = session.execute(
     select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
@@ -257,14 +258,16 @@ def create_element(
     is_active=True,
     created_by=created_by,
   )
-  session.add(element)
   try:
-    session.flush()
+    # Under a savepoint: a qname collision must not roll back the caller's
+    # whole transaction — only this insert.
+    with session.begin_nested():
+      session.add(element)
+      session.flush()
   except IntegrityError as exc:
     # Partial unique index `idx_elements_qname` fires when two CamelCased
     # account names collapse to the same qname. Translate to a domain
     # exception so the API layer can return 409 instead of 500.
-    session.rollback()
     if "idx_elements_qname" in str(exc.orig):
       raise ElementQNameConflictError(resolved_qname) from exc
     raise

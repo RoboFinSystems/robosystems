@@ -7,6 +7,7 @@ here because it's only used by `share_report`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -593,13 +594,8 @@ def regenerate_report(
     taxonomy_id=report_def.taxonomy_id,
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
-  # land. The FK `facts.fact_set_id → fact_sets.id` is ON DELETE CASCADE,
-  # so dropping the parent fact_sets cleans the child facts in one
-  # statement.
-  session.execute(
-    text("DELETE FROM fact_sets WHERE report_id = :report_id"),
-    {"report_id": report_def.id},
-  )
+  # land — facts by cascade, verification results by the sweep.
+  delete_report_fact_sets(session, [report_def.id])
   _pre_create_report_fact_sets(
     session,
     report_def.id,
@@ -849,11 +845,7 @@ def delete_report(
       f"retiring; deletion is only available for 'draft' or 'under_review'."
     )
 
-  # Facts cascade from their parent fact_sets on delete.
-  session.execute(
-    text("DELETE FROM fact_sets WHERE report_id = :report_id"),
-    {"report_id": report_id},
-  )
+  delete_report_fact_sets(session, [report_id])
   session.delete(report_def)
   session.commit()
   return True
@@ -1237,6 +1229,30 @@ def _copy_publication_artifacts(
     )
 
 
+def delete_report_fact_sets(session: Session, report_ids: Sequence[str]) -> None:
+  """Delete the statement sets of these reports, and what hangs off them.
+
+  Facts cascade from ``fact_sets`` at the DB level. ``verification_results``
+  only *loosely* references a set (``fact_set_id`` carries no FK), so it has
+  to be swept here or every regenerate, delete, purge and re-share leaves the
+  evaluated rule results of the removed snapshot behind as orphans.
+  """
+  ids = list(report_ids)
+  if not ids:
+    return
+  session.execute(
+    text(
+      "DELETE FROM verification_results WHERE fact_set_id IN "
+      "(SELECT id FROM fact_sets WHERE report_id = ANY(:report_ids))"
+    ),
+    {"report_ids": ids},
+  )
+  session.execute(
+    text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
+    {"report_ids": ids},
+  )
+
+
 def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   """Remove the object-store artifacts of reports whose rows are gone.
 
@@ -1257,7 +1273,13 @@ def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   if not report_ids:
     return
   bucket = env.USER_DATA_BUCKET
-  s3 = S3Client()
+  try:
+    s3 = S3Client()
+  except Exception as exc:
+    # Runs after the row deletion committed; a storage client that cannot be
+    # built must not turn a completed withdrawal into a failed request.
+    logger.warning("Object store unavailable; leaving report artifacts: %s", exc)
+    return
   for report_id in report_ids:
     prefix = get_report_bundle_prefix(graph_id, report_id)
     try:
@@ -1301,11 +1323,7 @@ def _delete_copies_in_session(
   if not copy_ids:
     return []
 
-  # Facts cascade from their parent fact_sets, so the fact_sets go first.
-  target_session.execute(
-    text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
-    {"report_ids": copy_ids},
-  )
+  delete_report_fact_sets(target_session, copy_ids)
   target_session.execute(
     text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
     {"report_ids": copy_ids},

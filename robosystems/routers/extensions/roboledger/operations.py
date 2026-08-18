@@ -408,6 +408,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
   ElementNotFoundError,
   EntityNotFoundError,
+  EntityTaxonomyConflictError,
   MappingAssociationExistsError,
   MappingStructureNotFoundError,
 )
@@ -1044,6 +1045,7 @@ link_entity_taxonomy_op = _registrar.register(
     error_map={
       EntityNotFoundError: 404,
       TaxonomyMissingError: 404,
+      EntityTaxonomyConflictError: 409,
     },
     mark_stale_reason="entity_taxonomy_linked",
     requires_created_by=False,
@@ -1493,7 +1495,7 @@ update_agent_op = _registrar.register(
     command=cmd_update_agent,
     request_model=UpdateAgentRequest,
     result_type=LedgerAgentResponse,
-    error_map={AgentNotFoundError: 404, ValueError: 422},
+    error_map={AgentNotFoundError: 404, RowLockedError: 409, ValueError: 422},
     mark_stale_reason="agent_updated",
   )
 )
@@ -1689,6 +1691,7 @@ update_event_handler_op = _registrar.register(
     error_map={
       EventHandlerNotFoundError: 404,
       TemplateValidationError: 422,
+      RowLockedError: 409,
       ValueError: 422,
     },
   )
@@ -2413,11 +2416,18 @@ async def delete_report_op(
   # The OLAP projection is a full rebuild from OLTP, so a deleted report leaves
   # the graph only once the graph is marked stale. Without this the recipient's
   # delete is cosmetic — the report stays queryable by their AI operators.
+  # The report's published artifacts go after the rows commit, never before
+  # (see `delete_report_artifacts`); a native report's bundles were the one
+  # withdrawal that used to leave them in the bucket.
+  def _finish_delete(_env) -> None:
+    mark_graph_stale(graph_id, "report_deleted")
+    delete_report_artifacts(graph_id, [body.report_id])
+
   return await _dispatch(
     ctx,
     _runner,
     cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_deleted"),
+    on_fresh_success=_finish_delete,
   )
 
 

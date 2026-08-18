@@ -104,3 +104,22 @@ class TestProvisionRefusesDeprovisionedGraph:
     ):
       provision_tenant_schema(GRAPH)
     engine.connect.assert_called_once()
+
+
+class TestEngineSessionGuards:
+  def test_engine_sets_an_idle_in_transaction_timeout(self):
+    """A leaked idle-in-transaction session holding FOR UPDATE blocked writers
+    for as long as the connection lived; Postgres now closes it."""
+    from unittest.mock import patch
+
+    with (
+      patch.object(ext, "create_engine") as create_engine,
+      patch.object(ext, "get_extensions_database_url", return_value="postgresql://x"),
+    ):
+      ext._create_extensions_engine()
+    kwargs = create_engine.call_args.kwargs
+    assert (
+      f"idle_in_transaction_session_timeout={ext.IDLE_IN_TRANSACTION_TIMEOUT_MS}"
+      in kwargs["connect_args"]["options"]
+    )
+    assert "statement_timeout" not in kwargs["connect_args"]["options"]

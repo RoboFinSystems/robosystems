@@ -40,6 +40,25 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# The `taxonomies.taxonomy_type` vocabulary — the single source for the model
+# CHECK and the tenant-provisioning widen step. 'reporting' is retained
+# transitionally for rows copied from an un-backfilled public schema; tenant
+# writes use 'reporting_standard' / 'reporting_extension' / 'custom_ontology'.
+TAXONOMY_TYPE_VALUES: tuple[str, ...] = (
+  "chart_of_accounts",
+  "reporting",
+  "mapping",
+  "schedule",
+  "trait-vocabulary",
+  "trait-assignment",
+  "classification-vocabulary",
+  "classification-assignment",
+  "rules",
+  "reporting_standard",
+  "reporting_extension",
+  "custom_ontology",
+)
+
 
 class Taxonomy(ExtensionsBase):
   __tablename__ = "taxonomies"
@@ -56,11 +75,7 @@ class Taxonomy(ExtensionsBase):
       postgresql_where="parent_taxonomy_id IS NOT NULL",
     ),
     CheckConstraint(
-      "taxonomy_type IN ("
-      "'chart_of_accounts', 'mapping', 'schedule', "
-      "'classification-vocabulary', 'classification-assignment', 'rules', "
-      "'reporting_standard', 'reporting_extension', 'custom_ontology'"
-      ")",
+      "taxonomy_type IN (" + ", ".join(f"'{v}'" for v in TAXONOMY_TYPE_VALUES) + ")",
       name="check_taxonomy_type",
     ),
     CheckConstraint(

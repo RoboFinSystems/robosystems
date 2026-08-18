@@ -32,6 +32,44 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# The `elements.source` vocabulary — the single source for the model CHECK and
+# for the tenant-provisioning widen step (`db.extensions._widen_library_checks`),
+# which used to carry its own copy that drifted from this one.
+#
+# 'system' is reserved for internal FK-anchor elements created by the taxonomy
+# seed (e.g., struct_balance_sheet) and is intentionally NOT in COA_SOURCES so
+# those rows never appear in the Chart of Accounts.
+# 'disclosures' / 'checklist' / 'styles' — rs-gaap framework extension packages
+# anchored to sibling namespaces of rs-gaap.
+# 'cm' — Conceptual Model posting-role concepts (cm:Debit/cm:Credit),
+# tenant-copied with the default pin so schedule has-part arcs resolve.
+# 'rs-metric' — the metric catalog package (seeded at 0002 on fresh databases,
+# backfilled by 0022 on existing ones).
+# 'rs-driver' — the forecast lever catalog package (seeded at 0024).
+# 'linked' — a concept that arrived with a report shared from another graph.
+# Deliberately NOT in COA_SOURCES: the sender's reporting extension has to
+# exist here for their facts to mean anything, but their revenue accounts are
+# not the recipient's chart of accounts. Mirrors Entity.source='linked'.
+ELEMENT_SOURCE_VALUES: tuple[str, ...] = (
+  "fac",
+  "rs-gaap",
+  "us-gaap",
+  "ifrs",
+  "quickbooks",
+  "xero",
+  "plaid",
+  "native",
+  "import",
+  "system",
+  "disclosures",
+  "checklist",
+  "styles",
+  "rs-metric",
+  "rs-driver",
+  "cm",
+  "linked",
+)
+
 
 class Element(ExtensionsBase):
   __tablename__ = "elements"
@@ -99,22 +137,7 @@ class Element(ExtensionsBase):
       name="check_element_type",
     ),
     CheckConstraint(
-      # 'system' is reserved for internal FK-anchor elements created by the
-      # taxonomy seed (e.g., struct_balance_sheet) and is intentionally NOT
-      # in COA_SOURCES so those rows never appear in the Chart of Accounts.
-      "source IN ('fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-      "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-      # 'cm' — Conceptual Model posting-role concepts (cm:Debit/cm:Credit),
-      # tenant-copied with the default pin so schedule has-part arcs resolve.
-      # 'rs-metric' — the metric catalog package (seeded at 0002 on fresh
-      # databases, backfilled by 0022 on existing ones).
-      # 'rs-driver' — the forecast lever catalog package (seeded at 0024).
-      # 'linked' — a concept that arrived with a report shared from another
-      # graph. Deliberately NOT in COA_SOURCES: the sender's reporting
-      # extension has to exist here for their facts to mean anything, but
-      # their revenue accounts are not the recipient's chart of accounts.
-      # Mirrors Entity.source='linked' for the same reason.
-      "'cm', 'rs-metric', 'rs-driver', 'linked')",
+      "source IN (" + ", ".join(f"'{v}'" for v in ELEMENT_SOURCE_VALUES) + ")",
       name="check_element_source",
     ),
   )

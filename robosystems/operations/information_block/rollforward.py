@@ -154,7 +154,18 @@ def create(
 
 
 def _load_rollforward_or_404(session: Session, structure_id: str) -> Structure:
-  structure = session.get(Structure, structure_id)
+  # Locked: `update` merges into the `artifact_mechanics` JSON read here, so
+  # two concurrent updates on an unlocked row would each write the version
+  # they read. `delete` decides from the same read. `RowLockedError` on
+  # contention, mapped to 409 by the surface.
+  from robosystems.operations.locking import lock_by_id
+
+  structure = lock_by_id(
+    session,
+    Structure,
+    structure_id,
+    f"Rollforward {structure_id} is being written by another process. Retry in a moment.",
+  )
   if structure is None or structure.block_type != ROLLFORWARD_BLOCK_TYPE:
     raise ValueError(
       f"Rollforward structure_id={structure_id!r} not found (or wrong block_type)."

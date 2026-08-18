@@ -24,6 +24,11 @@ from robosystems.config import env
 # but we re-validate here for defense in depth against SQL injection.
 _VALID_SCHEMA_PATTERN = re.compile(r"^kg[0-9a-f]{16,}$")
 
+# Five minutes: longer than any legitimate pause inside an extensions
+# transaction (a close's QuickBooks publish is the slowest, and it commits
+# between batches), far shorter than "until the ECS task is replaced".
+IDLE_IN_TRANSACTION_TIMEOUT_MS = 5 * 60 * 1000
+
 
 # Sentinel used in place of a real graph_id when the caller is routing to
 # the taxonomy library. `extensions_session(LIBRARY_GRAPH_ID)` binds the
@@ -66,6 +71,19 @@ def _create_extensions_engine():
     pool_recycle=TuningConfig.get_database_pool_recycle(),
     pool_pre_ping=True,
     echo=env.DATABASE_ECHO,
+    # A session that opened a transaction, took row locks (`FOR UPDATE`, the
+    # period fence's row locks) and then went idle — a task killed mid-request,
+    # a leaked connection — blocked every writer of those rows for as long as
+    # the connection lived. Postgres closes such a session after this long.
+    # Idle *inside* a transaction only; a busy statement (a long loader sync)
+    # is untouched, and so is a pooled connection idle between transactions.
+    # No `statement_timeout` here on purpose: loader syncs and materialization
+    # reads legitimately run long, and a wrong value there is an outage.
+    connect_args={
+      "options": (
+        f"-c idle_in_transaction_session_timeout={IDLE_IN_TRANSACTION_TIMEOUT_MS}"
+      )
+    },
   )
 
 
@@ -269,85 +287,27 @@ def _install_library_immutability_triggers(conn, schema: str) -> None:
 
 
 def _widen_library_checks(conn, schema: str) -> None:
-  """Align tenant-template CHECKs with the library's widened vocabulary.
+  """Align tenant-template CHECKs with the library's vocabulary.
 
   Matches the widening applied in the 0002 migration so a fresh provision
-  lands in the same state as a backfilled tenant (admits ``equivalence``,
-  ``general-special``, ``essence-alias``, ``has-part`` association types
-  and the ``fac``/``rs-gaap``/``cm`` element sources, the rules taxonomy
-  type, and the full Information Block structure-type vocabulary that the
-  library uses).
+  lands in the same state as a backfilled tenant. The vocabularies come from
+  the models — one source for the CHECK the model declares and the CHECK
+  this installs, so the two cannot drift again (they had: the model lists
+  were missing values this function admitted).
   """
-  widened_assoc = (
-    "association_type IN ("
-    "'presentation', 'calculation', 'mapping', "
-    "'equivalence', 'general-special', 'essence-alias', "
-    # 'definition' arcs land from rs-gaap-disclosure-mechanics,
-    # rs-gaap-reporting-checklist, and rs-gaap-reporting-styles.
-    "'definition', "
-    # 'derivation' arcs map BS leaves to their CF default change tags
-    # (rs-gaap-calculations).
-    "'derivation', "
-    # 'has-part' arcs declare cm:Debit/cm:Credit posting legs on schedule
-    # structures (the cm framework).
-    "'has-part'"
-    ")"
-  )
-  widened_source = (
-    "source IN ("
-    "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-    "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-    # rs-gaap framework extension packages anchored to
-    # sibling namespaces of rs-gaap.
-    "'disclosures', 'checklist', 'styles', 'rs-metric', 'rs-driver', "
-    # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
-    # tenant-copied with the default pin.
-    "'cm', "
-    # linked — concepts that arrived with a report shared from another
-    # graph (see Element.source). Not a CoA source.
-    "'linked'"
-    ")"
-  )
-  widened_taxonomy_type = (
-    "taxonomy_type IN ("
-    # 'reporting' retained transitionally for any rows copied from an
-    # un-backfilled public schema; tenant writes use
-    # 'reporting_standard' / 'reporting_extension' / 'custom_ontology'.
-    "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-    "'trait-vocabulary', 'trait-assignment', "
-    "'classification-vocabulary', 'classification-assignment', 'rules', "
-    "'reporting_standard', 'reporting_extension', 'custom_ontology'"
-    ")"
-  )
-  # Must stay in sync with both the SQLAlchemy model
-  # (``models/extensions/structure.py``) and the platform migration
-  # (``migrations/extensions/versions/0002_taxonomy_library.py``).
-  # ``copy_library_into_tenant`` mirrors rows from ``public.structures``
-  # — a tenant-side CHECK narrower than public's silently fails graph
-  # creation when the library introduces a new block_type value.
-  widened_block_type = (
-    "block_type IN ("
-    # Renderable financial-statement presentations
-    "'income_statement', 'balance_sheet', "
-    "'cash_flow_statement', 'equity_statement', "
-    "'comprehensive_income', "
-    # Domain-specific working-paper / schedule patterns
-    "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
-    # Forecast — authored scenario container (FP&A engine, 0024).
-    "'forecast', "
-    # CoA + CoA→GAAP mapping
-    "'chart_of_accounts', 'coa_mapping', "
-    # Reference-taxonomy structure kinds (XBRL network roles distinct
-    # from presentation): formal calculation rules, named SEC/regulatory
-    # disclosures, crosswalks between taxonomies.
-    "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
-    # Reporting Style — the bundle a company picks;
-    # composes Networks per statement_type via reporting_style_networks.
-    "'reporting_style', "
-    # Escape hatch
-    "'custom'"
-    ")"
-  )
+  # Function-level import: the models import `ExtensionsBase` from here.
+  from robosystems.models.extensions.association import ASSOCIATION_TYPE_VALUES
+  from robosystems.models.extensions.element import ELEMENT_SOURCE_VALUES
+  from robosystems.models.extensions.structure import BLOCK_TYPE_VALUES
+  from robosystems.models.extensions.taxonomy import TAXONOMY_TYPE_VALUES
+
+  def _in(column: str, values: tuple[str, ...]) -> str:
+    return f"{column} IN (" + ", ".join(f"'{v}'" for v in values) + ")"
+
+  widened_assoc = _in("association_type", ASSOCIATION_TYPE_VALUES)
+  widened_source = _in("source", ELEMENT_SOURCE_VALUES)
+  widened_taxonomy_type = _in("taxonomy_type", TAXONOMY_TYPE_VALUES)
+  widened_block_type = _in("block_type", BLOCK_TYPE_VALUES)
   conn.execute(
     text(
       f'ALTER TABLE "{schema}".associations '

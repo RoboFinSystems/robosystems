@@ -22,6 +22,26 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# The `associations.association_type` vocabulary — the single source for the
+# model CHECK and the tenant-provisioning widen step.
+# 'definition' arcs land from rs-gaap-disclosure-mechanics,
+# rs-gaap-reporting-checklist and rs-gaap-reporting-styles.
+# 'derivation' arcs map BS leaves to their CF default change tags.
+# 'has-part' — Conceptual Model posting arcs: cm:Debit/cm:Credit ─has-part→ a
+# CoA element, declaring the debit/credit legs of a schedule's posting
+# template as first-class atoms.
+ASSOCIATION_TYPE_VALUES: tuple[str, ...] = (
+  "presentation",
+  "calculation",
+  "mapping",
+  "equivalence",
+  "general-special",
+  "essence-alias",
+  "definition",
+  "derivation",
+  "has-part",
+)
+
 
 class Association(ExtensionsBase):
   __tablename__ = "associations"
@@ -44,13 +64,8 @@ class Association(ExtensionsBase):
     ),
     CheckConstraint(
       "association_type IN ("
-      "'presentation', 'calculation', 'mapping', 'derivation', "
-      "'equivalence', 'general-special', 'essence-alias', "
-      # 'has-part' — Conceptual Model posting arcs: cm:Debit/cm:Credit
-      # ─has-part→ a CoA element, declaring the debit/credit legs of a
-      # schedule's posting template as first-class atoms.
-      "'has-part'"
-      ")",
+      + ", ".join(f"'{v}'" for v in ASSOCIATION_TYPE_VALUES)
+      + ")",
       name="check_association_type",
     ),
   )

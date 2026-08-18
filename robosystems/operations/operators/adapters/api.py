@@ -14,6 +14,7 @@ from robosystems.operations.operators.ai_client import AIClient
 from robosystems.operations.operators.base import (
   OperatorMode,
   OperatorResult,
+  enforce_operator_graph_scope,
   enforce_operator_write_role,
 )
 from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
@@ -53,6 +54,7 @@ async def run_operator_api(
   # identity, so this is the only point at which the caller's graph role can
   # be checked on this path.
   enforce_operator_write_role(operator, graph_id, str(user.id))
+  enforce_operator_graph_scope(operator, graph_id)
 
   # Credits are consumed after each Bedrock call returns, so this pre-flight is
   # what bounds spend. The SSE and background-queue strategies reach this

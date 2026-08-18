@@ -272,3 +272,72 @@ class TestToolAccessCarriesTheActingUser:
     access = DirectToolAccess(GRAPH_ID, user_id="usr_worker")
     assert access.user_id == "usr_worker"
     assert DirectToolAccess(GRAPH_ID).user_id is None
+
+
+class TestGraphScopeGate:
+  """The orchestrator checks `graph_scope` when it routes; the SSE, queued and
+  worker paths call the adapters directly and used to skip it."""
+
+  def _scoped_operator(self) -> MagicMock:
+    from robosystems.operations.operators.base import GraphScope
+
+    operator = MagicMock()
+    operator.spec = OperatorSpec(
+      name="Ledger-only Operator",
+      description="test",
+      capabilities=[OperatorCapability.CUSTOM],
+      graph_scope=GraphScope(schema_extension="roboledger"),
+    )
+    operator.run = AsyncMock(return_value=OperatorResult(content="ok"))
+    return operator
+
+  def test_refuses_a_graph_outside_the_scope(self) -> None:
+    from fastapi import HTTPException
+
+    from robosystems.operations.operators.base import enforce_operator_graph_scope
+
+    with patch(
+      "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+      return_value=["roboinvestor"],
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        enforce_operator_graph_scope(self._scoped_operator(), GRAPH_ID)
+    assert exc_info.value.status_code == 403
+
+  def test_passes_a_graph_inside_the_scope_and_unscoped_operators(self) -> None:
+    from robosystems.operations.operators.base import enforce_operator_graph_scope
+
+    with patch(
+      "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+      return_value=["roboledger"],
+    ) as resolve:
+      enforce_operator_graph_scope(self._scoped_operator(), GRAPH_ID)
+      resolve.assert_called_once_with(GRAPH_ID)
+      resolve.reset_mock()
+      enforce_operator_graph_scope(_operator(read_only=False), GRAPH_ID)
+      resolve.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_api_adapter_applies_the_scope_gate(self) -> None:
+    from fastapi import HTTPException
+
+    from robosystems.operations.operators.adapters import api
+
+    user = MagicMock()
+    user.id = USER_ID
+    with (
+      patch.object(api, "enforce_operator_write_role"),
+      patch.object(api, "enforce_operator_credits"),
+      patch(
+        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+        return_value=[],
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await api.run_operator_api(
+          operator=self._scoped_operator(),
+          graph_id=GRAPH_ID,
+          user=user,
+          query="anything",
+        )
+    assert exc_info.value.status_code == 403
