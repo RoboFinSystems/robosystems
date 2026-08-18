@@ -137,7 +137,7 @@ class TestPublishMarkerDurability:
     bad_entry, bad_event = _seed_draft(ext_session, "rejected one")
     ext_session.commit()
 
-    def fake_execute(session, request, created_by):
+    def fake_execute(session, request, created_by, **_kwargs):
       if request.event_id == str(bad_event.id):
         return SimpleNamespace(
           status="pending",
@@ -168,7 +168,7 @@ class TestPublishMarkerDurability:
     _bad_entry, bad_event = _seed_draft(ext_session, "rejected one")
     ext_session.commit()
 
-    def first_attempt(session, request, created_by):
+    def first_attempt(session, request, created_by, **_kwargs):
       if request.event_id == str(bad_event.id):
         return SimpleNamespace(status="pending", qb_error={"code": "6000"})
       _mark_published(session, request.event_id, f"qb_{request.event_id[-6:]}")
@@ -180,7 +180,7 @@ class TestPublishMarkerDurability:
 
     published_on_retry: list[str] = []
 
-    def second_attempt(session, request, created_by):
+    def second_attempt(session, request, created_by, **_kwargs):
       published_on_retry.append(request.event_id)
       _mark_published(session, request.event_id, "qb_retry")
       return SimpleNamespace(status="fulfilled", qb_error=None)
@@ -197,7 +197,7 @@ class TestPublishMarkerDurability:
     entry, event = _seed_draft(ext_session, "june depreciation")
     ext_session.commit()
 
-    def fake_execute(session, request, created_by):
+    def fake_execute(session, request, created_by, **_kwargs):
       _mark_published(session, request.event_id, "qb_ok")
       return SimpleNamespace(status="fulfilled", qb_error=None)
 
@@ -220,7 +220,7 @@ class TestPublishMarkerDurability:
     _locked_entry, locked_event = _seed_draft(ext_session, "lock timeout")
     ext_session.commit()
 
-    def fake_execute(session, request, created_by):
+    def fake_execute(session, request, created_by, **_kwargs):
       if request.event_id == str(locked_event.id):
         raise RowLockedError("event is being written")
       _mark_published(session, request.event_id, "qb_ok")
@@ -237,3 +237,27 @@ class TestPublishMarkerDurability:
     assert persisted.metadata_.get("qb_external_id") == "qb_ok"
     ext_session.refresh(ext_session.get(Event, locked_event.id))
     assert not ext_session.get(Event, locked_event.id).metadata_.get("qb_external_id")
+
+  def test_retracted_event_drafts_are_not_published(self, ext_session):
+    """Voiding an event leaves its draft GL rows. Close must not hand
+    those leftovers to execute — that would un-void the event and post
+    a QB JournalEntry for retracted work."""
+    _live_entry, live_event = _seed_draft(ext_session, "still live")
+    _void_entry, void_event = _seed_draft(ext_session, "voided leftover")
+    void_event.status = "voided"
+    _super_entry, super_event = _seed_draft(ext_session, "superseded leftover")
+    super_event.status = "superseded"
+    ext_session.commit()
+
+    published: list[str] = []
+
+    def fake_execute(session, request, created_by, **_kwargs):
+      published.append(request.event_id)
+      _mark_published(session, request.event_id, "qb_ok")
+      return SimpleNamespace(status="fulfilled", qb_error=None)
+
+    _publish(ext_session, fake_execute)
+
+    assert published == [str(live_event.id)], published
+    assert void_event.id not in published
+    assert super_event.id not in published

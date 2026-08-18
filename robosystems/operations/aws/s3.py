@@ -6,6 +6,7 @@ import asyncio
 import gzip
 import hashlib
 import json
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -23,8 +24,9 @@ from robosystems.logger import logger
 class S3Client:
   """Sync S3 client for general object storage (XBRL textblocks, temp files).
 
-  All methods swallow errors and return a falsy value rather than raising,
-  so callers can translate to HTTP without try/except.
+  Most methods swallow errors and return a falsy value rather than raising,
+  so callers can translate to HTTP without try/except. ``iter_object_keys``
+  is the exception: a failed or truncated listing must not look empty.
   """
 
   def __init__(self, region_name: str | None = None, endpoint_url: str | None = None):
@@ -369,6 +371,22 @@ class S3Client:
     except Exception as e:
       logger.error(f"Unexpected error listing objects from S3: {e}")
       return []
+
+  def iter_object_keys(self, bucket: str, prefix: str | None = None) -> Iterator[str]:
+    """Yield every object key under ``prefix``.
+
+    Paginates ``list_objects_v2``. Raises on S3 failure so a caller can
+    tell a failed list from an empty prefix — ``list_objects`` cannot.
+    """
+    paginator = self.s3_client.get_paginator("list_objects_v2")
+    params: dict[str, Any] = {"Bucket": bucket}
+    if prefix:
+      params["Prefix"] = prefix
+    for page in paginator.paginate(**params):
+      for obj in page.get("Contents") or []:
+        key = obj.get("Key")
+        if key:
+          yield key
 
   def batch_upload_strings(
     self,

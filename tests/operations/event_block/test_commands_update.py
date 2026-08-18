@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -250,6 +250,82 @@ class TestApproveFiresHandler:
     )
     assert event.status == "committed"
     session.commit.assert_called_once()
+
+  def test_commit_takes_period_fence_before_row_lock(self) -> None:
+    """Approval must fence the period before locking the event row.
+
+    Close holds the exclusive fence then the event lock. Taking the
+    event first and the fence in the handler was the inversion that
+    failed close mid-publish.
+    """
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+
+    order: list[str] = []
+    session.query.return_value.filter.return_value.with_for_update.side_effect = (
+      lambda *a, **k: (
+        order.append("row_lock"),
+        session.query.return_value.filter.return_value,
+      )[1]
+    )
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda *a, **k: order.append("fence"),
+      ) as fence,
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fence.assert_called_once()
+    assert order == ["fence", "row_lock"], order
+    # Fenced on the event's current posting date (occurred_at, no effective_at).
+    assert fence.call_args.args[1:] == (date(2026, 3, 1),)
+    assert event.status == "committed"
+
+  def test_commit_with_effective_at_patch_fences_both_dates(self) -> None:
+    """An approval that also moves ``effective_at`` posts against the new
+    date, so the pre-lock fence must cover the period it is moving *to*
+    as well as the one it is leaving — as ``update_journal_entry`` does."""
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(
+      event_id="evt_qb_001",
+      transition_to="committed",
+      effective_at=datetime(2026, 4, 30, 23, 59, 59, tzinfo=UTC),
+    )
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed"
+      ) as fence,
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fence.assert_called_once()
+    assert fence.call_args.args[1:] == (date(2026, 3, 1), date(2026, 4, 30))
+
+  def test_void_does_not_take_period_fence(self) -> None:
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="voided")
+
+    with patch(
+      "robosystems.operations.event_block.commands.assert_period_not_closed"
+    ) as fence:
+      update_event_block(session, body, created_by="usr_test")
+
+    fence.assert_not_called()
+    assert event.status == "voided"
 
   def test_classified_to_committed_fires_handler(self) -> None:
     event = self._journal_event(status="classified")

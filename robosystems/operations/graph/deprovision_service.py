@@ -430,7 +430,11 @@ class GraphDeprovisionService:
 
       deleted = 0
       failed = 0
-      for key in s3.list_objects(bucket, prefix=prefix):
+      # ``iter_object_keys`` paginates and raises on list failure. The
+      # single-page ``list_objects`` treats both an S3 error and a
+      # truncated listing as "prefix empty", which is the one outcome
+      # this step exists to prevent.
+      for key in s3.iter_object_keys(bucket, prefix=prefix):
         if s3.delete_object(bucket, key):
           deleted += 1
         else:

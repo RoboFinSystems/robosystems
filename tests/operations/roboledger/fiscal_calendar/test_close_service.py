@@ -111,10 +111,16 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
   # Route session.query to the right mock based on model. Our service calls:
   # session.query(Entry).filter(...).update(...)
   # session.query(FiscalPeriod).filter(...).one_or_none()
+  # session.query(Event.id).filter(...) — retracted-event exclusion
   def _query_dispatch(model):
-    name = model.__name__ if hasattr(model, "__name__") else str(model)
+    name = getattr(model, "__name__", "")
     if name == "FiscalPeriod":
       return fp_query
+    parent = getattr(model, "class_", None)
+    if name == "Event" or getattr(parent, "__name__", "") == "Event":
+      retracted = MagicMock()
+      retracted.filter.return_value = []
+      return retracted
     return entry_query
 
   session.query.side_effect = _query_dispatch
@@ -857,7 +863,7 @@ class TestClosePrePublishWriteback:
     mock_platform_session.__exit__ = MagicMock(return_value=False)
     mock_platform_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_conn
 
-    def fake_execute(_sess, body, created_by):
+    def fake_execute(_sess, body, created_by, **_kwargs):
       # First event accepts, second rejects.
       if body.event_id == "evt_1":
         return ExecuteEventBlockResponse(

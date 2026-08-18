@@ -13,8 +13,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  WRITEBACK_EXCLUDED_EVENT_STATUSES,
   WritebackConnection,
   resolve_writeback_connection,
+  select_writeback_eligible_entries,
   writeback_eligible_entry_ids,
 )
 
@@ -76,3 +78,20 @@ class TestWritebackEligibleEntryIds:
       writeback_eligible_entry_ids(session, date(2026, 1, 1), date(2026, 1, 31))
       == set()
     )
+
+  def test_predicate_excludes_retracted_event_statuses(self):
+    """Voided / superseded leftovers must not publish. Pinned on the
+    shared predicate so the outbox preview and the close write cannot
+    drift independently of this check."""
+    session = MagicMock()
+    session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+
+    select_writeback_eligible_entries(session, date(2026, 1, 1), date(2026, 1, 31))
+
+    predicates = [
+      str(arg.compile(compile_kwargs={"literal_binds": True}))
+      for arg in session.query.return_value.join.return_value.filter.call_args[0]
+    ]
+    joined = " ".join(predicates)
+    for status in WRITEBACK_EXCLUDED_EVENT_STATUSES:
+      assert status in joined, predicates

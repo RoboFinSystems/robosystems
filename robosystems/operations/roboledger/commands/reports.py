@@ -1221,11 +1221,21 @@ def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   s3 = S3Client()
   for report_id in report_ids:
     prefix = get_report_bundle_prefix(graph_id, report_id)
-    for key in s3.list_objects(bucket, prefix=prefix):
-      if not s3.delete_object(bucket, key):
-        logger.warning(
-          "Failed to delete withdrawn report artifact s3://%s/%s.", bucket, key
-        )
+    try:
+      for key in s3.iter_object_keys(bucket, prefix=prefix):
+        if not s3.delete_object(bucket, key):
+          logger.warning(
+            "Failed to delete withdrawn report artifact s3://%s/%s.",
+            bucket,
+            key,
+          )
+    except Exception as exc:
+      logger.warning(
+        "Failed to list withdrawn report artifacts under s3://%s/%s: %s",
+        bucket,
+        prefix,
+        exc,
+      )
 
 
 def _delete_copies_in_session(

@@ -647,6 +647,60 @@ class TestS3ClientListObjects:
 
 
 @pytest.mark.unit
+class TestS3ClientIterObjectKeys:
+  """iter_object_keys paginates and raises — it must not look like an
+  empty prefix when the listing failed or was truncated."""
+
+  def _make_client(self):
+    with (
+      patch("robosystems.operations.aws.s3.boto3.client"),
+      patch("robosystems.operations.aws.s3.env") as mock_env,
+    ):
+      mock_env.AWS_DEFAULT_REGION = "us-east-1"
+      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.ENVIRONMENT = "dev"
+      mock_env.AWS_S3_ACCESS_KEY_ID = ""
+      mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
+      client = S3Client()
+    return client
+
+  def test_paginates_until_exhausted(self):
+    client = self._make_client()
+    page1 = {"Contents": [{"Key": "a"}, {"Key": "b"}]}
+    page2 = {"Contents": [{"Key": "c"}]}
+    paginator = MagicMock()
+    paginator.paginate.return_value = [page1, page2]
+    client.s3_client = MagicMock()
+    client.s3_client.get_paginator.return_value = paginator
+
+    assert list(client.iter_object_keys("bucket", prefix="data/")) == [
+      "a",
+      "b",
+      "c",
+    ]
+    paginator.paginate.assert_called_once_with(Bucket="bucket", Prefix="data/")
+
+  def test_empty_prefix_yields_nothing(self):
+    client = self._make_client()
+    paginator = MagicMock()
+    paginator.paginate.return_value = [{}]
+    client.s3_client = MagicMock()
+    client.s3_client.get_paginator.return_value = paginator
+
+    assert list(client.iter_object_keys("bucket")) == []
+
+  def test_list_failure_raises(self):
+    client = self._make_client()
+    paginator = MagicMock()
+    paginator.paginate.side_effect = _make_client_error("AccessDenied")
+    client.s3_client = MagicMock()
+    client.s3_client.get_paginator.return_value = paginator
+
+    with pytest.raises(ClientError):
+      list(client.iter_object_keys("bucket", prefix="data/"))
+
+
+@pytest.mark.unit
 class TestS3ClientBatchUploadStrings:
   """Tests for S3Client.batch_upload_strings with ThreadPoolExecutor."""
 
