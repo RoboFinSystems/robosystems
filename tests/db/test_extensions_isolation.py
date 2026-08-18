@@ -1,28 +1,27 @@
 """Multi-graph-per-org isolation: the `extensions_session` search_path contract.
 
 The extensions DB is multi-tenant by **schema-per-graph**: a tenant's data lives
-in its own PostgreSQL schema, reached by `SET search_path TO {schema}, public`.
-The whole isolation story has two halves:
+in its own PostgreSQL schema, reached through ``search_path``. The isolation
+story has two halves:
 
 1. **Between tasks** — the worker disposes both connection pools after every
-   task (even on failure), so a pooled connection can't carry a stale
-   search_path from one task into the next. Covered by
-   `tests/worker/test_cleanup.py` + `tests/worker/test_consumer.py`.
-2. **Per session** — every tenant-scoped session re-sets search_path at session
-   *start*, so even if a pooled connection previously served graph A, the next
-   `extensions_session(B)` re-scopes it to B before any query runs. **This is
-   the load-bearing primitive these tests pin** — it had no direct coverage
-   (every other test mocks `extensions_session` rather than exercising it).
-3. **On return** — each session also clears search_path back to `public` in its
-   `finally`, before the connection returns to the pool. A plain (non-LOCAL)
-   `SET` survives the pool's rollback-on-return, so without this the tenant
-   scope would linger on the pooled connection; this is defense-in-depth for any
-   future code path that reuses a connection without going through this manager.
+   task (even on failure), so a pooled connection can't carry stale state from
+   one task into the next. Covered by `tests/worker/test_cleanup.py` +
+   `tests/worker/test_consumer.py`.
+2. **Per session** — the load-bearing primitive these tests pin. ``search_path``
+   is *connection* state and a ``Session`` does not keep its connection:
+   ``commit()`` returns it to the pool and the next statement checks out
+   whichever connection the pool hands back — with whatever ``search_path`` the
+   previous borrower left on it. So the binding is applied on **every**
+   transaction the session begins (``after_begin``), and it is ``SET LOCAL`` so
+   nothing is ever left on a pooled connection. A command that commits mid-flow
+   and keeps going (close does, around its QuickBooks publish) stays on its own
+   tenant; a raw connection returned to the pool by someone else cannot bind a
+   session to the wrong schema.
 
-The failure mode these layers guard against is real: a pooled connection that
-keeps a search_path set by a previous tenant will write that tenant's schema
-(see `worker/cleanup.py`). With N client-company graphs under one org, this is
-the highest-severity isolation risk, so the contract must not silently regress.
+These run against the real extensions database because the failure mode is a
+connection hop, which a MagicMock session structurally cannot produce. The
+mock-based tests below pin the plumbing (validation, rollback/close) only.
 """
 
 from __future__ import annotations
@@ -32,97 +31,116 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 import robosystems.db.extensions as ext
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 
 # Two distinct, well-formed tenant graph_ids (kg + 16+ hex) standing in for two
-# graphs under the same org — the multi-graph-per-org case.
+# graphs under the same org — the multi-graph-per-org case. ``SET search_path``
+# to a schema that does not exist is legal, so no schema is created here.
 GRAPH_A = "kg00000000000000aa"
 GRAPH_B = "kg00000000000000bb"
 
+_WHOAMI = text("select pg_backend_pid(), current_setting('search_path')")
 
-def _drive(graph_id: str, *, session: MagicMock | None = None):
-  """Run the REAL `extensions_session(graph_id)` with a mocked session factory.
 
-  Returns `(session_mock, executed_sql)` where `executed_sql` is the ordered
-  list of SQL strings the context manager ran — so we can assert exactly which
-  `SET search_path` statement it issued (and that it ran first).
+@pytest.fixture()
+def engine():
+  """The real extensions engine, or a skip when the database is unreachable.
+
+  ``EXTENSIONS_DATABASE_URL`` always resolves to something, so connect before
+  deciding. Disposed on the way in and out so no test inherits pool state.
   """
-  session = session or MagicMock(name="session")
-  executed: list[str] = []
-  session.execute.side_effect = lambda clause, *a, **k: executed.append(str(clause))
-  factory = MagicMock(return_value=session)
-  with patch.object(ext, "_get_session_factory", return_value=factory):
-    with extensions_session(graph_id) as yielded:
-      assert yielded is session  # the tenant op gets the scoped session
-  return session, executed
+  try:
+    eng = ext._get_engine()
+    with eng.connect() as probe:
+      probe.execute(text("SELECT 1"))
+  except (OperationalError, RuntimeError) as exc:
+    pytest.skip(f"extensions database unreachable: {exc}")
+  eng.dispose()
+  yield eng
+  eng.dispose()
 
 
-def test_tenant_session_sets_scoped_search_path():
-  """A tenant session's FIRST act is to scope search_path to its own schema."""
-  session, executed = _drive(GRAPH_A)
-  assert executed[0] == f"SET search_path TO {GRAPH_A}, public"
-  session.commit.assert_called_once()
-  session.close.assert_called_once()
+def _poison_pool(engine, *stamps: str) -> None:
+  """Leave idle pooled connections bound to *other* schemas — the state a
+  raw connection, or a pre-fix session, would leave behind."""
+  conns = [engine.connect() for _ in stamps]
+  for conn, stamp in zip(conns, stamps, strict=True):
+    conn.execute(text(f"SET search_path TO {stamp}, public"))
+    conn.commit()
+  for conn in conns:
+    conn.close()
 
 
-def test_distinct_graphs_get_distinct_search_paths():
-  """Two graphs under one org never share a scope — each binds its own schema."""
-  _, executed_a = _drive(GRAPH_A)
-  _, executed_b = _drive(GRAPH_B)
-  assert executed_a[0] == f"SET search_path TO {GRAPH_A}, public"
-  assert executed_b[0] == f"SET search_path TO {GRAPH_B}, public"
-  assert executed_a[0] != executed_b[0]
+def _idle_search_paths(engine) -> list[str]:
+  conns = [engine.connect() for _ in range(engine.pool.checkedin())]
+  paths = [conn.execute(_WHOAMI).one()[1] for conn in conns]
+  for conn in conns:
+    conn.close()
+  return paths
 
 
-def test_sequential_reuse_rescopes_to_new_graph():
-  """Connection reuse can't leak: a session that served graph A is re-scoped to
-  B on the next `extensions_session(B)`. This is the exact incident fix — the
-  re-SET at session start overrides any path left on a reused pooled connection.
-  """
-  reused = MagicMock(name="reused-connection-session")
-  _, executed_a = _drive(GRAPH_A, session=reused)
-  _, executed_b = _drive(GRAPH_B, session=reused)  # same underlying session/conn
-  assert executed_a[0] == f"SET search_path TO {GRAPH_A}, public"
-  # The second use re-issues SET for B — B never inherits A's schema.
-  assert executed_b[0] == f"SET search_path TO {GRAPH_B}, public"
-  assert GRAPH_A not in executed_b[0]
+def test_binding_survives_a_mid_flow_commit(engine):
+  """The one that matters: commit inside the session, keep going, still on
+  the same tenant — even when the pool hands back a connection another
+  tenant last used."""
+  _poison_pool(engine, GRAPH_B, "kg00000000000000cc", "kg00000000000000dd")
+  with extensions_session(GRAPH_A) as session:
+    before = session.execute(_WHOAMI).one()
+    session.commit()
+    after = session.execute(_WHOAMI).one()
+  assert before[1] == f"{GRAPH_A}, public"
+  assert after[1] == f"{GRAPH_A}, public", after
 
 
-def test_resets_search_path_to_public_on_return():
-  """Defense-in-depth: a tenant session's LAST act is to clear search_path back
-  to `public`, so the connection returns to the pool unbound. A plain SET
-  survives the pool's rollback-on-return, so without this a later bypass could
-  inherit the tenant scope."""
-  session, executed = _drive(GRAPH_A)
-  assert executed[0] == f"SET search_path TO {GRAPH_A}, public"
-  assert executed[-1] == "SET search_path TO public"
-  session.close.assert_called_once()
+def test_binding_survives_a_rollback(engine):
+  _poison_pool(engine, GRAPH_B, "kg00000000000000cc")
+  with extensions_session(GRAPH_A) as session:
+    session.execute(_WHOAMI)
+    session.rollback()
+    assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
 
 
-def test_resets_search_path_even_on_error():
-  """The reset runs in `finally`, so even a failed tenant op leaves the pooled
-  connection unbound rather than scoped to the failed tenant."""
-  session = MagicMock(name="session")
-  executed: list[str] = []
-  session.execute.side_effect = lambda clause, *a, **k: executed.append(str(clause))
-  factory = MagicMock(return_value=session)
-  with patch.object(ext, "_get_session_factory", return_value=factory):
-    with pytest.raises(RuntimeError, match="boom"):
-      with extensions_session(GRAPH_A):
-        raise RuntimeError("boom")
-  assert executed[-1] == "SET search_path TO public"
-  session.rollback.assert_called_once()
-  session.close.assert_called_once()
+def test_binding_holds_inside_a_savepoint(engine):
+  """Handlers dispatch inside ``begin_nested()``; the binding is the outer
+  transaction's and a savepoint neither loses nor re-stamps it."""
+  with extensions_session(GRAPH_A) as session:
+    with session.begin_nested():
+      assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
+    assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
 
 
-def test_library_sentinel_binds_public_only():
+def test_nothing_is_left_on_the_pooled_connection(engine):
+  """``SET LOCAL`` ends with the transaction: after the session, no idle
+  connection carries the tenant — commit or rollback."""
+  with extensions_session(GRAPH_A) as session:
+    session.execute(_WHOAMI)
+    session.commit()
+  with pytest.raises(RuntimeError, match="boom"):
+    with extensions_session(GRAPH_B) as session:
+      session.execute(_WHOAMI)
+      raise RuntimeError("boom")
+  leaked = [p for p in _idle_search_paths(engine) if GRAPH_A in p or GRAPH_B in p]
+  assert not leaked, leaked
+
+
+def test_distinct_graphs_get_distinct_search_paths(engine):
+  """Two graphs under one org never share a scope, in either order."""
+  with extensions_session(GRAPH_A) as session:
+    assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
+  with extensions_session(GRAPH_B) as session:
+    assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_B}, public"
+
+
+def test_library_sentinel_binds_public_only(engine):
   """The `library` sentinel reads the canonical library (`public`), with no
   tenant-schema binding — so a library read can't be scoped to a tenant."""
-  _, executed = _drive(LIBRARY_GRAPH_ID)
-  assert executed[0] == "SET search_path TO public"
-  assert LIBRARY_GRAPH_ID not in executed[0]
+  _poison_pool(engine, GRAPH_A)
+  with extensions_session(LIBRARY_GRAPH_ID) as session:
+    assert session.execute(_WHOAMI).one()[1] == "public"
 
 
 @pytest.mark.parametrize(
@@ -137,32 +155,44 @@ def test_library_sentinel_binds_public_only():
   ],
 )
 def test_rejects_unsafe_graph_id(bad_graph_id):
-  """A graph_id that isn't a validated tenant schema is rejected before any
-  `SET search_path` runs — defense-in-depth against schema-name injection."""
-  session = MagicMock(name="session")
-  factory = MagicMock(return_value=session)
+  """A graph_id that isn't a validated tenant schema is rejected before a
+  session even exists — defense-in-depth against schema-name injection."""
+  factory = MagicMock(name="factory")
   with patch.object(ext, "_get_session_factory", return_value=factory):
     with pytest.raises(ValueError):
       with extensions_session(bad_graph_id):
         pass
-  # No tenant scoping was ever issued, and the session was cleaned up.
-  for call in session.execute.call_args_list:
-    assert "DROP" not in str(call).upper()
-  session.rollback.assert_called_once()
-  session.close.assert_called_once()
+  factory.assert_not_called()
 
 
 def test_rolls_back_and_closes_on_error():
-  """A failed tenant op rolls back and closes the session — so a half-applied,
-  still-scoped session is never returned to the pool for the next graph."""
+  """A failed tenant op rolls back and closes the session — so a half-applied
+  session is never handed to the next graph."""
   session = MagicMock(name="session")
   factory = MagicMock(return_value=session)
-  with patch.object(ext, "_get_session_factory", return_value=factory):
+  with (
+    patch.object(ext, "_get_session_factory", return_value=factory),
+    patch.object(ext, "bind_search_path"),
+  ):
     with pytest.raises(RuntimeError, match="boom"):
       with extensions_session(GRAPH_A):
         raise RuntimeError("boom")
   session.rollback.assert_called_once()
   session.commit.assert_not_called()
+  session.close.assert_called_once()
+
+
+def test_commits_and_closes_on_success():
+  session = MagicMock(name="session")
+  factory = MagicMock(return_value=session)
+  with (
+    patch.object(ext, "_get_session_factory", return_value=factory),
+    patch.object(ext, "bind_search_path") as bind,
+  ):
+    with extensions_session(GRAPH_A) as yielded:
+      assert yielded is session
+  bind.assert_called_once_with(session, f"{GRAPH_A}, public")
+  session.commit.assert_called_once()
   session.close.assert_called_once()
 
 

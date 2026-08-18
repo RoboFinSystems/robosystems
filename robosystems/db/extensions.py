@@ -14,8 +14,8 @@ land) with schema-per-graph tenancy.
 import re
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import DeclarativeBase, Session, SessionTransaction, sessionmaker
 
 from robosystems.config import env
 
@@ -129,13 +129,47 @@ def _sanitize_schema(graph_id: str) -> str:
   return graph_id
 
 
+def _search_path_for(graph_id: str) -> str:
+  """The ``search_path`` value a session for ``graph_id`` runs under."""
+  if graph_id == LIBRARY_GRAPH_ID:
+    return "public"
+  return f"{_sanitize_schema(graph_id)}, public"
+
+
+def bind_search_path(session: Session, search_path: str) -> None:
+  """Bind ``session`` to ``search_path`` for every transaction it opens.
+
+  ``SET search_path`` is connection state, and a ``Session`` does not keep
+  its connection: ``commit()`` returns it to the pool and the next statement
+  checks out whichever connection the pool hands back. A single ``SET`` at
+  the top of the session therefore covers exactly one transaction. A command
+  that commits mid-flow and keeps going — close does, around its QuickBooks
+  publish — would run the rest on a connection last used by some other
+  tenant, or on a fresh one bound to nothing.
+
+  So the binding is re-applied on every transaction the session begins,
+  from ``after_begin``, and it is ``SET LOCAL``: scoped to that transaction,
+  gone at commit or rollback, never left on a pooled connection for the
+  next borrower to inherit. Nested (savepoint) transactions inherit the
+  outer transaction's setting and are skipped.
+  """
+  stmt = text(f"SET LOCAL search_path TO {search_path}")
+
+  @event.listens_for(session, "after_begin")
+  def _stamp(_session: Session, transaction: SessionTransaction, connection) -> None:
+    if transaction.nested:
+      return
+    connection.execute(stmt)
+
+
 @contextmanager
 def extensions_session(graph_id: str):
   """Context manager providing a schema-scoped session for a tenant.
 
-  Sets search_path to '{graph_id}, public' so tenant tables resolve
-  in the graph_id schema and shared tables (fiscal_periods) resolve
-  from public.
+  Binds the session's search_path to '{graph_id}, public' so tenant tables
+  resolve in the graph_id schema and shared tables resolve from public. The
+  binding holds for the life of the session, across any commit inside it —
+  see :func:`bind_search_path` for why that is not the same as one ``SET``.
 
   Special case: `graph_id="library"` routes to the taxonomy library
   (read-only; library content currently lives in the `public` schema,
@@ -156,30 +190,16 @@ def extensions_session(graph_id: str):
   Yields:
       A SQLAlchemy Session scoped to the tenant schema (or library).
   """
+  search_path = _search_path_for(graph_id)
   session: Session = _get_session_factory()()
+  bind_search_path(session, search_path)
   try:
-    if graph_id == LIBRARY_GRAPH_ID:
-      session.execute(text("SET search_path TO public"))
-    else:
-      schema = _sanitize_schema(graph_id)
-      session.execute(text(f"SET search_path TO {schema}, public"))
     yield session
     session.commit()
   except Exception:
     session.rollback()
     raise
   finally:
-    # Defense-in-depth: clear the tenant search_path before the connection
-    # returns to the pool. Correctness does not depend on this — every
-    # extensions_session re-stamps search_path at the top before any query —
-    # but it removes the footgun where a code path that reuses a pooled
-    # connection without going through this context manager could inherit a
-    # stale tenant binding. A plain (non-LOCAL) SET survives the pool's
-    # rollback-on-return, which is exactly why the stale binding would persist.
-    try:
-      session.execute(text("SET search_path TO public"))
-    except Exception:
-      pass
     session.close()
 
 
