@@ -70,6 +70,7 @@ from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.event_block.locking import ordered_lock_column
 from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
@@ -234,6 +235,10 @@ def promote_pending_obligations(
       Event.status.in_(("pending", "classified")),
       Event.occurred_at <= as_of,
     )
+    # Ordered so this and `supersede_pending_obligations` — whose row sets
+    # overlap on pending obligations — can never acquire in opposing orders.
+    # See `locking.ordered_lock_column`.
+    .order_by(ordered_lock_column())
     .with_for_update()
     .all()
   )

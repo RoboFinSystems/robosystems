@@ -12,15 +12,18 @@ def _stub_existing_lookup(session, rows):
   """Stub a `query(...).filter(...)[.with_for_update()].all()` load on a mock session.
 
   Named for its main subject, the loader's existing-**events** lookup, which
-  takes a row lock so a concurrent inbox approval cannot commit between that
-  read and the handler dispatch below it — but the `MagicMock` chain is not
+  takes an ordered row lock so a concurrent inbox approval cannot commit
+  between that read and the handler dispatch below it — but the `MagicMock` chain is not
   type-differentiated, so the same helper serves the Element and Agent loads
   in this file. Both the locked and unlocked chains are stubbed, so a test can
   never accidentally assert against whichever one production stopped using.
   """
   filtered = session.query.return_value.filter.return_value
   filtered.all.return_value = rows
-  filtered.with_for_update.return_value.all.return_value = rows
+  # The events load is `.filter(...).order_by(id).with_for_update().all()`;
+  # self-returning links keep this stub independent of the chain's order.
+  filtered.order_by.return_value = filtered
+  filtered.with_for_update.return_value = filtered
 
 
 @pytest.fixture

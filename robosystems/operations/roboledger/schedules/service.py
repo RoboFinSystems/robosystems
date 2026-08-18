@@ -928,6 +928,8 @@ class ScheduleService:
     if not schedule_created_event_id:
       return 0
 
+    from robosystems.operations.event_block.locking import ordered_lock_column
+
     # Locked: this reads `pending` obligations and voids them, and the
     # promotion sweep reads the same rows to classify and draft their closing
     # entries. Unlocked, both can proceed from the same snapshot — the sweep
@@ -941,6 +943,9 @@ class ScheduleService:
           Event.obligated_by_event_id == schedule_created_event_id,
           Event.status == "pending",
         )
+        # Same order as the promotion sweep's candidate load — the two overlap
+        # on exactly these rows. See `locking.ordered_lock_column`.
+        .order_by(ordered_lock_column())
         .with_for_update()
       ).scalars()
     )

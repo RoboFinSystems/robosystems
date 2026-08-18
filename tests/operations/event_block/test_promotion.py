@@ -72,9 +72,12 @@ def _session_returning(
     }
   event_query = MagicMock()
   event_query.filter.return_value = event_query
-  # The candidate load takes `FOR UPDATE` — everything the sweep does after it
-  # is read-decide-write against these rows. Self-returning like `.filter` so
-  # the chain stays position-independent.
+  # The candidate load is `.filter(...).order_by(id).with_for_update().all()` —
+  # locked because everything the sweep does after it is read-decide-write
+  # against these rows, ordered so it cannot deadlock against the other batch
+  # locks. Self-returning like `.filter` so the chain stays
+  # position-independent.
+  event_query.order_by.return_value = event_query
   event_query.with_for_update.return_value = event_query
   event_query.all.return_value = events
   entry_query = MagicMock()
@@ -154,6 +157,33 @@ class TestCoPilotMode:
       for arg in call.args
     ]
     assert any("events.status = " in p for p in predicates), predicates
+
+  def test_candidate_load_is_ordered_for_deadlock_freedom(self) -> None:
+    """The candidate load orders by `id`.
+
+    `supersede_pending_obligations` locks an overlapping set of pending
+    obligations. Two transactions that take overlapping row locks in different
+    orders deadlock — each holding what the other waits for — and Postgres
+    resolves that by killing one with SQLSTATE 40P01. Without a shared ORDER BY
+    the acquisition sequence is whatever each query plan produces, which is not
+    a property either query controls. Pinned here because nothing else would
+    notice it going away until it happened in production.
+    """
+    session = _session_returning([_pending_event("evt_1", period_end="2026-01-31")])
+
+    promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    from robosystems.operations.event_block.locking import ordered_lock_column
+
+    ordered_by = [
+      arg for call in session.event_query.order_by.call_args_list for arg in call.args
+    ]
+    # Identity, not repr — a SQLAlchemy repr change should not fail this, and
+    # comparing against the shared column is what actually pins the invariant.
+    assert len(ordered_by) == 1
+    assert ordered_by[0] is ordered_lock_column()
 
   def test_does_not_call_handler_dispatch(self) -> None:
     e1 = _pending_event("evt_1")

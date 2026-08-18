@@ -14,6 +14,7 @@ from pathlib import Path
 
 from robosystems.logger import logger
 from robosystems.operations.event_block.commands import fire_handler_on_commit
+from robosystems.operations.event_block.locking import ordered_lock_column
 
 # Per-source rule for whether captured events auto-commit to GL on
 # inbound sync (handler fires immediately, event lands
@@ -1428,6 +1429,11 @@ class OLTPLoader:
         Event.source == source,
         Event.external_id.in_(list(txns_by_ext.keys())),
       )
+      # Ordered for the same reason as the other batch locks, though this
+      # one's rows are disjoint from theirs by `source`. Uniform discipline:
+      # the day a predicate widens, the ordering is already there.
+      # See `locking.ordered_lock_column`.
+      .order_by(ordered_lock_column())
       .with_for_update()
       .all()
     }
