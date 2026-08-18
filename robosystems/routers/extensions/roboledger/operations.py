@@ -317,6 +317,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   JournalEntryNotDraftError,
   JournalEntryNotFoundError,
   JournalEntryNotPostedError,
+  JournalEntryOwnedByEventError,
   UnbalancedJournalEntryError,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -1755,6 +1756,8 @@ delete_journal_entry_op = _registrar.register(
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
+      # The last draft of a live event: retract the event, not the draft.
+      JournalEntryOwnedByEventError: 422,
       ClosedPeriodError: 422,
       RowLockedError: 409,
     },

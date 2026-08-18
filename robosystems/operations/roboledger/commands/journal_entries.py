@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -50,6 +50,7 @@ from robosystems.models.api.extensions.journal_entries import (
   UpdateJournalEntryRequest,
 )
 from robosystems.models.extensions.roboledger.entry import Entry
+from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import RowLockedError, lock_by_id
@@ -103,6 +104,52 @@ class JournalEntryAlreadyReversedError(ValueError):
     )
     self.entry_id = entry_id
     self.reversing_entry_id = reversing_entry_id
+
+
+class JournalEntryOwnedByEventError(ValueError):
+  """Raised when a delete would leave a live event with no ledger rows.
+
+  A draft is the ledger's version of its event; the event is the record of
+  what happened. Deleting the last draft of an event that has not been
+  retracted leaves a committed event `execute` will still publish, with
+  nothing behind it in the books. The retraction belongs on the event —
+  void or supersede it — after which its leftover drafts are deletable.
+  Multi-entry events keep the surface: deleting one of several drafts is a
+  correction, and the rows that remain are what publishes.
+  """
+
+  def __init__(self, entry_id: str, event_id: str, event_status: str) -> None:
+    super().__init__(
+      f"Journal entry {entry_id} is the only ledger entry of event {event_id} "
+      f"(status {event_status!r}). Void or supersede the event instead of "
+      "deleting its draft; a retracted event's drafts can then be deleted."
+    )
+    self.entry_id = entry_id
+    self.event_id = event_id
+    self.event_status = event_status
+
+
+_RETRACTED_EVENT_STATUSES = frozenset({"voided", "superseded"})
+
+
+def _lock_owning_event(session: Session, entry: Entry) -> Event | None:
+  """Lock the event a draft belongs to, before the draft's own row.
+
+  `execute_event_block` and close both take the event row and then write its
+  entries; a correction that took the entry first and the event never (or
+  second) would either interleave with a publish — QuickBooks receiving the
+  version from before the correction — or acquire in the opposite order.
+  Event, then entry, everywhere. Bounded like the entry lock.
+  """
+  if entry.triggered_by_event_id is None:
+    return None
+  return lock_by_id(
+    session,
+    Event,
+    entry.triggered_by_event_id,
+    f"Event {entry.triggered_by_event_id} is being written by another "
+    "process. Retry in a moment.",
+  )
 
 
 class JournalEntryNotPostedError(ValueError):
@@ -424,6 +471,10 @@ def update_journal_entry(
     dates.append(body.posting_date)
   assert_period_not_closed(session, *dates)
 
+  # Event before entry — the order `execute` and close use — so a
+  # correction and a publish serialize, and QuickBooks receives the rows as
+  # corrected rather than the version a concurrent publish read first.
+  _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
     Entry,
@@ -494,11 +545,16 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
       period.
     `RowLockedError` (409) if another writer holds the entry, or if the
       posting date moved under us (retry so locks are acquired in order).
+    `JournalEntryOwnedByEventError` (422) if this is the last ledger entry
+      of an event that has not been voided or superseded.
   """
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
   assert_period_not_closed(session, peeked_date)
 
+  # Event before entry — see `_lock_owning_event`. Under the event lock the
+  # sibling count below cannot change before the delete.
+  owner = _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
     Entry,
@@ -511,6 +567,17 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   _raise_if_posting_date_moved(entry, peeked_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
+
+  if owner is not None and owner.status not in _RETRACTED_EVENT_STATUSES:
+    siblings = session.execute(
+      select(func.count())
+      .select_from(Entry)
+      .where(Entry.triggered_by_event_id == owner.id)
+    ).scalar_one()
+    if siblings <= 1:
+      raise JournalEntryOwnedByEventError(
+        str(entry.id), str(owner.id), str(owner.status)
+      )
 
   session.delete(entry)
   session.flush()

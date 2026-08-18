@@ -191,14 +191,14 @@ def _build_qb_journal_entry(
 
 
 def _entries_from_draft_rows(session: Session, event_id: str) -> list[dict[str, Any]]:
-  """Build nested-shape entry dicts from the draft GL rows linked to an event.
+  """Build nested-shape entry dicts from the GL rows linked to an event.
 
-  Handler-materialized closing entries (schedule_entry_due, manual closing
-  entries) keep their GL lines on the draft ``Entry`` / ``LineItem`` rows
-  (linked by ``triggered_by_event_id``), NOT in ``event.metadata`` — unlike
-  ``journal_entry_recorded`` events, whose lines ride in metadata. Without
-  this fallback the write-back posts an empty QB JournalEntry and QB rejects
-  it ("2020 Required param missing"). Returns one entry dict per linked Entry.
+  These rows are the ledger's version of the event — the drafts close will
+  post — and so the thing to publish. Every handler materializes them
+  (``journal_entry_recorded`` via `create_journal_entry`,
+  ``schedule_entry_due`` / ``asset_disposed`` via the schedule service);
+  ``event.metadata`` is the capture, which a draft correction leaves behind.
+  Returns one entry dict per linked Entry, in creation order.
   """
   entries = (
     session.query(Entry)
@@ -252,15 +252,25 @@ def post_event_to_qb(
   metadata = dict(event.metadata_ or {})
   qb_txn_ids: list[str] = []
 
-  # Resolve the entries to post, in priority order:
-  #   1. metadata["entries"]      — nested shape (one dict per entry)
-  #   2. metadata["line_items"]   — flat shape (a single entry in metadata)
-  #   3. draft Entry/LineItem rows — handler-materialized closing entries
-  #      (schedule_entry_due, manual) whose lines live on the GL rows, not
-  #      in metadata. Without (3) these post an empty JE → QB 2020 reject.
-  nested_entries = metadata.get("entries")
-  if not (isinstance(nested_entries, list) and nested_entries):
-    if metadata.get("line_items"):
+  # Resolve the entries to post. The ledger rows come first: what publishes
+  # to QuickBooks must be what the ledger posts, and the rows are what
+  # `execute` promotes to `posted` a few lines later. `event.metadata` is
+  # the *capture* — a draft corrected through `update-journal-entry` before
+  # close has moved on from it, and publishing the capture would put the
+  # original in QuickBooks and the correction in the ledger.
+  #   1. Entry/LineItem rows linked by ``triggered_by_event_id`` — every
+  #      handler materializes these (journal_entry_recorded via
+  #      `create_journal_entry`; schedule_entry_due / asset_disposed via the
+  #      schedule service).
+  #   2. metadata["entries"]      — nested shape, for an event that never
+  #      materialized rows
+  #   3. metadata["line_items"]   — flat shape, same case
+  nested_entries = _entries_from_draft_rows(session, str(event.id))
+  if not nested_entries:
+    captured = metadata.get("entries")
+    if isinstance(captured, list) and captured:
+      nested_entries = captured
+    elif metadata.get("line_items"):
       nested_entries = [
         {
           "posting_date": metadata.get("posting_date"),
@@ -268,8 +278,6 @@ def post_event_to_qb(
           "line_items": metadata.get("line_items"),
         }
       ]
-    else:
-      nested_entries = _entries_from_draft_rows(session, str(event.id))
 
   if not nested_entries:
     raise QBWritebackError(
