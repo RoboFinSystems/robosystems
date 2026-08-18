@@ -6,6 +6,7 @@ with ten graphs shared one budget. These cover the resolution that replaced it,
 weighted toward the failure modes — resolution must never fail *open*.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -203,6 +204,8 @@ class TestSharedRepositoryIsolation:
         ):
           for gid in ("kg1aaa", "kg1bbb"):
             request.url.path = f"/v1/graphs/{gid}/query/cypher"
+            # The graph auth dependency ran and authorized this caller.
+            request.state.auth_graph_id = gid
             subscription_aware_rate_limit_dependency(request)
 
     assert seen == [
@@ -245,6 +248,7 @@ class TestSharedRepositoryIsolation:
         ) as mock_resolve:
           for gid in (parent, f"{parent}_dev"):
             request.url.path = f"/v1/graphs/{gid}/query/cypher"
+            request.state.auth_graph_id = gid
             subscription_aware_rate_limit_dependency(request)
 
     assert seen == [f"graph_sub:{parent}:graph_query"] * 2, seen
@@ -295,3 +299,123 @@ class TestTierDifferentiation:
       ("kuzu-standard", 1.0),
     ):
       assert GraphTierConfig.get_api_rate_multiplier(tier) == expected
+
+
+class TestGraphBucketsAreMembersOnly:
+  """A graph's budget is charged only by a caller authorized on it. The URL
+  alone is not authorization: wherever the limiter runs ahead of the graph
+  auth dependency, an anonymous or unrelated caller could otherwise drain a
+  tenant's read/write budget with requests that all go on to 401."""
+
+  @staticmethod
+  def _request(path: str, headers: dict | None = None):
+    request = MagicMock()
+    request.method = "POST"
+    request.client.host = "1.2.3.4"
+    request.state = SimpleNamespace()  # nothing published: auth has not run
+    request.headers = headers or {}
+    request.url.path = path
+    return request
+
+  @staticmethod
+  def _limit(request, seen):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      subscription_aware_rate_limit_dependency,
+    )
+
+    def record(identifier, limit, window):
+      seen.append(identifier)
+      return (True, 100)
+
+    with patch(
+      "robosystems.middleware.rate_limits.rate_limiting.rate_limit_cache.check_rate_limit",
+      side_effect=record,
+    ):
+      with patch(
+        "robosystems.middleware.rate_limits.graph_tier_resolver.resolve_graph_tier",
+        return_value="ladybug-standard",
+      ):
+        subscription_aware_rate_limit_dependency(request)
+
+  def test_an_unverified_api_key_is_not_an_identity(self):
+    """Any string in X-API-Key used to mint a fresh per-key budget. Now a key
+    the auth cache has never validated is anonymous, and anonymous requests
+    share the IP bucket."""
+    from robosystems.middleware.rate_limits.rate_limiting import get_user_from_request
+
+    request = self._request(
+      "/v1/graphs/kg1victim/memory/remember", {"X-API-Key": "junk"}
+    )
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.get_cached_api_key_validation",
+      return_value=None,
+    ):
+      assert get_user_from_request(request) is None
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.get_cached_api_key_validation",
+      return_value={"user_id": "u1"},
+    ):
+      assert get_user_from_request(request).startswith("apikey_")
+
+  def test_anonymous_requests_never_charge_the_graph_bucket(self):
+    seen: list = []
+    request = self._request(
+      "/v1/graphs/kg1victim/memory/remember", {"X-API-Key": "junk"}
+    )
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.get_cached_api_key_validation",
+      return_value=None,
+    ):
+      self._limit(request, seen)
+    assert seen and all(i.startswith("anon_sub:") for i in seen), seen
+
+  def test_an_identified_but_unauthorized_caller_stays_on_their_own_budget(self):
+    seen: list = []
+    request = self._request("/v1/graphs/kg1victim/documents")
+    with (
+      patch(
+        "robosystems.middleware.rate_limits.rate_limiting.get_user_from_request",
+        return_value="user_attacker",
+      ),
+      patch(
+        "robosystems.middleware.auth.cache.api_key_cache.get_cached_jwt_graph_access",
+        return_value=None,
+      ),
+    ):
+      self._limit(request, seen)
+    assert seen == ["user_sub:user_attacker:graph_write"], seen
+
+  def test_a_cached_positive_decision_is_enough_when_auth_has_not_run_yet(self):
+    """Router-level mounting runs the limiter first; a member's earlier
+    request left a positive decision in the auth cache, so the graph
+    bucket applies without a second authorization round-trip."""
+    seen: list = []
+    request = self._request("/v1/graphs/kg1mine/documents")
+    with (
+      patch(
+        "robosystems.middleware.rate_limits.rate_limiting.get_user_from_request",
+        return_value="user_member",
+      ),
+      patch(
+        "robosystems.middleware.auth.cache.api_key_cache.get_cached_jwt_graph_access",
+        return_value=True,
+      ),
+    ):
+      self._limit(request, seen)
+    assert seen == ["graph_sub:kg1mine:graph_write"], seen
+
+  def test_a_negative_cached_decision_does_not_unlock_the_graph_bucket(self):
+    seen: list = []
+    request = self._request("/v1/graphs/kg1victim/documents")
+    with (
+      patch(
+        "robosystems.middleware.rate_limits.rate_limiting.get_user_from_request",
+        return_value="apikey_" + "0" * 64,
+      ),
+      patch(
+        "robosystems.middleware.auth.cache.api_key_cache.get_cached_graph_access",
+        return_value=False,
+      ),
+    ):
+      self._limit(request, seen)
+    assert seen and seen[0].startswith("user_sub:apikey_"), seen

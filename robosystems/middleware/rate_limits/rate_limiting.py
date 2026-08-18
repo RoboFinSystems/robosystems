@@ -56,15 +56,61 @@ def _verify_jwt_for_rate_limiting(token: str) -> str | None:
     return None
 
 
+def _api_key_digest(api_key: str) -> str:
+  import hashlib
+
+  return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def _api_key_is_cached_valid(api_key_hash: str) -> bool:
+  from robosystems.middleware.auth.cache import api_key_cache
+
+  try:
+    return api_key_cache.get_cached_api_key_validation(api_key_hash) is not None
+  except Exception:
+    return False
+
+
+def _caller_is_authorized_on_graph(
+  request: Request, user_id: str, graph_id: str, parent_graph_id: str
+) -> bool:
+  """Whether the identified caller is known to be authorized on the graph.
+
+  A graph's budget belongs to its members; charging it from a request that
+  merely names the graph in its URL would let anyone drain a tenant's
+  throughput without credentials. Evidence, cheapest first: the graph auth
+  dependency already ran and published its decision on ``request.state``;
+  otherwise the auth cache holds a positive decision for this principal on
+  the graph (or its parent) from an earlier request. Absent both, the
+  request is not graph-keyed — it falls back to the caller's own budget.
+  """
+  if getattr(request.state, "auth_graph_id", None) in (graph_id, parent_graph_id):
+    return True
+
+  from robosystems.middleware.auth.cache import api_key_cache
+
+  try:
+    if user_id.startswith("apikey_"):
+      digest = user_id[len("apikey_") :]
+      lookup = lambda g: api_key_cache.get_cached_graph_access(digest, g)  # noqa: E731
+    else:
+      lookup = lambda g: api_key_cache.get_cached_jwt_graph_access(user_id, g)  # noqa: E731
+    return any(lookup(g) is True for g in dict.fromkeys((graph_id, parent_graph_id)))
+  except Exception:
+    return False
+
+
 def get_user_identifier(request: Request) -> str:
   """Get user identifier for rate limiting based on authentication."""
+  # A key is an identity only once it is known to be valid (see
+  # `get_user_from_request`); an unverified header falls through to the
+  # published principal or the IP bucket, so junk keys cannot each mint a
+  # budget of their own.
   api_key = request.headers.get("X-API-Key")
   if api_key:
-    # Hash the API key for privacy
-    import hashlib
-
-    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    return f"apikey:{api_key_hash}"
+    api_key_hash = _api_key_digest(api_key)
+    if _api_key_is_cached_valid(api_key_hash):
+      return f"apikey:{api_key_hash}"
 
   auth_header = request.headers.get("Authorization")
   if auth_header and auth_header.startswith("Bearer "):
@@ -271,15 +317,17 @@ def get_user_from_request(request: Request) -> str | None:
     if user_id:
       return user_id
 
-  # Check for API key authentication - we'll need to look up the user
+  # API key: an identity only once the key is known to be valid. The auth
+  # cache is keyed by the same digest and is populated by every successful
+  # validation, so this is one cache read and no re-validation. A header
+  # that is not cached-valid mints no identity — otherwise any string in
+  # the header would be "a user" with a fresh budget of its own, and the
+  # limiter would be trivially bypassed by rotating garbage keys.
   api_key = request.headers.get("X-API-Key")
   if api_key:
-    # For now, we'll use API key hashing for anonymity
-    # In production, you'd want to look up the user associated with the API key
-    import hashlib
-
-    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    return f"apikey_{api_key_hash}"
+    api_key_hash = _api_key_digest(api_key)
+    if _api_key_is_cached_valid(api_key_hash):
+      return f"apikey_{api_key_hash}"
 
   # Principal published by the auth dependencies for credentials that carry
   # no reparseable header — the MCP connector's URL-carried key today, opaque
@@ -624,9 +672,14 @@ def subscription_aware_rate_limit_dependency(request: Request):
   #   3. The category hits the tenant's own instance. Shared-infrastructure
   #      categories stay user-keyed and tier-flat, or a customer could multiply
   #      their load on OpenSearch or the extensions RDS by creating graphs.
+  #   4. The caller is authorized on the graph. The bucket is the tenant's
+  #      budget; only a member may draw from it. When the auth dependency
+  #      has not run yet (router-level mounting) and no cached decision
+  #      exists, the request stays on the caller's own budget.
   graph_id = extract_graph_id(request.url.path) if user_id else None
   if (
     graph_id
+    and user_id
     and not is_shared_repository_or_subgraph(graph_id)
     and category in RateLimitConfig.DEDICATED_RESOURCE_CATEGORIES
   ):
@@ -636,8 +689,9 @@ def subscription_aware_rate_limit_dependency(request: Request):
     # budgets against one machine. Resolving the parent also spares the
     # resolver a per-subgraph cache entry and database row dependency.
     parent_graph_id, _subgraph_name = parse_graph_id(graph_id)
-    subscription_tier = resolve_graph_tier(parent_graph_id)
-    identifier = f"graph_sub:{parent_graph_id}"
+    if _caller_is_authorized_on_graph(request, user_id, graph_id, parent_graph_id):
+      subscription_tier = resolve_graph_tier(parent_graph_id)
+      identifier = f"graph_sub:{parent_graph_id}"
 
   limit_config = get_subscription_rate_limit(subscription_tier, category)
   if not limit_config:

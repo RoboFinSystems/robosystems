@@ -241,6 +241,9 @@ class TestSubscriptionAwareRateLimiting:
     # Setup mocks - authenticated users get standard tier
     mock_get_user.return_value = "user_456"  # Authenticated user
     mock_check_rate_limit.return_value = (True, 5000)  # Allowed with 5000 remaining
+    # The graph auth dependency authorized this caller on the graph; the graph
+    # bucket is a member's budget and is charged only with that evidence.
+    mock_request.state.auth_graph_id = "kg1a2b3c"
 
     # Call the dependency
     subscription_aware_rate_limit_dependency(mock_request)
