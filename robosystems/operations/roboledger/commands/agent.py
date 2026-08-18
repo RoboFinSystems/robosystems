@@ -73,7 +73,17 @@ def update_agent(
   body: UpdateAgentRequest,
   created_by: str,
 ) -> LedgerAgentResponse:
-  agent = session.get(Agent, body.agent_id)
+  # Locked: `metadata_patch` is a read-modify-write of a JSON blob, and two
+  # concurrent patches on an unlocked row would each merge into the version
+  # they read — the loser's keys silently gone.
+  from robosystems.operations.locking import lock_by_id
+
+  agent = lock_by_id(
+    session,
+    Agent,
+    body.agent_id,
+    f"Agent {body.agent_id} is being written by another process. Retry in a moment.",
+  )
   if agent is None:
     raise AgentNotFoundError(body.agent_id)
 

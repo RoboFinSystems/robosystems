@@ -9,8 +9,10 @@ handler writes every atom in one transaction.
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
   DeleteTaxonomyBlockRequest,
@@ -178,7 +180,18 @@ def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
       is_primary=True,
     )
   )
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # A concurrent CoA create linked the entity between the clear above and
+    # this insert (`idx_entity_taxonomies_primary`). Two CoA creates racing
+    # is a caller conflict, not a fault: say so.
+    if not violates(exc, "idx_entity_taxonomies_primary", "uq_entity_taxonomy_combo"):
+      raise
+    raise ValueError(
+      "Another chart of accounts was linked to the entity concurrently; "
+      "retry after it completes."
+    ) from exc
 
 
 def create(

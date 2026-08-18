@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.extensions.publish_lists import (
   AddMembersRequest,
   CreatePublishListRequest,
@@ -153,17 +154,26 @@ def add_publish_list_members(
 ) -> list[PublishListMemberResponse]:
   """Add target graphs to a publish list.
 
-  Validates that target graphs exist and have the `roboledger`
-  extension, prevents self-add, and rejects duplicates.
+  Only the list's owner may change its membership — the same rule
+  ``update_publish_list`` / ``delete_publish_list`` apply — since the list
+  decides where that owner's next share is delivered. Validates that target
+  graphs exist and can receive a share (they hold an extensions tenant:
+  ``roboledger`` or ``roboinvestor``, the same rule ``share_report``
+  applies to a recipient), prevents self-add, and rejects duplicates.
   """
   from robosystems.db.platform import SessionFactory
   from robosystems.models.core import Graph
+  from robosystems.operations.roboledger.commands.reports import (
+    _RECEIVING_EXTENSIONS,
+  )
 
   publish_list = session.execute(
     select(PublishList).where(PublishList.id == list_id)
   ).scalar_one_or_none()
   if publish_list is None:
     raise PublishListNotFoundError(list_id)
+  if publish_list.created_by != added_by:
+    raise PublishListNotAuthorizedError("Not authorized to modify this publish list.")
 
   with SessionFactory() as platform_session:
     graphs = (
@@ -181,7 +191,7 @@ def add_publish_list_members(
 
     for g in graphs:
       extensions = g.schema_extensions or []
-      if "roboledger" not in extensions:
+      if not any(ext in extensions for ext in _RECEIVING_EXTENSIONS):
         raise TargetGraphMissingExtensionError(str(g.graph_id))
 
   if current_graph_id in body.target_graph_ids:
@@ -209,16 +219,33 @@ def add_publish_list_members(
     )
     session.add(member)
     added.append(member)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # A concurrent add of the same recipient slipped between the check above
+    # and this insert; the unique key says so. Same answer as the check.
+    if not violates(exc, "uq_publish_list_members_pair"):
+      raise
+    raise MembersAlreadyPresentError(list(body.target_graph_ids)) from exc
 
   return enrich_members(added)
 
 
-def remove_publish_list_member(session: Session, list_id: str, member_id: str) -> bool:
+def remove_publish_list_member(
+  session: Session, list_id: str, member_id: str, acting_user_id: str
+) -> bool:
   """Remove a member from a publish list.
 
-  Returns False if the member was not found in this list.
+  Returns False if the member was not found in this list. Raises
+  ``PublishListNotAuthorizedError`` if the caller does not own the list.
   """
+  publish_list = session.execute(
+    select(PublishList).where(PublishList.id == list_id)
+  ).scalar_one_or_none()
+  if publish_list is None:
+    return False
+  if publish_list.created_by != acting_user_id:
+    raise PublishListNotAuthorizedError("Not authorized to modify this publish list.")
   row = session.execute(
     select(PublishListMember).where(
       PublishListMember.id == member_id,

@@ -19,8 +19,11 @@ MCP, GraphQL, and the REST read surface share one source of truth.
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
 )
@@ -37,6 +40,8 @@ from robosystems.operations.roboledger.reads.taxonomies import (
   list_unmapped_elements,
   suggest_mapping_candidates,
 )
+
+from ._errors import database_failure
 
 
 class ListMappingStructuresTool:
@@ -79,6 +84,9 @@ will have several.""",
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
 
     try:
@@ -96,6 +104,8 @@ will have several.""",
           ],
           "count": len(result.structures),
         }
+    except SQLAlchemyError as exc:
+      return database_failure("list-mapping-structures", exc)
     except Exception as exc:
       logger.warning(f"list-mapping-structures failed: {exc}")
       return {"error": str(exc)}
@@ -140,6 +150,9 @@ class GetUnmappedElementsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     mapping_id = arguments.get("mapping_id")
 
@@ -152,6 +165,8 @@ class GetUnmappedElementsTool:
           "total_coa_elements": total_coa,
           "elements": [e.model_dump(mode="json") for e in unmapped],
         }
+    except SQLAlchemyError as exc:
+      return database_failure("get-unmapped-elements", exc)
     except Exception as exc:
       logger.warning(f"get-unmapped-elements failed: {exc}")
       return {"error": str(exc)}
@@ -212,6 +227,9 @@ class SuggestMappingTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.roboledger.reports.network_picker import (
       load_primary_reporting_style,
     )
@@ -285,6 +303,8 @@ class SuggestMappingTool:
             for c in candidates
           ],
         }
+    except SQLAlchemyError as exc:
+      return database_failure("suggest-mapping", exc)
     except Exception as exc:
       logger.warning(f"suggest-mapping failed: {exc}")
       return {"error": str(exc)}
@@ -323,6 +343,9 @@ class GetMappingSummaryTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     mapping_id = arguments["mapping_id"]
 
@@ -357,6 +380,8 @@ class GetMappingSummaryTool:
             for u in coverage.unreachable
           ],
         }
+    except SQLAlchemyError as exc:
+      return database_failure("get-mapping-summary", exc)
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
       return {"error": str(exc)}
@@ -394,6 +419,9 @@ rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-lev
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.roboledger.reports.network_picker import (
       load_primary_reporting_style,
     )
@@ -414,6 +442,8 @@ rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-lev
         if result is None:
           return {"error": f"No fac-to-rs-gaap equivalence found for {fac_element_id}"}
         return result
+    except SQLAlchemyError as exc:
+      return database_failure("expand-to-rs-gaap-candidates", exc)
     except Exception as exc:
       logger.warning(f"expand-to-rs-gaap-candidates failed: {exc}")
       return {"error": str(exc)}
@@ -470,6 +500,9 @@ class CreateMappingAssociationTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     try:
       body = CreateMappingAssociationOperation(
@@ -480,8 +513,12 @@ class CreateMappingAssociationTool:
         association_type=arguments.get("association_type", "mapping"),
         suggested_by="mapping-agent",
       )
+      # `suggested_by` names the suggester (the mapping operator); `created_by`
+      # is the accountable user — the caller when one is threaded through,
+      # otherwise the operator's own tag.
+      created_by = str(getattr(self.client, "user_id", None) or "mapping-agent")
       with extensions_session(graph_id) as session:
-        result = create_mapping_association(session, body, created_by="mapping-agent")
+        result = create_mapping_association(session, body, created_by=created_by)
       # The registrar-published tools get this from `OperationSpec`; this one
       # is hand-written and reaches the command directly, so it has to mark
       # the graph itself. Associations are materialized, and `auto-map-elements`
@@ -494,6 +531,8 @@ class CreateMappingAssociationTool:
         "to_element_id": result.to_element_id,
         "confidence": result.confidence,
       }
+    except SQLAlchemyError as exc:
+      return database_failure("create-mapping-association", exc)
     except Exception as exc:
       logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}

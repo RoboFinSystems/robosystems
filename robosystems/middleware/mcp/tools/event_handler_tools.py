@@ -14,14 +14,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.event_handler import (
   get_event_handler as ops_get_event_handler,
 )
 from robosystems.operations.roboledger.reads.event_handler import (
   list_event_handlers as ops_list_event_handlers,
 )
+
+from ._errors import database_failure
 
 
 class GetEventHandlerTool:
@@ -65,6 +70,9 @@ is_active, origin, and AI provenance fields.
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     handler_id = arguments["id"]
 
@@ -77,6 +85,8 @@ is_active, origin, and AI provenance fields.
             "message": f"EventHandler not found: {handler_id}",
           }
         return handler.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("get-event-handler", exc)
     except Exception as exc:
       logger.warning(f"get-event-handler failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
@@ -124,6 +134,9 @@ List of EventHandlerResponse objects ordered by priority descending then name.""
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
@@ -162,6 +175,8 @@ List of EventHandlerResponse objects ordered by priority descending then name.""
           "handler_count": len(handlers),
           "handlers": [h.model_dump(mode="json") for h in handlers],
         }
+    except SQLAlchemyError as exc:
+      return database_failure("list-event-handlers", exc)
     except Exception as exc:
       logger.warning(f"list-event-handlers failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}

@@ -98,6 +98,12 @@ def _make_user() -> MagicMock:
 
 
 class _FakeCache:
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   def __init__(self) -> None:
     self.store: dict = {}
 

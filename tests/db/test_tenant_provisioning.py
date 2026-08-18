@@ -71,6 +71,24 @@ class TestProvisionRefusesDeprovisionedGraph:
     assert excinfo.value.graph_id == GRAPH
     engine.connect.assert_not_called()
 
+  def test_raises_while_teardown_is_in_flight(self):
+    """Teardown stamps `deleted_at` (committed) before it drops anything and
+    flips the status only at the end; a sync in that window must not
+    re-create the schema."""
+    from datetime import UTC, datetime
+
+    graph = MagicMock()
+    graph.status = GraphStatus.ACTIVE.value
+    graph.deleted_at = datetime.now(UTC)
+    engine = MagicMock()
+    with (
+      patch.object(ext, "_get_engine", return_value=engine),
+      patch("robosystems.database.platform_session", self._platform_with(graph)),
+    ):
+      with pytest.raises(TenantDeprovisionedError):
+        provision_tenant_schema(GRAPH)
+    engine.connect.assert_not_called()
+
   def test_missing_graph_row_still_provisions(self):
     """Scripts provision without a platform row (framework_validate); only a
     row that says *deprovisioned* refuses."""
@@ -86,3 +104,22 @@ class TestProvisionRefusesDeprovisionedGraph:
     ):
       provision_tenant_schema(GRAPH)
     engine.connect.assert_called_once()
+
+
+class TestEngineSessionGuards:
+  def test_engine_sets_an_idle_in_transaction_timeout(self):
+    """A leaked idle-in-transaction session holding FOR UPDATE blocked writers
+    for as long as the connection lived; Postgres now closes it."""
+    from unittest.mock import patch
+
+    with (
+      patch.object(ext, "create_engine") as create_engine,
+      patch.object(ext, "get_extensions_database_url", return_value="postgresql://x"),
+    ):
+      ext._create_extensions_engine()
+    kwargs = create_engine.call_args.kwargs
+    assert (
+      f"idle_in_transaction_session_timeout={ext.IDLE_IN_TRANSACTION_TIMEOUT_MS}"
+      in kwargs["connect_args"]["options"]
+    )
+    assert "statement_timeout" not in kwargs["connect_args"]["options"]

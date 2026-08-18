@@ -316,12 +316,33 @@ class TestDeprovisionService:
   async def test_deprovision_already_deprovisioned(
     self, service, db_session, test_graph
   ):
-    """Returns early for already-deprovisioned graph."""
+    """An already-deprovisioned graph re-runs only the idempotent data-disposal
+    steps — a partial teardown used to leave a ghost tenant schema behind with
+    no way to retry — and touches nothing else."""
+    from unittest.mock import patch
+
     test_graph.transition_status(GraphStatus.DEPROVISIONED, db_session)
 
-    result = await service.deprovision_graph(test_graph.graph_id, db_session)
+    with (
+      patch(
+        "robosystems.db.extensions.drop_tenant_schema", return_value=True
+      ) as drop_schema,
+      patch.object(service, "_purge_search_index") as purge_search,
+      patch.object(service, "_purge_report_bundles") as purge_bundles,
+      patch.object(service, "_delete_database") as delete_db,
+      patch.object(service, "_deallocate_registry") as dealloc,
+    ):
+      result = await service.deprovision_graph(test_graph.graph_id, db_session)
 
     assert result.status == "already_deprovisioned"
+    assert result.extensions_schema_dropped is True
+    assert "residual data disposal re-run" in result.message
+    drop_schema.assert_called_once_with(test_graph.graph_id)
+    purge_search.assert_called_once()
+    purge_bundles.assert_called_once()
+    delete_db.assert_not_called()
+    dealloc.assert_not_called()
+    assert test_graph.status == GraphStatus.DEPROVISIONED.value
 
   @pytest.mark.asyncio
   async def test_deprovision_rejects_shared_repository(
@@ -826,3 +847,45 @@ class TestReportBundlePurge:
     db_session.refresh(test_graph)
     assert test_graph.status == GraphStatus.DEPROVISIONED.value
     assert test_graph.deleted_at is not None
+
+
+class TestOrphanTenantSchemas:
+  """A partial teardown, or a crash after the drop step failed, leaves a
+  tenant schema no graph owns; every per-tenant migration keeps touching it."""
+
+  def test_orphans_are_schemas_without_a_live_graph(self, db_session, test_graph):
+    from unittest.mock import patch
+
+    from robosystems.operations.graph.deprovision_service import (
+      find_orphan_tenant_schemas,
+    )
+
+    ghost = "kgdeadbeefdeadbeef01"
+    with patch(
+      "robosystems.db.extensions.list_tenant_schemas",
+      return_value=[test_graph.graph_id, ghost],
+    ):
+      assert find_orphan_tenant_schemas(db_session) == [ghost]
+
+      # A deprovisioned graph's schema is an orphan too.
+      test_graph.transition_status(GraphStatus.DEPROVISIONED, db_session)
+      db_session.flush()
+      assert find_orphan_tenant_schemas(db_session) == [test_graph.graph_id, ghost]
+
+  def test_purge_drops_each_orphan(self, db_session, test_graph):
+    from unittest.mock import patch
+
+    from robosystems.operations.graph.deprovision_service import (
+      purge_orphan_tenant_schemas,
+    )
+
+    ghost = "kgdeadbeefdeadbeef01"
+    with (
+      patch(
+        "robosystems.db.extensions.list_tenant_schemas",
+        return_value=[test_graph.graph_id, ghost],
+      ),
+      patch("robosystems.db.extensions.drop_tenant_schema", return_value=True) as drop,
+    ):
+      assert purge_orphan_tenant_schemas(db_session) == [ghost]
+    drop.assert_called_once_with(ghost)

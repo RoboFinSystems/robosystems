@@ -83,6 +83,12 @@ def _make_facts(count: int = 5):
 class _FakeCache:
   """Minimal idempotency cache stub that stores nothing."""
 
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   async def get(self, *args, **kwargs):
     return None
 

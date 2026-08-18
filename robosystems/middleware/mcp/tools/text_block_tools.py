@@ -8,14 +8,18 @@ platform session nor the trusted-path ``graph_id``.
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 
+from ._errors import database_failure
 from .document_tools import (
   _block_shared_repository,
   _check_graph_access,
   _get_platform_session,
-  _resolve_graph_owner,
+  _resolve_acting_user,
 )
 
 
@@ -84,6 +88,9 @@ class BindTextBlockTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from pydantic import ValidationError
 
     from robosystems.models.api.extensions.text_blocks import BindTextBlockRequest
@@ -108,7 +115,7 @@ class BindTextBlockTool:
     except ValidationError as e:
       return {"error": "invalid_input", "message": str(e)}
 
-    owner_id = _resolve_graph_owner(graph_id)
+    owner_id = _resolve_acting_user(self.client, graph_id)
     if not owner_id:
       return {
         "error": "access_denied",
@@ -131,6 +138,8 @@ class BindTextBlockTool:
       return {"error": "not_found", "message": str(e)}
     except ValueError as e:
       return {"error": "invalid_input", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure("bind-text-block", e)
     except Exception as e:
       logger.error(f"bind-text-block failed for graph_id={graph_id}: {e}")
       return {"error": "command_failed", "message": str(e)}

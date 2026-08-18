@@ -179,6 +179,19 @@ class TestRequireGraphExtension:
     assert exc_info.value.status_code == 403
     assert "not provisioned" in str(exc_info.value.detail)
 
+  def test_rejects_subgraph_ids_before_loading_metadata(self) -> None:
+    """A subgraph has no tenant schema. The route pattern admits
+    `{parent}_{name}` ids, so the dependency refuses them up front (403, the
+    GraphQL endpoint's answer) instead of letting the session factory reject
+    the id inside a handler as a 404 or a 500."""
+    dep = require_graph_extension("roboledger")
+    with patch(f"{MODULE}.Graph.get_by_id") as get_by_id:
+      with pytest.raises(HTTPException) as exc_info:
+        dep(graph_id=f"{GRAPH_ID}_dev", session=MagicMock())
+    assert exc_info.value.status_code == 403
+    assert "target the parent graph" in str(exc_info.value.detail)
+    get_by_id.assert_not_called()
+
   def test_rejects_entity_graph_without_extension(self) -> None:
     """Entity graph with empty schema_extensions → 403."""
     with pytest.raises(HTTPException) as exc_info:

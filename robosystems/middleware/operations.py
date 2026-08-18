@@ -17,7 +17,9 @@ SSE endpoint accepts.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -25,6 +27,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, Literal, TypeVar
 
+import anyio
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +46,13 @@ TResult = TypeVar("TResult", default=Any)
 OperationStatus = Literal["completed", "pending", "failed"]
 
 IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+
+# How long a key stays reserved while its first request is still running.
+# Long enough for the slowest legitimate operation (a close with QuickBooks
+# writeback), short enough that a request that died mid-flight does not block
+# its own retry for a day. A run that outlives the reservation simply loses
+# the in-flight guard — the same behavior as before reservations existed.
+IDEMPOTENCY_RESERVATION_TTL_SECONDS = 5 * 60
 
 
 def generate_operation_id() -> str:
@@ -219,6 +229,26 @@ class IdempotencyKeyConflictError(Exception):
     self.operation_name = operation_name
 
 
+class IdempotencyInProgressError(IdempotencyKeyConflictError):
+  """Raised when a caller replays an idempotency key whose first request is
+  still executing.
+
+  Without this, two requests with the same key that arrive inside the first
+  one's run time both miss the cache and both execute — the double-submit
+  the key exists to prevent. The route layer already maps the parent class
+  to HTTP 409, so this needs no new mapping; the message says to retry.
+  """
+
+  def __init__(self, operation_name: str) -> None:
+    Exception.__init__(
+      self,
+      f"A request with this Idempotency-Key for operation "
+      f"{operation_name!r} is still in progress. Retry after it completes "
+      "to receive its result.",
+    )
+    self.operation_name = operation_name
+
+
 def compute_idempotency_cache_key(
   user_id: str,
   graph_id: str,
@@ -322,8 +352,15 @@ class IdempotencyCache:
       return None
     try:
       stored = json.loads(raw)
-      cached_envelope = OperationEnvelope.model_validate(stored["envelope"])
       cached_fingerprint = stored["body_fingerprint"]
+      if stored.get("pending"):
+        # The first request with this key is still running.
+        if cached_fingerprint != body_fingerprint:
+          raise IdempotencyKeyConflictError(operation_name)
+        raise IdempotencyInProgressError(operation_name)
+      cached_envelope = OperationEnvelope.model_validate(stored["envelope"])
+    except IdempotencyKeyConflictError:
+      raise
     except Exception as exc:  # pragma: no cover - defensive
       logger.warning(
         "Idempotency cache payload was invalid; evicting",
@@ -341,6 +378,74 @@ class IdempotencyCache:
       raise IdempotencyKeyConflictError(operation_name)
 
     return cached_envelope
+
+  async def reserve(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+    body_fingerprint: str,
+  ) -> bool:
+    """Claim the key for an in-flight run.
+
+    Atomic ``SET NX`` of a pending marker carrying the body fingerprint. Returns
+    ``True`` when this call now holds the key, ``False`` when another request
+    already holds it (pending or completed) — the caller re-reads with
+    ``get`` to learn which. A cache outage answers ``True``: idempotency is
+    best-effort here exactly as it is for ``get``/``put``, and a Valkey blip
+    must not turn every write into a 5xx.
+    """
+    cache_key = compute_idempotency_cache_key(
+      user_id, graph_id, operation_name, idempotency_key
+    )
+    payload = json.dumps({"pending": True, "body_fingerprint": body_fingerprint})
+    try:
+      claimed = await self._client.set(
+        cache_key, payload, ex=IDEMPOTENCY_RESERVATION_TTL_SECONDS, nx=True
+      )
+    except Exception as exc:  # pragma: no cover - defensive
+      logger.warning(
+        "Idempotency cache reserve failed",
+        extra={
+          "cache_key": cache_key,
+          "operation": operation_name,
+          "graph_id": graph_id,
+          "error": str(exc),
+        },
+      )
+      return True
+    return bool(claimed)
+
+  async def release(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+  ) -> None:
+    """Drop a pending marker after the run failed, so a retry can execute.
+
+    Removes the key only while it still holds a pending marker — never a
+    completed envelope another request may have stored in the meantime.
+    """
+    cache_key = compute_idempotency_cache_key(
+      user_id, graph_id, operation_name, idempotency_key
+    )
+    try:
+      raw = await self._client.get(cache_key)
+      if raw is not None and json.loads(raw).get("pending"):
+        await self._client.delete(cache_key)
+    except Exception as exc:  # pragma: no cover - defensive
+      logger.warning(
+        "Idempotency cache release failed",
+        extra={
+          "cache_key": cache_key,
+          "operation": operation_name,
+          "graph_id": graph_id,
+          "error": str(exc),
+        },
+      )
 
   async def put(
     self,
@@ -393,6 +498,7 @@ def log_operation_audit(
   idempotent_replay: bool = False,
   error: str | None = None,
   event: str = "extensions.operation",
+  surface: str = "rest",
 ) -> None:
   """Emit one structured audit-log line per operation call.
 
@@ -402,7 +508,9 @@ def log_operation_audit(
 
   ``event`` names the event in the audit payload and log message:
   ``"extensions.operation"`` for extension ops, ``"graph.operation"`` for
-  graph lifecycle ops.
+  graph lifecycle ops. ``surface`` names the entry point — ``"rest"`` for
+  the HTTP operation routes, ``"mcp"`` for tool calls — so the same command
+  reached two ways is distinguishable in the stream.
   """
   payload: dict[str, Any] = {
     "event": event,
@@ -410,6 +518,7 @@ def log_operation_audit(
     "operation_id": operation_id,
     "user_id": user_id,
     "graph_id": graph_id,
+    "surface": surface,
     "duration_ms": round(duration_ms, 2),
     "status": status,
     "idempotent_replay": idempotent_replay,
@@ -537,11 +646,60 @@ async def check_idempotency(
   return None
 
 
+# ── Runner execution ─────────────────────────────────────────────────────
+
+_runner_limiter: anyio.CapacityLimiter | None = None
+
+
+def _get_runner_limiter() -> anyio.CapacityLimiter:
+  """Bound on operation runners executing concurrently in worker threads.
+
+  Sized to the extensions OLTP pool (``pool_size + max_overflow``): every
+  sync runner opens one tenant session, so a wider limiter would only turn
+  a burst into ``QueuePool limit ... reached`` after ``pool_timeout`` where
+  the pre-threadpool code merely queued the request on the event loop.
+  Excess runners wait on the limiter instead — same latency shape as before,
+  without freezing the loop while they wait.
+  """
+  global _runner_limiter
+  if _runner_limiter is None:
+    from robosystems.config.tuning import TuningConfig
+
+    total = (
+      TuningConfig.get_extensions_pool_size()
+      + TuningConfig.get_extensions_max_overflow()
+    )
+    _runner_limiter = anyio.CapacityLimiter(max(1, total))
+  return _runner_limiter
+
+
+async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
+  """Run ``func`` without blocking the event loop.
+
+  A coroutine function is awaited directly. Anything else is a sync callable
+  doing database or network work — it runs in a worker thread (with the
+  request's contextvars, so the platform request-scoped session resolves the
+  same way it does on the loop) under the runner limiter. A sync callable that
+  hands back an awaitable gets that awaited on the loop.
+
+  This is what keeps ``/v1/status`` answering while a close posts to
+  QuickBooks or a bounded lock wait sits on a busy row: the API runs one
+  uvicorn worker, and before this every operation's SQL and HTTP ran inline
+  on the loop.
+  """
+  if inspect.iscoroutinefunction(func):
+    return await func(*args)
+  result = await anyio.to_thread.run_sync(func, *args, limiter=_get_runner_limiter())
+  if inspect.isawaitable(result):
+    result = await result
+  return result
+
+
 async def execute_operation(
   ctx: OperationContext,
   runner: OperationRunner | AsyncOperationRunner,
   idempotency_cache: IdempotencyCache | None = None,
-  on_fresh_success: Callable[[OperationEnvelope], None] | None = None,
+  on_fresh_success: Callable[[OperationEnvelope], None | Awaitable[None]] | None = None,
 ) -> OperationEnvelope:
   """Run an operation and return its `OperationEnvelope`.
 
@@ -551,7 +709,10 @@ async def execute_operation(
      both present. On match, return the cached envelope with an
      `idempotent_replay=True` audit line and never call the runner. On
      fingerprint mismatch, raise `IdempotencyKeyConflictError` for the
-     route to map to HTTP 409.
+     route to map to HTTP 409. On a miss, **reserve** the key: a second
+     request with the same key that arrives while this one runs gets
+     `IdempotencyInProgressError` (also 409) instead of executing too. The
+     reservation is released if the run fails, so a retry can execute.
   2. **Run + time** the runner; wall-clock duration excludes the lookup.
   3. **Side-effect hook** — `on_fresh_success(envelope)` runs ONLY on a
      fresh execution, and BEFORE the envelope is cached, so a hook failure
@@ -564,10 +725,10 @@ async def execute_operation(
   The `runner` opens its own database session, performs business
   validation beyond FastAPI's parsing, calls the ops layer, and
   translates domain exceptions into `HTTPException`. Sync and async
-  runners are both accepted.
+  runners are both accepted; a sync runner (and a sync `on_fresh_success`
+  hook) executes in a worker thread so its database and network work never
+  blocks the event loop.
   """
-  import inspect
-
   # Requires both a key AND a fingerprint so a route handler can't request
   # idempotency without the fingerprint that protects against key reuse.
   use_idempotency = (
@@ -613,77 +774,163 @@ async def execute_operation(
         idempotent_replay=True,
       )
       return cached
-
-  # HTTPException and bare Exception are caught separately: the former
-  # propagates with its original status/detail, the latter still produces a
-  # failed audit line before re-raising, so a buggy command can never 500
-  # with no audit record.
-  start = time.monotonic()
-  try:
-    maybe_result = runner()
-    if inspect.isawaitable(maybe_result):
-      result = await maybe_result
-    else:
-      result = maybe_result
-  except HTTPException as exc:
-    duration_ms = (time.monotonic() - start) * 1000
-    log_operation_audit(
-      operation_name=ctx.operation_name,
-      operation_id=generate_operation_id(),
-      user_id=ctx.user_id,
-      graph_id=ctx.graph_id,
-      duration_ms=duration_ms,
-      status="failed",
-      idempotency_key=ctx.idempotency_key,
-      error=str(exc.detail),
-    )
-    raise
-  except Exception as exc:
-    duration_ms = (time.monotonic() - start) * 1000
-    log_operation_audit(
-      operation_name=ctx.operation_name,
-      operation_id=generate_operation_id(),
-      user_id=ctx.user_id,
-      graph_id=ctx.graph_id,
-      duration_ms=duration_ms,
-      status="failed",
-      idempotency_key=ctx.idempotency_key,
-      error=f"{type(exc).__name__}: {exc}",
-    )
-    raise
-
-  duration_ms = (time.monotonic() - start) * 1000
-
-  # The hook runs before caching: if it raises, the failure aborts the
-  # request without poisoning the idempotency cache with a stuck envelope.
-  envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
-  if on_fresh_success is not None:
-    on_fresh_success(envelope)
-  if use_idempotency:
-    await idempotency_cache.put(
+    # Miss: claim the key before running, so a second request with the same
+    # key that lands during this run is told "in progress" (409) instead of
+    # executing alongside it. Losing the claim means another request took
+    # the key between our read and our write — read again to replay its
+    # result or report it in progress.
+    if not await idempotency_cache.reserve(
       ctx.user_id,
       ctx.graph_id,
       ctx.operation_name,
       ctx.idempotency_key,
-      envelope,
       ctx.body_fingerprint,
+    ):
+      raced = await idempotency_cache.get(
+        ctx.user_id,
+        ctx.graph_id,
+        ctx.operation_name,
+        ctx.idempotency_key,
+        ctx.body_fingerprint,
+      )
+      if raced is not None:
+        raced = raced.model_copy(update={"idempotent_replay": True})
+        log_operation_audit(
+          operation_name=ctx.operation_name,
+          operation_id=raced.operation_id,
+          user_id=ctx.user_id,
+          graph_id=ctx.graph_id,
+          duration_ms=0.0,
+          status=raced.status,
+          idempotency_key=ctx.idempotency_key,
+          idempotent_replay=True,
+        )
+        return raced
+      # The other holder released between our two reads (its run failed);
+      # treat it like the in-progress case rather than looping.
+      raise IdempotencyInProgressError(ctx.operation_name)
+
+  async def _run_and_record() -> OperationEnvelope:
+    # HTTPException and bare Exception are caught separately: the former
+    # propagates with its original status/detail, the latter still produces a
+    # failed audit line before re-raising, so a buggy command can never 500
+    # with no audit record. The reservation is released on every exit that
+    # did not store the envelope — including a hook failure and a
+    # cancellation — so the caller's retry can run.
+    start = time.monotonic()
+    recorded = False
+    try:
+      try:
+        result = await run_off_loop(runner)
+      except HTTPException as exc:
+        log_operation_audit(
+          operation_name=ctx.operation_name,
+          operation_id=generate_operation_id(),
+          user_id=ctx.user_id,
+          graph_id=ctx.graph_id,
+          duration_ms=(time.monotonic() - start) * 1000,
+          status="failed",
+          idempotency_key=ctx.idempotency_key,
+          error=str(exc.detail),
+        )
+        raise
+      except Exception as exc:
+        log_operation_audit(
+          operation_name=ctx.operation_name,
+          operation_id=generate_operation_id(),
+          user_id=ctx.user_id,
+          graph_id=ctx.graph_id,
+          duration_ms=(time.monotonic() - start) * 1000,
+          status="failed",
+          idempotency_key=ctx.idempotency_key,
+          error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+      duration_ms = (time.monotonic() - start) * 1000
+
+      # The hook runs before caching: if it raises, the failure aborts the
+      # request without poisoning the idempotency cache with a stuck
+      # envelope. A write whose command succeeded but whose post-hook failed
+      # is still audited, as failed, so it never reaches the client as a 500
+      # with no record.
+      envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
+      if on_fresh_success is not None:
+        try:
+          await run_off_loop(on_fresh_success, envelope)
+        except Exception as exc:
+          log_operation_audit(
+            operation_name=ctx.operation_name,
+            operation_id=envelope.operation_id,
+            user_id=ctx.user_id,
+            graph_id=ctx.graph_id,
+            duration_ms=(time.monotonic() - start) * 1000,
+            status="failed",
+            idempotency_key=ctx.idempotency_key,
+            error=f"on_fresh_success: {type(exc).__name__}: {exc}",
+          )
+          raise
+      if use_idempotency:
+        await idempotency_cache.put(
+          ctx.user_id,
+          ctx.graph_id,
+          ctx.operation_name,
+          ctx.idempotency_key,
+          envelope,
+          ctx.body_fingerprint,
+        )
+      recorded = True
+      log_operation_audit(
+        operation_name=ctx.operation_name,
+        operation_id=envelope.operation_id,
+        user_id=ctx.user_id,
+        graph_id=ctx.graph_id,
+        duration_ms=duration_ms,
+        status="completed",
+        idempotency_key=ctx.idempotency_key,
+      )
+      return envelope
+    finally:
+      if use_idempotency and not recorded:
+        await idempotency_cache.release(
+          ctx.user_id, ctx.graph_id, ctx.operation_name, ctx.idempotency_key
+        )
+
+  # Shielded from cancellation. The runner's write commits in its worker
+  # thread whether or not the request is still connected (a disconnected
+  # client cannot un-commit it), so the recording half — hook, cache, audit
+  # — must finish too: otherwise a client that dropped mid-write leaves a
+  # committed operation with no cached envelope, and its retry with the same
+  # key either re-executes the write or is refused as in progress. The
+  # cancellation is honored the moment the shielded work completes.
+  work = asyncio.ensure_future(_run_and_record())
+  try:
+    return await asyncio.shield(work)
+  except asyncio.CancelledError:
+    # Nothing awaits `work` any more; retrieve its outcome when it lands so
+    # a late failure is logged rather than reported as never retrieved.
+    work.add_done_callback(_log_abandoned_outcome)
+    raise
+
+
+def _log_abandoned_outcome(task: asyncio.Future) -> None:
+  if task.cancelled():
+    return
+  exc = task.exception()
+  if exc is not None:
+    logger.warning(
+      "operation finished after its request was cancelled and failed: %s: %s",
+      type(exc).__name__,
+      exc,
     )
-  log_operation_audit(
-    operation_name=ctx.operation_name,
-    operation_id=envelope.operation_id,
-    user_id=ctx.user_id,
-    graph_id=ctx.graph_id,
-    duration_ms=duration_ms,
-    status="completed",
-    idempotency_key=ctx.idempotency_key,
-  )
-  return envelope
 
 
 __all__ = [
+  "IDEMPOTENCY_RESERVATION_TTL_SECONDS",
   "IDEMPOTENCY_TTL_SECONDS",
   "AsyncOperationRunner",
   "IdempotencyCache",
+  "IdempotencyInProgressError",
   "IdempotencyKeyConflictError",
   "OperationContext",
   "OperationEnvelope",
@@ -696,6 +943,7 @@ __all__ = [
   "generate_operation_id",
   "get_idempotency_cache",
   "log_operation_audit",
+  "run_off_loop",
   "wrap_completed",
   "wrap_failed",
   "wrap_pending",

@@ -28,7 +28,7 @@ so a multi-entry RL event becomes N round-trips. The returned
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -356,7 +356,7 @@ def _save_with_retry(
       "code": "qb_transport_error" if is_network else "qb_validation_error",
       "message": str(e),
       "qb_error_code": getattr(e, "error_code", None) if not is_network else None,
-      "qb_response_at": datetime.now().isoformat(),
+      "qb_response_at": datetime.now(UTC).isoformat(),
       "event_id": event_id,
       "request_id": request_id,
     }

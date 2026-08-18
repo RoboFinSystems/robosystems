@@ -111,7 +111,7 @@ _STALE_IN_CALLEE = {
   # Async: enqueues the mapping operator, whose writes all land through this
   # direct MCP tool. The registrar-published tools inherit the mark from
   # their `OperationSpec`; this one is hand-written and marks for itself.
-  "auto-map-elements": "robosystems.middleware.mcp.tools.taxonomy_tools.CreateMappingAssociationTool.execute",
+  "auto-map-elements": "robosystems.middleware.mcp.tools.taxonomy_tools.CreateMappingAssociationTool._execute_sync",
 }
 
 # Same bar as `_EXEMPT`: name the table written and why the graph never

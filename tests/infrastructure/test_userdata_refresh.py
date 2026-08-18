@@ -68,9 +68,12 @@ esac
 exit 0
 """
 
+# `login` drains stdin: the script pipes the ECR token into it under pipefail,
+# and a stub that exits before the producer writes turns the run into a SIGPIPE
+# (141) "ECR login failed" on a loaded runner.
 DOCKER_STUB = """#!/bin/bash
 case "$1" in
-  login) exit 0 ;;
+  login) cat >/dev/null; exit 0 ;;
   pull) echo "$2" >> "$STUB_PULL_LOG"; exit ${STUB_PULL_EXIT:-0} ;;
   image)
     case "$2" in

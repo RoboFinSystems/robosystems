@@ -15,6 +15,7 @@ from robosystems.logger import logger
 from robosystems.operations.operators.ai_client import AIClient
 from robosystems.operations.operators.base import (
   OperatorMode,
+  enforce_operator_graph_scope,
   enforce_operator_write_role,
 )
 from robosystems.operations.operators.credit_consumer import FactoryCreditConsumer
@@ -54,6 +55,7 @@ async def run_operator_worker(
   # have been revoked — or the balance spent — in between. Same reasoning as
   # `GraphCreationService._validate_org`.
   enforce_operator_write_role(operator, graph_id, user_id)
+  enforce_operator_graph_scope(operator, graph_id)
 
   preflight_session = SessionFactory()
   try:
@@ -61,7 +63,7 @@ async def run_operator_worker(
   finally:
     preflight_session.close()
 
-  tools = DirectToolAccess(graph_id)
+  tools = DirectToolAccess(graph_id, user_id=user_id)
   ai_client = AIClient()
   credit_consumer = FactoryCreditConsumer()
 

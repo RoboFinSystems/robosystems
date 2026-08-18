@@ -19,14 +19,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.information_block import (
   get_information_block as ops_get_information_block,
 )
 from robosystems.operations.information_block import (
   list_information_blocks as ops_list_information_blocks,
 )
+
+from ._errors import database_failure
 
 # ────────────────────────────────────────────────────────────────────────────
 # get-information-block
@@ -124,6 +129,9 @@ were retired in favor of this pair.""",
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     block_id = arguments["id"]
     scenario_id = arguments.get("scenario_id")
@@ -147,6 +155,8 @@ were retired in favor of this pair.""",
             "message": f"Information Block not found: {block_id}",
           }
         return envelope.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("get-information-block", exc)
     except Exception as exc:
       logger.warning(f"get-information-block failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
@@ -244,6 +254,9 @@ class ListInformationBlocksTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     block_type = arguments.get("block_type")
     category = arguments.get("category")
@@ -293,6 +306,8 @@ class ListInformationBlocksTool:
     except ValueError as exc:
       # Raised on unknown block_type — surface as an argument-level error.
       return {"error": "invalid_arguments", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("list-information-blocks", exc)
     except Exception as exc:
       logger.warning(f"list-information-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}

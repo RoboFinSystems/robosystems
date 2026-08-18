@@ -25,6 +25,12 @@ _CMD = "robosystems.operations.graph.commands.metadata.update_graph_metadata_cmd
 class _FakeCache:
   """In-memory idempotency cache matching the real signature."""
 
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   def __init__(self) -> None:
     self.store: dict = {}
 

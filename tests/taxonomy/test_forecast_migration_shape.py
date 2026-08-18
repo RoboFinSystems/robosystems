@@ -96,23 +96,26 @@ class TestFreshPathParity:
 
   def test_provisioning_widens_match(self) -> None:
     """Fresh tenant schemas get their CHECKs from _widen_library_checks,
-    not from the migration chain — it must carry both new values."""
-    import inspect
-
+    not from the migration chain — it must carry both new values. The
+    widener now derives from the model vocabularies, so check what it emits."""
     from robosystems.db import extensions as extensions_db
 
-    source = inspect.getsource(extensions_db._widen_library_checks)
-    assert "'forecast'" in source
-    assert "'rs-driver'" in source
+    statements: list[str] = []
+
+    class FakeConn:
+      def execute(self, statement):
+        statements.append(str(statement))
+
+    extensions_db._widen_library_checks(FakeConn(), "kg0123456789abcdef")
+    assert any("'forecast'" in s for s in statements)
+    assert any("'rs-driver'" in s for s in statements)
 
   def test_models_match(self) -> None:
-    import inspect
+    from robosystems.models.extensions.element import ELEMENT_SOURCE_VALUES
+    from robosystems.models.extensions.structure import BLOCK_TYPE_VALUES
 
-    from robosystems.models.extensions import element as element_module
-    from robosystems.models.extensions import structure as structure_module
-
-    assert "'forecast'" in inspect.getsource(structure_module)
-    assert "'rs-driver'" in inspect.getsource(element_module)
+    assert "forecast" in BLOCK_TYPE_VALUES
+    assert "rs-driver" in ELEMENT_SOURCE_VALUES
 
   def test_manifest_lists_rs_driver_at_ordinal_15(self) -> None:
     manifest_path = (

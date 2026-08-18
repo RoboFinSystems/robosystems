@@ -19,6 +19,7 @@ from robosystems.middleware import operations as middleware_module
 from robosystems.middleware.operations import (
   IDEMPOTENCY_TTL_SECONDS,
   IdempotencyCache,
+  IdempotencyInProgressError,
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
@@ -248,8 +249,13 @@ class TestIdempotencyCache:
     async def _get(key: str) -> str | None:
       return store.get(key)
 
-    async def _set(key: str, value: str, ex: int | None = None) -> None:
+    async def _set(
+      key: str, value: str, ex: int | None = None, nx: bool = False
+    ) -> bool | None:
+      if nx and key in store:
+        return None
       store[key] = value
+      return True
 
     async def _delete(key: str) -> None:
       store.pop(key, None)
@@ -259,6 +265,46 @@ class TestIdempotencyCache:
     mock_client.delete = AsyncMock(side_effect=_delete)
 
     return IdempotencyCache(client=mock_client), mock_client, store
+
+  @pytest.mark.asyncio
+  async def test_reserve_claims_once_and_get_reports_in_progress(self) -> None:
+    cache, client, store = self._make_cache()
+    assert await cache.reserve("u", "g", "op", "k", "fp") is True
+    # SET NX with the short reservation TTL, not the 24h envelope TTL.
+    _, kwargs = client.set.call_args
+    assert kwargs["nx"] is True
+    assert kwargs["ex"] == middleware_module.IDEMPOTENCY_RESERVATION_TTL_SECONDS
+    # A second claim loses; a read with the same body says "in progress",
+    # a read with a different body is the usual conflict.
+    assert await cache.reserve("u", "g", "op", "k", "fp") is False
+    with pytest.raises(IdempotencyInProgressError):
+      await cache.get("u", "g", "op", "k", "fp")
+    with pytest.raises(IdempotencyKeyConflictError) as exc_info:
+      await cache.get("u", "g", "op", "k", "other")
+    assert not isinstance(exc_info.value, IdempotencyInProgressError)
+
+  @pytest.mark.asyncio
+  async def test_release_drops_only_a_pending_marker(self) -> None:
+    cache, _client, store = self._make_cache()
+    await cache.reserve("u", "g", "op", "k", "fp")
+    await cache.release("u", "g", "op", "k")
+    assert store == {}
+    # A completed envelope is never removed by release.
+    env = wrap_completed("op", {"ok": True})
+    await cache.put("u", "g", "op", "k", env, "fp")
+    await cache.release("u", "g", "op", "k")
+    assert len(store) == 1
+    assert (await cache.get("u", "g", "op", "k", "fp")) is not None
+
+  @pytest.mark.asyncio
+  async def test_put_replaces_the_reservation(self) -> None:
+    cache, _client, _store = self._make_cache()
+    await cache.reserve("u", "g", "op", "k", "fp")
+    env = wrap_completed("op", {"ok": True})
+    await cache.put("u", "g", "op", "k", env, "fp")
+    replay = await cache.get("u", "g", "op", "k", "fp")
+    assert replay is not None
+    assert replay.result == {"ok": True}
 
   @pytest.mark.asyncio
   async def test_miss_returns_none(self) -> None:
@@ -485,6 +531,8 @@ class _FakeIdempotencyCache:
 
   def __init__(self) -> None:
     self.store: dict[tuple[str, str, str, str], tuple[OperationEnvelope, str]] = {}
+    # Keys reserved by an in-flight run: key → body fingerprint.
+    self.pending: dict[tuple[str, str, str, str], str] = {}
 
   async def get(
     self,
@@ -494,13 +542,41 @@ class _FakeIdempotencyCache:
     idempotency_key: str,
     body_fingerprint: str,
   ) -> OperationEnvelope | None:
-    entry = self.store.get((user_id, graph_id, operation_name, idempotency_key))
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    if k in self.pending:
+      if self.pending[k] != body_fingerprint:
+        raise IdempotencyKeyConflictError(operation_name)
+      raise IdempotencyInProgressError(operation_name)
+    entry = self.store.get(k)
     if entry is None:
       return None
     cached_envelope, cached_fingerprint = entry
     if cached_fingerprint != body_fingerprint:
       raise IdempotencyKeyConflictError(operation_name)
     return cached_envelope
+
+  async def reserve(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+    body_fingerprint: str,
+  ) -> bool:
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    if k in self.pending or k in self.store:
+      return False
+    self.pending[k] = body_fingerprint
+    return True
+
+  async def release(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+  ) -> None:
+    self.pending.pop((user_id, graph_id, operation_name, idempotency_key), None)
 
   async def put(
     self,
@@ -512,10 +588,9 @@ class _FakeIdempotencyCache:
     body_fingerprint: str,
     ttl_seconds: int = IDEMPOTENCY_TTL_SECONDS,
   ) -> None:
-    self.store[(user_id, graph_id, operation_name, idempotency_key)] = (
-      envelope,
-      body_fingerprint,
-    )
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    self.pending.pop(k, None)
+    self.store[k] = (envelope, body_fingerprint)
 
 
 def _make_ctx(**overrides: Any) -> OperationContext:
@@ -587,6 +662,95 @@ class TestExecuteOperationHappyPath:
     assert audit["operation"] == "create-portfolio"
     assert audit["idempotent_replay"] is False
     assert audit["duration_ms"] >= 0
+
+
+class TestExecuteOperationRunsOffTheLoop:
+  """The API runs one uvicorn worker. A sync runner doing SQL or HTTP used
+  to execute inline on the event loop, freezing every other request —
+  including the ALB health check — for its whole duration."""
+
+  @pytest.mark.asyncio
+  async def test_sync_runner_does_not_block_the_event_loop(self) -> None:
+    import asyncio
+    import time
+
+    ctx = _make_ctx(operation_name="slow-op")
+    ticks: list[float] = []
+
+    async def _ticker() -> None:
+      for _ in range(3):
+        await asyncio.sleep(0.02)
+        ticks.append(time.monotonic())
+
+    def _blocking_runner():
+      time.sleep(0.25)
+      return {"slept": True}
+
+    with patch.object(middleware_module.logger, "info"):
+      ticker = asyncio.ensure_future(_ticker())
+      envelope = await execute_operation(ctx, _blocking_runner)
+      runner_returned_at = time.monotonic()
+      await ticker
+
+    assert envelope.result == {"slept": True}
+    # All three ticks landed while the runner was still sleeping — the loop
+    # kept turning. On the old inline path the ticker could not run until
+    # the runner returned, so every tick came after it.
+    assert len(ticks) == 3
+    assert all(t < runner_returned_at for t in ticks)
+
+  @pytest.mark.asyncio
+  async def test_sync_hook_runs_off_loop_and_async_hook_is_awaited(self) -> None:
+    import threading
+
+    ctx = _make_ctx(operation_name="hooked-op")
+    seen: dict[str, Any] = {}
+
+    def _sync_hook(envelope: OperationEnvelope) -> None:
+      seen["sync_thread"] = threading.current_thread()
+      seen["sync_env"] = envelope
+
+    async def _async_hook(envelope: OperationEnvelope) -> None:
+      seen["async_env"] = envelope
+
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(ctx, lambda: {"a": 1}, on_fresh_success=_sync_hook)
+      await execute_operation(ctx, lambda: {"a": 2}, on_fresh_success=_async_hook)
+
+    assert seen["sync_thread"] is not threading.main_thread()
+    assert seen["sync_env"].result == {"a": 1}
+    assert seen["async_env"].result == {"a": 2}
+
+  @pytest.mark.asyncio
+  async def test_runner_sees_the_request_contextvars(self) -> None:
+    """The platform request-scoped session resolves through a ContextVar;
+    the worker thread must see the same context or the runner would get a
+    different Session than the dependencies that ran on the loop."""
+    import contextvars
+
+    marker: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+      "op_marker", default=None
+    )
+    ctx = _make_ctx(operation_name="ctx-op")
+    token = marker.set("from-request")
+    try:
+      with patch.object(middleware_module.logger, "info"):
+        envelope = await execute_operation(ctx, lambda: {"marker": marker.get()})
+    finally:
+      marker.reset(token)
+    assert envelope.result == {"marker": "from-request"}
+
+  @pytest.mark.asyncio
+  async def test_sync_runner_exception_still_propagates(self) -> None:
+    ctx = _make_ctx(operation_name="boom-op")
+
+    def _runner():
+      raise HTTPException(status_code=409, detail="locked")
+
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(HTTPException) as exc_info:
+        await execute_operation(ctx, _runner)
+    assert exc_info.value.status_code == 409
 
 
 class TestExecuteOperationFailurePath:
@@ -686,6 +850,135 @@ class TestExecuteOperationFailurePath:
       await execute_operation(ctx, _runner, idempotency_cache=cache)
 
     assert cache.store == {}
+
+
+class TestExecuteOperationReservation:
+  """The cache had no in-flight state: two requests with the same key that
+  arrived inside the first one's run time both missed and both executed."""
+
+  @pytest.mark.asyncio
+  async def test_same_key_during_the_run_is_409_not_a_second_execution(
+    self,
+  ) -> None:
+    import asyncio
+
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k1", body_fingerprint="fp1")
+    calls = 0
+    release_runner = asyncio.Event()
+
+    def _slow_runner():
+      nonlocal calls
+      calls += 1
+      # Block the worker thread until the test lets the run finish.
+      asyncio.run_coroutine_threadsafe(release_runner.wait(), loop).result()
+      return {"n": calls}
+
+    loop = asyncio.get_running_loop()
+    with patch.object(middleware_module.logger, "info"):
+      first = asyncio.ensure_future(
+        execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      )
+      # Let the first request reach the runner and hold the reservation.
+      while calls == 0:
+        await asyncio.sleep(0.005)
+      with pytest.raises(IdempotencyInProgressError):
+        await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      release_runner.set()
+      envelope = await first
+
+    assert calls == 1
+    assert envelope.result == {"n": 1}
+    # Once the first completes, the same key replays its envelope.
+    with patch.object(middleware_module.logger, "info"):
+      replay = await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+    assert replay.idempotent_replay is True
+    assert replay.result == {"n": 1}
+    assert calls == 1
+
+  @pytest.mark.asyncio
+  async def test_failed_run_releases_the_key_so_a_retry_executes(self) -> None:
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k2", body_fingerprint="fp2")
+    attempts = 0
+
+    def _flaky_runner():
+      nonlocal attempts
+      attempts += 1
+      if attempts == 1:
+        raise HTTPException(status_code=502, detail="upstream")
+      return {"attempt": attempts}
+
+    with (
+      patch.object(middleware_module.logger, "info"),
+      patch.object(middleware_module.logger, "error"),
+    ):
+      with pytest.raises(HTTPException):
+        await execute_operation(ctx, _flaky_runner, idempotency_cache=cache)
+      assert cache.pending == {}
+      envelope = await execute_operation(ctx, _flaky_runner, idempotency_cache=cache)
+    assert envelope.result == {"attempt": 2}
+
+  @pytest.mark.asyncio
+  async def test_failing_hook_releases_the_key(self) -> None:
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k3", body_fingerprint="fp3")
+
+    def _hook(_env):
+      raise RuntimeError("hook exploded")
+
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(RuntimeError):
+        await execute_operation(
+          ctx, lambda: {"ok": True}, idempotency_cache=cache, on_fresh_success=_hook
+        )
+    assert cache.pending == {}
+    assert cache.store == {}
+
+  @pytest.mark.asyncio
+  async def test_cancelled_request_still_records_and_releases(self) -> None:
+    """The runner's write commits in its worker thread whether or not the
+    client is still there. Before shielding, a disconnect mid-run skipped
+    both `except` arms: the envelope was never cached and the reservation
+    stayed pending for its whole TTL, so the client's retry got 409 for a
+    write that had already landed."""
+    import asyncio
+    import threading
+
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k4", body_fingerprint="fp4")
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def _slow_runner():
+      nonlocal calls
+      calls += 1
+      started.set()
+      release.wait(timeout=5)
+      return {"n": calls}
+
+    with patch.object(middleware_module.logger, "info"):
+      request = asyncio.ensure_future(
+        execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      )
+      while not started.is_set():
+        await asyncio.sleep(0.005)
+      request.cancel()
+      with pytest.raises(asyncio.CancelledError):
+        await request
+      # The client is gone; the work finishes anyway and is recorded.
+      release.set()
+      for _ in range(200):
+        if cache.store:
+          break
+        await asyncio.sleep(0.01)
+      assert cache.pending == {}
+      assert len(cache.store) == 1
+      # The retry replays instead of re-executing or being refused.
+      replay = await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+    assert replay.idempotent_replay is True
+    assert calls == 1
 
 
 class TestExecuteOperationIdempotency:

@@ -14,8 +14,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.agent import (
   get_agent as ops_get_agent,
 )
@@ -25,6 +28,8 @@ from robosystems.operations.roboledger.reads.agent import (
 from robosystems.operations.roboledger.reads.agent import (
   list_agents as ops_list_agents,
 )
+
+from ._errors import database_failure
 
 
 class GetAgentTool:
@@ -67,6 +72,9 @@ source/external_id provenance, and is_active status.
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     agent_id = arguments["id"]
 
@@ -76,6 +84,8 @@ source/external_id provenance, and is_active status.
         if agent is None:
           return {"error": "not_found", "message": f"Agent not found: {agent_id}"}
         return agent.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("get-agent", exc)
     except Exception as exc:
       logger.warning(f"get-agent failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
@@ -120,6 +130,9 @@ List of AgentResponse objects ordered by name.""",
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
@@ -154,6 +167,8 @@ List of AgentResponse objects ordered by name.""",
           "agent_count": len(agents),
           "agents": [a.model_dump(mode="json") for a in agents],
         }
+    except SQLAlchemyError as exc:
+      return database_failure("list-agents", exc)
     except Exception as exc:
       logger.warning(f"list-agents failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
@@ -200,6 +215,9 @@ class AgentActivityTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     agent_id = arguments["id"]
     limit = int(arguments.get("limit", 100))
@@ -216,6 +234,8 @@ class AgentActivityTool:
         if activity is None:
           return {"error": "not_found", "message": f"Agent not found: {agent_id}"}
         return activity.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("agent-activity", exc)
     except Exception as exc:
       logger.warning(f"agent-activity failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}

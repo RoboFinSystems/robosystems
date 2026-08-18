@@ -24,6 +24,8 @@ share one source of truth for both behavior and wire shape.
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.db.platform import platform_session as _platform_session
 from robosystems.logger import logger
@@ -31,6 +33,7 @@ from robosystems.middleware.mcp.tools._gate import (
   MCPExtensionGateError,
   require_graph_extension_mcp,
 )
+from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
 )
@@ -67,6 +70,8 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampError,
 )
+
+from ._errors import database_failure
 
 
 def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:
@@ -145,6 +150,9 @@ class GetFiscalCalendarTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     svc = FiscalCalendarService()
 
@@ -160,6 +168,8 @@ class GetFiscalCalendarTool:
             ),
           }
         return _calendar_dict(session, graph_id, calendar, svc)
+    except SQLAlchemyError as exc:
+      return database_failure("get-fiscal-calendar", exc)
     except Exception as exc:
       logger.warning(f"get-fiscal-calendar failed: {exc}")
       return {"error": str(exc)}
@@ -282,6 +292,9 @@ class ClosePeriodTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
 
     try:
@@ -407,6 +420,8 @@ class ClosePeriodTool:
       }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("close-period", exc)
     except Exception as exc:
       logger.warning(f"close-period failed: {exc}")
       return {"error": str(exc)}
@@ -484,6 +499,9 @@ class ReopenPeriodTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
 
     try:
@@ -543,6 +561,8 @@ class ReopenPeriodTool:
         }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("reopen-period", exc)
     except Exception as exc:
       logger.warning(f"reopen-period failed: {exc}")
       return {"error": str(exc)}
@@ -679,6 +699,9 @@ class BackfillPlanHistoryTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
 
     try:
@@ -731,6 +754,8 @@ class BackfillPlanHistoryTool:
       return {"error": exc.code, "message": str(exc)}
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("backfill-plan-history", exc)
     except Exception as exc:
       logger.warning(f"backfill-plan-history failed: {exc}")
       return {"error": str(exc)}

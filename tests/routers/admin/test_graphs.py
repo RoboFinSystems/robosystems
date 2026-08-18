@@ -133,7 +133,8 @@ class TestDeprovisionGraph:
   def test_deprovision_already_deprovisioned(
     self, client, db_session, test_graph, mock_admin_auth
   ):
-    """Test 409 when graph is already deprovisioned."""
+    """An already-deprovisioned graph is a 200: the call re-runs the idempotent
+    data-disposal steps so a partial teardown can be finished from the CLI."""
     # First deprovision it
     test_graph.transition_status(GraphStatus.DEPROVISIONED, db_session)
 
@@ -142,8 +143,10 @@ class TestDeprovisionGraph:
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
-    assert response.status_code == 409
-    assert "already deprovisioned" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "already_deprovisioned"
+    assert "already deprovisioned" in body["message"].lower()
 
   def test_deprovision_rejects_shared_repository(
     self, client, db_session, test_graph, mock_admin_auth

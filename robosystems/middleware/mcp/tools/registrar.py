@@ -31,6 +31,7 @@ registrar internals.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
@@ -43,6 +44,13 @@ from robosystems.middleware.extensions import (
   OperationSpec,
   is_schema_missing,
 )
+from robosystems.middleware.operations import (
+  fingerprint_body,
+  generate_operation_id,
+  get_idempotency_cache,
+  log_operation_audit,
+  run_off_loop,
+)
 from robosystems.operations.extensions.staleness import mark_graph_stale
 
 from ._gate import MCPExtensionGateError, require_graph_extension_mcp
@@ -53,6 +61,13 @@ if TYPE_CHECKING:
 
 
 # ── Input schema derivation ─────────────────────────────────────────────────
+
+
+# Prefix of the reservation slot MCP calls claim in the idempotency cache. REST
+# requests reserve under their caller-supplied Idempotency-Key; MCP has none,
+# so a call claims `<prefix>:<argument fingerprint>` per (user, graph, tool) —
+# two calls are "identical" when their arguments fingerprint the same.
+_MCP_INFLIGHT_KEY = "mcp-inflight"
 
 
 def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
@@ -433,9 +448,68 @@ class _RegistrarMCPTool(BaseTool):
         return {"error": "invalid_arguments", "message": str(detail)}
 
     # ── 4. Resolve command, call it inside the session ─────────────────
+    # The command is synchronous database work; it runs in a worker thread
+    # (like every REST operation runner) so the MCP server's event loop keeps
+    # serving other tools — and `/v1/status` — while it executes.
+    #
+    # MCP carries no Idempotency-Key, so there is no replay. What can be
+    # prevented is the concurrent duplicate: an identical call (same user,
+    # graph, tool, arguments) that arrives while the first is still running
+    # is refused rather than executed alongside it. The claim is keyed by
+    # the argument fingerprint and released when the run ends, so a later
+    # identical call — a deliberate repeat — executes normally.
+    created_by = self._resolve_created_by(graph_id)
+    fingerprint = fingerprint_body(body)
+    inflight_key = f"{_MCP_INFLIGHT_KEY}:{fingerprint}"
+    cache = get_idempotency_cache()
+    claimed = await cache.reserve(
+      created_by, graph_id, self.spec.name, inflight_key, fingerprint
+    )
+    if not claimed:
+      log_operation_audit(
+        operation_name=self.spec.name,
+        operation_id=generate_operation_id(),
+        user_id=created_by,
+        graph_id=graph_id,
+        duration_ms=0.0,
+        status="failed",
+        error="duplicate call while an identical one is in progress",
+        surface="mcp",
+      )
+      return {
+        "error": "in_progress",
+        "message": (
+          f"An identical {self.spec.name} call is still in progress; wait for "
+          "its result instead of repeating it."
+        ),
+      }
+
+    start = time.monotonic()
+    try:
+      result = await run_off_loop(self._run_command, graph_id, body, created_by)
+    finally:
+      await cache.release(created_by, graph_id, self.spec.name, inflight_key)
+    duration_ms = (time.monotonic() - start) * 1000
+
+    # One audit line per tool call, the same shape and stream as the REST
+    # operation routes — a write reached through MCP was previously invisible
+    # to the "who did what" review.
+    failed = isinstance(result, dict) and "error" in result
+    log_operation_audit(
+      operation_name=self.spec.name,
+      operation_id=generate_operation_id(),
+      user_id=created_by,
+      graph_id=graph_id,
+      duration_ms=duration_ms,
+      status="failed" if failed else "completed",
+      error=str(result.get("error")) if failed else None,
+      surface="mcp",
+    )
+    return result
+
+  def _run_command(self, graph_id: str, body: BaseModel, created_by: str) -> Any:
     session_factory = self.registrar.session_factory
     command = self.spec.command
-    created_by = self._resolve_created_by(graph_id)
 
     session_bound = False
     try:

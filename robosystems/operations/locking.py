@@ -221,10 +221,21 @@ def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
       )
       acquired = True
     except OperationalError as exc:
+      # The failed statement aborted the transaction; roll it back and clear
+      # the session-level timeout before the connection goes back to the
+      # pool, or the next borrower inherits a 3s lock_timeout it never set.
+      try:
+        conn.rollback()
+        conn.execute(text("RESET lock_timeout"))
+        conn.commit()
+      except Exception:
+        conn.invalidate()
       if getattr(exc.orig, "pgcode", None) in _RETRYABLE_LOCK_STATES:
         raise RowLockedError(detail) from exc
       raise
-    conn.execute(text("SET lock_timeout = 0"))
+    # RESET, not `SET ... = 0`: restore whatever the connection's default is
+    # (an engine-level setting, say) rather than pin it to "wait forever".
+    conn.execute(text("RESET lock_timeout"))
     conn.commit()
     yield
   finally:

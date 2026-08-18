@@ -18,8 +18,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.logger import logger
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
@@ -162,6 +164,24 @@ def _assert_not_duplicate(session: Session, body: CreateEventBlockRequest) -> No
     raise DuplicateEventError(body.source, body.external_id)
 
 
+def _flush_new_event(
+  session: Session, event: Event, body: CreateEventBlockRequest
+) -> None:
+  """Flush a freshly added Event, translating the partial unique index on
+  ``(source, external_id)`` into ``DuplicateEventError``.
+
+  ``_assert_not_duplicate`` ran first, but two identical posts racing past
+  it both reach the insert; the index is the truth and its answer is the
+  same one the pre-check gives — not a 500.
+  """
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    if body.external_id and violates(exc, "idx_events_source_external"):
+      raise DuplicateEventError(body.source, body.external_id) from exc
+    raise
+
+
 def _validate_event_source(source: str, graph_id: str) -> None:
   """A source is valid iff it's platform-emitted or registered on the graph.
 
@@ -274,7 +294,7 @@ def create_event_block(
 
       event = _build_event_row(body, created_by, status=python_handler.target_status)
       session.add(event)
-      session.flush()
+      _flush_new_event(session, event, body)
 
       if body.dimension_ids:
         session.execute(
@@ -309,7 +329,7 @@ def create_event_block(
 
     event = _build_event_row(body, created_by, status="classified")
     session.add(event)
-    session.flush()
+    _flush_new_event(session, event, body)
 
     if body.dimension_ids:
       session.execute(
@@ -328,7 +348,7 @@ def create_event_block(
   # Capture-only path (apply_handlers=False)
   event = _build_event_row(body, created_by, status="captured")
   session.add(event)
-  session.flush()
+  _flush_new_event(session, event, body)
 
   if body.dimension_ids:
     session.execute(

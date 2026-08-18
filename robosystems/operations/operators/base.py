@@ -477,3 +477,35 @@ def enforce_operator_write_role(
   from robosystems.middleware.auth.dependencies import require_graph_write_role
 
   require_graph_write_role(user_id, graph_id)
+
+
+def enforce_operator_graph_scope(operator: Operator, graph_id: str) -> None:
+  """Refuse to run an operator on a graph outside its declared ``graph_scope``.
+
+  The orchestrator applies ``matches_graph_scope`` when it routes, but the
+  SSE, background-queue and worker paths call the execution adapters directly
+  and skipped it: a mapping operator scoped to ``roboledger`` could be started
+  on a graph with no ledger tenant, and its tools would then fail one by one
+  against a missing schema. Checked in the adapters, next to the write-role
+  gate, so every entry point inherits it. No-op for operators without a scope.
+
+  Raises:
+      HTTPException: 403 when the graph does not match the operator's scope.
+  """
+  scope = operator.spec.graph_scope
+  if scope is None:
+    return
+
+  from fastapi import HTTPException
+
+  from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
+
+  extensions = resolve_schema_extensions(graph_id)
+  if not matches_graph_scope(scope, graph_id, extensions):
+    raise HTTPException(
+      status_code=403,
+      detail=(
+        f"Operator '{operator.spec.name}' is not available on graph {graph_id}: "
+        "the graph is outside the operator's declared scope."
+      ),
+    )

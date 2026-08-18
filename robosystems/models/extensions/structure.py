@@ -67,6 +67,47 @@ TEXT_BLOCK_CAPS: frozenset[str] = frozenset(
 )
 
 
+# The `structures.block_type` vocabulary — the single source for the model
+# CHECK and the tenant-provisioning widen step (`copy_library_into_tenant`
+# mirrors rows from `public.structures`; a tenant-side CHECK narrower than
+# public's silently fails graph creation when the library adds a value).
+BLOCK_TYPE_VALUES: tuple[str, ...] = (
+  # Renderable financial-statement presentations (the user-facing forms)
+  "income_statement",
+  "balance_sheet",
+  "cash_flow_statement",
+  "equity_statement",
+  "comprehensive_income",
+  # Domain-specific working-paper / schedule patterns
+  "schedule",
+  "rollforward",
+  "reconciliation",
+  "policy",
+  "metric",
+  # Forecast — the authored scenario container (FP&A engine): lever
+  # assertions + scenario identity; derived forward facts land in the
+  # existing statement/metric block types stamped with fact_sets.scenario_id.
+  "forecast",
+  # Chart-of-accounts and CoA→GAAP mapping
+  "chart_of_accounts",
+  "coa_mapping",
+  # Reference-taxonomy structure kinds (XBRL network roles distinct from
+  # presentation): formal calculation/business rules, named SEC/regulatory
+  # disclosures, crosswalks between taxonomies. Filtered out of the
+  # report-package render path; consumed by the rule engine, disclosure
+  # registry and mapping resolver.
+  "validation_rules",
+  "regulatory_disclosure",
+  "taxonomy_mapping",
+  # Reporting Style — the bundle a company picks; pinned per entity via
+  # entities.reporting_style_id and composed per statement_type via
+  # reporting_style_networks.
+  "reporting_style",
+  # Escape hatch
+  "custom",
+)
+
+
 class Structure(ExtensionsBase):
   __tablename__ = "structures"
   __table_args__ = (
@@ -80,37 +121,7 @@ class Structure(ExtensionsBase):
       sqlalchemy_text("(metadata->>'role_uri')"),
     ),
     CheckConstraint(
-      "block_type IN ("
-      # Renderable financial-statement presentations (the user-facing forms)
-      "'income_statement', 'balance_sheet', "
-      "'cash_flow_statement', 'equity_statement', "
-      "'comprehensive_income', "
-      # Domain-specific working-paper / schedule patterns
-      "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
-      # Forecast — the authored scenario container (FP&A engine): lever
-      # assertions + scenario identity; derived forward facts land in
-      # the EXISTING statement/metric block types stamped with
-      # fact_sets.scenario_id, never in a parallel forecast statement.
-      "'forecast', "
-      # Chart-of-accounts and CoA→GAAP mapping
-      "'chart_of_accounts', 'coa_mapping', "
-      # Reference-taxonomy structure kinds (XBRL network roles distinct
-      # from presentation): formal calculation/business rules expressed
-      # as a network (FAC's "Assets = L + E"), named SEC/regulatory
-      # disclosures (rs-gaap-type-subtype's 991xxx schedules), and crosswalks
-      # between taxonomies (fac-to-rs-gaap concordances). Filtered out
-      # of the report-package render path; surfaced through their own
-      # consumption paths (rule engine, disclosure registry, mapping
-      # resolver).
-      "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
-      # Reporting Style — the bundle a company picks (Charlie Hoffman's
-      # term). Pinned per entity via entities.reporting_style_id (set at
-      # provision from the entity's legal form); composes Networks per
-      # statement_type via the reporting_style_networks table.
-      "'reporting_style', "
-      # Escape hatch for everything that doesn't fit the above
-      "'custom'"
-      ")",
+      "block_type IN (" + ", ".join(f"'{v}'" for v in BLOCK_TYPE_VALUES) + ")",
       name="check_block_type",
     ),
     # Concept Arrangement Pattern (CAP). Vocabulary from

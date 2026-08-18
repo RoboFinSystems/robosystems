@@ -30,6 +30,12 @@ from robosystems.routers.graphs.operations import (
 class _FakeCache:
   """In-memory idempotency cache matching the real signature."""
 
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   def __init__(self) -> None:
     self.store: dict = {}
 

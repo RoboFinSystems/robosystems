@@ -85,6 +85,17 @@ async def validate_mcp_access(
       # Write/admin tools require the 'member' or 'admin' role; 'viewer' is
       # read-only. Bare membership is not sufficient for mutations.
       if not GraphUser.user_has_write_access(current_user.id, graph_id, db):
+        # Same detective-control audit the REST write gate emits
+        # (`require_graph_write_role`), so an under-privileged MCP write
+        # attempt is visible in the security stream, not only in a 403.
+        from robosystems.security import SecurityAuditLogger
+
+        SecurityAuditLogger.log_authorization_denied(
+          user_id=str(current_user.id),
+          resource=graph_id,
+          action="write",
+          endpoint="mcp",
+        )
         raise HTTPException(
           status_code=403,
           detail=f"Write access denied to graph {graph_id}; your role is read-only.",

@@ -45,7 +45,17 @@ class DeprovisionResult:
     if self.status == "not_found":
       return f"Graph {self.graph_id} not found"
     if self.status == "already_deprovisioned":
-      return f"Graph {self.graph_id} is already deprovisioned"
+      redone = []
+      if self.extensions_schema_dropped:
+        redone.append("extensions schema dropped")
+      if self.search_purged:
+        redone.append("search index purged")
+      if self.report_bundles_deleted:
+        redone.append(f"{self.report_bundles_deleted} report bundle(s) deleted")
+      suffix = (
+        f"; residual data disposal re-run ({', '.join(redone)})" if redone else ""
+      )
+      return f"Graph {self.graph_id} is already deprovisioned{suffix}"
     if self.status == "rejected":
       return (
         self.errors[0]
@@ -63,6 +73,46 @@ class DeprovisionResult:
     if self.subgraphs_deleted > 0:
       parts.append(f"({self.subgraphs_deleted} subgraphs removed)")
     return " ".join(parts)
+
+
+def find_orphan_tenant_schemas(session: Session) -> list[str]:
+  """Tenant schemas in the extensions database that no live graph owns.
+
+  A schema is an orphan when its graph id has no platform ``Graph`` row, or
+  the row is deprovisioned / soft-deleted. Every ``for_each_tenant_schema``
+  migration keeps operating on such a schema, and the data in it belongs to
+  a tenant the platform no longer serves. Read-only; ``purge_orphan_tenant_schemas``
+  drops them.
+  """
+  from ...db.extensions import list_tenant_schemas
+  from ...models.core.graph import Graph, GraphStatus
+
+  schemas = list_tenant_schemas()
+  if not schemas:
+    return []
+  live = {
+    graph_id
+    for (graph_id,) in session.query(Graph.graph_id)
+    .filter(
+      Graph.graph_id.in_(schemas),
+      Graph.status != GraphStatus.DEPROVISIONED.value,
+      Graph.deleted_at.is_(None),
+    )
+    .all()
+  }
+  return [schema for schema in schemas if schema not in live]
+
+
+def purge_orphan_tenant_schemas(session: Session) -> list[str]:
+  """Drop every orphan tenant schema. Returns the ids that were dropped."""
+  from ...db.extensions import drop_tenant_schema
+
+  dropped: list[str] = []
+  for graph_id in find_orphan_tenant_schemas(session):
+    if drop_tenant_schema(graph_id):
+      logger.info(f"Dropped orphan extensions schema {graph_id}")
+      dropped.append(graph_id)
+  return dropped
 
 
 class GraphDeprovisionService:
@@ -105,8 +155,16 @@ class GraphDeprovisionService:
       return result
 
     if graph.status == GraphStatus.DEPROVISIONED.value:
+      # The status flipped even when a data-disposal step failed (`partial`),
+      # and there was no way back in: a ghost tenant schema, index documents,
+      # or report bundles stayed behind for good, and every per-tenant
+      # migration kept operating on the ghost. Re-running the disposal steps
+      # is idempotent — DROP SCHEMA IF EXISTS, delete-by-graph, prefix
+      # delete — so an already-deprovisioned graph re-runs exactly those and
+      # nothing else (no backup, no database, no registry, no status change).
       result.status = "already_deprovisioned"
       result.previous_status = graph.status
+      self._dispose_residual_data(graph_id, result)
       return result
 
     # Shared repositories (SEC, etc.) are platform-managed and must never
@@ -123,6 +181,15 @@ class GraphDeprovisionService:
 
     result.previous_status = graph.status or "active"
 
+    # --- 0. Mark the graph as leaving, and make it visible now ---
+    # `deleted_at` is stamped and committed before anything is dropped, so
+    # a QuickBooks sync already in flight cannot re-provision the tenant
+    # schema between step 3b (drop) and step 7 (status flip): the schema
+    # provisioner refuses a graph with `deleted_at` set. Status stays as it
+    # was until teardown ends, so a partial run still reads as unfinished.
+    graph.deleted_at = datetime.now(UTC)
+    session.commit()
+
     # --- 1. Create final backup ---
     if create_backup and not skip_backup_check:
       await self._create_final_backup(graph, session, result)
@@ -133,14 +200,11 @@ class GraphDeprovisionService:
     # --- 3. Delete parent database ---
     await self._delete_database(graph_id, result)
 
-    # --- 3b. Drop extensions OLTP schema (financial-data removal) ---
-    self._drop_extensions_schema(graph_id, result)
-
-    # --- 3c. Purge documents from the shared search index ---
-    self._purge_search_index(graph_id, result)
-
-    # --- 3d. Purge published report artifacts from object storage ---
-    self._purge_report_bundles(graph_id, result)
+    # --- 3b-3d. Dispose of the tenant's data outside the graph database:
+    # the extensions OLTP schema, the shared search index, and the published
+    # report artifacts. Idempotent, so a re-run on an already-deprovisioned
+    # graph can finish what a partial teardown left behind.
+    self._dispose_residual_data(graph_id, result)
 
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
@@ -151,8 +215,7 @@ class GraphDeprovisionService:
     # --- 6. Update subscription metadata ---
     self._update_subscription_metadata(graph_id, session, result)
 
-    # --- 7. Soft-delete and transition status ---
-    graph.deleted_at = datetime.now(UTC)
+    # --- 7. Transition status (soft-delete stamp landed in step 0) ---
     graph.transition_status(GraphStatus.DEPROVISIONED, session)
 
     if result.errors:
@@ -353,6 +416,12 @@ class GraphDeprovisionService:
       error_msg = f"Database deletion failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  def _dispose_residual_data(self, graph_id: str, result: DeprovisionResult) -> None:
+    """The three data-disposal steps that are safe to repeat."""
+    self._drop_extensions_schema(graph_id, result)
+    self._purge_search_index(graph_id, result)
+    self._purge_report_bundles(graph_id, result)
 
   def _drop_extensions_schema(self, graph_id: str, result: DeprovisionResult) -> None:
     """Drop the tenant's extensions OLTP schema (financial-data removal).

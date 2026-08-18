@@ -8,8 +8,10 @@ the deny list lives there rather than in the platform DB.
 from __future__ import annotations
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from robosystems.db.integrity import violates
 from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockedSourceGraphResponse,
   BlockSourceGraphRequest,
@@ -92,8 +94,22 @@ def block_source_graph(
       blocked_by=created_by,
       reason=body.reason,
     )
-    session.add(existing)
-    session.flush()
+    try:
+      # Savepoint: a concurrent block of the same source between the read
+      # above and this insert trips the unique key; that is the idempotent
+      # case, not a fault, so fall back to the row that won.
+      with session.begin_nested():
+        session.add(existing)
+        session.flush()
+    except IntegrityError as exc:
+      if not violates(exc, "uq_blocked_source_graphs_source"):
+        raise
+      existing = session.execute(
+        select(BlockedSourceGraph).where(
+          BlockedSourceGraph.source_graph_id == body.source_graph_id
+        )
+      ).scalar_one()
+      already_blocked = True
 
   purged_ids: list[str] = []
   if body.purge:
@@ -168,10 +184,11 @@ def _purge_shared_reports(session: Session, source_graph_id: str) -> list[str]:
   if not report_ids:
     return []
 
-  session.execute(
-    text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
-    {"report_ids": report_ids},
+  from robosystems.operations.roboledger.commands.reports import (
+    delete_report_fact_sets,
   )
+
+  delete_report_fact_sets(session, report_ids)
   session.execute(
     text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
     {"report_ids": report_ids},
