@@ -21,6 +21,7 @@ from typing import Any
 
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.db.extensions import extensions_session
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
   LIVE_STATEMENT_TYPES,
@@ -100,6 +101,9 @@ Facts with element qnames, names, classifications, values across current + prior
     }
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("live-financial-statement", arguments)
 
     statement_type = (arguments.get("statement_type") or "").strip()

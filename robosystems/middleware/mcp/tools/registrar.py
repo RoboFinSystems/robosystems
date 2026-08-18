@@ -43,6 +43,7 @@ from robosystems.middleware.extensions import (
   OperationSpec,
   is_schema_missing,
 )
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.extensions.staleness import mark_graph_stale
 
 from ._gate import MCPExtensionGateError, require_graph_extension_mcp
@@ -433,6 +434,12 @@ class _RegistrarMCPTool(BaseTool):
         return {"error": "invalid_arguments", "message": str(detail)}
 
     # ── 4. Resolve command, call it inside the session ─────────────────
+    # The command is synchronous database work; it runs in a worker thread
+    # (like every REST operation runner) so the MCP server's event loop keeps
+    # serving other tools — and `/v1/status` — while it executes.
+    return await run_off_loop(self._run_command, graph_id, body)
+
+  def _run_command(self, graph_id: str, body: BaseModel) -> Any:
     session_factory = self.registrar.session_factory
     command = self.spec.command
     created_by = self._resolve_created_by(graph_id)

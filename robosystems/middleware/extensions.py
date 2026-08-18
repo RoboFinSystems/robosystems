@@ -28,6 +28,7 @@ from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import require_graph_write_role
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationContext,
@@ -66,6 +67,50 @@ def is_schema_missing(exc: ProgrammingError) -> bool:
   """
   msg = str(exc)
   return "does not exist" in msg and ("schema" in msg or "relation" in msg)
+
+
+def guard_command_runner(
+  runner: Callable[[], Any],
+  *,
+  op_name: str,
+  graph_id: str,
+  schema_missing_404: Callable[[], HTTPException],
+) -> Callable[[], Any]:
+  """Give a hand-written command runner the registrar runner's error policy.
+
+  Wraps ``runner`` as the outermost layer, so the handler's own typed
+  ``except`` clauses (inside the runner) always win. What is left when the
+  runner raises:
+
+  - ``HTTPException`` — already translated; passes through.
+  - ``ProgrammingError`` — a missing tenant schema/relation is the
+    domain's "not initialized" 404. Anything else is a real database fault:
+    logged with its traceback and re-raised (500), never hidden behind the
+    friendly 404.
+  - ``ValueError`` — a domain refusal the handler did not map. Surfaced as
+    422 with its message (the shape every mapped ``ValueError`` already
+    takes) and logged so the map gets fixed. The extension dependency has
+    already refused subgraph and repository ids, so a ``ValueError`` here is
+    never the session factory rejecting the graph id.
+  """
+
+  def _guarded() -> Any:
+    try:
+      return runner()
+    except HTTPException:
+      raise
+    except ProgrammingError as exc:
+      if is_schema_missing(exc):
+        raise schema_missing_404()
+      logger.warning(
+        f"{op_name} on {graph_id}: database programming error", exc_info=True
+      )
+      raise
+    except ValueError as exc:
+      logger.warning(f"{op_name} on {graph_id}: unmapped {type(exc).__name__}: {exc}")
+      raise HTTPException(status_code=422, detail=str(exc))
+
+  return _guarded
 
 
 # ── OperationSpec ────────────────────────────────────────────────────────
@@ -213,6 +258,20 @@ def require_graph_extension(extension: str) -> Callable[..., GraphExtensionConte
     graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
     session: Session = Depends(get_db_session),
   ) -> GraphExtensionContext:
+    # A subgraph is a modality container, not an extensions target: it has
+    # no tenant schema of its own. The route pattern admits `{parent}_{name}`
+    # ids (so the same routers serve graph-scoped reads), so refuse them
+    # here — the same answer the GraphQL endpoint gives — instead of letting
+    # the session factory reject the id deep inside a handler, where it
+    # surfaced as a 404 or a 500 depending on which handler caught it.
+    if is_subgraph(graph_id):
+      raise HTTPException(
+        status_code=403,
+        detail=(
+          f"Subgraph '{graph_id}' is not addressable via {extension} "
+          "operations; target the parent graph."
+        ),
+      )
     meta = load_graph_metadata(graph_id, session)
     if meta.is_repository or meta.graph_type == "repository":
       raise HTTPException(
@@ -512,6 +571,7 @@ __all__ = [
   "GraphExtensionContext",
   "OperationRegistrar",
   "OperationSpec",
+  "guard_command_runner",
   "is_schema_missing",
   "load_graph_metadata",
   "require_graph_extension",

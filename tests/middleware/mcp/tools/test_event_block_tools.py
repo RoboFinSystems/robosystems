@@ -125,3 +125,77 @@ class TestListEventBlocksReconcilingItemFilter:
     (event,) = result["events"]
     assert event["is_reconciling_item"] is True
     assert event["metadata"]["drift_payload"] == {"amount": 99}
+
+
+class TestDatabaseFaultsAreNotEchoedToTheModel:
+  """Hand-written tools used to return ``str(exc)`` for every failure. A DBAPI
+  error's string carries the SQL and its bound parameters; the registrar tools
+  already give a fixed message, and the hand-written tools now do the same."""
+
+  @pytest.mark.asyncio
+  async def test_schema_missing_is_not_initialized(self) -> None:
+    from sqlalchemy.exc import ProgrammingError
+
+    tool = ListEventBlocksTool(_client())
+    with _patched_session():
+      with patch(
+        f"{MODULE}.ops_list_event_blocks",
+        side_effect=ProgrammingError(
+          "SELECT * FROM events", {}, Exception('relation "events" does not exist')
+        ),
+      ):
+        result = await tool.execute({})
+    assert result == {
+      "error": "not_initialized",
+      "message": "Ledger not initialized. Connect a data source first.",
+    }
+
+  @pytest.mark.asyncio
+  async def test_other_database_error_is_a_fixed_message(self) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    tool = ListEventBlocksTool(_client())
+    with _patched_session():
+      with patch(
+        f"{MODULE}.ops_list_event_blocks",
+        side_effect=OperationalError(
+          "SELECT secret_column FROM events WHERE x = %(x)s",
+          {"x": "sensitive"},
+          Exception("connection reset"),
+        ),
+      ):
+        result = await tool.execute({})
+    assert result["error"] == "command_failed"
+    assert "see server logs" in result["message"]
+    assert "secret_column" not in result["message"]
+    assert "sensitive" not in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_domain_errors_keep_their_message(self) -> None:
+    tool = ListEventBlocksTool(_client())
+    with _patched_session():
+      with patch(
+        f"{MODULE}.ops_list_event_blocks",
+        side_effect=ValueError("event_category must be one of ..."),
+      ):
+        result = await tool.execute({})
+    assert result == {
+      "error": "command_failed",
+      "message": "event_category must be one of ...",
+    }
+
+  @pytest.mark.asyncio
+  async def test_runs_in_a_worker_thread(self) -> None:
+    import threading
+
+    seen: dict[str, object] = {}
+
+    def _record(*_a, **_k):
+      seen["thread"] = threading.current_thread()
+      return []
+
+    tool = ListEventBlocksTool(_client())
+    with _patched_session():
+      with patch(f"{MODULE}.ops_list_event_blocks", side_effect=_record):
+        await tool.execute({})
+    assert seen["thread"] is not threading.main_thread()

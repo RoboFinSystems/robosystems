@@ -266,7 +266,9 @@ class TestUpdateEntityOp:
 
     with patch(
       "robosystems.routers.extensions.roboledger.operations.extensions_session",
-      side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
+      side_effect=ProgrammingError(
+        "stmt", {}, Exception('relation "entities" does not exist')
+      ),
     ):
       with pytest.raises(HTTPException) as exc:
         await update_entity_op(
@@ -279,6 +281,50 @@ class TestUpdateEntityOp:
 
     assert exc.value.status_code == 404
     assert "not initialized" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_other_programming_error_is_not_a_404(self) -> None:
+    """Only a missing tenant schema means "not initialized". A different
+    database fault used to be swallowed into the same friendly 404 by the
+    hand-written handlers; the shared guard lets it surface."""
+    from sqlalchemy.exc import ProgrammingError
+
+    body = UpdateEntityRequest(name="New Name")
+
+    with patch(
+      "robosystems.routers.extensions.roboledger.operations.extensions_session",
+      side_effect=ProgrammingError(
+        "stmt", {}, Exception('column "nope" does not exist')
+      ),
+    ):
+      with pytest.raises(ProgrammingError):
+        await update_entity_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+  @pytest.mark.asyncio
+  async def test_unmapped_value_error_is_422_with_its_message(self) -> None:
+    body = UpdateEntityRequest(name="New Name")
+
+    with patch(
+      "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+      side_effect=ValueError("ticker must be uppercase"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await update_entity_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "ticker must be uppercase"
 
   @pytest.mark.asyncio
   async def test_idempotency_key_cached_replay(self) -> None:

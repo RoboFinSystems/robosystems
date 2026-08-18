@@ -24,13 +24,18 @@ within one. Where the per-schedule operations live:
 from datetime import date
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.period_drafts import list_period_drafts
 from robosystems.operations.roboledger.reads.schedules import (
   get_period_close_status as ops_get_period_close_status,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
+
+from ._errors import database_failure
 
 # ────────────────────────────────────────────────────────────────────────────
 # get-period-close-status
@@ -77,6 +82,9 @@ class GetPeriodCloseStatusTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     period_start = date.fromisoformat(arguments["period_start"])
     period_end = date.fromisoformat(arguments["period_end"])
@@ -98,6 +106,8 @@ class GetPeriodCloseStatusTool:
             "details": [s.model_dump(mode="json") for s in response.schedules],
           },
         }
+    except SQLAlchemyError as exc:
+      return database_failure("get-period-close-status", exc)
     except Exception as exc:
       logger.warning(f"get-period-close-status failed: {exc}")
       return {"error": str(exc)}
@@ -166,6 +176,9 @@ class ListPeriodDraftsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
       resolve_writeback_connection,
@@ -180,6 +193,8 @@ class ListPeriodDraftsTool:
       with extensions_session(graph_id) as session:
         response = list_period_drafts(session, period, writeback=writeback)
         return response.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("list-period-drafts", exc)
     except Exception as exc:
       logger.warning(f"list-period-drafts failed: {exc}")
       return {"error": str(exc)}

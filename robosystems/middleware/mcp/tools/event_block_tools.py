@@ -13,14 +13,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.event_block import (
   get_event_block as ops_get_event_block,
 )
 from robosystems.operations.roboledger.reads.event_block import (
   list_event_blocks as ops_list_event_blocks,
 )
+
+from ._errors import database_failure
 
 
 class GetEventBlockTool:
@@ -69,6 +74,9 @@ An EventBlockEnvelope with:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     event_id = arguments["id"]
 
@@ -78,6 +86,8 @@ An EventBlockEnvelope with:
         if envelope is None:
           return {"error": "not_found", "message": f"Event Block not found: {event_id}"}
         return envelope.model_dump(mode="json")
+    except SQLAlchemyError as exc:
+      return database_failure("get-event-block", exc)
     except Exception as exc:
       logger.warning(f"get-event-block failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
@@ -159,6 +169,9 @@ class ListEventBlocksTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
@@ -196,6 +209,8 @@ class ListEventBlocksTool:
           "event_count": len(events),
           "events": events,
         }
+    except SQLAlchemyError as exc:
+      return database_failure("list-event-blocks", exc)
     except Exception as exc:
       logger.warning(f"list-event-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}

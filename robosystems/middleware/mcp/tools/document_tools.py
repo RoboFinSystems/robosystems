@@ -14,7 +14,12 @@ Discovery (search) is handled by the existing search-documents tool.
 
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
+
+from ._errors import database_failure
 
 
 def _get_platform_session():
@@ -154,6 +159,9 @@ class CreateDocumentTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.models.api.search import DocumentUploadRequest
     from robosystems.operations.document_service import DocumentService
 
@@ -215,6 +223,8 @@ class CreateDocumentTool:
       }
     except (ValueError, KeyError) as e:
       return {"error": "create_failed", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure("create-document", e, not_initialized_message=None)
     except Exception as e:
       logger.error(f"create-document failed for graph_id={graph_id}: {e}")
       return {"error": "create_failed", "message": str(e)}
@@ -270,6 +280,9 @@ Content changes are automatically re-indexed in OpenSearch.""",
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
@@ -317,6 +330,8 @@ Content changes are automatically re-indexed in OpenSearch.""",
       }
     except KeyError as e:
       return {"error": "not_found", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure("update-document", e, not_initialized_message=None)
     except Exception as e:
       logger.error(f"update-document failed for graph_id={graph_id}: {e}")
       return {"error": "update_failed", "message": str(e)}
@@ -357,6 +372,9 @@ class GetDocumentTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
@@ -389,6 +407,8 @@ class GetDocumentTool:
         "created_at": str(doc.created_at),
         "updated_at": str(doc.updated_at),
       }
+    except SQLAlchemyError as e:
+      return database_failure("get-document", e, not_initialized_message=None)
     except Exception as e:
       logger.error(f"get-document failed for graph_id={graph_id}: {e}")
       return {"error": "retrieval_failed", "message": str(e)}
@@ -426,6 +446,9 @@ from OpenSearch. This is permanent — use get-document to review before deletin
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
@@ -452,6 +475,8 @@ from OpenSearch. This is permanent — use get-document to review before deletin
         "deleted": True,
         "message": "Document deleted from PostgreSQL and OpenSearch",
       }
+    except SQLAlchemyError as e:
+      return database_failure("delete-document", e, not_initialized_message=None)
     except Exception as e:
       logger.error(f"delete-document failed for graph_id={graph_id}: {e}")
       return {"error": "delete_failed", "message": str(e)}
@@ -496,6 +521,9 @@ class ListDocumentsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.document_service import DocumentService
 
     graph_id = self.client.graph_id
@@ -532,6 +560,8 @@ class ListDocumentsTool:
           for d in docs
         ],
       }
+    except SQLAlchemyError as e:
+      return database_failure("list-documents", e, not_initialized_message=None)
     except Exception as e:
       logger.error(f"list-documents failed for graph_id={graph_id}: {e}")
       return {"error": "list_failed", "message": str(e)}

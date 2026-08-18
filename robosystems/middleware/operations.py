@@ -18,6 +18,7 @@ SSE endpoint accepts.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, Literal, TypeVar
 
+import anyio
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -537,11 +539,60 @@ async def check_idempotency(
   return None
 
 
+# ── Runner execution ─────────────────────────────────────────────────────
+
+_runner_limiter: anyio.CapacityLimiter | None = None
+
+
+def _get_runner_limiter() -> anyio.CapacityLimiter:
+  """Bound on operation runners executing concurrently in worker threads.
+
+  Sized to the extensions OLTP pool (``pool_size + max_overflow``): every
+  sync runner opens one tenant session, so a wider limiter would only turn
+  a burst into ``QueuePool limit ... reached`` after ``pool_timeout`` where
+  the pre-threadpool code merely queued the request on the event loop.
+  Excess runners wait on the limiter instead — same latency shape as before,
+  without freezing the loop while they wait.
+  """
+  global _runner_limiter
+  if _runner_limiter is None:
+    from robosystems.config.tuning import TuningConfig
+
+    total = (
+      TuningConfig.get_extensions_pool_size()
+      + TuningConfig.get_extensions_max_overflow()
+    )
+    _runner_limiter = anyio.CapacityLimiter(max(1, total))
+  return _runner_limiter
+
+
+async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
+  """Run ``func`` without blocking the event loop.
+
+  A coroutine function is awaited directly. Anything else is a sync callable
+  doing database or network work — it runs in a worker thread (with the
+  request's contextvars, so the platform request-scoped session resolves the
+  same way it does on the loop) under the runner limiter. A sync callable that
+  hands back an awaitable gets that awaited on the loop.
+
+  This is what keeps ``/v1/status`` answering while a close posts to
+  QuickBooks or a bounded lock wait sits on a busy row: the API runs one
+  uvicorn worker, and before this every operation's SQL and HTTP ran inline
+  on the loop.
+  """
+  if inspect.iscoroutinefunction(func):
+    return await func(*args)
+  result = await anyio.to_thread.run_sync(func, *args, limiter=_get_runner_limiter())
+  if inspect.isawaitable(result):
+    result = await result
+  return result
+
+
 async def execute_operation(
   ctx: OperationContext,
   runner: OperationRunner | AsyncOperationRunner,
   idempotency_cache: IdempotencyCache | None = None,
-  on_fresh_success: Callable[[OperationEnvelope], None] | None = None,
+  on_fresh_success: Callable[[OperationEnvelope], None | Awaitable[None]] | None = None,
 ) -> OperationEnvelope:
   """Run an operation and return its `OperationEnvelope`.
 
@@ -564,10 +615,10 @@ async def execute_operation(
   The `runner` opens its own database session, performs business
   validation beyond FastAPI's parsing, calls the ops layer, and
   translates domain exceptions into `HTTPException`. Sync and async
-  runners are both accepted.
+  runners are both accepted; a sync runner (and a sync `on_fresh_success`
+  hook) executes in a worker thread so its database and network work never
+  blocks the event loop.
   """
-  import inspect
-
   # Requires both a key AND a fingerprint so a route handler can't request
   # idempotency without the fingerprint that protects against key reuse.
   use_idempotency = (
@@ -620,11 +671,7 @@ async def execute_operation(
   # with no audit record.
   start = time.monotonic()
   try:
-    maybe_result = runner()
-    if inspect.isawaitable(maybe_result):
-      result = await maybe_result
-    else:
-      result = maybe_result
+    result = await run_off_loop(runner)
   except HTTPException as exc:
     duration_ms = (time.monotonic() - start) * 1000
     log_operation_audit(
@@ -658,7 +705,7 @@ async def execute_operation(
   # request without poisoning the idempotency cache with a stuck envelope.
   envelope = wrap_completed(ctx.operation_name, result, created_by=ctx.user_id)
   if on_fresh_success is not None:
-    on_fresh_success(envelope)
+    await run_off_loop(on_fresh_success, envelope)
   if use_idempotency:
     await idempotency_cache.put(
       ctx.user_id,
@@ -696,6 +743,7 @@ __all__ = [
   "generate_operation_id",
   "get_idempotency_cache",
   "log_operation_audit",
+  "run_off_loop",
   "wrap_completed",
   "wrap_failed",
   "wrap_pending",

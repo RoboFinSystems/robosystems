@@ -12,6 +12,7 @@ land) with schema-per-graph tenancy.
 """
 
 import re
+import threading
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, text
@@ -68,22 +69,27 @@ def _create_extensions_engine():
   )
 
 
-# Lazy engine — created on first use
+# Lazy engine — created on first use. Guarded by a lock: operation runners,
+# Dagster sensor threads and the MCP server can all reach a cold engine at
+# once, and without the lock each loser of the race builds (and leaks) a pool.
 _engine = None
 _session_factory = None
+_engine_lock = threading.Lock()
 
 
 def _get_engine():
   global _engine
   if _engine is None:
-    if not env.EXTENSIONS_ENABLED:
-      raise RuntimeError(
-        "Extensions database access attempted but no extension domain is "
-        "enabled. Set ROBOLEDGER_ENABLED=true or ROBOINVESTOR_ENABLED=true "
-        "to enable the extensions OLTP database (the EXTENSIONS_ENABLED "
-        "value is now derived from the per-domain flags)."
-      )
-    _engine = _create_extensions_engine()
+    with _engine_lock:
+      if _engine is None:
+        if not env.EXTENSIONS_ENABLED:
+          raise RuntimeError(
+            "Extensions database access attempted but no extension domain is "
+            "enabled. Set ROBOLEDGER_ENABLED=true or ROBOINVESTOR_ENABLED=true "
+            "to enable the extensions OLTP database (the EXTENSIONS_ENABLED "
+            "value is now derived from the per-domain flags)."
+          )
+        _engine = _create_extensions_engine()
   return _engine
 
 
@@ -103,9 +109,10 @@ def get_extensions_engine():
 def _get_session_factory():
   global _session_factory
   if _session_factory is None:
-    _session_factory = sessionmaker(
-      autocommit=False, autoflush=False, bind=_get_engine()
-    )
+    engine = _get_engine()
+    with _engine_lock:
+      if _session_factory is None:
+        _session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
   return _session_factory
 
 

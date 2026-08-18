@@ -383,6 +383,32 @@ class TestRegistrarToolExecute:
     assert result == {"id": "x", "echoed": 3}
 
   @pytest.mark.asyncio
+  async def test_command_runs_in_a_worker_thread(self) -> None:
+    """The MCP server shares the API's single event loop. The command is sync
+    database work and must leave the loop free while it runs."""
+    import threading
+
+    seen: dict[str, Any] = {}
+
+    def _recording_command(session, body: _Request, created_by: str) -> _Response:  # type: ignore[no-untyped-def]
+      seen["thread"] = threading.current_thread()
+      return _Response(id=body.id, echoed=body.value)
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_42"),
+      spec=_spec(command=_recording_command),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 3})
+
+    assert result == {"id": "x", "echoed": 3}
+    assert seen["thread"] is not threading.main_thread()
+
+  @pytest.mark.asyncio
   async def test_mark_stale_reason_marks_graph_after_success(self) -> None:
     tool = _RegistrarMCPTool(
       client=_client(graph_id="kg_stale", user_id="usr_42"),

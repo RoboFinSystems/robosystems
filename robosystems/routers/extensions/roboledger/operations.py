@@ -58,7 +58,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
@@ -73,7 +72,7 @@ from robosystems.middleware.extensions import (
   GraphExtensionContext,
   OperationRegistrar,
   OperationSpec,
-  is_schema_missing,
+  guard_command_runner,
   require_graph_extension,
 )
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -498,10 +497,22 @@ async def _dispatch(
   cache: IdempotencyCache,
   on_fresh_success=None,
 ) -> OperationEnvelope:
-  """Run `execute_operation` and translate idempotency conflicts to 409."""
+  """Run `execute_operation` and translate idempotency conflicts to 409.
+
+  Every hand-written runner below is wrapped in `guard_command_runner`, so
+  the registrar's error policy (schema-missing → 404, other database faults
+  → logged 500, unmapped `ValueError` → 422) applies to both registration
+  styles identically. Handlers keep only their domain-specific mappings.
+  """
+  guarded = guard_command_runner(
+    runner,
+    op_name=ctx.operation_name,
+    graph_id=ctx.graph_id,
+    schema_missing_404=_ledger_404,
+  )
   try:
     return await execute_operation(
-      ctx, runner, idempotency_cache=cache, on_fresh_success=on_fresh_success
+      ctx, guarded, idempotency_cache=cache, on_fresh_success=on_fresh_success
     )
   except IdempotencyKeyConflictError as exc:
     raise HTTPException(status_code=409, detail=str(exc))
@@ -525,11 +536,6 @@ def _ledger_404() -> HTTPException:
     status_code=404,
     detail="Ledger not initialized. Connect a data source first.",
   )
-
-
-# Shared with the registrar (`middleware/extensions.py`) so both registration
-# styles translate the same, and only the, schema-missing case to 404.
-_is_schema_missing = is_schema_missing
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -848,10 +854,6 @@ async def initialize_op(
       raise HTTPException(status_code=409, detail=str(e))
     except InvalidCloseTargetError as e:
       raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -894,11 +896,8 @@ async def update_entity_op(
   def _runner():
     if not updates:
       raise HTTPException(status_code=400, detail="No fields provided for update.")
-    try:
-      with extensions_session(graph_id) as session:
-        result = update_parent_entity(session, updates)
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      result = update_parent_entity(session, updates)
     if result is None:
       raise HTTPException(
         status_code=404, detail="No entity found. Create an entity graph first."
@@ -1449,10 +1448,6 @@ async def bind_text_block_op(
     except ValueError as e:
       # SectionNotFound / TextBlockStructure / TextBlockElement / size cap
       raise HTTPException(status_code=422, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(
     ctx,
@@ -1910,10 +1905,6 @@ async def set_close_target_op(
     except RowLockedError as e:
       # A close in flight holds the calendar row; retryable, like its siblings.
       raise HTTPException(status_code=409, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2074,10 +2065,6 @@ async def close_period_op(
       )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2156,10 +2143,6 @@ async def reopen_period_op(
       raise HTTPException(status_code=422, detail=str(e))
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2230,10 +2213,6 @@ async def backfill_plan_history_op(
       )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
-    except ProgrammingError as e:
-      if _is_schema_missing(e):
-        raise _ledger_404()
-      raise
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2277,24 +2256,19 @@ async def create_report_op(
     raise HTTPException(status_code=422, detail="period_end must be >= period_start")
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_create_report(session, graph_id, body, created_by=str(user.id))
-        except TaxonomyNotFoundError as e:
-          raise HTTPException(status_code=422, detail=f"Taxonomy '{e}' not found.")
-        except NoEntityError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except BundleUploadError as e:
-          # S3 unavailable during the publish-time bundle stamp. Publish
-          # aborted by ``_stamp_report_bundle`` to keep the invariant
-          # "every published Report has a stored bundle artifact"; surface
-          # as 502 (upstream failure) so the client can retry.
-          raise HTTPException(status_code=502, detail=str(e))
-    except (ValueError, ProgrammingError) as e:
-      if isinstance(e, ProgrammingError) and not _is_schema_missing(e):
-        raise
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_create_report(session, graph_id, body, created_by=str(user.id))
+      except TaxonomyNotFoundError as e:
+        raise HTTPException(status_code=422, detail=f"Taxonomy '{e}' not found.")
+      except NoEntityError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except BundleUploadError as e:
+        # S3 unavailable during the publish-time bundle stamp. Publish
+        # aborted by ``_stamp_report_bundle`` to keep the invariant
+        # "every published Report has a stored bundle artifact"; surface
+        # as 502 (upstream failure) so the client can retry.
+        raise HTTPException(status_code=502, detail=str(e))
 
   return await _dispatch(
     ctx,
@@ -2339,35 +2313,32 @@ async def regenerate_report_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_regenerate_report(
-            session, graph_id, body.report_id, body, acting_user_id=str(user.id)
-          )
-        except RowLockedError as e:
-          # A concurrent writer holds the rows this needs. Retryable, and the
-          # same 409 the registrar-driven operations return.
-          raise HTTPException(status_code=409, detail=str(e))
-        except ReportNotFoundError:
-          raise HTTPException(
-            status_code=404, detail=f"Report '{body.report_id}' not found."
-          )
-        except NotAuthorizedError:
-          raise HTTPException(
-            status_code=403, detail="Not authorized to modify this report."
-          )
-        except InvalidFilingTransitionError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except BundleUploadError as e:
-          # Same fail-loud semantics as create-report: a regenerate
-          # without a stamped bundle would publish a Report whose
-          # ``bundle_url`` lags the regenerated facts.
-          raise HTTPException(status_code=502, detail=str(e))
-        except ValueError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_regenerate_report(
+          session, graph_id, body.report_id, body, acting_user_id=str(user.id)
+        )
+      except RowLockedError as e:
+        # A concurrent writer holds the rows this needs. Retryable, and the
+        # same 409 the registrar-driven operations return.
+        raise HTTPException(status_code=409, detail=str(e))
+      except ReportNotFoundError:
+        raise HTTPException(
+          status_code=404, detail=f"Report '{body.report_id}' not found."
+        )
+      except NotAuthorizedError:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to modify this report."
+        )
+      except InvalidFilingTransitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except BundleUploadError as e:
+        # Same fail-loud semantics as create-report: a regenerate
+        # without a stamped bundle would publish a Report whose
+        # ``bundle_url`` lags the regenerated facts.
+        raise HTTPException(status_code=502, detail=str(e))
+      except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
   return await _dispatch(
     ctx,
@@ -2415,27 +2386,24 @@ async def delete_report_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          deleted = cmd_delete_report(
-            session,
-            body.report_id,
-            str(user.id),
-            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
-          )
-        except NotAuthorizedError:
-          raise HTTPException(
-            status_code=403, detail="Not authorized to delete this report."
-          )
-        except ReportHasActiveSharesError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-        except ReportNotFiledError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except RowLockedError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        deleted = cmd_delete_report(
+          session,
+          body.report_id,
+          str(user.id),
+          acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
+        )
+      except NotAuthorizedError:
+        raise HTTPException(
+          status_code=403, detail="Not authorized to delete this report."
+        )
+      except ReportHasActiveSharesError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+      except ReportNotFiledError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except RowLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if not deleted:
       raise HTTPException(
         status_code=404, detail=f"Report '{body.report_id}' not found."
@@ -2513,8 +2481,6 @@ async def share_report_op(
       raise HTTPException(
         status_code=422, detail="Only published reports can be shared."
       )
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
 
   def _mark_recipients_stale(envelope) -> None:
     # A share writes rows into each recipient's OLTP schema, but their
@@ -2592,8 +2558,6 @@ async def revoke_report_share_op(
       raise HTTPException(
         status_code=403, detail="Not authorized to revoke shares of this report."
       )
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
 
   def _mark_recipient_stale(envelope) -> None:
     # Same reasoning as the share path: the copy leaves the recipient's graph
@@ -2638,22 +2602,19 @@ async def file_report_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_file_report(session, body.report_id, filed_by=str(user.id))
-        except RowLockedError as e:
-          # Another lifecycle write holds the report. Retryable, same 409 the
-          # registrar-driven operations return.
-          raise HTTPException(status_code=409, detail=str(e))
-        except ReportNotFoundError:
-          raise HTTPException(
-            status_code=404, detail=f"Report '{body.report_id}' not found."
-          )
-        except InvalidFilingTransitionError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_file_report(session, body.report_id, filed_by=str(user.id))
+      except RowLockedError as e:
+        # Another lifecycle write holds the report. Retryable, same 409 the
+        # registrar-driven operations return.
+        raise HTTPException(status_code=409, detail=str(e))
+      except ReportNotFoundError:
+        raise HTTPException(
+          status_code=404, detail=f"Report '{body.report_id}' not found."
+        )
+      except InvalidFilingTransitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2693,22 +2654,17 @@ async def transition_filing_status_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_transition_filing_status(
-            session, body.report_id, body.target_status
-          )
-        except ReportNotFoundError:
-          raise HTTPException(
-            status_code=404, detail=f"Report '{body.report_id}' not found."
-          )
-        except InvalidFilingTransitionError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except RowLockedError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_transition_filing_status(session, body.report_id, body.target_status)
+      except ReportNotFoundError:
+        raise HTTPException(
+          status_code=404, detail=f"Report '{body.report_id}' not found."
+        )
+      except InvalidFilingTransitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except RowLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2752,14 +2708,11 @@ async def create_publish_list_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_create_publish_list(session, body, created_by=str(user.id))
-        except PublishListNameConflictError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-    except ProgrammingError:
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_create_publish_list(session, body, created_by=str(user.id))
+      except PublishListNameConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2795,20 +2748,17 @@ async def update_publish_list_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_update_publish_list(
-            session, body.list_id, body, acting_user_id=str(user.id)
-          )
-        except PublishListNotFoundError:
-          raise HTTPException(status_code=404, detail="Publish list not found.")
-        except PublishListNotAuthorizedError as e:
-          raise HTTPException(status_code=403, detail=str(e))
-        except PublishListNameConflictError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-    except ProgrammingError:
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_update_publish_list(
+          session, body.list_id, body, acting_user_id=str(user.id)
+        )
+      except PublishListNotFoundError:
+        raise HTTPException(status_code=404, detail="Publish list not found.")
+      except PublishListNotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+      except PublishListNameConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2848,14 +2798,11 @@ async def delete_publish_list_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          deleted = cmd_delete_publish_list(session, body.list_id, str(user.id))
-        except PublishListNotAuthorizedError as e:
-          raise HTTPException(status_code=403, detail=str(e))
-    except ProgrammingError:
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        deleted = cmd_delete_publish_list(session, body.list_id, str(user.id))
+      except PublishListNotAuthorizedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not deleted:
       raise HTTPException(status_code=404, detail="Publish list not found.")
     return DeleteResult(deleted=True)
@@ -2902,26 +2849,23 @@ async def add_publish_list_members_op(
   add_body = AddMembersRequest(target_graph_ids=body.target_graph_ids)
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_add_publish_list_members(
-            session, body.list_id, graph_id, add_body, added_by=str(user.id)
-          )
-        except PublishListNotFoundError:
-          raise HTTPException(status_code=404, detail="Publish list not found.")
-        except TargetGraphsNotFoundError as e:
-          raise HTTPException(status_code=404, detail=str(e))
-        except TargetGraphMissingExtensionError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except SelfAddError:
-          raise HTTPException(
-            status_code=422, detail="Cannot add your own graph to a publish list."
-          )
-        except MembersAlreadyPresentError as e:
-          raise HTTPException(status_code=409, detail=str(e))
-    except ProgrammingError:
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_add_publish_list_members(
+          session, body.list_id, graph_id, add_body, added_by=str(user.id)
+        )
+      except PublishListNotFoundError:
+        raise HTTPException(status_code=404, detail="Publish list not found.")
+      except TargetGraphsNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+      except TargetGraphMissingExtensionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except SelfAddError:
+        raise HTTPException(
+          status_code=422, detail="Cannot add your own graph to a publish list."
+        )
+      except MembersAlreadyPresentError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 
@@ -2957,11 +2901,8 @@ async def remove_publish_list_member_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        deleted = cmd_remove_publish_list_member(session, body.list_id, body.member_id)
-    except ProgrammingError:
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      deleted = cmd_remove_publish_list_member(session, body.list_id, body.member_id)
     if not deleted:
       raise HTTPException(status_code=404, detail="Member not found in this list.")
     return DeleteResult(deleted=True)
@@ -3017,22 +2958,19 @@ async def block_source_graph_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_block_source_graph(
-            session,
-            body,
-            created_by=str(user.id),
-            graph_id=graph_id,
-            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
-          )
-        except SelfBlockError as e:
-          raise HTTPException(status_code=422, detail=str(e))
-        except AdminRoleRequiredError as e:
-          raise HTTPException(status_code=403, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_block_source_graph(
+          session,
+          body,
+          created_by=str(user.id),
+          graph_id=graph_id,
+          acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
+        )
+      except SelfBlockError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+      except AdminRoleRequiredError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
   def _finish_purge(envelope) -> None:
     # Only a purge changes queryable content, and the OLAP projection is a
@@ -3098,20 +3036,17 @@ async def unblock_source_graph_op(
   )
 
   def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        try:
-          return cmd_unblock_source_graph(
-            session,
-            body,
-            acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
-          )
-        except AdminRoleRequiredError as e:
-          raise HTTPException(status_code=403, detail=str(e))
-        except SourceGraphNotBlockedError as e:
-          raise HTTPException(status_code=404, detail=str(e))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
+    with extensions_session(graph_id) as session:
+      try:
+        return cmd_unblock_source_graph(
+          session,
+          body,
+          acting_user_is_graph_admin=user_is_graph_admin(str(user.id), graph_id),
+        )
+      except AdminRoleRequiredError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+      except SourceGraphNotBlockedError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 

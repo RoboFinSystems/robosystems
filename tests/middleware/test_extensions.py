@@ -589,6 +589,95 @@ class TestExecuteOperationHappyPath:
     assert audit["duration_ms"] >= 0
 
 
+class TestExecuteOperationRunsOffTheLoop:
+  """The API runs one uvicorn worker. A sync runner doing SQL or HTTP used
+  to execute inline on the event loop, freezing every other request —
+  including the ALB health check — for its whole duration."""
+
+  @pytest.mark.asyncio
+  async def test_sync_runner_does_not_block_the_event_loop(self) -> None:
+    import asyncio
+    import time
+
+    ctx = _make_ctx(operation_name="slow-op")
+    ticks: list[float] = []
+
+    async def _ticker() -> None:
+      for _ in range(3):
+        await asyncio.sleep(0.02)
+        ticks.append(time.monotonic())
+
+    def _blocking_runner():
+      time.sleep(0.25)
+      return {"slept": True}
+
+    with patch.object(middleware_module.logger, "info"):
+      ticker = asyncio.ensure_future(_ticker())
+      envelope = await execute_operation(ctx, _blocking_runner)
+      runner_returned_at = time.monotonic()
+      await ticker
+
+    assert envelope.result == {"slept": True}
+    # All three ticks landed while the runner was still sleeping — the loop
+    # kept turning. On the old inline path the ticker could not run until
+    # the runner returned, so every tick came after it.
+    assert len(ticks) == 3
+    assert all(t < runner_returned_at for t in ticks)
+
+  @pytest.mark.asyncio
+  async def test_sync_hook_runs_off_loop_and_async_hook_is_awaited(self) -> None:
+    import threading
+
+    ctx = _make_ctx(operation_name="hooked-op")
+    seen: dict[str, Any] = {}
+
+    def _sync_hook(envelope: OperationEnvelope) -> None:
+      seen["sync_thread"] = threading.current_thread()
+      seen["sync_env"] = envelope
+
+    async def _async_hook(envelope: OperationEnvelope) -> None:
+      seen["async_env"] = envelope
+
+    with patch.object(middleware_module.logger, "info"):
+      await execute_operation(ctx, lambda: {"a": 1}, on_fresh_success=_sync_hook)
+      await execute_operation(ctx, lambda: {"a": 2}, on_fresh_success=_async_hook)
+
+    assert seen["sync_thread"] is not threading.main_thread()
+    assert seen["sync_env"].result == {"a": 1}
+    assert seen["async_env"].result == {"a": 2}
+
+  @pytest.mark.asyncio
+  async def test_runner_sees_the_request_contextvars(self) -> None:
+    """The platform request-scoped session resolves through a ContextVar;
+    the worker thread must see the same context or the runner would get a
+    different Session than the dependencies that ran on the loop."""
+    import contextvars
+
+    marker: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+      "op_marker", default=None
+    )
+    ctx = _make_ctx(operation_name="ctx-op")
+    token = marker.set("from-request")
+    try:
+      with patch.object(middleware_module.logger, "info"):
+        envelope = await execute_operation(ctx, lambda: {"marker": marker.get()})
+    finally:
+      marker.reset(token)
+    assert envelope.result == {"marker": "from-request"}
+
+  @pytest.mark.asyncio
+  async def test_sync_runner_exception_still_propagates(self) -> None:
+    ctx = _make_ctx(operation_name="boom-op")
+
+    def _runner():
+      raise HTTPException(status_code=409, detail="locked")
+
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(HTTPException) as exc_info:
+        await execute_operation(ctx, _runner)
+    assert exc_info.value.status_code == 409
+
+
 class TestExecuteOperationFailurePath:
   @pytest.mark.asyncio
   async def test_http_exception_re_raised(self) -> None:
