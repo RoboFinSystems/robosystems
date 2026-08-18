@@ -350,6 +350,24 @@ class TestClosePeriodToolErrors:
     assert "1000" in result["message"]
     assert "900" in result["message"]
 
+  @pytest.mark.asyncio
+  async def test_already_closed_error(self):
+    from robosystems.operations.roboledger.fiscal_calendar import (
+      PeriodAlreadyClosedError,
+    )
+
+    result = await self._run_with_side_effect(PeriodAlreadyClosedError("2026-03"))
+    assert result["error"] == "already_closed"
+
+  @pytest.mark.asyncio
+  async def test_row_locked_error(self):
+    from robosystems.operations.locking import RowLockedError
+
+    result = await self._run_with_side_effect(
+      RowLockedError("Period 2026-03 is being closed")
+    )
+    assert result["error"] == "row_locked"
+
 
 class TestStatementStampErrorTranslation:
   @pytest.mark.asyncio

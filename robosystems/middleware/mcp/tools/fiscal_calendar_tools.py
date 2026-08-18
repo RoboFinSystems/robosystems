@@ -34,6 +34,7 @@ from robosystems.middleware.mcp.tools._gate import (
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
 )
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   PeriodNotClosedError,
@@ -52,6 +53,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
   FiscalCalendarService,
+  PeriodAlreadyClosedError,
   PeriodNotFoundError,
   UnbalancedLedgerError,
 )
@@ -382,6 +384,10 @@ class ClosePeriodTool:
       return payload
     except PeriodNotFoundError as exc:
       return {"error": "period_not_found", "message": str(exc)}
+    except PeriodAlreadyClosedError as exc:
+      return {"error": "already_closed", "message": str(exc)}
+    except RowLockedError as exc:
+      return {"error": "row_locked", "message": str(exc)}
     except UnbalancedLedgerError as exc:
       return {
         "error": "unbalanced",
@@ -522,6 +528,8 @@ class ReopenPeriodTool:
             "error": "not_closed",
             "message": f"Period {period!r} is not closed (status={exc.status!r}).",
           }
+        except RowLockedError as exc:
+          return {"error": "row_locked", "message": str(exc)}
         fc_payload = result.fiscal_calendar.model_dump(mode="json")
         has_sync, _ = qb_sync_state(platform_db, graph_id)
         fc_payload["has_sync_connection"] = has_sync

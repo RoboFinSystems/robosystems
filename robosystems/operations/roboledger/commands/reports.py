@@ -506,7 +506,19 @@ def regenerate_report(
       — restate instead of regenerating.
     ValueError: if period_end < period_start in the new body.
   """
-  report_def = session.get(Report, report_id)
+  # Locked: the guard below decides from `filing_status` — filed and archived
+  # reports are immutable — and the regeneration then rewrites the report's
+  # facts. Unlocked, a file landing between that check and the rewrite gets a
+  # report stamped `filed` whose contents were replaced underneath it, which
+  # is the state the immutability check exists to prevent.
+  from robosystems.operations.locking import lock_by_id
+
+  report_def = lock_by_id(
+    session,
+    Report,
+    report_id,
+    f"Report {report_id} is being written by another process. Retry in a moment.",
+  )
   if report_def is None:
     raise ReportNotFoundError(report_id)
   if report_def.created_by != acting_user_id:
@@ -653,13 +665,24 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
   """
   from datetime import UTC, datetime
 
+  # Locked: the two guards below decide from `filing_status` and
+  # `generation_status`, then write the first. Lower stakes than the ledger
+  # transitions — a concurrent double-file overwrites the audit stamp rather
+  # than duplicating anything — but "who filed this, and when" is exactly the
+  # field an auditor reads, so last-writer-wins is not good enough for it.
+  from robosystems.operations.locking import lock_by_id
   from robosystems.operations.roboledger.reads.reports import (
     load_structures,
     report_to_response,
     resolve_entity_name,
   )
 
-  report_def = session.get(Report, report_id)
+  report_def = lock_by_id(
+    session,
+    Report,
+    report_id,
+    f"Report {report_id} is being written by another process. Retry in a moment.",
+  )
   if report_def is None:
     raise ReportNotFoundError(report_id)
 
@@ -698,13 +721,22 @@ def transition_filing_status(
   Other transitions (submit for review, withdraw, archive) are routed
   through here so the legal-transition graph stays in one place.
   """
+  # Locked with the rest of the report lifecycle. Unlocked, this reads a status,
+  # waits behind a concurrent file, and then writes its own over the top —
+  # leaving `filed_at` and `filed_by` populated on a report back in `draft`.
+  from robosystems.operations.locking import lock_by_id
   from robosystems.operations.roboledger.reads.reports import (
     load_structures,
     report_to_response,
     resolve_entity_name,
   )
 
-  report_def = session.get(Report, report_id)
+  report_def = lock_by_id(
+    session,
+    Report,
+    report_id,
+    f"Report {report_id} is being written by another process. Retry in a moment.",
+  )
   if report_def is None:
     raise ReportNotFoundError(report_id)
 
@@ -756,7 +788,17 @@ def delete_report(
   Revoke each recipient first. Shared *copies* are unaffected: the recipient's
   schema holds no share rows for a report they did not send.
   """
-  report_def = session.get(Report, report_id)
+  # Locked with the rest of the report lifecycle: the filed-report immutability
+  # guard below decides from `filing_status`, so unlocked a delete can pass it
+  # and then remove a report that was filed in between.
+  from robosystems.operations.locking import lock_by_id
+
+  report_def = lock_by_id(
+    session,
+    Report,
+    report_id,
+    f"Report {report_id} is being written by another process. Retry in a moment.",
+  )
   if report_def is None:
     return False
   if report_def.created_by != acting_user_id:

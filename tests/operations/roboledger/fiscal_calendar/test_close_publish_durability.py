@@ -209,3 +209,31 @@ class TestPublishMarkerDurability:
     persisted = ext_session.get(Event, event.id)
     ext_session.refresh(persisted)
     assert persisted.metadata_.get("qb_external_id") == "qb_ok"
+
+  def test_lock_timeout_on_one_item_does_not_lose_prior_markers(self, ext_session):
+    """A RowLockedError aborts the transaction unless it is isolated in a
+    savepoint. The markers for entries that already reached QuickBooks
+    must still commit."""
+    from robosystems.operations.locking import RowLockedError
+
+    ok_entry, ok_event = _seed_draft(ext_session, "published first")
+    _locked_entry, locked_event = _seed_draft(ext_session, "lock timeout")
+    ext_session.commit()
+
+    def fake_execute(session, request, created_by):
+      if request.event_id == str(locked_event.id):
+        raise RowLockedError("event is being written")
+      _mark_published(session, request.event_id, "qb_ok")
+      return SimpleNamespace(status="fulfilled", qb_error=None)
+
+    with pytest.raises(WritebackFailed) as exc:
+      _publish(ext_session, fake_execute)
+    assert exc.value.failed_events[0]["event_id"] == str(locked_event.id)
+
+    ext_session.rollback()
+
+    persisted = ext_session.get(Event, ok_event.id)
+    ext_session.refresh(persisted)
+    assert persisted.metadata_.get("qb_external_id") == "qb_ok"
+    ext_session.refresh(ext_session.get(Event, locked_event.id))
+    assert not ext_session.get(Event, locked_event.id).metadata_.get("qb_external_id")

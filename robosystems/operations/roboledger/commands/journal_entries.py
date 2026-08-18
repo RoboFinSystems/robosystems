@@ -26,9 +26,10 @@ Design notes:
   forever — the audit trail shows original + reversal side by side.
 
 - **Closed-period gate.** Enforced via `assert_period_not_closed()` from
-  `_guards.py`. Rejects writes whose `posting_date` falls in a closed
-  fiscal period. Applied to create, update (when posting_date changes),
-  and reverse (on the reversal's posting_date).
+  `_guards.py`. That guard takes the shared period fence, so a write
+  cannot land after close has finished. Applied to create, update
+  (existing date and any new date), delete, and reverse (original and
+  reversal dates).
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from robosystems.operations.locking import RowLockedError, lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
@@ -80,6 +82,27 @@ class JournalEntryNotDraftError(ValueError):
     )
     self.entry_id = entry_id
     self.status = status
+
+
+class JournalEntryAlreadyReversedError(ValueError):
+  """Raised when the entry already has a reversing entry against it.
+
+  Reachable without any race: a schedule with ``auto_reverse`` creates the
+  reversal at generation time and leaves the original's status untouched, so
+  the ``status == 'posted'`` check below passes on an entry that is already
+  reversed. Before `uq_entries_one_reversal_per_original` that produced a
+  second reversal — the double-post this work exists to stop; after it, the
+  insert would fail on the index. Neither is an answer a caller can act on,
+  so the state gets named here instead.
+  """
+
+  def __init__(self, entry_id: str, reversing_entry_id: str) -> None:
+    super().__init__(
+      f"Journal entry {entry_id} already has a reversing entry "
+      f"({reversing_entry_id}); an entry is reversed at most once."
+    )
+    self.entry_id = entry_id
+    self.reversing_entry_id = reversing_entry_id
 
 
 class JournalEntryNotPostedError(ValueError):
@@ -270,6 +293,22 @@ def _load_entry_or_404(session: Session, entry_id: str) -> Entry:
   return entry
 
 
+def _raise_if_posting_date_moved(entry: Entry, peeked_date) -> None:
+  """Refuse to take a period fence after the entry row is already locked.
+
+  Fence-then-row is the documented order. Re-fencing here because the
+  posting date moved under us would invert that — a close holding the
+  new period's exclusive fence and waiting to update this entry
+  deadlocks. The caller retries, peeks the current date, and acquires
+  in the right order.
+  """
+  if entry.posting_date != peeked_date:
+    raise RowLockedError(
+      f"Journal entry {entry.id} was moved to another period by another "
+      "process. Retry in a moment."
+    )
+
+
 # ── Create ───────────────────────────────────────────────────────────────
 
 
@@ -366,19 +405,37 @@ def update_journal_entry(
   Raises:
     `JournalEntryNotFoundError` (404) if the entry does not exist.
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
-    `ClosedPeriodError` (422) if the new `posting_date` falls in a closed
-      period.
+    `ClosedPeriodError` (422) if the existing or new `posting_date`
+      falls in a closed period.
+    `RowLockedError` (409) if another writer holds the entry, or if the
+      posting date moved under us (retry so locks are acquired in order).
     `UnbalancedJournalEntryError` (422) if replacement line items don't
       balance.
   """
-  entry = _load_entry_or_404(session, body.entry_id)
+  # Peek dates, fence, then lock and refresh. An unlocked load that we
+  # then trust for `status` can mutate a posted entry: another request
+  # posts it while we wait on the fence. Capture the peeked date as a
+  # value — after `lock_by_id` the peeked instance is the same identity
+  # and `populate_existing` would make `peek.posting_date` lie.
+  peek = _load_entry_or_404(session, body.entry_id)
+  peeked_date = peek.posting_date
+  dates = [peeked_date]
+  if body.posting_date is not None:
+    dates.append(body.posting_date)
+  assert_period_not_closed(session, *dates)
+
+  entry = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if entry is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  _raise_if_posting_date_moved(entry, peeked_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
-
-  # If the caller is changing posting_date, check the new date
-  # isn't in a closed period.
-  if body.posting_date is not None:
-    assert_period_not_closed(session, body.posting_date)
 
   # Scalar field updates (only mutate what the caller explicitly set).
   updates = body.model_dump(exclude_unset=True)
@@ -433,8 +490,25 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   Raises:
     `JournalEntryNotFoundError` (404) if the entry does not exist.
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
+    `ClosedPeriodError` (422) if the entry's posting_date is in a closed
+      period.
+    `RowLockedError` (409) if another writer holds the entry, or if the
+      posting date moved under us (retry so locks are acquired in order).
   """
-  entry = _load_entry_or_404(session, body.entry_id)
+  peek = _load_entry_or_404(session, body.entry_id)
+  peeked_date = peek.posting_date
+  assert_period_not_closed(session, peeked_date)
+
+  entry = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if entry is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  _raise_if_posting_date_moved(entry, peeked_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
@@ -467,16 +541,47 @@ def reverse_journal_entry(
     `ClosedPeriodError` (422) if the reversal's posting_date falls in
       a closed period.
   """
-  original = _load_entry_or_404(session, body.entry_id)
+  # Period fence first, then the entry row. Close takes the exclusive
+  # fence and then bulk-updates entries; a reversal that locked the
+  # entry first and the fence second would deadlock with that order.
+  peek = session.get(Entry, body.entry_id)
+  if peek is None:
+    raise JournalEntryNotFoundError(body.entry_id)
+  posting_date = body.posting_date or datetime.now(UTC).date()
+  assert_period_not_closed(session, peek.posting_date, posting_date)
+
+  # Locked, because everything below decides from `original.status`. Two
+  # concurrent reversals of the same entry both read 'posted', both pass the
+  # guard, and both write a full reversing entry — the entry gets reversed
+  # twice. Each reversing entry is internally balanced, so the trial balance
+  # stays happy while the books sit a full entry off in the other direction.
+  # `uq_entries_one_reversal_per_original` is the database's half of this;
+  # the lock is what turns a would-be IntegrityError into a clean 409.
+  original = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if original is None:
+    raise JournalEntryNotFoundError(body.entry_id)
   if original.status != "posted":
     raise JournalEntryNotPostedError(original.id, original.status)
+
+  # Checked under the lock, so the answer cannot go stale between here and the
+  # insert. `uq_entries_one_reversal_per_original` still backs it — this turns
+  # the constraint from the thing that reports the problem into the thing that
+  # guarantees it.
+  existing_reversal = session.execute(
+    select(Entry.id).where(Entry.reversal_of == original.id)
+  ).scalar_one_or_none()
+  if existing_reversal is not None:
+    raise JournalEntryAlreadyReversedError(str(original.id), str(existing_reversal))
 
   original_lines = _load_line_items(session, original.id)
   if not original_lines:
     raise ValueError(f"Journal entry {original.id} has no line items to reverse")
-
-  posting_date = body.posting_date or datetime.now(UTC).date()
-  assert_period_not_closed(session, posting_date)
   memo = body.memo or f"Reversal of journal entry {original.id}"
   now = datetime.now(UTC)
 

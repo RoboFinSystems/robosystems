@@ -24,6 +24,7 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.journal_entries import (
   JournalEntryNotDraftError,
@@ -78,6 +79,14 @@ def _mock_entry(
   e.reversal_of = None
   e.posted_at = None
   return e
+
+
+def _session_for_entry(entry):
+  """Peek via execute, lock via session.get — the update/delete sequence."""
+  session = MagicMock()
+  session.execute.return_value.scalar_one_or_none.return_value = entry
+  session.get.return_value = entry
+  return session
 
 
 def _mock_line(element_id: str, debit: int, credit: int, order: int):
@@ -454,34 +463,34 @@ class TestUpdateJournalEntry:
       update_journal_entry(session, UpdateJournalEntryRequest(entry_id="missing"))
     assert exc_info.value.entry_id == "missing"
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_posted_entry_raises(self, mock_load):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="posted"
-    )
+  def test_posted_entry_raises(self, mock_load, mock_guard):
+    entry = _mock_entry(status="posted")
     with pytest.raises(JournalEntryNotDraftError) as exc_info:
-      update_journal_entry(session, UpdateJournalEntryRequest(entry_id="entry_01"))
+      update_journal_entry(
+        _session_for_entry(entry), UpdateJournalEntryRequest(entry_id="entry_01")
+      )
     assert exc_info.value.status == "posted"
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_reversed_entry_raises(self, mock_load):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="reversed"
-    )
+  def test_reversed_entry_raises(self, mock_load, mock_guard):
+    entry = _mock_entry(status="reversed")
     with pytest.raises(JournalEntryNotDraftError) as exc_info:
-      update_journal_entry(session, UpdateJournalEntryRequest(entry_id="entry_01"))
+      update_journal_entry(
+        _session_for_entry(entry), UpdateJournalEntryRequest(entry_id="entry_01")
+      )
     assert exc_info.value.status == "reversed"
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_scalar_field_update(self, mock_load):
+  def test_scalar_field_update(self, mock_load, mock_guard):
     entry = _mock_entry(status="draft")
     entry.memo = "Old memo"
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
     update_journal_entry(
-      session, UpdateJournalEntryRequest(entry_id="entry_01", memo="New memo")
+      _session_for_entry(entry),
+      UpdateJournalEntryRequest(entry_id="entry_01", memo="New memo"),
     )
     assert entry.memo == "New memo"
 
@@ -489,31 +498,29 @@ class TestUpdateJournalEntry:
   @patch(f"{MODULE}._load_line_items", return_value=[])
   def test_posting_date_change_checks_period_gate(self, mock_load, mock_guard):
     entry = _mock_entry(status="draft")
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
+    session = _session_for_entry(entry)
     new_date = date(2026, 2, 1)
     update_journal_entry(
-      session, UpdateJournalEntryRequest(entry_id="entry_01", posting_date=new_date)
+      session,
+      UpdateJournalEntryRequest(entry_id="entry_01", posting_date=new_date),
     )
-    mock_guard.assert_called_once_with(session, new_date)
+    mock_guard.assert_called_once_with(session, _DATE, new_date)
 
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_no_posting_date_change_skips_period_gate(self, mock_load):
+  def test_memo_only_update_still_fences_the_existing_period(self, mock_load):
     entry = _mock_entry(status="draft")
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
-    # Updating memo only — no posting_date in body
+    session = _session_for_entry(entry)
     with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
       update_journal_entry(
         session, UpdateJournalEntryRequest(entry_id="entry_01", memo="Updated")
       )
-      mock_guard.assert_not_called()
+      mock_guard.assert_called_once_with(session, _DATE)
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_line_item_replacement_calls_delete(self, mock_load):
+  def test_line_item_replacement_calls_delete(self, mock_load, mock_guard):
     entry = _mock_entry(status="draft")
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
+    session = _session_for_entry(entry)
     body = UpdateJournalEntryRequest(
       entry_id="entry_01",
       line_items=[
@@ -526,12 +533,12 @@ class TestUpdateJournalEntry:
     session.query.assert_called()
     assert session.add.call_count == 2
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_unbalanced_replacement_raises_before_delete(self, mock_load):
+  def test_unbalanced_replacement_raises_before_delete(self, mock_load, mock_guard):
     """Validation must run before the delete so a bad batch cannot clobber existing lines."""
     entry = _mock_entry(status="draft")
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
+    session = _session_for_entry(entry)
     body = UpdateJournalEntryRequest(
       entry_id="entry_01",
       line_items=[
@@ -542,6 +549,37 @@ class TestUpdateJournalEntry:
     with pytest.raises(UnbalancedJournalEntryError):
       update_journal_entry(session, body)
     session.query.assert_not_called()
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_locks_the_entry_after_the_period_fence(self, mock_load, mock_guard):
+    entry = _mock_entry(status="draft")
+    session = _session_for_entry(entry)
+    update_journal_entry(
+      session, UpdateJournalEntryRequest(entry_id="entry_01", memo="x")
+    )
+    session.get.assert_called()
+    kwargs = session.get.call_args.kwargs
+    assert kwargs.get("with_for_update") is True
+    assert kwargs.get("populate_existing") is True
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_moved_posting_date_is_retryable_not_refenced(self, mock_load, mock_guard):
+    """Re-fencing after the entry lock inverts fence→row and can deadlock
+    with a close that holds the new period. Retry peeks the current date."""
+    peek = _mock_entry(status="draft")
+    peek.posting_date = date(2026, 1, 15)
+    locked = _mock_entry(status="draft")
+    locked.posting_date = date(2026, 3, 1)
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = peek
+    session.get.return_value = locked
+    with pytest.raises(RowLockedError, match="moved to another period"):
+      update_journal_entry(
+        session, UpdateJournalEntryRequest(entry_id="entry_01", memo="x")
+      )
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
 
 
 # ── delete_journal_entry ──────────────────────────────────────────────────
@@ -554,32 +592,55 @@ class TestDeleteJournalEntry:
     with pytest.raises(JournalEntryNotFoundError):
       delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="missing"))
 
-  def test_posted_entry_cannot_be_deleted(self):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="posted"
-    )
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_posted_entry_cannot_be_deleted(self, mock_guard):
+    entry = _mock_entry(status="posted")
     with pytest.raises(JournalEntryNotDraftError):
-      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+      delete_journal_entry(
+        _session_for_entry(entry), DeleteJournalEntryRequest(entry_id="entry_01")
+      )
 
-  def test_reversed_entry_cannot_be_deleted(self):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="reversed"
-    )
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_reversed_entry_cannot_be_deleted(self, mock_guard):
+    entry = _mock_entry(status="reversed")
     with pytest.raises(JournalEntryNotDraftError):
-      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+      delete_journal_entry(
+        _session_for_entry(entry), DeleteJournalEntryRequest(entry_id="entry_01")
+      )
 
   def test_draft_entry_is_deleted(self):
     entry = _mock_entry(status="draft")
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = entry
-    result = delete_journal_entry(
-      session, DeleteJournalEntryRequest(entry_id="entry_01")
-    )
+    session = _session_for_entry(entry)
+    with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
+      result = delete_journal_entry(
+        session, DeleteJournalEntryRequest(entry_id="entry_01")
+      )
+    mock_guard.assert_called_once_with(session, _DATE)
     assert result == {"deleted": True}
     session.delete.assert_called_once_with(entry)
     session.flush.assert_called()
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_locks_the_entry_after_the_period_fence(self, mock_guard):
+    entry = _mock_entry(status="draft")
+    session = _session_for_entry(entry)
+    delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    kwargs = session.get.call_args.kwargs
+    assert kwargs.get("with_for_update") is True
+    assert kwargs.get("populate_existing") is True
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_moved_posting_date_is_retryable_not_refenced(self, mock_guard):
+    peek = _mock_entry(status="draft")
+    peek.posting_date = date(2026, 1, 15)
+    locked = _mock_entry(status="draft")
+    locked.posting_date = date(2026, 3, 1)
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = peek
+    session.get.return_value = locked
+    with pytest.raises(RowLockedError, match="moved to another period"):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
 
 
 # ── reverse_journal_entry ─────────────────────────────────────────────────
@@ -589,35 +650,40 @@ class TestReverseJournalEntry:
   def _body(self, entry_id: str = "entry_01"):
     return ReverseJournalEntryRequest(entry_id=entry_id, posting_date=_DATE)
 
-  def test_not_found_raises(self):
+  @staticmethod
+  def _session(original):
+    """Session whose locked load returns `original`.
+
+    The reversal loads the original through `lock_by_id` — `session.get` with
+    `with_for_update` and `populate_existing` — rather than a plain select,
+    because two concurrent reversals that both read 'posted' both post.
+    """
     session = MagicMock()
+    session.get.return_value = original
+    # The original arrives via the locked `session.get`; `execute` now serves
+    # the "does a reversal already exist" check, which these cases want empty.
     session.execute.return_value.scalar_one_or_none.return_value = None
+    return session
+
+  def test_not_found_raises(self):
+    session = self._session(None)
     with pytest.raises(JournalEntryNotFoundError):
       reverse_journal_entry(session, self._body(), "usr_1")
 
   def test_draft_entry_cannot_be_reversed(self):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="draft"
-    )
+    session = self._session(_mock_entry(status="draft"))
     with pytest.raises(JournalEntryNotPostedError) as exc_info:
       reverse_journal_entry(session, self._body(), "usr_1")
     assert exc_info.value.status == "draft"
 
   def test_reversed_entry_cannot_be_reversed_again(self):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="reversed"
-    )
+    session = self._session(_mock_entry(status="reversed"))
     with pytest.raises(JournalEntryNotPostedError):
       reverse_journal_entry(session, self._body(), "usr_1")
 
   @patch(f"{MODULE}._load_line_items", return_value=[])
   def test_entry_with_no_line_items_raises(self, mock_load):
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = _mock_entry(
-      status="posted"
-    )
+    session = self._session(_mock_entry(status="posted"))
     with pytest.raises(ValueError, match="no line items"):
       reverse_journal_entry(session, self._body(), "usr_1")
 
@@ -629,9 +695,12 @@ class TestReverseJournalEntry:
     original = _mock_entry(status="posted")
     line = _mock_line("elem_a", debit=100, credit=0, order=1)
     line2 = _mock_line("elem_b", debit=0, credit=100, order=2)
-    session = MagicMock()
+    session = self._session(original)
+    # The original now arrives via the locked load, so `execute` serves the
+    # bounded wait's `SET LOCAL lock_timeout` and then the line-item read.
     session.execute.side_effect = [
-      _scalar_exec(original),
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line, line2]),
     ]
     with pytest.raises(ClosedPeriodError):
@@ -650,8 +719,10 @@ class TestReverseJournalEntry:
 
     added_objects: list = []
     session = MagicMock()
+    session.get.return_value = original
     session.execute.side_effect = [
-      _scalar_exec(original),
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry (response build)
     ]
@@ -689,8 +760,10 @@ class TestReverseJournalEntry:
 
     added_objects: list = []
     session = MagicMock()
+    session.get.return_value = original
     session.execute.side_effect = [
-      _scalar_exec(original),
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),
     ]
@@ -729,8 +802,10 @@ class TestReverseJournalEntry:
 
     added_objects: list = []
     session = MagicMock()
+    session.get.return_value = original
     session.execute.side_effect = [
-      _scalar_exec(original),
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry
     ]
@@ -755,8 +830,10 @@ class TestReverseJournalEntry:
     line2 = _mock_line("elem_b", debit=0, credit=200, order=2)
 
     session = MagicMock()
+    session.get.return_value = original
     session.execute.side_effect = [
-      _scalar_exec(original),
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry
     ]

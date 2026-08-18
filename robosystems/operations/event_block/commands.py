@@ -37,13 +37,21 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.locking import (
+  RowLockedError,
+  bounded_lock_wait,
+  ordered_lock_column,
+)
+from robosystems.operations.roboledger.commands._guards import (
+  ClosedPeriodError,
+  assert_period_not_closed,
+)
 from robosystems.operations.roboledger.reads.event_block import (
   _load_dimension_ids,
   _to_envelope,
 )
 
-from .engine import EngineValidationError, apply_handler
-from .locking import bounded_lock_wait, ordered_lock_column
+from .engine import EngineValidationError, apply_handler, posting_date_for_event
 from .python_handlers import get_python_handler
 from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (
@@ -583,6 +591,17 @@ def preview_event_block(
       validation_errors=errors,
       would_succeed=False,
     )
+
+  try:
+    assert_period_not_closed(
+      session,
+      posting_date_for_event(
+        effective_at=body.effective_at,
+        occurred_at=body.occurred_at,
+      ),
+    )
+  except (ClosedPeriodError, RowLockedError) as e:
+    errors.append(str(e))
 
   # Dry-evaluate template without writing
   template = handler.transaction_template or {}

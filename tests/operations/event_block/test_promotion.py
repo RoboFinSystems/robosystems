@@ -175,7 +175,7 @@ class TestCoPilotMode:
       session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
     )
 
-    from robosystems.operations.event_block.locking import ordered_lock_column
+    from robosystems.operations.locking import ordered_lock_column
 
     ordered_by = [
       arg for call in session.event_query.order_by.call_args_list for arg in call.args

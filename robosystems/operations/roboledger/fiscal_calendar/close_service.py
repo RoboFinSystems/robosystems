@@ -23,6 +23,7 @@ from robosystems.logger import logger
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.locking import bounded_lock_wait
 
 from .periods import period_date_range
 from .service import (
@@ -69,6 +70,20 @@ class PeriodNotFoundError(PeriodCloseError):
 
   def __init__(self, period: str):
     super().__init__(f"Fiscal period {period!r} not found.")
+    self.period = period
+
+
+class PeriodAlreadyClosedError(PeriodCloseError):
+  """Raised when the period is already closed at the post-publish revalidation.
+
+  The exclusive period fence is supposed to stop a second closer before
+  this, but the database close still re-locks the FiscalPeriod row after
+  the QuickBooks commit and refuses `status='closed'`. Without that
+  check a closer that skipped the fence would stamp again.
+  """
+
+  def __init__(self, period: str):
+    super().__init__(f"Fiscal period {period!r} is already closed.")
     self.period = period
 
 
@@ -250,15 +265,34 @@ class PeriodCloseService:
       session, graph_id, period_start, period_end, actor_id=actor_id
     )
 
-    # Find the FiscalPeriod row before mutating anything so we can detect
-    # the re-close path (status='closing' means a prior reopen).
-    fp = (
-      session.query(FiscalPeriod)
-      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-      .one_or_none()
-    )
+    # The exclusive period fence (taken by `close_period` / `reopen_period`
+    # around this call and their commit) is what serializes the whole
+    # operation, including the QB publish above. That fence is
+    # session-scoped on a dedicated connection because the publish
+    # **commits** — a FOR UPDATE taken before it would be released.
+    #
+    # The row lock here is the second half: it serializes the database
+    # close against anyone who skipped the fence, and it revalidates
+    # status so a loser cannot treat `closed` as a normal first-close
+    # and stamp again. Writers participate via the shared side of the
+    # same fence in `assert_period_not_closed`.
+    session.flush()
+    with bounded_lock_wait(
+      session,
+      f"Period {period} is being closed or reopened by another process. "
+      "Retry in a moment.",
+    ):
+      fp = (
+        session.query(FiscalPeriod)
+        .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+      )
     if fp is None:
       raise PeriodNotFoundError(period)
+    if fp.status == "closed":
+      raise PeriodAlreadyClosedError(period)
     is_reclose = fp.status == "closing"
 
     # 3. Draft → posted. The pre-publish step already promoted every
@@ -720,6 +754,7 @@ class PeriodCloseService:
 
 __all__ = [
   "CloseGateFailed",
+  "PeriodAlreadyClosedError",
   "PeriodCloseError",
   "PeriodCloseResult",
   "PeriodCloseService",

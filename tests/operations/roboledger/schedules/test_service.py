@@ -1424,6 +1424,15 @@ class TestCreateScheduleMaterializesObligations:
 
 
 class TestCreateClosingEntry:
+  @pytest.fixture(autouse=True)
+  def _open_period(self):
+    """These tests mock execute side-effects for entry/fact lookups.
+    The period fence would consume the first fetchone."""
+    with patch(
+      "robosystems.operations.roboledger.schedules.service.assert_period_not_closed"
+    ):
+      yield
+
   def _mock_schedule_structure(self):
     struct = MagicMock()
     struct.block_type = "schedule"

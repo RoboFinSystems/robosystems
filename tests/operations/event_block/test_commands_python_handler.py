@@ -351,6 +351,35 @@ class TestDslHandlerResolution:
     assert resp.would_succeed is True
     assert resp.matched_handler is not None
 
+  def test_dsl_preview_refuses_a_closed_period(self) -> None:
+    from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
+
+    session = MagicMock()
+    session.get.return_value = MagicMock(agent_type="vendor")
+    body = _make_body(
+      event_type="invoice_issued",
+      event_category="purchase",
+      metadata={},
+      agent_id="agt_vendor",
+    )
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.resolve_handler",
+        return_value=self._handler(),
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=ClosedPeriodError("2026-03", body.occurred_at.date()),
+      ),
+    ):
+      resp = preview_event_block(session, body, created_by="usr_test")
+    assert resp.would_succeed is False
+    assert any("closed period" in e for e in resp.validation_errors)
+
 
 class TestCreateDualityFields:
   """Stream 1 of event-driven-ledger: create-side flow-through of REA fields."""

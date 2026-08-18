@@ -200,7 +200,6 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.core import User
 from robosystems.operations.event_block import (
   DuplicateEventError,
-  EventLockedError,
   EventNotFoundError,
   InvalidEventTransitionError,
 )
@@ -255,6 +254,7 @@ from robosystems.operations.information_block.metrics import (
 from robosystems.operations.information_block.rules.commands import (
   cmd_evaluate_rules,
 )
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
@@ -312,6 +312,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   set_close_target as cmd_set_close_target,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
+  JournalEntryAlreadyReversedError,
   JournalEntryNotDraftError,
   JournalEntryNotFoundError,
   JournalEntryNotPostedError,
@@ -430,6 +431,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
   FiscalCalendarService,
+  PeriodAlreadyClosedError,
   PeriodNotFoundError,
   UnbalancedLedgerError,
   parse_period,
@@ -1258,7 +1260,7 @@ update_information_block_op = _registrar.register(
       ScheduleNotFoundError: 404,
       # A schedule template change supersedes its pending obligations, which
       # the promotion sweep may be holding. Retryable.
-      EventLockedError: 409,
+      RowLockedError: 409,
     },
     mark_stale_reason="information_block_updated",
   )
@@ -1529,6 +1531,12 @@ create_event_block_op = _registrar.register(
       TemplateInterpolationError: 422,
       EngineValidationError: 422,
       HandlerMetadataValidationError: 422,
+      # Handlers reach locked rows — `journal_entry_reversed` locks the entry
+      # it reverses. Retryable, like every other lock conflict.
+      RowLockedError: 409,
+      # An entry is reversed at most once; a second attempt is a fixable
+      # request, not a retryable conflict.
+      JournalEntryAlreadyReversedError: 422,
       DisposalScheduleNotFoundError: 404,
       JournalEntryNotFoundError: 404,
       JournalEntryNotPostedError: 422,
@@ -1569,9 +1577,14 @@ update_event_block_op = _registrar.register(
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+      # Approving a captured reversal fires the same handler create does, so
+      # this reaches the already-reversed guard too. Registered explicitly
+      # because it subclasses ValueError and would otherwise fall through to
+      # the generic handler and be reported as a 404.
+      JournalEntryAlreadyReversedError: 422,
       # A running sync holds the event's row lock. Retryable, and the only
       # error here the caller should try again rather than fix.
-      EventLockedError: 409,
+      RowLockedError: 409,
     },
     mark_stale_reason="event_block_updated",
   )
@@ -1613,7 +1626,7 @@ execute_event_block_op = _registrar.register(
       QBAuthFailedError: 401,
       # Another writer holds the event's row lock. Retryable, and the publish
       # deliberately did not reach QuickBooks.
-      EventLockedError: 409,
+      RowLockedError: 409,
       ValueError: 422,
     },
     mark_stale_reason="event_published",
@@ -1712,6 +1725,7 @@ update_journal_entry_op = _registrar.register(
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
       ClosedPeriodError: 422,
+      RowLockedError: 409,
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
@@ -1734,6 +1748,8 @@ delete_journal_entry_op = _registrar.register(
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
+      ClosedPeriodError: 422,
+      RowLockedError: 409,
     },
     requires_created_by=False,
     mark_stale_reason="journal_entry_deleted",
@@ -1769,7 +1785,7 @@ promote_obligations_op = _registrar.register(
     result_type=PromoteObligationsResponse,
     # The background sweep holds the candidate set's row locks. Retryable,
     # same as the approval path's conflict.
-    error_map={ValueError: 422, EventLockedError: 409},
+    error_map={ValueError: 422, RowLockedError: 409},
     mark_stale_reason="obligations_promoted",
   )
 )
@@ -1989,6 +2005,10 @@ async def close_period_op(
       raise HTTPException(status_code=422, detail=detail)
     except PeriodNotFoundError as e:
       raise HTTPException(status_code=404, detail=str(e))
+    except PeriodAlreadyClosedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
+    except RowLockedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
     except UnbalancedLedgerError as e:
       raise HTTPException(
         status_code=422,
@@ -2096,6 +2116,10 @@ async def reopen_period_op(
           note=body.note,
           service=_fiscal_svc,
         ).fiscal_calendar
+    except RowLockedError as e:
+      # A concurrent writer holds the rows this needs. Retryable, and the
+      # same 409 the registrar-driven operations return.
+      raise HTTPException(status_code=409, detail=str(e))
     except PeriodNotFoundInLedgerError:
       raise HTTPException(
         status_code=404, detail=f"Fiscal period {body.period!r} not found."
@@ -2168,6 +2192,9 @@ async def backfill_plan_history_op(
           service=_fiscal_svc,
           close_service=_close_svc,
         )
+    except RowLockedError as e:
+      # The internal reopen locks the period; another writer may hold it.
+      raise HTTPException(status_code=409, detail=str(e))
     except BackfillPreconditionError as e:
       raise HTTPException(
         status_code=422,
@@ -2290,6 +2317,10 @@ async def regenerate_report_op(
           return cmd_regenerate_report(
             session, graph_id, body.report_id, body, acting_user_id=str(user.id)
           )
+        except RowLockedError as e:
+          # A concurrent writer holds the rows this needs. Retryable, and the
+          # same 409 the registrar-driven operations return.
+          raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFoundError:
           raise HTTPException(
             status_code=404, detail=f"Report '{body.report_id}' not found."
@@ -2373,6 +2404,8 @@ async def delete_report_op(
           raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFiledError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except RowLockedError as e:
+          raise HTTPException(status_code=409, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
     if not deleted:
@@ -2581,6 +2614,10 @@ async def file_report_op(
       with extensions_session(graph_id) as session:
         try:
           return cmd_file_report(session, body.report_id, filed_by=str(user.id))
+        except RowLockedError as e:
+          # Another lifecycle write holds the report. Retryable, same 409 the
+          # registrar-driven operations return.
+          raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFoundError:
           raise HTTPException(
             status_code=404, detail=f"Report '{body.report_id}' not found."
@@ -2640,6 +2677,8 @@ async def transition_filing_status_op(
           )
         except InvalidFilingTransitionError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except RowLockedError as e:
+          raise HTTPException(status_code=409, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 

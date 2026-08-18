@@ -625,6 +625,30 @@ class TestUpdateJournalEntryOp:
     assert exc.value.status_code == 422
     assert "posted" in exc.value.detail
 
+  @pytest.mark.asyncio
+  async def test_409_when_row_locked(self) -> None:
+    from robosystems.operations.locking import RowLockedError
+
+    body = UpdateJournalEntryRequest(entry_id="je_abc", memo="X")
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.journal_entries.update_journal_entry",
+        side_effect=RowLockedError("Journal entry je_abc is being written"),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      with pytest.raises(HTTPException) as exc:
+        await update_journal_entry_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 409
+
 
 class TestDeleteJournalEntryOp:
   @pytest.mark.asyncio
@@ -676,6 +700,55 @@ class TestDeleteJournalEntryOp:
           cache=_FakeCache(),
         )
     assert exc.value.status_code == 422
+
+  @pytest.mark.asyncio
+  async def test_409_when_row_locked(self) -> None:
+    from robosystems.operations.locking import RowLockedError
+
+    body = DeleteJournalEntryRequest(entry_id="je_draft")
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.journal_entries.delete_journal_entry",
+        side_effect=RowLockedError("Journal entry je_draft is being written"),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      with pytest.raises(HTTPException) as exc:
+        await delete_journal_entry_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 409
+
+  @pytest.mark.asyncio
+  async def test_422_when_period_closed(self) -> None:
+    from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
+
+    body = DeleteJournalEntryRequest(entry_id="je_draft")
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.journal_entries.delete_journal_entry",
+        side_effect=ClosedPeriodError("2026-01", date(2026, 1, 15)),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      with pytest.raises(HTTPException) as exc:
+        await delete_journal_entry_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "closed period" in exc.value.detail
 
 
 # TestReverseJournalEntryOp removed: the `reverse-journal-entry`

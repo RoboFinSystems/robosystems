@@ -16,7 +16,7 @@ from robosystems.operations.event_block.commands import (
   InvalidEventTransitionError,
   update_event_block,
 )
-from robosystems.operations.event_block.locking import EventLockedError
+from robosystems.operations.locking import RowLockedError
 
 
 def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
@@ -393,7 +393,7 @@ class TestTransitionRowLock:
 
     locked_q = session.query.return_value.filter.return_value
     locked_q.with_for_update.assert_called()
-    from robosystems.operations.event_block.locking import ordered_lock_column
+    from robosystems.operations.locking import ordered_lock_column
 
     ordered = [a for c in locked_q.order_by.call_args_list for a in c.args]
     assert len(ordered) == 1
@@ -426,7 +426,7 @@ class TestLockContention:
     )
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
-    with pytest.raises(EventLockedError, match="evt_a"):
+    with pytest.raises(RowLockedError, match="evt_a"):
       update_event_block(session, body, created_by="usr_test")
 
     session.commit.assert_not_called()
@@ -443,7 +443,7 @@ class TestLockContention:
     )
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
-    with pytest.raises(EventLockedError, match="evt_a"):
+    with pytest.raises(RowLockedError, match="evt_a"):
       update_event_block(session, body, created_by="usr_test")
 
     session.commit.assert_not_called()

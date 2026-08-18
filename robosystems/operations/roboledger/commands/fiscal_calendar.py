@@ -23,10 +23,16 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.locking import (
+  RowLockedError,
+  bounded_lock_wait,
+  exclusive_period_fence,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
   FiscalCalendarService,
+  PeriodAlreadyClosedError,
   PeriodCloseService,
   PeriodNotFoundError,
   UnbalancedLedgerError,
@@ -195,23 +201,36 @@ def close_period(
   human-driven ones.
 
   Raises `CloseGateFailed`, `PeriodNotFoundError`,
+  `PeriodAlreadyClosedError`, `RowLockedError`,
   `UnbalancedLedgerError`, `FiscalCalendarError` — caller translates
   to appropriate HTTP status codes.
   """
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
-  result = close_service.close(
-    session,
+  # Exclusive fence spans the QB publish commit *and* this commit. A
+  # lock taken only inside `close()` would be released before the
+  # caller's commit, and a writer could sneak a draft into the month
+  # whose statements we just stamped.
+  with exclusive_period_fence(
     graph_id,
     period,
-    actor_id=actor_id,
-    actor_type=actor_type,
-    has_sync_connection=has_sync,
-    last_sync_at=last_sync_at,
-    allow_stale_sync=allow_stale_sync,
-    allow_stranded_obligations=allow_stranded_obligations,
-    note=note,
-  )
-  session.commit()
+    detail=(
+      f"Period {period} is being closed or reopened by another process. "
+      "Retry in a moment."
+    ),
+  ):
+    result = close_service.close(
+      session,
+      graph_id,
+      period,
+      actor_id=actor_id,
+      actor_type=actor_type,
+      has_sync_connection=has_sync,
+      last_sync_at=last_sync_at,
+      allow_stale_sync=allow_stale_sync,
+      allow_stranded_obligations=allow_stranded_obligations,
+      note=note,
+    )
+    session.commit()
 
   # The close's writes (entries posted, statement sets stamped) change
   # graph-materialized state, so the blue/green pipeline must rebuild —
@@ -263,52 +282,76 @@ def reopen_period(
   doesn't exist, `PeriodNotClosedError` if it's not actually closed,
   or service-level `FiscalCalendarError` for calendar issues.
   """
-  fp = (
-    session.query(FiscalPeriod)
-    .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-    .one_or_none()
-  )
-  if fp is None:
-    raise PeriodNotFoundInLedgerError(period)
-  if fp.status != "closed":
-    raise PeriodNotClosedError(period, fp.status)
-
-  fp.status = "closing"
-  fp.closed_at = None
-  fp.closed_by = None
-  session.flush()
-
-  calendar = service.retreat_closed_through(
-    session,
+  # Exclusive fence first — the same one `close_period` holds across its
+  # mid-flow QuickBooks commit — then the FiscalPeriod row lock. Two
+  # concurrent reopens cannot both retract the same month's statements,
+  # and a reopen cannot interleave with a close (that used to leave a
+  # period marked closed whose statements had been retracted).
+  with exclusive_period_fence(
     graph_id,
     period,
-    reason=reason,
-    actor_id=actor_id,
-    actor_type=actor_type,
-    note=note,
-  )
-  # Re-stamp schedule facts the retreated boundary has re-opened: the reopened
-  # window's facts were tagged 'historical' at generation and must return to
-  # 'in_scope' so the roll-forward carry-in and the re-close see the movement.
-  # Function-level import — commands.schedules ↔ information_block.schedule form
-  # a module-load cycle that a top-level import here would trip.
-  from robosystems.operations.roboledger.commands.schedules import (
-    reinstate_reopened_schedule_scopes,
-  )
+    detail=(
+      f"Period {period} is being closed or reopened by another process. "
+      "Retry in a moment."
+    ),
+  ):
+    session.flush()
+    with bounded_lock_wait(
+      session,
+      f"Period {period} is being closed or reopened by another process. "
+      "Retry in a moment.",
+    ):
+      fp = (
+        session.query(FiscalPeriod)
+        .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+      )
+    if fp is None:
+      raise PeriodNotFoundInLedgerError(period)
+    if fp.status != "closed":
+      raise PeriodNotClosedError(period, fp.status)
 
-  reinstate_reopened_schedule_scopes(session)
+    fp.status = "closing"
+    fp.closed_at = None
+    fp.closed_by = None
+    session.flush()
 
-  # Retract the reopened month's canonical statement sets. Function-level
-  # import — statement_sets pulls in information-block machinery this
-  # module otherwise never loads (same posture as the schedules import
-  # above).
-  from robosystems.operations.roboledger.reports.statement_sets import (
-    retract_canonical_statement_sets,
-  )
+    calendar = service.retreat_closed_through(
+      session,
+      graph_id,
+      period,
+      reason=reason,
+      actor_id=actor_id,
+      actor_type=actor_type,
+      note=note,
+    )
+    # Re-stamp schedule facts the retreated boundary has re-opened: the
+    # reopened window's facts were tagged 'historical' at generation and
+    # must return to 'in_scope' so the roll-forward carry-in and the
+    # re-close see the movement. Function-level import — commands.schedules
+    # ↔ information_block.schedule form a module-load cycle that a
+    # top-level import here would trip.
+    from robosystems.operations.roboledger.commands.schedules import (
+      reinstate_reopened_schedule_scopes,
+    )
 
-  ps, pe = period_date_range(period)
-  retracted = retract_canonical_statement_sets(session, period_start=ps, period_end=pe)
-  session.commit()
+    reinstate_reopened_schedule_scopes(session)
+
+    # Retract the reopened month's canonical statement sets.
+    # Function-level import — statement_sets pulls in information-block
+    # machinery this module otherwise never loads (same posture as the
+    # schedules import above).
+    from robosystems.operations.roboledger.reports.statement_sets import (
+      retract_canonical_statement_sets,
+    )
+
+    ps, pe = period_date_range(period)
+    retracted = retract_canonical_statement_sets(
+      session, period_start=ps, period_end=pe
+    )
+    session.commit()
 
   # The reopen retracts the month's canonical statement sets — graph
   # state changed; mirror close_period's marker.
@@ -482,12 +525,14 @@ def backfill_plan_history(
       )
     except (
       CloseGateFailed,
+      PeriodAlreadyClosedError,
       PeriodNotFoundError,
       UnbalancedLedgerError,
       WritebackFailed,
       StatementStampError,
       PeriodNotClosedError,
       FiscalCalendarError,
+      RowLockedError,
     ) as exc:
       session.rollback()
       processed.append(

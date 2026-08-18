@@ -30,6 +30,7 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
@@ -138,10 +139,23 @@ def dispatch_preview(
       "posted entries can be reversed."
     )
 
+  # Same check the command makes. A schedule with `auto_reverse` creates the
+  # reversal at generation time and leaves the original `posted`, so status
+  # alone would let preview promise a reversal the command then refuses — and a
+  # preview that disagrees with execution is worse than no preview.
+  existing_reversal = session.execute(
+    select(Entry.id).where(Entry.reversal_of == original.id)
+  ).scalar_one_or_none()
+  if existing_reversal is not None:
+    errors.append(
+      f"Journal entry {metadata.entry_id} already has a reversing entry "
+      f"({existing_reversal}); an entry is reversed at most once."
+    )
+
   posting_date = metadata.posting_date or body.occurred_at.date()
   try:
     assert_period_not_closed(session, posting_date)
-  except ClosedPeriodError as e:
+  except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 
   if errors:

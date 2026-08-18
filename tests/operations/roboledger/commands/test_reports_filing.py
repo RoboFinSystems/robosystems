@@ -79,7 +79,10 @@ def test_file_report_transitions_draft_to_filed() -> None:
   assert result.filing_status == "filed"
   assert result.filed_by == "user_01"
   assert result.filed_at is not None
-  session.flush.assert_called_once()
+  # Two flushes: the locked read flushes first (these sessions are
+  # autoflush=False, so a refresh would otherwise drop an in-flight write),
+  # then the filing stamp itself.
+  assert session.flush.call_count == 2
 
 
 def test_file_report_transitions_under_review_to_filed() -> None:

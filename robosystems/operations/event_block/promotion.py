@@ -70,11 +70,11 @@ from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
-from robosystems.operations.event_block.locking import ordered_lock_column
 from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
 )
+from robosystems.operations.locking import ordered_lock_column
 
 
 @dataclass

@@ -52,6 +52,7 @@ from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
@@ -509,7 +510,7 @@ def dispatch_preview(
   for pd in posting_dates:
     try:
       assert_period_not_closed(session, pd)
-    except ClosedPeriodError as e:
+    except (ClosedPeriodError, RowLockedError) as e:
       errors.append(str(e))
 
   planned, total_debit, total_credit, balance_errors = _preview_planned_entries(
