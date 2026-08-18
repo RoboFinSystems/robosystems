@@ -412,15 +412,25 @@ def update_event_block(
   # Fence before the event row lock — same order as journal update/delete
   # and as close's exclusive fence. Approving (event lock, then handler
   # fence) against a closer (exclusive fence, then event lock) used to
-  # sit until lock_timeout and fail close mid-publish.
+  # sit until lock_timeout and fail close mid-publish. Both the current
+  # posting date and the one ``body.effective_at`` would move it to, as
+  # ``update_journal_entry`` does — the handler posts against the patched
+  # date, and its own fence runs after the lock.
   if body.transition_to == "committed":
-    assert_period_not_closed(
-      session,
+    fence_dates = {
       posting_date_for_event(
         effective_at=peek.effective_at,
         occurred_at=peek.occurred_at,
-      ),
-    )
+      )
+    }
+    if body.effective_at is not None:
+      fence_dates.add(
+        posting_date_for_event(
+          effective_at=body.effective_at,
+          occurred_at=peek.occurred_at,
+        )
+      )
+    assert_period_not_closed(session, *sorted(fence_dates))
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "

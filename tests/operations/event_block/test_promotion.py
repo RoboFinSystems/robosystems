@@ -29,6 +29,7 @@ def _pending_event(
     occurred_at=datetime.combine(
       datetime.fromisoformat(period_end).date(), time(23, 59, 59), tzinfo=UTC
     ),
+    effective_at=None,
     metadata_={
       "schedule_id": schedule_id,
       "posting_date": period_end,
@@ -229,6 +230,55 @@ class TestAutopilotMode:
     # Status flips happened too — autopilot is co-pilot + dispatch
     assert e1.status == "classified"
     assert e2.status == "classified"
+
+  def test_period_fence_is_taken_before_the_row_locks(self) -> None:
+    """Autopilot writes GL, so it fences the period first and locks the
+    obligation rows second — the order close uses (exclusive fence, then
+    event locks). Locking first and fencing in the handler was the
+    inversion that failed close mid-publish. Only the write set is fenced:
+    the pending obligation, not the already-drafted classified one."""
+    pending = _pending_event("evt_pending", period_end="2026-02-28")
+    drafted = _pending_event("evt_done", status="classified", period_end="2026-01-31")
+    session = _session_returning(
+      [pending, drafted],
+      entries=[_entry_row("struct_a", "2026-01-31")],
+    )
+    order: list[str] = []
+    session.event_query.with_for_update.side_effect = lambda *a, **k: (
+      order.append("row_lock"),
+      session.event_query,
+    )[1]
+
+    handler = MagicMock()
+    handler.metadata_schema.model_validate.return_value = MagicMock()
+    with (
+      patch(
+        "robosystems.operations.event_block.promotion.get_python_handler",
+        return_value=handler,
+      ),
+      patch(
+        "robosystems.operations.event_block.promotion.assert_period_not_closed",
+        side_effect=lambda _s, *dates: order.append(f"fence:{dates}"),
+      ),
+    ):
+      promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 3, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    assert order == [f"fence:{(date(2026, 2, 28),)}", "row_lock"], order
+
+  def test_copilot_does_not_take_the_period_fence(self) -> None:
+    session = _session_returning([_pending_event("evt_1")])
+    with patch(
+      "robosystems.operations.event_block.promotion.assert_period_not_closed"
+    ) as fence:
+      promote_pending_obligations(
+        session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+      )
+    fence.assert_not_called()
 
   def test_per_event_validation_error_does_not_sink_sweep(self) -> None:
     """A single bad metadata payload is captured; other events still process."""
@@ -562,6 +612,7 @@ class TestStrandedObligations:
       event_type="schedule_entry_due",
       status="classified",
       occurred_at=datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC),
+      effective_at=None,
       metadata_=None,
     )
     session = _session_returning([opaque])

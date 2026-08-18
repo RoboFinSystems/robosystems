@@ -77,6 +77,7 @@ from robosystems.operations.event_block.python_handlers.types import (
 )
 from robosystems.operations.locking import ordered_lock_column
 from robosystems.operations.roboledger.commands._guards import (
+  ClosedPeriodError,
   assert_period_not_closed,
 )
 
@@ -201,6 +202,51 @@ def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Even
   return filter_stranded_obligations(session, classified)
 
 
+def _fence_autopilot_write_set(
+  session: Session, candidate_filter: list
+) -> list[tuple[str, str]]:
+  """Take the shared period fence for every obligation autopilot will write.
+
+  The write set is the ``pending`` candidates plus the stranded ``classified``
+  ones — not every classified obligation. Dispatched obligations stay
+  ``classified`` for good (see ``schedule_entry_due``), so fencing the whole
+  candidate set would fence every period that ever held a schedule and fail
+  the sweep on the first one that has since closed.
+
+  Returns ``(event_id, reason)`` for obligations whose period is closed, so
+  the caller can leave them out and report them. A fence that cannot be
+  taken because a closer holds the exclusive side propagates as
+  ``RowLockedError`` — that one is retryable and does apply to the sweep.
+  """
+  preview = session.query(Event).filter(*candidate_filter).all()
+  pending = [evt for evt in preview if evt.status == "pending"]
+  classified = [evt for evt in preview if evt.status == "classified"]
+  write_set = pending + (
+    filter_stranded_obligations(session, classified) if classified else []
+  )
+  if not write_set:
+    return []
+
+  by_date: dict[date, list[Event]] = {}
+  for evt in write_set:
+    posting_date = posting_date_for_event(
+      effective_at=evt.effective_at,
+      occurred_at=evt.occurred_at,
+    )
+    by_date.setdefault(posting_date, []).append(evt)
+
+  closed: list[tuple[str, str]] = []
+  # Sorted so two sweeps fence periods in the same order. Shared fences do
+  # not contend with each other, so this is tidiness rather than a
+  # deadlock guard — the row locks that follow are the ones ordered for that.
+  for posting_date in sorted(by_date):
+    try:
+      assert_period_not_closed(session, posting_date)
+    except ClosedPeriodError as e:
+      closed.extend((evt.id, f"closed period: {e}") for evt in by_date[posting_date])
+  return closed
+
+
 def promote_pending_obligations(
   session: Session,
   graph_id: str,
@@ -232,26 +278,22 @@ def promote_pending_obligations(
   # and (if a tick overruns) its own successor. See `locking` for the
   # bounded-vs-unbounded split: this function is called from both a Dagster
   # sweep and a request handler, and it is the *caller* that bounds the wait.
-  candidate_filter = (
+  candidate_filter = [
     Event.event_type == "schedule_entry_due",
     Event.status.in_(("pending", "classified")),
     Event.occurred_at <= as_of,
-  )
+  ]
+  result = PromotionResult(graph_id=graph_id)
   # Autopilot writes GL, so the period fence has to come *before* the
   # event row locks. Close takes exclusive fence then event locks;
   # locking first and fencing in the handler was the inversion that
-  # failed close mid-publish.
+  # failed close mid-publish. An obligation whose period is already
+  # closed is left out of the sweep and reported, not fatal to it.
   if dispatch_handlers:
-    preview = session.query(Event).filter(*candidate_filter).all()
-    fence_dates = [
-      posting_date_for_event(
-        effective_at=getattr(evt, "effective_at", None),
-        occurred_at=evt.occurred_at,
-      )
-      for evt in preview
-    ]
-    if fence_dates:
-      assert_period_not_closed(session, *fence_dates)
+    closed = _fence_autopilot_write_set(session, candidate_filter)
+    if closed:
+      result.errors.extend(closed)
+      candidate_filter.append(Event.id.notin_([evt_id for evt_id, _ in closed]))
   candidates = (
     session.query(Event)
     .filter(*candidate_filter)
@@ -264,8 +306,6 @@ def promote_pending_obligations(
   )
   pending = [evt for evt in candidates if evt.status == "pending"]
   classified = [evt for evt in candidates if evt.status == "classified"]
-
-  result = PromotionResult(graph_id=graph_id)
 
   stranded = filter_stranded_obligations(session, classified) if classified else []
 
