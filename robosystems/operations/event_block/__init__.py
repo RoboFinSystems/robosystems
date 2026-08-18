@@ -16,8 +16,16 @@ from .commands import (
   update_event_block,
 )
 
+# The lock policy moved to `operations/locking.py` and its error was renamed,
+# since it now guards entries, fiscal periods and reports as well as events.
+# This module's contract is a stable import path, so the old name keeps
+# resolving rather than breaking on the release that moved it. Deprecated —
+# import `RowLockedError` from `robosystems.operations.locking`.
+EventLockedError = RowLockedError
+
 __all__ = [
   "DuplicateEventError",
+  "EventLockedError",  # deprecated alias for RowLockedError
   "EventNotFoundError",
   "InvalidEventTransitionError",
   "RowLockedError",

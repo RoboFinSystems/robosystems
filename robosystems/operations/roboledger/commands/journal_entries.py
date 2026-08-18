@@ -83,6 +83,27 @@ class JournalEntryNotDraftError(ValueError):
     self.status = status
 
 
+class JournalEntryAlreadyReversedError(ValueError):
+  """Raised when the entry already has a reversing entry against it.
+
+  Reachable without any race: a schedule with ``auto_reverse`` creates the
+  reversal at generation time and leaves the original's status untouched, so
+  the ``status == 'posted'`` check below passes on an entry that is already
+  reversed. Before `uq_entries_one_reversal_per_original` that produced a
+  second reversal — the double-post this work exists to stop; after it, the
+  insert would fail on the index. Neither is an answer a caller can act on,
+  so the state gets named here instead.
+  """
+
+  def __init__(self, entry_id: str, reversing_entry_id: str) -> None:
+    super().__init__(
+      f"Journal entry {entry_id} already has a reversing entry "
+      f"({reversing_entry_id}); an entry is reversed at most once."
+    )
+    self.entry_id = entry_id
+    self.reversing_entry_id = reversing_entry_id
+
+
 class JournalEntryNotPostedError(ValueError):
   """Raised when trying to reverse a non-posted entry.
 
@@ -486,6 +507,16 @@ def reverse_journal_entry(
     raise JournalEntryNotFoundError(body.entry_id)
   if original.status != "posted":
     raise JournalEntryNotPostedError(original.id, original.status)
+
+  # Checked under the lock, so the answer cannot go stale between here and the
+  # insert. `uq_entries_one_reversal_per_original` still backs it — this turns
+  # the constraint from the thing that reports the problem into the thing that
+  # guarantees it.
+  existing_reversal = session.execute(
+    select(Entry.id).where(Entry.reversal_of == original.id)
+  ).scalar_one_or_none()
+  if existing_reversal is not None:
+    raise JournalEntryAlreadyReversedError(str(original.id), str(existing_reversal))
 
   original_lines = _load_line_items(session, original.id)
   if not original_lines:

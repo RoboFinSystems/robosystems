@@ -264,10 +264,14 @@ def reopen_period(
   doesn't exist, `PeriodNotClosedError` if it's not actually closed,
   or service-level `FiscalCalendarError` for calendar issues.
   """
-  # Locked, and against the same row `close_period` locks — a reopen
-  # interleaved with a close leaves a period marked closed whose statements
-  # were retracted, which is the one state the close/reopen pair must never
-  # produce.
+  # Locked: this decides from `fp.status` and then writes it, so two concurrent
+  # reopens cannot both retract the same month's statements.
+  #
+  # It does **not** serialize against `close_period`, which cannot take a
+  # transaction-scoped lock at all (its QB pre-publish commits mid-close — see
+  # that function's comment). A reopen interleaved with a close can still leave
+  # a period marked closed whose statements were retracted; closing that needs
+  # the session-scoped lock the close is waiting on.
   session.flush()
   with bounded_lock_wait(
     session,

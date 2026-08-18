@@ -180,8 +180,13 @@ class TestReversalLock:
 
 
 class TestPeriodTransitionLock:
-  """Close and reopen contend over the same `FiscalPeriod` row. Interleaved,
-  they can leave a period marked closed whose statements were retracted."""
+  """Two concurrent reopens cannot both retract the same month's statements.
+
+  This does **not** cover reopen-vs-close: `close_period` cannot hold a
+  transaction-scoped lock, because its QB pre-publish commits mid-close. That
+  gap is recorded in the close's own comment and in the spec, not papered over
+  with a test that would imply otherwise.
+  """
 
   @pytest.fixture(autouse=True)
   def closed_period(self, tenant):
@@ -233,3 +238,101 @@ class TestPeriodTransitionLock:
       )
       assert row.status == "closed"
       assert row.closed_at is not None
+
+
+class TestAlreadyReversed:
+  """A schedule with `auto_reverse` creates the reversal at generation time and
+  leaves the original's status untouched, so `status == 'posted'` passes on an
+  entry that already has one. That is a reachable state with no race in it."""
+
+  def test_second_reversal_raises_a_domain_error(self, tenant):
+    from robosystems.operations.roboledger.commands.journal_entries import (
+      JournalEntryAlreadyReversedError,
+    )
+
+    with extensions_session(GRAPH) as session:
+      session.add(
+        Entry(
+          id="je_auto_rev",
+          type="reversing",
+          status="draft",
+          posting_date=date(2026, 2, 1),
+          reversal_of=ENTRY_ID,
+          provenance="schedule_derived",
+          created_by="usr_schedule",
+        )
+      )
+
+    with extensions_session(GRAPH) as session:
+      with pytest.raises(JournalEntryAlreadyReversedError) as exc:
+        reverse_journal_entry(
+          session, ReverseJournalEntryRequest(entry_id=ENTRY_ID), "usr_op"
+        )
+      assert exc.value.reversing_entry_id == "je_auto_rev"
+
+    # No second reversal, and the constraint never had to be the one to say so.
+    with extensions_session(GRAPH) as check:
+      assert (
+        check.execute(
+          text("SELECT COUNT(*) FROM entries WHERE reversal_of = :id"),
+          {"id": ENTRY_ID},
+        ).scalar()
+        == 1
+      )
+
+
+class TestFileReportLock:
+  """`filed_by` and `filed_at` are what an auditor reads; last-writer-wins is
+  not good enough for them."""
+
+  REPORT_ID = "rpt_lock_0001"
+
+  @pytest.fixture(autouse=True)
+  def draft_report(self, tenant):
+    from robosystems.models.extensions import Taxonomy
+    from robosystems.models.extensions.roboledger.report import Report
+
+    with extensions_session(GRAPH) as session:
+      session.execute(text("DELETE FROM reports"))
+      session.execute(text("DELETE FROM taxonomies"))
+      session.add(
+        Taxonomy(
+          id="tax_rpt_0001",
+          name="Reporting",
+          taxonomy_type="reporting_standard",
+          created_by="usr_seed",
+        )
+      )
+      session.flush()
+      session.add(
+        Report(
+          id=self.REPORT_ID,
+          taxonomy_id="tax_rpt_0001",
+          name="Q1",
+          period_start=date(2026, 1, 1),
+          period_end=date(2026, 3, 31),
+          filing_status="draft",
+          generation_status="complete",
+          created_by="usr_seed",
+        )
+      )
+    yield
+
+  def test_a_locked_report_cannot_be_filed(self, tenant):
+    from robosystems.operations.roboledger.commands.reports import file_report
+
+    with extensions_session(GRAPH) as holder:
+      holder.execute(
+        text("SELECT id FROM reports WHERE id = :id FOR UPDATE"),
+        {"id": self.REPORT_ID},
+      )
+      with extensions_session(GRAPH) as filer:
+        with pytest.raises(RowLockedError, match=self.REPORT_ID):
+          file_report(filer, self.REPORT_ID, "usr_op")
+
+    with extensions_session(GRAPH) as check:
+      from robosystems.models.extensions.roboledger.report import Report
+
+      row = check.get(Report, self.REPORT_ID)
+      assert row.filing_status == "draft"
+      assert row.filed_at is None

@@ -312,6 +312,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   set_close_target as cmd_set_close_target,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
+  JournalEntryAlreadyReversedError,
   JournalEntryNotDraftError,
   JournalEntryNotFoundError,
   JournalEntryNotPostedError,
@@ -1529,6 +1530,12 @@ create_event_block_op = _registrar.register(
       TemplateInterpolationError: 422,
       EngineValidationError: 422,
       HandlerMetadataValidationError: 422,
+      # Handlers reach locked rows — `journal_entry_reversed` locks the entry
+      # it reverses. Retryable, like every other lock conflict.
+      RowLockedError: 409,
+      # An entry is reversed at most once; a second attempt is a fixable
+      # request, not a retryable conflict.
+      JournalEntryAlreadyReversedError: 422,
       DisposalScheduleNotFoundError: 404,
       JournalEntryNotFoundError: 404,
       JournalEntryNotPostedError: 422,
@@ -2096,6 +2103,10 @@ async def reopen_period_op(
           note=body.note,
           service=_fiscal_svc,
         ).fiscal_calendar
+    except RowLockedError as e:
+      # A concurrent writer holds the rows this needs. Retryable, and the
+      # same 409 the registrar-driven operations return.
+      raise HTTPException(status_code=409, detail=str(e))
     except PeriodNotFoundInLedgerError:
       raise HTTPException(
         status_code=404, detail=f"Fiscal period {body.period!r} not found."
@@ -2290,6 +2301,10 @@ async def regenerate_report_op(
           return cmd_regenerate_report(
             session, graph_id, body.report_id, body, acting_user_id=str(user.id)
           )
+        except RowLockedError as e:
+          # A concurrent writer holds the rows this needs. Retryable, and the
+          # same 409 the registrar-driven operations return.
+          raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFoundError:
           raise HTTPException(
             status_code=404, detail=f"Report '{body.report_id}' not found."

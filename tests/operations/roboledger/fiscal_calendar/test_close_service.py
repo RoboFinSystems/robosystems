@@ -91,7 +91,7 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
   """Build a mocked session where:
 
   - Entry bulk-update returns `updated`
-  - FiscalPeriod locked load returns `fp`
+  - FiscalPeriod one_or_none() returns `fp`
   - BS equation SUM query returns (debit, credit)
   """
   session = MagicMock()
@@ -102,19 +102,11 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
 
   # FiscalPeriod.first() path
   fp_query = MagicMock()
-  # The close loads the period locked and refreshed —
-  # `.filter(...).populate_existing().with_for_update().one_or_none()` — so
-  # two concurrent closes cannot each read it as closeable. Self-returning
-  # links keep this stub independent of the chain's order.
-  fp_filtered = fp_query.filter.return_value
-  fp_filtered.populate_existing.return_value = fp_filtered
-  fp_filtered.with_for_update.return_value = fp_filtered
-  fp_filtered.one_or_none.return_value = fp
+  fp_query.filter.return_value.one_or_none.return_value = fp
 
   # Route session.query to the right mock based on model. Our service calls:
   # session.query(Entry).filter(...).update(...)
-  # session.query(FiscalPeriod).filter(...).populate_existing()
-  #   .with_for_update().one_or_none()
+  # session.query(FiscalPeriod).filter(...).one_or_none()
   def _query_dispatch(model):
     name = model.__name__ if hasattr(model, "__name__") else str(model)
     if name == "FiscalPeriod":
@@ -510,8 +502,7 @@ class TestCloseAutoRunsRules:
     bs_exec.fetchone.return_value = bs_row
     schedules_exec = MagicMock()
     schedules_exec.scalars.return_value.all.return_value = schedule_ids
-    # The bounded wait's `SET LOCAL lock_timeout` consumes the first execute.
-    session.execute.side_effect = [MagicMock(), bs_exec, schedules_exec]
+    session.execute.side_effect = [bs_exec, schedules_exec]
 
     eval_patcher = patch(
       "robosystems.operations.information_block.rules.engine."
@@ -585,8 +576,7 @@ class TestCloseAutoRunsRules:
     bs_exec.fetchone.return_value = bs_row
     schedules_exec = MagicMock()
     schedules_exec.scalars.return_value.all.return_value = ["struct_ok", "struct_bad"]
-    # The bounded wait's `SET LOCAL lock_timeout` consumes the first execute.
-    session.execute.side_effect = [MagicMock(), bs_exec, schedules_exec]
+    session.execute.side_effect = [bs_exec, schedules_exec]
 
     from unittest.mock import patch
 
@@ -694,13 +684,7 @@ class TestCloseStampsStatementSets:
   def test_stamp_runs_after_post_and_before_schedule_rules(self):
     """At stamp time the FiscalPeriod is already closed (drafts posted)
     and only the BS-preflight execute has run — the schedule-rule query
-    hasn't happened yet.
-
-    Two executes by then, not one: the period's locked load issues a
-    `SET LOCAL lock_timeout` before the preflight. The assertion is about
-    *ordering* — the schedule-rule query is the one that must not have run
-    yet — so the count moves with the statements that legitimately precede
-    it."""
+    (the second session.execute) hasn't happened yet."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
     fp = _fp(status="open")
     observed = {}
@@ -723,7 +707,7 @@ class TestCloseStampsStatementSets:
     )
 
     assert observed["fp_status"] == "closed"
-    assert observed["execute_calls"] == 2  # SET LOCAL, then BS preflight
+    assert observed["execute_calls"] == 1
 
   def test_stamper_receives_period_window_and_actor(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))

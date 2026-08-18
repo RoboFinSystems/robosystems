@@ -599,7 +599,9 @@ class TestReverseJournalEntry:
     """
     session = MagicMock()
     session.get.return_value = original
-    session.execute.return_value.scalar_one_or_none.return_value = original
+    # The original arrives via the locked `session.get`; `execute` now serves
+    # the "does a reversal already exist" check, which these cases want empty.
+    session.execute.return_value.scalar_one_or_none.return_value = None
     return session
 
   def test_not_found_raises(self):
@@ -635,7 +637,11 @@ class TestReverseJournalEntry:
     session = self._session(original)
     # The original now arrives via the locked load, so `execute` serves the
     # bounded wait's `SET LOCAL lock_timeout` and then the line-item read.
-    session.execute.side_effect = [MagicMock(), _scalars_exec([line, line2])]
+    session.execute.side_effect = [
+      MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
+      _scalars_exec([line, line2]),
+    ]
     with pytest.raises(ClosedPeriodError):
       reverse_journal_entry(session, self._body(), "usr_1")
 
@@ -655,6 +661,7 @@ class TestReverseJournalEntry:
     session.get.return_value = original
     session.execute.side_effect = [
       MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry (response build)
     ]
@@ -695,6 +702,7 @@ class TestReverseJournalEntry:
     session.get.return_value = original
     session.execute.side_effect = [
       MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),
     ]
@@ -736,6 +744,7 @@ class TestReverseJournalEntry:
     session.get.return_value = original
     session.execute.side_effect = [
       MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry
     ]
@@ -763,6 +772,7 @@ class TestReverseJournalEntry:
     session.get.return_value = original
     session.execute.side_effect = [
       MagicMock(),  # bounded wait's SET LOCAL lock_timeout
+      _scalar_exec(None),  # no existing reversal
       _scalars_exec([line1, line2]),
       _scalars_exec([]),  # _load_line_items for reversing entry
     ]
