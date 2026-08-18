@@ -526,8 +526,12 @@ class TestRegistrarToolExecute:
 
   @pytest.mark.asyncio
   async def test_unmapped_exception_falls_back_to_command_failed(self) -> None:
+    """A fault is logged server-side and the caller gets a fixed message —
+    raw exception text can carry SQL, bound parameters and internal paths,
+    none of which belongs in front of the LLM."""
+
     def raising_cmd(session, body, created_by: str):
-      raise RuntimeError("boom")
+      raise RuntimeError("boom [SQL: INSERT ...] [parameters: {'secret': 1}]")
 
     tool = _RegistrarMCPTool(
       client=_client(user_id="usr_1"),
@@ -541,7 +545,76 @@ class TestRegistrarToolExecute:
       result = await tool.execute({"id": "x", "value": 0})
 
     assert result["error"] == "command_failed"
-    assert "boom" in result["message"]
+    assert "boom" not in result["message"]
+    assert "parameters" not in result["message"]
+    assert "see server logs" in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_db_programming_error_is_a_fixed_message(self) -> None:
+    from sqlalchemy.exc import ProgrammingError
+
+    def raising_cmd(session, body, created_by: str):
+      raise ProgrammingError(
+        "INSERT INTO t VALUES (%(v)s)", {"v": "secret"}, Exception("syntax error")
+      )
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_1"),
+      spec=_spec(command=raising_cmd),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 0})
+
+    assert result["error"] == "command_failed"
+    assert "secret" not in result["message"]
+    assert "INSERT" not in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_schema_missing_is_not_initialized(self) -> None:
+    from sqlalchemy.exc import ProgrammingError
+
+    def raising_cmd(session, body, created_by: str):
+      raise ProgrammingError("stmt", {}, Exception('relation "events" does not exist'))
+
+    reg = _registrar_stub()
+    reg.schema_missing_404.return_value = MagicMock(detail="Ledger not initialized.")
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_1"),
+      spec=_spec(command=raising_cmd),
+      registrar=reg,
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 0})
+
+    assert result == {"error": "not_initialized", "message": "Ledger not initialized."}
+
+  @pytest.mark.asyncio
+  async def test_unmapped_value_error_keeps_its_message(self) -> None:
+    """A domain refusal the map did not name is a request problem, and its
+    message is the useful part (REST answers 422 with the same text)."""
+
+    def raising_cmd(session, body, created_by: str):
+      raise ValueError("period must be YYYY-MM")
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_1"),
+      spec=_spec(command=raising_cmd),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 0})
+
+    assert result == {"error": "invalid_request", "message": "period must be YYYY-MM"}
 
   @pytest.mark.asyncio
   async def test_list_response_is_dumped_per_item(self) -> None:

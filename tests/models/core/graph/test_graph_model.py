@@ -1076,3 +1076,91 @@ class TestGraphRepositoryFeatures:
     assert repo.graph_type == "repository"
     assert repo.is_repository is True
     assert repo.repository_type == "test"
+
+
+class TestMarkFreshCompareAndClear:
+  """``mark_fresh`` clears staleness only for writes older than the
+  materialization's own snapshot.
+
+  A write that stamps ``graph_stale_at`` after the materialization began is
+  not in the graph; clearing the flag for it would drop the write from the
+  graph until an unrelated later write. The compare is done in SQL so an
+  instance loaded before the write cannot mask the newer stamp.
+  """
+
+  @pytest.fixture
+  def graph(self, test_org, db_session):
+    import uuid
+
+    return Graph.create(
+      graph_id=f"kg_stale_{uuid.uuid4().hex[:8]}",
+      graph_name="Stale Graph",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+      base_schema="base",
+      schema_extensions=["roboledger"],
+      graph_instance_id="cluster1",
+      graph_cluster_region="us-east-1",
+      graph_tier=GraphTier.LADYBUG_STANDARD,
+    )
+
+  def test_clears_when_the_stamp_predates_the_snapshot(self, graph, db_session):
+    from datetime import datetime, timedelta
+
+    graph.mark_stale(db_session, "journal_entry_updated")
+    started_at = datetime.now(UTC) + timedelta(seconds=1)
+
+    assert graph.mark_fresh(db_session, started_at=started_at) is True
+    db_session.refresh(graph)
+    assert graph.graph_stale is False
+    assert graph.graph_stale_at is None
+    assert graph.graph_metadata["materialization_count"] == 1
+
+  def test_keeps_stale_when_a_write_lands_after_the_snapshot(self, graph, db_session):
+    from datetime import datetime, timedelta
+
+    started_at = datetime.now(UTC) - timedelta(seconds=5)
+    graph.mark_stale(db_session, "journal_entry_updated")
+
+    assert graph.mark_fresh(db_session, started_at=started_at) is False
+    db_session.refresh(graph)
+    assert graph.graph_stale is True
+    assert graph.graph_stale_reason == "journal_entry_updated"
+    assert graph.graph_stale_at is not None
+    # The materialization itself is still recorded.
+    assert graph.graph_metadata["materialization_count"] == 1
+    assert "last_materialized_at" in graph.graph_metadata
+
+  def test_compares_against_the_row_not_the_identity_map(self, graph, db_session):
+    """The materializer's session loaded the graph before the concurrent
+    write; the write's newer stamp must still win."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import update
+
+    started_at = datetime.now(UTC) - timedelta(seconds=5)
+    # A concurrent writer stamps a newer graph_stale_at behind this session's
+    # back; the instance still carries the pre-write (fresh) values.
+    db_session.execute(
+      update(Graph)
+      .where(Graph.graph_id == graph.graph_id)
+      .values(
+        graph_stale=True,
+        graph_stale_reason="connector_sync",
+        graph_stale_at=datetime.now(UTC),
+      )
+      .execution_options(synchronize_session=False)
+    )
+    assert graph.graph_stale is False  # identity map is stale on purpose
+
+    assert graph.mark_fresh(db_session, started_at=started_at) is False
+    db_session.refresh(graph)
+    assert graph.graph_stale is True
+
+  def test_without_started_at_clears_unconditionally(self, graph, db_session):
+    graph.mark_stale(db_session, "connector_sync")
+
+    assert graph.mark_fresh(db_session) is True
+    db_session.refresh(graph)
+    assert graph.graph_stale is False

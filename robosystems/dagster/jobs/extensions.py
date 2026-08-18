@@ -11,6 +11,7 @@ Can be triggered:
 - On a schedule (future)
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 from dagster import (
@@ -105,6 +106,10 @@ def materialize_extensions_to_graph(
         },
       )
 
+    # Stamped before the source is read: a write that marks the graph stale
+    # after this point is not in the snapshot, and mark_fresh must leave the
+    # flag set for it (compare-and-clear).
+    started_at = datetime.now(UTC)
     materializer = ExtensionsMaterializer()
     result = loop.run_until_complete(
       materializer.materialize(
@@ -140,7 +145,12 @@ def materialize_extensions_to_graph(
   try:
     graph_row = db_session.query(Graph).filter(Graph.graph_id == graph_id).first()
     if graph_row:
-      graph_row.mark_fresh(session=db_session)
+      cleared = graph_row.mark_fresh(session=db_session, started_at=started_at)
+      if not cleared:
+        context.log.info(
+          f"{graph_id} was written during the materialization; leaving it stale "
+          "for the next sweep"
+        )
   finally:
     try:
       next(db_gen)

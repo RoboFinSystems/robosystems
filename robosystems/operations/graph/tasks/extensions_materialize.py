@@ -8,6 +8,7 @@ second run for the same staleness event.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from robosystems.logger import get_logger
@@ -35,6 +36,9 @@ class ExtensionsMaterializeTask(BaseTask):
     db = next(db_gen)
 
     try:
+      # Stamped before the source is read so a write that lands during the
+      # materialization keeps the graph stale (mark_fresh compares).
+      started_at = datetime.now(UTC)
       materializer = ExtensionsMaterializer()
       result = await materializer.materialize(
         graph_id=self.graph_id,
@@ -64,8 +68,11 @@ class ExtensionsMaterializeTask(BaseTask):
 
       # Clear staleness so the Dagster sensor does not re-submit for this event
       graph = db.query(Graph).filter(Graph.graph_id == self.graph_id).first()
-      if graph:
-        graph.mark_fresh(session=db)
+      if graph and not graph.mark_fresh(session=db, started_at=started_at):
+        logger.info(
+          f"{self.graph_id} was written during the materialization; "
+          "leaving it stale for the next sweep"
+        )
 
       logger.info(
         f"Extensions materialization complete for {self.graph_id}: "

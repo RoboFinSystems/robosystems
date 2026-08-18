@@ -518,7 +518,7 @@ class OLTPLoader:
     """
     import duckdb
 
-    from robosystems.db.extensions import extensions_session, provision_tenant_schema
+    from robosystems.db.extensions import ensure_tenant_schema, extensions_session
     from robosystems.models.extensions import (
       Dimension,
       Element,
@@ -527,7 +527,9 @@ class OLTPLoader:
 
     result = LoadResult(graph_id=graph_id, source=source, connection_id=connection_id)
 
-    provision_tenant_schema(graph_id)
+    # First-time provisioning only. Re-running the DDL on every sync would take
+    # AccessExclusive locks on every tenant table against live readers.
+    ensure_tenant_schema(graph_id)
 
     # fetchall(), not fetchdf(): pyarrow and DuckDB coexisting in the
     # containerized Dagster workers segfault on the dataframe path.
@@ -1882,8 +1884,8 @@ class OLTPLoader:
     """
     from robosystems.db.extensions import extensions_session
     from robosystems.models.extensions import Element, EntityTaxonomy
-    from robosystems.models.extensions.entity import Entity
     from robosystems.models.extensions.roboledger import Structure, Taxonomy
+    from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     try:
@@ -1935,7 +1937,7 @@ class OLTPLoader:
         # Ensure the graph's entity is linked to the CoA taxonomy as its
         # primary chart_of_accounts basis. This materializes to
         # ENTITY_HAS_TAXONOMY in the graph.
-        entity = session.query(Entity).first()
+        entity = resolve_parent_entity(session)
         if entity:
           existing_adoption = (
             session.query(EntityTaxonomy)
@@ -2008,7 +2010,7 @@ class OLTPLoader:
     import duckdb
 
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions.entity import Entity
+    from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
 
     try:
       con = duckdb.connect(str(duckdb_path), read_only=True)
@@ -2042,7 +2044,9 @@ class OLTPLoader:
         con.close()
 
       with extensions_session(graph_id) as session:
-        entity = session.query(Entity).first()
+        # The ledger's own entity by predicate — a shared-in `linked`
+        # counterparty must never receive the CompanyInfo overwrite.
+        entity = resolve_parent_entity(session)
         if not entity:
           logger.warning(
             f"No entity found in graph {graph_id}, skipping CompanyInfo update"

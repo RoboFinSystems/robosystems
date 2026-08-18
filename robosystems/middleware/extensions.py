@@ -25,6 +25,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import require_graph_write_role
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
@@ -54,6 +55,17 @@ ErrorMapEntry = int | tuple[int, ErrorDetailFactory]
 # `isinstance`, so subclass entries should come before superclass
 # entries (Python dicts preserve insertion order).
 ErrorMap = dict[type[Exception], ErrorMapEntry]
+
+
+def is_schema_missing(exc: ProgrammingError) -> bool:
+  """Whether a ``ProgrammingError`` is the tenant schema (or a table in it)
+  not existing — the one case that means "not initialized" rather than a
+  bug. Every other programming error (a migration that has not reached this
+  tenant, a SQL fault, a privilege error) must surface, not be translated
+  into a friendly 404 that hides it from the client and the audit log.
+  """
+  msg = str(exc)
+  return "does not exist" in msg and ("schema" in msg or "relation" in msg)
 
 
 # ── OperationSpec ────────────────────────────────────────────────────────
@@ -413,8 +425,14 @@ class OperationRegistrar:
 
       def _runner():
         command = _resolve_command()
+        # Set once the session factory has accepted the graph id, so a
+        # ValueError from the factory (not a tenant-schema id — subgraphs
+        # share their parent's schema) can be told apart from one the
+        # command raised.
+        session_bound = False
         try:
           with _resolve_session_factory()(graph_id) as session:
+            session_bound = True
             try:
               kwargs = {}
               if requires_created_by:
@@ -425,8 +443,26 @@ class OperationRegistrar:
             except tuple(error_map.keys()) as exc:
               _raise_mapped(exc, error_map)
               raise AssertionError("unreachable: _raise_mapped always raises")
-        except (ValueError, ProgrammingError):
-          raise schema_missing_404()
+        except ProgrammingError as exc:
+          # Only a missing schema/relation means "not initialized". Anything
+          # else is a real database fault: log it and let it surface as 500
+          # rather than hiding it behind the friendly 404.
+          if is_schema_missing(exc):
+            raise schema_missing_404()
+          logger.warning(
+            f"{op_name} on {graph_id}: database programming error", exc_info=True
+          )
+          raise
+        except ValueError as exc:
+          if not session_bound:
+            raise schema_missing_404()
+          # A domain refusal the spec's error_map did not name. Surface it as
+          # the validation failure it is (every mapped ValueError is 422),
+          # and log it so the map gets fixed.
+          logger.warning(
+            f"{op_name} on {graph_id}: unmapped {type(exc).__name__}: {exc}"
+          )
+          raise HTTPException(status_code=422, detail=str(exc))
 
       # Bind graph_id into the stale-reason callback so module-level specs
       # can declare the effect without capturing `graph_id` in a closure.
@@ -476,6 +512,7 @@ __all__ = [
   "GraphExtensionContext",
   "OperationRegistrar",
   "OperationSpec",
+  "is_schema_missing",
   "load_graph_metadata",
   "require_graph_extension",
 ]

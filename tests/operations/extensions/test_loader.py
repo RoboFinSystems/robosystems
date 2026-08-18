@@ -171,17 +171,19 @@ def _make_duckdb_mock(tables: dict[str, list[dict]]):
 class TestOLTPLoader:
   """Test the OLTPLoader class."""
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
-  def test_load_calls_provision_tenant_schema(
+  def test_load_ensures_tenant_schema(
     self,
     mock_duckdb_connect,
     mock_ext_session,
     mock_provision,
     mock_duckdb_data,
   ):
-    """Loader provisions the tenant schema before inserting."""
+    """Loader provisions the tenant schema only when it is missing (ensure, not
+    provision: re-running the DDL on every sync would AccessExclusive-lock the
+    tenant tables against live readers)."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock({})
@@ -201,7 +203,7 @@ class TestOLTPLoader:
 
     mock_provision.assert_called_once_with("kg0123456789abcdef")
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_reads_all_tables(
@@ -243,7 +245,7 @@ class TestOLTPLoader:
     # Elements + dimensions + captured event = 4
     assert result.total_rows == 4
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_full_rebuild_wipes_then_inserts(
@@ -278,7 +280,7 @@ class TestOLTPLoader:
     assert mock_session.query.called
     assert mock_session.flush.called
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_incremental_skips_pre_sync_wipe(
@@ -324,7 +326,7 @@ class TestOLTPLoader:
       "only full_rebuild=True should wipe."
     )
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_handles_missing_tables(
@@ -376,7 +378,7 @@ class TestOLTPLoader:
     assert result.entries == 0
     assert result.line_items == 0
 
-  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
   def test_load_silently_drops_orphan_line_items(

@@ -817,6 +817,9 @@ def materialize_graph_tables(
   )
 
   start_time = time.time()
+  # Compare-and-clear anchor for mark_fresh: a write stamped after this
+  # point is not in this build and must keep the graph stale.
+  started_at = datetime.now(UTC)
   graph_id = config.graph_id
   context.log.info(
     f"Starting graph materialization for {graph_id} "
@@ -1035,7 +1038,10 @@ def materialize_graph_tables(
           )
 
       context.log.info("[95%] Marking graph as fresh")
-      graph_record.mark_fresh(session=session)
+      if not graph_record.mark_fresh(session=session, started_at=started_at):
+        context.log.info(
+          f"{graph_id} was written during the materialization; leaving it stale"
+        )
 
       if config.rebuild:
         graph_metadata = (

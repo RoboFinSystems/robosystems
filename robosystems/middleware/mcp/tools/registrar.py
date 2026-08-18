@@ -34,12 +34,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.exc import ProgrammingError
 
 from robosystems.logger import logger
 from robosystems.middleware.extensions import (
   ErrorMap,
   OperationRegistrar,
   OperationSpec,
+  is_schema_missing,
 )
 from robosystems.operations.extensions.staleness import mark_graph_stale
 
@@ -435,8 +437,10 @@ class _RegistrarMCPTool(BaseTool):
     command = self.spec.command
     created_by = self._resolve_created_by(graph_id)
 
+    session_bound = False
     try:
       with session_factory(graph_id) as session:
+        session_bound = True
         kwargs = {}
         if self.spec.requires_created_by:
           kwargs["created_by"] = created_by
@@ -445,14 +449,48 @@ class _RegistrarMCPTool(BaseTool):
         result = command(session, body, **kwargs)
     except tuple(self.spec.error_map.keys()) as exc:
       return translate_error(exc, self.spec.error_map)
+    except ProgrammingError as exc:
+      # A missing schema/relation is "not initialized" — the same answer REST
+      # gives. Any other programming error is a database fault: log the
+      # detail server-side and hand the caller a fixed message; a DBAPI
+      # error's string carries the SQL and its bound parameters, which is
+      # not something to put in front of the LLM.
+      if is_schema_missing(exc):
+        return {
+          "error": "not_initialized",
+          "message": self.registrar.schema_missing_404().detail,
+        }
+      logger.warning(
+        "MCP tool %s hit a database programming error", self.spec.name, exc_info=True
+      )
+      return {
+        "error": "command_failed",
+        "message": f"{self.spec.name} failed on a database error; see server logs",
+      }
+    except ValueError as exc:
+      if not session_bound:
+        # The session factory rejected the graph id — not a tenant-schema id.
+        return {
+          "error": "not_initialized",
+          "message": self.registrar.schema_missing_404().detail,
+        }
+      # A domain refusal the error_map did not name (REST answers 422 with
+      # the same message).
+      logger.warning(
+        "MCP tool %s: unmapped %s: %s", self.spec.name, type(exc).__name__, exc
+      )
+      return {"error": "invalid_request", "message": str(exc)}
     except Exception as exc:
-      # Last-resort: the ops layer raises ValueError / ProgrammingError on
-      # schema-missing. Reuse the REST `schema_missing_404` helper's
-      # message so MCP and REST agree on the surface string.
+      # Anything else is a fault, not a message for the caller: log it with
+      # the traceback and return a fixed string. Raw exception text can carry
+      # SQL, parameters and internal paths.
       logger.warning(
         "MCP tool %s failed unexpectedly: %s", self.spec.name, exc, exc_info=True
       )
-      return {"error": "command_failed", "message": str(exc)}
+      return {
+        "error": "command_failed",
+        "message": f"{self.spec.name} failed unexpectedly; see server logs",
+      }
 
     if self.spec.mark_stale_reason is not None:
       mark_graph_stale(graph_id, self.spec.mark_stale_reason)

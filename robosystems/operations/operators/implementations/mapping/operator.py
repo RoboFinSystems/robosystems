@@ -345,16 +345,21 @@ class MappingOperator(Operator):
                 confidence = max(confidence, CONFIDENCE_AUTO_APPROVE)
 
             if target and confidence >= CONFIDENCE_AUTO_APPROVE:
-              mapped += 1
+              outcome = "mapped"
             elif target and confidence >= CONFIDENCE_MIN_MAP:
-              flagged += 1
+              outcome = "flagged"
             else:
               skipped += 1
               continue
 
             # Persist the CoA → rs-gaap arc as the primary mapping target.
+            # Counted only once the write lands: the tool never raises — it
+            # returns `{"error": ...}` for a rejected element, a duplicate,
+            # or a database fault — so counting before the call reported
+            # every failure as a mapping and the summary disagreed with the
+            # books.
             try:
-              await create_tool.execute(
+              written = await create_tool.execute(
                 {
                   "mapping_id": mapping_id,
                   "from_element_id": m["element_id"],
@@ -367,6 +372,19 @@ class MappingOperator(Operator):
               logger.warning(
                 f"rs-gaap mapping create failed for {m['element_id']}: {e}"
               )
+              skipped += 1
+              continue
+            if isinstance(written, dict) and written.get("error"):
+              logger.warning(
+                f"rs-gaap mapping create rejected for {m['element_id']}: "
+                f"{written.get('error')}"
+              )
+              skipped += 1
+              continue
+            if outcome == "mapped":
+              mapped += 1
+            else:
+              flagged += 1
 
         except Exception as e:
           logger.warning(f"Batch mapping failed for {cls}: {e}")
