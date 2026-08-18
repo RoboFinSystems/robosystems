@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -302,3 +302,90 @@ class TestCleanupIsBestEffort:
       ),
     ):
       await service._cleanup(persisted_graph.graph_id, _location(), None)
+
+
+class TestTenantSchemaProvisioning:
+  """An extensions-flagged graph must get its tenant schema at creation
+  whether or not an entity is created up front. `create_entity=false` used to
+  skip provisioning entirely, leaving a graph that passes the extension gate
+  with no schema for its sessions to land in.
+  """
+
+  def _pipeline(self, service, provision, provision_entity):
+    return (
+      patch.object(service, "_validate_org", return_value="org_test"),
+      patch.object(service, "_generate_graph_id", return_value="kg00000000000000ee"),
+      patch.object(
+        service, "_allocate", new_callable=AsyncMock, return_value=_location()
+      ),
+      patch.object(
+        service,
+        "_create_database",
+        new_callable=AsyncMock,
+        return_value=(AsyncMock(), None),
+      ),
+      patch.object(
+        service,
+        "_install_schema",
+        new_callable=AsyncMock,
+        return_value=("", {}),
+      ),
+      patch.object(service, "_persist_metadata"),
+      patch.object(service, "_create_credits"),
+      patch.object(service, "_provision_entity", provision_entity),
+      patch("robosystems.db.extensions.provision_tenant_schema", provision),
+    )
+
+  @pytest.mark.asyncio
+  async def test_extensions_graph_without_entity_still_gets_a_schema(self):
+    service = GraphCreationService()
+    provision = MagicMock()
+    provision_entity = AsyncMock()
+    config = GraphCreationConfig(
+      user_id="u1",
+      tier="ladybug-standard",
+      graph_name="Empty ledger",
+      graph_type="entity",
+      schema_extensions=["roboledger"],
+      create_entity=False,
+    )
+    with ExitStack() as stack:
+      for p in self._pipeline(service, provision, provision_entity):
+        stack.enter_context(p)
+      await service.create(config)
+
+    provision.assert_called_once_with("kg00000000000000ee")
+    provision_entity.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_entity_graph_provisions_then_creates_the_entity(self):
+    service = GraphCreationService()
+    provision = MagicMock()
+    provision_entity = AsyncMock(return_value={"id": "entity_x"})
+    config = GraphCreationConfig(
+      user_id="u1",
+      tier="ladybug-standard",
+      graph_name="Ledger",
+      graph_type="entity",
+      schema_extensions=["roboledger"],
+      entity_data={"name": "Acme"},
+    )
+    with ExitStack() as stack:
+      for p in self._pipeline(service, provision, provision_entity):
+        stack.enter_context(p)
+      result = await service.create(config)
+
+    provision.assert_called_once_with("kg00000000000000ee")
+    provision_entity.assert_awaited_once()
+    assert result.entity == {"id": "entity_x"}
+
+  @pytest.mark.asyncio
+  async def test_generic_graph_gets_no_tenant_schema(self):
+    service = GraphCreationService()
+    provision = MagicMock()
+    with ExitStack() as stack:
+      for p in self._pipeline(service, provision, AsyncMock()):
+        stack.enter_context(p)
+      await service.create(_config())
+
+    provision.assert_not_called()

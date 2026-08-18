@@ -38,10 +38,14 @@ import robosystems.db.extensions as ext
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 
 # Two distinct, well-formed tenant graph_ids (kg + 16+ hex) standing in for two
-# graphs under the same org — the multi-graph-per-org case. ``SET search_path``
-# to a schema that does not exist is legal, so no schema is created here.
+# graphs under the same org — the multi-graph-per-org case. The bind is
+# fail-closed (a missing schema raises rather than falling through to
+# ``public``), so the ``tenants`` fixture creates these two — empty is enough:
+# these tests only ever ask the connection who it is.
 GRAPH_A = "kg00000000000000aa"
 GRAPH_B = "kg00000000000000bb"
+# Never created: the graph a session must refuse to bind to.
+GRAPH_UNPROVISIONED = "kg00000000000000de"
 
 _WHOAMI = text("select pg_backend_pid(), current_setting('search_path')")
 
@@ -64,6 +68,19 @@ def engine():
   eng.dispose()
 
 
+@pytest.fixture()
+def tenants(engine):
+  """Provision (empty) tenant schemas for GRAPH_A / GRAPH_B; drop after."""
+  with engine.begin() as conn:
+    for schema in (GRAPH_A, GRAPH_B):
+      conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+    conn.execute(text(f'DROP SCHEMA IF EXISTS "{GRAPH_UNPROVISIONED}" CASCADE'))
+  yield
+  with engine.begin() as conn:
+    for schema in (GRAPH_A, GRAPH_B, GRAPH_UNPROVISIONED):
+      conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
 def _poison_pool(engine, *stamps: str) -> None:
   """Leave idle pooled connections bound to *other* schemas — the state a
   raw connection, or a pre-fix session, would leave behind."""
@@ -83,7 +100,7 @@ def _idle_search_paths(engine) -> list[str]:
   return paths
 
 
-def test_binding_survives_a_mid_flow_commit(engine):
+def test_binding_survives_a_mid_flow_commit(engine, tenants):
   """The one that matters: commit inside the session, keep going, still on
   the same tenant — even when the pool hands back a connection another
   tenant last used."""
@@ -96,7 +113,7 @@ def test_binding_survives_a_mid_flow_commit(engine):
   assert after[1] == f"{GRAPH_A}, public", after
 
 
-def test_binding_survives_a_rollback(engine):
+def test_binding_survives_a_rollback(engine, tenants):
   _poison_pool(engine, GRAPH_B, "kg00000000000000cc")
   with extensions_session(GRAPH_A) as session:
     session.execute(_WHOAMI)
@@ -104,7 +121,7 @@ def test_binding_survives_a_rollback(engine):
     assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
 
 
-def test_binding_holds_inside_a_savepoint(engine):
+def test_binding_holds_inside_a_savepoint(engine, tenants):
   """Handlers dispatch inside ``begin_nested()``; the binding is the outer
   transaction's and a savepoint neither loses nor re-stamps it."""
   with extensions_session(GRAPH_A) as session:
@@ -113,7 +130,7 @@ def test_binding_holds_inside_a_savepoint(engine):
     assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
 
 
-def test_nothing_is_left_on_the_pooled_connection(engine):
+def test_nothing_is_left_on_the_pooled_connection(engine, tenants):
   """``SET LOCAL`` ends with the transaction: after the session, no idle
   connection carries the tenant — commit or rollback."""
   with extensions_session(GRAPH_A) as session:
@@ -127,12 +144,46 @@ def test_nothing_is_left_on_the_pooled_connection(engine):
   assert not leaked, leaked
 
 
-def test_distinct_graphs_get_distinct_search_paths(engine):
+def test_distinct_graphs_get_distinct_search_paths(engine, tenants):
   """Two graphs under one org never share a scope, in either order."""
   with extensions_session(GRAPH_A) as session:
     assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_A}, public"
   with extensions_session(GRAPH_B) as session:
     assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_B}, public"
+
+
+def test_refuses_to_bind_a_schema_that_does_not_exist(engine, tenants):
+  """The other silent landing. PostgreSQL skips a missing ``search_path``
+  entry, and ``public`` holds a copy of every tenant table, so a session on
+  a never-provisioned (or already-dropped) graph would run every unqualified
+  statement against the shared template — no error. The bind must refuse,
+  on the first statement, with the same code a genuinely missing schema
+  produces, so the surfaces' "not initialized" translation applies."""
+  from sqlalchemy.exc import ProgrammingError
+
+  from robosystems.middleware.extensions import is_schema_missing
+
+  with pytest.raises(ProgrammingError) as excinfo:
+    with extensions_session(GRAPH_UNPROVISIONED) as session:
+      session.execute(text("select current_schema()"))
+  assert getattr(excinfo.value.orig, "pgcode", None) == "3F000"
+  assert is_schema_missing(excinfo.value)
+  assert GRAPH_UNPROVISIONED in str(excinfo.value)
+
+
+def test_refuses_the_next_transaction_after_the_schema_is_dropped(engine, tenants):
+  """Teardown drops the schema while a member's session may still be open:
+  the transaction that began before the drop is the tenant's; the next one
+  must not land on ``public``."""
+  from sqlalchemy.exc import ProgrammingError
+
+  with pytest.raises(ProgrammingError):
+    with extensions_session(GRAPH_B) as session:
+      assert session.execute(_WHOAMI).one()[1] == f"{GRAPH_B}, public"
+      session.commit()
+      with engine.begin() as conn:
+        conn.execute(text(f'DROP SCHEMA "{GRAPH_B}" CASCADE'))
+      session.execute(_WHOAMI)
 
 
 def test_library_sentinel_binds_public_only(engine):
@@ -191,9 +242,20 @@ def test_commits_and_closes_on_success():
   ):
     with extensions_session(GRAPH_A) as yielded:
       assert yielded is session
-  bind.assert_called_once_with(session, f"{GRAPH_A}, public")
+  bind.assert_called_once_with(session, f"{GRAPH_A}, public", tenant_schema=GRAPH_A)
   session.commit.assert_called_once()
   session.close.assert_called_once()
+
+
+def test_bind_statement_guards_tenants_and_not_the_library():
+  """The guard is part of the bind — same round trip, no second query a
+  caller could forget — and the library sentinel binds ``public`` unguarded."""
+  tenant = ext._bind_statement(f"{GRAPH_A}, public", GRAPH_A)
+  assert tenant.startswith("DO $$")
+  assert f"to_regnamespace('{GRAPH_A}') IS NULL" in tenant
+  assert "ERRCODE = '3F000'" in tenant
+  assert tenant.endswith(f"SET LOCAL search_path TO {GRAPH_A}, public")
+  assert ext._bind_statement("public", None) == "SET LOCAL search_path TO public"
 
 
 def test_no_bypass_of_the_scoped_session_factory():

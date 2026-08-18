@@ -493,6 +493,7 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
 
   with (
     patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.tenant_schema_exists", return_value=True),
     patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
     patch.object(reports_mod, "create_fact_set", side_effect=_capture),
     patch.object(reports_mod, "_ensure_linked_entity"),
@@ -580,6 +581,7 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
 
   with (
     patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.tenant_schema_exists", return_value=True),
     patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
     patch.object(reports_mod, "create_fact_set", side_effect=_fs),
     patch.object(reports_mod, "_ensure_linked_entity"),
@@ -643,6 +645,7 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
 
   with (
     patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.tenant_schema_exists", return_value=True),
     patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
     patch.object(reports_mod, "S3Client", return_value=s3),
     patch.object(reports_mod, "_ensure_linked_entity"),

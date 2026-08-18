@@ -149,10 +149,26 @@ class GraphCreationService:
         graph_id, org_id, location, config, schema_ddl, schema_info
       )
 
+      # The tenant schema is provisioned whenever the graph carries an
+      # extension that has one — independent of whether an entity is created
+      # up front. An extensions-flagged graph with no schema passes the
+      # extension gate and then has nowhere to land (db/extensions.py,
+      # `_bind_statement`), so "empty entity graph" means an empty *schema*,
+      # not a missing one.
+      from robosystems.db.extensions import (
+        needs_tenant_schema,
+        provision_tenant_schema,
+      )
+
       entity_dict = None
-      if config.graph_type == "entity" and config.create_entity and config.entity_data:
-        self._emit(config, "Provisioning entity...", 85)
-        entity_dict = await self._provision_entity(graph_id, config)
+      if not config.has_custom_schema and needs_tenant_schema(config.schema_extensions):
+        self._emit(config, "Provisioning tenant schema...", 82)
+        provision_tenant_schema(graph_id)
+        if (
+          config.graph_type == "entity" and config.create_entity and config.entity_data
+        ):
+          self._emit(config, "Provisioning entity...", 85)
+          entity_dict = await self._provision_entity(graph_id, config)
 
       self._emit(config, "Creating credit pool...", 92)
       self._create_credits(graph_id, config)
@@ -429,11 +445,12 @@ class GraphCreationService:
     graph_id: str,
     config: GraphCreationConfig,
   ) -> dict[str, Any]:
-    """Provision extensions OLTP tenant schema and create entity node.
+    """Create the entity row in the (already provisioned) tenant schema.
 
-    Only called for entity graphs with create_entity=True.
+    Only called for entity graphs with create_entity=True; the schema itself
+    is provisioned by the pipeline for every extensions-flagged graph.
     """
-    from robosystems.db.extensions import extensions_session, provision_tenant_schema
+    from robosystems.db.extensions import extensions_session
     from robosystems.models.api import EntityCreate
     from robosystems.models.extensions.entity import Entity as LedgerEntity
 
@@ -447,8 +464,6 @@ class GraphCreationService:
     # on the entity, not the graph, so one graph can hold entities of
     # different legal forms.
     reporting_style_id = resolve_reporting_style_id(config.entity_data)
-
-    provision_tenant_schema(graph_id)
 
     entity_identifier = f"entity_{graph_id}"
     entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"

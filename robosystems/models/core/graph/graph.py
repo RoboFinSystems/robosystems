@@ -361,10 +361,20 @@ class Graph(Model):
   def get_by_id(
     cls, graph_id: str, session: Session, include_deprovisioned: bool = False
   ) -> Optional["Graph"]:
-    """Get a graph by its ID, skipping deprovisioned graphs by default."""
+    """Get a graph by its ID, skipping deprovisioned graphs by default.
+
+    A graph whose ``deleted_at`` is stamped is gone too: teardown stamps it
+    first and flips ``status`` last, and in between the tenant schema and
+    database are being dropped. Serving such a graph would bind sessions to a
+    schema that no longer exists — so the soft-delete stamp, not just the
+    terminal status, is what "deprovisioned" means to every reader that does
+    not opt in.
+    """
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if not include_deprovisioned:
-      query = query.filter(cls.status != GraphStatus.DEPROVISIONED.value)
+      query = query.filter(
+        cls.status != GraphStatus.DEPROVISIONED.value, cls.deleted_at.is_(None)
+      )
     return query.first()
 
   @classmethod

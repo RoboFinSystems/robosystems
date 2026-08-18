@@ -35,6 +35,46 @@ def _list(owner: str = "usr_owner"):
   return row
 
 
+class TestAddMembersAdmitsOnlyLiveTenants:
+  """A recipient must be a live graph with a schema of its own: dead graphs
+  are filtered out of the platform lookup (so they read as not found), and a
+  subgraph id — which never has a schema — is dropped the same way."""
+
+  def _run(self, targets, platform_rows):
+    from unittest.mock import patch
+
+    from robosystems.operations.roboledger.commands.publish_lists import (
+      TargetGraphsNotFoundError,
+    )
+
+    session = _session_returning(_list("usr_owner"))
+    platform = MagicMock()
+    platform.__enter__.return_value.execute.return_value.scalars.return_value.all.return_value = platform_rows
+    with patch("robosystems.db.platform.SessionFactory", return_value=platform):
+      with pytest.raises(TargetGraphsNotFoundError):
+        add_publish_list_members(
+          session,
+          "pl_1",
+          "kg_current",
+          AddMembersRequest(target_graph_ids=targets),
+          added_by="usr_owner",
+        )
+    # The liveness filter is part of the query, not a Python check after it.
+    stmt = platform.__enter__.return_value.execute.call_args[0][0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "deleted_at IS NULL" in compiled
+    assert "status !=" in compiled
+
+  def test_a_deprovisioned_recipient_reads_as_not_found(self) -> None:
+    self._run(["kg00000000000000aa"], platform_rows=[])
+
+  def test_a_subgraph_id_is_never_a_recipient(self) -> None:
+    sub = MagicMock()
+    sub.graph_id = "kg00000000000000aa_dev"
+    sub.schema_extensions = ["roboledger"]
+    self._run(["kg00000000000000aa_dev"], platform_rows=[sub])
+
+
 class TestAddMembersOwnership:
   def test_non_owner_is_refused_before_any_platform_lookup(self) -> None:
     session = _session_returning(_list("usr_owner"))

@@ -162,7 +162,9 @@ def add_publish_list_members(
   applies to a recipient), prevents self-add, and rejects duplicates.
   """
   from robosystems.db.platform import SessionFactory
+  from robosystems.middleware.graph.utils.subgraph import is_subgraph
   from robosystems.models.core import Graph
+  from robosystems.models.core.graph import GraphStatus
   from robosystems.operations.roboledger.commands.reports import (
     _RECEIVING_EXTENSIONS,
   )
@@ -176,14 +178,20 @@ def add_publish_list_members(
     raise PublishListNotAuthorizedError("Not authorized to modify this publish list.")
 
   with SessionFactory() as platform_session:
+    # Live graphs only: a deprovisioned or mid-teardown recipient has no
+    # schema for a share to land in, and a subgraph never has one of its own.
     graphs = (
       platform_session.execute(
-        select(Graph).where(Graph.graph_id.in_(body.target_graph_ids))
+        select(Graph).where(
+          Graph.graph_id.in_(body.target_graph_ids),
+          Graph.status != GraphStatus.DEPROVISIONED.value,
+          Graph.deleted_at.is_(None),
+        )
       )
       .scalars()
       .all()
     )
-    found_ids = {str(g.graph_id) for g in graphs}
+    found_ids = {str(g.graph_id) for g in graphs if not is_subgraph(g.graph_id)}
 
     missing = set(body.target_graph_ids) - found_ids
     if missing:

@@ -544,6 +544,14 @@ class GraphDeprovisionService:
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
 
+  @staticmethod
+  def _invalidate_member_access(graph_id: str, member_ids: list[str]) -> None:
+    from ...middleware.auth.cache import api_key_cache
+
+    for user_id in member_ids:
+      api_key_cache.invalidate_user_jwt_graph_access(user_id, graph_id)
+    api_key_cache.invalidate_user_graph_access("*", graph_id)
+
   def _clean_pg_records(
     self, graph_id: str, session: Session, result: DeprovisionResult
   ) -> None:
@@ -572,6 +580,19 @@ class GraphDeprovisionService:
       session.query(GraphCredits).filter(GraphCredits.graph_id == graph_id).delete(
         synchronize_session=False
       )
+
+      # Drop the members' cached access decisions with their rows: a warm
+      # positive entry would otherwise let a member's request past the auth
+      # dependency for up to the cache TTL, onto a graph whose schema and
+      # database are being dropped underneath it. Best-effort — the cache
+      # helpers log and swallow their own failures.
+      member_ids = [
+        row[0]
+        for row in session.query(GraphUser.user_id)
+        .filter(GraphUser.graph_id == graph_id)
+        .all()
+      ]
+      self._invalidate_member_access(graph_id, member_ids)
 
       session.query(GraphUser).filter(GraphUser.graph_id == graph_id).delete(
         synchronize_session=False
