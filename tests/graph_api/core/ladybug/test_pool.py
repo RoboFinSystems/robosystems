@@ -142,6 +142,21 @@ class TestLadybugConnectionPoolAcquireRelease:
     # Should not raise
     pool._release_connection("testdb", mock_info)
 
+  def test_release_rolls_back_a_transaction_left_open(self):
+    """The backstop behind the validators: a manual transaction that reached
+    the engine must not be handed to the next borrower of the connection.
+    The engine raises when nothing is open, and that is swallowed."""
+    pool = _make_pool(self.temp_dir)
+    mock_info = MagicMock()
+    pool._release_connection("testdb", mock_info)
+    mock_info.connection.execute.assert_called_once_with("ROLLBACK")
+
+    quiet = MagicMock()
+    quiet.connection.execute.side_effect = RuntimeError(
+      "No active transaction for ROLLBACK."
+    )
+    pool._release_connection("testdb", quiet)  # must not raise
+
 
 @pytest.mark.unit
 class TestLadybugConnectionPoolValidity:

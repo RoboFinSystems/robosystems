@@ -98,6 +98,15 @@ class TestIsSchemaDD:
   def test_non_ddl_query(self, analyzer):
     assert analyzer.is_schema_ddl("MATCH (n:Person) RETURN n") is False
 
+  def test_comment_on_is_catalog_ddl(self, analyzer):
+    """`COMMENT ON` rewrites what every reader sees in `show_tables()`; the
+    write keyword set cannot carry a bare `comment` (too common a property),
+    so the two-word form is refused as DDL — on the read path too."""
+    assert analyzer.is_schema_ddl("COMMENT ON TABLE Entity IS 'tenant note'")
+    assert analyzer.is_schema_ddl("comment on table Entity is 'x'")
+    assert analyzer.is_write_operation("COMMENT ON TABLE Entity IS 'x'") is False
+    assert analyzer.is_schema_ddl("MATCH (n) RETURN n.comment") is False
+
   def test_module_level_function(self):
     assert is_schema_ddl("CREATE NODE TABLE Test(id STRING, PRIMARY KEY(id))")
 
@@ -135,6 +144,36 @@ class TestIsAdminOperation:
 
   def test_non_admin_query(self, analyzer):
     assert analyzer.is_admin_operation("MATCH (n) RETURN n") is False
+
+  @pytest.mark.parametrize(
+    "statement",
+    [
+      "BEGIN TRANSACTION",
+      "begin transaction read only",
+      "COMMIT",
+      "ROLLBACK",
+      "CHECKPOINT",
+      "  BEGIN TRANSACTION",
+      "MATCH (n) RETURN count(n); COMMIT",
+    ],
+  )
+  def test_transaction_control_is_refused_as_admin(self, analyzer, statement):
+    """A manual transaction outlives the request on a pooled engine
+    connection and the next borrower inherits it; CHECKPOINT is engine
+    maintenance. All are refused on every surface, like ATTACH."""
+    assert analyzer.is_admin_operation(statement)
+
+  @pytest.mark.parametrize(
+    "statement",
+    [
+      "MATCH (n) RETURN n.begin, n.commit, n.rollback",
+      "MATCH (p:Period) WHERE p.checkpoint > 1 RETURN p",
+      "// begin\nMATCH (n) RETURN n",
+      "MATCH (n) WHERE n.name = 'COMMIT' RETURN n",
+    ],
+  )
+  def test_transaction_words_inside_a_read_are_not_admin(self, analyzer, statement):
+    assert analyzer.is_admin_operation(statement) is False
 
   def test_module_level_function(self):
     assert is_admin_operation("EXPORT DATABASE 'test'")
