@@ -104,6 +104,12 @@ def _make_entity_response() -> LedgerEntityResponse:
 
 
 class _FakeCache:
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   """In-memory idempotency cache matching the real signature.
 
   Mirrors `IdempotencyCache.get/put` so route-handler tests can

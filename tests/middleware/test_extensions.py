@@ -19,6 +19,7 @@ from robosystems.middleware import operations as middleware_module
 from robosystems.middleware.operations import (
   IDEMPOTENCY_TTL_SECONDS,
   IdempotencyCache,
+  IdempotencyInProgressError,
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
@@ -248,8 +249,13 @@ class TestIdempotencyCache:
     async def _get(key: str) -> str | None:
       return store.get(key)
 
-    async def _set(key: str, value: str, ex: int | None = None) -> None:
+    async def _set(
+      key: str, value: str, ex: int | None = None, nx: bool = False
+    ) -> bool | None:
+      if nx and key in store:
+        return None
       store[key] = value
+      return True
 
     async def _delete(key: str) -> None:
       store.pop(key, None)
@@ -259,6 +265,46 @@ class TestIdempotencyCache:
     mock_client.delete = AsyncMock(side_effect=_delete)
 
     return IdempotencyCache(client=mock_client), mock_client, store
+
+  @pytest.mark.asyncio
+  async def test_reserve_claims_once_and_get_reports_in_progress(self) -> None:
+    cache, client, store = self._make_cache()
+    assert await cache.reserve("u", "g", "op", "k", "fp") is True
+    # SET NX with the short reservation TTL, not the 24h envelope TTL.
+    _, kwargs = client.set.call_args
+    assert kwargs["nx"] is True
+    assert kwargs["ex"] == middleware_module.IDEMPOTENCY_RESERVATION_TTL_SECONDS
+    # A second claim loses; a read with the same body says "in progress",
+    # a read with a different body is the usual conflict.
+    assert await cache.reserve("u", "g", "op", "k", "fp") is False
+    with pytest.raises(IdempotencyInProgressError):
+      await cache.get("u", "g", "op", "k", "fp")
+    with pytest.raises(IdempotencyKeyConflictError) as exc_info:
+      await cache.get("u", "g", "op", "k", "other")
+    assert not isinstance(exc_info.value, IdempotencyInProgressError)
+
+  @pytest.mark.asyncio
+  async def test_release_drops_only_a_pending_marker(self) -> None:
+    cache, _client, store = self._make_cache()
+    await cache.reserve("u", "g", "op", "k", "fp")
+    await cache.release("u", "g", "op", "k")
+    assert store == {}
+    # A completed envelope is never removed by release.
+    env = wrap_completed("op", {"ok": True})
+    await cache.put("u", "g", "op", "k", env, "fp")
+    await cache.release("u", "g", "op", "k")
+    assert len(store) == 1
+    assert (await cache.get("u", "g", "op", "k", "fp")) is not None
+
+  @pytest.mark.asyncio
+  async def test_put_replaces_the_reservation(self) -> None:
+    cache, _client, _store = self._make_cache()
+    await cache.reserve("u", "g", "op", "k", "fp")
+    env = wrap_completed("op", {"ok": True})
+    await cache.put("u", "g", "op", "k", env, "fp")
+    replay = await cache.get("u", "g", "op", "k", "fp")
+    assert replay is not None
+    assert replay.result == {"ok": True}
 
   @pytest.mark.asyncio
   async def test_miss_returns_none(self) -> None:
@@ -485,6 +531,8 @@ class _FakeIdempotencyCache:
 
   def __init__(self) -> None:
     self.store: dict[tuple[str, str, str, str], tuple[OperationEnvelope, str]] = {}
+    # Keys reserved by an in-flight run: key → body fingerprint.
+    self.pending: dict[tuple[str, str, str, str], str] = {}
 
   async def get(
     self,
@@ -494,13 +542,41 @@ class _FakeIdempotencyCache:
     idempotency_key: str,
     body_fingerprint: str,
   ) -> OperationEnvelope | None:
-    entry = self.store.get((user_id, graph_id, operation_name, idempotency_key))
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    if k in self.pending:
+      if self.pending[k] != body_fingerprint:
+        raise IdempotencyKeyConflictError(operation_name)
+      raise IdempotencyInProgressError(operation_name)
+    entry = self.store.get(k)
     if entry is None:
       return None
     cached_envelope, cached_fingerprint = entry
     if cached_fingerprint != body_fingerprint:
       raise IdempotencyKeyConflictError(operation_name)
     return cached_envelope
+
+  async def reserve(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+    body_fingerprint: str,
+  ) -> bool:
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    if k in self.pending or k in self.store:
+      return False
+    self.pending[k] = body_fingerprint
+    return True
+
+  async def release(
+    self,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str,
+  ) -> None:
+    self.pending.pop((user_id, graph_id, operation_name, idempotency_key), None)
 
   async def put(
     self,
@@ -512,10 +588,9 @@ class _FakeIdempotencyCache:
     body_fingerprint: str,
     ttl_seconds: int = IDEMPOTENCY_TTL_SECONDS,
   ) -> None:
-    self.store[(user_id, graph_id, operation_name, idempotency_key)] = (
-      envelope,
-      body_fingerprint,
-    )
+    k = (user_id, graph_id, operation_name, idempotency_key)
+    self.pending.pop(k, None)
+    self.store[k] = (envelope, body_fingerprint)
 
 
 def _make_ctx(**overrides: Any) -> OperationContext:
@@ -774,6 +849,90 @@ class TestExecuteOperationFailurePath:
     ):
       await execute_operation(ctx, _runner, idempotency_cache=cache)
 
+    assert cache.store == {}
+
+
+class TestExecuteOperationReservation:
+  """The cache had no in-flight state: two requests with the same key that
+  arrived inside the first one's run time both missed and both executed."""
+
+  @pytest.mark.asyncio
+  async def test_same_key_during_the_run_is_409_not_a_second_execution(
+    self,
+  ) -> None:
+    import asyncio
+
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k1", body_fingerprint="fp1")
+    calls = 0
+    release_runner = asyncio.Event()
+
+    def _slow_runner():
+      nonlocal calls
+      calls += 1
+      # Block the worker thread until the test lets the run finish.
+      asyncio.run_coroutine_threadsafe(release_runner.wait(), loop).result()
+      return {"n": calls}
+
+    loop = asyncio.get_running_loop()
+    with patch.object(middleware_module.logger, "info"):
+      first = asyncio.ensure_future(
+        execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      )
+      # Let the first request reach the runner and hold the reservation.
+      while calls == 0:
+        await asyncio.sleep(0.005)
+      with pytest.raises(IdempotencyInProgressError):
+        await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+      release_runner.set()
+      envelope = await first
+
+    assert calls == 1
+    assert envelope.result == {"n": 1}
+    # Once the first completes, the same key replays its envelope.
+    with patch.object(middleware_module.logger, "info"):
+      replay = await execute_operation(ctx, _slow_runner, idempotency_cache=cache)
+    assert replay.idempotent_replay is True
+    assert replay.result == {"n": 1}
+    assert calls == 1
+
+  @pytest.mark.asyncio
+  async def test_failed_run_releases_the_key_so_a_retry_executes(self) -> None:
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k2", body_fingerprint="fp2")
+    attempts = 0
+
+    def _flaky_runner():
+      nonlocal attempts
+      attempts += 1
+      if attempts == 1:
+        raise HTTPException(status_code=502, detail="upstream")
+      return {"attempt": attempts}
+
+    with (
+      patch.object(middleware_module.logger, "info"),
+      patch.object(middleware_module.logger, "error"),
+    ):
+      with pytest.raises(HTTPException):
+        await execute_operation(ctx, _flaky_runner, idempotency_cache=cache)
+      assert cache.pending == {}
+      envelope = await execute_operation(ctx, _flaky_runner, idempotency_cache=cache)
+    assert envelope.result == {"attempt": 2}
+
+  @pytest.mark.asyncio
+  async def test_failing_hook_releases_the_key(self) -> None:
+    cache = _FakeIdempotencyCache()
+    ctx = _make_ctx(idempotency_key="k3", body_fingerprint="fp3")
+
+    def _hook(_env):
+      raise RuntimeError("hook exploded")
+
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(RuntimeError):
+        await execute_operation(
+          ctx, lambda: {"ok": True}, idempotency_cache=cache, on_fresh_success=_hook
+        )
+    assert cache.pending == {}
     assert cache.store == {}
 
 

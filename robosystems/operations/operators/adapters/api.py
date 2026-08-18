@@ -63,7 +63,9 @@ async def run_operator_api(
   # The tool surface must not exceed what the role gate above checked for:
   # a read-only operator skips the write-role gate, so it must also get a
   # read-only tool surface.
-  tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only)
+  tools = HttpToolAccess(
+    graph_id, read_only=operator.spec.read_only, user_id=str(user.id)
+  )
   ai_client = AIClient()
 
   if db_session is None:

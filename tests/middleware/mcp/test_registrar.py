@@ -365,6 +365,125 @@ class TestRegistrarToolDefinition:
     assert defn["description"] == "Demo Op"
 
 
+class _InflightCache:
+  """In-memory stand-in for the idempotency cache's reserve/release pair."""
+
+  def __init__(self) -> None:
+    self.held: dict[tuple[str, str, str, str], str] = {}
+
+  async def reserve(self, user_id, graph_id, op, key, fingerprint) -> bool:
+    k = (user_id, graph_id, op, key)
+    if k in self.held:
+      return False
+    self.held[k] = fingerprint
+    return True
+
+  async def release(self, user_id, graph_id, op, key) -> None:
+    self.held.pop((user_id, graph_id, op, key), None)
+
+
+@pytest.fixture(autouse=True)
+def _inflight_cache():
+  cache = _InflightCache()
+  with patch(
+    "robosystems.middleware.mcp.tools.registrar.get_idempotency_cache",
+    return_value=cache,
+  ):
+    yield cache
+
+
+class TestRegistrarToolAuditAndInflight:
+  @pytest.mark.asyncio
+  async def test_every_call_emits_an_operation_audit_line(self) -> None:
+    tool = _RegistrarMCPTool(
+      client=_client(graph_id="kg_audit", user_id="usr_42"),
+      spec=_spec(),
+      registrar=_registrar_stub(),
+    )
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+        return_value=MagicMock(),
+      ),
+      patch("robosystems.middleware.mcp.tools.registrar.log_operation_audit") as audit,
+    ):
+      await tool.execute({"id": "x", "value": 3})
+
+    audit.assert_called_once()
+    kwargs = audit.call_args.kwargs
+    assert kwargs["operation_name"] == "demo-op"
+    assert kwargs["user_id"] == "usr_42"
+    assert kwargs["graph_id"] == "kg_audit"
+    assert kwargs["status"] == "completed"
+    assert kwargs["surface"] == "mcp"
+
+  @pytest.mark.asyncio
+  async def test_domain_failure_is_audited_as_failed(self) -> None:
+    def _boom(session, body: _Request, created_by: str) -> _Response:  # type: ignore[no-untyped-def]
+      raise DemoNotFoundError("nope")
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_42"),
+      spec=_spec(command=_boom),
+      registrar=_registrar_stub(),
+    )
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+        return_value=MagicMock(),
+      ),
+      patch("robosystems.middleware.mcp.tools.registrar.log_operation_audit") as audit,
+    ):
+      result = await tool.execute({"id": "x", "value": 3})
+
+    assert "error" in result
+    assert audit.call_args.kwargs["status"] == "failed"
+
+  @pytest.mark.asyncio
+  async def test_identical_concurrent_call_is_refused_and_released_after(
+    self, _inflight_cache: _InflightCache
+  ) -> None:
+    import asyncio
+    import threading
+
+    gate = threading.Event()
+    calls = 0
+
+    def _slow(session, body: _Request, created_by: str) -> _Response:  # type: ignore[no-untyped-def]
+      nonlocal calls
+      calls += 1
+      gate.wait(timeout=5)
+      return _Response(id=body.id, echoed=body.value)
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_42"),
+      spec=_spec(command=_slow),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      first = asyncio.ensure_future(tool.execute({"id": "x", "value": 3}))
+      while calls == 0:
+        await asyncio.sleep(0.005)
+      # Same arguments while the first is running → refused, not executed.
+      dup = await tool.execute({"id": "x", "value": 3})
+      # Different arguments are a different call and run.
+      gate.set()
+      other = await tool.execute({"id": "y", "value": 4})
+      result = await first
+      # Once released, the identical call is a deliberate repeat and runs.
+      again = await tool.execute({"id": "x", "value": 3})
+
+    assert dup["error"] == "in_progress"
+    assert result == {"id": "x", "echoed": 3}
+    assert other == {"id": "y", "echoed": 4}
+    assert again == {"id": "x", "echoed": 3}
+    assert calls == 3
+    assert _inflight_cache.held == {}
+
+
 class TestRegistrarToolExecute:
   @pytest.mark.asyncio
   async def test_happy_path_returns_model_dump(self) -> None:

@@ -50,8 +50,11 @@ def _resolve_tier(graph_id: str) -> str | None:
 
 
 def _resolve_graph_owner(graph_id: str) -> str | None:
-  """Resolve the owner user_id for a graph (first admin, or any member)."""
+  """Resolve a fallback actor for a graph: its earliest admin, else its
+  earliest member. Only for callers that carry no authenticated user."""
   try:
+    from sqlalchemy import case
+
     from robosystems.database import SessionFactory
     from robosystems.models.core.graph.graph_user import GraphUser
 
@@ -60,7 +63,10 @@ def _resolve_graph_owner(graph_id: str) -> str | None:
       graph_user = (
         session.query(GraphUser)
         .filter(GraphUser.graph_id == graph_id)
-        .order_by(GraphUser.created_at.asc())
+        .order_by(
+          case((GraphUser.role == "admin", 0), else_=1),
+          GraphUser.created_at.asc(),
+        )
         .first()
       )
       return graph_user.user_id if graph_user else None
@@ -68,6 +74,21 @@ def _resolve_graph_owner(graph_id: str) -> str | None:
       session.close()
   except Exception:
     return None
+
+
+def _resolve_acting_user(client: Any, graph_id: str) -> str | None:
+  """Who a write should be stamped with.
+
+  The MCP handler attaches the authenticated user's id to the client
+  (``client.user_id``); that is the actor. Only when no user is threaded
+  through — an in-process tool driven by a background operator — does this
+  fall back to the graph's admin, so the write is at least attributed to an
+  accountable owner rather than to whichever member happened to join first.
+  """
+  user_id = getattr(client, "user_id", None)
+  if user_id:
+    return str(user_id)
+  return _resolve_graph_owner(graph_id)
 
 
 def _block_shared_repository(graph_id: str) -> dict | None:
@@ -198,7 +219,7 @@ class CreateDocumentTool:
         tags=tags,
         folder=folder,
       )
-      owner_id = _resolve_graph_owner(graph_id)
+      owner_id = _resolve_acting_user(self.client, graph_id)
       if not owner_id:
         return {
           "success": False,

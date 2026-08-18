@@ -61,7 +61,7 @@ async def run_operator_worker(
   finally:
     preflight_session.close()
 
-  tools = DirectToolAccess(graph_id)
+  tools = DirectToolAccess(graph_id, user_id=user_id)
   ai_client = AIClient()
   credit_consumer = FactoryCreditConsumer()
 

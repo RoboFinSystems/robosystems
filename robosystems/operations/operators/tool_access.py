@@ -48,9 +48,12 @@ class HttpToolAccess:
   path. Defaults to read-only so a caller has to opt in to writes.
   """
 
-  def __init__(self, graph_id: str, read_only: bool = True) -> None:
+  def __init__(
+    self, graph_id: str, read_only: bool = True, user_id: str | None = None
+  ) -> None:
     self._graph_id = graph_id
     self._read_only = read_only
+    self._user_id = user_id
     self._client = None
     self._tools = None
 
@@ -67,6 +70,10 @@ class HttpToolAccess:
     from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions
 
     self._client = await create_graph_mcp_client(graph_id=self._graph_id)
+    # The registrar tools stamp `created_by` from `client.user_id`; without it
+    # every write an operator makes is attributed to `mcp:{graph_id}`.
+    if self._user_id:
+      self._client.user_id = self._user_id
     schema_extensions = resolve_schema_extensions(self._graph_id)
     self._tools = GraphMCPTools(
       self._client,
@@ -152,13 +159,20 @@ class DirectToolAccess:
       result = await unmapped_tool.execute({"mapping_id": "..."})
   """
 
-  def __init__(self, graph_id: str) -> None:
+  def __init__(self, graph_id: str, user_id: str | None = None) -> None:
     self._graph_id = graph_id
+    self._user_id = user_id
     self._tool_instances: dict[str, Any] = {}
 
   @property
   def graph_id(self) -> str:
     return self._graph_id
+
+  @property
+  def user_id(self) -> str | None:
+    """The acting user, read by tools as ``client.user_id`` for
+    ``created_by`` — the operator's caller, not a fixed agent tag."""
+    return self._user_id
 
   def get_tool_instance(self, tool_class: type) -> Any:
     """Get or create a tool instance by class.

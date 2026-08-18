@@ -37,6 +37,12 @@ def _make_user(user_id: str = "usr_test"):
 
 
 class _FakeCache:
+  async def reserve(self, *args, **kwargs):
+    return True
+
+  async def release(self, *args, **kwargs):
+    return None
+
   async def get(self, *a, **kw):
     return None
 

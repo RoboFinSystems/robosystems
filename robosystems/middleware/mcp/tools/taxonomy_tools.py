@@ -513,8 +513,12 @@ class CreateMappingAssociationTool:
         association_type=arguments.get("association_type", "mapping"),
         suggested_by="mapping-agent",
       )
+      # `suggested_by` names the suggester (the mapping operator); `created_by`
+      # is the accountable user — the caller when one is threaded through,
+      # otherwise the operator's own tag.
+      created_by = str(getattr(self.client, "user_id", None) or "mapping-agent")
       with extensions_session(graph_id) as session:
-        result = create_mapping_association(session, body, created_by="mapping-agent")
+        result = create_mapping_association(session, body, created_by=created_by)
       # The registrar-published tools get this from `OperationSpec`; this one
       # is hand-written and reaches the command directly, so it has to mark
       # the graph itself. Associations are materialized, and `auto-map-elements`

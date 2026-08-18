@@ -197,7 +197,7 @@ class TestToolSurfaceMatchesSpec:
         query="anything",
       )
 
-    tool_access.assert_called_once_with(GRAPH_ID, read_only=True)
+    tool_access.assert_called_once_with(GRAPH_ID, read_only=True, user_id=str(USER_ID))
 
   @pytest.mark.asyncio
   async def test_api_adapter_grants_writes_only_to_write_capable_specs(self) -> None:
@@ -221,7 +221,7 @@ class TestToolSurfaceMatchesSpec:
         query="anything",
       )
 
-    tool_access.assert_called_once_with(GRAPH_ID, read_only=False)
+    tool_access.assert_called_once_with(GRAPH_ID, read_only=False, user_id=str(USER_ID))
 
   @pytest.mark.asyncio
   async def test_http_tool_access_wires_read_only_into_the_tool_manager(self) -> None:
@@ -263,3 +263,12 @@ class TestToolSurfaceMatchesSpec:
       await HttpToolAccess(GRAPH_ID).initialize()
 
     assert tools_cls.call_args.kwargs["read_only"] is True
+
+
+class TestToolAccessCarriesTheActingUser:
+  def test_direct_tool_access_exposes_user_id_to_tools(self) -> None:
+    from robosystems.operations.operators.tool_access import DirectToolAccess
+
+    access = DirectToolAccess(GRAPH_ID, user_id="usr_worker")
+    assert access.user_id == "usr_worker"
+    assert DirectToolAccess(GRAPH_ID).user_id is None

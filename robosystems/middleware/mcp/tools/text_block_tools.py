@@ -19,7 +19,7 @@ from .document_tools import (
   _block_shared_repository,
   _check_graph_access,
   _get_platform_session,
-  _resolve_graph_owner,
+  _resolve_acting_user,
 )
 
 
@@ -115,7 +115,7 @@ class BindTextBlockTool:
     except ValidationError as e:
       return {"error": "invalid_input", "message": str(e)}
 
-    owner_id = _resolve_graph_owner(graph_id)
+    owner_id = _resolve_acting_user(self.client, graph_id)
     if not owner_id:
       return {
         "error": "access_denied",
