@@ -619,12 +619,15 @@ class PeriodCloseService:
     # Durability boundary: the qb_external_id markers written by the loop
     # record JournalEntries that now exist in QuickBooks, so they must
     # survive whatever happens to the rest of the close. This is the
-    # close's first mutation point, and the tenant search_path is a plain
-    # (non-LOCAL) SET that survives commit. Without this commit, a later
-    # failure — the WritebackFailed below, a StatementStampError, a
-    # failed final commit — would roll the markers back while the QB
-    # writes stand, and the retried close would re-publish the same
-    # drafts into QuickBooks as duplicates.
+    # close's first mutation point. The session stays bound to the tenant
+    # across it — `extensions_session` re-binds search_path on every
+    # transaction, not just the first (see `db.extensions.bind_search_path`),
+    # so the connection the pool hands back for the rest of the close is
+    # scoped the same as the one this commit released. Without this
+    # commit, a later failure — the WritebackFailed below, a
+    # StatementStampError, a failed final commit — would roll the markers
+    # back while the QB writes stand, and the retried close would
+    # re-publish the same drafts into QuickBooks as duplicates.
     session.commit()
 
     if failed_events:
