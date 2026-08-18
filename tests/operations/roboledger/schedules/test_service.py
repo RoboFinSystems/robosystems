@@ -873,6 +873,14 @@ class TestCreateScheduleSourceTransactionId:
     assert structure.artifact_mechanics["source_transaction_id"] is None
 
 
+def _locked_ids(n: int) -> MagicMock:
+  """Result of the ordered ``SELECT … FOR UPDATE`` that precedes the void
+  UPDATE: ``.scalars()`` yields the pending ids."""
+  result = MagicMock()
+  result.scalars.return_value = iter([f"evt_pending_{i}" for i in range(n)])
+  return result
+
+
 class TestCreateScheduleMaterializesObligations:
   """Stream 2.A — schedule creation emits 1 schedule_created + N pending events."""
 
@@ -1132,7 +1140,7 @@ class TestCreateScheduleMaterializesObligations:
 
     session = MagicMock()
     update_result = MagicMock(rowcount=12)
-    session.execute.return_value = update_result
+    session.execute.side_effect = [_locked_ids(12), update_result]
     session.get.return_value = originator
 
     svc = ScheduleService()
@@ -1143,6 +1151,16 @@ class TestCreateScheduleMaterializesObligations:
     )
 
     assert voided == 12
+    # Locked first, in the shared order, then updated by id — the void and
+    # the promotion sweep hold these same rows and must acquire alike.
+    lock_stmt = session.execute.call_args_list[0].args[0]
+    lock_sql = str(lock_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "FOR UPDATE" in lock_sql
+    assert "ORDER BY events.id" in lock_sql
+    update_stmt = session.execute.call_args_list[1].args[0]
+    update_sql = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "events.id IN (" in update_sql
+    assert "events.status = 'pending'" in update_sql
     assert originator.metadata_["pending_event_count"] == 0
     assert len(originator.metadata_["void_history"]) == 1
     assert originator.metadata_["void_history"][0]["voided_count"] == 12
@@ -1158,7 +1176,7 @@ class TestCreateScheduleMaterializesObligations:
     originator.metadata_ = {"pending_event_count": 6}
 
     session = MagicMock()
-    session.execute.return_value = MagicMock(rowcount=4)
+    session.execute.side_effect = [_locked_ids(4), MagicMock(rowcount=4)]
     session.get.return_value = originator
 
     svc = ScheduleService()
@@ -1218,7 +1236,7 @@ class TestCreateScheduleMaterializesObligations:
     recovery = MagicMock()
     recovery.scalar.return_value = "evt_origin_recovered"
     update_result = MagicMock(rowcount=5)
-    session.execute.side_effect = [recovery, update_result]
+    session.execute.side_effect = [recovery, _locked_ids(5), update_result]
     session.get.return_value = originator
 
     svc = ScheduleService()
@@ -1228,7 +1246,8 @@ class TestCreateScheduleMaterializesObligations:
 
     assert voided == 5
     assert originator.metadata_["pending_event_count"] == 0
-    assert session.execute.call_count == 2  # recovery select + UPDATE
+    # recovery select + locked select + UPDATE
+    assert session.execute.call_count == 3
 
   def test_void_pending_obligations_no_op_when_no_pending_rows(self):
     """When the UPDATE matches zero rows, originator metadata is untouched."""
@@ -1236,7 +1255,7 @@ class TestCreateScheduleMaterializesObligations:
     structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
 
     session = MagicMock()
-    session.execute.return_value = MagicMock(rowcount=0)
+    session.execute.side_effect = [_locked_ids(0)]
 
     svc = ScheduleService()
     voided = svc.void_pending_obligations(
@@ -1244,7 +1263,8 @@ class TestCreateScheduleMaterializesObligations:
     )
 
     assert voided == 0
-    # session.get not called since we short-circuit before the originator load
+    # Nothing to lock → no UPDATE, and no originator load.
+    assert session.execute.call_count == 1
     session.get.assert_not_called()
 
   def test_supersede_no_op_when_schedule_predates_stream_2a(self):

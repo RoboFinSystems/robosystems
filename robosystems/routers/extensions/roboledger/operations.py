@@ -1281,6 +1281,9 @@ delete_information_block_op = _registrar.register(
     request_model=DeleteInformationBlockRequest,
     result_type=DeleteInformationBlockResponse,
     error_map={
+      # Deleting a schedule voids its pending obligations, which the
+      # promotion sweep may be holding. Retryable.
+      RowLockedError: 409,
       ValueError: 422,
       NotImplementedError: 501,
       ScheduleNotFoundError: 404,
@@ -1817,6 +1820,9 @@ rebuild_schedule_op = _registrar.register(
     result_type=ScheduleCreatedResponse,
     error_map={
       ScheduleNotFoundError: 404,
+      # The rebuild voids the schedule's pending obligations, which the
+      # promotion sweep may be holding. Retryable.
+      RowLockedError: 409,
       ValueError: 422,
     },
     mark_stale_reason="schedule_rebuilt",

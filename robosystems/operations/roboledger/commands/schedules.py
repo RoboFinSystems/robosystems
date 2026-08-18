@@ -468,12 +468,21 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   structure = _load_schedule_or_404(session, body.structure_id)
   # Void any pending obligations first so they can't outlive their
   # `schedule_created` originator and trip the close-period gate
-  # after the schedule is gone.
-  ScheduleService().void_pending_obligations(
+  # after the schedule is gone. Request-facing, and the void locks the
+  # same pending rows the promotion sweep holds — bound the wait rather
+  # than hold this request for the length of a background tick.
+  from robosystems.operations.locking import bounded_lock_wait
+
+  with bounded_lock_wait(
     session,
-    structure=structure,
-    void_reason="schedule_deleted",
-  )
+    "This schedule's pending obligations are being written by another "
+    "process. Retry in a moment.",
+  ):
+    ScheduleService().void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="schedule_deleted",
+    )
   association_ids = (
     session.execute(
       select(Association.id).where(Association.structure_id == structure.id)
@@ -689,11 +698,20 @@ def rebuild_schedule(
 
   # Void the old pending obligation chain so the regenerated chain doesn't
   # double-count and the old pending events can't trip the close gate.
-  service.void_pending_obligations(
+  # Bounded for the same reason as `delete_schedule`: request-facing, and
+  # it contends with the promotion sweep over these rows.
+  from robosystems.operations.locking import bounded_lock_wait
+
+  with bounded_lock_wait(
     session,
-    structure=structure,
-    void_reason="schedule_rebuilt",
-  )
+    "This schedule's pending obligations are being written by another "
+    "process. Retry in a moment.",
+  ):
+    service.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="schedule_rebuilt",
+    )
 
   # Cascade-delete the old facts, FactSets, and SumEquals rule(s) — mirror
   # delete_schedule's cascade, but NOT the Structure, Associations, or

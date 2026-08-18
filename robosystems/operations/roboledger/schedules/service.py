@@ -864,16 +864,36 @@ class ScheduleService:
     if not schedule_created_event_id:
       return 0
 
+    from robosystems.operations.locking import ordered_lock_column
+
+    # Lock first, in the shared order, then update by id. A bare multi-row
+    # UPDATE takes its row locks in scan order, and the promotion sweep holds
+    # these same pending rows in `id` order — two orders over one row set is
+    # the deadlock the ordered discipline exists to rule out, and it would
+    # surface at flush, outside any lock-wait translation. The status
+    # predicate stays on the UPDATE: it is the invariant that a row this
+    # call did not lock as `pending` is never voided.
+    pending_ids = list(
+      session.execute(
+        select(Event.id)
+        .where(
+          Event.obligated_by_event_id == schedule_created_event_id,
+          Event.status == "pending",
+        )
+        .order_by(ordered_lock_column())
+        .with_for_update()
+      ).scalars()
+    )
+    if not pending_ids:
+      return 0
+
     update_values: dict[str, object] = {"status": "voided"}
     if voided_by_event_id is not None:
       update_values["replaced_by_event_id"] = voided_by_event_id
 
     result = session.execute(
       update(Event)
-      .where(
-        Event.obligated_by_event_id == schedule_created_event_id,
-        Event.status == "pending",
-      )
+      .where(Event.id.in_(pending_ids), Event.status == "pending")
       .values(**update_values)
     )
     voided_count = int(result.rowcount or 0)

@@ -17,6 +17,7 @@ has since closed — on a tenant's *second* month-end.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
@@ -226,3 +227,82 @@ class TestAutopilotFence:
     assert set(result.dispatched_event_ids) == {may.id, june.id}
     assert result.errors == []
     assert handler.dispatch.call_count == 2
+
+
+class TestSweepLocksOnlyTheWriteSet:
+  """The sweep locks what it writes — pending + stranded — not the classified
+  history, and it decides status from the locked read, not the preview."""
+
+  def test_does_not_lock_the_classified_history(self, ext_session):
+    """Close's publish holds schedule-sourced events FOR UPDATE while it posts
+    to QuickBooks. A dispatched, drafted May obligation is exactly such a row;
+    the June sweep must not wait behind it."""
+    from robosystems.operations.locking import bounded_lock_wait
+
+    _seed_calendar(ext_session, may_status="open")
+    may = _obligation(ext_session, status="classified", period_end=date(2026, 5, 31))
+    _draft_for(ext_session, may)
+    june = _obligation(ext_session, status="pending", period_end=date(2026, 6, 30))
+    ext_session.commit()
+
+    schema = ext_session.execute(text("select current_schema()")).scalar()
+    holder = ext_session.get_bind().connect()
+    try:
+      holder.execute(text(f'SET search_path TO "{schema}"'))
+      holder.execute(
+        text("SELECT id FROM events WHERE id = :id FOR UPDATE"), {"id": may.id}
+      )
+      # Bounded so a sweep that does try the May row fails in 3s instead of
+      # hanging the test behind the holder.
+      with bounded_lock_wait(ext_session, "sweep blocked on the classified history"):
+        result, handler = _sweep(ext_session)
+    finally:
+      holder.rollback()
+      holder.close()
+
+    assert result.dispatched_event_ids == [june.id]
+    assert result.errors == []
+    handler.dispatch.assert_called_once()
+
+  def test_locked_read_sees_a_void_that_landed_after_the_preview(self, ext_session):
+    """The unlocked preview puts the rows in the identity map. Without
+    ``populate_existing`` the locked read hands back the preview's status,
+    and a void that committed while the sweep waited on the lock is acted on
+    as if it never happened — the lost update the lock exists to prevent."""
+    import threading
+
+    _seed_calendar(ext_session, may_status="open")
+    june = _obligation(ext_session, status="pending", period_end=date(2026, 6, 30))
+    ext_session.commit()
+    schema = ext_session.execute(text("select current_schema()")).scalar()
+
+    holder = ext_session.get_bind().connect()
+    holder.execute(text(f'SET search_path TO "{schema}"'))
+    holder.execute(
+      text("SELECT id FROM events WHERE id = :id FOR UPDATE"), {"id": june.id}
+    )
+    swept = threading.Event()
+
+    def _void_then_release():
+      # Let the sweep preview `pending` and block on the row lock, then void.
+      swept.wait(timeout=5)
+      time.sleep(0.5)
+      holder.execute(
+        text("UPDATE events SET status = 'voided' WHERE id = :id"), {"id": june.id}
+      )
+      holder.commit()
+      holder.close()
+
+    voider = threading.Thread(target=_void_then_release)
+    voider.start()
+    swept.set()
+    try:
+      result, handler = _sweep(ext_session)
+    finally:
+      voider.join(timeout=10)
+
+    assert result.classified_event_ids == []
+    assert result.dispatched_event_ids == []
+    handler.dispatch.assert_not_called()
+    ext_session.expire_all()
+    assert ext_session.get(Event, june.id).status == "voided"
