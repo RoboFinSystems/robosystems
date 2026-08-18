@@ -928,7 +928,7 @@ class ScheduleService:
     if not schedule_created_event_id:
       return 0
 
-    from robosystems.operations.event_block.locking import ordered_lock_column
+    from robosystems.operations.locking import ordered_lock_column
 
     # Locked: this reads `pending` obligations and voids them, and the
     # promotion sweep reads the same rows to classify and draft their closing

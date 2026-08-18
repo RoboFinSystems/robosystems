@@ -59,6 +59,18 @@ class Entry(ExtensionsBase):
       "status IN ('draft', 'posted', 'reversed')",
       name="check_entry_status",
     ),
+    # An entry is reversed at most once. This is a real invariant, not a
+    # concurrency workaround: two reversing entries against one original is
+    # wrong however it arose — a double-clicked button, a retried request, a
+    # race. `reverse_journal_entry` locks the original so the ordinary path
+    # returns a clean conflict instead of an IntegrityError, but the guarantee
+    # belongs here, where nothing can route around it.
+    Index(
+      "uq_entries_one_reversal_per_original",
+      "reversal_of",
+      unique=True,
+      postgresql_where="reversal_of IS NOT NULL",
+    ),
     CheckConstraint(
       "type IN ('standard', 'adjusting', 'closing', 'reversing')",
       name="check_entry_type",

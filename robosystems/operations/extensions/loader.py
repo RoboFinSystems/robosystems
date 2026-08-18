@@ -14,7 +14,7 @@ from pathlib import Path
 
 from robosystems.logger import logger
 from robosystems.operations.event_block.commands import fire_handler_on_commit
-from robosystems.operations.event_block.locking import ordered_lock_column
+from robosystems.operations.locking import ordered_lock_column
 
 # Per-source rule for whether captured events auto-commit to GL on
 # inbound sync (handler fires immediately, event lands

@@ -41,8 +41,8 @@ from robosystems.operations.event_block.commands import (
   execute_event_block,
   update_event_block,
 )
-from robosystems.operations.event_block.locking import EventLockedError
 from robosystems.operations.event_block.promotion import promote_pending_obligations
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.schedules import promote_obligations
 
 pytestmark = pytest.mark.integration
@@ -145,7 +145,7 @@ def test_sync_batch_lock_blocks_an_approval(tenant):
     # must not proceed to fire the handler.
     started = time.monotonic()
     with extensions_session(GRAPH) as approval_session:
-      with pytest.raises(EventLockedError, match=EVENT_ID):
+      with pytest.raises(RowLockedError, match=EVENT_ID):
         update_event_block(
           approval_session,
           UpdateEventBlockRequest(event_id=EVENT_ID, transition_to="committed"),
@@ -297,7 +297,7 @@ class TestObligationSweepLock:
       assert result.stranded_event_ids == [self.OBLIGATION_ID]
 
       with extensions_session(GRAPH) as request_session:
-        with pytest.raises(EventLockedError, match="written by another process"):
+        with pytest.raises(RowLockedError, match="written by another process"):
           promote_obligations(
             request_session,
             PromoteObligationsRequest(dispatch_handlers=False),
@@ -342,7 +342,7 @@ class TestPublishLock:
         with patch(
           "robosystems.operations.event_block.qb_writeback.post_event_to_qb"
         ) as post:
-          with pytest.raises(EventLockedError, match=EVENT_ID):
+          with pytest.raises(RowLockedError, match=EVENT_ID):
             execute_event_block(
               publish_session,
               ExecuteEventBlockRequest(event_id=EVENT_ID),

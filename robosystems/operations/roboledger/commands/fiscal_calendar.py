@@ -23,6 +23,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.locking import bounded_lock_wait
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
@@ -263,11 +264,23 @@ def reopen_period(
   doesn't exist, `PeriodNotClosedError` if it's not actually closed,
   or service-level `FiscalCalendarError` for calendar issues.
   """
-  fp = (
-    session.query(FiscalPeriod)
-    .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-    .one_or_none()
-  )
+  # Locked, and against the same row `close_period` locks — a reopen
+  # interleaved with a close leaves a period marked closed whose statements
+  # were retracted, which is the one state the close/reopen pair must never
+  # produce.
+  session.flush()
+  with bounded_lock_wait(
+    session,
+    f"Period {period} is being closed or reopened by another process. "
+    "Retry in a moment.",
+  ):
+    fp = (
+      session.query(FiscalPeriod)
+      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+      .populate_existing()
+      .with_for_update()
+      .one_or_none()
+    )
   if fp is None:
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":

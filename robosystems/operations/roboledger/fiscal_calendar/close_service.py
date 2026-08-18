@@ -23,6 +23,7 @@ from robosystems.logger import logger
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.locking import bounded_lock_wait
 
 from .periods import period_date_range
 from .service import (
@@ -252,11 +253,26 @@ class PeriodCloseService:
 
     # Find the FiscalPeriod row before mutating anything so we can detect
     # the re-close path (status='closing' means a prior reopen).
-    fp = (
-      session.query(FiscalPeriod)
-      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
-      .one_or_none()
-    )
+    # Locked. Everything from here decides from `fp.status` — the re-close
+    # branch, the draft promotion, the QB pre-publish, the statement stamping —
+    # and then writes it. Two concurrent closes of the same period would each
+    # read it as closeable and each run the whole close, publishing to
+    # QuickBooks and stamping statements twice. Some of that is accidentally
+    # idempotent (QB's request_id dedup, replace-semantics on stamping); none
+    # of it is a guard.
+    session.flush()
+    with bounded_lock_wait(
+      session,
+      f"Period {period} is being closed or reopened by another process. "
+      "Retry in a moment.",
+    ):
+      fp = (
+        session.query(FiscalPeriod)
+        .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+      )
     if fp is None:
       raise PeriodNotFoundError(period)
     is_reclose = fp.status == "closing"

@@ -506,7 +506,19 @@ def regenerate_report(
       — restate instead of regenerating.
     ValueError: if period_end < period_start in the new body.
   """
-  report_def = session.get(Report, report_id)
+  # Locked: the two guards below decide from `filing_status` and
+  # `generation_status`, then write the first. Lower stakes than the ledger
+  # transitions — a concurrent double-file overwrites the audit stamp rather
+  # than duplicating anything — but "who filed this, and when" is exactly the
+  # field an auditor reads, so last-writer-wins is not good enough for it.
+  from robosystems.operations.locking import lock_by_id
+
+  report_def = lock_by_id(
+    session,
+    Report,
+    report_id,
+    f"Report {report_id} is being written by another process. Retry in a moment.",
+  )
   if report_def is None:
     raise ReportNotFoundError(report_id)
   if report_def.created_by != acting_user_id:

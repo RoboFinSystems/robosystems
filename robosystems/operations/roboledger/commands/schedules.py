@@ -265,8 +265,8 @@ def promote_obligations(
   sweep is idempotent (re-running skips already-classified rows and
   reconciles to existing drafts).
   """
-  from robosystems.operations.event_block.locking import bounded_lock_wait
   from robosystems.operations.event_block.promotion import promote_pending_obligations
+  from robosystems.operations.locking import bounded_lock_wait
 
   # Request-facing, so the wait is bounded: the sweep locks its whole candidate
   # set, and the Dagster sensor runs the same function every few minutes. An
@@ -390,7 +390,7 @@ def update_schedule(
   # impossible: either the new template + new pending events both land,
   # or neither does.
   if template_changed:
-    from robosystems.operations.event_block.locking import (
+    from robosystems.operations.locking import (
       bounded_lock_wait as _bounded_lock_wait,
     )
 

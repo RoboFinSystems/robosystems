@@ -61,6 +61,18 @@ def _close_result(**overrides) -> PeriodCloseResult:
   return PeriodCloseResult(**defaults)
 
 
+def _stub_period_lock(session, fp):
+  """Stub the reopen/close period load, which is locked and refreshed.
+
+  `.filter(...).populate_existing().with_for_update().one_or_none()` — the
+  chain links self-return so the stub does not depend on their order.
+  """
+  q = session.query.return_value.filter.return_value
+  q.populate_existing.return_value = q
+  q.with_for_update.return_value = q
+  q.one_or_none.return_value = fp
+
+
 class TestClosePeriodResponseMapping:
   def _run(self, result: PeriodCloseResult):
     close_service = MagicMock()
@@ -133,7 +145,7 @@ class TestReopenRetractsCanonicalSets:
     session = MagicMock()
     fp = MagicMock()
     fp.status = fp_status
-    session.query.return_value.filter.return_value.one_or_none.return_value = fp
+    _stub_period_lock(session, fp)
 
     retract = MagicMock(return_value=list(retracted))
     with (
@@ -180,7 +192,7 @@ class TestReopenRetractsCanonicalSets:
 
   def test_period_not_found_raises(self):
     session = MagicMock()
-    session.query.return_value.filter.return_value.one_or_none.return_value = None
+    _stub_period_lock(session, None)
     with pytest.raises(PeriodNotFoundInLedgerError):
       reopen_period(
         session,
@@ -197,7 +209,7 @@ class TestReopenRetractsCanonicalSets:
     session = MagicMock()
     fp = MagicMock()
     fp.status = "open"
-    session.query.return_value.filter.return_value.one_or_none.return_value = fp
+    _stub_period_lock(session, fp)
     with pytest.raises(PeriodNotClosedError):
       reopen_period(
         session,

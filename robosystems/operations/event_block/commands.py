@@ -37,13 +37,13 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.locking import bounded_lock_wait, ordered_lock_column
 from robosystems.operations.roboledger.reads.event_block import (
   _load_dimension_ids,
   _to_envelope,
 )
 
 from .engine import EngineValidationError, apply_handler
-from .locking import bounded_lock_wait, ordered_lock_column
 from .python_handlers import get_python_handler
 from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (

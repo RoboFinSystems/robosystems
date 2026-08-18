@@ -1,13 +1,22 @@
-"""Row-lock policy for event writes.
+"""Row-lock policy for state transitions.
 
-Every path that decides an event's next status does so read-decide-write, and
-the decision is only sound if nothing else can move the row in between. Two
-writers that both read `captured` both fire the handler, and the event ends up
-with two sets of GL rows — a ledger that still foots and is still wrong.
+**The shape this exists for**: load a row, branch on a state column, write that
+column back. Approving an event, reversing a journal entry, closing or reopening
+a fiscal period, filing a report — all of them. Unlocked, two callers read the
+same state, both pass the guard, and both act: one event with two sets of GL
+rows, one entry reversed twice, one period closed twice. Each of those leaves
+books that still foot, which is why none of them announce themselves.
 
-So the reads that feed those decisions take `FOR UPDATE`. This module holds the
-half of that policy which is about *waiting*: how long a request-facing caller
-waits for a conflicting writer before giving up, and what the failure is called.
+So the read that feeds the decision takes `FOR UPDATE`, and `lock_by_id` is the
+one-call version of doing that correctly. This module also holds the half of the
+policy about *waiting*: how long a request-facing caller waits for a conflicting
+writer before giving up, and what the failure is called.
+
+It lives at `operations/` root deliberately. It began under `event_block/`, which
+made it invisible to every other subsystem with the same shape — and the second
+and third instances of this bug were found in `roboledger/` only after someone
+went looking. A shared discipline filed inside one of its consumers is a
+discipline the next consumer will not find.
 
 The split that matters: **background jobs wait, request handlers do not.** A
 sync or a Dagster sweep should block behind a conflicting approval rather than
@@ -77,8 +86,8 @@ def ordered_lock_column():
   return Event.id
 
 
-class EventLockedError(Exception):
-  """Raised when event rows needed by this operation are held by another writer.
+class RowLockedError(Exception):
+  """Raised when rows this operation must write are held by another writer.
 
   In practice that writer is a running sync or the obligation-promotion sweep,
   both of which lock their whole batch for the life of their transaction.
@@ -101,8 +110,41 @@ def bounded_lock_wait(session: Session, detail: str):
     yield
   except OperationalError as exc:
     if getattr(exc.orig, "pgcode", None) in _RETRYABLE_LOCK_STATES:
-      raise EventLockedError(detail) from exc
+      raise RowLockedError(detail) from exc
     raise
 
 
-__all__ = ["EventLockedError", "bounded_lock_wait", "ordered_lock_column"]
+def lock_by_id(session: Session, entity, ident, detail: str):
+  """Load one row by primary key, locked and refreshed, with a bounded wait.
+
+  The correct form of the read that feeds a state transition, in one call, so
+  each site does not have to remember all four parts:
+
+  - `FOR UPDATE`, so a concurrent writer cannot move the row between the read
+    and the write that follows it;
+  - `populate_existing`, so a caller reusing a session gets the row as the
+    database has it rather than as its identity map remembers it;
+  - `session.flush()` first, because these sessions are `autoflush=False`
+    (`db/extensions.py`) and the refresh would otherwise discard an in-flight
+    change without a word;
+  - a bounded wait, so a request blocked behind a long background writer
+    returns a retryable error instead of pinning a pooled connection.
+
+  Returns `None` when the row does not exist — callers raise their own typed
+  not-found error, since that message is theirs to phrase.
+
+  Not for multi-row locks: those must order by `ordered_lock_column()` in a
+  single statement, or two callers acquiring the same rows in opposite orders
+  deadlock.
+  """
+  session.flush()
+  with bounded_lock_wait(session, detail):
+    return session.get(entity, ident, with_for_update=True, populate_existing=True)
+
+
+__all__ = [
+  "RowLockedError",
+  "bounded_lock_wait",
+  "lock_by_id",
+  "ordered_lock_column",
+]

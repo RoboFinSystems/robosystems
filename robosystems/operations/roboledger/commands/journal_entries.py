@@ -51,6 +51,7 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
@@ -467,7 +468,22 @@ def reverse_journal_entry(
     `ClosedPeriodError` (422) if the reversal's posting_date falls in
       a closed period.
   """
-  original = _load_entry_or_404(session, body.entry_id)
+  # Locked, because everything below decides from `original.status`. Two
+  # concurrent reversals of the same entry both read 'posted', both pass the
+  # guard, and both write a full reversing entry — the entry gets reversed
+  # twice. Each reversing entry is internally balanced, so the trial balance
+  # stays happy while the books sit a full entry off in the other direction.
+  # `ck_entries_one_reversal_per_original` is the database's half of this;
+  # the lock is what turns a would-be IntegrityError into a clean 409.
+  original = lock_by_id(
+    session,
+    Entry,
+    body.entry_id,
+    f"Journal entry {body.entry_id} is being written by another process. "
+    "Retry in a moment.",
+  )
+  if original is None:
+    raise JournalEntryNotFoundError(body.entry_id)
   if original.status != "posted":
     raise JournalEntryNotPostedError(original.id, original.status)
 
