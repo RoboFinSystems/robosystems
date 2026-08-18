@@ -1576,6 +1576,11 @@ update_event_block_op = _registrar.register(
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+      # Approving a captured reversal fires the same handler create does, so
+      # this reaches the already-reversed guard too. Registered explicitly
+      # because it subclasses ValueError and would otherwise fall through to
+      # the generic handler and be reported as a 404.
+      JournalEntryAlreadyReversedError: 422,
       # A running sync holds the event's row lock. Retryable, and the only
       # error here the caller should try again rather than fix.
       RowLockedError: 409,
@@ -2179,6 +2184,9 @@ async def backfill_plan_history_op(
           service=_fiscal_svc,
           close_service=_close_svc,
         )
+    except RowLockedError as e:
+      # The internal reopen locks the period; another writer may hold it.
+      raise HTTPException(status_code=409, detail=str(e))
     except BackfillPreconditionError as e:
       raise HTTPException(
         status_code=422,
@@ -2596,6 +2604,10 @@ async def file_report_op(
       with extensions_session(graph_id) as session:
         try:
           return cmd_file_report(session, body.report_id, filed_by=str(user.id))
+        except RowLockedError as e:
+          # Another lifecycle write holds the report. Retryable, same 409 the
+          # registrar-driven operations return.
+          raise HTTPException(status_code=409, detail=str(e))
         except ReportNotFoundError:
           raise HTTPException(
             status_code=404, detail=f"Report '{body.report_id}' not found."

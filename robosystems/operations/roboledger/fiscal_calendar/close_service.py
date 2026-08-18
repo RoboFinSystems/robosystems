@@ -266,7 +266,14 @@ class PeriodCloseService:
     # needs a lock whose lifetime is the session rather than the transaction
     # (`pg_advisory_lock`, not `pg_advisory_xact_lock`) or a persisted
     # close-intent row, which is a change to the close's concurrency model and
-    # belongs in its own change. See `specs/ledger/event-write-isolation.md` §5.
+    # belongs in its own change.
+    #
+    # The second half of that change, easy to miss: every period-affecting
+    # writer must take the same lock. `assert_period_not_closed`
+    # (`commands/_guards.py`) is a plain read, so a writer can observe `open`,
+    # pause, and commit after the close has finished — leaving a draft, or an
+    # edited posted entry, inside a period whose statements are already
+    # stamped. Locking the close alone would not fix that.
     fp = (
       session.query(FiscalPeriod)
       .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
@@ -540,14 +547,25 @@ class PeriodCloseService:
     failed_events: list[dict] = []
     for entry, event in drafts_to_publish:
       try:
-        result = execute_event_block(
-          session,
-          ExecuteEventBlockRequest(
-            event_id=str(event.id),
-            connection_id=qb_connection_id,
-          ),
-          created_by=actor_id,
-        )
+        # Each publish gets its own SAVEPOINT. Without one, a *database* error
+        # here — `execute_event_block` bounds its lock wait, so a timeout
+        # surfaces as RowLockedError over an aborted transaction — poisons the
+        # whole transaction. The loop would carry on collecting failures, every
+        # later statement would fail on the aborted transaction, and the
+        # `session.commit()` below would take the qb_external_id markers for
+        # entries that DID reach QuickBooks down with it. QuickBooks would hold
+        # journal entries the ledger has no record of sending, and the retried
+        # close would publish them again once QB's RequestId window expired —
+        # the precise duplication this function's commit exists to prevent.
+        with session.begin_nested():
+          result = execute_event_block(
+            session,
+            ExecuteEventBlockRequest(
+              event_id=str(event.id),
+              connection_id=qb_connection_id,
+            ),
+            created_by=actor_id,
+          )
         if result.status == "pending":
           # QB rejected — collect for the batch error.
           failed_events.append(

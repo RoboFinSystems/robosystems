@@ -113,6 +113,9 @@ class TestDispatchPreview:
       _line(element_id="elem_cash", debit=10000, credit=0, order=1),
       _line(element_id="elem_revenue", debit=0, credit=10000, order=2),
     ]
+    # Preview now makes the same already-reversed check the command does, so
+    # `execute` serves that lookup before the line-item read.
+    session.execute.return_value.scalar_one_or_none.return_value = None
     session.execute.return_value.scalars.return_value.all.return_value = line_items
 
     with patch(
@@ -187,3 +190,46 @@ def _line(element_id: str, debit: int, credit: int, order: int):
   li.credit_amount = credit
   li.line_order = order
   return li
+
+
+class TestPreviewAgreesWithExecution:
+  """Preview and the command must reach the same verdict.
+
+  A schedule with `auto_reverse` creates the reversal at generation time and
+  leaves the original `posted`, so a status-only preview promises a reversal
+  the command then refuses with `JournalEntryAlreadyReversedError`. A preview
+  that disagrees with execution is worse than no preview — an operator acts on
+  it.
+  """
+
+  def test_preview_refuses_an_already_reversed_entry(self) -> None:
+    from unittest.mock import MagicMock
+
+    from robosystems.models.api.event_block import CreateEventBlockRequest
+    from robosystems.operations.event_block.python_handlers.journal_entry_reversed import (
+      JournalEntryReversedMetadata,
+      dispatch_preview,
+    )
+
+    original = MagicMock()
+    original.id = "je_original"
+    original.status = "posted"  # untouched by the auto-reversal
+
+    session = MagicMock()
+    session.get.return_value = original
+    session.execute.return_value.scalar_one_or_none.return_value = "je_auto_rev"
+
+    body = CreateEventBlockRequest(
+      event_type="journal_entry_reversed",
+      event_category="adjustment",
+      event_class="economic",
+      occurred_at=datetime(2026, 2, 1, tzinfo=UTC),
+      source="manual",
+      metadata={},
+    )
+    metadata = JournalEntryReversedMetadata(entry_id="je_original")
+
+    preview = dispatch_preview(session, body, metadata)
+
+    assert preview.would_succeed is False
+    assert any("already has a reversing entry" in e for e in preview.validation_errors)
