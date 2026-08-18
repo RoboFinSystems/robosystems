@@ -1600,6 +1600,9 @@ update_event_block_op = _registrar.register(
       JournalEntryNotPostedError: 422,
       ValueError: 422,
     },
+    # A `metadata_patch.connection_id` must name one of this graph's
+    # connections; the tenant session alone doesn't carry the graph id.
+    requires_graph_id=True,
     mark_stale_reason="event_block_updated",
   )
 )
@@ -1646,6 +1649,9 @@ execute_event_block_op = _registrar.register(
       ClosedPeriodError: 422,
       ValueError: 422,
     },
+    # The connection published to must be one of this graph's; the override
+    # in the body and the routing id in event metadata are both caller-set.
+    requires_graph_id=True,
     mark_stale_reason="event_published",
   )
 )

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 COMMANDS_MODULE = "robosystems.operations.event_block.commands"
+GRAPH_ID = "kg00000000000000aa"
 
 
 def _make_event(
@@ -75,6 +76,7 @@ class TestExecuteEventBlockNativeFastPath:
       session,
       ExecuteEventBlockRequest(event_id="evt_test_abc"),
       created_by="user_1",
+      graph_id=GRAPH_ID,
     )
 
     assert result.status == "classified"
@@ -91,6 +93,7 @@ class TestExecuteEventBlockNativeFastPath:
     session = _make_session(evt)
 
     mock_connection = MagicMock()
+    mock_connection.graph_id = GRAPH_ID
     mock_connection.write_policy = "native"
     mock_connection.provider = "quickbooks"
     mock_platform_session = MagicMock()
@@ -108,10 +111,59 @@ class TestExecuteEventBlockNativeFastPath:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     assert result.status == "classified"
     assert result.qb_external_id is None
+    assert evt.status == "classified"
+
+  def test_a_connection_from_another_graph_is_refused_before_any_qb_client(self):
+    """The override and the routing id are both caller-controlled and
+    connection ids are platform-wide, so the publish must join the connection
+    to the calling graph — even for a native-policy connection, whose fast
+    path would otherwise report success for a graph it never belonged to."""
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import (
+      ConnectionNotOnGraphError,
+      execute_event_block,
+    )
+
+    evt = _make_event(metadata={"connection_id": "conn_victims"})
+    session = _make_session(evt)
+
+    other_graphs_connection = MagicMock()
+    other_graphs_connection.graph_id = "kg00000000000000bb"
+    other_graphs_connection.write_policy = "qb_authoritative"
+    other_graphs_connection.provider = "quickbooks"
+    other_graphs_connection.realm_id = "9341452700148642"
+    mock_platform_session = MagicMock()
+    mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
+    mock_platform_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_platform_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=other_graphs_connection,
+      ),
+      patch("robosystems.adapters.quickbooks.client.api.QBClient") as qb_client,
+      patch(
+        "robosystems.models.core.connection.connection_credentials.ConnectionCredentials.get_by_connection_id"
+      ) as creds,
+    ):
+      with pytest.raises(ConnectionNotOnGraphError):
+        execute_event_block(
+          session,
+          ExecuteEventBlockRequest(
+            event_id="evt_test_abc", connection_id="conn_victims"
+          ),
+          created_by="user_1",
+          graph_id=GRAPH_ID,
+        )
+
+    creds.assert_not_called()
+    qb_client.assert_not_called()
     assert evt.status == "classified"
 
   def test_event_not_found_raises(self):
@@ -128,6 +180,7 @@ class TestExecuteEventBlockNativeFastPath:
         session,
         ExecuteEventBlockRequest(event_id="evt_nonexistent"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
   def test_missing_connection_skips_write(self):
@@ -154,6 +207,7 @@ class TestExecuteEventBlockNativeFastPath:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     assert result.status == "classified"
@@ -173,6 +227,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
     session = _make_session(evt)
 
     mock_connection = MagicMock()
+    mock_connection.graph_id = GRAPH_ID
     mock_connection.write_policy = "qb_authoritative"
     mock_connection.provider = "quickbooks"
     mock_connection.realm_id = "9341452700148642"
@@ -214,6 +269,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     assert result.status == "fulfilled"
@@ -262,7 +318,10 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
     session = _make_session(evt)
 
     mock_connection = MagicMock(
-      write_policy="qb_authoritative", provider="quickbooks", realm_id="9341"
+      graph_id=GRAPH_ID,
+      write_policy="qb_authoritative",
+      provider="quickbooks",
+      realm_id="9341",
     )
     mock_cred = MagicMock()
     mock_cred.get_credentials.return_value = {"refresh_token": "r"}
@@ -290,6 +349,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     # Response surfaces the primary (first) qb_txn_id.
@@ -336,7 +396,10 @@ class TestExecuteEventBlockQBReject:
     session = _make_session(evt)
 
     mock_connection = MagicMock(
-      write_policy="qb_authoritative", provider="quickbooks", realm_id="9341"
+      graph_id=GRAPH_ID,
+      write_policy="qb_authoritative",
+      provider="quickbooks",
+      realm_id="9341",
     )
     mock_cred = MagicMock()
     mock_cred.get_credentials.return_value = {"refresh_token": "r"}
@@ -371,6 +434,7 @@ class TestExecuteEventBlockQBReject:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     assert result.status == "pending"
@@ -407,6 +471,7 @@ class TestExecuteEventBlockRefusesRetracted:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     post.assert_not_called()
@@ -430,6 +495,7 @@ class TestExecuteEventBlockRefusesRetracted:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     post.assert_not_called()
@@ -455,6 +521,7 @@ class TestExecuteEventBlockRefusesRetracted:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     post.assert_not_called()
@@ -476,6 +543,7 @@ class TestExecuteEventBlockRefusesRetracted:
         session,
         ExecuteEventBlockRequest(event_id="evt_test_abc"),
         created_by="user_1",
+        graph_id=GRAPH_ID,
       )
 
     post.assert_not_called()

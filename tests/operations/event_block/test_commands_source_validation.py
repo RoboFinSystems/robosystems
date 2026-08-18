@@ -151,3 +151,102 @@ class TestCreateEventBlockSourceGate:
 
     assert envelope.source == "salesforce"
     assert envelope.status == "captured"
+
+
+class TestRoutedConnectionMustBeOnTheGraph:
+  """`metadata.connection_id` is what `execute-event-block` publishes to.
+  It is caller-set at capture and patchable afterwards, and connection ids
+  are platform-wide — so both write paths must join it to the calling graph,
+  or a later publish would post into another tenant's source-of-truth."""
+
+  @staticmethod
+  def _patch_get_by_id(connection):
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__ = MagicMock(return_value=MagicMock())
+    session_factory.return_value.__exit__ = MagicMock(return_value=False)
+    return (
+      patch("robosystems.database.SessionFactory", session_factory),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        MagicMock(return_value=connection),
+      ),
+    )
+
+  def test_capture_refuses_a_connection_registered_on_another_graph(self) -> None:
+    from robosystems.operations.event_block.commands import (
+      ConnectionNotOnGraphError,
+      _validate_routed_connection,
+    )
+
+    foreign = SimpleNamespace(id="conn_victim", graph_id="kg000000000000ffff")
+    factory_p, lookup_p = self._patch_get_by_id(foreign)
+    with factory_p, lookup_p:
+      with pytest.raises(ConnectionNotOnGraphError):
+        _validate_routed_connection({"connection_id": "conn_victim"}, GRAPH_ID)
+
+  def test_capture_accepts_the_graphs_own_connection_and_none_at_all(self) -> None:
+    from robosystems.operations.event_block.commands import _validate_routed_connection
+
+    own = SimpleNamespace(id="conn_mine", graph_id=GRAPH_ID)
+    factory_p, lookup_p = self._patch_get_by_id(own)
+    with factory_p, lookup_p:
+      _validate_routed_connection({"connection_id": "conn_mine"}, GRAPH_ID)
+    # No routing id → nothing to join; no platform lookup at all.
+    factory_p2, lookup_p2 = self._patch_get_by_id(None)
+    with factory_p2, lookup_p2 as get_by_id:
+      _validate_routed_connection({"posting_date": "2026-05-19"}, GRAPH_ID)
+      _validate_routed_connection(None, GRAPH_ID)
+    get_by_id.assert_not_called()
+
+  def test_create_event_block_validates_before_persisting(self) -> None:
+    from robosystems.operations.event_block.commands import ConnectionNotOnGraphError
+
+    session = MagicMock()
+    foreign = SimpleNamespace(id="conn_victim", graph_id="kg000000000000ffff")
+    factory_p, lookup_p = self._patch_get_by_id(foreign)
+    body = CreateEventBlockRequest(
+      event_type="bank_transaction",
+      event_category="treasury",
+      source="manual",
+      occurred_at=datetime(2026, 7, 1, tzinfo=UTC),
+      metadata={"connection_id": "conn_victim"},
+      apply_handlers=False,
+    )
+    with factory_p, lookup_p:
+      with pytest.raises(ConnectionNotOnGraphError):
+        create_event_block(session, body, created_by="usr", graph_id=GRAPH_ID)
+    session.add.assert_not_called()
+
+  def test_metadata_patch_cannot_reroute_to_another_graphs_connection(self) -> None:
+    from robosystems.models.api.event_block import UpdateEventBlockRequest
+    from robosystems.operations.event_block.commands import (
+      ConnectionNotOnGraphError,
+      update_event_block,
+    )
+
+    event = MagicMock()
+    event.id = "evt_1"
+    event.status = "captured"
+    event.metadata_ = {"connection_id": "conn_mine"}
+    session = MagicMock()
+    session.get.return_value = event
+    # The locked read: `.filter(...).order_by(...).populate_existing()
+    # .with_for_update().all()` keyed by id afterwards.
+    locked_q = session.query.return_value.filter.return_value
+    locked_q.order_by.return_value = locked_q
+    locked_q.populate_existing.return_value = locked_q
+    locked_q.with_for_update.return_value = locked_q
+    locked_q.all.return_value = [event]
+    foreign = SimpleNamespace(id="conn_victim", graph_id="kg000000000000ffff")
+    factory_p, lookup_p = self._patch_get_by_id(foreign)
+    with factory_p, lookup_p:
+      with pytest.raises(ConnectionNotOnGraphError):
+        update_event_block(
+          session,
+          UpdateEventBlockRequest(
+            event_id="evt_1", metadata_patch={"connection_id": "conn_victim"}
+          ),
+          created_by="usr",
+          graph_id=GRAPH_ID,
+        )
+    assert event.metadata_ == {"connection_id": "conn_mine"}
