@@ -873,6 +873,14 @@ class TestCreateScheduleSourceTransactionId:
     assert structure.artifact_mechanics["source_transaction_id"] is None
 
 
+def _no_stale_dates() -> MagicMock:
+  """Result of `truncate_schedule`'s stale-draft posting-date read (the period
+  fence taken before its deletes): no drafts past the new end."""
+  result = MagicMock()
+  result.scalars.return_value.all.return_value = []
+  return result
+
+
 def _locked_ids(n: int) -> MagicMock:
   """Result of the ordered ``SELECT … FOR UPDATE`` that precedes the void
   UPDATE: ``.scalars()`` yields the pending ids."""
@@ -1904,9 +1912,13 @@ class TestTruncateSchedule:
     # The sequence of session.execute calls:
     # 1. bounds (SELECT) — fetchone
     # 2. overlap (SELECT) — fetchone
-    # 3. DELETE line_items (draft stale)
-    # 4. DELETE entries (draft stale)
-    # 5. DELETE facts → rowcount=15
+    # 3. stale-draft posting dates (SELECT DISTINCT) — scalars().all(), for
+    #    the period fence taken before the deletes lock any rows
+    # 4. DELETE line_items (draft stale)
+    # 5. DELETE entries (draft stale)
+    # 6. DELETE facts → rowcount=15
+    stale_dates = MagicMock()
+    stale_dates.scalars.return_value.all.return_value = []
     session.execute.side_effect = [
       MagicMock(
         fetchone=MagicMock(
@@ -1916,6 +1928,7 @@ class TestTruncateSchedule:
         )
       ),
       MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
+      stale_dates,
       MagicMock(),  # delete line_items
       MagicMock(),  # delete entries
       delete_result,  # delete facts
@@ -1976,6 +1989,7 @@ class TestTruncateSchedule:
         )
       ),
       MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
+      _no_stale_dates(),  # period fence read before the deletes
       MagicMock(),
       MagicMock(),
       MagicMock(rowcount=10),
@@ -2003,6 +2017,7 @@ class TestTruncateSchedule:
         )
       ),
       MagicMock(fetchone=MagicMock(return_value=MagicMock(c=0))),
+      _no_stale_dates(),  # period fence read before the deletes
       MagicMock(),
       MagicMock(),
       MagicMock(rowcount=10),

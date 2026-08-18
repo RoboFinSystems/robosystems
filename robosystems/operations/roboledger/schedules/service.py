@@ -1635,6 +1635,23 @@ class ScheduleService:
         "not clear this guard."
       )
 
+    # Fence before the deletes below take their row locks — the order every
+    # ledger writer keeps against close (exclusive fence, then rows).
+    stale_dates = (
+      session.execute(
+        text("""
+          SELECT DISTINCT posting_date FROM entries
+          WHERE source_structure_id = :sid
+            AND status = 'draft'
+            AND posting_date > :new_end
+        """),
+        {"sid": structure_id, "new_end": new_end_date},
+      )
+      .scalars()
+      .all()
+    )
+    assert_period_not_closed(session, *stale_dates)
+
     # Delete any draft entries that fall past the new end date (they're now stale)
     session.execute(
       text("""

@@ -601,6 +601,23 @@ class OLTPLoader:
         entry_subq = session.query(Entry.id).filter(
           Entry.triggered_by_event_id.in_(events_to_wipe_subq)
         )
+        # Fence before the deletes take their row locks — the order every
+        # ledger writer keeps against close. Nothing here should sit in a
+        # closed month (close posts every live draft), so a refusal means
+        # a closer holds the fence right now; the sync fails this batch and
+        # the next tick retries, rather than holding rows close is about
+        # to update.
+        from robosystems.operations.roboledger.commands._guards import (
+          assert_period_not_closed,
+        )
+
+        wipe_dates = (
+          session.query(Entry.posting_date)
+          .filter(Entry.triggered_by_event_id.in_(events_to_wipe_subq))
+          .distinct()
+          .all()
+        )
+        assert_period_not_closed(session, *(d for (d,) in wipe_dates))
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )

@@ -696,11 +696,34 @@ def rebuild_schedule(
 
   service = ScheduleService()
 
+  # Fence first, then rows — the order every other ledger writer keeps. The
+  # rebuild deletes this schedule's draft closing entries below and re-drafts
+  # them through `create_closing_entry`, whose own fence would otherwise be
+  # the first, taken *after* the deletes had already locked the rows.
+  # A closer holding the exclusive side (or a closed month with a stale
+  # draft still in it) is refused here, before anything is touched.
+  from robosystems.operations.roboledger.commands._guards import (
+    assert_period_not_closed,
+  )
+
+  draft_dates = (
+    session.execute(
+      text(
+        "SELECT DISTINCT posting_date FROM entries "
+        "WHERE source_structure_id = :sid AND status = 'draft'"
+      ),
+      {"sid": structure.id},
+    )
+    .scalars()
+    .all()
+  )
+  assert_period_not_closed(session, *draft_dates)
+
   # Void the old pending obligation chain so the regenerated chain doesn't
   # double-count and the old pending events can't trip the close gate.
   # Bounded for the same reason as `delete_schedule`: request-facing, and
   # it contends with the promotion sweep over these rows.
-  from robosystems.operations.locking import bounded_lock_wait
+  from robosystems.operations.locking import bounded_lock_wait, lock_by_id
 
   with bounded_lock_wait(
     session,
@@ -782,7 +805,17 @@ def rebuild_schedule(
     and new_schedule_created_event_id
     and old_schedule_created_event_id != new_schedule_created_event_id
   ):
-    old_evt = session.get(Event, old_schedule_created_event_id)
+    # Locked: this is a status write off a read, like every other event
+    # transition. An inbox transition on the originator is the only thing
+    # that could race it, and it should lose cleanly rather than be
+    # overwritten.
+    old_evt = lock_by_id(
+      session,
+      Event,
+      old_schedule_created_event_id,
+      f"Event {old_schedule_created_event_id} is being written by another "
+      "process. Retry in a moment.",
+    )
     if old_evt is not None:
       old_evt.status = "voided"
       old_evt.replaced_by_event_id = new_schedule_created_event_id
