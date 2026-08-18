@@ -43,7 +43,7 @@ from robosystems.operations.roboledger.reads.event_block import (
 )
 
 from .engine import EngineValidationError, apply_handler
-from .locking import bounded_lock_wait
+from .locking import bounded_lock_wait, ordered_lock_column
 from .python_handlers import get_python_handler
 from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (
@@ -384,14 +384,32 @@ def update_event_block(
     f"Event {body.event_id} is being written by another process "
     "(most likely a running sync). Retry in a moment.",
   ):
+    # Lock **every row this operation will write**, in one ordered statement.
+    # The supersede path mutates the successor as well, so taking only this
+    # event's lock leaves two callers superseding each other in opposite
+    # directions (A←B here, B←A there) each holding what the other needs, and
+    # the resulting deadlock surfaces at commit rather than here. Ordering by
+    # `id` makes that cycle impossible instead of translating it afterwards —
+    # the same discipline the batch locks use (`locking.ORDERED_LOCK_KEY`).
+    #
     # `populate_existing` for the same reason as `execute_event_block`: every
     # production caller opens a fresh session per request, so the identity map
     # is empty today, but a caller that reused a session would otherwise get
     # the lock and a stale status — the one combination this guard exists to
     # prevent. The flush that pairs with it is there too, one line up.
-    event = session.get(
-      Event, body.event_id, with_for_update=True, populate_existing=True
-    )
+    wanted = {body.event_id}
+    if body.transition_to == "superseded" and body.superseded_by_id:
+      wanted.add(body.superseded_by_id)
+    locked = {
+      row.id: row
+      for row in session.query(Event)
+      .filter(Event.id.in_(wanted))
+      .order_by(ordered_lock_column())
+      .populate_existing()
+      .with_for_update()
+      .all()
+    }
+  event = locked.get(body.event_id)
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
 
@@ -411,7 +429,8 @@ def update_event_block(
         )
       if body.superseded_by_id == event.id:
         raise InvalidEventTransitionError("An event cannot supersede itself.")
-      successor = session.get(Event, body.superseded_by_id)
+      # Locked above alongside `event`, in id order.
+      successor = locked.get(body.superseded_by_id)
       if successor is None:
         raise EventNotFoundError(
           f"Superseding event not found: {body.superseded_by_id}"

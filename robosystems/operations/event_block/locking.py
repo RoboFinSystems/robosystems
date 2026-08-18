@@ -38,10 +38,15 @@ _LOCK_NOT_AVAILABLE = "55P03"
 # there is nothing to salvage — but it is retryable in exactly the sense 55P03
 # is, and it must not reach the caller as an unhandled 500. It should be
 # unreachable between the batch-locking reads, which all order by `id` so their
-# acquisition sequence cannot diverge (see ORDERED_LOCK_KEY); this catches the
-# paths that lock more than one row without a shared order — chiefly the
-# supersede pair in `update_event_block`, where two callers superseding each
-# other in opposite directions each hold what the other wants.
+# acquisition sequence cannot diverge (see `ordered_lock_column`), and the
+# supersede pair in `update_event_block` now locks both of its rows in that
+# same order. So no path in this module is known to reach it.
+#
+# It stays translated as defense, and the honest limit is worth stating: a
+# deadlock materializes when the conflicting writes are **flushed**, which for
+# operations whose commit belongs to `extensions_session` happens outside any
+# wrapper here. Covering those needs the translation at the transaction
+# boundary, not at lock acquisition.
 _DEADLOCK_DETECTED = "40P01"
 
 _RETRYABLE_LOCK_STATES = frozenset({_LOCK_NOT_AVAILABLE, _DEADLOCK_DETECTED})
@@ -61,7 +66,15 @@ _RETRYABLE_LOCK_STATES = frozenset({_LOCK_NOT_AVAILABLE, _DEADLOCK_DETECTED})
 # ambiguous), immutable (so a concurrent status write cannot reorder anything
 # mid-scan), and present on every one of these reads. Ordering by `occurred_at`
 # would satisfy none of those.
-ORDERED_LOCK_KEY = "id"
+#
+# Exported as the column itself, not its name, so the call sites `order_by` it
+# rather than each hardcoding `Event.id` beside a comment pointing here — a
+# constant nothing reads cannot keep anything in step with it.
+def ordered_lock_column():
+  """The column every batch-locking read over `events` must order by."""
+  from robosystems.models.extensions.roboledger.event import Event
+
+  return Event.id
 
 
 class EventLockedError(Exception):
@@ -92,4 +105,4 @@ def bounded_lock_wait(session: Session, detail: str):
     raise
 
 
-__all__ = ["EventLockedError", "bounded_lock_wait"]
+__all__ = ["EventLockedError", "bounded_lock_wait", "ordered_lock_column"]

@@ -175,12 +175,15 @@ class TestCoPilotMode:
       session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
     )
 
+    from robosystems.operations.event_block.locking import ordered_lock_column
+
     ordered_by = [
-      str(arg)
-      for call in session.event_query.order_by.call_args_list
-      for arg in call.args
+      arg for call in session.event_query.order_by.call_args_list for arg in call.args
     ]
-    assert ordered_by == ["Event.id"], ordered_by
+    # Identity, not repr — a SQLAlchemy repr change should not fail this, and
+    # comparing against the shared column is what actually pins the invariant.
+    assert len(ordered_by) == 1
+    assert ordered_by[0] is ordered_lock_column()
 
   def test_does_not_call_handler_dispatch(self) -> None:
     e1 = _pending_event("evt_1")

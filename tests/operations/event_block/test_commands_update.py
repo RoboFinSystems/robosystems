@@ -55,6 +55,16 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   by_id = {e.id: e for e in events}
   session = MagicMock()
   session.get.side_effect = lambda _cls, eid, **_kwargs: by_id.get(eid)
+  # The locked read is one ordered batch query covering the event and, on a
+  # supersede, its successor — `.filter(...).order_by(id).populate_existing()
+  # .with_for_update().all()`. Self-returning links keep the stub independent
+  # of the chain's order; the command keys the result by id, so handing back
+  # every event is equivalent to a matching IN clause.
+  locked_q = session.query.return_value.filter.return_value
+  locked_q.order_by.return_value = locked_q
+  locked_q.populate_existing.return_value = locked_q
+  locked_q.with_for_update.return_value = locked_q
+  locked_q.all.return_value = list(events)
   # _load_dimension_ids issues a select via session.execute → return [].
   session.execute.return_value.scalars.return_value.all.return_value = []
   return session
@@ -357,8 +367,39 @@ class TestTransitionRowLock:
     body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
     update_event_block(session, body, created_by="usr_test")
 
-    _args, kwargs = session.get.call_args
-    assert kwargs.get("with_for_update") is True
+    locked_q = session.query.return_value.filter.return_value
+    locked_q.with_for_update.assert_called()
+    locked_q.populate_existing.assert_called()
+
+  def test_supersede_locks_both_rows_in_id_order(self) -> None:
+    """Both rows the supersede path writes are locked in the same statement.
+
+    Locking only the predecessor leaves two callers superseding each other in
+    opposite directions each holding what the other needs; the deadlock then
+    surfaces at commit, outside any wrapper that would translate it. Ordering
+    makes the cycle impossible rather than translating it after the fact.
+    """
+    predecessor = _event("evt_a", status="classified")
+    successor = _event("evt_b", status="classified")
+    session = _session_with_events(predecessor, successor)
+
+    update_event_block(
+      session,
+      UpdateEventBlockRequest(
+        event_id="evt_a", transition_to="superseded", superseded_by_id="evt_b"
+      ),
+      created_by="usr_test",
+    )
+
+    locked_q = session.query.return_value.filter.return_value
+    locked_q.with_for_update.assert_called()
+    from robosystems.operations.event_block.locking import ordered_lock_column
+
+    ordered = [a for c in locked_q.order_by.call_args_list for a in c.args]
+    assert len(ordered) == 1
+    assert ordered[0] is ordered_lock_column()
+    # The successor came from the locked batch, not a second unlocked fetch.
+    assert not [c for c in session.get.call_args_list if c.args[1:2] == ("evt_b",)]
 
 
 class TestLockContention:
@@ -380,8 +421,25 @@ class TestLockContention:
 
   def test_lock_not_available_becomes_event_locked_error(self) -> None:
     session = _session_with_events(_event("evt_a"))
-    session.get.side_effect = OperationalError(
+    session.query.side_effect = OperationalError(
       "SELECT ...", {}, SimpleNamespace(pgcode="55P03")
+    )
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
+    with pytest.raises(EventLockedError, match="evt_a"):
+      update_event_block(session, body, created_by="usr_test")
+
+    session.commit.assert_not_called()
+
+  def test_deadlock_also_becomes_event_locked_error(self) -> None:
+    """40P01 is retryable in exactly the sense 55P03 is.
+
+    Postgres has already aborted the transaction by the time it surfaces, so
+    there is nothing to salvage — but it must not reach the inbox as a 500.
+    """
+    session = _session_with_events(_event("evt_a"))
+    session.query.side_effect = OperationalError(
+      "SELECT ...", {}, SimpleNamespace(pgcode="40P01")
     )
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
@@ -394,7 +452,7 @@ class TestLockContention:
     """Only 55P03 is a lock conflict. A connection fault must keep its
     identity rather than surfacing to the inbox as 'retry in a moment'."""
     session = _session_with_events(_event("evt_a"))
-    session.get.side_effect = OperationalError(
+    session.query.side_effect = OperationalError(
       "SELECT ...", {}, SimpleNamespace(pgcode="08006")
     )
 
