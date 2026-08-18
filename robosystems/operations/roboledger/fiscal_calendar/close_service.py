@@ -559,16 +559,20 @@ class PeriodCloseService:
     failed_events: list[dict] = []
     for entry, event in drafts_to_publish:
       try:
-        # Each publish gets its own SAVEPOINT. Without one, a *database* error
-        # here — `execute_event_block` bounds its lock wait, so a timeout
-        # surfaces as RowLockedError over an aborted transaction — poisons the
-        # whole transaction. The loop would carry on collecting failures, every
-        # later statement would fail on the aborted transaction, and the
-        # `session.commit()` below would take the qb_external_id markers for
-        # entries that DID reach QuickBooks down with it. QuickBooks would hold
-        # journal entries the ledger has no record of sending, and the retried
-        # close would publish them again once QB's RequestId window expired —
-        # the precise duplication this function's commit exists to prevent.
+        # Each publish runs in its own SAVEPOINT so a database error here
+        # cannot take the whole batch down with it.
+        #
+        # `execute_event_block` bounds its wait for the event's row lock, so a
+        # conflicting writer surfaces as an error over an **aborted**
+        # transaction rather than as a block. Without a savepoint the loop
+        # would carry on collecting failures while every later statement failed
+        # on that aborted transaction, and the `session.commit()` below — the
+        # one whose entire purpose is to make the qb_external_id markers
+        # durable — would go down with it. QuickBooks would be holding journal
+        # entries the ledger has no record of sending, and the retried close
+        # would publish them a second time once QB's RequestId dedup window
+        # expired. The savepoint keeps a failed publish to the one entry that
+        # failed, so the markers for entries that did reach QB still commit.
         with session.begin_nested():
           result = execute_event_block(
             session,
