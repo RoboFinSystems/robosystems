@@ -52,7 +52,7 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
-from robosystems.operations.locking import lock_by_id
+from robosystems.operations.locking import RowLockedError, lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
@@ -293,6 +293,22 @@ def _load_entry_or_404(session: Session, entry_id: str) -> Entry:
   return entry
 
 
+def _raise_if_posting_date_moved(entry: Entry, peeked_date) -> None:
+  """Refuse to take a period fence after the entry row is already locked.
+
+  Fence-then-row is the documented order. Re-fencing here because the
+  posting date moved under us would invert that — a close holding the
+  new period's exclusive fence and waiting to update this entry
+  deadlocks. The caller retries, peeks the current date, and acquires
+  in the right order.
+  """
+  if entry.posting_date != peeked_date:
+    raise RowLockedError(
+      f"Journal entry {entry.id} was moved to another period by another "
+      "process. Retry in a moment."
+    )
+
+
 # ── Create ───────────────────────────────────────────────────────────────
 
 
@@ -391,7 +407,8 @@ def update_journal_entry(
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
     `ClosedPeriodError` (422) if the existing or new `posting_date`
       falls in a closed period.
-    `RowLockedError` (409) if another writer holds the entry.
+    `RowLockedError` (409) if another writer holds the entry, or if the
+      posting date moved under us (retry so locks are acquired in order).
     `UnbalancedJournalEntryError` (422) if replacement line items don't
       balance.
   """
@@ -416,8 +433,7 @@ def update_journal_entry(
   )
   if entry is None:
     raise JournalEntryNotFoundError(body.entry_id)
-  if entry.posting_date != peeked_date:
-    assert_period_not_closed(session, entry.posting_date)
+  _raise_if_posting_date_moved(entry, peeked_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
@@ -476,7 +492,8 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
     `JournalEntryNotDraftError` (422) if the entry is posted or reversed.
     `ClosedPeriodError` (422) if the entry's posting_date is in a closed
       period.
-    `RowLockedError` (409) if another writer holds the entry.
+    `RowLockedError` (409) if another writer holds the entry, or if the
+      posting date moved under us (retry so locks are acquired in order).
   """
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
@@ -491,8 +508,7 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   )
   if entry is None:
     raise JournalEntryNotFoundError(body.entry_id)
-  if entry.posting_date != peeked_date:
-    assert_period_not_closed(session, entry.posting_date)
+  _raise_if_posting_date_moved(entry, peeked_date)
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 

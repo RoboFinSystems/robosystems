@@ -24,6 +24,7 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.journal_entries import (
   JournalEntryNotDraftError,
@@ -562,8 +563,11 @@ class TestUpdateJournalEntry:
     assert kwargs.get("with_for_update") is True
     assert kwargs.get("populate_existing") is True
 
+  @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
-  def test_refences_if_the_locked_posting_date_moved(self, mock_load):
+  def test_moved_posting_date_is_retryable_not_refenced(self, mock_load, mock_guard):
+    """Re-fencing after the entry lock inverts fence→row and can deadlock
+    with a close that holds the new period. Retry peeks the current date."""
     peek = _mock_entry(status="draft")
     peek.posting_date = date(2026, 1, 15)
     locked = _mock_entry(status="draft")
@@ -571,13 +575,11 @@ class TestUpdateJournalEntry:
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = peek
     session.get.return_value = locked
-    with patch(f"{MODULE}.assert_period_not_closed") as mock_guard:
+    with pytest.raises(RowLockedError, match="moved to another period"):
       update_journal_entry(
         session, UpdateJournalEntryRequest(entry_id="entry_01", memo="x")
       )
-    assert mock_guard.call_count == 2
-    mock_guard.assert_any_call(session, date(2026, 1, 15))
-    mock_guard.assert_any_call(session, date(2026, 3, 1))
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
 
 
 # ── delete_journal_entry ──────────────────────────────────────────────────
@@ -626,6 +628,19 @@ class TestDeleteJournalEntry:
     kwargs = session.get.call_args.kwargs
     assert kwargs.get("with_for_update") is True
     assert kwargs.get("populate_existing") is True
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_moved_posting_date_is_retryable_not_refenced(self, mock_guard):
+    peek = _mock_entry(status="draft")
+    peek.posting_date = date(2026, 1, 15)
+    locked = _mock_entry(status="draft")
+    locked.posting_date = date(2026, 3, 1)
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = peek
+    session.get.return_value = locked
+    with pytest.raises(RowLockedError, match="moved to another period"):
+      delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
 
 
 # ── reverse_journal_entry ─────────────────────────────────────────────────
