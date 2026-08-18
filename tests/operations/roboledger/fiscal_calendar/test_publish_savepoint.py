@@ -69,7 +69,7 @@ def test_a_failed_publish_does_not_cost_the_markers_of_earlier_ones():
 
   published: list[str] = []
 
-  def _fake_execute(session, body, created_by):
+  def _fake_execute(session, body, created_by, **_kwargs):
     if body.event_id == "evt_2":
       raise _AbortedTransaction("current transaction is aborted")
     published.append(body.event_id)

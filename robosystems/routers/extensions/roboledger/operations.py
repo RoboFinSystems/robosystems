@@ -201,6 +201,7 @@ from robosystems.models.core import User
 from robosystems.operations.event_block import (
   DuplicateEventError,
   EventNotFoundError,
+  EventNotPublishableError,
   InvalidEventTransitionError,
 )
 from robosystems.operations.event_block import (
@@ -1627,6 +1628,9 @@ execute_event_block_op = _registrar.register(
       # Another writer holds the event's row lock. Retryable, and the publish
       # deliberately did not reach QuickBooks.
       RowLockedError: 409,
+      # Voided / superseded — publishing would un-retract the event.
+      EventNotPublishableError: 409,
+      ClosedPeriodError: 422,
       ValueError: 422,
     },
     mark_stale_reason="event_published",

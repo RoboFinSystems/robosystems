@@ -9,6 +9,7 @@ from robosystems.operations.locking import RowLockedError
 from .commands import (
   DuplicateEventError,
   EventNotFoundError,
+  EventNotPublishableError,
   InvalidEventTransitionError,
   create_event_block,
   execute_event_block,
@@ -27,6 +28,7 @@ __all__ = [
   "DuplicateEventError",
   "EventLockedError",  # deprecated alias for RowLockedError
   "EventNotFoundError",
+  "EventNotPublishableError",
   "InvalidEventTransitionError",
   "RowLockedError",
   "create_event_block",

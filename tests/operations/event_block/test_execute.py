@@ -47,8 +47,11 @@ def _make_session(event: MagicMock) -> MagicMock:
 
   The read is locked and refreshed — `.populate_existing().with_for_update()`
   — so the chain is stubbed self-returning rather than pinned to a position.
+  ``session.get`` is the unlocked peek used to take the period fence
+  before that lock.
   """
   session = MagicMock()
+  session.get.return_value = event
   filtered = session.query.return_value.filter.return_value
   filtered.populate_existing.return_value = filtered
   filtered.with_for_update.return_value = filtered
@@ -378,6 +381,106 @@ class TestExecuteEventBlockQBReject:
     assert evt.metadata_["last_outbound_error"] == rejection
     # qb_external_id should NOT be stamped on rejection.
     assert "qb_external_id" not in evt.metadata_
+
+
+@pytest.mark.unit
+class TestExecuteEventBlockRefusesRetracted:
+  """A voided or superseded event must not post to QuickBooks or be
+  stamped fulfilled — that would un-retract work the books already
+  took off. Already-published events are an idempotent skip."""
+
+  def test_voided_event_raises_before_qb_write(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import (
+      EventNotPublishableError,
+      execute_event_block,
+    )
+
+    evt = _make_event(status="voided")
+    session = _make_session(evt)
+
+    with (
+      patch("robosystems.operations.event_block.qb_writeback.post_event_to_qb") as post,
+      pytest.raises(EventNotPublishableError, match="voided"),
+    ):
+      execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc"),
+        created_by="user_1",
+      )
+
+    post.assert_not_called()
+    assert evt.status == "voided"
+
+  def test_superseded_event_raises_before_qb_write(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import (
+      EventNotPublishableError,
+      execute_event_block,
+    )
+
+    evt = _make_event(status="superseded")
+    session = _make_session(evt)
+
+    with (
+      patch("robosystems.operations.event_block.qb_writeback.post_event_to_qb") as post,
+      pytest.raises(EventNotPublishableError, match="superseded"),
+    ):
+      execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc"),
+        created_by="user_1",
+      )
+
+    post.assert_not_called()
+    assert evt.status == "superseded"
+
+  def test_already_published_skips_qb_write(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    evt = _make_event(
+      status="fulfilled",
+      metadata={
+        "connection_id": "conn_qb_1",
+        "qb_external_id": "JournalEntry_99001,JournalEntry_99002",
+      },
+    )
+    session = _make_session(evt)
+
+    with patch(
+      "robosystems.operations.event_block.qb_writeback.post_event_to_qb"
+    ) as post:
+      result = execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc"),
+        created_by="user_1",
+      )
+
+    post.assert_not_called()
+    assert result.status == "fulfilled"
+    assert result.qb_external_id == "JournalEntry_99001"
+    assert evt.status == "fulfilled"
+
+  def test_fulfilled_without_qb_id_skips_qb_write(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    evt = _make_event(status="fulfilled")
+    session = _make_session(evt)
+
+    with patch(
+      "robosystems.operations.event_block.qb_writeback.post_event_to_qb"
+    ) as post:
+      result = execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc"),
+        created_by="user_1",
+      )
+
+    post.assert_not_called()
+    assert result.status == "fulfilled"
+    assert result.qb_external_id is None
 
 
 @pytest.mark.unit

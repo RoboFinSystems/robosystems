@@ -251,6 +251,44 @@ class TestApproveFiresHandler:
     assert event.status == "committed"
     session.commit.assert_called_once()
 
+  def test_commit_takes_period_fence_before_row_lock(self) -> None:
+    """Approval must fence the period before locking the event row.
+
+    Close holds the exclusive fence then the event lock. Taking the
+    event first and the fence in the handler was the inversion that
+    failed close mid-publish.
+    """
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed"
+      ) as fence,
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fence.assert_called_once()
+    assert event.status == "committed"
+
+  def test_void_does_not_take_period_fence(self) -> None:
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="voided")
+
+    with patch(
+      "robosystems.operations.event_block.commands.assert_period_not_closed"
+    ) as fence:
+      update_event_block(session, body, created_by="usr_test")
+
+    fence.assert_not_called()
+    assert event.status == "voided"
+
   def test_classified_to_committed_fires_handler(self) -> None:
     event = self._journal_event(status="classified")
     session = _session_with_events(event)

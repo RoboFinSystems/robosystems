@@ -70,11 +70,15 @@ from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.event_block.engine import posting_date_for_event
 from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
 )
 from robosystems.operations.locking import ordered_lock_column
+from robosystems.operations.roboledger.commands._guards import (
+  assert_period_not_closed,
+)
 
 
 @dataclass
@@ -228,13 +232,29 @@ def promote_pending_obligations(
   # and (if a tick overruns) its own successor. See `locking` for the
   # bounded-vs-unbounded split: this function is called from both a Dagster
   # sweep and a request handler, and it is the *caller* that bounds the wait.
+  candidate_filter = (
+    Event.event_type == "schedule_entry_due",
+    Event.status.in_(("pending", "classified")),
+    Event.occurred_at <= as_of,
+  )
+  # Autopilot writes GL, so the period fence has to come *before* the
+  # event row locks. Close takes exclusive fence then event locks;
+  # locking first and fencing in the handler was the inversion that
+  # failed close mid-publish.
+  if dispatch_handlers:
+    preview = session.query(Event).filter(*candidate_filter).all()
+    fence_dates = [
+      posting_date_for_event(
+        effective_at=getattr(evt, "effective_at", None),
+        occurred_at=evt.occurred_at,
+      )
+      for evt in preview
+    ]
+    if fence_dates:
+      assert_period_not_closed(session, *fence_dates)
   candidates = (
     session.query(Event)
-    .filter(
-      Event.event_type == "schedule_entry_due",
-      Event.status.in_(("pending", "classified")),
-      Event.occurred_at <= as_of,
-    )
+    .filter(*candidate_filter)
     # Ordered so this and `supersede_pending_obligations` — whose row sets
     # overlap on pending obligations — can never acquire in opposing orders.
     # See `locking.ordered_lock_column`.

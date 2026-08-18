@@ -116,7 +116,7 @@ def stub_bundle_purge():
   so the tests that care about the purge can drive it."""
   with patch("robosystems.operations.aws.s3.S3Client") as cls:
     client = MagicMock()
-    client.list_objects.return_value = []
+    client.iter_object_keys.return_value = []
     client.delete_object.return_value = True
     cls.return_value = client
     yield client
@@ -752,7 +752,7 @@ class TestReportBundlePurge:
       f"report-bundles/{test_graph.graph_id}/rpt_a/g1.holon.jsonld",
       f"report-bundles/{test_graph.graph_id}/rpt_b/g2.zip",
     ]
-    stub_bundle_purge.list_objects.return_value = keys
+    stub_bundle_purge.iter_object_keys.return_value = keys
 
     with (
       patch(
@@ -766,7 +766,7 @@ class TestReportBundlePurge:
       )
 
     # Scoped to this graph's prefix — never the whole bucket.
-    _, kwargs = stub_bundle_purge.list_objects.call_args
+    _, kwargs = stub_bundle_purge.iter_object_keys.call_args
     assert kwargs["prefix"] == f"report-bundles/{test_graph.graph_id}/"
 
     assert stub_bundle_purge.delete_object.call_count == 3
@@ -780,7 +780,7 @@ class TestReportBundlePurge:
     """Incomplete disposal is the one outcome this step exists to prevent, so a
     surviving object degrades the teardown to `partial` rather than passing
     quietly. This is deliberately stricter than the sibling purges."""
-    stub_bundle_purge.list_objects.return_value = [
+    stub_bundle_purge.iter_object_keys.return_value = [
       f"report-bundles/{test_graph.graph_id}/rpt_a/g1.jsonld",
       f"report-bundles/{test_graph.graph_id}/rpt_b/g1.jsonld",
     ]
@@ -807,7 +807,7 @@ class TestReportBundlePurge:
   ):
     """Best-effort like its siblings: object storage being unreachable must not
     hold the graph in a half-torn-down state or block the capacity release."""
-    stub_bundle_purge.list_objects.side_effect = RuntimeError("s3 unreachable")
+    stub_bundle_purge.iter_object_keys.side_effect = RuntimeError("s3 unreachable")
 
     with (
       patch(

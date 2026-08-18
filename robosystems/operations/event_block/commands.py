@@ -74,6 +74,20 @@ class InvalidEventTransitionError(Exception):
   pass
 
 
+class EventNotPublishableError(Exception):
+  """Raised when execute is asked to publish a retracted event.
+
+  Terminal states have no outbound transitions. Publishing one would
+  overwrite ``voided`` / ``superseded`` with ``fulfilled`` and post a
+  JournalEntry for work the books already retracted.
+  """
+
+  def __init__(self, event_id: str, status: str) -> None:
+    super().__init__(f"Event {event_id} is {status!r} and cannot be published.")
+    self.event_id = event_id
+    self.status = status
+
+
 class DuplicateEventError(Exception):
   """Raised when (source, external_id) already names an event on this graph.
 
@@ -108,6 +122,11 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "voided": frozenset(),
   "superseded": frozenset(),
 }
+
+# Execute must not post these. ``fulfilled`` is also terminal, but a
+# repeat execute of an already-published event is an idempotent no-op
+# (see ``qb_external_id`` / status checks in ``execute_event_block``).
+_UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
 
 
 def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
@@ -387,6 +406,21 @@ def update_event_block(
   # Bounded, because the conflicting writer is usually a sync or a promotion
   # sweep that runs long — see `locking.bounded_lock_wait`.
   session.flush()  # pairs with populate_existing below; autoflush is off here
+  peek = session.get(Event, body.event_id)
+  if peek is None:
+    raise EventNotFoundError(f"Event not found: {body.event_id}")
+  # Fence before the event row lock — same order as journal update/delete
+  # and as close's exclusive fence. Approving (event lock, then handler
+  # fence) against a closer (exclusive fence, then event lock) used to
+  # sit until lock_timeout and fail close mid-publish.
+  if body.transition_to == "committed":
+    assert_period_not_closed(
+      session,
+      posting_date_for_event(
+        effective_at=peek.effective_at,
+        occurred_at=peek.occurred_at,
+      ),
+    )
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -397,8 +431,8 @@ def update_event_block(
     # event's lock leaves two callers superseding each other in opposite
     # directions (A←B here, B←A there) each holding what the other needs, and
     # the resulting deadlock surfaces at commit rather than here. Ordering by
-    # `id` makes that cycle impossible instead of translating it afterwards —
-    # the same discipline the batch locks use (`locking.ORDERED_LOCK_KEY`).
+    # `ordered_lock_column()` makes that cycle impossible instead of
+    # translating it afterwards.
     #
     # `populate_existing` for the same reason as `execute_event_block`: every
     # production caller opens a fresh session per request, so the identity map
@@ -678,6 +712,8 @@ def execute_event_block(
   session: Session,
   body: ExecuteEventBlockRequest,
   created_by: str,
+  *,
+  acquire_period_fence: bool = True,
 ) -> ExecuteEventBlockResponse:
   """Publish an event to its connection's source-of-truth system.
 
@@ -698,7 +734,14 @@ def execute_event_block(
 
   Idempotency: the QB POST carries `request_id=event.id`. QB's
   ~5-minute RequestId dedup window means our retry-after-network-blip
-  path is safe at the API layer.
+  path is safe at the API layer. An event that already carries
+  ``qb_external_id`` (or is already ``fulfilled``) is returned as-is.
+  ``voided`` / ``superseded`` raise :class:`EventNotPublishableError`
+  before any external write.
+
+  ``acquire_period_fence`` is the request-facing default. Close already
+  holds the exclusive fence on a dedicated connection; taking the
+  shared side here would wait on that exclusive lock and time out.
   """
   # Local imports to avoid pulling QB SDK + platform-DB session into
   # callers that only need create/update/preview.
@@ -733,6 +776,17 @@ def execute_event_block(
   # today; this makes that a property of the function rather than of its
   # callers.
   session.flush()
+  peek = session.get(Event, body.event_id)
+  if peek is None:
+    raise EventNotFoundError(f"Event {body.event_id} not found")
+  if acquire_period_fence:
+    assert_period_not_closed(
+      session,
+      posting_date_for_event(
+        effective_at=peek.effective_at,
+        occurred_at=peek.occurred_at,
+      ),
+    )
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process. Retry in a moment.",
@@ -748,6 +802,24 @@ def execute_event_block(
     raise EventNotFoundError(f"Event {body.event_id} not found")
 
   metadata = dict(event.metadata_ or {})
+  existing_qb_id = metadata.get("qb_external_id")
+  if existing_qb_id:
+    primary = str(existing_qb_id).split(",", 1)[0]
+    return ExecuteEventBlockResponse(
+      event_id=str(event.id),
+      status=str(event.status),
+      qb_external_id=primary,
+      qb_error=None,
+    )
+  if event.status in _UNPUBLISHABLE_STATUSES:
+    raise EventNotPublishableError(str(event.id), str(event.status))
+  if event.status == "fulfilled":
+    return ExecuteEventBlockResponse(
+      event_id=str(event.id),
+      status="fulfilled",
+      qb_external_id=None,
+      qb_error=None,
+    )
   # Caller can override the connection (used by the close-period batch
   # where schedule events don't carry connection_id in metadata).
   connection_id = body.connection_id or metadata.get("connection_id")

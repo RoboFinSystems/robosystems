@@ -507,7 +507,7 @@ def test_revoke_withdraws_the_stored_publication_too() -> None:
 
   with patch(f"{_REPORTS_CMD}.S3Client") as s3_cls:
     s3 = s3_cls.return_value
-    s3.list_objects.return_value = [
+    s3.iter_object_keys.return_value = [
       f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
       f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
     ]
@@ -520,7 +520,7 @@ def test_revoke_withdraws_the_stored_publication_too() -> None:
     )
 
   # Scoped to the withdrawn copy's own prefix — never the whole graph's.
-  _, list_kwargs = s3.list_objects.call_args
+  _, list_kwargs = s3.iter_object_keys.call_args
   assert list_kwargs["prefix"] == f"report-bundles/{TARGET_GRAPH}/{copy_id}/"
   deleted = {call.args[1] for call in s3.delete_object.call_args_list}
   assert deleted == {

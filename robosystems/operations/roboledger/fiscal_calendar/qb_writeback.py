@@ -14,7 +14,8 @@ The predicate has two halves:
   ``Connection`` whose ``write_policy`` is qb_authoritative / hybrid.
 - **eligible drafts** (extensions DB): in-period ``draft`` entries whose
   triggering ``Event`` is RL-originated (``source IN ('schedule',
-  'manual')``) and not already in QB (no ``qb_external_id``).
+  'manual')``), not retracted (``status`` not ``voided`` /
+  ``superseded``), and not already in QB (no ``qb_external_id``).
 
 A draft publishes on close iff both hold.
 """
@@ -34,6 +35,11 @@ from robosystems.models.extensions.roboledger.event import Event
 # close. Synced-in QB transactions (``source='quickbooks'``) already live
 # in QB and are excluded.
 WRITEBACK_EVENT_SOURCES = ("schedule", "manual")
+
+# Retracted events keep leftover draft GL rows. Close must not publish
+# or locally-post those drafts — void/supersede already said the work
+# is off the books.
+WRITEBACK_EXCLUDED_EVENT_STATUSES = ("voided", "superseded")
 
 # Connection write policies that publish RL-originated drafts back to the
 # source of truth on close (``native`` does not — RoboSystems is the SoR).
@@ -98,6 +104,7 @@ def select_writeback_eligible_entries(
       Entry.posting_date <= period_end,
       Entry.status == "draft",
       Event.source.in_(WRITEBACK_EVENT_SOURCES),
+      Event.status.notin_(WRITEBACK_EXCLUDED_EVENT_STATUSES),
       Event.metadata_["qb_external_id"].astext.is_(None),
     )
     .all()

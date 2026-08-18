@@ -16,16 +16,18 @@ from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.extensions.roboledger.entry import Entry
+from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.locking import bounded_lock_wait
 
 from .periods import period_date_range
+from .qb_writeback import WRITEBACK_EXCLUDED_EVENT_STATUSES
 from .service import (
   CloseableGateResult,
   FiscalCalendarService,
@@ -300,12 +302,19 @@ class PeriodCloseService:
     # (local-only drafts); the receipt's entries_posted is the sum of
     # both paths.
     now = datetime.now(UTC)
+    retracted_event_ids = session.query(Event.id).filter(
+      Event.status.in_(WRITEBACK_EXCLUDED_EVENT_STATUSES)
+    )
     posted_locally = (
       session.query(Entry)
       .filter(
         Entry.posting_date >= period_start,
         Entry.posting_date <= period_end,
         Entry.status == "draft",
+        or_(
+          Entry.triggered_by_event_id.is_(None),
+          ~Entry.triggered_by_event_id.in_(retracted_event_ids),
+        ),
       )
       .update(
         {Entry.status: "posted", Entry.posted_at: now},
@@ -581,6 +590,7 @@ class PeriodCloseService:
               connection_id=qb_connection_id,
             ),
             created_by=actor_id,
+            acquire_period_fence=False,
           )
         if result.status == "pending":
           # QB rejected — collect for the batch error.
