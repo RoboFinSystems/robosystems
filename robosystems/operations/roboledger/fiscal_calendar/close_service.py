@@ -525,14 +525,29 @@ class PeriodCloseService:
     failed_events: list[dict] = []
     for entry, event in drafts_to_publish:
       try:
-        result = execute_event_block(
-          session,
-          ExecuteEventBlockRequest(
-            event_id=str(event.id),
-            connection_id=qb_connection_id,
-          ),
-          created_by=actor_id,
-        )
+        # Each publish runs in its own SAVEPOINT so a database error here
+        # cannot take the whole batch down with it.
+        #
+        # `execute_event_block` bounds its wait for the event's row lock, so a
+        # conflicting writer surfaces as an error over an **aborted**
+        # transaction rather than as a block. Without a savepoint the loop
+        # would carry on collecting failures while every later statement failed
+        # on that aborted transaction, and the `session.commit()` below — the
+        # one whose entire purpose is to make the qb_external_id markers
+        # durable — would go down with it. QuickBooks would be holding journal
+        # entries the ledger has no record of sending, and the retried close
+        # would publish them a second time once QB's RequestId dedup window
+        # expired. The savepoint keeps a failed publish to the one entry that
+        # failed, so the markers for entries that did reach QB still commit.
+        with session.begin_nested():
+          result = execute_event_block(
+            session,
+            ExecuteEventBlockRequest(
+              event_id=str(event.id),
+              connection_id=qb_connection_id,
+            ),
+            created_by=actor_id,
+          )
         if result.status == "pending":
           # QB rejected — collect for the batch error.
           failed_events.append(
