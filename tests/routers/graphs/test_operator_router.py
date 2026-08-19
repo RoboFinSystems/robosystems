@@ -15,6 +15,20 @@ from robosystems.operations.operators.base import OperatorMode
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
+@pytest.fixture(autouse=True)
+def _bypass_graph_lifecycle_gate():
+  """The operator router runs `require_graph_access` (lifecycle/subscription)
+  before dispatch; these tests use synthetic graph ids with no Graph row, so
+  the gate would 404 before reaching the handler logic under test. Its own
+  behavior is covered in tests/middleware/billing/test_enforcement.py and the
+  wiring in TestOperatorLifecycleGate."""
+  with patch(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    return_value=None,
+  ):
+    yield
+
+
 @pytest.fixture
 def mock_user():
   """Create a mock authenticated user."""
@@ -433,6 +447,45 @@ class TestOperatorEndpoints:
     components = openapi["components"]["schemas"]
     assert "OperatorRequest" in components
     assert "OperatorResponse" in components
+
+
+class TestOperatorLifecycleGate:
+  """The operator surface runs the graph lifecycle/subscription gate.
+
+  A suspended, mid-teardown or expired graph accepted operator runs on no
+  other surface's say-so — the gate lives in the shared pre-dispatch helper
+  so every operator entry point (sync, SSE, queued) inherits it.
+  """
+
+  @pytest.mark.asyncio
+  async def test_lifecycle_gate_runs_before_repository_limits(self):
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+
+    from robosystems.routers.graphs.operator.execute import (
+      _enforce_shared_repository_agent_limits,
+    )
+
+    user = MagicMock()
+    db = MagicMock()
+
+    with (
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access",
+        side_effect=HTTPException(status_code=403, detail="Subscription has ended."),
+      ) as gate,
+      patch(
+        "robosystems.routers.graphs.query.execute._check_shared_repository_limits",
+        new=AsyncMock(),
+      ) as mock_check,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await _enforce_shared_repository_agent_limits("kg0123456789abcdef", user, db)
+
+    assert exc.value.status_code == 403
+    gate.assert_called_once_with("kg0123456789abcdef", db, require_write=False)
+    mock_check.assert_not_awaited()
 
 
 class TestOperatorSharedRepositoryLimits:

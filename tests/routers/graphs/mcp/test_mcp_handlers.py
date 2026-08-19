@@ -76,10 +76,41 @@ class TestValidateMcpAccess:
         "robosystems.models.core.GraphUser.user_has_access",
         return_value=True,
       ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access"
+      ) as mock_access,
     ):
       await validate_mcp_access(
         "kg01234567890abcdef", _make_mock_user(), Mock(), "read"
       )
+    # Membership proven → the lifecycle/subscription gate runs at read strength.
+    mock_access.assert_called_once()
+    assert mock_access.call_args.kwargs["require_write"] is False
+
+  @pytest.mark.asyncio
+  async def test_user_graph_read_blocked_by_lifecycle(self):
+    """A member of a suspended / expired graph is refused even for reads —
+    the same answer `/query` gives, so MCP is not the surface that still
+    serves a graph the platform has closed."""
+    with (
+      patch(
+        "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access",
+        side_effect=HTTPException(status_code=403, detail="Subscription has ended."),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await validate_mcp_access(
+          "kg01234567890abcdef", _make_mock_user(), Mock(), "read"
+        )
+      assert exc_info.value.status_code == 403
 
   @pytest.mark.asyncio
   async def test_user_graph_access_denied(self):
@@ -112,11 +143,41 @@ class TestValidateMcpAccess:
         "robosystems.models.core.GraphUser.user_has_write_access",
         return_value=True,
       ) as mock_write,
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access"
+      ) as mock_access,
     ):
       await validate_mcp_access(
         "kg01234567890abcdef", _make_mock_user(), Mock(), "write"
       )
       mock_write.assert_called_once()
+    # Write tools run the lifecycle gate at write strength: a canceled grace
+    # period or a tier upgrade blocks the MCP write like the REST write.
+    assert mock_access.call_args.kwargs["require_write"] is True
+
+  @pytest.mark.asyncio
+  async def test_user_graph_write_blocked_by_lifecycle(self):
+    with (
+      patch(
+        "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access",
+        side_effect=HTTPException(
+          status_code=403, detail="Graph tier upgrade in progress."
+        ),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await validate_mcp_access(
+          "kg01234567890abcdef", _make_mock_user(), Mock(), "write"
+        )
+      assert exc_info.value.status_code == 403
 
   @pytest.mark.asyncio
   async def test_user_graph_write_denied_for_readonly_role(self):

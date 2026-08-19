@@ -333,16 +333,16 @@ class TestMCPAccessControl:
 
   @pytest.mark.asyncio
   async def test_mcp_access_validation_user_graph(
-    self, db_session: Session, test_user: User, test_user_graph
+    self, db_session: Session, test_user: User, test_graph_with_credits
   ):
     """Test MCP access validation for user graphs."""
     from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
 
-    # User should have access to their own graph
+    # User should have access to their own (subscribed) graph
     # validate_mcp_access doesn't return a boolean, it raises HTTPException on failure
     try:
       await validate_mcp_access(
-        graph_id=test_user_graph.graph_id,
+        graph_id=test_graph_with_credits["graph"].graph_id,
         current_user=test_user,
         db=db_session,
         operation_type="read",

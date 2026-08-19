@@ -7,6 +7,20 @@ from robosystems.models.api.graphs.operator import OperatorMessage
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
+@pytest.fixture(autouse=True)
+def _bypass_graph_lifecycle_gate():
+  """The operator router runs `require_graph_access` (lifecycle/subscription)
+  before dispatch; these tests use synthetic graph ids with no Graph row, so
+  the gate would 404 before reaching the handler logic under test. Its own
+  behavior is covered in tests/middleware/billing/test_enforcement.py and the
+  wiring in test_operator_router.py::TestOperatorLifecycleGate."""
+  with patch(
+    "robosystems.middleware.billing.enforcement.require_graph_access",
+    return_value=None,
+  ):
+    yield
+
+
 @pytest.fixture
 def mock_anthropic_response():
   """Mock response from Anthropic API"""

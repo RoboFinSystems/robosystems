@@ -242,19 +242,68 @@ class TestMCPAccessValidation:
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_entity_graph(
-    self, db_session, test_user, test_user_graph
+    self, db_session, test_user, test_graph_with_credits
   ):
     """Test access validation for entity graphs."""
-    # User has access to their own graph - should not raise
+    graph_id = test_graph_with_credits["graph"].graph_id
+    # User has access to their own (subscribed, active) graph - should not raise
     try:
       await validate_mcp_access(
-        graph_id=test_user_graph.graph_id, current_user=test_user, db=db_session
+        graph_id=graph_id, current_user=test_user, db=db_session
       )
       # If no exception, access was granted
       assert True
     except HTTPException:
       # Access was denied
       raise AssertionError("User should have access to their own graph")
+
+  @pytest.mark.asyncio
+  async def test_validate_mcp_access_requires_subscription(
+    self, db_session, test_user, test_user_graph
+  ):
+    """Membership on a graph with no live subscription is refused (billing
+    on): MCP applies the same lifecycle/subscription gate as `/query`."""
+    with pytest.raises(HTTPException) as exc_info:
+      await validate_mcp_access(
+        graph_id=test_user_graph.graph_id, current_user=test_user, db=db_session
+      )
+    assert exc_info.value.status_code == 403
+    assert "subscription" in str(exc_info.value.detail).lower()
+
+  @pytest.mark.asyncio
+  async def test_validate_mcp_access_suspended_graph(
+    self, db_session, test_user, test_graph_with_credits
+  ):
+    """A suspended graph is closed on the MCP surface too."""
+    from robosystems.models.core import GraphStatus
+
+    graph = test_graph_with_credits["graph"]
+    graph.status = GraphStatus.SUSPENDED.value
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+      await validate_mcp_access(
+        graph_id=graph.graph_id, current_user=test_user, db=db_session
+      )
+    assert exc_info.value.status_code == 403
+
+  @pytest.mark.asyncio
+  async def test_validate_mcp_access_deleted_graph(
+    self, db_session, test_user, test_graph_with_credits
+  ):
+    """A graph mid-teardown (deleted_at stamped, status not yet flipped) is
+    gone for its admin as well — the role resolver denies it outright."""
+    from datetime import UTC, datetime
+
+    graph = test_graph_with_credits["graph"]
+    graph.deleted_at = datetime.now(UTC)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+      await validate_mcp_access(
+        graph_id=graph.graph_id, current_user=test_user, db=db_session
+      )
+    assert exc_info.value.status_code == 403
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_no_permission(self, db_session, test_user):
@@ -314,42 +363,17 @@ class TestMCPAccessValidation:
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_write_level(
-    self, db_session, test_user, test_user_graph
+    self, db_session, test_user, test_graph_with_credits
   ):
     """Test that write-level access allows MCP tools."""
-    # Update user_graph to have write access
-    test_user_graph.access_level = "write"
-    db_session.commit()
-
+    graph_id = test_graph_with_credits["graph"].graph_id
     try:
       await validate_mcp_access(
-        graph_id=test_user_graph.graph_id, current_user=test_user, db=db_session
+        graph_id=graph_id, current_user=test_user, db=db_session, operation_type="write"
       )
       assert True
     except HTTPException:
       raise AssertionError("User should have write access")
-
-  @pytest.mark.asyncio
-  async def test_validate_mcp_access_inactive_graph(
-    self, db_session, test_user, test_user_graph
-  ):
-    """Test that inactive graphs still allow access if user has permissions."""
-    # Make graph inactive
-    test_user_graph.is_active = False
-    db_session.commit()
-
-    # The current implementation doesn't check is_active in validate_mcp_access
-    # It only checks if the user has access to the graph
-    # This test documents the current behavior
-    try:
-      await validate_mcp_access(
-        graph_id=test_user_graph.graph_id, current_user=test_user, db=db_session
-      )
-      # Current implementation doesn't check is_active, so access is granted
-      assert True
-    except HTTPException:
-      # If this starts failing, it means the implementation now checks is_active
-      raise AssertionError("Implementation changed - now checks is_active field")
 
 
 class TestMCPErrorSanitization:

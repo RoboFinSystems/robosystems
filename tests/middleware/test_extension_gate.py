@@ -116,10 +116,17 @@ class TestLoadGraphMetadata:
 
 class TestRequireGraphExtension:
   def _call_dep(self, extension: str, graph: MagicMock | None) -> GraphExtensionContext:
-    """Invoke the inner dependency with mocks for session + graph loader."""
+    """Invoke the inner dependency with mocks for session + graph loader.
+
+    The lifecycle/subscription gate the dependency runs last is bypassed here
+    (it has its own tests in tests/middleware/billing/test_enforcement.py);
+    `TestRequireGraphExtensionLifecycle` covers the wiring."""
     session = MagicMock()
     dep = require_graph_extension(extension)
-    with patch(f"{MODULE}.Graph.get_by_id", return_value=graph):
+    with (
+      patch(f"{MODULE}.Graph.get_by_id", return_value=graph),
+      patch(f"{MODULE}.require_graph_access", return_value=None),
+    ):
       return dep(graph_id=GRAPH_ID, session=session)
 
   def test_passes_on_entity_graph_with_extension(self) -> None:
@@ -225,9 +232,57 @@ class TestRequireGraphExtension:
     investor_dep = require_graph_extension("roboinvestor")
 
     graph_ledger_only = _graph(graph_type="entity", schema_extensions=["roboledger"])
-    with patch(f"{MODULE}.Graph.get_by_id", return_value=graph_ledger_only):
+    with (
+      patch(f"{MODULE}.Graph.get_by_id", return_value=graph_ledger_only),
+      patch(f"{MODULE}.require_graph_access", return_value=None),
+    ):
       # Ledger passes
       ledger_dep(graph_id=GRAPH_ID, session=MagicMock())
       # Investor rejects on the same graph
       with pytest.raises(HTTPException):
         investor_dep(graph_id=GRAPH_ID, session=MagicMock())
+
+
+class TestRequireGraphExtensionLifecycle:
+  """Every extensions route (reads, views, commands) passes through this
+  dependency, so a suspended or expired graph is closed on the whole surface
+  from one place — after the provisioning checks, at read strength."""
+
+  def test_gate_runs_after_provisioning_checks(self) -> None:
+    session = MagicMock()
+    dep = require_graph_extension("roboledger")
+    graph = _graph(graph_type="entity", schema_extensions=["roboledger"])
+    with (
+      patch(f"{MODULE}.Graph.get_by_id", return_value=graph),
+      patch(f"{MODULE}.require_graph_access", return_value=None) as gate,
+    ):
+      dep(graph_id=GRAPH_ID, session=session)
+    gate.assert_called_once_with(GRAPH_ID, session, require_write=False)
+
+  def test_unprovisioned_graph_never_reaches_the_gate(self) -> None:
+    session = MagicMock()
+    dep = require_graph_extension("roboinvestor")
+    graph = _graph(graph_type="entity", schema_extensions=["roboledger"])
+    with (
+      patch(f"{MODULE}.Graph.get_by_id", return_value=graph),
+      patch(f"{MODULE}.require_graph_access", return_value=None) as gate,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        dep(graph_id=GRAPH_ID, session=session)
+    assert exc_info.value.status_code == 403
+    gate.assert_not_called()
+
+  def test_closed_graph_is_refused(self) -> None:
+    session = MagicMock()
+    dep = require_graph_extension("roboledger")
+    graph = _graph(graph_type="entity", schema_extensions=["roboledger"])
+    with (
+      patch(f"{MODULE}.Graph.get_by_id", return_value=graph),
+      patch(
+        f"{MODULE}.require_graph_access",
+        side_effect=HTTPException(status_code=403, detail="Subscription has ended."),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        dep(graph_id=GRAPH_ID, session=session)
+    assert exc_info.value.status_code == 403

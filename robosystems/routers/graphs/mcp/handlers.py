@@ -63,7 +63,11 @@ async def validate_mcp_access(
   """Validate user access for MCP operations, raising 403 on denial.
 
   Shared repositories resolve through repository access (subgraphs resolve to
-  their parent); other graphs check per-graph membership.
+  their parent); other graphs check per-graph membership and role, then the
+  graph's lifecycle/subscription state (``require_graph_access``) — the same
+  pair the REST command surfaces enforce through ``require_graph_write_role``
+  — so a suspended, mid-teardown or grace-period graph is no more writable
+  through an MCP tool than through an operation endpoint.
   """
   # Check shared repositories (including subgraphs like "sec_historical")
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -102,6 +106,12 @@ async def validate_mcp_access(
         )
     elif not GraphUser.user_has_access(current_user.id, graph_id, db):
       raise HTTPException(status_code=403, detail=f"Access denied to graph {graph_id}")
+
+    from robosystems.middleware.billing.enforcement import require_graph_access
+
+    require_graph_access(
+      graph_id, db, require_write=operation_type in ("write", "admin")
+    )
 
 
 class MCPHandler:

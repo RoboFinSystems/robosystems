@@ -122,24 +122,19 @@ def check_graph_subscription_active(
   return (True, None)
 
 
-def require_graph_access(
-  graph_id: str, session: Session, require_write: bool = False
-) -> Graph:
-  """Validate graph is accessible for the requested operation type.
+def _assert_graph_live(graph: Graph | None) -> Graph:
+  """Layer 1 of ``require_graph_access``: the graph exists and is not gone.
 
-  Checks two layers:
-  1. Graph status (suspended -> 403, deprovisioned -> 404)
-  2. Subscription status (grace period: reads OK, writes blocked)
+  ``deleted_at`` counts as gone — teardown stamps it before the tenant schema
+  and database are dropped and flips ``status`` only at the end, so a graph
+  caught mid-teardown (or stranded there) must answer 404, not serve.
   """
-  graph = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
-
-  if not graph:
+  if graph is None or graph.deleted_at is not None:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail="Graph not found.",
     )
 
-  # Layer 1: Graph lifecycle status
   graph_status = graph.status or GraphStatus.ACTIVE.value
 
   if graph_status == GraphStatus.DEPROVISIONED.value:
@@ -153,16 +148,44 @@ def require_graph_access(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Subscription has ended. Resubscribe to access this graph.",
     )
+  return graph
+
+
+def require_graph_access(
+  graph_id: str, session: Session, require_write: bool = False
+) -> Graph:
+  """Validate graph is accessible for the requested operation type.
+
+  Checks two layers:
+  1. Graph lifecycle (deleted/deprovisioned -> 404, suspended -> 403)
+  2. Subscription status (grace period: reads OK, writes blocked)
+
+  A subgraph carries no subscription of its own and lives on its parent's
+  infrastructure, so it is held to its parent's lifecycle *and* billed
+  through the parent: both rows must be live, and the subscription lookup
+  (and its cache entry) is keyed on the parent graph. Returns the row for
+  ``graph_id`` itself.
+  """
+  graph = _assert_graph_live(
+    Graph.get_by_id(graph_id, session, include_deprovisioned=True)
+  )
+
+  billing_graph = graph
+  if graph.is_subgraph and graph.parent_graph_id:
+    billing_graph = _assert_graph_live(
+      Graph.get_by_id(graph.parent_graph_id, session, include_deprovisioned=True)
+    )
+  billing_graph_id = str(billing_graph.graph_id)
 
   # Layer 2: Subscription check (only when billing is enabled)
   if not env.BILLING_ENABLED:
     return graph
 
   # Skip subscription check for shared repositories
-  if graph.is_repository:
+  if billing_graph.is_repository:
     return graph
 
-  cached = _get_cached_subscription(graph_id)
+  cached = _get_cached_subscription(billing_graph_id)
   if cached == "active":
     return graph
   elif cached == "upgrading":
@@ -192,12 +215,12 @@ def require_graph_access(
 
   # Cache miss — query DB
   subscription = BillingSubscription.get_by_resource(
-    resource_type="graph", resource_id=graph_id, session=session
+    resource_type="graph", resource_id=billing_graph_id, session=session
   )
 
   if not subscription:
-    logger.warning(f"No subscription found for graph {graph_id}")
-    _cache_subscription(graph_id, "no_subscription")
+    logger.warning(f"No subscription found for graph {billing_graph_id}")
+    _cache_subscription(billing_graph_id, "no_subscription")
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="No active subscription for this graph.",
@@ -205,7 +228,7 @@ def require_graph_access(
 
   if subscription.status == "upgrading":
     # Tier migration in progress: reads OK, writes blocked
-    _cache_subscription(graph_id, "upgrading")
+    _cache_subscription(billing_graph_id, "upgrading")
     if require_write:
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -223,7 +246,7 @@ def require_graph_access(
 
     if ends_at and ends_at > now:
       # Grace period: reads OK, writes blocked
-      _cache_subscription(graph_id, "canceled_grace")
+      _cache_subscription(billing_graph_id, "canceled_grace")
       if require_write:
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,
@@ -232,7 +255,7 @@ def require_graph_access(
       return graph
 
     # Past grace period
-    _cache_subscription(graph_id, "canceled_expired")
+    _cache_subscription(billing_graph_id, "canceled_expired")
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Subscription has ended. Resubscribe to access this graph.",
@@ -240,7 +263,7 @@ def require_graph_access(
 
   # Only explicitly active subscriptions get full access
   if subscription.status == SubscriptionStatus.ACTIVE.value:
-    _cache_subscription(graph_id, "active")
+    _cache_subscription(billing_graph_id, "active")
     return graph
 
   # All other statuses (past_due, unpaid, paused, pending, etc.) are blocked

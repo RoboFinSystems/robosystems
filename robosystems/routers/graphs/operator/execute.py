@@ -66,15 +66,22 @@ router = APIRouter()
 async def _enforce_shared_repository_agent_limits(
   graph_id: str, current_user: User, db: Session
 ) -> None:
-  """Apply shared-repository access + per-plan agent volume limits.
+  """Apply the graph lifecycle gate, then shared-repository agent limits.
 
   Repository plans advertise agent_calls_per_* limits; until this hook,
   nothing ever checked them (query/mcp/search had their equivalents, the
-  operator surface did not), so the advertised numbers were unenforced.
+  operator surface did not), so the advertised numbers were unenforced. The
+  lifecycle gate is the same one: a suspended or expired graph refused the
+  operator on no surface until this ran here.
   """
+  from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.routers.graphs.query.execute import (
     _check_shared_repository_limits,
   )
+
+  # Lifecycle/subscription gate (read strength — write-capable operators run
+  # the write-strength check through `enforce_operator_write_role`).
+  require_graph_access(graph_id, db, require_write=False)
 
   await _check_shared_repository_limits(
     graph_id, current_user, db, endpoint="agent", operation="agent"

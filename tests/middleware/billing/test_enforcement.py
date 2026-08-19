@@ -469,6 +469,9 @@ class TestRequireGraphAccessBillingDisabled:
     graph = Mock()
     graph.status = "active"
     graph.is_repository = False
+    graph.deleted_at = None
+    graph.is_subgraph = False
+    graph.parent_graph_id = None
     return graph
 
   @patch("robosystems.middleware.billing.enforcement.env")
@@ -527,6 +530,9 @@ class TestRequireGraphAccessGracePeriod:
     graph = Mock()
     graph.status = "active"
     graph.is_repository = False
+    graph.deleted_at = None
+    graph.is_subgraph = False
+    graph.parent_graph_id = None
     return graph
 
   def _canceled_subscription(self, ends_at):
@@ -606,3 +612,112 @@ class TestRequireGraphAccessGracePeriod:
     graph = require_graph_access("kg_gracetest4", mock_session)
 
     assert graph is mock_graph_class.get_by_id.return_value
+
+
+class TestRequireGraphAccessLifecycle:
+  """Lifecycle layer of require_graph_access: gone graphs and subgraphs.
+
+  ``deleted_at`` is stamped first in teardown and ``status`` flipped last, so
+  the stamp alone must read as gone. Subgraphs carry no subscription and no
+  infrastructure of their own: they are held to the parent's lifecycle and
+  billed through the parent.
+  """
+
+  @pytest.fixture
+  def mock_session(self):
+    return Mock()
+
+  @pytest.fixture(autouse=True)
+  def clear_subscription_cache(self):
+    from robosystems.middleware.billing import enforcement
+
+    enforcement._subscription_cache.clear()
+    yield
+    enforcement._subscription_cache.clear()
+
+  @staticmethod
+  def _graph(graph_id, *, status="active", deleted_at=None, parent=None):
+    graph = Mock()
+    graph.graph_id = graph_id
+    graph.status = status
+    graph.is_repository = False
+    graph.deleted_at = deleted_at
+    graph.is_subgraph = parent is not None
+    graph.parent_graph_id = parent
+    return graph
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_deleted_at_stamp_is_gone(self, mock_graph_class, mock_env, mock_session):
+    mock_env.BILLING_ENABLED = False
+    mock_graph_class.get_by_id.return_value = self._graph(
+      "kg_stranded", status="suspended", deleted_at=datetime.now(UTC)
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_stranded", mock_session)
+    assert exc.value.status_code == 404
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_subgraph_billed_through_parent(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    """The subscription lookup and its cache entry key on the parent, and the
+    subgraph's own row is what is returned."""
+    mock_env.BILLING_ENABLED = True
+    parent = self._graph("kg_parent")
+    child = self._graph("kg_parent_dev", parent="kg_parent")
+    mock_graph_class.get_by_id.side_effect = lambda gid, *_a, **_k: {
+      "kg_parent": parent,
+      "kg_parent_dev": child,
+    }[gid]
+    active = Mock()
+    active.status = SubscriptionStatus.ACTIVE.value
+    mock_subscription_class.get_by_resource.return_value = active
+
+    graph = require_graph_access("kg_parent_dev", mock_session, require_write=True)
+
+    assert graph is child
+    mock_subscription_class.get_by_resource.assert_called_once_with(
+      resource_type="graph", resource_id="kg_parent", session=mock_session
+    )
+    from robosystems.middleware.billing import enforcement
+
+    assert "kg_parent" in enforcement._subscription_cache
+    assert "kg_parent_dev" not in enforcement._subscription_cache
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_subgraph_of_suspended_parent_is_suspended(
+    self, mock_graph_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = False
+    parent = self._graph("kg_parent", status="suspended")
+    child = self._graph("kg_parent_dev", parent="kg_parent")
+    mock_graph_class.get_by_id.side_effect = lambda gid, *_a, **_k: {
+      "kg_parent": parent,
+      "kg_parent_dev": child,
+    }[gid]
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_parent_dev", mock_session)
+    assert exc.value.status_code == 403
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_subgraph_of_deleted_parent_is_gone(
+    self, mock_graph_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = False
+    parent = self._graph("kg_parent", deleted_at=datetime.now(UTC))
+    child = self._graph("kg_parent_dev", parent="kg_parent")
+    mock_graph_class.get_by_id.side_effect = lambda gid, *_a, **_k: {
+      "kg_parent": parent,
+      "kg_parent_dev": child,
+    }[gid]
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_parent_dev", mock_session)
+    assert exc.value.status_code == 404

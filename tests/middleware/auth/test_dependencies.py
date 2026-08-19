@@ -1375,9 +1375,58 @@ class TestRequireGraphWriteRole:
         "robosystems.models.core.GraphUser.user_has_write_access",
         return_value=True,
       ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access"
+      ) as mock_access,
     ):
-      # member/admin -> no raise
+      # member/admin on a writable graph -> no raise
       require_graph_write_role("user_1", "kg0123456789abcdef")
+    # The lifecycle half of the gate runs as a *write* check on the same
+    # short-lived session the role check used.
+    mock_access.assert_called_once()
+    args, kwargs = mock_access.call_args
+    assert args[0] == "kg0123456789abcdef"
+    assert kwargs.get("require_write") is True
+
+  def test_write_role_blocked_by_graph_lifecycle(self):
+    """A write role is not enough: a graph that is not writable (suspended,
+    mid-teardown, canceled grace period, tier upgrade) refuses the write from
+    the same gate, so no command surface has to remember the second check."""
+    with (
+      patch("robosystems.database.SessionFactory", return_value=Mock()),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access",
+        side_effect=HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail="Subscription canceled. Write operations disabled.",
+        ),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        require_graph_write_role("user_1", "kg0123456789abcdef")
+      assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+      assert "Write operations disabled" in exc.value.detail
+
+  def test_role_is_checked_before_lifecycle(self):
+    """A viewer is refused on role alone; the lifecycle lookup never runs, so
+    the denial is attributed (audited) to the role and not the graph state."""
+    with (
+      patch("robosystems.database.SessionFactory", return_value=Mock()),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.middleware.billing.enforcement.require_graph_access"
+      ) as mock_access,
+    ):
+      with pytest.raises(HTTPException):
+        require_graph_write_role("user_1", "kg0123456789abcdef")
+      mock_access.assert_not_called()
 
 
 class TestApiKeyIdentityStash:
