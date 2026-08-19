@@ -161,12 +161,43 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
       .all()
     )
 
-    if not ready_subs:
+    graph_ids = [sub.resource_id for sub in ready_subs if sub.resource_id]
+
+    # Re-select graphs stranded mid-teardown: deleted_at was stamped (teardown
+    # started) but status never reached DEPROVISIONED — a run killed part-way
+    # (a Dagster daemon restart on deploy; teardown includes a full backup), a
+    # DBAPI error that failed the run, or a database-delete failure that
+    # deliberately left the registry intact (deprovision_service). The query
+    # above excludes them (deleted_at IS NULL), so nothing would ever retry
+    # them and their .lbug / registry entry / tenant rows would sit forever.
+    # Gate on deleted_at being older than a threshold so a normal in-flight
+    # teardown (minutes) is not double-run; a teardown "leaving" for over an
+    # hour is genuinely stuck. deprovision_graph is idempotent on re-run.
+    stranded_cutoff = now - timedelta(hours=1)
+    stranded = (
+      db.query(Graph.graph_id)
+      .filter(
+        Graph.deleted_at.isnot(None),
+        Graph.deleted_at < stranded_cutoff,
+        Graph.status != GraphStatus.DEPROVISIONED.value,
+        Graph.is_repository.is_(False),
+      )
+      .all()
+    )
+    stranded_ids = [row[0] for row in stranded if row[0]]
+    if stranded_ids:
+      context.log.info(
+        f"Found {len(stranded_ids)} graphs stranded mid-teardown to retry"
+      )
+    # Dedup: a stranded graph could also match ready_subs.
+    graph_ids = list(dict.fromkeys(graph_ids + stranded_ids))
+
+    if not graph_ids:
       return
 
-    graph_ids = [sub.resource_id for sub in ready_subs if sub.resource_id]
     context.log.info(
-      f"Found {len(graph_ids)} suspended graphs ready for deprovisioning"
+      f"Found {len(graph_ids)} graphs ready for deprovisioning "
+      f"({len(stranded_ids)} stranded)"
     )
 
     yield RunRequest(

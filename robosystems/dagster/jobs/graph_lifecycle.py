@@ -108,6 +108,16 @@ def deprovision_suspended_graphs(
         error_msg = f"Failed to deprovision {graph_id}: {e}"
         errors.append(error_msg)
         context.log.error(error_msg)
+        # A DBAPI error leaves this shared session in a failed transaction
+        # (e.g. a delete in _clean_pg_records). Without a rollback the NEXT
+        # graph's first statement raises PendingRollbackError and the whole
+        # run cascades — one poison graph took down every graph after it.
+        # Reset so each graph is independent; the failed one is left stranded
+        # (deleted_at set, status not deprovisioned) for the sensor to retry.
+        try:
+          session.rollback()
+        except Exception:
+          context.log.warning(f"Session rollback after {graph_id} failure failed")
 
   context.log.info(
     f"Deprovisioned {deprovisioned_count}/{len(config.graph_ids)} graphs"

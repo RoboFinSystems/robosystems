@@ -151,11 +151,54 @@ class TestCleanupBeforePersist:
   """A failure before the row is committed still has an allocation to release."""
 
   @pytest.mark.asyncio
-  async def test_cleanup_deallocates_when_no_row_exists(self, db_session):
+  async def test_cleanup_deletes_the_orphan_database_before_deallocating(
+    self, db_session
+  ):
+    """Pre-persist: `_create_database` may have written the `.lbug`, but there
+    is no Graph row to drive teardown. The file must be deleted BEFORE the
+    registry slot is freed — a freed slot whose `.lbug` is still on disk
+    poisons the instance (on-disk count vs registry count diverge)."""
     service = GraphCreationService()
+    order: list[str] = []
+
+    graph_client = AsyncMock()
+    graph_client.delete_database.side_effect = lambda gid: order.append("delete")
+
+    async def _get_client(**_kwargs):
+      return graph_client
 
     with (
       patch("robosystems.db.platform.platform_session", lambda: _yield(db_session)),
+      patch("robosystems.graph_api.client.factory.get_graph_client", _get_client),
+      patch(f"{SERVICE_MODULE}.LadybugAllocationManager") as alloc_cls,
+    ):
+      manager = AsyncMock()
+      manager.deallocate_database.side_effect = lambda gid: order.append("dealloc")
+      alloc_cls.return_value = manager
+
+      await service._cleanup("kg_neverpersisted", _location(), None)
+
+    graph_client.delete_database.assert_awaited_once_with("kg_neverpersisted")
+    manager.deallocate_database.assert_awaited_once_with("kg_neverpersisted")
+    assert order == ["delete", "dealloc"], "the .lbug must be deleted before dealloc"
+
+  @pytest.mark.asyncio
+  async def test_cleanup_still_deallocates_when_the_orphan_delete_fails(
+    self, db_session
+  ):
+    """A failed delete must not abort the deallocation — best-effort, with the
+    reclaim reconciliation as the backstop."""
+    service = GraphCreationService()
+
+    graph_client = AsyncMock()
+    graph_client.delete_database.side_effect = Exception("graph api down")
+
+    async def _get_client(**_kwargs):
+      return graph_client
+
+    with (
+      patch("robosystems.db.platform.platform_session", lambda: _yield(db_session)),
+      patch("robosystems.graph_api.client.factory.get_graph_client", _get_client),
       patch(f"{SERVICE_MODULE}.LadybugAllocationManager") as alloc_cls,
     ):
       manager = AsyncMock()

@@ -431,10 +431,18 @@ class TestDeprovisionService:
       assert test_graph.status == GraphStatus.DEPROVISIONED.value
 
   @pytest.mark.asyncio
-  async def test_deprovision_database_deletion_failure_continues(
+  async def test_deprovision_database_deletion_failure_leaves_graph_for_retry(
     self, service, db_session, test_graph
   ):
-    """Database deletion failure does not block deprovisioning."""
+    """A database-delete failure must NOT free the registry or flip the status.
+
+    The `.lbug` is still on the instance; freeing the registry slot would
+    strand it (the allocator reads the instance as empty while the graph_api
+    counts the on-disk file against max_databases). So the registry entry and
+    the status are left intact — deleted_at is already stamped, so the graph is
+    closed to callers — and the teardown sensor re-selects the stranded graph
+    to retry the whole sequence.
+    """
     with (
       patch(
         "robosystems.graph_api.client.factory.get_graph_client",
@@ -457,10 +465,17 @@ class TestDeprovisionService:
 
       assert result.status == "partial"
       assert result.database_deleted is False
+      assert result.registry_deallocated is False
       assert any("Database deletion failed" in e for e in result.errors)
 
+      # Registry was NOT freed, so the .lbug is not stranded on an "empty"
+      # instance.
+      mock_alloc.deallocate_database.assert_not_called()
+
+      # Status left un-deprovisioned, deleted_at still set → sensor retries it.
       db_session.refresh(test_graph)
-      assert test_graph.status == GraphStatus.DEPROVISIONED.value
+      assert test_graph.status != GraphStatus.DEPROVISIONED.value
+      assert test_graph.deleted_at is not None
 
   @pytest.mark.asyncio
   async def test_deprovision_registry_deallocation_failure_continues(

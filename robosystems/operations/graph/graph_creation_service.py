@@ -622,6 +622,33 @@ class GraphCreationService:
           return
 
       if location:
+        # Pre-persist failure (no Graph row above): `_create_database` may
+        # already have written the `.lbug` to the instance, and there is no
+        # Graph row to drive teardown. Delete the file BEFORE releasing the
+        # allocation — a freed registry slot whose `.lbug` is still on disk
+        # poisons that instance, because the graph_api counts on-disk
+        # databases against `max_databases` (=1 on every tier) while the
+        # allocator counts registry rows, so the instance reports full to
+        # `create_database` (507) yet empty to `_find_best_instance`, which
+        # keeps re-picking it. Best-effort: if the delete fails the daily
+        # reclaim reconciliation is the backstop.
+        try:
+          from robosystems.graph_api.client.factory import get_graph_client
+
+          cleanup_client = await get_graph_client(
+            graph_id=graph_id, operation_type="write"
+          )
+          try:
+            await cleanup_client.delete_database(graph_id)
+            logger.info(f"Deleted orphaned database file for {graph_id} on cleanup")
+          finally:
+            await cleanup_client.close()
+        except Exception as e:
+          logger.warning(
+            f"Cleanup database delete failed for {graph_id} "
+            f"(reclaim reconciliation will catch it): {e}"
+          )
+
         manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
         await manager.deallocate_database(graph_id)
         logger.info(f"Deallocated {graph_id}")

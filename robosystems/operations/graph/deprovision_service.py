@@ -206,6 +206,25 @@ class GraphDeprovisionService:
     # graph can finish what a partial teardown left behind.
     self._dispose_residual_data(graph_id, result)
 
+    # If the graph database itself could not be deleted, the `.lbug` is still
+    # on the instance. Freeing the registry slot now would strand it: the
+    # instance/volume would read as empty to the allocator while carrying the
+    # departed tenant's file, poisoning the next tenant that lands there (see
+    # `graph_api` on-disk vs registry counting). So leave the registry entry
+    # and the status alone — deleted_at is already stamped, so the graph is
+    # closed to callers, and the teardown sensor re-selects a stranded graph
+    # (deleted_at set, status not yet deprovisioned) to retry the whole
+    # sequence. Every step above is idempotent on re-run.
+    if not result.database_deleted:
+      result.status = "partial"
+      logger.warning(
+        f"Graph {graph_id} database delete failed; leaving registry, PG records "
+        "and status intact for the teardown sensor to retry (avoids stranding "
+        "the .lbug on a freed instance)",
+        extra={"graph_id": graph_id, "errors": result.errors},
+      )
+      return result
+
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
