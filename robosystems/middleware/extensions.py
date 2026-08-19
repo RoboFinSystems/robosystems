@@ -21,10 +21,11 @@ from typing import Any, ClassVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
+from robosystems.db.extensions import is_statement_timeout
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import require_graph_write_role
 from robosystems.middleware.billing.enforcement import require_graph_access
@@ -70,6 +71,28 @@ def is_schema_missing(exc: ProgrammingError) -> bool:
   return "does not exist" in msg and ("schema" in msg or "relation" in msg)
 
 
+# Client-facing translation of a statement the extensions session ceiling cut
+# short. 504 rather than 500: the request was well-formed and the fault is
+# time, not code — the caller can narrow the request or retry when the
+# tenant's other work has drained. The message never carries the SQL.
+STATEMENT_TIMEOUT_STATUS = 504
+STATEMENT_TIMEOUT_DETAIL = (
+  "The request exceeded the per-statement time limit for this surface. "
+  "Narrow the request (filters, a smaller page) or retry shortly."
+)
+
+
+def statement_timeout_504(op_name: str, graph_id: str) -> HTTPException:
+  """The 504 a cancelled statement surfaces as, logged once at the boundary
+  so the tenant and operation are attributable without the SQL."""
+  logger.warning(f"{op_name} on {graph_id}: statement exceeded the interactive ceiling")
+  return HTTPException(
+    status_code=STATEMENT_TIMEOUT_STATUS,
+    detail=STATEMENT_TIMEOUT_DETAIL,
+    headers={"Retry-After": "5"},
+  )
+
+
 def guard_command_runner(
   runner: Callable[[], Any],
   *,
@@ -88,6 +111,9 @@ def guard_command_runner(
     domain's "not initialized" 404. Anything else is a real database fault:
     logged with its traceback and re-raised (500), never hidden behind the
     friendly 404.
+  - a cancelled statement (the session's ``statement_timeout``) — 504 with
+    a fixed, SQL-free message and ``Retry-After``; see
+    :func:`statement_timeout_504`.
   - ``ValueError`` — a domain refusal the handler did not map. Surfaced as
     422 with its message (the shape every mapped ``ValueError`` already
     takes) and logged so the map gets fixed. The extension dependency has
@@ -106,6 +132,10 @@ def guard_command_runner(
       logger.warning(
         f"{op_name} on {graph_id}: database programming error", exc_info=True
       )
+      raise
+    except DBAPIError as exc:
+      if is_statement_timeout(exc):
+        raise statement_timeout_504(op_name, graph_id) from exc
       raise
     except ValueError as exc:
       logger.warning(f"{op_name} on {graph_id}: unmapped {type(exc).__name__}: {exc}")
@@ -517,6 +547,10 @@ class OperationRegistrar:
           logger.warning(
             f"{op_name} on {graph_id}: database programming error", exc_info=True
           )
+          raise
+        except DBAPIError as exc:
+          if is_statement_timeout(exc):
+            raise statement_timeout_504(op_name, graph_id) from exc
           raise
         except ValueError as exc:
           if not session_bound:

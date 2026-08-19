@@ -39,6 +39,11 @@ class DatabaseDefaults:
   # instance size.
   EXTENSIONS_POOL_SIZE = 5
   EXTENSIONS_MAX_OVERFLOW = 10
+  # Per-statement ceiling for interactive extensions sessions (request-scoped
+  # reads and command writes). The pool is shared by every tenant, so a
+  # statement that runs unbounded holds a shared connection for everyone;
+  # bulk paths (loader syncs, migrations, backfills) opt out explicitly.
+  EXTENSIONS_STATEMENT_TIMEOUT_MS = 30_000
 
 
 class CacheDefaults:
@@ -273,4 +278,7 @@ SSM_TUNING_PATHS = {
   "database/POOL_RECYCLE": DatabaseDefaults.POOL_RECYCLE,
   "database/EXTENSIONS_POOL_SIZE": DatabaseDefaults.EXTENSIONS_POOL_SIZE,
   "database/EXTENSIONS_MAX_OVERFLOW": DatabaseDefaults.EXTENSIONS_MAX_OVERFLOW,
+  "database/EXTENSIONS_STATEMENT_TIMEOUT_MS": (
+    DatabaseDefaults.EXTENSIONS_STATEMENT_TIMEOUT_MS
+  ),
 }

@@ -147,6 +147,10 @@ class _FakeCache:
       body_fingerprint,
     )
 
+  async def bind_operation(self, operation_id, cache_key):
+    self.bindings = getattr(self, "bindings", {})
+    self.bindings.setdefault(operation_id, set()).add(cache_key)
+
 
 class TestUpdateEntityOp:
   @pytest.mark.asyncio
@@ -287,6 +291,35 @@ class TestUpdateEntityOp:
 
     assert exc.value.status_code == 404
     assert "not initialized" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_cancelled_statement_is_a_504_without_the_sql(self) -> None:
+    """A statement the session ceiling cut short surfaces as a retryable 504
+    with a fixed message — never the SQL, never a bare 500."""
+    from sqlalchemy.exc import OperationalError
+
+    body = UpdateEntityRequest(name="New Name")
+
+    with patch(
+      "robosystems.routers.extensions.roboledger.operations.extensions_session",
+      side_effect=OperationalError(
+        "UPDATE entities SET name = %(n)s",
+        {"n": "secret"},
+        MagicMock(pgcode="57014"),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await update_entity_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 504
+    assert "secret" not in exc.value.detail
+    assert exc.value.headers == {"Retry-After": "5"}
 
   @pytest.mark.asyncio
   async def test_other_programming_error_is_not_a_404(self) -> None:
@@ -461,6 +494,44 @@ class TestAutoMapElementsOp:
     assert first.idempotent_replay is False
     # Replayed call: idempotent_replay=True (the fix under test)
     assert second.idempotent_replay is True
+
+  @pytest.mark.asyncio
+  async def test_fresh_enqueue_binds_the_operation_to_its_envelope_key(
+    self,
+  ) -> None:
+    """The pending envelope is bound to the worker task's operation id so a
+    failed run can evict it (a retry then dispatches again instead of
+    replaying `pending` for 24h)."""
+    from robosystems.middleware.operations import compute_idempotency_cache_key
+
+    body = AutoMapElementsOperation(mapping_id="map_bind")
+    cache = _FakeCache()
+    task_response = {
+      "operation_id": "op_01BINDTEST0000000000000000",
+      "operation_type": "operator",
+      "_links": {},
+      "deduplicated": False,
+    }
+
+    with patch(
+      "robosystems.worker.client.enqueue_task",
+      return_value=task_response,
+    ):
+      await auto_map_elements_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key="bind-key",
+        cache=cache,
+      )
+
+    assert cache.bindings == {
+      "op_01BINDTEST0000000000000000": {
+        compute_idempotency_cache_key(
+          "usr_test123", GRAPH_ID, "auto-map-elements", "bind-key"
+        )
+      }
+    }
 
   @pytest.mark.asyncio
   async def test_idempotent_replay_does_not_poison_cached_instance(self) -> None:

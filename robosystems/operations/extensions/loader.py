@@ -558,7 +558,7 @@ class OLTPLoader:
 
     now = datetime.now(UTC)
 
-    with extensions_session(graph_id) as session:
+    with extensions_session(graph_id, statement_timeout_ms=None) as session:
       # ── Pre-sync deletes (full_rebuild only) ───────────────────────
       #
       # This block is constrained as follows:
@@ -1889,7 +1889,7 @@ class OLTPLoader:
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     try:
-      with extensions_session(graph_id) as session:
+      with extensions_session(graph_id, statement_timeout_ms=None) as session:
         # Check if a CoA taxonomy already exists
         existing_coa = (
           session.query(Taxonomy)
@@ -2043,7 +2043,7 @@ class OLTPLoader:
       finally:
         con.close()
 
-      with extensions_session(graph_id) as session:
+      with extensions_session(graph_id, statement_timeout_ms=None) as session:
         # The ledger's own entity by predicate — a shared-in `linked`
         # counterparty must never receive the CompanyInfo overwrite.
         entity = resolve_parent_entity(session)

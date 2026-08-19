@@ -46,7 +46,7 @@ _TENANT_SCHEMA_SQL = text(
 
 def list_tenant_schemas() -> list[str]:
   """Every provisioned tenant schema name, sorted."""
-  with extensions_session(LIBRARY_GRAPH_ID) as session:
+  with extensions_session(LIBRARY_GRAPH_ID, statement_timeout_ms=None) as session:
     rows = session.execute(_TENANT_SCHEMA_SQL).fetchall()
   return [row[0] for row in rows]
 
@@ -59,7 +59,7 @@ def resync_tenant(graph_id: str, pin: dict[str, str] | None = None) -> CopyStats
   the library UPDATEs, then the ``DO UPDATE`` fan-out runs across all 12 library
   tables on the same connection/transaction.
   """
-  with extensions_session(graph_id) as session:
+  with extensions_session(graph_id, statement_timeout_ms=None) as session:
     session.execute(text(SET_LIBRARY_RESYNC))
     stats = resync_library_into_tenant(session.connection(), graph_id, pin)
   logger.info(

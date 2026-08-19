@@ -35,8 +35,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 
+from robosystems.db.extensions import is_statement_timeout
 from robosystems.logger import logger
 from robosystems.middleware.extensions import (
   ErrorMap,
@@ -44,6 +45,7 @@ from robosystems.middleware.extensions import (
   OperationSpec,
   is_schema_missing,
 )
+from robosystems.middleware.mcp.tools._errors import statement_timeout_answer
 from robosystems.middleware.operations import (
   fingerprint_body,
   generate_operation_id,
@@ -541,6 +543,10 @@ class _RegistrarMCPTool(BaseTool):
         "error": "command_failed",
         "message": f"{self.spec.name} failed on a database error; see server logs",
       }
+    except DBAPIError as exc:
+      if is_statement_timeout(exc):
+        return statement_timeout_answer(self.spec.name)
+      raise
     except ValueError as exc:
       if not session_bound:
         # The session factory rejected the graph id — not a tenant-schema id.

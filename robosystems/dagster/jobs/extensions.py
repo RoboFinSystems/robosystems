@@ -194,7 +194,15 @@ def materialize_extensions_to_graph(
   description="Materialize extensions OLTP data to LadybugDB graph",
 )
 def extensions_materialize_job():
-  """Materialize all extension data from PostgreSQL OLTP to LadybugDB graph."""
+  """Materialize all extension data from PostgreSQL OLTP to LadybugDB graph.
+
+  The per-graph ``materialize_db`` concurrency tag cannot be a job-level tag
+  here (the graph is run config, not a constant like ``sec``), so every
+  launcher must set ``materialize_db=<graph_id>`` on the run — the staleness
+  sensor does; a manual Dagster UI launch should add it too. The per-graph
+  Valkey lock inside ``ExtensionsMaterializer`` is the hard backstop either
+  way; the tag turns a would-be lock refusal into a queued run.
+  """
   materialize_extensions_to_graph()
 
 
@@ -239,7 +247,7 @@ def promote_obligations_for_graph(
     f"dispatch={config.dispatch_handlers})"
   )
 
-  with extensions_session(graph_id) as session:
+  with extensions_session(graph_id, statement_timeout_ms=None) as session:
     result = promote_pending_obligations(
       session,
       graph_id,

@@ -16,10 +16,21 @@ from typing import Any
 
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 
+from robosystems.db.extensions import is_statement_timeout
 from robosystems.logger import logger
-from robosystems.middleware.extensions import is_schema_missing
+from robosystems.middleware.extensions import (
+  STATEMENT_TIMEOUT_DETAIL,
+  is_schema_missing,
+)
 
 LEDGER_NOT_INITIALIZED = "Ledger not initialized. Connect a data source first."
+
+
+def statement_timeout_answer(tool_name: str) -> dict[str, Any]:
+  """The MCP answer for a statement the session ceiling cancelled — the same
+  fixed text REST returns as 504, so the LLM can narrow or retry."""
+  logger.warning("MCP tool %s exceeded the statement ceiling", tool_name)
+  return {"error": "statement_timeout", "message": STATEMENT_TIMEOUT_DETAIL}
 
 
 def database_failure(
@@ -40,6 +51,8 @@ def database_failure(
     and is_schema_missing(exc)
   ):
     return {"error": "not_initialized", "message": not_initialized_message}
+  if is_statement_timeout(exc):
+    return statement_timeout_answer(tool_name)
   logger.warning("MCP tool %s hit a database error", tool_name, exc_info=True)
   return {
     "error": "command_failed",
@@ -47,4 +60,4 @@ def database_failure(
   }
 
 
-__all__ = ["LEDGER_NOT_INITIALIZED", "database_failure"]
+__all__ = ["LEDGER_NOT_INITIALIZED", "database_failure", "statement_timeout_answer"]

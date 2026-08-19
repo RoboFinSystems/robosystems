@@ -974,7 +974,7 @@ def run_coverage(graphs: dict[str, str]) -> list[CoverageResult]:
   results: list[CoverageResult] = []
   for label, graph_id in graphs.items():
     try:
-      with extensions_session(graph_id) as session:
+      with extensions_session(graph_id, statement_timeout_ms=None) as session:
         results.append(measure_coverage(session, label, graph_id))
     except Exception as exc:  # graph deprovisioned / schema missing
       results.append(CoverageResult(label=label, graph_id=graph_id, available=False))
@@ -1036,7 +1036,7 @@ def format_coverage(results: list[CoverageResult]) -> str:
 def validate_framework(keep: bool = False) -> GapReport:
   """Provision a reference tenant and run the structural + package checks."""
   with reference_tenant(keep=keep) as rt:
-    with extensions_session(rt.graph_id) as session:
+    with extensions_session(rt.graph_id, statement_timeout_ms=None) as session:
       report = run_structural(session, rt.styles)
       run_package_integrity(session, report)
       return report
@@ -1084,7 +1084,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
   with reference_tenant(keep=args.keep) as rt:
-    with extensions_session(rt.graph_id) as session:
+    with extensions_session(rt.graph_id, statement_timeout_ms=None) as session:
       report = run_structural(session, rt.styles)
       run_package_integrity(session, report)
       if not args.summary:

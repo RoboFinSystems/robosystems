@@ -66,7 +66,7 @@ def _has_matured_pending_obligations(graph_id: str, as_of: datetime) -> bool:
   schedule_entry_due event has matured by `as_of`.
   """
   try:
-    with extensions_session(graph_id) as session:
+    with extensions_session(graph_id, statement_timeout_ms=None) as session:
       count = (
         session.query(Event)
         .filter(

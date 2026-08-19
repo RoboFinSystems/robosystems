@@ -719,6 +719,30 @@ class TestRegistrarToolExecute:
     assert "INSERT" not in result["message"]
 
   @pytest.mark.asyncio
+  async def test_cancelled_statement_is_a_timeout_answer(self) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    def raising_cmd(session, body, created_by: str):
+      raise OperationalError(
+        "SELECT * FROM t WHERE v = %(v)s", {"v": "secret"}, MagicMock(pgcode="57014")
+      )
+
+    tool = _RegistrarMCPTool(
+      client=_client(user_id="usr_1"),
+      spec=_spec(command=raising_cmd),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      result = await tool.execute({"id": "x", "value": 0})
+
+    assert result["error"] == "statement_timeout"
+    assert "secret" not in result["message"]
+    assert "SELECT" not in result["message"]
+
+  @pytest.mark.asyncio
   async def test_schema_missing_is_not_initialized(self) -> None:
     from sqlalchemy.exc import ProgrammingError
 
