@@ -60,6 +60,29 @@ def _session_cm(mock_session: MagicMock):
   return cm
 
 
+def _live_graph_row(graph_id: str = GRAPH_ID) -> MagicMock:
+  """A `Graph` projection row as `GraphUser.get_effective_role` reads it —
+  the resolver first checks the graph is live (exists, not deprovisioned, no
+  `deleted_at`) before consulting the membership row."""
+  row = MagicMock()
+  row.graph_id = graph_id
+  row.org_id = None
+  row.status = "active"
+  row.deleted_at = None
+  return row
+
+
+def _script_admin_role(mock_db: MagicMock, role: str = "admin") -> None:
+  """Script the two queries `get_effective_role` runs against the fake
+  session: a live Graph row (`.all()`), then the caller's GraphUser row
+  (`.first()`)."""
+  membership = MagicMock()
+  membership.role = role
+  chain = mock_db.query.return_value.filter.return_value
+  chain.all.return_value = [_live_graph_row()]
+  chain.first.return_value = membership
+
+
 @pytest.fixture
 def mock_db():
   """Patch `_open_platform_session` to return a fake session."""
@@ -101,22 +124,113 @@ class TestCreateSubgraphExecute:
     result = await tool.execute({"name": "dev"})
     assert result["error"] == "authentication_required"
 
+  # The tool mirrors the REST create-subgraph gates by calling the same
+  # helpers from routers/graphs/subgraphs/utils.py; these tests patch those
+  # helpers at their source module (the tool imports them lazily).
+  UTILS = "robosystems.routers.graphs.subgraphs.utils"
+
+  def _gates(self, parent: MagicMock):
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(
+      patch(f"{self.UTILS}.verify_parent_graph_access", return_value=parent)
+    )
+    stack.enter_context(patch(f"{self.UTILS}.verify_subgraph_tier_support"))
+    stack.enter_context(patch(f"{self.UTILS}.verify_parent_graph_active"))
+    stack.enter_context(
+      patch(f"{self.UTILS}.check_subgraph_quota", return_value=(0, 3, []))
+    )
+    stack.enter_context(patch(f"{self.UTILS}.validate_subgraph_name_unique"))
+    return stack
+
   @pytest.mark.asyncio
   async def test_parent_not_found(self, mock_db: MagicMock) -> None:
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-    result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    from fastapi import HTTPException
+
+    with patch(
+      f"{self.UTILS}.verify_parent_graph_access",
+      side_effect=HTTPException(status_code=404, detail="Graph not found."),
+    ):
+      result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
     assert result["error"] == "parent_not_found"
+
+  @pytest.mark.asyncio
+  async def test_feature_flag_off_returns_disabled(self, mock_db: MagicMock) -> None:
+    from robosystems.config import env as env_module
+
+    with patch.object(env_module, "SUBGRAPH_CREATION_ENABLED", False):
+      result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    assert result["error"] == "subgraph_creation_disabled"
+
+  @pytest.mark.asyncio
+  async def test_member_without_admin_rejected(self, mock_db: MagicMock) -> None:
+    """REST requires admin on the parent (`verify_parent_graph_access(...,
+    "admin")`); the tool asks the same helper for the same role, so a member
+    who is not admin gets the REST answer over MCP too."""
+    from fastapi import HTTPException
+
+    with patch(
+      f"{self.UTILS}.verify_parent_graph_access",
+      side_effect=HTTPException(
+        status_code=403,
+        detail="Admin access to parent graph required for this operation",
+      ),
+    ) as gate:
+      result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    assert result["error"] == "insufficient_permissions"
+    assert gate.call_args.args[3] == "admin"
+
+  @pytest.mark.asyncio
+  async def test_lifecycle_and_tier_gates_are_mirrored(
+    self, mock_db: MagicMock
+  ) -> None:
+    from fastapi import HTTPException
+
+    parent = MagicMock()
+    with (
+      patch(f"{self.UTILS}.verify_parent_graph_access", return_value=parent),
+      patch(
+        f"{self.UTILS}.verify_subgraph_tier_support",
+        side_effect=HTTPException(
+          status_code=403, detail="Subgraphs are not available for this tier."
+        ),
+      ),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_svc_class,
+    ):
+      result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    assert result["error"] == "subgraph_not_allowed"
+    mock_svc_class.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_name_collision_reported(self, mock_db: MagicMock) -> None:
+    from fastapi import HTTPException
+
+    parent = MagicMock()
+    with self._gates(parent):
+      with patch(
+        f"{self.UTILS}.validate_subgraph_name_unique",
+        side_effect=HTTPException(
+          status_code=409, detail="Subgraph name 'dev' already exists."
+        ),
+      ):
+        result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    assert result["error"] == "name_taken"
 
   @pytest.mark.asyncio
   async def test_happy_path_delegates_to_subgraph_service(
     self, mock_db: MagicMock
   ) -> None:
     parent = MagicMock()
-    mock_db.query.return_value.filter.return_value.first.return_value = parent
 
-    with patch(
-      "robosystems.operations.graph.subgraph_service.SubgraphService"
-    ) as mock_svc_class:
+    with (
+      self._gates(parent),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_svc_class,
+    ):
       mock_svc = AsyncMock()
       mock_svc.create_subgraph.return_value = {
         "graph_id": f"{GRAPH_ID}_dev",
@@ -205,15 +319,19 @@ class TestDeleteSubgraphExecute:
   async def test_happy_path(self, mock_db: MagicMock) -> None:
     subgraph = MagicMock()
     subgraph.is_subgraph = True
-    admin = MagicMock()
-    admin.role = "admin"
     filter_chain = MagicMock()
-    filter_chain.first.side_effect = [subgraph, admin]
+    filter_chain.first.side_effect = [subgraph]
     mock_db.query.return_value.filter.return_value = filter_chain
 
-    with patch(
-      "robosystems.operations.graph.subgraph_service.SubgraphService"
-    ) as mock_svc_class:
+    with (
+      patch(
+        "robosystems.models.core.graph.graph_user.GraphUser.user_has_admin_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_svc_class,
+    ):
       mock_svc = AsyncMock()
       mock_svc_class.return_value = mock_svc
 
@@ -350,9 +468,7 @@ class TestCreateBackupExecute:
   async def test_non_admin_rejected(self, mock_db: MagicMock) -> None:
     from robosystems.config import env as env_module
 
-    non_admin = MagicMock()
-    non_admin.role = "member"
-    mock_db.query.return_value.filter.return_value.first.return_value = non_admin
+    _script_admin_role(mock_db, role="member")
 
     with patch.object(env_module, "BACKUP_CREATION_ENABLED", True):
       result = await CreateBackupTool(_client()).execute({})
@@ -363,9 +479,7 @@ class TestCreateBackupExecute:
   async def test_happy_path_enqueues_dagster_job(self, mock_db: MagicMock) -> None:
     from robosystems.config import env as env_module
 
-    admin = MagicMock()
-    admin.role = "admin"
-    mock_db.query.return_value.filter.return_value.first.return_value = admin
+    _script_admin_role(mock_db)
 
     graph = MagicMock()
     graph.graph_tier = "ladybug-standard"
@@ -411,9 +525,7 @@ class TestCreateBackupExecute:
     """
     from robosystems.config import env as env_module
 
-    admin = MagicMock()
-    admin.role = "admin"
-    mock_db.query.return_value.filter.return_value.first.return_value = admin
+    _script_admin_role(mock_db)
 
     graph = MagicMock()
     graph.graph_tier = "ladybug-standard"
@@ -440,9 +552,7 @@ class TestCreateBackupExecute:
     """A negative limit means unlimited, not "zero allowed"."""
     from robosystems.config import env as env_module
 
-    admin = MagicMock()
-    admin.role = "admin"
-    mock_db.query.return_value.filter.return_value.first.return_value = admin
+    _script_admin_role(mock_db)
 
     graph = MagicMock()
     graph.graph_tier = "ladybug-xlarge"
