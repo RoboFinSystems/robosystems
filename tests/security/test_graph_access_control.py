@@ -122,7 +122,9 @@ class TestGraphAccessControlDependency:
         mock_request, sample_graph.graph_id, test_api_key.key
       )
       assert user.id == test_user.id
-      mock_validate.assert_called_once_with(test_api_key.key, sample_graph.graph_id)
+      mock_validate.assert_called_once_with(
+        test_api_key.key, sample_graph.graph_id, allow_deprovisioned=False
+      )
 
   async def test_api_key_without_graph_access_raises_403(
     self, mock_request, test_user, sample_graph, test_api_key
