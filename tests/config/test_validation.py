@@ -40,6 +40,54 @@ class MockEnvConfig:
     self.EMAIL_VERIFICATION_ENABLED = True
     self.CAPTCHA_ENABLED = False
     self.BILLING_ENABLED = False
+    # SSM reachability signals, healthy by default; the deployed-env assertion
+    # in validation.py reads these.
+    self.PARAMETER_STORE_AVAILABLE = True
+    self.FEATURE_FLAGS_PRELOADED = True
+
+
+class TestParameterStoreReachability:
+  """A deployed boot that could not read SSM would serve its whole life on code
+  defaults — registration open, no rate limiting. It must refuse to start."""
+
+  def _prod(self):
+    cfg = MockEnvConfig()
+    cfg.ENVIRONMENT = "prod"
+    cfg.GRAPH_API_KEY = "k"
+    return cfg
+
+  def test_healthy_prod_passes(self):
+    with patch("os.getenv", return_value=None):
+      EnvValidator.validate_required_vars(self._prod())  # does not raise
+
+  def test_param_store_unavailable_refuses_boot(self):
+    cfg = self._prod()
+    cfg.PARAMETER_STORE_AVAILABLE = False
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(cfg)
+
+  def test_no_flags_preloaded_refuses_boot(self):
+    cfg = self._prod()
+    cfg.FEATURE_FLAGS_PRELOADED = False
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(cfg)
+
+  def test_rate_limit_off_in_prod_refuses_boot(self):
+    cfg = self._prod()
+    cfg.RATE_LIMIT_ENABLED = False
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(cfg)
+
+  def test_dev_is_never_subject_to_the_reachability_assertion(self):
+    cfg = MockEnvConfig()  # ENVIRONMENT="dev"
+    cfg.PARAMETER_STORE_AVAILABLE = False
+    cfg.FEATURE_FLAGS_PRELOADED = False
+    cfg.RATE_LIMIT_ENABLED = False
+    with patch("os.getenv", return_value=None):
+      EnvValidator.validate_required_vars(cfg)  # does not raise
 
 
 class TestConfigValidationError:

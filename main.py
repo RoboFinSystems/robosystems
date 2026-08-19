@@ -38,6 +38,7 @@ from robosystems.middleware.otel.metrics import (
   record_request_metrics,
 )
 from robosystems.middleware.rate_limits import RateLimitHeaderMiddleware
+from robosystems.middleware.request_size import RequestSizeLimitMiddleware
 from robosystems.routers import (
   auth_router_v1,
   billing_router_v1,
@@ -252,6 +253,22 @@ def create_app() -> FastAPI:
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600,  # Cache preflight requests for 1 hour
+  )
+
+  # Bound request-body size on the internet-facing surface, inside CORS but
+  # outside logging/db/rate-limit — FastAPI reads the body before dependencies
+  # run, so an unbounded body is a pre-auth allocation nothing downstream can
+  # cap. The Stripe webhook reads its body before verifying the signature, so
+  # it carries a tighter limit.
+  from robosystems.config.constants import (
+    PUBLIC_MAX_REQUEST_SIZE,
+    WEBHOOK_MAX_REQUEST_SIZE,
+  )
+
+  app.add_middleware(
+    RequestSizeLimitMiddleware,
+    max_body_size=PUBLIC_MAX_REQUEST_SIZE,
+    path_limits=[("/admin/v1/webhooks/", WEBHOOK_MAX_REQUEST_SIZE)],
   )
 
   # Add logging middleware (order matters - first added = outermost layer)

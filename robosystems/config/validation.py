@@ -216,6 +216,34 @@ class EnvValidator:
         "PASSKEYS_ENABLED — their auth rate buckets are no-ops without it"
       )
 
+    # Parameter Store reachability. In a deployed environment, a boot that
+    # could not read SSM serves its entire life on code defaults — flags are
+    # resolved once at import — which means registration open, no CAPTCHA, no
+    # email verification, and (below) no rate limiting. Refuse to boot instead
+    # of silently serving inert controls.
+    if deployed:
+      if not getattr(env_config, "PARAMETER_STORE_AVAILABLE", False):
+        errors.append(
+          "PARAMETER_STORE_AVAILABLE is False in a deployed environment — SSM "
+          "could not be reached, so every feature flag would fall back to its "
+          "code default. Refusing to boot on inert controls."
+        )
+      elif not getattr(env_config, "FEATURE_FLAGS_PRELOADED", False):
+        errors.append(
+          "No feature flags were preloaded from SSM in a deployed environment "
+          "— the batched read returned nothing, so controls would run on code "
+          "defaults. Refusing to boot on inert controls."
+        )
+      # Belt and braces: rate limiting must be on in any deployed environment.
+      # The checks above catch the cause (SSM unreachable); this catches the
+      # symptom regardless of cause — RATE_LIMIT_ENABLED false here is the tell
+      # of a read that fell back to the (false) code default.
+      if not getattr(env_config, "RATE_LIMIT_ENABLED", False):
+        errors.append(
+          "RATE_LIMIT_ENABLED is false in a deployed environment — this is the "
+          "signature of an SSM read that fell back to defaults. Refusing to boot."
+        )
+
     # Validate value ranges and formats
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)

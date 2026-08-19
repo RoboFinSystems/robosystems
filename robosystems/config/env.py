@@ -63,6 +63,12 @@ try:
   # class definition. This populates the cache so individual get_parameter_value
   # calls don't each make a separate SSM API call (which can fail under load).
   _preloaded_flags = preload_feature_flags()
+  # Whether the batched SSM read actually returned flags. Read by
+  # EnvValidator in deployed environments: a boot that could not reach SSM
+  # serves its whole life on code defaults, so it must refuse to start rather
+  # than silently run with permissive fallbacks. Always {} (→ False) outside
+  # prod/staging by design; the validator only asserts on it when deployed.
+  FEATURE_FLAGS_PRELOADED = bool(_preloaded_flags)
   if _preloaded_flags:
     print(f"Preloaded {len(_preloaded_flags)} feature flags from SSM")
   elif os.getenv("ENVIRONMENT", "dev") in ("prod", "staging"):
@@ -71,6 +77,7 @@ except Exception as _e:
   # If parameter_store can't be imported, fall back to default values
   # Catch all exceptions (not just ImportError) to handle transitive failures
   PARAMETER_STORE_AVAILABLE = False
+  FEATURE_FLAGS_PRELOADED = False
   print(
     f"WARNING: Parameter store unavailable ({type(_e).__name__}: {_e}). "
     "All feature flags will use defaults (false)."
@@ -361,6 +368,12 @@ class EnvConfig:
   # ==========================================================================
   # 1. CORE APPLICATION CONFIGURATION
   # ==========================================================================
+
+  # SSM Parameter Store reachability, captured at import. EnvValidator asserts
+  # on these in deployed environments (see validation.py): a boot that could
+  # not read SSM would serve its whole life on code defaults.
+  PARAMETER_STORE_AVAILABLE = PARAMETER_STORE_AVAILABLE
+  FEATURE_FLAGS_PRELOADED = FEATURE_FLAGS_PRELOADED
 
   # Environment and debugging
   ENVIRONMENT = get_str_env("ENVIRONMENT", "dev")

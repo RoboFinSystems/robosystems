@@ -228,7 +228,11 @@ class LimitsDefaults:
   These values control quotas and resource limits that can be adjusted at runtime.
   """
 
-  ORG_GRAPHS_DEFAULT = 10  # Default max graphs per organization
+  # Safe-by-default: the code default is the floor, so SSM can only ever
+  # RAISE the cap, never a permissive fallback. An org bootstrapped during
+  # an SSM blip snapshots THIS value into org_limits.max_graphs durably, so
+  # the code default must be the conservative one. Prod SSM sets it to 1.
+  ORG_GRAPHS_DEFAULT = 1  # Default max graphs per organization
 
 
 # SSM Parameter paths for tunables

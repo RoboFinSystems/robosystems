@@ -606,6 +606,19 @@ def billing_rate_limit_dependency(request: Request):
   request.state.billing_rate_limit_limit = limit
 
 
+def webhook_rate_limit_dependency(request: Request):
+  """Per-source-IP limit for inbound provider webhooks (Stripe).
+
+  The body is signature-verified downstream, so this only bounds pre-verify
+  body reads and retries from one source. Fails open (the default): a Redis
+  outage must not drop legitimate billing events — the signature check is the
+  security control, this is DoS defense in depth. Generous, because Stripe
+  legitimately bursts redeliveries.
+  """
+  limit = get_int_env("RATE_LIMIT_WEBHOOK", "1200")  # anonymous → 120/min per IP
+  return create_custom_rate_limit_dependency(limit, 60, "webhook")(request)
+
+
 def public_api_rate_limit_dependency(request: Request):
   """Rate limiting for public API endpoints (no auth required)."""
   # More generous for anonymous users since these endpoints are meant to be public
