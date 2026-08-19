@@ -622,6 +622,39 @@ class TestStreamQueuedCall:
     assert final["result"]["isError"] is True
     assert "syntax error" in final["result"]["content"][0]["text"]
 
+  async def test_write_statement_is_refused_before_submission(self):
+    """`read-graph-cypher` is a read tool on every strategy: the queue path
+    runs the raw statement, so the same read-only guard the tool applies on
+    the direct path must refuse a write here — before anything is enqueued,
+    with the reason surfaced to the model and no breaker hit."""
+    manager = _make_queue_manager([{"status": "completed"}])
+    tool_call = _make_tool_call()
+    tool_call.arguments = {"query": "MATCH (n) DETACH DELETE n", "parameters": {}}
+    breaker = Mock()
+    with (
+      patch.object(remote, "circuit_breaker", breaker),
+      patch.object(remote, "_get_user_priority", Mock(return_value=5)),
+      patch.object(remote, "_QUEUE_POLL_SECONDS", 0),
+      patch(
+        "robosystems.middleware.graph.query_queue.get_query_queue",
+        return_value=manager,
+      ),
+    ):
+      events = [
+        event
+        async for event in remote._stream_queued_call(
+          "kg123", tool_call, _make_user(), 8, None
+        )
+      ]
+
+    final = json.loads(events[-1]["data"])
+    assert final["id"] == 8
+    assert final["result"]["isError"] is True
+    assert "read-only" in final["result"]["content"][0]["text"]
+    manager.submit_query.assert_not_awaited()
+    manager.cancel_query.assert_not_awaited()
+    breaker.record_failure.assert_not_called()
+
   async def test_disconnect_cancels_queued_query(self):
     manager = _make_queue_manager(
       [{"status": "pending", "queue_position": 1}, {"status": "pending"}] * 50

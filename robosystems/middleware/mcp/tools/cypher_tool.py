@@ -187,34 +187,49 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     Raises:
         ValueError: If query contains write, bulk, admin, or schema-DDL operations
     """
-    # Route every category through the central security analyzer — the same
-    # predicates the StatementKernel (REST /query/cypher) composes — so this
-    # tool-layer guard can't diverge. It also protects the Operator path, which
-    # invokes this tool directly, bypassing the HTTP handler and kernel.
-    from robosystems.security.cypher_analyzer import (
-      is_admin_operation,
-      is_bulk_operation,
-      is_schema_ddl,
-      is_write_operation,
+    assert_read_only_cypher(query)
+
+
+def assert_read_only_cypher(query: str) -> None:
+  """Refuse anything but a read for the read-graph-cypher tool.
+
+  Module-level so every path that executes on the tool's behalf runs the
+  same predicate: `CypherTool.execute_query` (direct and streaming), the
+  Operator path (which calls the tool directly, bypassing the HTTP handler
+  and kernel), and the queued strategies in the MCP routers, which submit
+  the raw statement to the query queue without ever constructing the tool.
+
+  Raises:
+      ValueError: If the query contains write, bulk, admin, or schema-DDL
+          operations.
+  """
+  # Route every category through the central security analyzer — the same
+  # predicates the StatementKernel (REST /query/cypher) composes — so this
+  # tool-layer guard can't diverge.
+  from robosystems.security.cypher_analyzer import (
+    is_admin_operation,
+    is_bulk_operation,
+    is_schema_ddl,
+    is_write_operation,
+  )
+
+  if is_bulk_operation(query):
+    logger.warning("Blocked bulk operation (COPY/LOAD/IMPORT) in read-graph-cypher")
+    raise ValueError("Only read-only queries are allowed")
+
+  if is_admin_operation(query):
+    logger.warning(
+      "Blocked administrative operation (EXPORT/INSTALL/ATTACH/USE) in "
+      "read-graph-cypher"
     )
+    raise ValueError("Only read-only queries are allowed")
 
-    if is_bulk_operation(query):
-      logger.warning("Blocked bulk operation (COPY/LOAD/IMPORT) in read-graph-cypher")
-      raise ValueError("Only read-only queries are allowed")
+  if is_schema_ddl(query):
+    logger.warning("Blocked schema DDL in read-graph-cypher")
+    raise ValueError("Only read-only queries are allowed")
 
-    if is_admin_operation(query):
-      logger.warning(
-        "Blocked administrative operation (EXPORT/INSTALL/ATTACH/USE) in "
-        "read-graph-cypher"
-      )
-      raise ValueError("Only read-only queries are allowed")
-
-    if is_schema_ddl(query):
-      logger.warning("Blocked schema DDL in read-graph-cypher")
-      raise ValueError("Only read-only queries are allowed")
-
-    if is_write_operation(query):
-      logger.warning(
-        "Blocked write operation (CREATE/MERGE/SET/DELETE) in read-graph-cypher"
-      )
-      raise ValueError("Only read-only queries are allowed")
+  if is_write_operation(query):
+    logger.warning(
+      "Blocked write operation (CREATE/MERGE/SET/DELETE) in read-graph-cypher"
+    )
+    raise ValueError("Only read-only queries are allowed")
