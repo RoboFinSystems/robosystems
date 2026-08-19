@@ -199,3 +199,12 @@ def _fail_operation_sync(sse_client: Any, task_id: str, attempts: int) -> None:
     sse_client.set(meta_key, json.dumps(meta), keepttl=True)
   except (json.JSONDecodeError, Exception) as e:
     logger.warning(f"Failed to update SSE metadata for {task_id}: {e}")
+    return
+
+  # This writes the terminal status directly rather than through the SSE
+  # store, so the store's own eviction hook does not run: evict the cached
+  # idempotency envelope here too, or the DLQ'd operation replays `pending`
+  # under its Idempotency-Key for the rest of the day.
+  from robosystems.middleware.operations import invalidate_operation_idempotency_sync
+
+  invalidate_operation_idempotency_sync(task_id)

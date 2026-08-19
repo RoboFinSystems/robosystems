@@ -32,11 +32,11 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
-  check_idempotency,
   execute_operation,
   fingerprint_body,
   generate_operation_id,
   get_idempotency_cache,
+  idempotent_dispatch,
   log_operation_audit,
   wrap_completed,
   wrap_pending,
@@ -170,38 +170,35 @@ async def create_subgraph_op(
 
   if body.fork_parent:
     # Async path — enqueue worker task, return pending envelope
-    replay = await check_idempotency(
+    async with idempotent_dispatch(
       cache, user_id, graph_id, op_name, idempotency_key, fingerprint_body(body)
-    )
-    if replay is not None:
-      return replay
+    ) as idem:
+      if idem.replay is not None:
+        return idem.replay
 
-    result = await create_subgraph(
-      request=body, graph_id=graph_id, current_user=user, db=db
-    )
-    operation_id = result.get("operation_id", generate_operation_id())
-
-    envelope = wrap_pending(
-      op_name,
-      operation_id=operation_id,
-      partial_result=result,
-      created_by=user_id,
-    )
-    if idempotency_key is not None:
-      await cache.put(
-        user_id, graph_id, op_name, idempotency_key, envelope, fingerprint_body(body)
+      result = await create_subgraph(
+        request=body, graph_id=graph_id, current_user=user, db=db
       )
-    log_operation_audit(
-      operation_name=op_name,
-      operation_id=envelope.operation_id,
-      user_id=user_id,
-      graph_id=graph_id,
-      duration_ms=0.0,
-      status="pending",
-      idempotency_key=idempotency_key,
-      event=_AUDIT_EVENT,
-    )
-    return envelope
+      operation_id = result.get("operation_id", generate_operation_id())
+
+      envelope = wrap_pending(
+        op_name,
+        operation_id=operation_id,
+        partial_result=result,
+        created_by=user_id,
+      )
+      await idem.record(envelope)
+      log_operation_audit(
+        operation_name=op_name,
+        operation_id=envelope.operation_id,
+        user_id=user_id,
+        graph_id=graph_id,
+        duration_ms=0.0,
+        status="pending",
+        idempotency_key=idempotency_key,
+        event=_AUDIT_EVENT,
+      )
+      return envelope
 
   # Sync path — create immediately
   ctx = _ctx(
@@ -659,122 +656,121 @@ async def create_backup_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await check_idempotency(
+  async with idempotent_dispatch(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  verify_admin_access(user, graph_id, db)
+    verify_admin_access(user, graph_id, db)
 
-  if is_shared_repository_or_subgraph(graph_id):
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail=f"Creating backups is not allowed on shared repository '{graph_id}'.",
+    if is_shared_repository_or_subgraph(graph_id):
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Creating backups is not allowed on shared repository '{graph_id}'.",
+      )
+
+    if not env.BACKUP_CREATION_ENABLED:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Backup creation is currently disabled.",
+      )
+
+    if body.backup_format != "full_dump":
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Only 'full_dump' backup format is currently supported",
+      )
+
+    # Cap retention to the tier's maximum. Unconditional: a missing graph row
+    # or tier falls back to the smallest tier's cap rather than skipping the
+    # clamp — an uncapped value would be accepted here and then destroyed by
+    # the 90-day S3 lifecycle rule, leaving a COMPLETED record pointing at a
+    # deleted object.
+    graph_record = Graph.get_by_id(graph_id, db)
+    backup_tier = (
+      str(graph_record.graph_tier)
+      if graph_record and graph_record.graph_tier
+      else "ladybug-standard"
     )
+    backup_limits = GraphTierConfig.get_backup_limits(backup_tier)
+    tier_max = backup_limits.get("backup_retention_days", 7)
+    effective_retention_days = min(body.retention_days, tier_max)
 
-  if not env.BACKUP_CREATION_ENABLED:
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Backup creation is currently disabled.",
-    )
-
-  if body.backup_format != "full_dump":
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Only 'full_dump' backup format is currently supported",
-    )
-
-  # Cap retention to the tier's maximum. Unconditional: a missing graph row
-  # or tier falls back to the smallest tier's cap rather than skipping the
-  # clamp — an uncapped value would be accepted here and then destroyed by
-  # the 90-day S3 lifecycle rule, leaving a COMPLETED record pointing at a
-  # deleted object.
-  graph_record = Graph.get_by_id(graph_id, db)
-  backup_tier = (
-    str(graph_record.graph_tier)
-    if graph_record and graph_record.graph_tier
-    else "ladybug-standard"
-  )
-  backup_limits = GraphTierConfig.get_backup_limits(backup_tier)
-  tier_max = backup_limits.get("backup_retention_days", 7)
-  effective_retention_days = min(body.retention_days, tier_max)
-
-  # Enforce the per-tier daily limit that /limits and /tiers have been
-  # publishing all along. Same fail-small posture as the retention clamp: an
-  # unresolvable tier gets the smallest allowance rather than an exemption.
-  # A negative limit means unlimited (the xlarge tier).
-  max_per_day = backup_limits.get("max_backups_per_day", 2)
-  reservation_id = _reserve_backup_slot(
-    graph_id=graph_id,
-    user_id=user_id,
-    max_per_day=max_per_day,
-    backup_tier=backup_tier,
-    retention_days=effective_retention_days,
-    db=db,
-  )
-
-  run_config = build_graph_job_config(
-    "backup_graph_job",
-    graph_id=graph_id,
-    user_id=user_id,
-    backup_type="full",
-    backup_format=body.backup_format,
-    retention_days=effective_retention_days,
-    compression=True,
-    initiated_by="user",
-    backup_id=reservation_id,
-  )
-
-  try:
-    response = await enqueue_task(
-      task_type="dagster_job_monitor",
+    # Enforce the per-tier daily limit that /limits and /tiers have been
+    # publishing all along. Same fail-small posture as the retention clamp: an
+    # unresolvable tier gets the smallest allowance rather than an exemption.
+    # A negative limit means unlimited (the xlarge tier).
+    max_per_day = backup_limits.get("max_backups_per_day", 2)
+    reservation_id = _reserve_backup_slot(
       graph_id=graph_id,
       user_id=user_id,
-      params={"job_name": "backup_graph_job", "run_config": run_config},
+      max_per_day=max_per_day,
+      backup_tier=backup_tier,
+      retention_days=effective_retention_days,
+      db=db,
     )
-  except Exception:
-    # Release the slot rather than leaving a PENDING row holding quota for a
-    # job that will never run. FAILED rows are excluded from the count.
-    _release_backup_slot(reservation_id, db)
-    raise
-  operation_id = response["operation_id"]
 
-  envelope = wrap_pending(
-    op_name,
-    operation_id=operation_id,
-    partial_result={
-      "status": "accepted",
-      "message": (
-        "Backup creation started"
-        if effective_retention_days == body.retention_days
-        else (
-          f"Backup creation started (retention capped to "
-          f"{effective_retention_days} days, the {backup_tier} maximum)"
-        )
-      ),
-      "retention_days": effective_retention_days,
-      "monitoring": {
-        "sse_endpoint": f"/v1/operations/{operation_id}/stream",
+    run_config = build_graph_job_config(
+      "backup_graph_job",
+      graph_id=graph_id,
+      user_id=user_id,
+      backup_type="full",
+      backup_format=body.backup_format,
+      retention_days=effective_retention_days,
+      compression=True,
+      initiated_by="user",
+      backup_id=reservation_id,
+    )
+
+    try:
+      response = await enqueue_task(
+        task_type="dagster_job_monitor",
+        graph_id=graph_id,
+        user_id=user_id,
+        params={"job_name": "backup_graph_job", "run_config": run_config},
+      )
+    except Exception:
+      # Release the slot rather than leaving a PENDING row holding quota for a
+      # job that will never run. FAILED rows are excluded from the count.
+      _release_backup_slot(reservation_id, db)
+      raise
+    operation_id = response["operation_id"]
+
+    envelope = wrap_pending(
+      op_name,
+      operation_id=operation_id,
+      partial_result={
+        "status": "accepted",
+        "message": (
+          "Backup creation started"
+          if effective_retention_days == body.retention_days
+          else (
+            f"Backup creation started (retention capped to "
+            f"{effective_retention_days} days, the {backup_tier} maximum)"
+          )
+        ),
+        "retention_days": effective_retention_days,
+        "monitoring": {
+          "sse_endpoint": f"/v1/operations/{operation_id}/stream",
+        },
       },
-    },
-    created_by=user_id,
-  )
+      created_by=user_id,
+    )
 
-  if idempotency_key is not None:
-    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
+    await idem.record(envelope)
 
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status="pending",
-    idempotency_key=idempotency_key,
-    event=_AUDIT_EVENT,
-  )
-  return envelope
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+      event=_AUDIT_EVENT,
+    )
+    return envelope
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -823,37 +819,36 @@ async def change_tier_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await check_idempotency(
+  async with idempotent_dispatch(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  operation_id = await change_graph_tier_cmd(graph_id, body.new_tier, user, db)
+    operation_id = await change_graph_tier_cmd(graph_id, body.new_tier, user, db)
 
-  envelope = wrap_pending(
-    op_name,
-    operation_id=operation_id,
-    partial_result={
-      "new_tier": body.new_tier,
-    },
-    created_by=user_id,
-  )
+    envelope = wrap_pending(
+      op_name,
+      operation_id=operation_id,
+      partial_result={
+        "new_tier": body.new_tier,
+      },
+      created_by=user_id,
+    )
 
-  if idempotency_key is not None:
-    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
+    await idem.record(envelope)
 
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status="pending",
-    idempotency_key=idempotency_key,
-    event=_AUDIT_EVENT,
-  )
-  return envelope
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+      event=_AUDIT_EVENT,
+    )
+    return envelope
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -960,42 +955,41 @@ async def materialize_op(
 
   body_fp = fingerprint_body(body)
 
-  replay = await check_idempotency(
+  async with idempotent_dispatch(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  result = await materialize_cmd(graph_id, body, user, db)
+    result = await materialize_cmd(graph_id, body, user, db)
 
-  if body.dry_run:
-    envelope = wrap_completed(op_name, result=result, created_by=user_id)
-  else:
-    operation_id = (
-      result.operation_id
-      if hasattr(result, "operation_id")
-      else result.get("operation_id", generate_operation_id())
+    if body.dry_run:
+      envelope = wrap_completed(op_name, result=result, created_by=user_id)
+    else:
+      operation_id = (
+        result.operation_id
+        if hasattr(result, "operation_id")
+        else result.get("operation_id", generate_operation_id())
+      )
+      envelope = wrap_pending(
+        op_name,
+        operation_id=operation_id,
+        partial_result=result
+        if isinstance(result, dict)
+        else result.model_dump(mode="json"),
+        created_by=user_id,
+      )
+
+    await idem.record(envelope)
+
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=envelope.operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status=envelope.status,
+      idempotency_key=idempotency_key,
+      event=_AUDIT_EVENT,
     )
-    envelope = wrap_pending(
-      op_name,
-      operation_id=operation_id,
-      partial_result=result
-      if isinstance(result, dict)
-      else result.model_dump(mode="json"),
-      created_by=user_id,
-    )
-
-  if idempotency_key is not None:
-    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
-
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=envelope.operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status=envelope.status,
-    idempotency_key=idempotency_key,
-    event=_AUDIT_EVENT,
-  )
-  return envelope
+    return envelope

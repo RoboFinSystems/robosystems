@@ -81,10 +81,10 @@ from robosystems.middleware.operations import (
   IdempotencyKeyConflictError,
   OperationContext,
   OperationEnvelope,
-  check_idempotency,
   execute_operation,
   fingerprint_body,
   get_idempotency_cache,
+  idempotent_dispatch,
   log_operation_audit,
   wrap_pending,
 )
@@ -1166,7 +1166,7 @@ async def auto_map_elements_op(
   user_id = str(user.id)
   body_fingerprint = fingerprint_body(body)
 
-  replay = await check_idempotency(
+  async with idempotent_dispatch(
     cache,
     user_id,
     graph_id,
@@ -1174,43 +1174,40 @@ async def auto_map_elements_op(
     idempotency_key,
     body_fingerprint,
     event="extensions.operation",
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  task_response = await enqueue_task(
-    task_type="operator",
-    graph_id=graph_id,
-    user_id=user_id,
-    params={"operator_type": "mapping", "mapping_id": body.mapping_id},
-  )
-
-  envelope = wrap_pending(
-    op_name,
-    operation_id=task_response["operation_id"],
-    partial_result={
-      "operation_type": task_response.get("operation_type"),
-      "links": task_response.get("_links"),
-      "deduplicated": task_response.get("deduplicated", False),
-    },
-    created_by=user_id,
-  )
-
-  if idempotency_key is not None:
-    await cache.put(
-      user_id, graph_id, op_name, idempotency_key, envelope, body_fingerprint
+    task_response = await enqueue_task(
+      task_type="operator",
+      graph_id=graph_id,
+      user_id=user_id,
+      params={"operator_type": "mapping", "mapping_id": body.mapping_id},
     )
 
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=envelope.operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status="pending",
-    idempotency_key=idempotency_key,
-  )
-  return envelope
+    envelope = wrap_pending(
+      op_name,
+      operation_id=task_response["operation_id"],
+      partial_result={
+        "operation_type": task_response.get("operation_type"),
+        "links": task_response.get("_links"),
+        "deduplicated": task_response.get("deduplicated", False),
+      },
+      created_by=user_id,
+    )
+
+    await idem.record(envelope)
+
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=envelope.operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+    )
+    return envelope
 
 
 # ═══════════════════════════════════════════════════════════════════════════

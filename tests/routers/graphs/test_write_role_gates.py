@@ -172,7 +172,7 @@ class TestConnectionWriteRoleGates:
     with (
       patch(f"{SYNC}.require_graph_write_role", gate),
       patch(f"{SYNC}.dispatch_connection_sync") as dispatch,
-      patch(f"{SYNC}.check_idempotency") as idem,
+      patch(f"{SYNC}.idempotent_dispatch") as idem,
     ):
       with pytest.raises(HTTPException) as exc:
         asyncio.run(

@@ -14,9 +14,9 @@ from robosystems.middleware.auth.dependencies import (
 from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationEnvelope,
-  check_idempotency,
   fingerprint_body,
   get_idempotency_cache,
+  idempotent_dispatch,
   log_operation_audit,
   wrap_pending,
 )
@@ -358,144 +358,148 @@ async def create_graph(
   _graph_id = "new"
   body_fp = fingerprint_body(request)
 
-  replay = await check_idempotency(
+  # The key is reserved from here until the pending envelope is recorded, so
+  # a concurrent retry cannot dispatch a second creation, and every exit that
+  # does not record — a 402/403 from the checks below, an enqueue failure —
+  # releases it.
+  async with idempotent_dispatch(
     cache, user_id, _graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  try:
-    # Check org's graph limits
-    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
-    if not user_orgs:
-      # Reachable, not exceptional: removal from a last org leaves an account
-      # with no membership, and every other org-resolving surface answers 403
-      # here. A 500 would file an ordinary authorization outcome as a server
-      # fault and count against the API's error rate.
-      _raise_http_exception(
-        status_code=status.HTTP_403_FORBIDDEN,
-        error_code="org_not_found",
-        message=(
-          "You are not a member of any organization, so there is nothing to "
-          "bill a new graph to. Please contact support."
-        ),
-      )
+    try:
+      # Check org's graph limits
+      user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+      if not user_orgs:
+        # Reachable, not exceptional: removal from a last org leaves an account
+        # with no membership, and every other org-resolving surface answers 403
+        # here. A 500 would file an ordinary authorization outcome as a server
+        # fault and count against the API's error rate.
+        _raise_http_exception(
+          status_code=status.HTTP_403_FORBIDDEN,
+          error_code="org_not_found",
+          message=(
+            "You are not a member of any organization, so there is nothing to "
+            "bill a new graph to. Please contact support."
+          ),
+        )
 
-    membership = user_orgs[0]
-    org_id = membership.org_id
+      membership = user_orgs[0]
+      org_id = membership.org_id
 
-    # Creating a graph starts a recurring charge on the org's payment method
-    # and consumes org quota, so it is an owner/admin action. Members cannot
-    # add a payment method either (checkout is owner-only), so without this a
-    # member could commit the org's stored card without its billing
-    # administrators knowing until the invoice arrived.
-    if not membership.can_create_graphs():
-      _raise_http_exception(
-        status_code=status.HTTP_403_FORBIDDEN,
-        error_code="graph_creation_requires_admin",
-        message=(
-          "Only organization owners and admins can create graphs. "
-          "Ask an owner or admin to create one, or to grant you access to "
-          "an existing graph."
-        ),
-      )
+      # Creating a graph starts a recurring charge on the org's payment method
+      # and consumes org quota, so it is an owner/admin action. Members cannot
+      # add a payment method either (checkout is owner-only), so without this a
+      # member could commit the org's stored card without its billing
+      # administrators knowing until the invoice arrived.
+      if not membership.can_create_graphs():
+        _raise_http_exception(
+          status_code=status.HTTP_403_FORBIDDEN,
+          error_code="graph_creation_requires_admin",
+          message=(
+            "Only organization owners and admins can create graphs. "
+            "Ask an owner or admin to create one, or to grant you access to "
+            "an existing graph."
+          ),
+        )
 
-    org_limits = OrgLimits.get_or_create_for_org(org_id, db)
+      org_limits = OrgLimits.get_or_create_for_org(org_id, db)
 
-    can_create, reason = org_limits.can_create_graph(db)
-    if not can_create:
-      _raise_http_exception(
-        status_code=status.HTTP_403_FORBIDDEN,
-        error_code="graph_limit_reached",
-        message=reason,
-      )
+      can_create, reason = org_limits.can_create_graph(db)
+      if not can_create:
+        _raise_http_exception(
+          status_code=status.HTTP_403_FORBIDDEN,
+          error_code="graph_limit_reached",
+          message=reason,
+        )
 
-    tier_map = {
-      "ladybug-standard": GraphTier.LADYBUG_STANDARD,
-      "ladybug-large": GraphTier.LADYBUG_LARGE,
-      "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
-    }
-    graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD)
-
-    can_provision, billing_error = check_can_provision_graph(
-      user_id=current_user.id,
-      requested_tier=graph_tier,
-      session=db,
-    )
-    if not can_provision:
-      _raise_http_exception(
-        status_code=status.HTTP_402_PAYMENT_REQUIRED,
-        error_code="payment_required",
-        message=billing_error or "Valid payment method required to create graphs.",
-      )
-
-    is_entity = request.initial_entity is not None
-    entity_data = None
-    if is_entity:
-      entity_data = {
-        **request.initial_entity.model_dump(),
-        "extensions": request.metadata.schema_extensions,
+      tier_map = {
+        "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+        "ladybug-large": GraphTier.LADYBUG_LARGE,
+        "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
       }
+      graph_tier = tier_map.get(
+        request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD
+      )
 
-    logger.info(
-      f"Enqueuing graph creation: user={current_user.id}, "
-      f"type={'entity' if is_entity else 'generic'}, tier={request.instance_tier}"
-    )
+      can_provision, billing_error = check_can_provision_graph(
+        user_id=current_user.id,
+        requested_tier=graph_tier,
+        session=db,
+      )
+      if not can_provision:
+        _raise_http_exception(
+          status_code=status.HTTP_402_PAYMENT_REQUIRED,
+          error_code="payment_required",
+          message=billing_error or "Valid payment method required to create graphs.",
+        )
 
-    response = await enqueue_task(
-      task_type="graph_creation",
-      graph_id=None,
-      user_id=user_id,
-      params={
-        "graph_type": "entity" if is_entity else "generic",
-        "graph_name": request.metadata.graph_name,
-        "tier": request.instance_tier,
-        "schema_extensions": request.metadata.schema_extensions,
-        "custom_schema": request.custom_schema.model_dump()
-        if request.custom_schema
-        else None,
-        "entity_data": entity_data,
-        "create_entity": request.create_entity if is_entity else False,
-        "description": request.metadata.description,
-        "tags": request.tags or [],
-      },
-    )
+      is_entity = request.initial_entity is not None
+      entity_data = None
+      if is_entity:
+        entity_data = {
+          **request.initial_entity.model_dump(),
+          "extensions": request.metadata.schema_extensions,
+        }
 
-    operation_id = response["operation_id"]
-    envelope = wrap_pending(
-      op_name,
-      operation_id=operation_id,
-      partial_result=response,
-      created_by=user_id,
-    )
+      logger.info(
+        f"Enqueuing graph creation: user={current_user.id}, "
+        f"type={'entity' if is_entity else 'generic'}, tier={request.instance_tier}"
+      )
 
-    # Known limitation: cache.put is after enqueue_task. A Valkey failure here
-    # leaves the task dispatched without idempotency protection — the next retry
-    # would dispatch again. Fixing requires a two-phase write (placeholder before
-    # dispatch, update after), which is a systemic change tracked separately.
-    if idempotency_key is not None:
-      await cache.put(user_id, _graph_id, op_name, idempotency_key, envelope, body_fp)
+      response = await enqueue_task(
+        task_type="graph_creation",
+        graph_id=None,
+        user_id=user_id,
+        params={
+          "graph_type": "entity" if is_entity else "generic",
+          "graph_name": request.metadata.graph_name,
+          "tier": request.instance_tier,
+          "schema_extensions": request.metadata.schema_extensions,
+          "custom_schema": request.custom_schema.model_dump()
+          if request.custom_schema
+          else None,
+          "entity_data": entity_data,
+          "create_entity": request.create_entity if is_entity else False,
+          "description": request.metadata.description,
+          "tags": request.tags or [],
+        },
+      )
 
-    log_operation_audit(
-      operation_name=op_name,
-      operation_id=operation_id,
-      user_id=user_id,
-      graph_id=_graph_id,
-      duration_ms=0.0,
-      status="pending",
-      idempotency_key=idempotency_key,
-      event="graph.operation",
-    )
-    return envelope
+      operation_id = response["operation_id"]
+      envelope = wrap_pending(
+        op_name,
+        operation_id=operation_id,
+        partial_result=response,
+        created_by=user_id,
+      )
 
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to create graph creation operation: {e}", exc_info=True)
-    raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to create graph creation operation.",
-    )
+      # The pending envelope is bound to the operation: should creation later
+      # fail, the terminal-status hook evicts it so a retry under the same key
+      # dispatches again instead of replaying `pending` for 24h.
+      await idem.record(envelope)
+
+      log_operation_audit(
+        operation_name=op_name,
+        operation_id=operation_id,
+        user_id=user_id,
+        graph_id=_graph_id,
+        duration_ms=0.0,
+        status="pending",
+        idempotency_key=idempotency_key,
+        event="graph.operation",
+      )
+      return envelope
+
+    except HTTPException:
+      raise
+    except Exception as e:
+      logger.error(f"Failed to create graph creation operation: {e}", exc_info=True)
+      raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Failed to create graph creation operation.",
+      )
 
 
 @router.get(

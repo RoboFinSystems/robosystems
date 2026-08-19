@@ -257,12 +257,31 @@ class TestIdempotencyCache:
       store[key] = value
       return True
 
-    async def _delete(key: str) -> None:
-      store.pop(key, None)
+    async def _delete(*keys: str) -> int:
+      return sum(1 for key in keys if store.pop(key, None) is not None)
+
+    # Sets back the operation → envelope-key bindings; a set is stored in the
+    # same dict so `store` stays the single view of what the cache holds.
+    async def _sadd(key: str, *members: str) -> int:
+      current = store.setdefault(key, set())
+      assert isinstance(current, set)
+      added = len(set(members) - current)
+      current.update(members)
+      return added
+
+    async def _smembers(key: str) -> set[str]:
+      current = store.get(key)
+      return set(current) if isinstance(current, set) else set()
+
+    async def _expire(key: str, seconds: int) -> bool:
+      return key in store
 
     mock_client.get = AsyncMock(side_effect=_get)
     mock_client.set = AsyncMock(side_effect=_set)
     mock_client.delete = AsyncMock(side_effect=_delete)
+    mock_client.sadd = AsyncMock(side_effect=_sadd)
+    mock_client.smembers = AsyncMock(side_effect=_smembers)
+    mock_client.expire = AsyncMock(side_effect=_expire)
 
     return IdempotencyCache(client=mock_client), mock_client, store
 
@@ -422,6 +441,75 @@ class TestIdempotencyCache:
 # ---------------------------------------------------------------------------
 
 
+class TestIdempotencyCacheOperationBinding:
+  """`bind_operation` / `invalidate_operation` — the link between an async
+  operation and the pending envelope its route cached, which the SSE
+  terminal-status hook uses to evict that envelope on failure."""
+
+  def _make_cache(self):
+    return TestIdempotencyCache()._make_cache()
+
+  @pytest.mark.asyncio
+  async def test_invalidate_evicts_every_bound_envelope_and_the_binding(
+    self,
+  ) -> None:
+    cache, client, store = self._make_cache()
+    env = wrap_pending("create-backup", operation_id="op_1")
+    # Two callers, two keys, one deduplicated worker task: both envelopes hang
+    # off the same operation and both must go when it fails.
+    await cache.put("u1", "g", "create-backup", "k1", env, "fp")
+    await cache.put("u2", "g", "create-backup", "k2", env, "fp")
+    key1 = compute_idempotency_cache_key("u1", "g", "create-backup", "k1")
+    key2 = compute_idempotency_cache_key("u2", "g", "create-backup", "k2")
+    await cache.bind_operation("op_1", key1)
+    await cache.bind_operation("op_1", key2)
+    # The binding lives as long as the envelope it points at.
+    assert client.expire.call_args.args[1] == IDEMPOTENCY_TTL_SECONDS
+
+    assert await cache.invalidate_operation("op_1") == 2
+    assert store == {}
+    assert await cache.get("u1", "g", "create-backup", "k1", "fp") is None
+    assert await cache.get("u2", "g", "create-backup", "k2", "fp") is None
+
+  @pytest.mark.asyncio
+  async def test_invalidate_unknown_operation_is_a_noop(self) -> None:
+    cache, client, store = self._make_cache()
+    env = wrap_pending("materialize", operation_id="op_other")
+    await cache.put("u", "g", "materialize", "k", env, "fp")
+    assert await cache.invalidate_operation("op_never_bound") == 0
+    # An unrelated envelope is untouched and nothing was deleted.
+    assert len(store) == 1
+    client.delete.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_module_level_invalidate_uses_the_shared_cache(self) -> None:
+    cache, _client, store = self._make_cache()
+    env = wrap_pending("create-graph", operation_id="op_2")
+    await cache.put("u", "new", "create-graph", "k", env, "fp")
+    await cache.bind_operation(
+      "op_2", compute_idempotency_cache_key("u", "new", "create-graph", "k")
+    )
+    with patch.object(middleware_module, "get_idempotency_cache", return_value=cache):
+      assert await middleware_module.invalidate_operation_idempotency("op_2") == 1
+    assert store == {}
+
+  def test_sync_invalidate_mirrors_the_async_path(self) -> None:
+    from unittest.mock import MagicMock
+
+    store: dict[str, Any] = {"idem:g:op:abc": "{}", "op-idem:op_3": {"idem:g:op:abc"}}
+    client = MagicMock()
+    client.smembers = MagicMock(side_effect=lambda k: set(store.get(k, set())))
+    client.delete = MagicMock(
+      side_effect=lambda *keys: sum(1 for k in keys if store.pop(k, None))
+    )
+    with patch.object(
+      middleware_module, "_get_sync_idempotency_client", return_value=client
+    ):
+      assert middleware_module.invalidate_operation_idempotency_sync("op_3") == 1
+      assert store == {}
+      assert middleware_module.invalidate_operation_idempotency_sync("op_3") == 0
+
+
 class TestLogOperationAudit:
   """Verifies the audit log payload shape.
 
@@ -465,6 +553,41 @@ class TestLogOperationAudit:
     assert "idempotency_key_hash" in audit
     assert audit["idempotency_key_hash"] != "caller-provided-key"
     assert len(audit["idempotency_key_hash"]) == 16
+    # Outside a request there is no correlation or credential to attribute.
+    assert "request_id" not in audit
+    assert "api_key_prefix" not in audit
+
+  def test_inside_a_request_the_credential_and_request_id_are_attributed(
+    self,
+  ) -> None:
+    from robosystems.security.request_context import (
+      RequestPrincipal,
+      bind_principal,
+      bind_request_id,
+      reset_principal,
+      reset_request_id,
+    )
+
+    rid = bind_request_id("req_audit")
+    ptoken = bind_principal(RequestPrincipal("usr_abc", "api_key", "rfs_abcd"))
+    try:
+      with patch.object(middleware_module.logger, "info") as info_mock:
+        log_operation_audit(
+          operation_name="close-period",
+          operation_id="op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          user_id="usr_abc",
+          graph_id="kg1",
+          duration_ms=1.0,
+          status="completed",
+        )
+    finally:
+      reset_principal(ptoken)
+      reset_request_id(rid)
+
+    audit = self._get_audit_payload(info_mock)
+    assert audit["request_id"] == "req_audit"
+    assert audit["auth_method"] == "api_key"
+    assert audit["api_key_prefix"] == "rfs_abcd"
 
   def test_failed_logs_at_error_with_error_field(self) -> None:
     with (
@@ -533,6 +656,8 @@ class _FakeIdempotencyCache:
     self.store: dict[tuple[str, str, str, str], tuple[OperationEnvelope, str]] = {}
     # Keys reserved by an in-flight run: key → body fingerprint.
     self.pending: dict[tuple[str, str, str, str], str] = {}
+    # operation_id → envelope cache keys bound to it.
+    self.bindings: dict[str, set[str]] = {}
 
   async def get(
     self,
@@ -592,6 +717,9 @@ class _FakeIdempotencyCache:
     self.pending.pop(k, None)
     self.store[k] = (envelope, body_fingerprint)
 
+  async def bind_operation(self, operation_id: str, cache_key: str) -> None:
+    self.bindings.setdefault(operation_id, set()).add(cache_key)
+
 
 def _make_ctx(**overrides: Any) -> OperationContext:
   defaults: dict[str, Any] = {
@@ -604,6 +732,180 @@ def _make_ctx(**overrides: Any) -> OperationContext:
   }
   defaults.update(overrides)
   return OperationContext(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# check_idempotency / idempotent_dispatch — the async (pending) route guard
+# ---------------------------------------------------------------------------
+
+
+class TestCheckIdempotency:
+  """`check_idempotency` claims the key on a miss, exactly as the sync
+  dispatcher does, so two identical async requests cannot both enqueue."""
+
+  @pytest.mark.asyncio
+  async def test_miss_reserves_the_key(self) -> None:
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      result = await middleware_module.check_idempotency(
+        cache, "usr_1", "kg1", "create-backup", "key-1", "fp"
+      )
+    assert result is None
+    assert ("usr_1", "kg1", "create-backup", "key-1") in cache.pending
+
+  @pytest.mark.asyncio
+  async def test_concurrent_second_call_is_409_in_progress(self) -> None:
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      await middleware_module.check_idempotency(
+        cache, "usr_1", "kg1", "create-backup", "key-1", "fp"
+      )
+    with (
+      patch.object(middleware_module.logger, "info"),
+      patch.object(middleware_module.logger, "error"),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await middleware_module.check_idempotency(
+          cache, "usr_1", "kg1", "create-backup", "key-1", "fp"
+        )
+    assert exc_info.value.status_code == 409
+    assert "still in progress" in str(exc_info.value.detail)
+
+  @pytest.mark.asyncio
+  async def test_lost_reservation_replays_a_recorded_envelope(self) -> None:
+    """The other holder recorded its envelope between our read and our claim."""
+    cache = _FakeIdempotencyCache()
+    recorded = wrap_pending("create-backup", operation_id="op_first")
+
+    original_reserve = cache.reserve
+
+    async def _lose_the_race(*args: Any, **kwargs: Any) -> bool:
+      await cache.put("usr_1", "kg1", "create-backup", "key-1", recorded, "fp")
+      return False
+
+    cache.reserve = _lose_the_race  # type: ignore[method-assign]
+    try:
+      with patch.object(middleware_module.logger, "info"):
+        replay = await middleware_module.check_idempotency(
+          cache, "usr_1", "kg1", "create-backup", "key-1", "fp"
+        )
+    finally:
+      cache.reserve = original_reserve  # type: ignore[method-assign]
+    assert replay is not None
+    assert replay.operation_id == "op_first"
+    assert replay.idempotent_replay is True
+
+  @pytest.mark.asyncio
+  async def test_lost_reservation_without_envelope_is_409(self) -> None:
+    """The other holder released between our two reads (its dispatch failed)."""
+    cache = _FakeIdempotencyCache()
+
+    async def _lose_the_race(*args: Any, **kwargs: Any) -> bool:
+      return False
+
+    cache.reserve = _lose_the_race  # type: ignore[method-assign]
+    with (
+      patch.object(middleware_module.logger, "info"),
+      patch.object(middleware_module.logger, "error"),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await middleware_module.check_idempotency(
+          cache, "usr_1", "kg1", "create-backup", "key-1", "fp"
+        )
+    assert exc_info.value.status_code == 409
+
+  @pytest.mark.asyncio
+  async def test_no_key_neither_reads_nor_reserves(self) -> None:
+    cache = _FakeIdempotencyCache()
+    assert (
+      await middleware_module.check_idempotency(
+        cache, "usr_1", "kg1", "create-backup", None, "fp"
+      )
+      is None
+    )
+    assert cache.pending == {}
+
+
+class TestIdempotentDispatch:
+  """The context manager every async route wraps its enqueue in."""
+
+  def _args(self, cache: _FakeIdempotencyCache, key: str | None = "key-1"):
+    return (cache, "usr_1", "kg1", "create-backup", key, "fp")
+
+  @pytest.mark.asyncio
+  async def test_records_and_binds_a_pending_envelope(self) -> None:
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      async with middleware_module.idempotent_dispatch(*self._args(cache)) as idem:
+        assert idem.replay is None
+        envelope = wrap_pending("create-backup", operation_id="op_1")
+        await idem.record(envelope)
+    k = ("usr_1", "kg1", "create-backup", "key-1")
+    assert k not in cache.pending
+    assert cache.store[k][0].operation_id == "op_1"
+    assert cache.bindings == {
+      "op_1": {compute_idempotency_cache_key("usr_1", "kg1", "create-backup", "key-1")}
+    }
+
+  @pytest.mark.asyncio
+  async def test_completed_envelope_is_recorded_but_not_bound(self) -> None:
+    """A dry-run or inline path completes in the envelope; there is no
+    operation whose failure could later evict it."""
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      async with middleware_module.idempotent_dispatch(*self._args(cache)) as idem:
+        await idem.record(wrap_completed("create-backup", {"ok": True}))
+    assert len(cache.store) == 1
+    assert cache.bindings == {}
+
+  @pytest.mark.asyncio
+  async def test_dispatch_failure_releases_the_reservation(self) -> None:
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(RuntimeError, match="queue down"):
+        async with middleware_module.idempotent_dispatch(*self._args(cache)):
+          raise RuntimeError("queue down")
+    assert cache.pending == {}
+    assert cache.store == {}
+    # ...so the retry executes rather than being told "in progress".
+    with patch.object(middleware_module.logger, "info"):
+      async with middleware_module.idempotent_dispatch(*self._args(cache)) as idem:
+        assert idem.replay is None
+
+  @pytest.mark.asyncio
+  async def test_validation_4xx_before_dispatch_releases_too(self) -> None:
+    cache = _FakeIdempotencyCache()
+    with patch.object(middleware_module.logger, "info"):
+      with pytest.raises(HTTPException):
+        async with middleware_module.idempotent_dispatch(*self._args(cache)):
+          raise HTTPException(status_code=403, detail="not admin")
+    assert cache.pending == {}
+
+  @pytest.mark.asyncio
+  async def test_replay_path_does_not_touch_the_key(self) -> None:
+    cache = _FakeIdempotencyCache()
+    recorded = wrap_pending("create-backup", operation_id="op_first")
+    await cache.put("usr_1", "kg1", "create-backup", "key-1", recorded, "fp")
+    with patch.object(middleware_module.logger, "info"):
+      async with middleware_module.idempotent_dispatch(*self._args(cache)) as idem:
+        assert idem.replay is not None
+        assert idem.replay.operation_id == "op_first"
+        assert idem.replay.idempotent_replay is True
+    # Still cached, still not reserved by anyone.
+    assert len(cache.store) == 1
+    assert cache.pending == {}
+
+  @pytest.mark.asyncio
+  async def test_no_key_is_a_pass_through(self) -> None:
+    cache = _FakeIdempotencyCache()
+    async with middleware_module.idempotent_dispatch(
+      *self._args(cache, key=None)
+    ) as idem:
+      assert idem.replay is None
+      await idem.record(wrap_pending("create-backup", operation_id="op_1"))
+    assert cache.store == {}
+    assert cache.pending == {}
+    assert cache.bindings == {}
 
 
 class TestExecuteOperationHappyPath:

@@ -107,6 +107,44 @@ class OperationMetadata:
     return asdict(self)
 
 
+_TERMINAL_FAILURE_STATUSES = frozenset(
+  {OperationStatus.FAILED, OperationStatus.CANCELLED}
+)
+
+
+async def _invalidate_idempotency(operation_id: str) -> None:
+  """Evict the idempotency envelope an async route cached for this operation.
+
+  A route that enqueues work caches a ``pending`` envelope under the caller's
+  Idempotency-Key for 24h. Once the operation fails or is cancelled that
+  envelope would replay ``pending`` to every retry with the same key, so the
+  terminal transition evicts it. Imported lazily: the operations module
+  pulls in FastAPI, which this store must not require.
+  """
+  from robosystems.middleware.operations import invalidate_operation_idempotency
+
+  try:
+    await invalidate_operation_idempotency(operation_id)
+  except Exception as exc:
+    logger.warning(
+      f"Idempotency eviction failed for terminal operation {operation_id}: {exc}"
+    )
+
+
+def _invalidate_idempotency_sync(operation_id: str) -> None:
+  """Sync counterpart to ``_invalidate_idempotency`` for ``store_event_sync``."""
+  from robosystems.middleware.operations import (
+    invalidate_operation_idempotency_sync,
+  )
+
+  try:
+    invalidate_operation_idempotency_sync(operation_id)
+  except Exception as exc:
+    logger.warning(
+      f"Idempotency eviction failed for terminal operation {operation_id}: {exc}"
+    )
+
+
 class SSEEventStorage:
   """Redis-backed SSE event store with automatic TTL expiry.
 
@@ -317,6 +355,7 @@ class SSEEventStorage:
 
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
+    terminal_failure = False
 
     with redis.pipeline() as pipe:
       try:
@@ -353,6 +392,7 @@ class SSEEventStorage:
         ):
           metadata.status = new_status
           metadata.updated_at = datetime.now(UTC).isoformat()
+          terminal_failure = new_status in _TERMINAL_FAILURE_STATUSES
 
           if event_type == EventType.OPERATION_COMPLETED:
             # Merge, so a graph_id recorded by the Dagster job survives.
@@ -375,6 +415,9 @@ class SSEEventStorage:
         logger.debug(
           f"[SYNC] Metadata update skipped for {operation_id} due to concurrent modification"
         )
+
+    if terminal_failure:
+      _invalidate_idempotency_sync(operation_id)
 
   def update_operation_result_sync(
     self, operation_id: str, result: dict[str, Any]
@@ -455,6 +498,7 @@ class SSEEventStorage:
 
     redis = await self._get_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
+    terminal_failure = False
 
     try:
       await redis.watch(metadata_key)
@@ -490,6 +534,7 @@ class SSEEventStorage:
       ):
         metadata.status = new_status
         metadata.updated_at = datetime.now(UTC).isoformat()
+        terminal_failure = new_status in _TERMINAL_FAILURE_STATUSES
 
         if event_type == EventType.OPERATION_COMPLETED:
           new_result = data.get("result") or {}
@@ -513,6 +558,9 @@ class SSEEventStorage:
       logger.debug(
         f"Metadata update skipped for {operation_id} due to concurrent modification"
       )
+
+    if terminal_failure:
+      await _invalidate_idempotency(operation_id)
 
   async def get_events(
     self, operation_id: str, from_sequence: int = 0, limit: int | None = None
