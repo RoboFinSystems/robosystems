@@ -413,6 +413,13 @@ async def deprovision_graph(
       status=(
         "already_deprovisioned"
         if result.status == "already_deprovisioned"
+        # A database-delete failure leaves the graph stranded (not flipped to
+        # DEPROVISIONED) for the teardown sensor to retry — reporting
+        # "deprovisioned" would misdescribe a graph that is still live. A
+        # "partial" whose database WAS deleted (e.g. a registry-dealloc lag) is
+        # genuinely deprovisioned.
+        else "partial"
+        if not result.database_deleted
         else "deprovisioned"
       ),
       database_deleted=result.database_deleted,
