@@ -52,21 +52,21 @@ from robosystems.logger import logger
 
 
 def _open_platform_session():
-  """Open a short-lived platform-DB session.
+  """Open a short-lived, INDEPENDENT platform-DB session.
 
-  MCP tools don't receive a FastAPI-injected session, so each helper
-  opens its own generator-backed session and closes it on exit.
+  MCP tools don't receive a FastAPI-injected session. This opens its own
+  ``SessionFactory()`` session rather than the request-scoped registry: an MCP
+  tool body runs inside a request and inside a runner thread that inherited the
+  request's contextvars, so the scoped session would resolve to the endpoint's
+  own Session and closing it here would tear it down mid-request. Returns
+  ``(session, close)``.
   """
-  from robosystems.database import get_db_session
+  from robosystems.database import SessionFactory
 
-  gen = get_db_session()
-  session = next(gen)
+  session = SessionFactory()
 
   def close():
-    try:
-      next(gen)
-    except StopIteration:
-      pass
+    session.close()
 
   return session, close
 

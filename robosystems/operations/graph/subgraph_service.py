@@ -77,10 +77,12 @@ class SubgraphService:
       )
 
     from ...config.graph_tier import GraphTierConfig
-    from ...database import get_db_session
+    from ...database import SessionFactory
     from ...models.core.graph import Graph
 
-    db = next(get_db_session())
+    # Independent session (see platform_session docs): the scoped session
+    # would be the caller's request session and close() would tear it down.
+    db = SessionFactory()
     try:
       parent_graph = db.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
       if not parent_graph:
@@ -117,10 +119,11 @@ class SubgraphService:
 
     try:
       from robosystems.config import env
-      from robosystems.database import get_db_session
+      from robosystems.database import SessionFactory
       from robosystems.models.core.graph import Graph
 
-      session = next(get_db_session())
+      # Independent session (see platform_session docs).
+      session = SessionFactory()
       parent_graph_record = (
         session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
       )
@@ -277,7 +280,7 @@ class SubgraphService:
     databases no registry knows about. A failed ``fork_parent`` does *not*
     unwind the subgraph; it is reported in the returned ``fork_status``.
     """
-    from ...database import get_db_session
+    from ...database import SessionFactory
     from ...models.core.graph import Graph
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
@@ -313,7 +316,8 @@ class SubgraphService:
       logger.error(f"Failed to create LadybugDB database for subgraph: {e}")
       raise
 
-    db = next(get_db_session())
+    # Independent session (see platform_session docs).
+    db = SessionFactory()
     try:
       existing_subgraphs = (
         db.query(Graph)
