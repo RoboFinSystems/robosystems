@@ -571,7 +571,7 @@ async def call_mcp_tool(
           "tool_name": tool_call.name,
           "access_type": access_type,
           "is_write": is_write_query,
-          "api_key_prefix": getattr(full_request.state, "api_key_prefix", None),
+          "api_key_prefix": key_prefix,
           "arguments_size": len(str(tool_call.arguments)) if tool_call.arguments else 0,
         },
       },

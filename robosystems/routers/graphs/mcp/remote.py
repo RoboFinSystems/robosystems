@@ -746,7 +746,7 @@ async def _handle_tools_call(
       "metadata": {
         "tool_name": name,
         "access_type": access_type,
-        "api_key_prefix": getattr(request.state, "api_key_prefix", None),
+        "api_key_prefix": key_prefix,
       },
     },
   )
