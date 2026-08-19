@@ -14,18 +14,26 @@ This mirrors the post-authentication portion of
 
 from __future__ import annotations
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 
 from robosystems.db.extensions import LIBRARY_GRAPH_ID
 from robosystems.models.core import User
 
 
-def check_graph_access(user: User, graph_id: str) -> None:
+def check_graph_access(
+  user: User, graph_id: str, request: Request | None = None
+) -> None:
   """Verify the authenticated user has read access to `graph_id`, else 403.
 
   Covers both shared repositories (SEC, etc.) and user graphs. The `library`
   sentinel routes to the taxonomy library, shared reference material that
   any authenticated user may read, so no per-graph ACL applies to it.
+
+  A user-graph denial is audited (`AuthorizationDenied`) the way the REST
+  and MCP gates audit theirs: an authenticated account querying graphs it
+  does not belong to is the enumeration signal the detective control is
+  for, and a bare 403 leaves no trail. Repository denials are already
+  audited inside `validate_repository_access`.
   """
   if graph_id == LIBRARY_GRAPH_ID:
     return
@@ -48,6 +56,18 @@ def check_graph_access(user: User, graph_id: str) -> None:
     has_access = _db_check_graph_access(user_id, graph_id)
 
   if not has_access:
+    if not is_shared_repository_or_subgraph(graph_id):
+      from robosystems.security import SecurityAuditLogger
+
+      SecurityAuditLogger.log_authorization_denied(
+        user_id=user_id,
+        resource=f"graph_database:{graph_id}",
+        action="read",
+        ip_address=(
+          request.client.host if request is not None and request.client else None
+        ),
+        endpoint=f"/extensions/{graph_id}/graphql",
+      )
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail=f"Access denied to graph: {graph_id}",

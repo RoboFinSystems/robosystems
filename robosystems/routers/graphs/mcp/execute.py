@@ -554,6 +554,10 @@ async def call_mcp_tool(
     operation_type = _get_mcp_operation_type(graph_id)
     repository = await get_graph_repository(graph_id, operation_type)
 
+    # The structured formatter keeps only its known top-level fields plus
+    # `metadata`; the tool name and access class live there so the read-tool
+    # trail (who ran which tool on which graph, under which credential) is
+    # searchable rather than buried in the message text.
     api_logger.info(
       f"MCP tool execution started: {tool_call.name}",
       extra={
@@ -561,11 +565,13 @@ async def call_mcp_tool(
         "action": "tool_started",
         "user_id": str(current_user.id),
         "database": graph_id,
-        "tool_name": tool_call.name,
-        "access_type": access_type,
-        "is_write": is_write_query,
+        "request_id": getattr(full_request.state, "request_id", None),
         "metadata": {
           "endpoint": "/v1/graphs/{graph_id}/mcp/call-tool",
+          "tool_name": tool_call.name,
+          "access_type": access_type,
+          "is_write": is_write_query,
+          "api_key_prefix": getattr(full_request.state, "api_key_prefix", None),
           "arguments_size": len(str(tool_call.arguments)) if tool_call.arguments else 0,
         },
       },

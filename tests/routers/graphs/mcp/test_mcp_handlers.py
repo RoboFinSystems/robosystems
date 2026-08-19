@@ -132,6 +132,31 @@ class TestValidateMcpAccess:
       assert exc_info.value.status_code == 403
 
   @pytest.mark.asyncio
+  async def test_user_graph_read_denial_is_audited(self):
+    """A read on a graph the caller is not a member of emits the same
+    AuthorizationDenied event the write gate does — the enumeration signal."""
+    with (
+      patch(
+        "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_access",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as denied,
+    ):
+      with pytest.raises(HTTPException):
+        await validate_mcp_access(
+          "kg01234567890abcdef", _make_mock_user(), Mock(), "read"
+        )
+    denied.assert_called_once()
+    assert denied.call_args.kwargs["action"] == "read"
+    assert denied.call_args.kwargs["resource"] == "kg01234567890abcdef"
+
+  @pytest.mark.asyncio
   async def test_user_graph_write_requires_write_role(self):
     """Write operations on a user graph require the write role, not bare membership."""
     with (

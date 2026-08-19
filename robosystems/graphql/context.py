@@ -43,6 +43,7 @@ from robosystems.db.extensions import LIBRARY_GRAPH_ID
 from robosystems.graphql.auth import check_graph_access
 from robosystems.middleware.auth.dependencies import (
   API_KEY_HEADER,
+  _stash_api_key_identity,
   get_current_user,
 )
 from robosystems.middleware.auth.utils import validate_api_key_with_graph
@@ -120,6 +121,10 @@ async def get_context(
       if user is None:
         # Genuinely invalid, or a key scoped to a different graph → real 401.
         raise
+      # `get_current_user` publishes the principal on its own success path;
+      # this rescue path authenticated outside it, so publish here or the
+      # request stays unattributed downstream.
+      _stash_api_key_identity(request, api_key, user)
     else:
       # Bad/expired Bearer token → real transport-layer auth failure.
       raise
@@ -154,7 +159,7 @@ async def get_context(
   schema_extensions: tuple[str, ...] = ()
   graph_type: str = ""
   if user is not None:
-    check_graph_access(user, graph_id)
+    check_graph_access(user, graph_id, request)
     # Library sentinel — no graph row to load, no per-graph metadata.
     # The `library` extension is always "enabled" for this sentinel.
     if graph_id == LIBRARY_GRAPH_ID:

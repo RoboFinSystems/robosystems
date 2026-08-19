@@ -149,8 +149,12 @@ class TestGetContextAuthContract:
     assert ctx["user"] is user
     # Re-validated against THIS graph (the URL scope), reusing the request db.
     mock_scoped.assert_called_once_with("rfsc_scoped_to_this_graph", GRAPH_ID, db)
+    # The rescue path authenticated outside `get_current_user`, so it must
+    # publish the principal itself or the request stays unattributed.
+    assert request.state.user_id == "usr_owner"
+    assert request.state.api_key_prefix == "rfsc_sco"
     # Graph access is still enforced on top of key validation.
-    mock_check.assert_called_once_with(user, GRAPH_ID)
+    mock_check.assert_called_once_with(user, GRAPH_ID, request)
 
   async def test_bearer_failure_does_not_trigger_graph_scoped_retry(self):
     """The graph-scoped retry is for pure API-key requests only. A failed
@@ -219,7 +223,7 @@ class TestGetContextAuthContract:
     assert ctx["graph_id"] == GRAPH_ID
     assert ctx["schema_extensions"] == ("roboledger", "roboinvestor")
     assert ctx["graph_type"] == "entity"
-    mock_check.assert_called_once_with(user, GRAPH_ID)
+    mock_check.assert_called_once_with(user, GRAPH_ID, request)
     mock_meta.assert_called_once_with(GRAPH_ID, db)
 
   async def test_valid_credentials_but_no_graph_access_raises_403(self):
@@ -413,7 +417,7 @@ class TestSubgraphGuard:
       )
 
     assert ctx["graph_id"] == "sec"
-    mock_check.assert_called_once_with(user, "sec")
+    mock_check.assert_called_once_with(user, "sec", request)
 
 
 @pytest.mark.asyncio
@@ -483,3 +487,71 @@ class TestGetContextLifecycleGate:
 
     assert ctx["graph_type"] == "library"
     gate.assert_not_called()
+
+
+class TestCheckGraphAccessAudit:
+  """A user-graph read denial through the GraphQL gate is audited; repository
+  denials are audited by `validate_repository_access` itself, so the gate
+  must not double-count them."""
+
+  def test_user_graph_denial_emits_authorization_denied(self):
+    from robosystems.graphql.auth import check_graph_access
+
+    user = MagicMock()
+    user.id = "usr_probe"
+    request = _make_request(headers={})
+    request.client.host = "203.0.113.9"
+    with (
+      patch(
+        "robosystems.middleware.auth.dependencies._db_check_graph_access",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as denied,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        check_graph_access(user, GRAPH_ID, request)
+    assert exc.value.status_code == 403
+    denied.assert_called_once_with(
+      user_id="usr_probe",
+      resource=f"graph_database:{GRAPH_ID}",
+      action="read",
+      ip_address="203.0.113.9",
+      endpoint=f"/extensions/{GRAPH_ID}/graphql",
+    )
+
+  def test_repository_denial_is_not_double_counted(self):
+    from robosystems.graphql.auth import check_graph_access
+
+    user = MagicMock()
+    user.id = "usr_probe"
+    with (
+      patch(
+        "robosystems.middleware.graph.utils.MultiTenantUtils.validate_repository_access",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as denied,
+    ):
+      with pytest.raises(HTTPException):
+        check_graph_access(user, "sec", _make_request(headers={}))
+    denied.assert_not_called()
+
+  def test_granted_access_emits_nothing(self):
+    from robosystems.graphql.auth import check_graph_access
+
+    user = MagicMock()
+    user.id = "usr_member"
+    with (
+      patch(
+        "robosystems.middleware.auth.dependencies._db_check_graph_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as denied,
+    ):
+      check_graph_access(user, GRAPH_ID, _make_request(headers={}))
+    denied.assert_not_called()

@@ -234,6 +234,23 @@ Failed API-key validation and failed graph access return the *same* 403 with
 the same message. That conflation is intentional — it denies an attacker an
 oracle for whether a key is valid.
 
+**Read denials are audited too.** The GraphQL gate (`graphql/auth.py`) and the
+MCP gate (`validate_mcp_access(..., "read")`) emit `AuthorizationDenied` when
+an authenticated account is refused a user graph, so an account probing graphs
+it does not belong to trips the same detective control as a refused write.
+Repository denials are audited inside `validate_repository_access`.
+
+**Who acted, exactly.** Every authentication success — JWT and API key, on
+every dependency — publishes the caller through
+`security/request_context.py::publish_principal`: onto `request.state`
+(`user_id` / `auth_user_id` / `auth_method` / `api_key_prefix`) for the
+access log and the rate limiter, and into a request-scoped `ContextVar` that
+the operation audit line and every `SECURITY_AUDIT` event read at write time
+(`request_id`, `auth_method`, `api_key_prefix`). The access-log middleware
+binds `request_id` before the route runs and reads `user_id` after it, so the
+line names the caller. A new authentication branch must publish the principal
+or its requests are unattributed downstream.
+
 ## Caching
 
 `cache.py` caches both positive and negative results in Valkey, keyed by the

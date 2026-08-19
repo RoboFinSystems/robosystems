@@ -105,6 +105,17 @@ async def validate_mcp_access(
           detail=f"Write access denied to graph {graph_id}; your role is read-only.",
         )
     elif not GraphUser.user_has_access(current_user.id, graph_id, db):
+      # A read attempt on a graph the caller is not a member of is the
+      # enumeration signal — audited like the write gate above, so a probe
+      # trips the same detective control rather than only a 403.
+      from robosystems.security import SecurityAuditLogger
+
+      SecurityAuditLogger.log_authorization_denied(
+        user_id=str(current_user.id),
+        resource=graph_id,
+        action="read",
+        endpoint="mcp",
+      )
       raise HTTPException(status_code=403, detail=f"Access denied to graph {graph_id}")
 
     from robosystems.middleware.billing.enforcement import require_graph_access
