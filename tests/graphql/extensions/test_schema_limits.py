@@ -65,9 +65,28 @@ class TestAliasLimiter:
 class TestRealSchemaWiring:
   """The limiters must actually be attached to the served schema."""
 
-  def test_real_schema_configures_four_extensions(self) -> None:
-    # 3 query-bounding limiters + the OpenTelemetry tracing extension.
-    assert len(real_schema.extensions) == 4
+  def test_real_schema_configures_six_extensions(self) -> None:
+    # 3 query-bounding limiters + OpenTelemetry tracing + the two execution
+    # guards (resolver offload, error masking).
+    assert len(real_schema.extensions) == 6
+
+  def test_offload_is_outside_tracing_and_masking_is_last(self) -> None:
+    """Resolve hooks compose with the last extension outermost, so the offload
+    must follow tracing for the span to wrap the work in the thread."""
+    from strawberry.extensions.tracing.opentelemetry import (
+      OpenTelemetryExtensionSync,
+    )
+
+    from robosystems.graphql.execution import (
+      MaskUnexpectedErrors,
+      OffloadSyncResolvers,
+    )
+
+    ordered = [ext for ext in real_schema.extensions if isinstance(ext, type)]
+    assert ordered.index(OpenTelemetryExtensionSync) < ordered.index(
+      OffloadSyncResolvers
+    )
+    assert ordered[-1] is MaskUnexpectedErrors
 
   def test_real_schema_rejects_overdeep_query(self) -> None:
     """Depth validation runs before resolvers, so no auth context is needed.
