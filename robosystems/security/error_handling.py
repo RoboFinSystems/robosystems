@@ -6,6 +6,7 @@ a status code derived from the error's classification, so an error never
 reveals database, path, or configuration internals.
 """
 
+import re
 from typing import Any, NoReturn
 
 from fastapi import HTTPException, status
@@ -248,6 +249,27 @@ def is_safe_to_expose(detail_message: str) -> bool:
   ]
 
   return not any(pattern in detail_lower for pattern in sensitive_patterns)
+
+
+_CONNSTR_PASSWORD_RE = re.compile(r"password=\S+")
+_URL_CRED_RE = re.compile(r"(postgres(?:ql)?://[^:/@\s]+:)[^@\s]+@")
+
+
+def redact_connection_secrets(text: str) -> str:
+  """Redact database credentials from an error string, keeping the rest.
+
+  The extensions materializer interpolates a libpq connstr (``password=…``)
+  into the ``postgres_scan()`` SQL it ships to the graph_api; a DuckDB error
+  that echoes the failing statement would otherwise carry the RDS master
+  credential into a tenant-visible operation result (``result.errors``) and the
+  logs. This scrubs the secret and leaves the diagnostic text intact — unlike
+  :func:`sanitize_error_detail`, which would blank the whole message.
+  """
+  if not text:
+    return text
+  text = _CONNSTR_PASSWORD_RE.sub("password=***", text)
+  text = _URL_CRED_RE.sub(r"\1***@", text)
+  return text
 
 
 def sanitize_error_detail(detail_message: str) -> str:
