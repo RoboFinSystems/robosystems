@@ -313,15 +313,19 @@ class UserRepositoryCredits(Base):
     drained = Decimal(str(drained_row.drained))
     shortfall = amount - drained
 
+    # Built-ins win on collision: these are the audit-critical fields the drain
+    # exists to record, so a caller-supplied `metadata` key must not overwrite
+    # them. Matches GraphCredits._drain_for_shortfall (the success path above
+    # spreads caller-last, but that record is not audit-critical the way this
+    # one is).
     transaction_metadata = {
+      **(metadata or {}),
       "repository": repository_name,
       "operation_type": operation_type,
       "drained_to_zero": True,
       "true_cost": str(amount),
       "shortfall": str(shortfall),
     }
-    if metadata:
-      transaction_metadata.update(metadata)
 
     UserRepositoryCreditTransaction.create_transaction(
       credit_pool_id=cast(str, self.id),

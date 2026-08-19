@@ -261,6 +261,8 @@ class TestUserRepositoryCredits:
         repository_name="sec",
         operation_type="query",
         session=self.session,
+        # Colliding caller keys must NOT overwrite the audit-critical fields.
+        metadata={"shortfall": "0", "drained_to_zero": False, "note": "keep me"},
       )
 
     # Billing is post-hoc: the call already happened, so the short pool is
@@ -281,8 +283,10 @@ class TestUserRepositoryCredits:
     assert drain_tx is not None
     assert drain_tx.amount == Decimal("-50")
     meta = drain_tx.get_metadata()
+    # Built-ins win over the colliding caller keys; non-colliding keys survive.
     assert meta["drained_to_zero"] is True
     assert Decimal(meta["shortfall"]) == Decimal("50")
+    assert meta["note"] == "keep me"
 
   def test_consume_credits_on_an_empty_pool_records_nothing(self):
     credits = UserRepositoryCredits(
