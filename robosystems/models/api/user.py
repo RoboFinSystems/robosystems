@@ -1,5 +1,7 @@
 """User management API models."""
 
+from typing import Any
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -59,12 +61,27 @@ class UserResponse(BaseModel):
 
 
 class UpdateUserRequest(BaseModel):
-  """Request model for updating user profile."""
+  """Request model for updating user profile.
+
+  Changing ``email`` re-authenticates: a fresh proof (password re-entry or a
+  ``mgmt``-flow passkey assertion) must accompany the request, exactly as
+  passkey enrollment and removal require. Name-only updates need no proof.
+  """
 
   name: str | None = Field(
     None, min_length=1, max_length=100, description="User's display name"
   )
   email: EmailStr | None = Field(None, description="User's email address")
+  reauth_password: str | None = Field(
+    None,
+    description="Password re-entry, required to change email for a "
+    "password-holding account",
+  )
+  reauth_assertion: dict[str, Any] | None = Field(
+    None,
+    description="A fresh mgmt-flow passkey assertion, required to change email "
+    "for a passkey-only account",
+  )
 
 
 class UpdatePasswordRequest(BaseModel):

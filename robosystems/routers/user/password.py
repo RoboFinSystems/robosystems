@@ -1,6 +1,5 @@
 """User password management endpoints."""
 
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -71,9 +70,8 @@ async def update_user_password(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    if not bcrypt.checkpw(
-      request.current_password.encode("utf-8"),
-      user_with_password.password_hash.encode("utf-8"),
+    if not PasswordSecurity.verify_password(
+      request.current_password, user_with_password.password_hash
     ):
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
@@ -112,10 +110,11 @@ async def update_user_password(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    salt = bcrypt.gensalt()
-    new_password_hash = bcrypt.hashpw(
-      request.new_password.encode("utf-8"), salt
-    ).decode("utf-8")
+    # Hash through the policy function (BCRYPT_ROUNDS), not a bare gensalt():
+    # registration and reset both hash at the policy cost, and a bare
+    # bcrypt.gensalt() defaults to cost 12, silently downgrading every account
+    # that changes its password below the configured work factor.
+    new_password_hash = PasswordSecurity.hash_password(request.new_password)
 
     user_in_session = User.get_by_id(user_id, db)
     if not user_in_session:

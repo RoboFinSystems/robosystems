@@ -123,6 +123,49 @@ class TestSESEmailService:
     assert "home" in message["Body"]["Html"]["Data"]
 
   @pytest.mark.asyncio
+  async def test_send_email_changed_notice_goes_to_previous_address(
+    self, ses_service, mock_ses_client
+  ):
+    """The change notice is a security email sent to the OLD address; it names
+    the masked new address and warns the reader if they didn't do it."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-chg"}
+
+    result = await ses_service.send_email_changed_notice(
+      user_email="old@example.com",
+      user_name="Old Owner",
+      new_email="n***@example.com",
+      app="robosystems",
+    )
+
+    assert result is True
+    call_args = mock_ses_client.send_email.call_args
+    assert call_args.kwargs["Destination"]["ToAddresses"] == ["old@example.com"]
+    html = call_args.kwargs["Message"]["Body"]["Html"]["Data"]
+    assert "n***@example.com" in html
+    assert "changed" in call_args.kwargs["Message"]["Subject"]["Data"].lower()
+    assert "didn't" in html or "contact support" in html.lower()
+
+  @pytest.mark.asyncio
+  async def test_send_email_changed_notice_escapes_user_name(
+    self, ses_service, mock_ses_client
+  ):
+    """user_name is attacker-controllable on a takeover — it must be escaped
+    so the very address change that triggered the email can't inject markup."""
+    mock_ses_client.send_email.return_value = {"MessageId": "msg-chg2"}
+
+    await ses_service.send_email_changed_notice(
+      user_email="old@example.com",
+      user_name="<script>alert(1)</script>",
+      new_email="n***@example.com",
+    )
+
+    html = mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
+      "Data"
+    ]
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+  @pytest.mark.asyncio
   async def test_send_email_with_client_error(self, ses_service, mock_ses_client):
     """Test handling of AWS client errors."""
     mock_ses_client.send_email.side_effect = ClientError(

@@ -28,6 +28,7 @@ class SendEmailConfig(Config):
   org_name: str | None = None  # For org_invitation emails
   inviter_name: str | None = None  # For org_invitation emails
   passkey_name: str | None = None  # For passkey_enrolled emails
+  new_email: str | None = None  # For email_changed notice (masked new address)
 
 
 class EmailResult:
@@ -139,6 +140,15 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
           app=config.app,
         )
       )
+    elif config.email_type == "email_changed":
+      success = loop.run_until_complete(
+        ses_service.send_email_changed_notice(
+          user_email=config.to_email,
+          user_name=config.user_name,
+          new_email=config.new_email or "a new address",
+          app=config.app,
+        )
+      )
     else:
       raise ValueError(f"Unknown email type: {config.email_type}")
 
@@ -226,6 +236,7 @@ def build_email_job_config(
   org_name: str | None = None,
   inviter_name: str | None = None,
   passkey_name: str | None = None,
+  new_email: str | None = None,
 ) -> dict:
   """Build the Dagster run_config for send_email_job.
 
@@ -259,6 +270,9 @@ def build_email_job_config(
 
   if passkey_name:
     config["passkey_name"] = passkey_name
+
+  if new_email:
+    config["new_email"] = new_email
 
   run_config: dict = {
     "ops": {

@@ -9,7 +9,10 @@ from ...config import env
 from ...config.constants import EMAIL_TOKEN_EXPIRY_HOURS
 from ...database import get_db_session
 from ...logger import logger
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import (
+  get_current_user,
+  get_optional_jwt_user,
+)
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
@@ -27,6 +30,7 @@ from ...models.api.user import (
   UserResponse,
 )
 from ...models.core import User, UserToken
+from ...operations import passkeys as passkey_ops
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,
@@ -35,6 +39,17 @@ from ...security.input_validation import (
 from ..auth.utils import detect_app_source
 
 router = APIRouter(tags=["User"])
+
+
+def _mask_email(email: str | None) -> str:
+  """``jane@example.com`` -> ``j***@example.com`` for the change notice, which
+  goes to the OLD address and should hint at the new one without disclosing it
+  in full."""
+  if not email or "@" not in email:
+    return "a new address"
+  local, _, domain = email.partition("@")
+  shown = local[0] if local else ""
+  return f"{shown}***@{domain}"
 
 
 @router.get(
@@ -103,11 +118,22 @@ async def update_user_profile(
   request: UpdateUserRequest,
   fastapi_request: Request,
   background_tasks: BackgroundTasks,
-  current_user: User = Depends(get_current_user),
+  current_user: User | None = Depends(get_optional_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserResponse:
-  user_id = getattr(current_user, "id", None) if current_user else None
+  # Interactive session only. A programmatic API key must never reach a route
+  # that can change the sign-in address — changing email plus the public
+  # password-reset flow would otherwise be a full account takeover from a key
+  # that legitimately lives in CI configs and connector URLs. Same rule the
+  # passkey surfaces enforce (middleware/auth/dependencies.py get_optional_jwt_user).
+  if current_user is None:
+    raise create_error_response(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="An interactive session is required to update your profile",
+      code=ErrorCode.UNAUTHORIZED,
+    )
+  user_id = getattr(current_user, "id", None)
 
   try:
     update_data = request.model_dump(exclude_unset=True)
@@ -138,7 +164,37 @@ async def update_user_profile(
           code=ErrorCode.INVALID_INPUT,
         )
 
-      sanitized_email = sanitize_string(update_data["email"], max_length=254)
+      # Re-authenticate before changing the sign-in address, exactly as passkey
+      # enrollment/removal do. A live proof (password or a fresh mgmt-flow
+      # passkey assertion) is required; a valid session alone is not enough.
+      try:
+        passkey_ops.verify_reauth(
+          db,
+          current_user,
+          password=request.reauth_password,
+          assertion=request.reauth_assertion,
+        )
+      except passkey_ops.ReauthInvalidError:
+        client_ip = fastapi_request.client.host if fastapi_request.client else None
+        SecurityAuditLogger.log_security_event(
+          event_type=SecurityEventType.AUTH_FAILURE,
+          user_id=str(user_id),
+          ip_address=client_ip,
+          user_agent=fastapi_request.headers.get("user-agent"),
+          endpoint="/v1/user",
+          details={"action": "email_change_reauth_failed"},
+          risk_level="medium",
+        )
+        raise create_error_response(
+          status_code=status.HTTP_401_UNAUTHORIZED,
+          detail="Re-authentication is required to change your email",
+          code=ErrorCode.UNAUTHORIZED,
+        )
+
+      # Store lowercase: User.create/update and get_by_email all normalize, and
+      # a mixed-case address written here would silently never match at login
+      # or password reset (both lowercase their input before the lookup).
+      sanitized_email = sanitize_string(update_data["email"], max_length=254).lower()
       existing_user = User.get_by_email(sanitized_email, db)
       if existing_user:
         metrics_instance = get_endpoint_metrics()
@@ -165,19 +221,40 @@ async def update_user_profile(
 
     if "name" in update_data:
       user_in_session.name = sanitize_string(update_data["name"], max_length=100)
-    if "email" in update_data:
-      user_in_session.email = (
-        sanitized_email if sanitized_email else update_data["email"]
-      )
-      if sanitized_email:
-        email_changed = True
-        if env.EMAIL_VERIFICATION_ENABLED:
-          user_in_session.email_verified = False
+    # Only write email on a real change (sanitized_email is set only when the
+    # requested address differs from the current one and passed reauth). This
+    # is also where the previous address is captured for the change notice.
+    previous_email: str | None = None
+    if sanitized_email:
+      previous_email = str(user_in_session.email) if user_in_session.email else None
+      user_in_session.email = sanitized_email
+      email_changed = True
+      if env.EMAIL_VERIFICATION_ENABLED:
+        user_in_session.email_verified = False
 
     user_in_session.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(user_in_session)
+
+    # Tell the PREVIOUS address its account's email was changed — the one
+    # signal the account owner still receives if this change was hostile. Sent
+    # regardless of EMAIL_VERIFICATION_ENABLED; a fire-and-forget notice whose
+    # failure never fails the request (the Dagster op's own send is best-effort).
+    if email_changed and previous_email:
+      app = detect_app_source(fastapi_request)
+      background_tasks.add_task(
+        run_and_monitor_dagster_job,
+        job_name="send_email_job",
+        operation_id=None,
+        run_config=build_email_job_config(
+          email_type="email_changed",
+          to_email=previous_email,
+          user_name=user_in_session.name or "there",
+          new_email=_mask_email(user_in_session.email),
+          app=app,
+        ),
+      )
 
     # Queue verification email for new email address
     if email_changed and env.EMAIL_VERIFICATION_ENABLED:

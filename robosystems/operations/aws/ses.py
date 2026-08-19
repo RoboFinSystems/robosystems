@@ -164,6 +164,7 @@ class SESEmailService:
       "passkey_enrolled": self._passkey_enrolled_template(
         app_name, user_name, template_data
       ),
+      "email_changed": self._email_changed_template(app_name, user_name, template_data),
     }
 
     return templates.get(
@@ -283,6 +284,41 @@ If you didn't request this, no action is needed. Your password will not change.
 A passkey ({passkey_name}) was just added to your {app_name} account. It can now be used to sign in.
 
 If you didn't add this passkey, reset your password immediately and remove it from your account's security settings.
+
+{app_name}""",
+    }
+
+  @staticmethod
+  def _email_changed_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
+    # Goes to the PREVIOUS address. new_email is already masked by the caller,
+    # but escape anyway — user_name is attacker-controllable on a takeover.
+    new_email = data.get("new_email", "a new address")
+    safe_new_email = html.escape(str(new_email))
+    safe_user_name = html.escape(str(user_name))
+
+    content = (
+      _paragraph(f"Hi {safe_user_name},")
+      + _paragraph(
+        f"The email address on your {app_name} account was just changed to "
+        f"{safe_new_email}. You are receiving this at your previous address."
+      )
+      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
+      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
+      "If you didn't make this change, contact support immediately — someone "
+      "may have access to your account."
+      "</p></div>"
+    )
+
+    return {
+      "subject": f"The email on your {app_name} account was changed",
+      "html": _base_template(app_name, content),
+      "text": f"""Hi {user_name},
+
+The email address on your {app_name} account was just changed to {new_email}. You are receiving this at your previous address.
+
+If you didn't make this change, contact support immediately — someone may have access to your account.
 
 {app_name}""",
     }
@@ -586,6 +622,23 @@ View usage details: {url}
     }
 
     return await self.send_email("passkey_enrolled", user_email, template_data)
+
+  async def send_email_changed_notice(
+    self,
+    user_email: str,
+    user_name: str,
+    new_email: str,
+    app: str = "robosystems",
+  ) -> bool:
+    """Security notification to the PREVIOUS address that the account's email
+    was changed. ``new_email`` is expected pre-masked by the caller."""
+    template_data = {
+      "user_name": user_name,
+      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      "new_email": new_email,
+    }
+
+    return await self.send_email("email_changed", user_email, template_data)
 
   async def send_org_invitation_email(
     self,
