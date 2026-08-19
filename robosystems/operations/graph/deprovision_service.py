@@ -242,7 +242,7 @@ class GraphDeprovisionService:
     # --- 7. Update subscription metadata ---
     self._update_subscription_metadata(graph_id, session, result)
 
-    # --- 7. Transition status (soft-delete stamp landed in step 0) ---
+    # --- 8. Transition status (soft-delete stamp landed in step 0) ---
     graph.transition_status(GraphStatus.DEPROVISIONED, session)
 
     if result.errors:
@@ -654,6 +654,7 @@ class GraphDeprovisionService:
     try:
       from ...config import env
       from ...config.storage.graph import get_staging_prefix
+      from ...middleware.graph.types import parse_graph_id
       from ...models.core.graph.graph_user import GraphUser
       from ...operations.aws.s3 import S3Client
 
@@ -661,10 +662,16 @@ class GraphDeprovisionService:
       if not bucket:
         return
 
+      # Members are recorded on the PARENT graph — a subgraph carries no
+      # GraphUser row of its own (access to a subgraph is the parent's grant).
+      # So resolve the parent id for the membership lookup, but key the S3
+      # prefix on the graph_id we were handed: a file uploaded directly against
+      # a subgraph lives under user-staging/{user_id}/{subgraph_id}/.
+      parent_id, _ = parse_graph_id(graph_id)
       user_ids = [
         row[0]
         for row in session.query(GraphUser.user_id)
-        .filter(GraphUser.graph_id == graph_id)
+        .filter(GraphUser.graph_id == parent_id)
         .distinct()
         .all()
       ]

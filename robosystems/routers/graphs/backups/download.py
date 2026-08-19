@@ -109,7 +109,7 @@ async def get_backup_download_url(
   minutes to 24 hours.
   """
   try:
-    # Access validated by the require_graph_access dependency
+    # Access validated by the graph_access_dependency (deprovisioned-tolerant)
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
     # The single id the monthly counter is keyed on. Both the check and the

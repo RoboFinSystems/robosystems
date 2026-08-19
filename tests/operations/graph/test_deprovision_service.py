@@ -1156,6 +1156,49 @@ class TestStagedUploadPurge:
     remaining = db_session.query(GU).filter(GU.graph_id == test_graph.graph_id).count()
     assert remaining == 0
 
+  def test_subgraph_purge_resolves_members_from_the_parent(
+    self, service, db_session, test_org, test_user, stub_bundle_purge
+  ):
+    """A subgraph has no GraphUser row of its own — access is the parent's
+    grant. So the purge must resolve the parent for the member lookup while
+    keying the S3 prefix on the subgraph id, or it silently deletes nothing.
+    (Uses a realistic kg-hex parent id so subgraph parsing extracts the parent;
+    the shared test_graph fixture's kg_<uid> form has a stray underscore.)"""
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.core.graph.graph_user import GraphUser
+    from robosystems.operations.graph.deprovision_service import DeprovisionResult
+
+    parent = Graph.create(
+      graph_id=f"kg{uuid.uuid4().hex[:16]}",
+      graph_name="Parent",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
+    )
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=parent.graph_id,  # parent only — subgraphs carry no row
+      role="admin",
+      session=db_session,
+    )
+    subgraph_id = f"{parent.graph_id}_dev"
+    staged_key = f"user-staging/{test_user.id}/{subgraph_id}/Entity/f1/data.parquet"
+
+    def iter_keys(bucket, prefix):
+      if prefix == f"user-staging/{test_user.id}/{subgraph_id}/":
+        return iter([staged_key])
+      return iter([])
+
+    stub_bundle_purge.iter_object_keys.side_effect = iter_keys
+
+    result = DeprovisionResult(graph_id=subgraph_id, status="success")
+    service._purge_staged_uploads(subgraph_id, db_session, result)
+
+    assert result.staged_objects_deleted == 1
+    deleted = [c.args[1] for c in stub_bundle_purge.delete_object.call_args_list]
+    assert staged_key in deleted
+
   @pytest.mark.asyncio
   async def test_purge_is_best_effort_and_never_strands_teardown(
     self, service, db_session, test_graph, test_user, stub_bundle_purge

@@ -85,7 +85,7 @@ async def list_backups(
       f"Starting list_backups for graph_id: {graph_id}, user: {current_user.id}"
     )
 
-    # Access validated by the require_graph_access dependency
+    # Access validated by the graph_access_dependency (deprovisioned-tolerant)
 
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")

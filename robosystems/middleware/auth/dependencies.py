@@ -529,11 +529,13 @@ async def _resolve_user_with_graph(
   )
 
 
-def require_graph_access(allow_deprovisioned: bool = False):
+def graph_access_dependency(allow_deprovisioned: bool = False):
   """Build the graph-membership dependency.
 
-  The default instance (``get_current_user_with_graph``) denies a torn-down
-  graph. ``allow_deprovisioned=True`` is used by exactly the backup-list and
+  Named to avoid colliding with ``billing.enforcement.require_graph_access``
+  (a different check with a different signature). The default instance
+  (``get_current_user_with_graph``) denies a torn-down graph.
+  ``allow_deprovisioned=True`` is used by exactly the backup-list and
   backup-download routes so a departing org's OWNER/ADMIN can export during the
   grace period; it must not be applied to any other route (see
   ``GraphUser.get_effective_role``).
@@ -553,13 +555,13 @@ def require_graph_access(allow_deprovisioned: bool = False):
 
 # Default graph-membership dependency: denies deprovisioned graphs. Every
 # existing `Depends(get_current_user_with_graph)` keeps its behavior.
-get_current_user_with_graph = require_graph_access()
+get_current_user_with_graph = graph_access_dependency()
 
 # The one sanctioned deprovisioned-tolerant variant, used by exactly the
 # backup-list and backup-download routes so a departing org's OWNER/ADMIN can
 # export during the grace period. A named singleton (not an inline
-# `require_graph_access(True)`) so it is a stable, overridable dependency.
-get_current_user_with_deprovisioned_graph = require_graph_access(
+# `graph_access_dependency(True)`) so it is a stable, overridable dependency.
+get_current_user_with_deprovisioned_graph = graph_access_dependency(
   allow_deprovisioned=True
 )
 
