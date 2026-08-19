@@ -113,6 +113,13 @@ The schema carries three Strawberry limiters, since each resolved field can open
 
 The depth limiter does not count introspection fields, so SDK codegen is unaffected. `OpenTelemetryExtensionSync` is also registered — the `Sync` variant, because the async one breaks `schema.execute_sync(...)`.
 
+Two more extensions guard execution itself (`graphql/execution.py`):
+
+- **`OffloadSyncResolvers`** — every resolver is a plain `def` that opens an OLTP session, and Strawberry runs a sync resolver inline on the event loop. The API is one uvicorn worker, so without this a slow read stalled every request on the task. User-written sync resolvers now run through `run_off_loop` (the same runner limiter the REST operations and MCP tools use); default attribute resolvers and introspection stay inline. It is a no-op when there is no running loop (`execute_sync` in tests, MCP introspection). It must be registered **after** the OpenTelemetry extension — resolve hooks compose with the last extension outermost, and the resolver span has to open inside the thread.
+- **`MaskUnexpectedErrors`** — only deliberate `GraphQLError`s (the `StrawberryGraphQLError`s with a `code`) and parse/validation errors reach `errors[]` verbatim. Anything else — a database fault, a stray Python error — is replaced with `Internal error` (`code: INTERNAL_ERROR`, plus `requestId` for log correlation); a statement cancelled by the extensions session's `statement_timeout` becomes `code: STATEMENT_TIMEOUT` with the same fixed message REST returns as 504.
+
+Every session a resolver opens runs under the interactive per-statement ceiling (`extensions_session` default; `database/EXTENSIONS_STATEMENT_TIMEOUT_MS`, 30s). See `robosystems/db/extensions.py`.
+
 ## Pagination guards
 
 Strawberry has no `Field(ge=…, le=…)` equivalent, so bounds are asserted at the resolver boundary in `resolvers/_common.py`. Pagination arguments are declared **nullable** (`Int`, not `Int! = N`) because generated SDK clients pass explicit `null` for omitted variables, and GraphQL rejects explicit null for a non-null argument even when it has a default. `resolve_pagination` defaults them and then bounds-checks:

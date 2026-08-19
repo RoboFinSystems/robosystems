@@ -691,6 +691,16 @@ class TestGetCurrentUser:
     assert mock_verify_jwt.call_count == 1
     assert mock_verify_jwt.call_args.args[0] == "valid.jwt.token"
     mock_audit_logger.log_auth_success.assert_called_once()
+    # A JWT success publishes the principal like the API-key path does, so
+    # the access log and the audit trail can name the caller.
+    assert self.mock_request.state.user_id == user_id
+    assert self.mock_request.state.auth_method == "jwt_token"
+    from robosystems.security.request_context import current_principal
+
+    principal = current_principal()
+    assert principal is not None
+    assert principal.user_id == user_id
+    assert principal.api_key_prefix is None
 
   @pytest.mark.asyncio
   @patch("robosystems.middleware.auth.dependencies.verify_jwt_claims")

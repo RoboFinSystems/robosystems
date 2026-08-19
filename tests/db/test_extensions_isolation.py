@@ -186,6 +186,41 @@ def test_refuses_the_next_transaction_after_the_schema_is_dropped(engine, tenant
       session.execute(_WHOAMI)
 
 
+def test_statement_timeout_cancels_a_slow_statement(engine, tenants):
+  """A statement past the ceiling is cancelled server-side (SQLSTATE 57014) —
+  the client's own timeout is not what frees the shared connection."""
+  with pytest.raises(OperationalError) as exc_info:
+    with extensions_session(GRAPH_A, statement_timeout_ms=100) as session:
+      session.execute(text("select pg_sleep(2)"))
+  assert ext.is_statement_timeout(exc_info.value)
+
+
+def test_statement_timeout_is_transaction_local(engine, tenants):
+  """The ceiling never outlives the transaction: after a bounded session,
+  every idle pooled connection is back on the server default."""
+  with extensions_session(GRAPH_A, statement_timeout_ms=100) as session:
+    assert session.execute(text("show statement_timeout")).scalar() == "100ms"
+    session.commit()
+    # Re-applied on the next transaction of the same session.
+    assert session.execute(text("show statement_timeout")).scalar() == "100ms"
+  conns = [engine.connect() for _ in range(engine.pool.checkedin())]
+  try:
+    for conn in conns:
+      assert conn.execute(text("show statement_timeout")).scalar() != "100ms"
+  finally:
+    for conn in conns:
+      conn.close()
+
+
+def test_opted_out_session_runs_unbounded(engine, tenants):
+  with extensions_session(GRAPH_A, statement_timeout_ms=None) as session:
+    default = session.execute(text("show statement_timeout")).scalar()
+  assert default != "100ms"
+  with extensions_session(GRAPH_A) as session:
+    interactive = session.execute(text("show statement_timeout")).scalar()
+  assert interactive == f"{ext.interactive_statement_timeout_ms() // 1000}s"
+
+
 def test_library_sentinel_binds_public_only(engine):
   """The `library` sentinel reads the canonical library (`public`), with no
   tenant-schema binding — so a library read can't be scoped to a tenant."""
@@ -242,9 +277,47 @@ def test_commits_and_closes_on_success():
   ):
     with extensions_session(GRAPH_A) as yielded:
       assert yielded is session
-  bind.assert_called_once_with(session, f"{GRAPH_A}, public", tenant_schema=GRAPH_A)
+  bind.assert_called_once_with(
+    session,
+    f"{GRAPH_A}, public",
+    tenant_schema=GRAPH_A,
+    statement_timeout_ms=ext.interactive_statement_timeout_ms(),
+  )
   session.commit.assert_called_once()
   session.close.assert_called_once()
+
+
+def test_bulk_callers_opt_out_of_the_statement_timeout():
+  """``statement_timeout_ms=None`` is the explicit opt-out; an explicit value
+  is passed through as given, and the default resolves the tunable."""
+  session = MagicMock(name="session")
+  factory = MagicMock(return_value=session)
+  with (
+    patch.object(ext, "_get_session_factory", return_value=factory),
+    patch.object(ext, "bind_search_path") as bind,
+    patch.object(ext, "interactive_statement_timeout_ms", return_value=12_345),
+  ):
+    with extensions_session(GRAPH_A, statement_timeout_ms=None):
+      pass
+    with extensions_session(GRAPH_A, statement_timeout_ms=90_000):
+      pass
+    with extensions_session(GRAPH_A):
+      pass
+  timeouts = [call.kwargs["statement_timeout_ms"] for call in bind.call_args_list]
+  assert timeouts == [None, 90_000, 12_345]
+
+
+def test_interactive_timeout_zero_means_unbounded():
+  with patch(
+    "robosystems.config.tuning.TuningConfig.get_extensions_statement_timeout_ms",
+    return_value=0,
+  ):
+    assert ext.interactive_statement_timeout_ms() is None
+  with patch(
+    "robosystems.config.tuning.TuningConfig.get_extensions_statement_timeout_ms",
+    return_value=30_000,
+  ):
+    assert ext.interactive_statement_timeout_ms() == 30_000
 
 
 def test_bind_statement_guards_tenants_and_not_the_library():
@@ -259,6 +332,28 @@ def test_bind_statement_guards_tenants_and_not_the_library():
   # The interpolation validates its own input, independent of the caller.
   with pytest.raises(ValueError):
     ext._bind_statement("kg00000000000000aa, public", "kg00000000000000aa') --")
+
+
+def test_bind_statement_puts_the_timeout_ahead_of_the_guard():
+  """The ceiling is ``SET LOCAL`` and comes first, so the guard and every
+  statement after it are bounded; ``None``/``0`` emit no timeout at all."""
+  bounded = ext._bind_statement(f"{GRAPH_A}, public", GRAPH_A, 30_000)
+  assert bounded.startswith("SET LOCAL statement_timeout = 30000; DO $$")
+  assert bounded.endswith(f"SET LOCAL search_path TO {GRAPH_A}, public")
+  library = ext._bind_statement("public", None, 5_000)
+  assert library == (
+    "SET LOCAL statement_timeout = 5000; SET LOCAL search_path TO public"
+  )
+  assert "statement_timeout" not in ext._bind_statement("public", None, None)
+  assert "statement_timeout" not in ext._bind_statement("public", None, 0)
+
+
+def test_is_statement_timeout_matches_only_query_canceled():
+  cancelled = OperationalError("stmt", {}, MagicMock(pgcode="57014"))
+  other = OperationalError("stmt", {}, MagicMock(pgcode="40001"))
+  assert ext.is_statement_timeout(cancelled)
+  assert not ext.is_statement_timeout(other)
+  assert not ext.is_statement_timeout(RuntimeError("boom"))
 
 
 def test_no_bypass_of_the_scoped_session_factory():

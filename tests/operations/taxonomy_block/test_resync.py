@@ -18,7 +18,10 @@ _MODULE = "robosystems.operations.taxonomy_block.resync"
 
 def _session_cm(session: MagicMock):
   @contextmanager
-  def _cm(graph_id: str):
+  def _cm(graph_id: str, *, statement_timeout_ms=None):
+    # Migration-time fan-out is a bulk path: it must opt out of the
+    # interactive per-statement ceiling.
+    assert statement_timeout_ms is None
     yield session
 
   return _cm

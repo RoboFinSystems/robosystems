@@ -20,6 +20,7 @@ from robosystems.logger import (
   log_auth_event,
   security_logger,
 )
+from robosystems.security.request_context import bind_request_id, reset_request_id
 
 logger = api_logger
 
@@ -149,12 +150,13 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     if any(request.url.path.startswith(path) for path in self.exclude_paths):
       return await call_next(request)
 
-    # Generate request ID for tracing
+    # Generate request ID for tracing. Bound to the request context as well
+    # as request.state so the audit and security events written below the
+    # route handler carry it (`security.request_context`).
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
+    request_id_token = bind_request_id(request_id)
 
-    # Extract user context if available
-    user_id = getattr(request.state, "user_id", None)
     entity_id = getattr(request.state, "entity_id", None)
 
     # Extract entity from path if it's a entity-scoped endpoint
@@ -177,6 +179,11 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
       response = await call_next(request)
       duration_ms = (time.time() - start_time) * 1000
 
+      # The caller is resolved by the auth dependency inside the route, so
+      # it is only knowable after the response — read it then, or every
+      # access-log line records an anonymous request.
+      user_id = getattr(request.state, "user_id", None)
+
       # Log successful requests using structured logging
       log_api(
         method=request.method,
@@ -194,6 +201,7 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
 
     except Exception as e:
       duration_ms = (time.time() - start_time) * 1000
+      user_id = getattr(request.state, "user_id", None)
 
       # Categorize errors for better searching
       error_category = "application"
@@ -224,6 +232,8 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
 
       # Re-raise the exception to be handled by FastAPI
       raise
+    finally:
+      reset_request_id(request_id_token)
 
 
 class SecurityLoggingMiddleware(BaseHTTPMiddleware):

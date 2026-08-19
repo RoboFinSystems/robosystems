@@ -107,6 +107,81 @@ class OperationMetadata:
     return asdict(self)
 
 
+_TERMINAL_FAILURE_STATUSES = frozenset(
+  {OperationStatus.FAILED, OperationStatus.CANCELLED}
+)
+_TERMINAL_STATUSES = _TERMINAL_FAILURE_STATUSES | {OperationStatus.COMPLETED}
+
+# The lifecycle only moves forward, and the first terminal status is final:
+# a late or duplicate OPERATION_ERROR after OPERATION_COMPLETED (at-least-once
+# delivery, a reaper racing a finishing worker) must neither flip a finished
+# operation to failed nor evict the idempotency envelope of an operation that
+# succeeded — a client retry under the same key would then dispatch it again.
+_STATUS_PRIORITY = {
+  OperationStatus.PENDING: 0,
+  OperationStatus.RUNNING: 1,
+  OperationStatus.COMPLETED: 2,
+  OperationStatus.FAILED: 2,
+  OperationStatus.CANCELLED: 2,
+}
+
+
+def _next_status(event_type: EventType) -> OperationStatus | None:
+  if event_type == EventType.OPERATION_STARTED:
+    return OperationStatus.RUNNING
+  if event_type == EventType.OPERATION_COMPLETED:
+    return OperationStatus.COMPLETED
+  if event_type == EventType.OPERATION_ERROR:
+    return OperationStatus.FAILED
+  if event_type == EventType.OPERATION_CANCELLED:
+    return OperationStatus.CANCELLED
+  return None
+
+
+def _transition_allowed(current: OperationStatus, new: OperationStatus) -> bool:
+  """Whether ``current`` → ``new`` is a forward move.
+
+  Same-status re-writes are allowed (a completion event may arrive twice and
+  merge result data); a different terminal status after a terminal one is not.
+  """
+  if current in _TERMINAL_STATUSES and new != current:
+    return False
+  return _STATUS_PRIORITY.get(new, 0) >= _STATUS_PRIORITY.get(current, 0)
+
+
+async def _invalidate_idempotency(operation_id: str) -> None:
+  """Evict the idempotency envelope an async route cached for this operation.
+
+  A route that enqueues work caches a ``pending`` envelope under the caller's
+  Idempotency-Key for 24h. Once the operation fails or is cancelled that
+  envelope would replay ``pending`` to every retry with the same key, so the
+  terminal transition evicts it. Imported lazily: the operations module
+  pulls in FastAPI, which this store must not require.
+  """
+  from robosystems.middleware.operations import invalidate_operation_idempotency
+
+  try:
+    await invalidate_operation_idempotency(operation_id)
+  except Exception as exc:
+    logger.warning(
+      f"Idempotency eviction failed for terminal operation {operation_id}: {exc}"
+    )
+
+
+def _invalidate_idempotency_sync(operation_id: str) -> None:
+  """Sync counterpart to ``_invalidate_idempotency`` for ``store_event_sync``."""
+  from robosystems.middleware.operations import (
+    invalidate_operation_idempotency_sync,
+  )
+
+  try:
+    invalidate_operation_idempotency_sync(operation_id)
+  except Exception as exc:
+    logger.warning(
+      f"Idempotency eviction failed for terminal operation {operation_id}: {exc}"
+    )
+
+
 class SSEEventStorage:
   """Redis-backed SSE event store with automatic TTL expiry.
 
@@ -317,6 +392,7 @@ class SSEEventStorage:
 
     redis = self._get_sync_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
+    terminal_failure = False
 
     with redis.pipeline() as pipe:
       try:
@@ -330,27 +406,18 @@ class SSEEventStorage:
         metadata_dict = json.loads(str(metadata_json))
         metadata = OperationMetadata(**metadata_dict)
 
-        # Never downgrade a terminal status back to RUNNING.
-        status_priority = {
-          OperationStatus.PENDING: 0,
-          OperationStatus.RUNNING: 1,
-          OperationStatus.COMPLETED: 2,
-          OperationStatus.FAILED: 2,
-          OperationStatus.CANCELLED: 2,
-        }
-        new_status = None
-        if event_type == EventType.OPERATION_STARTED:
-          new_status = OperationStatus.RUNNING
-        elif event_type == EventType.OPERATION_COMPLETED:
-          new_status = OperationStatus.COMPLETED
-        elif event_type == EventType.OPERATION_ERROR:
-          new_status = OperationStatus.FAILED
-        elif event_type == EventType.OPERATION_CANCELLED:
-          new_status = OperationStatus.CANCELLED
+        # Never move a status backwards, and never past its first terminal
+        # state (see `_transition_allowed`).
+        new_status = _next_status(event_type)
 
-        if new_status and status_priority.get(new_status, 0) >= status_priority.get(
-          metadata.status, 0
-        ):
+        if new_status and _transition_allowed(metadata.status, new_status):
+          # Evict only on the transition *into* failure, and only once this
+          # write actually lands: a lost CAS below means another event won
+          # the transition, possibly a completion.
+          entering_failure = (
+            new_status in _TERMINAL_FAILURE_STATUSES
+            and metadata.status not in _TERMINAL_STATUSES
+          )
           metadata.status = new_status
           metadata.updated_at = datetime.now(UTC).isoformat()
 
@@ -367,6 +434,7 @@ class SSEEventStorage:
           pipe.multi()
           pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
           pipe.execute()
+          terminal_failure = entering_failure
         else:
           pipe.unwatch()
 
@@ -375,6 +443,9 @@ class SSEEventStorage:
         logger.debug(
           f"[SYNC] Metadata update skipped for {operation_id} due to concurrent modification"
         )
+
+    if terminal_failure:
+      _invalidate_idempotency_sync(operation_id)
 
   def update_operation_result_sync(
     self, operation_id: str, result: dict[str, Any]
@@ -455,6 +526,7 @@ class SSEEventStorage:
 
     redis = await self._get_redis()
     metadata_key = f"{self.metadata_prefix}{operation_id}"
+    terminal_failure = False
 
     try:
       await redis.watch(metadata_key)
@@ -467,27 +539,15 @@ class SSEEventStorage:
       metadata_dict = json.loads(metadata_json)
       metadata = OperationMetadata(**metadata_dict)
 
-      # Never downgrade a terminal status back to RUNNING.
-      status_priority = {
-        OperationStatus.PENDING: 0,
-        OperationStatus.RUNNING: 1,
-        OperationStatus.COMPLETED: 2,
-        OperationStatus.FAILED: 2,
-        OperationStatus.CANCELLED: 2,
-      }
-      new_status = None
-      if event_type == EventType.OPERATION_STARTED:
-        new_status = OperationStatus.RUNNING
-      elif event_type == EventType.OPERATION_COMPLETED:
-        new_status = OperationStatus.COMPLETED
-      elif event_type == EventType.OPERATION_ERROR:
-        new_status = OperationStatus.FAILED
-      elif event_type == EventType.OPERATION_CANCELLED:
-        new_status = OperationStatus.CANCELLED
+      # Never move a status backwards, and never past its first terminal
+      # state (see `_transition_allowed`).
+      new_status = _next_status(event_type)
 
-      if new_status and status_priority.get(new_status, 0) >= status_priority.get(
-        metadata.status, 0
-      ):
+      if new_status and _transition_allowed(metadata.status, new_status):
+        entering_failure = (
+          new_status in _TERMINAL_FAILURE_STATUSES
+          and metadata.status not in _TERMINAL_STATUSES
+        )
         metadata.status = new_status
         metadata.updated_at = datetime.now(UTC).isoformat()
 
@@ -505,6 +565,7 @@ class SSEEventStorage:
           pipe = redis.pipeline()
           pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
           await pipe.execute()
+          terminal_failure = entering_failure
       else:
         await redis.unwatch()
 
@@ -513,6 +574,9 @@ class SSEEventStorage:
       logger.debug(
         f"Metadata update skipped for {operation_id} due to concurrent modification"
       )
+
+    if terminal_failure:
+      await _invalidate_idempotency(operation_id)
 
   async def get_events(
     self, operation_id: str, from_sequence: int = 0, limit: int | None = None

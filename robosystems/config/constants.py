@@ -39,6 +39,15 @@ PRESIGNED_URL_EXPIRY_SECONDS = 3600  # 1 hour
 # Files above this size use Dagster for async processing with progress tracking
 SMALL_FILE_STAGING_THRESHOLD_MB = 50  # 50MB
 
+# Platform-wide ceiling on rows in a single uploaded file, checked at ingest
+# from the measured (or estimated) row count. Equal to the largest tier's
+# `max_single_table_rows` in .github/configs/graph.yml — no tier can materialize
+# a table bigger than this, so a file above it is refused before it burns
+# storage. Smaller tiers are capped tighter by their own `max_single_table_rows`
+# at ingest as well; this is the bound that holds even for a hostile parquet
+# footer that declares an absurd row count against a 100 MB object.
+MAX_ROWS_PER_FILE = 100_000_000
+
 # Row Count Estimation Fallback (bytes per row for different formats)
 FALLBACK_BYTES_PER_ROW_PARQUET = 50  # Compressed format
 FALLBACK_BYTES_PER_ROW_CSV = 200  # Text format with moderate row size

@@ -28,6 +28,10 @@ class LockAcquisitionResult:
   holder_id: str | None
   ttl_remaining: int | None
   error_message: str | None = None
+  # True when the attempt never got an answer from Redis, so "not acquired"
+  # says nothing about whether the lock is held. Callers that fail closed use
+  # this to report "lock service unavailable" rather than "already in progress".
+  backend_error: bool = False
 
 
 class DistributedLock:
@@ -151,6 +155,7 @@ class DistributedLock:
           holder_id=None,
           ttl_remaining=None,
           error_message=f"Redis error: {e!s}",
+          backend_error=True,
         )
 
     SecurityAuditLogger.log_security_event(

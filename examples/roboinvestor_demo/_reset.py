@@ -40,7 +40,7 @@ def reset_investor_state(graph_id: str) -> None:
 
   assert_local_extensions_db()
 
-  with extensions_session(graph_id) as session:
+  with extensions_session(graph_id, statement_timeout_ms=None) as session:
     # Positions FK both portfolios and securities, so they go first.
     session.execute(text("DELETE FROM positions"))
     session.execute(text("DELETE FROM portfolios"))
@@ -105,7 +105,7 @@ def reset_issuer_share_state(graph_id: str) -> None:
 
   assert_local_extensions_db()
 
-  with extensions_session(graph_id) as session:
+  with extensions_session(graph_id, statement_timeout_ms=None) as session:
     session.execute(text("DELETE FROM report_shares"))
     session.execute(text("DELETE FROM publish_list_members"))
     session.execute(text("DELETE FROM publish_lists"))

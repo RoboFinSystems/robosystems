@@ -25,7 +25,8 @@ async def materialize_cmd(
   - Billing enforcement / write-access check
   - Source auto-detection based on graph type
   - Dry-run limit validation (returns immediately, no lock acquired)
-  - Distributed lock to prevent concurrent materialization
+  - Distributed lock to prevent concurrent materialization (fail-closed:
+    409 when held, 503 + Retry-After when the lock service is unavailable)
   - Content-limit gate (413 if tier limits exceeded)
   - Source routing: extensions (OLTP) vs staged (DuckDB) x direct vs Dagster
 
@@ -89,24 +90,49 @@ async def materialize_cmd(
       "limit_check": limit_check,
     }
 
-  # Acquire distributed lock to prevent concurrent materialization
-  lock = None
+  # Acquire distributed lock to prevent concurrent materialization. This
+  # fails closed: a materialization is a retryable background job (the
+  # staleness sensor re-fires within minutes, and the client can retry), but
+  # an unlocked double-writer silently duplicates relationship-table edges.
+  # A Valkey outage is therefore a 503 with Retry-After, never a lockless run.
+  lock_unavailable = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    detail=(
+      "Materialization lock service unavailable; retry shortly "
+      "(materialization refuses to run unlocked)"
+    ),
+    headers={"Retry-After": "30"},
+  )
   try:
     redis_client = create_redis_client(ValkeyDatabase.LOCKS)
     lock = DistributedLock(
       redis_client, f"graph_materialize:{graph_id}", ttl_seconds=INGESTION_LOCK_TTL
     )
     lock_result = lock.acquire(blocking=False)
-    if not lock_result.acquired:
-      raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="Materialization already in progress for this graph",
-      )
-  except HTTPException:
-    raise
   except Exception as e:
     logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
-    lock = None  # Degraded mode — proceed without lock
+    raise lock_unavailable from e
+
+  if not lock_result.acquired:
+    if lock_result.backend_error:
+      logger.warning(
+        f"Distributed lock backend error for {graph_id}: {lock_result.error_message}"
+      )
+      raise lock_unavailable
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail="Materialization already in progress for this graph",
+    )
+
+  # The worker releases the lock when the task finishes; lock_id makes that a
+  # compare-and-delete, so a task that outlives the TTL cannot strip a
+  # successor's lock. The lock is not extended from the worker: the
+  # extensions task's own timeout (TASK_TIMEOUTS, 1800s) is half of
+  # INGESTION_LOCK_TTL, so it cannot lapse under a running task, and the
+  # per-graph MaterializationLock inside the run is the one that is extended
+  # at each table checkpoint.
+  lock_key = f"graph_materialize:{graph_id}"
+  lock_id = lock.lock_id
 
   try:
     graph_tier = graph.graph_tier or "ladybug-standard"
@@ -158,7 +184,6 @@ async def materialize_cmd(
     if source == "extensions":
       from robosystems.worker.client import enqueue_task
 
-      lock_key = f"graph_materialize:{graph_id}" if lock else None
       response = await enqueue_task(
         task_type="extensions_materialize",
         graph_id=graph_id,
@@ -166,6 +191,7 @@ async def materialize_cmd(
         params={
           "rebuild": body.rebuild,
           "lock_key": lock_key,
+          "lock_id": lock_id,
         },
       )
       return {
@@ -178,7 +204,6 @@ async def materialize_cmd(
     # Staged path: uploaded parquet files → DuckDB → LadybugDB
     _require_rebuild_for_populated_graph(db, graph_id, rebuild=body.rebuild)
     use_direct = _should_use_direct_materialization(db, graph_id)
-    lock_key = f"graph_materialize:{graph_id}" if lock else None
 
     if use_direct:
       from robosystems.worker.client import enqueue_task
@@ -192,6 +217,7 @@ async def materialize_cmd(
           "rebuild": body.rebuild,
           "materialize_embeddings": body.materialize_embeddings,
           "lock_key": lock_key,
+          "lock_id": lock_id,
         },
       )
       return {
@@ -221,6 +247,7 @@ async def materialize_cmd(
           "job_name": "materialize_graph_job",
           "run_config": run_config,
           "lock_key": lock_key,
+          "lock_id": lock_id,
         },
       )
       return {
@@ -231,8 +258,7 @@ async def materialize_cmd(
       }
 
   except Exception:
-    if lock is not None:
-      lock.release()
+    lock.release()
     raise
 
 

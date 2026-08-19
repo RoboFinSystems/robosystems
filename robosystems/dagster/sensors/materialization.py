@@ -126,7 +126,17 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
               }
             }
           },
-          tags={"graph_id": graph_id, "trigger": "stale_sensor"},
+          # materialize_db is the key dagster.yaml's tag_concurrency_limits
+          # serializes on (limit 1 per unique value): two runs COPYing into the
+          # same tenant graph would interleave writes into rel tables that have
+          # no primary key. Queuing the duplicate makes the worst case a
+          # redundant run rather than duplicate edges. sec_materialize carries
+          # the same key as a job-level tag; tenant runs must set it per graph.
+          tags={
+            "graph_id": graph_id,
+            "trigger": "stale_sensor",
+            "materialize_db": graph_id,
+          },
         )
       )
       new_cursor[graph_id] = now.isoformat()

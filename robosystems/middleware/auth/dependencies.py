@@ -19,6 +19,7 @@ from ...logger import logger
 from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import extract_device_fingerprint
+from ...security.request_context import API_KEY_PREFIX_LENGTH, publish_principal
 from .cache import api_key_cache
 
 # Import JWT helpers from local jwt module to avoid circular imports
@@ -194,19 +195,25 @@ def _stash_api_key_identity(
 
   The first 8 characters are the key's stored identification prefix
   (``UserAPIKey.prefix``), so downstream telemetry can attribute activity
-  to a specific key without access to the raw header. JWT-authenticated
-  requests leave the attribute unset.
+  to a specific key without access to the raw header.
 
-  When the resolved ``user`` is passed, the sanitized principal is also
-  published as ``request.state.auth_user_id`` / ``auth_method``, so
-  downstream consumers that cannot reparse the credential — the rate
-  limiter for URL-token connectors, and eventually opaque OAuth bearer
-  tokens — can identify the caller without re-validating anything.
+  When the resolved ``user`` is passed, the principal is published through
+  `security.request_context.publish_principal`: onto ``request.state``
+  (``user_id`` / ``auth_user_id`` / ``auth_method`` / ``api_key_prefix``)
+  for the access log and the rate limiter, and into the request context so
+  the operation audit and security events below the route can name the
+  credential that acted.
   """
-  request.state.api_key_prefix = api_key[:8]
-  if user is not None:
-    request.state.auth_user_id = str(user.id)
-    request.state.auth_method = auth_method
+  if user is None:
+    request.state.api_key_prefix = api_key[:API_KEY_PREFIX_LENGTH]
+    return
+  publish_principal(request, str(user.id), auth_method, api_key=api_key)
+
+
+def _publish_jwt_identity(request: Request, user_id: str) -> None:
+  """The JWT counterpart of `_stash_api_key_identity`: publish the session
+  principal so JWT-authenticated requests are attributable downstream too."""
+  publish_principal(request, str(user_id), "jwt_token")
 
 
 def _publish_graph_authorization(request: Request, graph_id: str) -> None:
@@ -250,6 +257,7 @@ async def get_optional_user(
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)
       if user:
+        _publish_jwt_identity(request, user_id)
         return user
 
   if api_key:
@@ -302,6 +310,7 @@ async def get_current_user(
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)
       if user:
+        _publish_jwt_identity(request, user_id)
         SecurityAuditLogger.log_auth_success(
           user_id=str(user_id),
           ip_address=client_ip,
@@ -418,6 +427,7 @@ async def get_current_user_with_graph(
           api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
 
         if has_access:
+          _publish_jwt_identity(request, user_id)
           SecurityAuditLogger.log_auth_success(
             user_id=str(user_id),
             ip_address=client_ip,
@@ -695,6 +705,7 @@ async def get_current_user_sse(
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)
       if user:
+        _publish_jwt_identity(request, user_id)
         SecurityAuditLogger.log_auth_success(
           user_id=str(user_id),
           ip_address=client_ip,

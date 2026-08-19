@@ -31,9 +31,9 @@ from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationEnvelope,
-  check_idempotency,
   fingerprint_body,
   get_idempotency_cache,
+  idempotent_dispatch,
   log_operation_audit,
   wrap_completed,
   wrap_pending,
@@ -584,47 +584,46 @@ async def ingest_file_op(
   user_id = str(user.id)
   body_fp = fingerprint_body(body)
 
-  replay = await check_idempotency(
+  async with idempotent_dispatch(
     cache, user_id, graph_id, op_name, idempotency_key, body_fp
-  )
-  if replay is not None:
-    return replay
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  result = await ingest_file_cmd(
-    graph_id=graph_id,
-    file_id=body.file_id,
-    ingest_to_graph=body.ingest_to_graph,
-    current_user=user,
-    db=db,
-    background_tasks=background_tasks,
-  )
-
-  # Async staging (Dagster) returns an operation_id → pending; direct staging with
-  # no follow-on ingest completes inline → completed.
-  if result.get("operation_id"):
-    envelope = wrap_pending(
-      op_name,
-      operation_id=result["operation_id"],
-      partial_result=result,
-      created_by=user_id,
+    result = await ingest_file_cmd(
+      graph_id=graph_id,
+      file_id=body.file_id,
+      ingest_to_graph=body.ingest_to_graph,
+      current_user=user,
+      db=db,
+      background_tasks=background_tasks,
     )
-  else:
-    envelope = wrap_completed(op_name, result=result, created_by=user_id)
 
-  if idempotency_key is not None:
-    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
+    # Async staging (Dagster) returns an operation_id → pending; direct staging
+    # with no follow-on ingest completes inline → completed.
+    if result.get("operation_id"):
+      envelope = wrap_pending(
+        op_name,
+        operation_id=result["operation_id"],
+        partial_result=result,
+        created_by=user_id,
+      )
+    else:
+      envelope = wrap_completed(op_name, result=result, created_by=user_id)
 
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=envelope.operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status=envelope.status,
-    idempotency_key=idempotency_key,
-    event=_AUDIT_EVENT,
-  )
-  return envelope
+    await idem.record(envelope)
+
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=envelope.operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status=envelope.status,
+      idempotency_key=idempotency_key,
+      event=_AUDIT_EVENT,
+    )
+    return envelope
 
 
 # ═══════════════════════════════════════════════════════════════════════════

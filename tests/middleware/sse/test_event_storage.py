@@ -758,6 +758,243 @@ class TestSSEEventStorage:
       mock_pipe.unwatch.assert_called_once()
 
 
+def _running_metadata(operation_id: str = "op123", status: str = "running") -> str:
+  return json.dumps(
+    {
+      "operation_id": operation_id,
+      "operation_type": "backup",
+      "user_id": "user456",
+      "graph_id": "kg789",
+      "status": status,
+      "created_at": "2023-01-01T12:00:00Z",
+      "updated_at": "2023-01-01T12:30:00Z",
+      "error_message": None,
+      "result_data": None,
+    }
+  )
+
+
+class TestTerminalFailureEvictsIdempotency:
+  """A route that enqueues work caches a `pending` envelope under the caller's
+  Idempotency-Key. When the operation fails or is cancelled that envelope
+  must go, or every retry with the same key replays `pending` for 24h."""
+
+  def _async_storage(self, metadata_json: str | None) -> SSEEventStorage:
+    mock_redis = AsyncMock()
+    mock_redis.get.return_value = metadata_json
+    mock_redis.ttl.return_value = 600
+    # setex is queued synchronously on the pipeline; only execute is awaited.
+    pipe = Mock()
+    pipe.execute = AsyncMock()
+    mock_redis.pipeline = Mock(return_value=pipe)
+    return SSEEventStorage(redis_client=mock_redis)
+
+  @pytest.mark.parametrize(
+    "event_type",
+    [EventType.OPERATION_ERROR, EventType.OPERATION_CANCELLED],
+  )
+  async def test_failed_or_cancelled_transition_evicts(self, event_type):
+    storage = self._async_storage(_running_metadata())
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", event_type, {"error": "disk full", "reason": "user"}
+      )
+    evict.assert_awaited_once_with("op123")
+
+  async def test_completed_transition_does_not_evict(self):
+    storage = self._async_storage(_running_metadata())
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_COMPLETED, {"result": {"ok": True}}
+      )
+    evict.assert_not_awaited()
+
+  @pytest.mark.parametrize(
+    "event_type",
+    [EventType.OPERATION_ERROR, EventType.OPERATION_CANCELLED],
+  )
+  async def test_late_failure_after_completion_neither_flips_nor_evicts(
+    self, event_type
+  ):
+    """At-least-once delivery: a duplicate or late error event after the
+    completion must not turn a finished operation into a failed one, and must
+    not evict the envelope of an operation that succeeded — a retry under
+    the same key would dispatch it again."""
+    storage = self._async_storage(_running_metadata(status="completed"))
+    pipe = storage._redis_client.pipeline.return_value
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata("op123", event_type, {"error": "late"})
+    evict.assert_not_awaited()
+    pipe.setex.assert_not_called()
+
+  async def test_repeated_failure_event_evicts_only_once(self):
+    storage = self._async_storage(_running_metadata(status="failed"))
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_ERROR, {"error": "again"}
+      )
+    evict.assert_not_awaited()
+
+  async def test_lost_cas_does_not_evict(self):
+    """The transition was computed but another writer won the WATCH: nothing
+    of ours landed, so nothing is evicted (the winner may be a completion)."""
+    storage = self._async_storage(_running_metadata())
+    pipe = storage._redis_client.pipeline.return_value
+    pipe.execute = AsyncMock(side_effect=RuntimeError("WatchError"))
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_ERROR, {"error": "x"}
+      )
+    evict.assert_not_awaited()
+
+  async def test_unknown_operation_does_not_evict(self):
+    storage = self._async_storage(None)
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op_missing", EventType.OPERATION_ERROR, {"error": "x"}
+      )
+    evict.assert_not_awaited()
+
+  async def test_eviction_reaches_the_bound_envelope_key(self):
+    """End to end through the real `IdempotencyCache` on an in-memory client:
+    the envelope the route cached is gone after the FAILED transition, and
+    an unrelated envelope survives."""
+    from robosystems.middleware import operations as ops
+    from robosystems.middleware.operations import (
+      IdempotencyCache,
+      compute_idempotency_cache_key,
+      wrap_pending,
+    )
+
+    store: dict = {}
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=lambda k: store.get(k))
+
+    async def _set(k, v, ex=None, nx=False):
+      store[k] = v
+      return True
+
+    async def _delete(*keys):
+      return sum(1 for k in keys if store.pop(k, None) is not None)
+
+    async def _sadd(k, *members):
+      store.setdefault(k, set()).update(members)
+      return len(members)
+
+    client.set = AsyncMock(side_effect=_set)
+    client.delete = AsyncMock(side_effect=_delete)
+    client.sadd = AsyncMock(side_effect=_sadd)
+    client.smembers = AsyncMock(side_effect=lambda k: set(store.get(k, set())))
+    client.expire = AsyncMock(return_value=True)
+    cache = IdempotencyCache(client=client)
+
+    failed = wrap_pending("create-backup", operation_id="op123")
+    other = wrap_pending("create-backup", operation_id="op_other")
+    await cache.put("u", "kg789", "create-backup", "k-failed", failed, "fp")
+    await cache.put("u", "kg789", "create-backup", "k-other", other, "fp")
+    await cache.bind_operation(
+      "op123", compute_idempotency_cache_key("u", "kg789", "create-backup", "k-failed")
+    )
+
+    storage = self._async_storage(_running_metadata())
+    with patch.object(ops, "get_idempotency_cache", return_value=cache):
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_ERROR, {"error": "disk full"}
+      )
+
+    assert await cache.get("u", "kg789", "create-backup", "k-failed", "fp") is None
+    survivor = await cache.get("u", "kg789", "create-backup", "k-other", "fp")
+    assert survivor is not None and survivor.operation_id == "op_other"
+
+  def _sync_storage(self, metadata_json: str | None) -> SSEEventStorage:
+    mock_redis = Mock()
+    mock_redis.get.return_value = metadata_json
+    mock_pipe = Mock()
+    mock_redis.pipeline.return_value.__enter__ = Mock(return_value=mock_pipe)
+    mock_redis.pipeline.return_value.__exit__ = Mock(return_value=False)
+    storage = SSEEventStorage()
+    storage._sync_redis = mock_redis
+    return storage
+
+  @pytest.mark.parametrize(
+    "event_type",
+    [EventType.OPERATION_ERROR, EventType.OPERATION_CANCELLED],
+  )
+  def test_sync_failed_or_cancelled_transition_evicts(self, event_type):
+    storage = self._sync_storage(_running_metadata())
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", event_type, {"error": "dagster run failed"}
+      )
+    evict.assert_called_once_with("op123")
+
+  def test_sync_completed_transition_does_not_evict(self):
+    storage = self._sync_storage(_running_metadata())
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", EventType.OPERATION_COMPLETED, {"result": {"ok": True}}
+      )
+    evict.assert_not_called()
+
+  def test_sync_late_failure_after_completion_neither_flips_nor_evicts(self):
+    storage = self._sync_storage(_running_metadata(status="completed"))
+    mock_pipe = storage._sync_redis.pipeline.return_value.__enter__.return_value
+    mock_pipe.get.return_value = _running_metadata(status="completed")
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", EventType.OPERATION_ERROR, {"error": "late"}
+      )
+    evict.assert_not_called()
+    mock_pipe.setex.assert_not_called()
+
+  def test_sync_lost_cas_does_not_evict(self):
+    storage = self._sync_storage(_running_metadata())
+    mock_pipe = storage._sync_redis.pipeline.return_value.__enter__.return_value
+    mock_pipe.get.return_value = _running_metadata()
+    mock_pipe.execute.side_effect = RuntimeError("WatchError")
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", EventType.OPERATION_ERROR, {"error": "x"}
+      )
+    evict.assert_not_called()
+
+  def test_sync_unknown_operation_does_not_evict(self):
+    storage = self._sync_storage(None)
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op_missing", EventType.OPERATION_ERROR, {"error": "x"}
+      )
+    evict.assert_not_called()
+
+
 class TestGetEventStorage:
   """Test global event storage instance."""
 

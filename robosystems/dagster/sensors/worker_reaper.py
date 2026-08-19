@@ -186,16 +186,45 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
 
 
 def _fail_operation_sync(sse_client: Any, task_id: str, attempts: int) -> None:
-  """Mark an SSE operation as failed by updating its metadata directly."""
+  """Mark an SSE operation as failed by updating its metadata directly.
+
+  Compare-and-set on the metadata key: the sensor's staleness decision was
+  made from a snapshot taken earlier in the tick, and a worker can finish
+  the task in between. A terminal status already written by the worker —
+  ``completed`` above all — wins; this only ever moves ``pending`` /
+  ``running`` to ``failed``, and only when it does so does it evict the
+  cached idempotency envelope (this path writes the status directly rather
+  than through the SSE store, so the store's own eviction hook does not
+  run). Without the guard a DLQ'd-but-actually-finished backup would show
+  as failed and become re-dispatchable under its Idempotency-Key.
+  """
   meta_key = f"{SSE_META_PREFIX}{task_id}"
-  meta_json = sse_client.get(meta_key)
-  if not meta_json:
+  try:
+    with sse_client.pipeline() as pipe:
+      pipe.watch(meta_key)
+      meta_json = pipe.get(meta_key)
+      if not meta_json:
+        pipe.unwatch()
+        return
+      meta = json.loads(meta_json)
+      if meta.get("status") not in ("pending", "running"):
+        pipe.unwatch()
+        logger.info(
+          f"Reaper left {task_id} alone: already terminal "
+          f"({meta.get('status')}) by the time the DLQ decision landed"
+        )
+        return
+      meta["status"] = "failed"
+      meta["updated_at"] = datetime.now(UTC).isoformat()
+      pipe.multi()
+      pipe.set(meta_key, json.dumps(meta), keepttl=True)
+      pipe.execute()
+  except Exception as e:
+    # A WatchError here means the worker wrote first; either way nothing
+    # was changed by us, so there is nothing to evict.
+    logger.warning(f"Failed to update SSE metadata for {task_id}: {e}")
     return
 
-  try:
-    meta = json.loads(meta_json)
-    meta["status"] = "failed"
-    meta["updated_at"] = datetime.now(UTC).isoformat()
-    sse_client.set(meta_key, json.dumps(meta), keepttl=True)
-  except (json.JSONDecodeError, Exception) as e:
-    logger.warning(f"Failed to update SSE metadata for {task_id}: {e}")
+  from robosystems.middleware.operations import invalidate_operation_idempotency_sync
+
+  invalidate_operation_idempotency_sync(task_id)

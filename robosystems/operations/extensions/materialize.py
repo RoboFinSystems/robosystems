@@ -25,9 +25,26 @@ from urllib.parse import urlparse
 
 if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
+  from robosystems.graph_api.core.ladybug.materialization_lock import (
+    MaterializationLock,
+  )
 
 from robosystems.logger import logger
 from robosystems.security.error_handling import redact_connection_secrets
+
+# How long ``materialize`` waits for the per-graph lock before giving up.
+_LOCK_ACQUIRE_TIMEOUT_SECONDS = 5
+
+
+class MaterializationLockError(RuntimeError):
+  """The per-graph materialization lock could not be taken, or lapsed mid-run.
+
+  Raised instead of proceeding unlocked. A materialization is a retryable
+  background job — the staleness sensor re-fires within minutes — whereas an
+  unlocked double-writer silently duplicates relationship-table edges (edge
+  tables have no primary key), so the run must fail closed.
+  """
+
 
 # Association types the graph renderer needs. Anything omitted here exists in
 # OLTP but is invisible to the graph — dropping `mapping`, for instance, empties
@@ -1375,8 +1392,9 @@ class ExtensionsMaterializer:
     An existing database takes the blue-green path: a WIP copy is built
     alongside the live graph and swapped in on success, so the live graph keeps
     serving queries and downtime is the length of a file rename. First-time
-    creation builds in place. Errors are collected on the result rather than
-    raised — check ``status``.
+    creation builds in place. Both paths run under the per-graph
+    materialization lock and fail closed if it cannot be taken. Errors are
+    collected on the result rather than raised — check ``status``.
     """
     from robosystems.graph_api.client.factory import get_graph_client
 
@@ -1397,8 +1415,8 @@ class ExtensionsMaterializer:
       return result
 
     # Per-instance busy signal so ASG refresh workflows wait rather than
-    # cycling the node mid-rebuild. The per-graph lock is separate and lives in
-    # _materialize_blue_green.
+    # cycling the node mid-rebuild. The per-graph lock is separate: it is
+    # taken below and wraps both build paths.
     from robosystems.middleware.graph.instance_busy import (
       OP_KIND_EXTENSIONS_MATERIALIZE,
       begin_destructive_op,
@@ -1410,12 +1428,26 @@ class ExtensionsMaterializer:
 
     try:
       async with client:
-        db_exists = await client.database_exists(graph_id)
+        # One per-graph lock for both paths. The first build (no database yet)
+        # is as exposed to a double-writer as a rebuild: a stale-sensor run
+        # and a user-initiated materialize can otherwise both create and COPY
+        # into the same fresh graph. Any cross-plane cap on total concurrent
+        # materializations would attach here, after the per-graph acquire.
+        lock = await self._acquire_lock(graph_id)
+        try:
+          db_exists = await client.database_exists(graph_id)
 
-        if db_exists and rebuild:
-          await self._materialize_blue_green(client, graph_id, entity_id, result)
-        else:
-          await self._materialize_direct(client, graph_id, entity_id, rebuild, result)
+          if db_exists and rebuild:
+            await self._materialize_blue_green(
+              client, graph_id, entity_id, result, lock
+            )
+          else:
+            await self._materialize_direct(
+              client, graph_id, entity_id, rebuild, result, lock
+            )
+        finally:
+          # A no-op if the lock lapsed under us (extend already cleared it).
+          await lock.release()
 
     except Exception as e:
       logger.error(f"Ledger materialization failed for {graph_id}: {e}", exc_info=True)
@@ -1436,6 +1468,67 @@ class ExtensionsMaterializer:
 
     return result
 
+  async def _acquire_lock(self, graph_id: str) -> "MaterializationLock":
+    """Take the per-graph materialization lock, failing closed.
+
+    Every failure mode raises ``MaterializationLockError`` — a lock held by
+    another run, a Valkey outage, or the lock module failing to import. The
+    message tells the two retryable causes apart so an operator reading the
+    result knows whether to wait for the other run or look at Valkey.
+    """
+    try:
+      from robosystems.config.valkey_registry import (
+        ValkeyDatabase,
+        create_async_redis_client,
+      )
+      from robosystems.graph_api.core.ladybug.materialization_lock import (
+        MaterializationLock,
+      )
+
+      redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
+      lock = MaterializationLock(redis_client, graph_id)
+    except Exception as e:
+      raise MaterializationLockError(
+        f"Materialization lock service unavailable for {graph_id} "
+        f"({e.__class__.__name__}: {e}); retry later"
+      ) from e
+
+    acquired = await lock.acquire(timeout_seconds=_LOCK_ACQUIRE_TIMEOUT_SECONDS)
+    if acquired:
+      return lock
+
+    if lock.last_backend_error:
+      raise MaterializationLockError(
+        f"Materialization lock service unavailable for {graph_id} "
+        f"({lock.last_backend_error}); retry later"
+      )
+    raise MaterializationLockError(
+      f"Materialization lock for {graph_id} is held by another run; retry later"
+    )
+
+  async def _refresh_lock(self, lock: "MaterializationLock | None") -> None:
+    """Checkpoint: push the lock TTL out, or abort if the lock is no longer ours.
+
+    Called once per table. A run longer than the TTL would otherwise lose the
+    lock silently and carry a stale token into the swap while a second run
+    builds against the same graph. A backend error here is tolerated — the key
+    still has whatever TTL remains, and any competing acquire fails closed
+    while the backend is down — but a token mismatch means the lock lapsed
+    and someone else may hold it, so the run stops before it can swap.
+    """
+    if lock is None:
+      return
+    try:
+      still_held = await lock.extend()
+    except Exception as e:
+      logger.warning(f"Materialization lock extend failed for {lock.lock_key}: {e}")
+      return
+    if not still_held:
+      raise MaterializationLockError(
+        f"Materialization lock {lock.lock_key} lapsed mid-run (another run may "
+        "now hold it); aborting before swap"
+      )
+
   async def _materialize_direct(
     self,
     client: "GraphClient",
@@ -1443,6 +1536,7 @@ class ExtensionsMaterializer:
     entity_id: str,
     rebuild: bool,
     result: MaterializeResult,
+    lock: "MaterializationLock | None" = None,
   ) -> None:
     """Build in place — for first-time creation, or when ``rebuild`` is False.
 
@@ -1458,9 +1552,11 @@ class ExtensionsMaterializer:
     enabled_extensions = set(await self._get_graph_extensions(graph_id))
 
     staging_sql = _staging_sql(graph_id, entity_id, connstr)
-    await self._stage_tables(client, graph_id, staging_sql, result, enabled_extensions)
+    await self._stage_tables(
+      client, graph_id, staging_sql, result, enabled_extensions, lock=lock
+    )
 
-    await self._materialize_tables(client, graph_id, result)
+    await self._materialize_tables(client, graph_id, result, lock=lock)
 
   async def _materialize_blue_green(
     self,
@@ -1468,6 +1564,7 @@ class ExtensionsMaterializer:
     graph_id: str,
     entity_id: str,
     result: MaterializeResult,
+    lock: "MaterializationLock | None" = None,
   ) -> None:
     """Build ``{graph_id}-wip`` alongside the live graph and swap on success.
 
@@ -1475,40 +1572,15 @@ class ExtensionsMaterializer:
     file rename. Only a fully clean build is swapped in — a partial one is
     discarded so the last good graph stays active.
 
-    Holds a per-graph materialization lock. If Valkey is unavailable the
-    rebuild proceeds unlocked, so concurrent rebuilds become possible.
+    ``lock`` is the per-graph materialization lock ``materialize`` already
+    holds; its token is passed through to the WIP delete and the swap so the
+    Graph API endpoints do not re-acquire it.
     """
-    from robosystems.graph_api.core.ladybug.materialization_lock import (
-      MaterializationLock,
-    )
-
     wip_id = f"{graph_id}-wip"
-    lock: MaterializationLock | None = None
 
     logger.info(f"Blue-green materialization: building WIP {wip_id}")
 
     try:
-      try:
-        from robosystems.config.valkey_registry import (
-          ValkeyDatabase,
-          create_async_redis_client,
-        )
-
-        redis_client = create_async_redis_client(ValkeyDatabase.LOCKS)
-        lock = MaterializationLock(redis_client, graph_id)
-        acquired = await lock.acquire(timeout_seconds=5)
-        if not acquired:
-          raise RuntimeError(
-            f"Could not acquire materialization lock for {graph_id} "
-            "(another materialization may be in progress)"
-          )
-      except ImportError:
-        logger.warning("Valkey not available — proceeding without materialization lock")
-      except RuntimeError:
-        raise
-      except Exception as e:
-        logger.warning(f"Could not acquire materialization lock: {e}")
-
       # A leftover WIP means a previous run died before cleanup.
       wip_exists = await client.database_exists(wip_id)
       if wip_exists:
@@ -1531,15 +1603,20 @@ class ExtensionsMaterializer:
       connstr = build_postgres_connstr()
       staging_sql = _staging_sql(graph_id, entity_id, connstr)
       await self._stage_tables(
-        client, graph_id, staging_sql, result, enabled_extensions
+        client, graph_id, staging_sql, result, enabled_extensions, lock=lock
       )
 
-      await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
+      await self._materialize_tables(
+        client, wip_id, result, source_graph_id=graph_id, lock=lock
+      )
 
       # Only a clean build ships. A 'partial' WIP — one where an edge table
       # failed to COPY — would swap in a ledger whose statements render empty,
       # so the last good graph stays active and staleness is left set to retry.
       if result.status == "success":
+        # Last checkpoint before the swap: a lapsed lock aborts here rather
+        # than carrying a stale token into the rename.
+        await self._refresh_lock(lock)
         logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
         await client.swap_database(graph_id, lock_token=lock.token if lock else None)
         logger.info(f"Blue-green swap complete for {graph_id}")
@@ -1568,9 +1645,6 @@ class ExtensionsMaterializer:
           f"Failed to clean up WIP {wip_id} after blue-green failure: {cleanup_err}"
         )
       raise
-    finally:
-      if lock is not None and lock.acquired:
-        await lock.release()
 
   async def _ensure_database(
     self,
@@ -1649,6 +1723,7 @@ class ExtensionsMaterializer:
     staging_sql: dict[str, str],
     result: MaterializeResult,
     enabled_extensions: set[str],
+    lock: "MaterializationLock | None" = None,
   ) -> None:
     """Create the DuckDB staging tables from PostgreSQL via postgres_scanner.
 
@@ -1666,6 +1741,7 @@ class ExtensionsMaterializer:
       if not sql:
         continue
 
+      await self._refresh_lock(lock)
       try:
         logger.info(f"Staging {table_name} from PostgreSQL → DuckDB")
         # Must be the internal write path: the read-only /tables/query surface
@@ -1690,6 +1766,7 @@ class ExtensionsMaterializer:
     graph_id: str,
     result: MaterializeResult,
     source_graph_id: str | None = None,
+    lock: "MaterializationLock | None" = None,
   ) -> None:
     """COPY the staged DuckDB tables into LadybugDB, nodes before edges.
 
@@ -1705,6 +1782,7 @@ class ExtensionsMaterializer:
     """
     node_tables = set(NODE_TABLES)
     for table_name in result.tables_staged:
+      await self._refresh_lock(lock)
       try:
         logger.info(f"Materializing {table_name} → LadybugDB ({graph_id})")
         response = await client.materialize_table(

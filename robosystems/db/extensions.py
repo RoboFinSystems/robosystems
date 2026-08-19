@@ -172,7 +172,11 @@ def _search_path_for(graph_id: str) -> str:
   return f"{_sanitize_schema(graph_id)}, public"
 
 
-def _bind_statement(search_path: str, tenant_schema: str | None) -> str:
+def _bind_statement(
+  search_path: str,
+  tenant_schema: str | None,
+  statement_timeout_ms: int | None = None,
+) -> str:
   """The SQL that binds one transaction to ``search_path``.
 
   For a tenant, the bind is guarded: PostgreSQL accepts a ``search_path``
@@ -186,25 +190,37 @@ def _bind_statement(search_path: str, tenant_schema: str | None) -> str:
   the ``SET LOCAL``, and its absence raises ``invalid_schema_name``
   (``3F000``): the same failure a genuinely missing schema produces, which
   the surfaces already translate to "not initialized" (404).
+
+  ``statement_timeout_ms`` adds a ``SET LOCAL statement_timeout`` ahead of
+  the guard, so every statement in the transaction — the guard included —
+  is bounded. Also ``LOCAL``: it ends with the transaction and is never left
+  on the pooled connection.
   """
-  set_local = f"SET LOCAL search_path TO {search_path}"
-  if tenant_schema is None:
-    return set_local
-  # Validated here as well as by the caller: this is the interpolation, and
-  # the guarantee should not depend on statement order in `extensions_session`.
-  tenant_schema = _sanitize_schema(tenant_schema)
-  return (
-    "DO $$ BEGIN "
-    f"IF to_regnamespace('{tenant_schema}') IS NULL THEN "
-    f"RAISE EXCEPTION 'tenant schema \"{tenant_schema}\" does not exist' "
-    "USING ERRCODE = '3F000'; "
-    "END IF; END $$; "
-    f"{set_local}"
-  )
+  statements: list[str] = []
+  if statement_timeout_ms:
+    statements.append(f"SET LOCAL statement_timeout = {int(statement_timeout_ms)}")
+  if tenant_schema is not None:
+    # Validated here as well as by the caller: this is the interpolation, and
+    # the guarantee should not depend on statement order in
+    # `extensions_session`.
+    tenant_schema = _sanitize_schema(tenant_schema)
+    statements.append(
+      "DO $$ BEGIN "
+      f"IF to_regnamespace('{tenant_schema}') IS NULL THEN "
+      f"RAISE EXCEPTION 'tenant schema \"{tenant_schema}\" does not exist' "
+      "USING ERRCODE = '3F000'; "
+      "END IF; END $$"
+    )
+  statements.append(f"SET LOCAL search_path TO {search_path}")
+  return "; ".join(statements)
 
 
 def bind_search_path(
-  session: Session, search_path: str, *, tenant_schema: str | None = None
+  session: Session,
+  search_path: str,
+  *,
+  tenant_schema: str | None = None,
+  statement_timeout_ms: int | None = None,
 ) -> None:
   """Bind ``session`` to ``search_path`` for every transaction it opens.
 
@@ -226,8 +242,13 @@ def bind_search_path(
   begin a transaction on a schema that does not exist — see
   :func:`_bind_statement` for why falling through to ``public`` is the
   failure being prevented.
+
+  ``statement_timeout_ms`` bounds every statement the session runs, per
+  transaction and per statement (a session that commits mid-flow and keeps
+  going gets the bound re-applied with the bind). ``None`` leaves the
+  server default in force.
   """
-  stmt = text(_bind_statement(search_path, tenant_schema))
+  stmt = text(_bind_statement(search_path, tenant_schema, statement_timeout_ms))
 
   @event.listens_for(session, "after_begin")
   def _stamp(_session: Session, transaction: SessionTransaction, connection) -> None:
@@ -236,8 +257,28 @@ def bind_search_path(
     connection.execute(stmt)
 
 
+# Sentinel default for `extensions_session(statement_timeout_ms=...)`: resolve
+# the interactive ceiling from tuning at open time. Distinct from `None`,
+# which is the explicit opt-out for bulk work.
+_INTERACTIVE_TIMEOUT = -1
+
+
+def interactive_statement_timeout_ms() -> int | None:
+  """The per-statement ceiling an interactive extensions session runs under.
+
+  Read from tuning on every call (the tuning layer caches), so an SSM change
+  reaches new sessions without a restart. ``0`` disables the ceiling.
+  """
+  from robosystems.config.tuning import TuningConfig
+
+  timeout_ms = TuningConfig.get_extensions_statement_timeout_ms()
+  return timeout_ms if timeout_ms > 0 else None
+
+
 @contextmanager
-def extensions_session(graph_id: str):
+def extensions_session(
+  graph_id: str, *, statement_timeout_ms: int | None = _INTERACTIVE_TIMEOUT
+):
   """Context manager providing a schema-scoped session for a tenant.
 
   Binds the session's search_path to '{graph_id}, public' so tenant tables
@@ -247,6 +288,18 @@ def extensions_session(graph_id: str):
   The bind is fail-closed: a graph whose schema does not exist (never
   provisioned, or already torn down) raises ``invalid_schema_name`` on the
   session's first statement instead of falling through to ``public``.
+
+  Every statement is bounded by a ``statement_timeout``. The engine's pool
+  is one pool for every tenant, and a statement left to run unbounded holds
+  a shared connection for the duration — a legal-but-expensive aggregate on
+  one tenant's data becomes every other tenant's queue-pool wait. The
+  default is the interactive ceiling (`interactive_statement_timeout_ms`,
+  SSM-tunable, 30s); a bulk path whose single statements legitimately run
+  longer — a loader's full sync, a migration-time backfill — passes
+  ``statement_timeout_ms=None`` to opt out, or a larger explicit value. The
+  ceiling is per statement, not per session: a command that commits between
+  steps and continues is not cut short by it. A cancelled statement raises
+  ``OperationalError`` with SQLSTATE ``57014``; see `is_statement_timeout`.
 
   Special case: `graph_id="library"` routes to the taxonomy library
   (read-only; library content currently lives in the `public` schema,
@@ -269,8 +322,15 @@ def extensions_session(graph_id: str):
   """
   search_path = _search_path_for(graph_id)
   tenant_schema = None if graph_id == LIBRARY_GRAPH_ID else graph_id
+  if statement_timeout_ms == _INTERACTIVE_TIMEOUT:
+    statement_timeout_ms = interactive_statement_timeout_ms()
   session: Session = _get_session_factory()()
-  bind_search_path(session, search_path, tenant_schema=tenant_schema)
+  bind_search_path(
+    session,
+    search_path,
+    tenant_schema=tenant_schema,
+    statement_timeout_ms=statement_timeout_ms,
+  )
   try:
     yield session
     session.commit()
@@ -279,6 +339,22 @@ def extensions_session(graph_id: str):
     raise
   finally:
     session.close()
+
+
+STATEMENT_TIMEOUT_SQLSTATE = "57014"
+
+
+def is_statement_timeout(exc: BaseException) -> bool:
+  """Whether ``exc`` is PostgreSQL cancelling a statement for exceeding
+  ``statement_timeout`` (SQLSTATE ``57014``, ``query_canceled``) — the
+  failure an interactive session's ceiling produces. Surfaces translate it
+  to a timeout the client can act on rather than a generic database fault.
+  """
+  from sqlalchemy.exc import DBAPIError
+
+  if not isinstance(exc, DBAPIError):
+    return False
+  return getattr(exc.orig, "pgcode", None) == STATEMENT_TIMEOUT_SQLSTATE
 
 
 _LIBRARY_IMMUTABLE_TABLES = (

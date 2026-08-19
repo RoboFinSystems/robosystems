@@ -110,6 +110,95 @@ class TestUpgradeTierEndpoint:
       del app.dependency_overrides[get_idempotency_cache]
 
   @pytest.mark.unit
+  def test_idempotency_key_reserves_records_and_binds(self, client, mock_user):
+    """With an Idempotency-Key the route claims the key before dispatch,
+    caches the pending envelope, and binds it to the operation for eviction
+    on failure."""
+    from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.operations import (
+      compute_idempotency_cache_key,
+      get_idempotency_cache,
+    )
+
+    mock_cache = AsyncMock()
+    mock_cache.get = AsyncMock(return_value=None)
+    mock_cache.reserve = AsyncMock(return_value=True)
+
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
+    app.dependency_overrides[get_async_db_session] = lambda: MagicMock()
+    app.dependency_overrides[get_idempotency_cache] = lambda: mock_cache
+
+    try:
+      with patch(
+        f"{CMD_MODULE}.change_graph_tier_cmd",
+        new_callable=AsyncMock,
+        return_value="op_test_abc123",
+      ):
+        response = client.post(
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/change-tier",
+          json={"new_tier": "ladybug-large"},
+          headers={"Idempotency-Key": "tier-key-1"},
+        )
+
+      assert response.status_code == 202
+      mock_cache.reserve.assert_awaited_once()
+      mock_cache.put.assert_awaited_once()
+      mock_cache.bind_operation.assert_awaited_once_with(
+        "op_test_abc123",
+        compute_idempotency_cache_key(
+          "test-user-123", VALID_TEST_GRAPH_ID, "change-tier", "tier-key-1"
+        ),
+      )
+      mock_cache.release.assert_not_awaited()
+    finally:
+      del app.dependency_overrides[get_current_user_with_graph]
+      del app.dependency_overrides[get_async_db_session]
+      del app.dependency_overrides[get_idempotency_cache]
+
+  @pytest.mark.unit
+  def test_failed_dispatch_releases_the_reservation(self, client, mock_user):
+    """A dispatch that raises leaves no reservation behind, so the caller's
+    retry with the same key runs instead of answering 409."""
+    from fastapi import HTTPException
+
+    from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.operations import get_idempotency_cache
+
+    mock_cache = AsyncMock()
+    mock_cache.get = AsyncMock(return_value=None)
+    mock_cache.reserve = AsyncMock(return_value=True)
+
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
+    app.dependency_overrides[get_async_db_session] = lambda: MagicMock()
+    app.dependency_overrides[get_idempotency_cache] = lambda: mock_cache
+
+    try:
+      with patch(
+        f"{CMD_MODULE}.change_graph_tier_cmd",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=402, detail="payment required"),
+      ):
+        response = client.post(
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operations/change-tier",
+          json={"new_tier": "ladybug-large"},
+          headers={"Idempotency-Key": "tier-key-2"},
+        )
+
+      assert response.status_code == 402
+      mock_cache.reserve.assert_awaited_once()
+      mock_cache.put.assert_not_awaited()
+      mock_cache.bind_operation.assert_not_awaited()
+      mock_cache.release.assert_awaited_once_with(
+        "test-user-123", VALID_TEST_GRAPH_ID, "change-tier", "tier-key-2"
+      )
+    finally:
+      del app.dependency_overrides[get_current_user_with_graph]
+      del app.dependency_overrides[get_async_db_session]
+      del app.dependency_overrides[get_idempotency_cache]
+
+  @pytest.mark.unit
   def test_rejects_invalid_tier(self, client, mock_user):
     """Invalid tier values are rejected with 422."""
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph

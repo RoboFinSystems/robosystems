@@ -86,3 +86,64 @@ async def test_declared_size_at_the_limit_is_allowed_through_the_gate():
 async def test_omitted_size_skips_the_gate():
   """The field is optional; existing clients that omit it are unaffected."""
   await _assert_size_gate_passed(None)
+
+
+# ── Signing the declared length into the presigned PUT ──────────────────
+
+
+async def _presign_params(file_size_bytes: int | None) -> dict:
+  """Run the command with S3 stubbed and return the Params it presigned."""
+  graph = MagicMock()
+  graph.graph_type = "generic"
+  s3 = MagicMock()
+  s3.s3_client.generate_presigned_url.return_value = "https://s3/put"
+
+  with (
+    patch(
+      "robosystems.middleware.billing.enforcement.require_graph_access",
+      return_value=graph,
+    ),
+    patch(
+      "robosystems.operations.graph.commands.create_file_upload.get_universal_repository",
+      return_value=MagicMock(),
+    ),
+    patch(
+      "robosystems.operations.graph.commands.create_file_upload.S3Client",
+      return_value=s3,
+    ),
+    patch("robosystems.models.core.GraphTable.get_by_name", return_value=MagicMock()),
+    patch(
+      "robosystems.models.core.GraphFile.create",
+      return_value=MagicMock(id="file_1"),
+    ),
+    patch(
+      "robosystems.operations.graph.commands.create_file_upload.get_endpoint_metrics",
+      return_value=MagicMock(),
+    ),
+  ):
+    await create_file_upload_cmd(
+      graph_id="kg123",
+      request=_request(file_size_bytes),
+      current_user=MagicMock(id="user123"),
+      db=MagicMock(),
+    )
+
+  s3.s3_client.generate_presigned_url.assert_called_once()
+  call = s3.s3_client.generate_presigned_url.call_args
+  assert call.args[0] == "put_object"
+  return call.kwargs["Params"]
+
+
+@pytest.mark.asyncio
+async def test_declared_size_is_signed_into_the_presigned_put():
+  """SigV4 signs Content-Length, so a PUT of any other size fails at S3."""
+  params = await _presign_params(12_345)
+  assert params["ContentLength"] == 12_345
+  assert params["ContentType"] == "text/csv"
+
+
+@pytest.mark.asyncio
+async def test_undeclared_size_leaves_content_length_unsigned():
+  """Clients that never send a size (the integration template) keep working."""
+  params = await _presign_params(None)
+  assert "ContentLength" not in params

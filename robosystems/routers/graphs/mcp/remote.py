@@ -742,8 +742,12 @@ async def _handle_tools_call(
       "action": "tool_started",
       "user_id": str(current_user.id),
       "database": graph_id,
-      "tool_name": name,
-      "access_type": access_type,
+      "request_id": getattr(request.state, "request_id", None),
+      "metadata": {
+        "tool_name": name,
+        "access_type": access_type,
+        "api_key_prefix": key_prefix,
+      },
     },
   )
 

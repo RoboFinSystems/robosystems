@@ -362,7 +362,7 @@ def _bootstrap_fiscal_calendar_if_needed(
 
   try:
     service = FiscalCalendarService()
-    with extensions_session(config.graph_id) as session:
+    with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
       existing = service.get(session, config.graph_id)
       if existing is not None and existing.initialized_at is not None:
         # Self-heal: earlier bootstrap revisions seeded the calendar pointer
@@ -453,7 +453,7 @@ def _trigger_auto_map_if_needed(
 
   mapping_id: str | None = None
   try:
-    with extensions_session(config.graph_id) as session:
+    with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
       structure = (
         session.query(Structure)
         .filter(

@@ -54,7 +54,7 @@ def reset_demo_state(graph_id: str) -> None:
 
   assert_local_extensions_db()
 
-  with extensions_session(graph_id) as session:
+  with extensions_session(graph_id, statement_timeout_ms=None) as session:
     # 1-3. All entries + line items + transactions (tenant-generated;
     # the library itself never authors these). Dimension tables
     # FK back to their parent rows so wipe them first.

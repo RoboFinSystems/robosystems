@@ -105,3 +105,109 @@ class TestMaterializationLock:
     assert lock.token == "my-token-123"
     assert lock.acquired is True
     assert lock.lock_key == "materialize_lock:kg123"
+
+
+class TestAcquireBackendErrorSignal:
+  """``acquire`` returning False must be distinguishable between "held by
+  another run" and "the lock service is unavailable" — the caller fails closed
+  either way, but the message it surfaces differs."""
+
+  @pytest.mark.asyncio
+  async def test_held_by_another_run_leaves_no_backend_error(self):
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=False)
+    lock = MaterializationLock(redis, "kg123")
+
+    assert await lock.acquire(timeout_seconds=0.05) is False
+    assert lock.last_backend_error is None
+
+  @pytest.mark.asyncio
+  async def test_backend_outage_records_last_error(self):
+    redis = AsyncMock()
+    redis.set = AsyncMock(side_effect=ConnectionError("Connection refused"))
+    lock = MaterializationLock(redis, "kg123")
+
+    assert await lock.acquire(timeout_seconds=0.05) is False
+    assert lock.acquired is False
+    assert lock.last_backend_error == "Connection refused"
+
+  @pytest.mark.asyncio
+  async def test_success_after_blip_clears_error(self):
+    redis = AsyncMock()
+    redis.set = AsyncMock(side_effect=[ConnectionError("blip"), True])
+    lock = MaterializationLock(redis, "kg123")
+
+    assert await lock.acquire(timeout_seconds=1) is True
+    assert lock.last_backend_error is None
+
+
+class TestExtend:
+  @pytest.mark.asyncio
+  async def test_extend_with_matching_token_refreshes_ttl(self):
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    redis.eval = AsyncMock(return_value=1)
+    lock = MaterializationLock(redis, "kg123", ttl_seconds=1234)
+    await lock.acquire(timeout_seconds=1)
+
+    assert await lock.extend() is True
+    assert lock.acquired is True
+    args = redis.eval.await_args.args
+    # Compare-and-extend: script, 1 key, our key, our token, the full TTL.
+    assert args[1] == 1
+    assert args[2] == "materialize_lock:kg123"
+    assert args[3] == lock.token
+    assert args[4] == "1234"
+
+  @pytest.mark.asyncio
+  async def test_extend_with_wrong_token_reports_lock_lost(self):
+    """The Lua script returns 0 when the stored value is not our token — the
+    lock expired and was re-acquired by another process. The instance must
+    then consider itself no longer the holder so a later release is a no-op."""
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    redis.eval = AsyncMock(return_value=0)
+    lock = MaterializationLock(redis, "kg123")
+    await lock.acquire(timeout_seconds=1)
+
+    assert await lock.extend() is False
+    assert lock.acquired is False
+
+    # release() after a lost lock does not touch the key.
+    redis.eval.reset_mock()
+    assert await lock.release() is False
+    redis.eval.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_extend_without_acquire_is_false(self):
+    redis = AsyncMock()
+    lock = MaterializationLock(redis, "kg123")
+
+    assert await lock.extend() is False
+    redis.eval.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_extend_backend_error_propagates(self):
+    """Unlike acquire/release, extend raises on a backend error: the caller
+    decides whether the remaining TTL makes a blip tolerable."""
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+    redis.eval = AsyncMock(side_effect=ConnectionError("blip"))
+    lock = MaterializationLock(redis, "kg123")
+    await lock.acquire(timeout_seconds=1)
+
+    with pytest.raises(ConnectionError):
+      await lock.extend()
+    # Still considered held: nothing proved the token was lost.
+    assert lock.acquired is True
+
+  @pytest.mark.asyncio
+  async def test_extend_script_compares_token(self):
+    """Pin the Lua: get == token guards the expire (a stale holder must not
+    push out someone else's TTL)."""
+    from robosystems.graph_api.core.ladybug.materialization_lock import (
+      _EXTEND_SCRIPT,
+    )
+
+    assert 'redis.call("get", KEYS[1]) == ARGV[1]' in _EXTEND_SCRIPT
+    assert 'redis.call("expire", KEYS[1], ARGV[2])' in _EXTEND_SCRIPT

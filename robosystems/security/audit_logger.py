@@ -14,6 +14,7 @@ from typing import Any
 
 from ..config import env
 from ..logger import logger
+from .request_context import audit_context
 
 
 class SecurityEventType(Enum):
@@ -241,6 +242,11 @@ class SecurityAuditLogger:
       "user_agent": user_agent,
       "endpoint": endpoint,
       "details": details or {},
+      # Request correlation and credential attribution, when inside a
+      # request: the request id ties the event to the access-log line, and
+      # the api_key_prefix scopes an incident to the credential that acted.
+      # Absent outside a request; never overrides what the caller supplied.
+      **audit_context(),
     }
 
     # Log as structured JSON for security monitoring

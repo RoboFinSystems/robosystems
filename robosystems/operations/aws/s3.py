@@ -90,7 +90,16 @@ class S3Client:
 
     return boto3.client(
       "s3",
-      config=BotoConfig(retries={"mode": "adaptive", "max_attempts": 3}),
+      # SigV4 explicitly: botocore still presigns with SigV2 in us-east-1
+      # by default, and a SigV2 URL signs no headers — so the
+      # `ContentLength` the upload presign declares would not bind the PUT.
+      # Under SigV4 `content-length` joins the signed headers and a PUT with
+      # a different length is refused by S3. Every current bucket and region
+      # accepts SigV4; SigV2 has been deprecated by AWS since 2020.
+      config=BotoConfig(
+        signature_version="s3v4",
+        retries={"mode": "adaptive", "max_attempts": 3},
+      ),
       **s3_config,
     )
 

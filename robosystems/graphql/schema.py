@@ -31,6 +31,7 @@ from strawberry.types import Info
 
 from robosystems.config import env
 from robosystems.graphql.context import GraphQLContext, require_user
+from robosystems.graphql.execution import MaskUnexpectedErrors, OffloadSyncResolvers
 from robosystems.graphql.resolvers.information_block import InformationBlockQuery
 from robosystems.graphql.resolvers.investor import InvestorQuery
 from robosystems.graphql.resolvers.ledger import LedgerQuery
@@ -102,6 +103,12 @@ Query = _build_query_type()
 # provider set up in `middleware/otel/setup.py`). The `Sync` variant works on
 # both sync and async execution paths; the async variant breaks
 # `schema.execute_sync(...)`, which cannot host async context managers.
+#
+# `OffloadSyncResolvers` must come after the OpenTelemetry extension: the
+# resolve hooks compose with the last extension outermost, and the resolver
+# span has to open inside the worker thread around the actual work rather
+# than around a coroutine handle. `MaskUnexpectedErrors` scrubs what reaches
+# `errors[]` — see `graphql/execution.py` for both.
 schema = strawberry.Schema(
   query=Query,
   extensions=[
@@ -109,5 +116,7 @@ schema = strawberry.Schema(
     lambda: MaxAliasesLimiter(max_alias_count=env.EXTENSIONS_GRAPHQL_MAX_ALIASES),
     lambda: MaxTokensLimiter(max_token_count=env.EXTENSIONS_GRAPHQL_MAX_TOKENS),
     OpenTelemetryExtensionSync,
+    OffloadSyncResolvers,
+    MaskUnexpectedErrors,
   ],
 )

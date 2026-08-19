@@ -22,7 +22,8 @@ import hashlib
 import inspect
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, Literal, TypeVar
@@ -34,8 +35,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
   create_async_redis_client,
+  create_redis_client,
 )
 from robosystems.logger import logger
+from robosystems.security.request_context import audit_context
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # `default=Any` (PEP 696) keeps unparameterized `OperationEnvelope` loose
@@ -53,6 +56,19 @@ IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 # its own retry for a day. A run that outlives the reservation simply loses
 # the in-flight guard — the same behavior as before reservations existed.
 IDEMPOTENCY_RESERVATION_TTL_SECONDS = 5 * 60
+
+# An async operation's pending envelope is cached under its idempotency key
+# for the full 24h; when the operation later fails or is cancelled the
+# terminal-status hook in the SSE event store evicts it, so the caller's
+# retry with the same key dispatches again instead of replaying `pending`.
+# The eviction needs the envelope key from only the operation id, so each
+# pending envelope is bound to its operation under this prefix (a set, since
+# a worker-side dedup can hand two keys the same operation).
+IDEMPOTENCY_BINDING_PREFIX = "op-idem:"
+
+
+def _operation_binding_key(operation_id: str) -> str:
+  return f"{IDEMPOTENCY_BINDING_PREFIX}{operation_id}"
 
 
 def generate_operation_id() -> str:
@@ -480,6 +496,99 @@ class IdempotencyCache:
         },
       )
 
+  async def bind_operation(self, operation_id: str, cache_key: str) -> None:
+    """Record that ``operation_id``'s pending envelope lives under ``cache_key``.
+
+    ``invalidate_operation`` reads this back when the operation reaches a
+    terminal failure. Best-effort like every other write here: a Valkey blip
+    leaves the pending envelope un-evictable for its TTL, not the request
+    failed.
+    """
+    binding_key = _operation_binding_key(operation_id)
+    try:
+      await self._client.sadd(binding_key, cache_key)
+      await self._client.expire(binding_key, IDEMPOTENCY_TTL_SECONDS)
+    except Exception as exc:  # pragma: no cover - defensive
+      logger.warning(
+        "Idempotency operation binding failed",
+        extra={
+          "operation_id": operation_id,
+          "cache_key": cache_key,
+          "error": str(exc),
+        },
+      )
+
+  async def invalidate_operation(self, operation_id: str) -> int:
+    """Evict every envelope bound to ``operation_id``; returns how many.
+
+    Called when the operation fails or is cancelled, so a retry under the
+    same idempotency key dispatches again rather than replaying ``pending``
+    for the rest of the day.
+    """
+    binding_key = _operation_binding_key(operation_id)
+    try:
+      cache_keys = await self._client.smembers(binding_key)
+      if not cache_keys:
+        return 0
+      await self._client.delete(*cache_keys, binding_key)
+    except Exception as exc:  # pragma: no cover - defensive
+      logger.warning(
+        "Idempotency operation invalidation failed",
+        extra={"operation_id": operation_id, "error": str(exc)},
+      )
+      return 0
+    return len(cache_keys)
+
+
+_sync_idempotency_client: Any | None = None
+
+
+def _get_sync_idempotency_client() -> Any:
+  """Sync client on the idempotency DB for the SSE store's sync write path.
+
+  Dagster and background threads record terminal statuses through
+  ``store_event_sync``; they have no event loop to drive ``IdempotencyCache``.
+  """
+  global _sync_idempotency_client
+  if _sync_idempotency_client is None:
+    _sync_idempotency_client = create_redis_client(
+      ValkeyDatabase.OPERATION_IDEMPOTENCY, decode_responses=True
+    )
+  return _sync_idempotency_client
+
+
+async def invalidate_operation_idempotency(operation_id: str) -> int:
+  """Evict the pending envelopes bound to a failed or cancelled operation."""
+  evicted = await get_idempotency_cache().invalidate_operation(operation_id)
+  if evicted:
+    logger.info(
+      "Evicted idempotency envelope for terminal operation",
+      extra={"operation_id": operation_id, "evicted": evicted},
+    )
+  return evicted
+
+
+def invalidate_operation_idempotency_sync(operation_id: str) -> int:
+  """Sync counterpart to ``invalidate_operation_idempotency``."""
+  binding_key = _operation_binding_key(operation_id)
+  try:
+    client = _get_sync_idempotency_client()
+    cache_keys = client.smembers(binding_key)
+    if not cache_keys:
+      return 0
+    client.delete(*cache_keys, binding_key)
+  except Exception as exc:  # pragma: no cover - defensive
+    logger.warning(
+      "Idempotency operation invalidation failed",
+      extra={"operation_id": operation_id, "error": str(exc)},
+    )
+    return 0
+  logger.info(
+    "Evicted idempotency envelope for terminal operation",
+    extra={"operation_id": operation_id, "evicted": len(cache_keys)},
+  )
+  return len(cache_keys)
+
 
 # ---------------------------------------------------------------------------
 # Audit logging
@@ -511,6 +620,12 @@ def log_operation_audit(
   graph lifecycle ops. ``surface`` names the entry point — ``"rest"`` for
   the HTTP operation routes, ``"mcp"`` for tool calls — so the same command
   reached two ways is distinguishable in the stream.
+
+  *Who* is more than ``user_id``: when the call runs inside a request the
+  payload also carries ``request_id`` (correlates to the access-log line and
+  to any security event of the same request) and ``auth_method`` /
+  ``api_key_prefix`` (from `security.request_context`), so a leaked-key
+  incident can be scoped to the credential rather than the whole account.
   """
   payload: dict[str, Any] = {
     "event": event,
@@ -522,6 +637,7 @@ def log_operation_audit(
     "duration_ms": round(duration_ms, 2),
     "status": status,
     "idempotent_replay": idempotent_replay,
+    **audit_context(),
   }
   if idempotency_key is not None:
     # Log only the hash prefix so keys aren't retained verbatim.
@@ -604,12 +720,18 @@ async def check_idempotency(
 
   Returns a cached envelope (with ``idempotent_replay=True``) on a cache hit,
   ``None`` on a miss. Raises ``HTTPException 409`` when the key is reused with
-  a different body.
+  a different body, or while the first request with this key is still
+  between its check and its ``put``.
 
-  Use this before enqueueing any async operation that cannot go through
-  ``execute_operation`` — i.e. ops that return ``wrap_pending`` rather than
-  ``wrap_completed``. The ``event`` parameter is forwarded to
-  ``log_operation_audit``; pass ``"extensions.operation"`` for extension ops.
+  A miss **claims the key** — the same ``SET NX`` reservation
+  ``execute_operation`` takes — so two identical requests inside one
+  another's dispatch window cannot both enqueue. That makes the caller
+  responsible for either recording an envelope under the key or releasing
+  it on every failure path; ``idempotent_dispatch`` does both, and is what
+  routes should use rather than calling this directly.
+
+  The ``event`` parameter is forwarded to ``log_operation_audit``; pass
+  ``"extensions.operation"`` for extension ops.
   """
   if idempotency_key is None:
     return None
@@ -617,6 +739,17 @@ async def check_idempotency(
     cached = await cache.get(
       user_id, graph_id, op_name, idempotency_key, body_fingerprint
     )
+    if cached is None and not await cache.reserve(
+      user_id, graph_id, op_name, idempotency_key, body_fingerprint
+    ):
+      # Another request took the key between our read and our claim: replay
+      # its envelope if it has already been recorded, otherwise report it
+      # in progress rather than dispatching alongside it.
+      cached = await cache.get(
+        user_id, graph_id, op_name, idempotency_key, body_fingerprint
+      )
+      if cached is None:
+        raise IdempotencyInProgressError(op_name)
   except IdempotencyKeyConflictError as exc:
     log_operation_audit(
       operation_name=op_name,
@@ -644,6 +777,103 @@ async def check_idempotency(
     )
     return cached.model_copy(update={"idempotent_replay": True})
   return None
+
+
+class PendingDispatch:
+  """Handle yielded by ``idempotent_dispatch``.
+
+  ``replay`` is the cached envelope when the key has already been used;
+  ``record`` stores the envelope this request produced and, for a pending
+  one, binds it to its operation so a terminal failure can evict it.
+  """
+
+  def __init__(
+    self,
+    cache: IdempotencyCache,
+    *,
+    user_id: str,
+    graph_id: str,
+    operation_name: str,
+    idempotency_key: str | None,
+    body_fingerprint: str,
+    replay: OperationEnvelope | None,
+  ) -> None:
+    self._cache = cache
+    self._user_id = user_id
+    self._graph_id = graph_id
+    self._operation_name = operation_name
+    self._idempotency_key = idempotency_key
+    self._body_fingerprint = body_fingerprint
+    self.replay = replay
+    self.recorded = False
+
+  async def record(self, envelope: OperationEnvelope) -> None:
+    """Cache ``envelope`` under the key and bind a pending one to its operation."""
+    self.recorded = True
+    if self._idempotency_key is None:
+      return
+    await self._cache.put(
+      self._user_id,
+      self._graph_id,
+      self._operation_name,
+      self._idempotency_key,
+      envelope,
+      self._body_fingerprint,
+    )
+    if envelope.status == "pending":
+      await self._cache.bind_operation(
+        envelope.operation_id,
+        compute_idempotency_cache_key(
+          self._user_id, self._graph_id, self._operation_name, self._idempotency_key
+        ),
+      )
+
+
+@asynccontextmanager
+async def idempotent_dispatch(
+  cache: IdempotencyCache,
+  user_id: str,
+  graph_id: str,
+  op_name: str,
+  idempotency_key: str | None,
+  body_fingerprint: str,
+  event: str = "graph.operation",
+) -> AsyncIterator[PendingDispatch]:
+  """Idempotency guard for a route that enqueues work and returns ``pending``.
+
+  Enter it before any side effect. ``replay`` set means the key was already
+  used — return it. Otherwise the key is now reserved for this request:
+  every exit that did not ``record`` an envelope — a validation 4xx, a
+  dispatch failure, a cancellation — releases the reservation so the
+  caller's retry can run, exactly as ``execute_operation`` does for sync
+  operations. Without this, a failed request would answer 409 to its own
+  retry until the reservation expired.
+
+      async with idempotent_dispatch(cache, user_id, graph_id, op, key, fp) as idem:
+        if idem.replay is not None:
+          return idem.replay
+        ...validate, enqueue...
+        envelope = wrap_pending(op, operation_id=..., created_by=user_id)
+        await idem.record(envelope)
+        return envelope
+  """
+  replay = await check_idempotency(
+    cache, user_id, graph_id, op_name, idempotency_key, body_fingerprint, event
+  )
+  handle = PendingDispatch(
+    cache,
+    user_id=user_id,
+    graph_id=graph_id,
+    operation_name=op_name,
+    idempotency_key=idempotency_key,
+    body_fingerprint=body_fingerprint,
+    replay=replay,
+  )
+  try:
+    yield handle
+  finally:
+    if idempotency_key is not None and replay is None and not handle.recorded:
+      await cache.release(user_id, graph_id, op_name, idempotency_key)
 
 
 # ── Runner execution ─────────────────────────────────────────────────────
@@ -952,6 +1182,7 @@ def _log_abandoned_outcome(task: asyncio.Future) -> None:
 
 
 __all__ = [
+  "IDEMPOTENCY_BINDING_PREFIX",
   "IDEMPOTENCY_RESERVATION_TTL_SECONDS",
   "IDEMPOTENCY_TTL_SECONDS",
   "AsyncOperationRunner",
@@ -962,12 +1193,16 @@ __all__ = [
   "OperationEnvelope",
   "OperationRunner",
   "OperationStatus",
+  "PendingDispatch",
   "check_idempotency",
   "compute_idempotency_cache_key",
   "execute_operation",
   "fingerprint_body",
   "generate_operation_id",
   "get_idempotency_cache",
+  "idempotent_dispatch",
+  "invalidate_operation_idempotency",
+  "invalidate_operation_idempotency_sync",
   "log_operation_audit",
   "run_off_loop",
   "wrap_completed",
