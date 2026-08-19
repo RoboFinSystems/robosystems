@@ -60,6 +60,26 @@ class _PayloadTooLarge(Exception):
   """The object yielded more bytes than the size gate admitted."""
 
 
+# Column names become SQL identifiers in the staging layer; the graph API
+# refuses anything outside this class and so does the edge, where the tenant
+# gets the 400 directly instead of a staging warning in a log.
+_COLUMN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+
+
+class _InvalidColumnName(Exception):
+  """The file declares a column whose name cannot be a staging identifier."""
+
+  def __init__(self, name: object):
+    self.name = name
+    super().__init__(repr(name)[:80])
+
+
+def _validate_column_names(names: list[str]) -> None:
+  for name in names:
+    if not isinstance(name, str) or not _COLUMN_NAME.match(name):
+      raise _InvalidColumnName(name)
+
+
 class _BoundedS3Body(io.RawIOBase):
   """Raw stream over an S3 body that stops once ``limit`` bytes have been read.
 
@@ -133,7 +153,11 @@ def _parquet_row_count(
     raise ValueError(f"parquet footer of {footer_len:,} bytes refused")
   if footer_span > len(tail):
     tail = _read_range(s3, bucket, key, file_size - footer_span, file_size - 1)
-  return pq.read_metadata(io.BytesIO(tail[-footer_span:])).num_rows
+  metadata = pq.read_metadata(io.BytesIO(tail[-footer_span:]))
+  # Top-level Arrow names — what the staging probe sees. ``ParquetSchema.names``
+  # would give leaf paths (``embedding.list.element``) and reject a list column.
+  _validate_column_names(list(metadata.schema.to_arrow_schema().names))
+  return metadata.num_rows
 
 
 def _csv_row_count(body: Any, byte_limit: int, row_cap: int) -> int:
@@ -227,7 +251,7 @@ def _measure_row_count(
       return _json_row_count(body, byte_limit, row_cap), True
     finally:
       body.close()
-  except _PayloadTooLarge:
+  except (_PayloadTooLarge, _InvalidColumnName):
     raise
   except Exception as e:
     logger.warning(
@@ -353,6 +377,15 @@ async def ingest_file_cmd(
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail=f"File exceeds maximum of {MAX_FILE_SIZE_MB} MB",
+    )
+  except _InvalidColumnName as e:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        f"Invalid column name {e} in {graph_file.file_name}. Column names must "
+        "start with a letter or underscore and contain only letters, digits "
+        "and underscores (max 128 characters)."
+      ),
     )
 
   if actual_row_count is not None and actual_row_count > row_cap:

@@ -30,6 +30,49 @@ def validate_table_name(table_name: str) -> None:
     )
 
 
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER_MAX_LENGTH = 128
+
+
+def validate_column_names(column_names: list[str], *, source: str) -> None:
+  """Refuse any probed column name outside ``[A-Za-z_][A-Za-z0-9_]*`` with a 400.
+
+  Column names read from an uploaded file are tenant-controlled and are
+  interpolated into staging DDL as identifiers. Quoting alone is not the
+  barrier — rejection is, because it fails loudly, is testable, and does not
+  depend on every interpolation site getting the escape right. The class
+  matches what a graph property name can be, so nothing a legitimate file
+  needs is excluded. ``source`` names the file or table in the error.
+  """
+  for name in column_names:
+    if (
+      not isinstance(name, str)
+      or len(name) > _IDENTIFIER_MAX_LENGTH
+      or not _IDENTIFIER_PATTERN.match(name)
+    ):
+      shown = repr(name)[:80]
+      logger.warning(f"Invalid column name rejected in {source}: {shown}")
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          f"Invalid column name {shown} in {source}. Column names must start "
+          "with a letter or underscore and contain only letters, digits and "
+          f"underscores (max {_IDENTIFIER_MAX_LENGTH} characters)."
+        ),
+      )
+
+
+def quote_identifier(name: str) -> str:
+  """Double-quote a SQL identifier, doubling any embedded quote.
+
+  Every identifier interpolated into staging SQL goes through here, so a
+  name that slipped past ``validate_column_names`` still cannot terminate the
+  identifier it is quoted into. Defense in depth behind the validator, never
+  a substitute for it.
+  """
+  return '"' + name.replace('"', '""') + '"'
+
+
 def validate_table_name_decorator(func):
   """Validate a method's ``table_name``, whether passed by keyword, on a
   request object, or as the first positional argument."""
@@ -153,6 +196,13 @@ def _interrupt_after(conn, timeout: float, timed_out: dict):
     timer.cancel()
 
 
+def _dedup_col_expr(column: str, null_cols: set[str]) -> str:
+  """``FIRST("c") AS "c"`` for a carried column, ``NULL AS "c"`` for one the
+  caller asked to keep in the schema but skip the data of."""
+  quoted = quote_identifier(column)
+  return f"NULL AS {quoted}" if column in null_cols else f"FIRST({quoted}) AS {quoted}"
+
+
 class DuckDBTableManager:
   """Create, load, query and drop the DuckDB staging tables that feed
   LadybugDB ingestion.
@@ -200,12 +250,11 @@ class DuckDBTableManager:
       null_cols = null_columns or set()
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
-      select_parts = [f'"{c}"' for c in dedupe_cols] + [
-        f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
-        for c in other_cols
+      select_parts = [quote_identifier(c) for c in dedupe_cols] + [
+        _dedup_col_expr(c, null_cols) for c in other_cols
       ]
       select_clause = ", ".join(select_parts)
-      group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+      group_by_clause = ", ".join(quote_identifier(c) for c in dedupe_cols)
 
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
@@ -221,8 +270,7 @@ class DuckDBTableManager:
       other_cols = [c for c in column_names if c not in dedupe_cols]
       # Build select: src, dst first, then FIRST() for other columns
       select_parts = ['"from" AS src', '"to" AS dst'] + [
-        f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
-        for c in other_cols
+        _dedup_col_expr(c, null_cols) for c in other_cols
       ]
       select_clause = ", ".join(select_parts)
 
@@ -299,15 +347,12 @@ class DuckDBTableManager:
       dedupe_cols = ["identifier"]
       other_cols = [c for c in column_names if c not in dedupe_cols]
       select_parts = (
-        [f'"{c}"' for c in dedupe_cols]
-        + [
-          f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
-          for c in other_cols
-        ]
+        [quote_identifier(c) for c in dedupe_cols]
+        + [_dedup_col_expr(c, null_cols) for c in other_cols]
         + ["FIRST(file_id) AS file_id"]
       )
       select_clause = ", ".join(select_parts)
-      group_by_clause = ", ".join(f'"{c}"' for c in dedupe_cols)
+      group_by_clause = ", ".join(quote_identifier(c) for c in dedupe_cols)
 
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
@@ -322,10 +367,7 @@ class DuckDBTableManager:
       other_cols = [c for c in column_names if c not in ["from", "to"]]
       select_parts = (
         ["src", "dst"]
-        + [
-          f'NULL AS "{c}"' if c in null_cols else f'FIRST("{c}") AS "{c}"'
-          for c in other_cols
-        ]
+        + [_dedup_col_expr(c, null_cols) for c in other_cols]
         + ["FIRST(file_id) AS file_id"]
       )
       select_clause = ", ".join(select_parts)
@@ -391,6 +433,11 @@ class DuckDBTableManager:
           [sample_file],
         ).description
         column_names = [col[0] for col in probe_result]
+        # Names read from an uploaded file are tenant-controlled; refuse
+        # anything outside the identifier class before any SQL is built.
+        validate_column_names(
+          column_names, source=f"file {sample_file.rsplit('/', 1)[-1]}"
+        )
         has_identifier = "identifier" in column_names
         has_from_to = "from" in column_names and "to" in column_names
 
@@ -461,6 +508,8 @@ class DuckDBTableManager:
           row_count=row_count,
         )
 
+    except HTTPException:
+      raise
     except Exception as e:
       logger.error(f"Failed to create table {request.table_name}: {e}")
       raise HTTPException(
@@ -555,6 +604,7 @@ class DuckDBTableManager:
             f"SELECT * FROM {parquet_read} LIMIT 0"
           ).description
           parquet_columns = [col[0] for col in parquet_probe]
+          validate_column_names(parquet_columns, source="the uploaded file")
           parquet_has_from_to = "from" in parquet_columns and "to" in parquet_columns
 
           # Schema evolution: add parquet columns the table lacks, which
@@ -573,7 +623,8 @@ class DuckDBTableManager:
             for col_name in new_cols:
               col_type = parquet_type_map.get(col_name, "VARCHAR")
               conn.execute(
-                f'ALTER TABLE {quoted_table} ADD COLUMN "{col_name}" {col_type}'
+                f"ALTER TABLE {quoted_table} ADD COLUMN "
+                f"{quote_identifier(col_name)} {col_type}"
               )
               logger.info(
                 f"Schema evolution: added column {col_name} ({col_type}) "
@@ -604,18 +655,19 @@ class DuckDBTableManager:
               if null_cols and "to" in null_cols:
                 return 'NULL AS "dst"'
               return '"to" AS dst'
+            quoted_col = quote_identifier(table_col)
             if null_cols and table_col in null_cols:
-              return f'NULL AS "{table_col}"'
+              return f"NULL AS {quoted_col}"
             # Target has a column the source parquet lacks — schema evolution
             # only adds source columns, never drops stale target-only ones.
             # NULL it rather than referencing a nonexistent source column,
             # which raises "Values list 't' does not have a column named ...".
             if table_col not in parquet_columns:
-              return f'NULL AS "{table_col}"'
-            return f't."{table_col}"'
+              return f"NULL AS {quoted_col}"
+            return f"t.{quoted_col}"
 
           select_expr = ", ".join(_explicit_col_expr(c) for c in post_cols)
-          insert_cols_clause = ", ".join(f'"{c}"' for c in post_cols)
+          insert_cols_clause = ", ".join(quote_identifier(c) for c in post_cols)
 
           if has_identifier:
             intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "identifier") = 1'
@@ -666,6 +718,7 @@ class DuckDBTableManager:
             f"SELECT * FROM {parquet_read} LIMIT 0"
           ).description
           append_columns = [col[0] for col in append_parquet_probe]
+          validate_column_names(append_columns, source="the uploaded file")
           table_probe = conn.execute(
             f"SELECT * FROM {quoted_table} LIMIT 0"
           ).description
@@ -676,7 +729,8 @@ class DuckDBTableManager:
             for col_name in new_append_cols:
               col_type = append_type_map.get(col_name, "VARCHAR")
               conn.execute(
-                f'ALTER TABLE {quoted_table} ADD COLUMN "{col_name}" {col_type}'
+                f"ALTER TABLE {quoted_table} ADD COLUMN "
+                f"{quote_identifier(col_name)} {col_type}"
               )
               logger.info(
                 f"Schema evolution: added column {col_name} ({col_type}) "
@@ -687,7 +741,10 @@ class DuckDBTableManager:
 
           if null_cols:
             append_expr = ", ".join(
-              f'NULL AS "{c}"' if c in null_cols else f'"{c}"' for c in append_columns
+              f"NULL AS {quote_identifier(c)}"
+              if c in null_cols
+              else quote_identifier(c)
+              for c in append_columns
             )
             sql = f"INSERT INTO {quoted_table} SELECT {append_expr}{file_id_suffix} FROM {parquet_read}"
           else:
@@ -725,6 +782,8 @@ class DuckDBTableManager:
           row_count=rows_added,
         )
 
+    except HTTPException:
+      raise
     except Exception as e:
       logger.error(f"Failed to insert into table {request.table_name}: {e}")
       raise HTTPException(

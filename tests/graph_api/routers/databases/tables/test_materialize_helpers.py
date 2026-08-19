@@ -185,8 +185,8 @@ class TestReconciledSelect:
       source_table="staged",
     )
 
-    assert "TRY_CAST(identifier AS VARCHAR) AS identifier" in select
-    assert "TRY_CAST(value AS BIGINT) AS value" in select
+    assert 'TRY_CAST("identifier" AS VARCHAR) AS "identifier"' in select
+    assert 'TRY_CAST("value" AS BIGINT) AS "value"' in select
 
   def test_missing_source_columns_become_typed_nulls(self):
     """DuckDB infers all-NULL staged columns as INT32; without the typed NULL
@@ -197,7 +197,7 @@ class TestReconciledSelect:
       source_table="staged",
     )
 
-    assert "NULL::DOUBLE AS added_later" in select
+    assert 'NULL::DOUBLE AS "added_later"' in select
 
   def test_relationship_key_columns_are_passed_through_first(self):
     """TABLE_INFO omits from/to for rel tables, but COPY requires them."""
@@ -226,8 +226,8 @@ class TestReconciledSelect:
     )
 
     columns = [part.strip() for part in select.split(",")]
-    from_columns = [c for c in columns if c.endswith("from") or c == '"from"']
-    assert from_columns == ["TRY_CAST(from AS VARCHAR) AS from"], (
+    from_columns = [c for c in columns if c.endswith('"from"')]
+    assert from_columns == ['TRY_CAST("from" AS VARCHAR) AS "from"'], (
       "the implicit pass-through must be skipped when TABLE_INFO already "
       f"declares the column, else COPY gets it twice: {select}"
     )
@@ -250,7 +250,7 @@ class TestReconciledSelect:
       null_cols={"embedding"},
     )
 
-    assert "NULL::FLOAT[384] AS embedding" in select
+    assert 'NULL::FLOAT[384] AS "embedding"' in select
     assert "TRY_CAST(embedding" not in select
 
 

@@ -152,6 +152,16 @@ SQL, values are bound as parameters, and paths are resolved through
 `get_duckdb_staging_path` with a defense-in-depth check that the result stays
 under the base directory.
 
+Column names are tenant-controlled too — they are probed from the uploaded
+file and become identifiers in the staging DDL. `create_table` and
+`insert_into_table` refuse any probed name outside
+`^[A-Za-z_][A-Za-z0-9_]*$` (max 128 chars) with a 400 before building SQL
+(`validate_column_names`), and every identifier interpolation goes through
+`quote_identifier`, which doubles embedded quotes. The validator is the
+barrier; the quoting is defense in depth for the next interpolation site
+someone adds. `tests/graph_api/core/duckdb/test_staging_identifiers.py` drives
+both against real DuckDB.
+
 ## Incremental loads
 
 Pass `file_id_map` at create time and each row carries its source file's ID:
