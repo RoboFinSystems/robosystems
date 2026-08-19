@@ -50,6 +50,8 @@ class TestRequestSizeLimit:
     r = client.post("/echo", content=b"x" * 2000)
     assert r.status_code == 413
     assert "too large" in r.json()["detail"].lower()
+    # Answered without consuming the body → the connection must not be reused.
+    assert r.headers.get("connection", "").lower() == "close"
 
   def test_chunked_body_over_limit_is_413(self):
     """No Content-Length; the cap must hold on the streamed bytes."""

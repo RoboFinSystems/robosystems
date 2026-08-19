@@ -122,6 +122,11 @@ class RequestSizeLimitMiddleware:
         "headers": [
           (b"content-type", b"application/json"),
           (b"content-length", str(len(body)).encode()),
+          # We answer without consuming the (over-limit) request body. On an
+          # HTTP/1.1 keep-alive connection the unread bytes would otherwise be
+          # read as the start of the next request and desync the stream, so
+          # signal the server to close the connection after this response.
+          (b"connection", b"close"),
         ],
       }
     )
