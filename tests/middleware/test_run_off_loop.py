@@ -72,6 +72,35 @@ async def test_timeout_holds_the_runner_token_until_the_thread_completes(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_late_failure_after_timeout_is_logged_not_lost(fresh_limiter):
+  """A worker that raises *after* the caller timed out must reach the logger,
+  not surface as an unretrieved-exception stderr traceback from an orphan task
+  (parity with execute_operation's abandoned-outcome handling)."""
+  from unittest.mock import patch
+
+  release = threading.Event()
+
+  def slow_then_fail():
+    release.wait(5.0)
+    raise RuntimeError("late boom")
+
+  with patch.object(operations.logger, "warning") as mock_warning:
+    with pytest.raises((asyncio.TimeoutError, TimeoutError)):
+      await asyncio.wait_for(operations.run_off_loop(slow_then_fail), 0.2)
+
+    release.set()
+    for _ in range(500):
+      if mock_warning.called:
+        break
+      await asyncio.sleep(0.01)
+
+  assert mock_warning.called, "a post-cancellation worker failure was not logged"
+  logged = " ".join(str(a) for a in mock_warning.call_args.args)
+  assert "late boom" in logged or "RuntimeError" in logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_normal_completion_releases_the_token(fresh_limiter):
   limiter = fresh_limiter
 

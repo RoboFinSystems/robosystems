@@ -703,9 +703,19 @@ async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
   """
   if inspect.iscoroutinefunction(func):
     return await func(*args)
-  result = await asyncio.shield(
+  work = asyncio.ensure_future(
     anyio.to_thread.run_sync(func, *args, limiter=_get_runner_limiter())
   )
+  try:
+    result = await asyncio.shield(work)
+  except asyncio.CancelledError:
+    # The worker thread keeps running to completion (a Python thread cannot be
+    # cancelled), and nothing awaits `work` any more — retrieve its outcome
+    # when it lands so a late failure reaches the structured logger rather than
+    # surfacing as an "exception was never retrieved" stderr traceback from a
+    # task nobody holds. Same handling as `execute_operation`.
+    work.add_done_callback(_log_abandoned_outcome)
+    raise
   if inspect.isawaitable(result):
     result = await result
   return result

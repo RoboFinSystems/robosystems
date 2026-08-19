@@ -167,6 +167,96 @@ class TestDeprovisionService:
       assert test_graph.deleted_at is not None
 
   @pytest.mark.asyncio
+  async def test_final_backup_is_skipped_when_this_teardown_already_made_one(
+    self, service, db_session, test_graph
+  ):
+    """On a stranded-graph retry the sensor re-selects the same graph every
+    cycle; the final backup must not be re-dumped each time. A completed FULL
+    backup created since deleted_at (this teardown's own) is reused."""
+    from datetime import UTC, datetime, timedelta
+
+    from robosystems.models.core.graph.graph_backup import (
+      BackupStatus,
+      BackupType,
+      GraphBackup,
+    )
+    from robosystems.operations.graph.deprovision_service import DeprovisionResult
+
+    test_graph.deleted_at = datetime.now(UTC) - timedelta(minutes=10)
+    db_session.commit()
+
+    prior = GraphBackup.create(
+      graph_id=test_graph.graph_id,
+      database_name=test_graph.graph_id,
+      backup_type=BackupType.FULL.value,
+      s3_bucket="test-bucket",
+      s3_key="backups/prior-final.lbug.zip",
+      session=db_session,
+    )
+    prior.status = BackupStatus.COMPLETED.value
+    prior.created_at = datetime.now(UTC) - timedelta(minutes=5)  # after deleted_at
+    db_session.commit()
+
+    result = DeprovisionResult(graph_id=test_graph.graph_id, status="success")
+
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.BackupManager"
+    ) as mock_backup_cls:
+      mock_backup = AsyncMock()
+      mock_backup_cls.return_value = mock_backup
+
+      await service._create_final_backup(test_graph, db_session, result)
+
+    # No fresh S3 dump; the existing final backup is reused.
+    mock_backup.create_backup.assert_not_called()
+    assert result.backup_created is True
+    assert result.backup_path == "backups/prior-final.lbug.zip"
+
+  @pytest.mark.asyncio
+  async def test_final_backup_ignores_a_backup_older_than_this_teardown(
+    self, service, db_session, test_graph
+  ):
+    """A nightly/on-demand backup from before deleted_at is NOT the final
+    snapshot — the first teardown still takes a fresh dump."""
+    from datetime import UTC, datetime, timedelta
+
+    from robosystems.models.core.graph.graph_backup import (
+      BackupStatus,
+      BackupType,
+      GraphBackup,
+    )
+    from robosystems.operations.graph.deprovision_service import DeprovisionResult
+
+    test_graph.deleted_at = datetime.now(UTC)
+    db_session.commit()
+
+    nightly = GraphBackup.create(
+      graph_id=test_graph.graph_id,
+      database_name=test_graph.graph_id,
+      backup_type=BackupType.FULL.value,
+      s3_bucket="test-bucket",
+      s3_key="backups/nightly.lbug.zip",
+      session=db_session,
+    )
+    nightly.status = BackupStatus.COMPLETED.value
+    nightly.created_at = datetime.now(UTC) - timedelta(days=1)  # before deleted_at
+    db_session.commit()
+
+    result = DeprovisionResult(graph_id=test_graph.graph_id, status="success")
+
+    with patch(
+      "robosystems.operations.graph.engine.backup_manager.BackupManager"
+    ) as mock_backup_cls:
+      mock_backup = AsyncMock()
+      mock_backup.s3_adapter.bucket_name = "test-bucket"
+      mock_backup.create_backup.return_value = _final_backup_metadata()
+      mock_backup_cls.return_value = mock_backup
+
+      await service._create_final_backup(test_graph, db_session, result)
+
+    mock_backup.create_backup.assert_awaited_once()
+
+  @pytest.mark.asyncio
   async def test_final_backup_is_registered_for_retrieval(
     self, service, db_session, test_graph
   ):
