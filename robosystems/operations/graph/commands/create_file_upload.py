@@ -9,6 +9,7 @@ to stage the result.
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path as PathLib
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -168,13 +169,22 @@ async def create_file_upload_cmd(
     s3_client = S3Client()
     bucket = env.USER_DATA_BUCKET
 
+    presign_params: dict[str, Any] = {
+      "Bucket": bucket,
+      "Key": s3_key,
+      "ContentType": request.content_type,
+    }
+    # A declared size is signed into the URL: SigV4 puts Content-Length in the
+    # signed headers, so a PUT of any other length fails the signature at S3
+    # (`content-length-range` is a POST-policy feature and does not apply to a
+    # presigned PUT). Optional because clients that never declare a size still
+    # get a working URL; `ingest-file` measures the real object regardless.
+    if request.file_size_bytes is not None:
+      presign_params["ContentLength"] = request.file_size_bytes
+
     upload_url = s3_client.s3_client.generate_presigned_url(
       "put_object",
-      Params={
-        "Bucket": bucket,
-        "Key": s3_key,
-        "ContentType": request.content_type,
-      },
+      Params=presign_params,
       ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
     )
 

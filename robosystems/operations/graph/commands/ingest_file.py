@@ -6,7 +6,10 @@ ones are dispatched and the result carries an ``operation_id`` to follow.
 
 from __future__ import annotations
 
+import io
+import re
 import uuid
+from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,14 +20,215 @@ from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_JSON,
   FALLBACK_BYTES_PER_ROW_PARQUET,
   MAX_FILE_SIZE_MB,
+  MAX_ROWS_PER_FILE,
   SMALL_FILE_STAGING_THRESHOLD_MB,
 )
+from robosystems.config.graph_tier import GraphTierConfig
 from robosystems.logger import logger
+from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.graphs.tables import FileUploadStatus
 from robosystems.models.core import Graph, GraphFile, GraphTable, User
 from robosystems.operations.aws.s3 import S3Client
 
 __all__ = ["ingest_file_cmd"]
+
+_FALLBACK_BYTES_PER_ROW = {
+  "parquet": FALLBACK_BYTES_PER_ROW_PARQUET,
+  "csv": FALLBACK_BYTES_PER_ROW_CSV,
+  "json": FALLBACK_BYTES_PER_ROW_JSON,
+}
+
+# Parquet locates its metadata from the end of the file: a 4-byte footer length
+# followed by the "PAR1" magic. pyarrow reads the last 64 KiB first, same as
+# here, and only goes back for more when the footer is bigger.
+_PARQUET_TRAILER_BYTES = 8
+_PARQUET_TAIL_READ_BYTES = 64 * 1024
+# A footer is Thrift metadata (schema + row-group index); a legitimate file under
+# the 100 MB cap is nowhere near this. Anything larger is refused as malformed
+# rather than decoded into memory.
+_PARQUET_MAX_FOOTER_BYTES = 16 * 1024 * 1024
+_STREAM_BUFFER_BYTES = 1024 * 1024
+_JSON_WHITESPACE = re.compile(r"[ \t\n\r]*")
+
+
+def _skip_json_whitespace(text: str, index: int) -> int:
+  match = _JSON_WHITESPACE.match(text, index)
+  return match.end() if match else index
+
+
+class _PayloadTooLarge(Exception):
+  """The object yielded more bytes than the size gate admitted."""
+
+
+class _BoundedS3Body(io.RawIOBase):
+  """Raw stream over an S3 body that stops once ``limit`` bytes have been read.
+
+  The size gate ran against HEAD; the presigned PUT stays valid for an hour, so
+  the object can be replaced by a larger one between HEAD and GET. Bounding the
+  read here — rather than trusting ContentLength — is what keeps a swap from
+  turning the count into an unbounded read.
+  """
+
+  def __init__(self, body: Any, limit: int) -> None:
+    super().__init__()
+    self._body = body
+    self._limit = limit
+    self._consumed = 0
+
+  def readable(self) -> bool:
+    return True
+
+  def readinto(self, buffer: Any) -> int:
+    chunk = self._body.read(len(buffer))
+    self._consumed += len(chunk)
+    if self._consumed > self._limit:
+      raise _PayloadTooLarge(f"object exceeded {self._limit:,} bytes while being read")
+    buffer[: len(chunk)] = chunk
+    return len(chunk)
+
+
+def _object_size(s3: Any, bucket: str, key: str) -> int:
+  return int(s3.head_object(Bucket=bucket, Key=key)["ContentLength"])
+
+
+def _read_range(s3: Any, bucket: str, key: str, start: int, end: int) -> bytes:
+  response = s3.get_object(Bucket=bucket, Key=key, Range=f"bytes={start}-{end}")
+  return response["Body"].read()
+
+
+def _parquet_row_count(
+  s3: Any, bucket: str, key: str, file_size: int, byte_limit: int
+) -> int:
+  """Row count from the parquet footer alone — no row group is ever decoded.
+
+  Reading the whole object and decoding it (``pq.read_table``) is what made a
+  100 MB snappy file a multi-GB allocation; the footer carries ``num_rows``
+  and is all a count needs. pyarrow parses metadata relative to the end of the
+  buffer, so a buffer holding only footer + trailer reads like the full file.
+  """
+  import pyarrow.parquet as pq
+  from botocore.exceptions import FlexibleChecksumError
+
+  try:
+    tail_len = min(file_size, _PARQUET_TAIL_READ_BYTES)
+    tail = _read_range(s3, bucket, key, file_size - tail_len, file_size - 1)
+  except FlexibleChecksumError:
+    # LocalStack (and some S3-compatible stores) answer a ranged GET with the
+    # whole object's checksum, which botocore then fails to verify — same
+    # quirk `dagster/resources/storage.py` sidesteps. Real S3 omits the header
+    # for a range. Fall back to one bounded full read; the parse below is
+    # still footer-only, so this costs transfer, not memory.
+    tail = io.BufferedReader(
+      _BoundedS3Body(s3.get_object(Bucket=bucket, Key=key)["Body"], byte_limit),
+      _STREAM_BUFFER_BYTES,
+    ).read()
+    file_size = len(tail)
+  if len(tail) < _PARQUET_TRAILER_BYTES or tail[-4:] != b"PAR1":
+    raise ValueError("missing parquet trailer")
+  footer_len = int.from_bytes(tail[-8:-4], "little")
+  footer_span = footer_len + _PARQUET_TRAILER_BYTES
+  if footer_span > file_size:
+    raise ValueError("parquet footer length exceeds the object")
+  if footer_len > _PARQUET_MAX_FOOTER_BYTES:
+    raise ValueError(f"parquet footer of {footer_len:,} bytes refused")
+  if footer_span > len(tail):
+    tail = _read_range(s3, bucket, key, file_size - footer_span, file_size - 1)
+  return pq.read_metadata(io.BytesIO(tail[-footer_span:])).num_rows
+
+
+def _csv_row_count(body: Any, byte_limit: int, row_cap: int) -> int:
+  """Data rows in a CSV, streamed row by row; stops once past ``row_cap``.
+
+  ``csv.reader`` over a text stream handles quoted newlines without holding
+  more than one record, so memory is bounded by the longest record rather than
+  the file. Counting stops one past the cap because the exact figure of a file
+  that is being refused anyway is not worth the rest of the scan.
+  """
+  import csv
+
+  text = io.TextIOWrapper(
+    io.BufferedReader(_BoundedS3Body(body, byte_limit), _STREAM_BUFFER_BYTES),
+    encoding="utf-8",
+    newline="",
+  )
+  records = 0
+  for _ in csv.reader(text):
+    records += 1
+    if records - 1 > row_cap:
+      break
+  return max(records - 1, 0)
+
+
+def _json_row_count(body: Any, byte_limit: int, row_cap: int) -> int:
+  """Elements of a top-level JSON array; anything else stages as one row.
+
+  Walks the array with ``raw_decode`` one element at a time instead of
+  ``json.loads`` on the whole payload: the text is held once (bounded by the
+  size gate) and elements are decoded and dropped in turn, so a 100 MB array
+  no longer expands into gigabytes of Python objects just to be ``len()``'d.
+  """
+  import json
+
+  text = (
+    io.BufferedReader(_BoundedS3Body(body, byte_limit), _STREAM_BUFFER_BYTES)
+    .read()
+    .decode("utf-8")
+  )
+  index = _skip_json_whitespace(text, 0)
+  if index >= len(text) or text[index] != "[":
+    return 1
+
+  decoder = json.JSONDecoder()
+  count = 0
+  index += 1
+  while True:
+    index = _skip_json_whitespace(text, index)
+    if index >= len(text):
+      raise ValueError("unterminated JSON array")
+    if text[index] == "]":
+      return count
+    _, index = decoder.raw_decode(text, index)
+    count += 1
+    if count > row_cap:
+      return count
+    index = _skip_json_whitespace(text, index)
+    if index < len(text) and text[index] == ",":
+      index += 1
+
+
+def _measure_row_count(
+  s3: Any,
+  bucket: str,
+  key: str,
+  file_format: str,
+  file_size: int,
+  row_cap: int,
+) -> tuple[int | None, bool]:
+  """``(row_count, exact)`` for the object; sync, meant for a worker thread.
+
+  A format that cannot be counted (malformed, unreadable) falls back to the
+  bytes-per-row estimate — same degradation as before — and reports
+  ``exact=False``. Unknown formats yield ``None``. A body that outgrows the
+  size gate mid-read escapes as ``_PayloadTooLarge`` for the caller.
+  """
+  if file_format not in _FALLBACK_BYTES_PER_ROW:
+    return None, False
+  byte_limit = MAX_FILE_SIZE_MB * 1024 * 1024
+  try:
+    if file_format == "parquet":
+      return _parquet_row_count(s3, bucket, key, file_size, byte_limit), True
+    body = s3.get_object(Bucket=bucket, Key=key)["Body"]
+    if file_format == "csv":
+      return _csv_row_count(body, byte_limit, row_cap), True
+    return _json_row_count(body, byte_limit, row_cap), True
+  except _PayloadTooLarge:
+    raise
+  except Exception as e:
+    logger.warning(
+      f"Could not calculate row count for {key} ({file_format}): {e}. "
+      f"Row count will be estimated."
+    )
+    return file_size // _FALLBACK_BYTES_PER_ROW[file_format], False
 
 
 async def ingest_file_cmd(
@@ -42,14 +246,16 @@ async def ingest_file_cmd(
       status_code=status.HTTP_404_NOT_FOUND, detail=f"File {file_id} not found"
     )
 
+  # boto3 clients are safe to share across threads; the S3 calls below run in
+  # a worker thread via ``run_off_loop`` so a 100 MB read never stalls the
+  # single-worker API loop for every other tenant.
   s3_client = S3Client()
   bucket = env.USER_DATA_BUCKET
 
   try:
-    head_response = s3_client.s3_client.head_object(
-      Bucket=bucket, Key=graph_file.s3_key
+    actual_file_size = await run_off_loop(
+      _object_size, s3_client.s3_client, bucket, graph_file.s3_key
     )
-    actual_file_size = head_response["ContentLength"]
   except Exception as e:
     logger.error(f"Failed to get file size from S3: {e}")
     raise HTTPException(
@@ -116,51 +322,46 @@ async def ingest_file_cmd(
       f"Attempted upload: {actual_file_size / (1024**3):.2f} GB",
     )
 
-  actual_row_count = None
+  # The per-file row cap is the tier's per-table materialization cap, bounded
+  # by the platform ceiling: a single file above `max_single_table_rows` can
+  # never materialize on this tier, so it is refused here instead of after it
+  # has been stored and staged. Fallback tracks ladybug-standard, as in
+  # IngestionLimitChecker — a fallback wider than the box defeats the guard.
+  tier_row_cap = GraphTierConfig.get_graph_limits(graph_tier).get(
+    "max_single_table_rows", 2_500_000
+  )
+  row_cap = min(MAX_ROWS_PER_FILE, int(tier_row_cap))
+  file_format = str(graph_file.file_format)
+
   try:
-    file_obj = s3_client.s3_client.get_object(Bucket=bucket, Key=graph_file.s3_key)
-    file_content = file_obj["Body"].read()
-
-    file_format = str(graph_file.file_format)
-    if file_format == "parquet":
-      from io import BytesIO
-
-      import pyarrow.parquet as pq
-
-      parquet_file = pq.read_table(BytesIO(file_content))
-      actual_row_count = parquet_file.num_rows
-    elif file_format == "csv":
-      import csv
-      from io import StringIO
-
-      csv_content = file_content.decode("utf-8")
-      reader = csv.reader(StringIO(csv_content))
-      actual_row_count = sum(1 for _ in reader) - 1
-    elif graph_file.file_format == "json":
-      import json
-
-      json_data = json.loads(file_content)
-      if isinstance(json_data, list):
-        actual_row_count = len(json_data)
-      else:
-        actual_row_count = 1
-
-    logger.info(f"Calculated row count for {graph_file.file_name}: {actual_row_count}")
-  except Exception as e:
-    logger.warning(
-      f"Could not calculate row count for {graph_file.file_name}: {e}. Row count will be estimated."
+    actual_row_count, exact_count = await run_off_loop(
+      _measure_row_count,
+      s3_client.s3_client,
+      bucket,
+      graph_file.s3_key,
+      file_format,
+      actual_file_size,
+      row_cap,
     )
-    if graph_file.file_format == "parquet":
-      actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_PARQUET
-    elif graph_file.file_format == "csv":
-      actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
-    elif graph_file.file_format == "json":
-      actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_JSON
-    else:
-      actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
-    logger.info(
-      f"Estimated row count for {graph_file.file_name} ({graph_file.file_format}): {actual_row_count}"
+  except _PayloadTooLarge:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"File exceeds maximum of {MAX_FILE_SIZE_MB} MB",
     )
+
+  if actual_row_count is not None and actual_row_count > row_cap:
+    raise HTTPException(
+      status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+      detail=(
+        f"File has {'at least ' if exact_count else 'an estimated '}"
+        f"{actual_row_count:,} rows, exceeding the per-file limit of "
+        f"{row_cap:,} rows for tier {graph_tier}"
+      ),
+    )
+  logger.info(
+    f"{'Calculated' if exact_count else 'Estimated'} row count for "
+    f"{graph_file.file_name} ({file_format}): {actual_row_count}"
+  )
 
   graph_file.file_size_bytes = actual_file_size
   graph_file.row_count = actual_row_count

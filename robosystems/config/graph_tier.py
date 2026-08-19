@@ -266,14 +266,12 @@ class GraphTierConfig:
 
     ``max_file_size_gb`` is **derived from the enforced constant, not read from
     graph.yml**, and is therefore the same for every tier. Upload size is not a
-    tier-scoped product limit: ``ingest_file_cmd`` reads the whole object into
-    memory to count rows, and it does that in the shared API container, so the
-    ceiling is bounded by that container rather than by the tenant's graph
-    instance. Publishing a per-tier figure here previously advertised up to
-    10 GB against a flat 100 MB rejection.
-
-    Raising this means making the row-count path stream; until then the
-    published number tracks the one the write path actually enforces.
+    tier-scoped product limit: ``ingest_file_cmd`` counts rows in the shared
+    API container (footer-only for parquet, streamed for CSV/JSON, off the
+    event loop), so the ceiling is bounded by that container and the S3 round
+    trip rather than by the tenant's graph instance. Publishing a per-tier
+    figure here previously advertised up to 10 GB against a flat 100 MB
+    rejection; the published number tracks the one the write path enforces.
     """
     tier_config = cls.get_tier_config(tier, environment)
     default_limits = {
