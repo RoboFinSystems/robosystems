@@ -103,6 +103,14 @@ class TestSyncConnection:
   """Tests for the sync_connection endpoint."""
 
   @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    """These tests use synthetic users with no GraphUser row, so the write-role
+    + lifecycle gate would 403 before reaching handler logic. The deny path is
+    covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
+    with patch(f"{SYNC_MODULE}.require_graph_write_role"):
+      yield
+
+  @pytest.fixture(autouse=True)
   def _bypass_sync_lock(self):
     """The sync endpoint acquires a `DistributedLock` against the real
     Valkey LOCKS database. Unit tests run sequentially against shared

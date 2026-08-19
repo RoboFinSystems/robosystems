@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import require_graph_write_role
+from robosystems.middleware.billing.enforcement import require_graph_access
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.middleware.operations import (
@@ -283,6 +284,11 @@ def require_graph_extension(extension: str) -> Callable[..., GraphExtensionConte
         status_code=403,
         detail=f"{extension} is not provisioned for this graph",
       )
+    # Lifecycle/subscription gate at read strength — every extensions route
+    # (reads, views, commands) passes through here, so a suspended or expired
+    # graph is closed on the whole surface. Commands additionally run the
+    # write-strength check inside `require_graph_write_role`.
+    require_graph_access(graph_id, session, require_write=False)
     return meta
 
   return _dep

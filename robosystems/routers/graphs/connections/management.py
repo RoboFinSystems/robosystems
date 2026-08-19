@@ -62,6 +62,10 @@ async def create_connection(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
+  # Registering a source is a write to the graph (it seeds sync, the fiscal
+  # calendar and the mapping operator); membership alone is not enough.
+  require_graph_write_role(str(current_user.id), graph_id)
+
   # Initialize robustness components
   components = create_robustness_components()
 

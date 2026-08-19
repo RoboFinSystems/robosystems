@@ -592,7 +592,23 @@ class GraphDeprovisionService:
         .filter(GraphUser.graph_id == graph_id)
         .all()
       ]
-      self._invalidate_member_access(graph_id, member_ids)
+      # Org OWNER/ADMIN hold implicit graph admin without a GraphUser row, so
+      # their cached decisions have to be dropped by name as well.
+      from ...models.core.graph.graph import Graph
+      from ...models.core.org.org_user import OrgRole, OrgUser
+
+      org_id = session.query(Graph.org_id).filter(Graph.graph_id == graph_id).scalar()
+      if org_id is not None:
+        member_ids += [
+          row[0]
+          for row in session.query(OrgUser.user_id)
+          .filter(
+            OrgUser.org_id == org_id,
+            OrgUser.role.in_([OrgRole.OWNER, OrgRole.ADMIN]),
+          )
+          .all()
+        ]
+      self._invalidate_member_access(graph_id, list(dict.fromkeys(member_ids)))
 
       session.query(GraphUser).filter(GraphUser.graph_id == graph_id).delete(
         synchronize_session=False

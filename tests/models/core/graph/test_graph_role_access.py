@@ -176,3 +176,91 @@ class TestOrphanedGraphRecovery:
 
     assert not GraphUser.user_has_access(creator.id, graph.graph_id, test_db)
     assert GraphUser.user_has_admin_access(test_user.id, graph.graph_id, test_db)
+
+
+class TestGoneGraphsGrantNoRole:
+  """Nobody holds a role on a graph that is gone.
+
+  Teardown stamps ``deleted_at`` first and flips ``status`` last; org
+  OWNER/ADMIN hold implicit admin through ``Graph.org_id`` with no GraphUser
+  row to delete. Both paths used to outlive the graph — the resolver is the
+  one place every surface authorizes through, so it denies here.
+  """
+
+  def test_deprovisioned_graph_denies_explicit_admin(
+    self, test_db, test_user, test_org
+  ):
+    from robosystems.models.core import GraphStatus
+
+    graph = _create_org_graph(test_db, test_org.id)
+    grantee = _create_user(test_db, test_user.password_hash)
+    GraphUser.create(
+      user_id=grantee.id, graph_id=graph.graph_id, role=GraphRole.ADMIN, session=test_db
+    )
+    assert GraphUser.user_has_admin_access(grantee.id, graph.graph_id, test_db)
+
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    role, _ = GraphUser.get_effective_role(grantee.id, graph.graph_id, test_db)
+    assert role is None
+    assert not GraphUser.user_has_access(grantee.id, graph.graph_id, test_db)
+
+  def test_deleted_at_stamp_denies_org_owner(self, test_db, test_user, test_org):
+    """The implicit grant does not survive the soft-delete stamp — even while
+    ``status`` still reads suspended/active mid-teardown."""
+    from datetime import UTC, datetime
+
+    graph = _create_org_graph(test_db, test_org.id)
+    assert GraphUser.user_has_admin_access(test_user.id, graph.graph_id, test_db)
+
+    graph.deleted_at = datetime.now(UTC)
+    test_db.commit()
+
+    role, implicit = GraphUser.get_effective_role(test_user.id, graph.graph_id, test_db)
+    assert role is None
+    assert implicit is False
+    assert not GraphUser.user_has_admin_access(test_user.id, graph.graph_id, test_db)
+
+  def test_subgraph_of_gone_parent_denies(self, test_db, test_user, test_org):
+    from robosystems.models.core import GraphStatus
+
+    graph = _create_org_graph(test_db, test_org.id)
+    subgraph_id = f"{graph.graph_id}_dev"
+    assert GraphUser.user_has_admin_access(test_user.id, subgraph_id, test_db)
+
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    assert not GraphUser.user_has_access(test_user.id, subgraph_id, test_db)
+
+  def test_gone_subgraph_row_denies_while_parent_lives(
+    self, test_db, test_user, test_org
+  ):
+    """A subgraph row that exists is held to the same standard as its parent."""
+    from robosystems.models.core import GraphStatus
+
+    graph = _create_org_graph(test_db, test_org.id)
+    subgraph = Graph.create(
+      graph_id=f"{graph.graph_id}_dev",
+      org_id=test_org.id,
+      graph_name="dev",
+      graph_type="generic",
+      session=test_db,
+      is_subgraph=True,
+      parent_graph_id=graph.graph_id,
+      subgraph_index=1,
+      subgraph_name="dev",
+    )
+    assert GraphUser.user_has_admin_access(test_user.id, subgraph.graph_id, test_db)
+
+    subgraph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    assert not GraphUser.user_has_access(test_user.id, subgraph.graph_id, test_db)
+    # The parent itself is untouched.
+    assert GraphUser.user_has_admin_access(test_user.id, graph.graph_id, test_db)
+
+  def test_missing_graph_row_denies(self, test_db, test_user):
+    role, _ = GraphUser.get_effective_role(test_user.id, _kg_id(), test_db)
+    assert role is None

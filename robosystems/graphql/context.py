@@ -46,6 +46,7 @@ from robosystems.middleware.auth.dependencies import (
   get_current_user,
 )
 from robosystems.middleware.auth.utils import validate_api_key_with_graph
+from robosystems.middleware.billing.enforcement import require_graph_access
 from robosystems.middleware.extensions import load_graph_metadata
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils.subgraph import is_subgraph
@@ -166,6 +167,10 @@ async def get_context(
       meta = load_graph_metadata(graph_id, db)
       schema_extensions = meta.schema_extensions
       graph_type = meta.graph_type
+      # Lifecycle/subscription gate (reads): a suspended or expired graph is
+      # not readable through GraphQL any more than through /query. Same
+      # gate the REST reads run; raises 403/404 like the rest of the getter.
+      require_graph_access(graph_id, db, require_write=False)
 
   return {
     "request": request,

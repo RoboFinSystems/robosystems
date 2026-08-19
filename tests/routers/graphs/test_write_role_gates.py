@@ -17,6 +17,8 @@ from fastapi import HTTPException
 
 OPS = "robosystems.routers.graphs.operations"
 MGMT = "robosystems.routers.graphs.connections.management"
+OAUTH = "robosystems.routers.graphs.connections.oauth"
+SYNC = "robosystems.routers.graphs.connections.sync"
 
 
 def _deny_gate() -> MagicMock:
@@ -85,6 +87,110 @@ class TestLifecycleWriteRoleGates:
         )
     assert exc.value.status_code == 403
     gate.assert_called_once_with("usr_1", "kg123")
+
+
+@pytest.mark.unit
+class TestConnectionWriteRoleGates:
+  """Connections are a write surface end to end: creating one seeds sync, the
+  fiscal calendar and the mapping operator; completing OAuth stores credentials
+  and starts a full-rebuild sync; a sync rewrites captured events. All four
+  entry points authenticate on membership only, so each must run the shared
+  write gate before any work — a viewer must not reach the provider registry,
+  the OAuth handler or the sync kernel."""
+
+  def test_create_connection_denies_viewer(self):
+    from robosystems.routers.graphs.connections.management import create_connection
+
+    gate = _deny_gate()
+    with (
+      patch(f"{MGMT}.require_graph_write_role", gate),
+      patch(f"{MGMT}.create_robustness_components") as components,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+          create_connection(
+            graph_id="kg123",
+            request=MagicMock(provider="quickbooks"),
+            current_user=SimpleNamespace(id="usr_1"),
+            db=MagicMock(),
+            _rate_limit=None,
+          )
+        )
+    assert exc.value.status_code == 403
+    gate.assert_called_once_with("usr_1", "kg123")
+    components.assert_not_called()
+
+  def test_init_oauth_denies_viewer(self):
+    from robosystems.routers.graphs.connections.oauth import init_oauth
+
+    gate = _deny_gate()
+    with (
+      patch(f"{OAUTH}.require_graph_write_role", gate),
+      patch(f"{OAUTH}.ConnectionService") as service,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+          init_oauth(
+            graph_id="kg123",
+            request=MagicMock(connection_id="conn_1"),
+            current_user=SimpleNamespace(id="usr_1"),
+            db=MagicMock(),
+            _rate_limit=None,
+          )
+        )
+    assert exc.value.status_code == 403
+    gate.assert_called_once_with("usr_1", "kg123")
+    service.get_connection.assert_not_called()
+
+  def test_oauth_callback_denies_viewer(self):
+    from robosystems.routers.graphs.connections.oauth import oauth_callback
+
+    gate = _deny_gate()
+    with (
+      patch(f"{OAUTH}.require_graph_write_role", gate),
+      patch(f"{OAUTH}.ConnectionService") as service,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+          oauth_callback(
+            provider="quickbooks",
+            graph_id="kg123",
+            request=MagicMock(error=None),
+            current_user=SimpleNamespace(id="usr_1"),
+            db=MagicMock(),
+            _rate_limit=None,
+          )
+        )
+    assert exc.value.status_code == 403
+    gate.assert_called_once_with("usr_1", "kg123")
+    service.get_connection.assert_not_called()
+
+  def test_sync_connection_denies_viewer(self):
+    from robosystems.routers.graphs.connections.sync import sync_connection
+
+    gate = _deny_gate()
+    with (
+      patch(f"{SYNC}.require_graph_write_role", gate),
+      patch(f"{SYNC}.dispatch_connection_sync") as dispatch,
+      patch(f"{SYNC}.check_idempotency") as idem,
+    ):
+      with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+          sync_connection(
+            graph_id="kg123",
+            connection_id="conn_1",
+            request=MagicMock(),
+            current_user=SimpleNamespace(id="usr_1"),
+            db=MagicMock(),
+            _rate_limit=None,
+            idempotency_key=None,
+            cache=MagicMock(),
+          )
+        )
+    assert exc.value.status_code == 403
+    gate.assert_called_once_with("usr_1", "kg123")
+    dispatch.assert_not_called()
+    idem.assert_not_called()
 
 
 @pytest.mark.unit

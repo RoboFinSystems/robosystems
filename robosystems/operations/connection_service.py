@@ -110,8 +110,13 @@ class ConnectionService:
 
     Pass `graph_id` (the URL scope the caller already authorized) whenever it
     is known: `connection_id` is caller-supplied, so without the scope check a
-    guessed id reaches another graph's connection. `SYSTEM_USER_ID` bypasses
-    the ownership check.
+    guessed id reaches another graph's connection.
+
+    Connections are graph assets that record their creator, not the
+    creator's property: with `graph_id` given, the graph scope is the
+    authorization and every member of the graph resolves the same
+    connection (role is enforced by the caller). Without a graph scope the
+    legacy creator check applies; `SYSTEM_USER_ID` bypasses it.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -122,11 +127,11 @@ class ConnectionService:
         logger.warning("Connection not found: %s", connection_id)
         return None
 
-      if graph_id and conn.graph_id != graph_id:
-        logger.warning("Connection %s not in requested graph scope", connection_id)
-        return None
-
-      if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
+      if graph_id:
+        if conn.graph_id != graph_id:
+          logger.warning("Connection %s not in requested graph scope", connection_id)
+          return None
+      elif user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
         logger.warning("User not authorized for connection %s", connection_id)
         return None
 
@@ -164,15 +169,18 @@ class ConnectionService:
   ) -> list[dict[str, Any]]:
     """List connections, without decrypting credentials.
 
-    `graph_id` takes precedence over `entity_id`; `SYSTEM_USER_ID` sees every
-    user's connections. Each dict carries `has_credentials` and `is_expired`.
+    `graph_id` takes precedence over `entity_id`. A graph scope lists the
+    graph's connections for every member (they are graph assets — see
+    `get_connection`); only the legacy scope-less call filters by creator, and
+    `SYSTEM_USER_ID` sees every user's connections. Each dict carries
+    `has_credentials` and `is_expired`.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
 
     try:
       target_graph_id = graph_id or entity_id
-      filter_user_id = None if user_id == SYSTEM_USER_ID else user_id
+      filter_user_id = None if (graph_id or user_id == SYSTEM_USER_ID) else user_id
 
       connections = Connection.list_filtered(
         session=session,
@@ -475,10 +483,12 @@ class ConnectionService:
     Graph-scoped on purpose: the connection must belong to `graph_id` (the
     URL scope the caller already authorized) — this prevents flipping
     another graph's connection into write-back via a guessed connection_id.
+    Any write-role member of the graph may set the policy, not only the
+    member who created the connection (the router enforces the role).
     Returns the updated connection dict, or None when the connection is
-    missing, belongs to a different graph, or isn't owned by the user.
-    Raises ValueError for an unsupported policy value (the model validates);
-    valid values are 'native' and 'qb_authoritative'.
+    missing or belongs to a different graph. Raises ValueError for an
+    unsupported policy value (the model validates); valid values are
+    'native' and 'qb_authoritative'.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -492,9 +502,6 @@ class ConnectionService:
         logger.warning(
           "Connection %s does not belong to graph %s", connection_id, graph_id
         )
-        return None
-      if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
-        logger.warning("User not authorized for connection %s", connection_id)
         return None
 
       conn.set_write_policy(session, write_policy)

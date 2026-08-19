@@ -565,19 +565,28 @@ async def get_current_user_with_graph_or_url_token(
 
 
 def require_graph_write_role(user_id: str, graph_id: str) -> None:
-  """Assert the user holds a write role (member/admin) on the graph.
+  """Assert the user may write to the graph right now.
 
-  ``viewer`` is read-only; bare graph *membership* (which
-  ``get_current_user_with_graph`` proves) is not sufficient to mutate a graph.
-  This is the single write-role authorization check the command surfaces share
-  — REST command ops (the extensions registrar, content-ops) call it before
-  dispatching, and the MCP surface enforces the same via
-  ``validate_mcp_access(..., "write")``. Raises 403 for a read-only role.
+  Two checks, one gate:
+
+  1. Role — ``viewer`` is read-only; bare graph *membership* (which
+     ``get_current_user_with_graph`` proves) is not sufficient to mutate a
+     graph. Raises 403 for a read-only role.
+  2. Lifecycle — the graph must be writable: not suspended, deleted or
+     deprovisioned, and (billing on) not in a canceled grace period or a tier
+     upgrade. This is ``require_graph_access(require_write=True)``.
+
+  It is the single write gate the command surfaces share — the extensions
+  registrar, content-ops, the lifecycle ops, connections and write-capable
+  operators call it before dispatching, and the MCP surface enforces the same
+  pair via ``validate_mcp_access(..., "write")`` — so a state that blocks
+  writes on one surface blocks them on all of them.
 
   Opens a short-lived platform session — ``GraphUser`` lives in the platform
   DB, not the per-graph OLTP DB.
   """
   from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.models.core import GraphUser
 
   session = SessionFactory()
@@ -596,6 +605,7 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"Write access denied to graph {graph_id}; your role is read-only.",
       )
+    require_graph_access(graph_id, session, require_write=True)
   finally:
     session.close()
 

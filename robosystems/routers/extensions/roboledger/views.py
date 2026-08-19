@@ -24,9 +24,12 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from sqlalchemy.orm import Session
 
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.billing.enforcement import require_graph_access
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
@@ -73,6 +76,29 @@ _OP_TAG = "Extensions: RoboLedger"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 
+def _require_readable_graph(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  _user: User = Depends(get_current_user_with_graph),
+  session: Session = Depends(get_db_session),
+) -> None:
+  """Lifecycle/subscription gate (read strength) for the analytical views.
+
+  The views read LadybugDB directly rather than the extensions OLTP, so they
+  do not pass through `require_graph_extension`; this is the same
+  `require_graph_access` check that dependency and `/query` run, so a
+  suspended or expired graph is closed here too. Shared repositories pass —
+  their access is per-user, checked by `get_current_user_with_graph`.
+
+  Depends on the auth dependency so it can only run for an authenticated
+  member (route-level dependencies otherwise resolve before the handler's
+  own, and graph state must not be observable before authentication).
+  """
+  require_graph_access(graph_id, session, require_write=False)
+
+
+_READABLE_GRAPH = Depends(_require_readable_graph)
+
+
 @router.post(
   "/build-fact-grid",
   response_model=OperationEnvelope[ViewResponse],
@@ -80,7 +106,7 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
   summary="Build Fact Grid",
   description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns deduplicated facts plus the aspects they span — arranging them into a table is the consumer's job, since collapsing cells safely requires the full aspect signature. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
   tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
   responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
@@ -190,7 +216,7 @@ async def build_fact_grid_op(
     "graphs, provide `report_id` explicitly."
   ),
   tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
+  dependencies=[_RATE_LIMIT, _READABLE_GRAPH],
   responses={**OPERATION_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(

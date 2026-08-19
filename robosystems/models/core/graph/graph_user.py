@@ -190,30 +190,52 @@ class GraphUser(Model):
     Org OWNER/ADMIN hold implicit graph admin on graphs their org owns (paying
     for a graph carries the right to manage it), so the effective role is the
     stronger of the explicit row and that implicit grant.
+
+    Nobody holds a role on a graph that is gone. A missing, deprovisioned, or
+    ``deleted_at``-stamped graph (teardown stamps first and flips status last)
+    resolves to no role for everyone — including org OWNER/ADMIN, whose
+    implicit grant would otherwise outlive the graph via ``Graph.org_id`` —
+    so every surface that authorizes through this resolver (REST, GraphQL,
+    MCP, the extensions registrar) denies in one place. A subgraph row that
+    exists is held to the same standard as its parent.
     """
     from robosystems.middleware.graph.types import parse_graph_id
+    from robosystems.models.core.graph.graph import Graph, GraphStatus
 
     parent_id, _ = parse_graph_id(graph_id)
 
+    graph_ids = {parent_id, graph_id}
+    rows = (
+      session.query(Graph.graph_id, Graph.org_id, Graph.status, Graph.deleted_at)
+      .filter(Graph.graph_id.in_(graph_ids))
+      .all()
+    )
+    by_id = {r.graph_id: r for r in rows}
+    parent_row = by_id.get(parent_id)
+    if parent_row is None:
+      return None, False
+    for row in by_id.values():
+      if row.status == GraphStatus.DEPROVISIONED.value or row.deleted_at is not None:
+        return None, False
+
     explicit_role: GraphRole | None = None
-    row = (
+    membership = (
       session.query(cls)
       .filter(cls.user_id == user_id, cls.graph_id == parent_id)
       .first()
     )
-    if row is not None:
+    if membership is not None:
       try:
-        explicit_role = GraphRole.coerce(row.role)
+        explicit_role = GraphRole.coerce(membership.role)
       except ValueError:
         explicit_role = GraphRole.VIEWER
 
     if explicit_role == GraphRole.ADMIN:
       return GraphRole.ADMIN, False
 
-    from robosystems.models.core.graph.graph import Graph
     from robosystems.models.core.org.org_user import OrgRole, OrgUser
 
-    org_id = session.query(Graph.org_id).filter(Graph.graph_id == parent_id).scalar()
+    org_id = parent_row.org_id
     if org_id is not None:
       org_user = OrgUser.get_by_org_and_user(org_id, user_id, session)
       if org_user is not None and org_user.role in (OrgRole.OWNER, OrgRole.ADMIN):

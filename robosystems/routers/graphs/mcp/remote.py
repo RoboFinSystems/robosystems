@@ -160,6 +160,10 @@ def _rpc_error(
   )
 
 
+class _ReadOnlyViolation(Exception):
+  """A read-graph-cypher statement refused by the read-only guard."""
+
+
 def _tool_error_payload(msg_id: Any, text: str) -> dict[str, Any]:
   """A tool-execution failure as a complete JSON-RPC response payload.
 
@@ -537,6 +541,7 @@ async def _stream_queued_call(
   stops consuming queue capacity.
   """
   from robosystems.middleware.graph.query_queue import get_query_queue
+  from robosystems.middleware.mcp.tools.cypher_tool import assert_read_only_cypher
 
   queue_manager = get_query_queue()
   query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
@@ -550,6 +555,12 @@ async def _stream_queued_call(
   outcome = "client_disconnected"
   try:
     try:
+      # Same read-only guard the tool applies on the direct path; the queue
+      # runs the raw statement, so it must be refused before submission.
+      try:
+        assert_read_only_cypher(query)
+      except ValueError as exc:
+        raise _ReadOnlyViolation(str(exc)) from exc
       queue_id = await queue_manager.submit_query(
         cypher=query,
         parameters=parameters,  # type: ignore[arg-type]
@@ -626,6 +637,12 @@ async def _stream_queued_call(
             break
 
           await asyncio.sleep(_QUEUE_POLL_SECONDS)
+    except _ReadOnlyViolation as exc:
+      # A denied statement is a policy answer, not a backend failure: no
+      # breaker hit, and the model sees why so it can rephrase.
+      query_settled = True
+      outcome = "denied"
+      payload = _tool_error_payload(msg_id, f"Error: {exc}")
     except TimeoutError:
       outcome = "bridge_timeout"
       # Deliberate: the bridge ceiling exhausting counts against the breaker.

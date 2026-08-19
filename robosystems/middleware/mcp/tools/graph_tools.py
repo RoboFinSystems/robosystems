@@ -174,7 +174,6 @@ class CreateSubgraphTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
-    from robosystems.models.core.graph import Graph
     from robosystems.operations.graph.subgraph_service import SubgraphService
 
     name = arguments.get("name") or ""
@@ -208,11 +207,55 @@ class CreateSubgraphTool:
 
     session, close = _open_platform_session()
     try:
-      parent = session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
-      if not parent:
+      # Mirror the REST gates (`routers/graphs/subgraphs/main.py::create_subgraph`)
+      # by running the same helpers: the feature flag, admin role + lifecycle/
+      # subscription state on the parent, tier support, active parent, quota
+      # and name uniqueness. A gate that exists on one of two entry points to
+      # the same service is not a gate.
+      from fastapi import HTTPException
+
+      from robosystems.config import env
+      from robosystems.routers.graphs.subgraphs.utils import (
+        check_subgraph_quota,
+        validate_subgraph_name_unique,
+        verify_parent_graph_access,
+        verify_parent_graph_active,
+        verify_subgraph_tier_support,
+      )
+
+      if not env.SUBGRAPH_CREATION_ENABLED:
         return {
-          "error": "parent_not_found",
-          "message": f"Parent graph {parent_graph_id} not found.",
+          "error": "subgraph_creation_disabled",
+          "message": "Subgraph creation is currently disabled.",
+        }
+      try:
+        parent = verify_parent_graph_access(parent_graph_id, user, session, "admin")
+        verify_subgraph_tier_support(parent)
+        verify_parent_graph_active(parent)
+        _count, _max, existing = check_subgraph_quota(parent, session)
+        validate_subgraph_name_unique(name, existing, parent_graph_id)
+      except HTTPException as gate_error:
+        if gate_error.status_code == 404:
+          return {
+            "error": "parent_not_found",
+            "message": f"Parent graph {parent_graph_id} not found.",
+          }
+        detail = str(gate_error.detail)
+        if gate_error.status_code == 409:
+          return {"error": "name_taken", "message": detail}
+        if gate_error.status_code == 400:
+          # A malformed name is caught by validate_subgraph_name() above, so
+          # this is unreachable for real input today; keep the mapping
+          # exhaustive so a 400 from any gate helper codes as invalid_name
+          # rather than defaulting into the subgraph_not_allowed bucket.
+          return {"error": "invalid_name", "message": detail}
+        lowered = detail.lower()
+        is_role_denial = "admin access" in lowered or "access denied" in lowered
+        return {
+          "error": "insufficient_permissions"
+          if is_role_denial
+          else "subgraph_not_allowed",
+          "message": detail,
         }
 
       service = SubgraphService()
@@ -235,8 +278,6 @@ class CreateSubgraphTool:
       # stdio bridge you created then switched in-session, but a remote
       # connector is URL-anchored, so the caller needs the address and the
       # (already-satisfied) credential answer handed to them, not inferred.
-      from robosystems.config import env
-
       subgraph_id = result.get("graph_id")
       return {
         "subgraph_id": subgraph_id,

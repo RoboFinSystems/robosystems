@@ -358,6 +358,7 @@ class TestCallMcpToolValidation:
         "robosystems.routers.graphs.mcp.execute.get_graph_repository", new=AsyncMock()
       ),
       patch("robosystems.models.core.GraphUser.user_has_access", return_value=True),
+      patch("robosystems.middleware.billing.enforcement.require_graph_access"),
       patch("robosystems.routers.graphs.mcp.execute.MCPHandler") as handler_cls,
       patch(
         "robosystems.routers.graphs.mcp.execute.create_operation_response",
@@ -382,6 +383,72 @@ class TestCallMcpToolValidation:
     assert body["operation_id"] == "op-xyz"
     assert body["monitor_url"] == "/v1/operations/op-xyz/stream"
     queue.submit_query.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_queue_path_refuses_write_statement_before_submission(self):
+    """`read-graph-cypher` stays a read tool on the queue strategies.
+
+    The queue executes the raw statement without constructing `CypherTool`,
+    so a write-role caller who lands on a queue strategy would otherwise get
+    a write through a read tool. The read-only guard runs before
+    `submit_query`; a violation is a 403, not an enqueued write.
+
+    On a subgraph deliberately: the statement kernel's write policy already
+    refuses direct writes on *main* graphs, so a main-graph id would pass
+    this test without the guard. Subgraphs accept direct writes from a
+    write-role caller — that is where the read tool leaked.
+    """
+    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
+
+    mock_request = Mock()
+    mock_request.headers = {
+      "user-agent": "python-httpx/0.27",
+      "accept": "application/json",
+    }
+    user = _make_mock_user()
+    tool_call = _make_mock_tool_call(
+      "read-graph-cypher", {"query": "MATCH (n) DETACH DELETE n"}
+    )
+
+    queue = Mock()
+    queue.get_stats = Mock(return_value={"queue_size": 20, "running_queries": 10})
+    queue.submit_query = AsyncMock(return_value="queue-abc")
+
+    with (
+      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
+      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
+      patch("robosystems.routers.graphs.mcp.execute.log_shared_query_start"),
+      patch("robosystems.routers.graphs.mcp.execute.record_shared_query_outcome"),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.get_query_queue", return_value=queue
+      ),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.get_graph_repository", new=AsyncMock()
+      ),
+      # A write-role caller: the statement kernel classifies the DELETE as a
+      # write and the role check passes — the read-only guard is what refuses.
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access", return_value=True
+      ),
+      patch("robosystems.middleware.billing.enforcement.require_graph_access"),
+      patch("robosystems.routers.graphs.mcp.execute.MCPHandler") as handler_cls,
+    ):
+      handler_cls.return_value.close = AsyncMock()
+
+      with pytest.raises(HTTPException) as exc:
+        await call_mcp_tool(
+          full_request=mock_request,
+          graph_id="kg01234567890abcdef_dev",
+          tool_call=tool_call,
+          format=None,
+          test_mode=False,
+          current_user=user,
+          _rate_limit=None,
+        )
+
+    assert exc.value.status_code == 403
+    assert "Only read-only queries are allowed" in str(exc.value.detail)
+    queue.submit_query.assert_not_awaited()
 
   def test_non_cypher_tool_not_in_cypher_tool_list(self):
     """Test that non-cypher tools are not in the cypher validation tool list.

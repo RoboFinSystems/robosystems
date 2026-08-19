@@ -11,6 +11,21 @@ from tests.conftest import VALID_TEST_GRAPH_ID
 
 @pytest.mark.unit
 class TestUploadRouterAutoTableCreation:
+  @pytest.fixture(autouse=True)
+  def _bypass_graph_access_gate(self):
+    """`create_file_upload_cmd` opens with the lifecycle/subscription gate
+    `require_graph_access(require_write=True)`; these tests drive it with a
+    bare Mock session, so stub the gate to a live generic graph. Its own
+    behavior is covered in tests/middleware/billing/test_enforcement.py and
+    tests/operations/graph/commands/test_create_file_upload_size_gate.py."""
+    graph = Mock()
+    graph.graph_type = "generic"
+    with patch(
+      "robosystems.middleware.billing.enforcement.require_graph_access",
+      return_value=graph,
+    ):
+      yield
+
   @pytest.mark.asyncio
   async def test_auto_creates_node_table_for_pascal_case_name(self):
     graph_id = VALID_TEST_GRAPH_ID

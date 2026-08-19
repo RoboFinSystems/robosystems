@@ -753,6 +753,20 @@ async def call_mcp_tool(
           query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
           parameters = tool_call.arguments.get("parameters", {})
 
+          # The queue executes the raw statement without constructing the
+          # tool, so the read-only guard `CypherTool` applies on the direct
+          # path has to run here — a read tool must not become a write path
+          # for a write-role caller by picking a queue strategy.
+          from robosystems.middleware.mcp.tools.cypher_tool import (
+            assert_read_only_cypher,
+          )
+
+          try:
+            assert_read_only_cypher(query)
+          except ValueError as exc:
+            await handler.close()
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
           queue_manager = get_query_queue()
           queue_id = await queue_manager.submit_query(
             cypher=query,

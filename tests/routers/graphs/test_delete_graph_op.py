@@ -100,8 +100,20 @@ class TestDeleteGraphRunner:
   """
 
   def _setup_admin_membership(self, db: MagicMock, role: str = "admin") -> MagicMock:
-    """Wire `db.query(GraphUser).filter(...).first()` to return a membership
-    with the given role (None means no membership)."""
+    """Wire the two queries `get_effective_role` runs against `db`:
+
+    - the graph-liveness query (`.all()`) returns one live Graph row, so the
+      resolver gets past the "graph is gone" guard; and
+    - the membership query (`.first()`) returns a GraphUser with the given
+      role (None means no membership).
+    """
+    live_graph = MagicMock()
+    live_graph.graph_id = "kg_x"
+    live_graph.org_id = "org_1"
+    live_graph.status = "active"
+    live_graph.deleted_at = None
+    db.query.return_value.filter.return_value.all.return_value = [live_graph]
+
     membership = None
     if role is not None:
       membership = MagicMock()

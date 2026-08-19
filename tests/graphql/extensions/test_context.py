@@ -42,6 +42,15 @@ def _entity_meta(
   )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_lifecycle_gate():
+  """`get_context` runs the graph lifecycle/subscription gate after the access
+  check and metadata load; these tests use synthetic graph ids, so bypass it
+  by default. `TestGetContextLifecycleGate` covers the wiring."""
+  with patch(f"{MODULE}.require_graph_access", return_value=None):
+    yield
+
+
 def _make_request(headers: dict[str, str] | None = None) -> MagicMock:
   """Build a stub Request with controllable headers."""
   request = MagicMock()
@@ -405,3 +414,72 @@ class TestSubgraphGuard:
 
     assert ctx["graph_id"] == "sec"
     mock_check.assert_called_once_with(user, "sec")
+
+
+@pytest.mark.asyncio
+class TestGetContextLifecycleGate:
+  """A suspended, mid-teardown or expired graph is not readable through
+  GraphQL: the same `require_graph_access` gate `/query` runs, at read
+  strength, after the access check and only for real graphs (the `library`
+  sentinel has no Graph row)."""
+
+  async def test_gate_runs_after_access_check_at_read_strength(self):
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_test"
+    db = MagicMock()
+    order: list[str] = []
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(
+        f"{MODULE}.check_graph_access",
+        side_effect=lambda *_a, **_k: order.append("access"),
+      ),
+      patch(f"{MODULE}.load_graph_metadata", return_value=_entity_meta()),
+      patch(
+        f"{MODULE}.require_graph_access",
+        side_effect=lambda *_a, **_k: order.append("lifecycle"),
+      ) as gate,
+    ):
+      await get_context(request=request, api_key="rfs_valid", graph_id=GRAPH_ID, db=db)
+
+    assert order == ["access", "lifecycle"]
+    gate.assert_called_once_with(GRAPH_ID, db, require_write=False)
+
+  async def test_closed_graph_is_refused(self):
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_test"
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access"),
+      patch(f"{MODULE}.load_graph_metadata", return_value=_entity_meta()),
+      patch(
+        f"{MODULE}.require_graph_access",
+        side_effect=HTTPException(status_code=403, detail="Subscription has ended."),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await get_context(
+          request=request, api_key="rfs_valid", graph_id=GRAPH_ID, db=MagicMock()
+        )
+    assert exc.value.status_code == 403
+
+  async def test_library_sentinel_skips_the_gate(self):
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_test"
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access"),
+      patch(f"{MODULE}.require_graph_access") as gate,
+    ):
+      ctx = await get_context(
+        request=request, api_key="rfs_valid", graph_id="library", db=MagicMock()
+      )
+
+    assert ctx["graph_type"] == "library"
+    gate.assert_not_called()
