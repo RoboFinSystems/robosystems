@@ -119,6 +119,14 @@ def _make_robustness_components():
 class TestCreateConnection:
   """Tests for the create_connection endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    """These tests use synthetic users with no GraphUser row, so the write-role
+    + lifecycle gate would 403 before reaching handler logic. The deny path is
+    covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
+    with patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"):
+      yield
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_create_connection_success_quickbooks(self):

@@ -221,6 +221,30 @@ class TestGetConnection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_graph_scope_supersedes_creator(self):
+    """With the (authorized) graph scope given, a connection created by a
+    colleague resolves — connections belong to the graph, not the creator."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_other")
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+    ):
+      MockConn.get_by_id.return_value = mock_conn
+      MockCreds.get_by_connection_id.return_value = None
+      result = await ConnectionService.get_connection(
+        connection_id="conn_test123",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is not None
+    assert result["connection_id"] == "conn_test123"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_system_user_bypasses_access_check(self):
     mock_session = MagicMock()
     mock_conn = _make_mock_connection(user_id="usr_other")
@@ -338,6 +362,49 @@ class TestListConnections:
 
     call_kwargs = MockConn.list_filtered.call_args.kwargs
     assert call_kwargs["user_id"] is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_graph_scope_lists_every_members_connections(self):
+    """A graph-scoped list is not filtered by creator: every member sees the
+    graph's connections (the duplicate check on create relies on this too —
+    'one per provider per graph' was silently 'per creator per graph')."""
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      await ConnectionService.list_connections(
+        graph_id="kg_test",
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    call_kwargs = MockConn.list_filtered.call_args.kwargs
+    assert call_kwargs["graph_id"] == "kg_test"
+    assert call_kwargs["user_id"] is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_scopeless_list_still_filters_by_creator(self):
+    mock_session = MagicMock()
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials"),
+    ):
+      MockConn.list_filtered.return_value = []
+
+      await ConnectionService.list_connections(
+        user_id="usr_123",
+        db_session=mock_session,
+      )
+
+    call_kwargs = MockConn.list_filtered.call_args.kwargs
+    assert call_kwargs["user_id"] == "usr_123"
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -1082,7 +1149,10 @@ class TestSetWritePolicy:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_wrong_user_returns_none(self):
+  async def test_other_member_of_graph_may_set_policy(self):
+    """A connection is a graph asset: any write-role member of the graph sets
+    its policy, not only the member who created it (co-admins were 404ing on
+    each other's connections while delete was already graph-scoped)."""
     mock_session = MagicMock()
     mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_other")
 
@@ -1096,8 +1166,8 @@ class TestSetWritePolicy:
         db_session=mock_session,
       )
 
-    assert result is None
-    mock_conn.set_write_policy.assert_not_called()
+    assert result is not None
+    mock_conn.set_write_policy.assert_called_once_with(mock_session, "native")
 
   @pytest.mark.asyncio
   @pytest.mark.unit

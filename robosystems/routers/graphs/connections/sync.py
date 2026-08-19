@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_graph,
+  require_graph_write_role,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
@@ -76,6 +79,12 @@ async def sync_connection(
 ) -> OperationEnvelope:
   op_name = "sync-connection"
   user_id = str(current_user.id)
+
+  # A sync rewrites the graph's captured events (full_rebuild wipes and
+  # reloads them); membership alone is not enough. Same gate the MCP
+  # `sync-connection` tool clears through its write classification.
+  require_graph_write_role(user_id, graph_id)
+
   body_fp = fingerprint_body(request)
 
   replay = await check_idempotency(

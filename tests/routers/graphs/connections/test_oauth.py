@@ -85,6 +85,14 @@ def _make_oauth_callback_request(
 class TestInitOAuth:
   """Tests for the init_oauth endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    """These tests use synthetic users with no GraphUser row, so the write-role
+    + lifecycle gate would 403 before reaching handler logic. The deny path is
+    covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
+    with patch(f"{OAUTH_MODULE}.require_graph_write_role"):
+      yield
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_init_oauth_success_quickbooks(self):
@@ -300,6 +308,14 @@ class TestInitOAuth:
 class TestOAuthCallback:
   """Tests for the oauth_callback endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    """These tests use synthetic users with no GraphUser row, so the write-role
+    + lifecycle gate would 403 before reaching handler logic. The deny path is
+    covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
+    with patch(f"{OAUTH_MODULE}.require_graph_write_role"):
+      yield
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_oauth_callback_success_quickbooks(self):
@@ -480,6 +496,81 @@ class TestOAuthCallback:
     assert (
       mock_oauth_handler.store_tokens.call_args.args[0] == "conn_prior_soft_deleted"
     )
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_oauth_callback_revived_lookup_miss_is_404_not_crash(self):
+    """If the revived connection cannot be re-read after the prior row was
+    restored (it is stored, tokens are written), the callback answers a 404
+    rather than an AttributeError on `None.get(...)`."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_callback_request()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+
+    state_data = {
+      "user_id": USER_ID,
+      "connection_id": CONNECTION_ID,
+      "redirect_uri": "http://localhost:3001/connections/qb-callback",
+    }
+    tokens = {"access_token": "access_abc", "refresh_token": "refresh_xyz"}
+
+    prior_conn = MagicMock()
+    prior_conn.id = "conn_prior_soft_deleted"
+    pending_conn = MagicMock()
+    pending_conn.id = CONNECTION_ID
+
+    mock_oauth_handler = MagicMock()
+    mock_oauth_handler.exchange_code_for_tokens = AsyncMock(return_value=tokens)
+    mock_oauth_provider = MagicMock()
+    mock_oauth_provider.extract_provider_data = MagicMock(
+      return_value={"realm_id": "9341452700148642"}
+    )
+    mock_provider_registry = MagicMock()
+    mock_provider_registry.sync_connection = AsyncMock()
+
+    with (
+      patch(
+        "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+        return_value=state_data,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        side_effect=[connection_dict, None],
+      ),
+      patch(f"{OAUTH_MODULE}.ConnectionService.update", new_callable=AsyncMock),
+      patch(
+        "robosystems.models.core.connection.connection.Connection."
+        "find_soft_deleted_for_realm",
+        return_value=prior_conn,
+      ),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=pending_conn,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
+        mock_oauth_provider,
+      ),
+      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await oauth_callback(
+          provider="quickbooks",
+          graph_id=GRAPH_ID,
+          request=request,
+          current_user=mock_user,
+          db=mock_db,
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 404
+    mock_provider_registry.sync_connection.assert_not_called()
 
   @pytest.mark.unit
   @pytest.mark.asyncio

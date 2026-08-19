@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_graph,
+  require_graph_write_role,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
@@ -47,6 +50,10 @@ async def init_oauth(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OAuthInitResponse:
+  # Completing OAuth stores credentials and starts a full-rebuild sync —
+  # a write to the graph, so the write role is required from the start.
+  require_graph_write_role(str(current_user.id), graph_id)
+
   try:
     # Get connection to verify it exists and get provider
     connection = await ConnectionService.get_connection(
@@ -117,6 +124,10 @@ async def oauth_callback(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
+  # The callback stores tokens, revives soft-deleted connections and kicks
+  # off the initial sync: a write to the graph.
+  require_graph_write_role(str(current_user.id), graph_id)
+
   try:
     # Handle OAuth errors
     if request.error:
@@ -236,8 +247,19 @@ async def oauth_callback(
         target_connection_id, tokens, provider_data, db, user_id=str(current_user.id)
       )
 
+      if connection is None:
+        # Tokens are stored on the revived row already; the sync below
+        # needs the connection dict, so this is a hard stop, not a
+        # crash — surfacing an actionable error beats an AttributeError
+        # after the credential write.
+        raise create_error_response(
+          status_code=status.HTTP_404_NOT_FOUND,
+          detail="Connection not found",
+          code=ErrorCode.NOT_FOUND,
+        )
+
       # Update connection metadata
-      metadata = (connection or {}).get("metadata") or {}
+      metadata = connection.get("metadata") or {}
       metadata.update(
         {
           "status": "connected",

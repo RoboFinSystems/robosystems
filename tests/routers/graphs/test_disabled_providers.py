@@ -192,6 +192,29 @@ class TestDisabledProviderHandling:
         session=test_db,
       )
 
+    # An active subscription: creating/syncing a connection is a write, and
+    # the write gate now enforces the graph's lifecycle/subscription state
+    # (billing is on under pytest.ini). Without this the write gate would 403
+    # on "no subscription" before the provider-enabled check under test.
+    from robosystems.models.core import OrgUser
+    from robosystems.models.core.billing import BillingSubscription
+
+    if (
+      BillingSubscription.get_by_resource("graph", VALID_TEST_GRAPH_ID, test_db) is None
+    ):
+      org_users = OrgUser.get_user_orgs(test_user.id, test_db)
+      org_id = org_users[0].org_id if org_users else test_org.id
+      sub = BillingSubscription.create_subscription(
+        org_id=org_id,
+        resource_type="graph",
+        resource_id=VALID_TEST_GRAPH_ID,
+        plan_name="ladybug-standard",
+        base_price_cents=9900,
+        session=test_db,
+      )
+      sub.status = "active"
+      test_db.commit()
+
     # Create an API key for the test user
     _, plain_key = UserAPIKey.create(
       user_id=test_user.id, name="Test API Key", session=test_db
