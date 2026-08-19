@@ -264,3 +264,72 @@ class TestGoneGraphsGrantNoRole:
   def test_missing_graph_row_denies(self, test_db, test_user):
     role, _ = GraphUser.get_effective_role(test_user.id, _kg_id(), test_db)
     assert role is None
+
+
+class TestExportGracePeriod:
+  """``allow_deprovisioned=True`` — the one sanctioned relaxation of the
+  gone-graph denial, for the backup export path only. Org OWNER/ADMIN keep
+  implicit admin so a departing customer can export during the grace period;
+  everyone else, and every other caller, still resolves to no role.
+  """
+
+  def test_org_owner_keeps_implicit_admin_on_a_deprovisioned_graph(
+    self, test_db, test_user, test_org
+  ):
+    from robosystems.models.core import GraphStatus
+
+    graph = _create_org_graph(test_db, test_org.id)
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    # Default: denied.
+    assert GraphUser.get_effective_role(test_user.id, graph.graph_id, test_db) == (
+      None,
+      False,
+    )
+    # Grace period: implicit admin restored.
+    role, implicit = GraphUser.get_effective_role(
+      test_user.id, graph.graph_id, test_db, allow_deprovisioned=True
+    )
+    assert role == GraphRole.ADMIN
+    assert implicit is True
+    assert GraphUser.user_has_admin_access(
+      test_user.id, graph.graph_id, test_db, allow_deprovisioned=True
+    )
+
+  def test_grace_period_survives_the_deleted_at_stamp(
+    self, test_db, test_user, test_org
+  ):
+    from datetime import UTC, datetime
+
+    graph = _create_org_graph(test_db, test_org.id)
+    graph.deleted_at = datetime.now(UTC)
+    test_db.commit()
+
+    assert not GraphUser.user_has_access(test_user.id, graph.graph_id, test_db)
+    assert GraphUser.user_has_admin_access(
+      test_user.id, graph.graph_id, test_db, allow_deprovisioned=True
+    )
+
+  def test_a_non_member_stranger_still_gets_nothing(self, test_db, test_user, test_org):
+    """The relaxation is the org's implicit grant, not open access — a user
+    with no role and no org membership resolves to None even with the flag."""
+    from robosystems.models.core import GraphStatus
+
+    graph = _create_org_graph(test_db, test_org.id)
+    stranger = _create_user(test_db, test_user.password_hash)
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    role, _ = GraphUser.get_effective_role(
+      stranger.id, graph.graph_id, test_db, allow_deprovisioned=True
+    )
+    assert role is None
+
+  def test_a_missing_graph_denies_even_with_the_flag(self, test_db, test_user):
+    """The flag relaxes gone, not absent — a graph that never existed still
+    resolves to no role."""
+    role, _ = GraphUser.get_effective_role(
+      test_user.id, _kg_id(), test_db, allow_deprovisioned=True
+    )
+    assert role is None

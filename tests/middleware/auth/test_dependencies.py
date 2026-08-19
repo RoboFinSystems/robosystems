@@ -966,7 +966,9 @@ class TestGetCurrentUserWithGraph:
     )
 
     assert result == mock_user
-    mock_validate_api_key_with_graph.assert_called_once_with(api_key, self.graph_id)
+    mock_validate_api_key_with_graph.assert_called_once_with(
+      api_key, self.graph_id, allow_deprovisioned=False
+    )
     mock_audit_logger.log_auth_success.assert_called_once()
 
   @pytest.mark.asyncio

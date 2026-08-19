@@ -29,7 +29,9 @@ from sqlalchemy.orm import Session
 from robosystems.config.storage.graph import get_download_extension
 from robosystems.database import get_async_db_session
 from robosystems.logger import logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_deprovisioned_graph,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
@@ -72,7 +74,9 @@ async def list_backups(
     50, ge=1, le=100, description="Maximum number of backups to return"
   ),
   offset: int = Query(0, ge=0, description="Number of backups to skip"),
-  current_user: User = Depends(get_current_user_with_graph),
+  # Export grace period: a departing org's OWNER/ADMIN can still list a
+  # torn-down graph's backups (get_effective_role allow_deprovisioned).
+  current_user: User = Depends(get_current_user_with_deprovisioned_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BackupListResponse:
@@ -81,7 +85,7 @@ async def list_backups(
       f"Starting list_backups for graph_id: {graph_id}, user: {current_user.id}"
     )
 
-    # Access validated by get_current_user_with_graph dependency
+    # Access validated by the graph_access_dependency (deprovisioned-tolerant)
 
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")

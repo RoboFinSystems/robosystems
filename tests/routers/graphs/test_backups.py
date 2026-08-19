@@ -105,13 +105,17 @@ class TestBackupEndpoints:
   ):
     """Test backup listing endpoint."""
     from robosystems.database import session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     # Create mock session
     mock_session = MagicMock()
 
     # Override the dependencies
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[session] = lambda: mock_session
 
     try:
@@ -146,8 +150,8 @@ class TestBackupEndpoints:
       assert "total_count" in data
     finally:
       # Reset only the specific overrides we added
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if session in app.dependency_overrides:
         del app.dependency_overrides[session]
 

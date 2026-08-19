@@ -37,6 +37,7 @@ class DeprovisionResult:
   connections_deleted: int = 0
   search_purged: bool = False
   report_bundles_deleted: int = 0
+  staged_objects_deleted: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -228,13 +229,20 @@ class GraphDeprovisionService:
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
-    # --- 5. Clean PostgreSQL records ---
+    # --- 5. Purge staged uploads BEFORE the PG records that index them ---
+    # user-staging/{user_id}/{graph_id}/ is the last customer-data store, and
+    # the GraphUser rows are the only record of which users hold objects there.
+    # _clean_pg_records drops those rows, after which the platform can no longer
+    # enumerate what it still holds — so this must run first.
+    self._purge_staged_uploads(graph_id, session, result)
+
+    # --- 6. Clean PostgreSQL records ---
     self._clean_pg_records(graph_id, session, result)
 
-    # --- 6. Update subscription metadata ---
+    # --- 7. Update subscription metadata ---
     self._update_subscription_metadata(graph_id, session, result)
 
-    # --- 7. Transition status (soft-delete stamp landed in step 0) ---
+    # --- 8. Transition status (soft-delete stamp landed in step 0) ---
     graph.transition_status(GraphStatus.DEPROVISIONED, session)
 
     if result.errors:
@@ -441,7 +449,9 @@ class GraphDeprovisionService:
         result.errors.append(error_msg)
         logger.warning(error_msg)
 
-      # Clean subgraph PG records (schemas, files) before marking deprovisioned
+      # Purge staged uploads before the PG records that index them (see the
+      # parent path), then clean subgraph PG records.
+      self._purge_staged_uploads(subgraph.graph_id, session, result)
       self._clean_pg_records(subgraph.graph_id, session, result)
       self._purge_search_index(subgraph.graph_id, result)
 
@@ -455,7 +465,17 @@ class GraphDeprovisionService:
         logger.warning(error_msg)
 
   async def _delete_database(self, graph_id: str, result: DeprovisionResult) -> None:
-    """Delete the parent graph database."""
+    """Delete the parent graph database.
+
+    A 404 (the .lbug is already absent) counts as success. The invariant that
+    gates the rest of teardown is *the file is not on the instance*, not *we
+    were the one who removed it*: run #1 can delete the file and the Dagster
+    daemon can restart before the status flip, and then every retry would get
+    the same 404 and strand the graph forever. Delete is idempotent on the
+    outcome that matters.
+    """
+    from ...graph_api.client.exceptions import GraphAPIError
+
     try:
       from ...graph_api.client.factory import get_graph_client
 
@@ -466,6 +486,18 @@ class GraphDeprovisionService:
         logger.info(f"Deleted database for graph {graph_id}")
       finally:
         await graph_client.close()
+    except GraphAPIError as e:
+      if getattr(e, "status_code", None) == 404:
+        result.database_deleted = True
+        logger.info(
+          f"Database for graph {graph_id} already absent; treating delete as "
+          "complete so teardown can converge",
+          extra={"graph_id": graph_id},
+        )
+      else:
+        error_msg = f"Database deletion failed: {e}"
+        result.errors.append(error_msg)
+        logger.warning(error_msg, extra={"graph_id": graph_id})
     except Exception as e:
       error_msg = f"Database deletion failed: {e}"
       result.errors.append(error_msg)
@@ -605,6 +637,61 @@ class GraphDeprovisionService:
     for user_id in member_ids:
       api_key_cache.invalidate_user_jwt_graph_access(user_id, graph_id)
     api_key_cache.invalidate_user_graph_access("*", graph_id)
+
+  def _purge_staged_uploads(
+    self, graph_id: str, session: Session, result: DeprovisionResult
+  ) -> None:
+    """Delete the graph's staged uploads from the user-data bucket.
+
+    The prefix is ``user-staging/{user_id}/{graph_id}/`` — raw source files a
+    customer uploaded before ingestion, held only by a bucket lifecycle rule.
+    Must run before ``_clean_pg_records`` drops the GraphUser rows: those rows
+    are the only record of which users have objects under this graph, so once
+    they are gone the objects can no longer be enumerated. Best-effort — a
+    failure records a warning without stranding teardown, and the lifecycle
+    rule remains the backstop.
+    """
+    try:
+      from ...config import env
+      from ...config.storage.graph import get_staging_prefix
+      from ...middleware.graph.types import parse_graph_id
+      from ...models.core.graph.graph_user import GraphUser
+      from ...operations.aws.s3 import S3Client
+
+      bucket = env.USER_DATA_BUCKET
+      if not bucket:
+        return
+
+      # Members are recorded on the PARENT graph — a subgraph carries no
+      # GraphUser row of its own (access to a subgraph is the parent's grant).
+      # So resolve the parent id for the membership lookup, but key the S3
+      # prefix on the graph_id we were handed: a file uploaded directly against
+      # a subgraph lives under user-staging/{user_id}/{subgraph_id}/.
+      parent_id, _ = parse_graph_id(graph_id)
+      user_ids = [
+        row[0]
+        for row in session.query(GraphUser.user_id)
+        .filter(GraphUser.graph_id == parent_id)
+        .distinct()
+        .all()
+      ]
+      if not user_ids:
+        return
+
+      s3 = S3Client()
+      deleted = 0
+      for user_id in user_ids:
+        prefix = get_staging_prefix(user_id, graph_id)
+        for key in s3.iter_object_keys(bucket, prefix):
+          if s3.delete_object(bucket, key):
+            deleted += 1
+      result.staged_objects_deleted += deleted
+      if deleted:
+        logger.info(f"Purged {deleted} staged upload object(s) for graph {graph_id}")
+    except Exception as e:
+      error_msg = f"Staged upload purge failed: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
 
   def _clean_pg_records(
     self, graph_id: str, session: Session, result: DeprovisionResult
