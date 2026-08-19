@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ...database import SessionFactory, get_db_session
 from ...logger import get_logger
+from ...middleware.rate_limits import webhook_rate_limit_dependency
 from ...models.core.billing import BillingAuditLog
 from ...operations.providers.payment_provider import get_payment_provider
 from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
@@ -165,6 +166,7 @@ Webhooks are verified using Stripe signature before processing.""",
 async def handle_stripe_webhook(
   request: Request,
   db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(webhook_rate_limit_dependency),
 ):
   """Handle Stripe webhook events."""
   try:

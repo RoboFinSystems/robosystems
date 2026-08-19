@@ -24,6 +24,15 @@ DEFAULT_GRAPH_API_PORT = 8001
 MAX_QUERY_LENGTH = 10000  # characters
 MAX_ERROR_MESSAGE_LENGTH = 1000  # characters
 
+# Public API request-body size limits (bytes). Presigned uploads go straight to
+# S3, so request bodies to the public API are JSON/form payloads and small; the
+# limit bounds an unbounded-body allocation on the internet-facing surface,
+# which auth and rate limiting cannot — FastAPI reads the body before solving
+# dependencies. The webhook limit is tighter because a Stripe event is small
+# and its body is read (await request.body()) before the signature is checked.
+PUBLIC_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10 MB
+WEBHOOK_MAX_REQUEST_SIZE = 512 * 1024  # 512 KB
+
 # Batch Processing
 DEFAULT_BATCH_SIZE = 5000  # Optimized for Graph API bulk ingestion
 MIN_BATCH_SIZE = 1

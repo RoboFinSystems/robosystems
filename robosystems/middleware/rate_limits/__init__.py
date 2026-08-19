@@ -34,6 +34,7 @@ from .rate_limiting import (
   sync_operations_rate_limit_dependency,
   tasks_management_rate_limit_dependency,
   user_management_rate_limit_dependency,
+  webhook_rate_limit_dependency,
 )
 from .repository_rate_limits import (
   BLOCKED_SHARED_ENDPOINTS,
@@ -91,4 +92,5 @@ __all__ = [
   "sync_operations_rate_limit_dependency",
   "tasks_management_rate_limit_dependency",
   "user_management_rate_limit_dependency",
+  "webhook_rate_limit_dependency",
 ]

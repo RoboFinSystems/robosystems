@@ -28,6 +28,16 @@ def mock_cache():
       return value
 
     def set(self, key, value, expire=None):
+      # As strict as redis-py's encoder: it accepts only str/bytes/int/float
+      # and raises DataError on a dict or list. The production bug this suite
+      # missed for months was code handing the cache a raw dict; a fake that
+      # round-trips arbitrary objects can never catch it. Storing a decoded
+      # copy also proves the code parses on read rather than leaning on the
+      # fake returning live Python objects.
+      if not isinstance(value, (str, bytes, int, float)):
+        raise TypeError(
+          f"redis accepts only str/bytes/int/float, got {type(value).__name__}"
+        )
       expire_at = time.time() + expire if expire else None
       store[key] = (value, expire_at)
 
@@ -113,6 +123,35 @@ class TestGetIpThreatAssessment:
       mock_time.time.return_value = time.time() + 100000
       assessment = AdvancedAuthProtection.get_ip_threat_assessment(ip)
       assert assessment.is_blocked is False
+
+
+class TestLayerRoundTripsThroughRedis:
+  """The layer was dead for months because it handed the cache raw dicts, which
+  redis rejects, and read back str it never parsed. These pin the round-trip
+  against the redis-strict fake."""
+
+  def test_progressive_delay_is_zero_for_a_fresh_ip(self):
+    # The latent bug the encode fix exposes: min(0, 8) is not a delay key, so
+    # a zero-failure IP fell back to the 8th-failure value (900s). A brand-new
+    # visitor must never be told to wait a quarter of an hour.
+    assert AdvancedAuthProtection.get_progressive_delay("203.0.113.7") == 0
+
+  def test_assessment_persists_as_a_redis_compatible_string(self, mock_cache):
+    ip = "203.0.113.8"
+    AdvancedAuthProtection.record_auth_attempt(ip, success=False)
+    # The strict fake would have raised on a dict; assert the stored value is a
+    # str and that it re-reads as the same failure count.
+    stored = [v for (v, _exp) in mock_cache.values()]
+    assert stored and all(isinstance(v, str) for v in stored)
+    assert AdvancedAuthProtection.get_ip_threat_assessment(ip).failed_attempts == 1
+
+  def test_progressive_delay_applies_after_a_failure(self):
+    ip = "203.0.113.9"
+    for _ in range(3):
+      AdvancedAuthProtection.record_auth_attempt(ip, success=False)
+    AdvancedAuthProtection.apply_progressive_delay(ip)
+    # 3rd-failure delay is 5s; the window was just opened, so >0 remains.
+    assert AdvancedAuthProtection.get_progressive_delay(ip) > 0
 
 
 class TestRecordAuthAttempt:

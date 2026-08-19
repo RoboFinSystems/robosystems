@@ -6,10 +6,12 @@ delay tiers into timed blocks. IPs are keyed by hash, never stored in clear.
 """
 
 import hashlib
+import json
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 
+from ..logger import logger
 from ..middleware.rate_limits import rate_limit_cache
 from ..security import SecurityAuditLogger, SecurityEventType
 
@@ -52,6 +54,8 @@ class AdvancedAuthProtection:
 
   # Progressive delay configuration (seconds)
   PROGRESSIVE_DELAYS = {
+    0: 0,  # no failures: no delay (without this, min(0, 8) misses and falls
+    #       back to the 8th-failure value — a fresh IP charged 15 minutes)
     1: 1,  # 1st failure: 1 second
     2: 2,  # 2nd failure: 2 seconds
     3: 5,  # 3rd failure: 5 seconds
@@ -141,6 +145,39 @@ class AdvancedAuthProtection:
         },
       )
 
+  @staticmethod
+  def _dump(value) -> str:
+    """Serialize to a JSON string. The cache backs onto redis, whose encoder
+    accepts only str/bytes/int/float — a raw dict or list raises DataError and
+    the whole layer silently no-ops (which is exactly how it went dead)."""
+    return json.dumps(value)
+
+  @staticmethod
+  def _load(raw):
+    """Parse a cached value. decode_responses=True hands back a str, so the
+    stored JSON must be parsed before use; already-decoded values pass through
+    (the strict test fake stores the same JSON string)."""
+    if raw is None:
+      return None
+    if isinstance(raw, (bytes, bytearray)):
+      raw = raw.decode("utf-8")
+    if isinstance(raw, str):
+      return json.loads(raw)
+    return raw
+
+  @classmethod
+  def _dump_assessment(cls, assessment: "IPThreatAssessment") -> str:
+    data = asdict(assessment)
+    data["threat_level"] = assessment.threat_level.value
+    return json.dumps(data)
+
+  @classmethod
+  def _load_assessment(cls, raw) -> "IPThreatAssessment":
+    data = cls._load(raw)
+    data = dict(data)
+    data["threat_level"] = ThreatLevel(data["threat_level"])
+    return IPThreatAssessment(**data)
+
   @classmethod
   def _update_attempt_history(cls, ip_address: str, attempt: AuthAttempt) -> None:
     """Update attempt history for an IP address."""
@@ -148,7 +185,7 @@ class AdvancedAuthProtection:
 
     try:
       # Get existing attempts (last 24 hours)
-      attempts_data = rate_limit_cache.get(key) or []
+      attempts_data = cls._load(rate_limit_cache.get(key)) or []
 
       # Add new attempt
       attempts_data.append(
@@ -165,11 +202,13 @@ class AdvancedAuthProtection:
       attempts_data = [a for a in attempts_data if a["timestamp"] > cutoff]
 
       # Store back in cache (expire in 25 hours to be safe)
-      rate_limit_cache.set(key, attempts_data, expire=86400 + 3600)
+      rate_limit_cache.set(key, cls._dump(attempts_data), expire=86400 + 3600)
 
-    except Exception:
-      # If cache fails, continue without storing
-      pass
+    except Exception as e:
+      # Auth must not fail because the threat store is unreachable or corrupt;
+      # but log the type so a real breakage is visible, not silently swallowed
+      # the way this layer's failures were for months.
+      logger.warning(f"auth threat: attempt history not stored ({type(e).__name__})")
 
   @classmethod
   def _update_threat_assessment(cls, ip_address: str, attempt: AuthAttempt) -> None:
@@ -181,7 +220,7 @@ class AdvancedAuthProtection:
       assessment_data = rate_limit_cache.get(key)
 
       if assessment_data:
-        assessment = IPThreatAssessment(**assessment_data)
+        assessment = cls._load_assessment(assessment_data)
       else:
         assessment = IPThreatAssessment(
           threat_level=ThreatLevel.LOW,
@@ -227,11 +266,10 @@ class AdvancedAuthProtection:
           assessment.block_expires = None
 
       # Store assessment (expire in 25 hours)
-      rate_limit_cache.set(key, assessment.__dict__, expire=86400 + 3600)
+      rate_limit_cache.set(key, cls._dump_assessment(assessment), expire=86400 + 3600)
 
-    except Exception:
-      # If cache fails, continue without storing
-      pass
+    except Exception as e:
+      logger.warning(f"auth threat: assessment not stored ({type(e).__name__})")
 
   @classmethod
   def get_ip_threat_assessment(cls, ip_address: str) -> IPThreatAssessment:
@@ -241,7 +279,7 @@ class AdvancedAuthProtection:
     try:
       assessment_data = rate_limit_cache.get(key)
       if assessment_data:
-        assessment = IPThreatAssessment(**assessment_data)
+        assessment = cls._load_assessment(assessment_data)
 
         # Check if block has expired
         if assessment.is_blocked and assessment.block_expires:
@@ -250,8 +288,8 @@ class AdvancedAuthProtection:
             assessment.block_expires = None
 
         return assessment
-    except Exception:
-      pass
+    except Exception as e:
+      logger.warning(f"auth threat: assessment not read ({type(e).__name__})")
 
     # Return default assessment
     return IPThreatAssessment(
@@ -284,9 +322,11 @@ class AdvancedAuthProtection:
         # Update cache
         key = cls._get_threat_key(ip_address)
         try:
-          rate_limit_cache.set(key, assessment.__dict__, expire=86400 + 3600)
-        except Exception:
-          pass
+          rate_limit_cache.set(
+            key, cls._dump_assessment(assessment), expire=86400 + 3600
+          )
+        except Exception as e:
+          logger.warning(f"auth threat: block clear not stored ({type(e).__name__})")
 
     return False, None
 
@@ -308,13 +348,13 @@ class AdvancedAuthProtection:
     # Check if we're still in delay period
     delay_key = cls._get_delay_key(ip_address)
     try:
-      last_delay_time = rate_limit_cache.get(delay_key)
+      last_delay_time = cls._load(rate_limit_cache.get(delay_key))
       if last_delay_time:
-        elapsed = time.time() - last_delay_time
+        elapsed = time.time() - float(last_delay_time)
         if elapsed < delay:
           return int(delay - elapsed)
-    except Exception:
-      pass
+    except Exception as e:
+      logger.warning(f"auth threat: progressive delay not read ({type(e).__name__})")
 
     return 0
 
@@ -324,9 +364,9 @@ class AdvancedAuthProtection:
     delay_key = cls._get_delay_key(ip_address)
     try:
       # Record the delay application time
-      rate_limit_cache.set(delay_key, time.time(), expire=3600)  # 1 hour max
-    except Exception:
-      pass
+      rate_limit_cache.set(delay_key, cls._dump(time.time()), expire=3600)  # 1 hour
+    except Exception as e:
+      logger.warning(f"auth threat: progressive delay not stored ({type(e).__name__})")
 
   @classmethod
   def get_security_headers(cls, ip_address: str) -> dict[str, str]:
