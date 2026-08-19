@@ -243,6 +243,12 @@ class CreateSubgraphTool:
         detail = str(gate_error.detail)
         if gate_error.status_code == 409:
           return {"error": "name_taken", "message": detail}
+        if gate_error.status_code == 400:
+          # A malformed name is caught by validate_subgraph_name() above, so
+          # this is unreachable for real input today; keep the mapping
+          # exhaustive so a 400 from any gate helper codes as invalid_name
+          # rather than defaulting into the subgraph_not_allowed bucket.
+          return {"error": "invalid_name", "message": detail}
         lowered = detail.lower()
         is_role_denial = "admin access" in lowered or "access denied" in lowered
         return {

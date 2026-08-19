@@ -205,6 +205,28 @@ class TestCreateSubgraphExecute:
     mock_svc_class.assert_not_called()
 
   @pytest.mark.asyncio
+  async def test_malformed_name_from_gate_codes_as_invalid_name(
+    self, mock_db: MagicMock
+  ) -> None:
+    """A 400 from a gate helper (e.g. the REST name validator) codes as
+    invalid_name, not the subgraph_not_allowed default. Unreachable for real
+    input — validate_subgraph_name() catches a bad name before the gates — but
+    the mapping is kept exhaustive so the error code can't drift."""
+    from fastapi import HTTPException
+
+    parent = MagicMock()
+    with self._gates(parent):
+      with patch(
+        f"{self.UTILS}.validate_subgraph_name_unique",
+        side_effect=HTTPException(
+          status_code=400,
+          detail="Subgraph name must be alphanumeric and 1-20 characters",
+        ),
+      ):
+        result = await CreateSubgraphTool(_client()).execute({"name": "dev"})
+    assert result["error"] == "invalid_name"
+
+  @pytest.mark.asyncio
   async def test_name_collision_reported(self, mock_db: MagicMock) -> None:
     from fastapi import HTTPException
 
