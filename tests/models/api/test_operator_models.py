@@ -6,6 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from robosystems.models.api.graphs.operator import (
+  MAX_OPERATOR_HISTORY_MESSAGES,
+  MAX_OPERATOR_MESSAGE_CHARS,
   OperatorHealthResponse,
   OperatorHealthStatus,
   OperatorListResponse,
@@ -76,6 +78,28 @@ class TestOperatorRequest:
     assert model.enable_rag is True
     assert model.stream is False
     assert model.force_extended_analysis is False
+
+  def test_message_is_length_bounded(self):
+    """The tenant-controlled AI input is capped so a single oversized message
+    cannot drive a Bedrock call whose true cost the post-hoc debit bills at
+    zero (the free-spend band)."""
+    OperatorRequest(message="x" * MAX_OPERATOR_MESSAGE_CHARS)  # at the cap: ok
+    with pytest.raises(ValidationError):
+      OperatorRequest(message="x" * (MAX_OPERATOR_MESSAGE_CHARS + 1))
+
+  def test_empty_message_rejected(self):
+    with pytest.raises(ValidationError):
+      OperatorRequest(message="")
+
+  def test_history_is_bounded_in_size_and_content(self):
+    too_many = [
+      OperatorMessage(role="user", content="q")
+      for _ in range(MAX_OPERATOR_HISTORY_MESSAGES + 1)
+    ]
+    with pytest.raises(ValidationError):
+      OperatorRequest(message="ok", history=too_many)
+    with pytest.raises(ValidationError):
+      OperatorMessage(role="user", content="x" * (MAX_OPERATOR_MESSAGE_CHARS + 1))
 
   def test_with_history(self):
     history = [

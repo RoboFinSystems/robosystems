@@ -13,12 +13,23 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Bounds the tenant-controlled AI input. Without a cap, a single oversized
+# message (or a long history) can drive a Bedrock call whose true cost exceeds
+# the balance, which the post-hoc conditional debit then bills at zero — the
+# free-spend band. See specs/security/operation-lifecycle-budgets.md §3.1.
+MAX_OPERATOR_MESSAGE_CHARS = 100_000
+MAX_OPERATOR_HISTORY_MESSAGES = 100
+
 
 class OperatorMessage(BaseModel):
   """Message in conversation history."""
 
   role: str = Field(..., description="Message role (user/assistant)")
-  content: str = Field(..., description="Message content")
+  content: str = Field(
+    ...,
+    max_length=MAX_OPERATOR_MESSAGE_CHARS,
+    description="Message content",
+  )
   timestamp: datetime | None = Field(None, description="Message timestamp")
 
 
@@ -50,9 +61,16 @@ class SelectionCriteria(BaseModel):
 class OperatorRequest(BaseModel):
   """Request model for operator interactions."""
 
-  message: str = Field(..., description="The query or message to process")
+  message: str = Field(
+    ...,
+    min_length=1,
+    max_length=MAX_OPERATOR_MESSAGE_CHARS,
+    description="The query or message to process",
+  )
   history: list[OperatorMessage] = Field(
-    default_factory=list, description="Conversation history"
+    default_factory=list,
+    max_length=MAX_OPERATOR_HISTORY_MESSAGES,
+    description="Conversation history",
   )
   context: dict[str, Any] | None = Field(
     None,
