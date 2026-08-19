@@ -599,6 +599,21 @@ class TestDeprovisionService:
       session=db_session,
     )
 
+    # An org ADMIN with no GraphUser row: implicit graph admin through the
+    # org, so no membership row is deleted for them — their cached decision
+    # has to be dropped by name.
+    org_admin = User(
+      id=f"org_admin_{uuid.uuid4().hex[:8]}",
+      email=f"admin+{uuid.uuid4().hex[:8]}@example.com",
+      name="Org Admin",
+      password_hash="hash",
+    )
+    db_session.add(org_admin)
+    db_session.commit()
+    OrgUser.create(
+      org_id=test_graph.org_id, user_id=org_admin.id, role="ADMIN", session=db_session
+    )
+
     connection = Connection.create(
       graph_id=test_graph.graph_id,
       user_id=test_user.id,
@@ -646,6 +661,11 @@ class TestDeprovisionService:
       # cannot carry a request onto the half-dropped graph.
       cache.invalidate_user_jwt_graph_access.assert_any_call(
         test_user.id, test_graph.graph_id
+      )
+      # ...and so do the org OWNER/ADMIN's, who hold implicit admin with no
+      # row of their own to delete.
+      cache.invalidate_user_jwt_graph_access.assert_any_call(
+        org_admin.id, test_graph.graph_id
       )
       cache.invalidate_user_graph_access.assert_called_once_with(
         "*", test_graph.graph_id
