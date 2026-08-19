@@ -217,10 +217,16 @@ def _measure_row_count(
   try:
     if file_format == "parquet":
       return _parquet_row_count(s3, bucket, key, file_size, byte_limit), True
+    # Closed on every exit: an early stop at the row cap would otherwise
+    # leave the HTTP connection to S3 open until garbage collection, and a
+    # burst of cap-rejected uploads would drain the client's connection pool.
     body = s3.get_object(Bucket=bucket, Key=key)["Body"]
-    if file_format == "csv":
-      return _csv_row_count(body, byte_limit, row_cap), True
-    return _json_row_count(body, byte_limit, row_cap), True
+    try:
+      if file_format == "csv":
+        return _csv_row_count(body, byte_limit, row_cap), True
+      return _json_row_count(body, byte_limit, row_cap), True
+    finally:
+      body.close()
   except _PayloadTooLarge:
     raise
   except Exception as e:

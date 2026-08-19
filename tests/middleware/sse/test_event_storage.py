@@ -758,14 +758,14 @@ class TestSSEEventStorage:
       mock_pipe.unwatch.assert_called_once()
 
 
-def _running_metadata(operation_id: str = "op123") -> str:
+def _running_metadata(operation_id: str = "op123", status: str = "running") -> str:
   return json.dumps(
     {
       "operation_id": operation_id,
       "operation_type": "backup",
       "user_id": "user456",
       "graph_id": "kg789",
-      "status": "running",
+      "status": status,
       "created_at": "2023-01-01T12:00:00Z",
       "updated_at": "2023-01-01T12:30:00Z",
       "error_message": None,
@@ -812,6 +812,53 @@ class TestTerminalFailureEvictsIdempotency:
     ) as evict:
       await storage._update_operation_metadata(
         "op123", EventType.OPERATION_COMPLETED, {"result": {"ok": True}}
+      )
+    evict.assert_not_awaited()
+
+  @pytest.mark.parametrize(
+    "event_type",
+    [EventType.OPERATION_ERROR, EventType.OPERATION_CANCELLED],
+  )
+  async def test_late_failure_after_completion_neither_flips_nor_evicts(
+    self, event_type
+  ):
+    """At-least-once delivery: a duplicate or late error event after the
+    completion must not turn a finished operation into a failed one, and must
+    not evict the envelope of an operation that succeeded — a retry under
+    the same key would dispatch it again."""
+    storage = self._async_storage(_running_metadata(status="completed"))
+    pipe = storage._redis_client.pipeline.return_value
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata("op123", event_type, {"error": "late"})
+    evict.assert_not_awaited()
+    pipe.setex.assert_not_called()
+
+  async def test_repeated_failure_event_evicts_only_once(self):
+    storage = self._async_storage(_running_metadata(status="failed"))
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_ERROR, {"error": "again"}
+      )
+    evict.assert_not_awaited()
+
+  async def test_lost_cas_does_not_evict(self):
+    """The transition was computed but another writer won the WATCH: nothing
+    of ours landed, so nothing is evicted (the winner may be a completion)."""
+    storage = self._async_storage(_running_metadata())
+    pipe = storage._redis_client.pipeline.return_value
+    pipe.execute = AsyncMock(side_effect=RuntimeError("WatchError"))
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency",
+      new_callable=AsyncMock,
+    ) as evict:
+      await storage._update_operation_metadata(
+        "op123", EventType.OPERATION_ERROR, {"error": "x"}
       )
     evict.assert_not_awaited()
 
@@ -908,6 +955,32 @@ class TestTerminalFailureEvictsIdempotency:
     ) as evict:
       storage._update_operation_metadata_sync(
         "op123", EventType.OPERATION_COMPLETED, {"result": {"ok": True}}
+      )
+    evict.assert_not_called()
+
+  def test_sync_late_failure_after_completion_neither_flips_nor_evicts(self):
+    storage = self._sync_storage(_running_metadata(status="completed"))
+    mock_pipe = storage._sync_redis.pipeline.return_value.__enter__.return_value
+    mock_pipe.get.return_value = _running_metadata(status="completed")
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", EventType.OPERATION_ERROR, {"error": "late"}
+      )
+    evict.assert_not_called()
+    mock_pipe.setex.assert_not_called()
+
+  def test_sync_lost_cas_does_not_evict(self):
+    storage = self._sync_storage(_running_metadata())
+    mock_pipe = storage._sync_redis.pipeline.return_value.__enter__.return_value
+    mock_pipe.get.return_value = _running_metadata()
+    mock_pipe.execute.side_effect = RuntimeError("WatchError")
+    with patch(
+      "robosystems.middleware.sse.event_storage._invalidate_idempotency_sync"
+    ) as evict:
+      storage._update_operation_metadata_sync(
+        "op123", EventType.OPERATION_ERROR, {"error": "x"}
       )
     evict.assert_not_called()
 

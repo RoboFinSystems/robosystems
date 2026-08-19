@@ -110,6 +110,43 @@ class OperationMetadata:
 _TERMINAL_FAILURE_STATUSES = frozenset(
   {OperationStatus.FAILED, OperationStatus.CANCELLED}
 )
+_TERMINAL_STATUSES = _TERMINAL_FAILURE_STATUSES | {OperationStatus.COMPLETED}
+
+# The lifecycle only moves forward, and the first terminal status is final:
+# a late or duplicate OPERATION_ERROR after OPERATION_COMPLETED (at-least-once
+# delivery, a reaper racing a finishing worker) must neither flip a finished
+# operation to failed nor evict the idempotency envelope of an operation that
+# succeeded — a client retry under the same key would then dispatch it again.
+_STATUS_PRIORITY = {
+  OperationStatus.PENDING: 0,
+  OperationStatus.RUNNING: 1,
+  OperationStatus.COMPLETED: 2,
+  OperationStatus.FAILED: 2,
+  OperationStatus.CANCELLED: 2,
+}
+
+
+def _next_status(event_type: EventType) -> OperationStatus | None:
+  if event_type == EventType.OPERATION_STARTED:
+    return OperationStatus.RUNNING
+  if event_type == EventType.OPERATION_COMPLETED:
+    return OperationStatus.COMPLETED
+  if event_type == EventType.OPERATION_ERROR:
+    return OperationStatus.FAILED
+  if event_type == EventType.OPERATION_CANCELLED:
+    return OperationStatus.CANCELLED
+  return None
+
+
+def _transition_allowed(current: OperationStatus, new: OperationStatus) -> bool:
+  """Whether ``current`` → ``new`` is a forward move.
+
+  Same-status re-writes are allowed (a completion event may arrive twice and
+  merge result data); a different terminal status after a terminal one is not.
+  """
+  if current in _TERMINAL_STATUSES and new != current:
+    return False
+  return _STATUS_PRIORITY.get(new, 0) >= _STATUS_PRIORITY.get(current, 0)
 
 
 async def _invalidate_idempotency(operation_id: str) -> None:
@@ -369,30 +406,20 @@ class SSEEventStorage:
         metadata_dict = json.loads(str(metadata_json))
         metadata = OperationMetadata(**metadata_dict)
 
-        # Never downgrade a terminal status back to RUNNING.
-        status_priority = {
-          OperationStatus.PENDING: 0,
-          OperationStatus.RUNNING: 1,
-          OperationStatus.COMPLETED: 2,
-          OperationStatus.FAILED: 2,
-          OperationStatus.CANCELLED: 2,
-        }
-        new_status = None
-        if event_type == EventType.OPERATION_STARTED:
-          new_status = OperationStatus.RUNNING
-        elif event_type == EventType.OPERATION_COMPLETED:
-          new_status = OperationStatus.COMPLETED
-        elif event_type == EventType.OPERATION_ERROR:
-          new_status = OperationStatus.FAILED
-        elif event_type == EventType.OPERATION_CANCELLED:
-          new_status = OperationStatus.CANCELLED
+        # Never move a status backwards, and never past its first terminal
+        # state (see `_transition_allowed`).
+        new_status = _next_status(event_type)
 
-        if new_status and status_priority.get(new_status, 0) >= status_priority.get(
-          metadata.status, 0
-        ):
+        if new_status and _transition_allowed(metadata.status, new_status):
+          # Evict only on the transition *into* failure, and only once this
+          # write actually lands: a lost CAS below means another event won
+          # the transition, possibly a completion.
+          entering_failure = (
+            new_status in _TERMINAL_FAILURE_STATUSES
+            and metadata.status not in _TERMINAL_STATUSES
+          )
           metadata.status = new_status
           metadata.updated_at = datetime.now(UTC).isoformat()
-          terminal_failure = new_status in _TERMINAL_FAILURE_STATUSES
 
           if event_type == EventType.OPERATION_COMPLETED:
             # Merge, so a graph_id recorded by the Dagster job survives.
@@ -407,6 +434,7 @@ class SSEEventStorage:
           pipe.multi()
           pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
           pipe.execute()
+          terminal_failure = entering_failure
         else:
           pipe.unwatch()
 
@@ -511,30 +539,17 @@ class SSEEventStorage:
       metadata_dict = json.loads(metadata_json)
       metadata = OperationMetadata(**metadata_dict)
 
-      # Never downgrade a terminal status back to RUNNING.
-      status_priority = {
-        OperationStatus.PENDING: 0,
-        OperationStatus.RUNNING: 1,
-        OperationStatus.COMPLETED: 2,
-        OperationStatus.FAILED: 2,
-        OperationStatus.CANCELLED: 2,
-      }
-      new_status = None
-      if event_type == EventType.OPERATION_STARTED:
-        new_status = OperationStatus.RUNNING
-      elif event_type == EventType.OPERATION_COMPLETED:
-        new_status = OperationStatus.COMPLETED
-      elif event_type == EventType.OPERATION_ERROR:
-        new_status = OperationStatus.FAILED
-      elif event_type == EventType.OPERATION_CANCELLED:
-        new_status = OperationStatus.CANCELLED
+      # Never move a status backwards, and never past its first terminal
+      # state (see `_transition_allowed`).
+      new_status = _next_status(event_type)
 
-      if new_status and status_priority.get(new_status, 0) >= status_priority.get(
-        metadata.status, 0
-      ):
+      if new_status and _transition_allowed(metadata.status, new_status):
+        entering_failure = (
+          new_status in _TERMINAL_FAILURE_STATUSES
+          and metadata.status not in _TERMINAL_STATUSES
+        )
         metadata.status = new_status
         metadata.updated_at = datetime.now(UTC).isoformat()
-        terminal_failure = new_status in _TERMINAL_FAILURE_STATUSES
 
         if event_type == EventType.OPERATION_COMPLETED:
           new_result = data.get("result") or {}
@@ -550,6 +565,7 @@ class SSEEventStorage:
           pipe = redis.pipeline()
           pipe.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
           await pipe.execute()
+          terminal_failure = entering_failure
       else:
         await redis.unwatch()
 
