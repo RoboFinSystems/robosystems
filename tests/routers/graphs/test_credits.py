@@ -142,24 +142,31 @@ class TestGetGraphAccess:
       assert exc_info.value.status_code == 400
 
   def test_user_graph_access_validation_fail_safety(self):
-    """Test safety check when user_has_access returns True but no GraphUser found."""
+    """No effective role → 403, even on a live graph.
+
+    `get_graph_access` resolves the caller's role via
+    `GraphUser.get_effective_role`; when that returns None (no membership row
+    and no implicit org grant) the request is denied. The graph itself is
+    live here, so the denial is the role decision, not the lifecycle gate.
+    """
     identity = _make_mock_identity(is_shared_repository=False, is_user_graph=True)
+
+    live_graph = Mock()
+    live_graph.graph_id = "kg01234567890abcdef"
+    live_graph.org_id = None  # no org → no implicit admin
+    live_graph.status = "active"
+    live_graph.deleted_at = None
 
     mock_db = Mock()
     mock_query = Mock()
     mock_query.filter.return_value = mock_query
-    mock_query.first.return_value = None
+    mock_query.all.return_value = [live_graph]  # liveness query
+    mock_query.first.return_value = None  # no membership row
     mock_db.query.return_value = mock_query
 
-    with (
-      patch(
-        "robosystems.middleware.graph.utils.MultiTenantUtils.get_graph_identity",
-        return_value=identity,
-      ),
-      patch(
-        "robosystems.models.core.graph.graph_user.GraphUser.user_has_access",
-        return_value=True,
-      ),
+    with patch(
+      "robosystems.middleware.graph.utils.MultiTenantUtils.get_graph_identity",
+      return_value=identity,
     ):
       with pytest.raises(HTTPException) as exc_info:
         get_graph_access(

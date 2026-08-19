@@ -493,19 +493,22 @@ class TestGraphScopedKeys:
     mock_api_key_class.get_by_key.return_value = mock_key_record
     return mock_key_record
 
-  @patch("robosystems.models.core.GraphUser")
   @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
   def test_scoped_key_valid_on_its_graph_db(
-    self, mock_api_key_class, mock_cache, mock_session_factory, mock_graph_user
+    self, mock_api_key_class, mock_cache, mock_session_factory
   ):
     """A scoped key authenticates its own graph through the DB path."""
     mock_cache.get_cached_api_key_validation.return_value = None
     mock_cache.get_cached_graph_access.return_value = None
     self._db_setup(mock_api_key_class, mock_session_factory, "kg123")
 
-    with patch("robosystems.models.core.GraphUser.user_has_access", return_value=True):
+    # utils binds `GraphUser` at import (`from ...models.core import GraphUser`),
+    # so the access decision must be patched on the name utils actually calls.
+    with patch(
+      "robosystems.middleware.auth.utils.GraphUser.user_has_access", return_value=True
+    ):
       result = validate_api_key_with_graph(
         "rfsc" + "a" * 64, "kg123", require_scoped=True
       )
