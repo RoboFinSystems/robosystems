@@ -66,11 +66,49 @@ RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
 # never stolen out from under itself.
 STALE_CLAIM_SECONDS = int(os.environ.get("STALE_CLAIM_SECONDS", "900"))
 
-# Volume defaults (used as fallback when tier not found in tier_config)
+# Volume defaults (used as fallback when tier not found in TIER_VOLUME_SPEC)
 DEFAULT_SIZE = 50  # GB
 DEFAULT_TYPE = "gp3"
 DEFAULT_IOPS = 3000
 DEFAULT_THROUGHPUT = 125  # MB/s
+
+# Per-tier volume spec.
+#
+# `size` is the INITIAL size, not a cap: the volume monitor expands at 80% usage
+# every 15 minutes, and EBS volumes can grow but never shrink - so provisioning
+# small and growing on demand costs strictly less than provisioning for a ceiling
+# most graphs never reach. The product cap is enforced separately by
+# instance_storage_limit_gb in .github/configs/graph.yml (20/50/100 GB); these do
+# not need to match it, since expansion at 80% fires before the write-path cap
+# is reached. gp3's baseline performance is size-independent, so a smaller
+# volume carries no performance penalty.
+#
+# `iops` / `throughput` are the gp3 performance FLOOR for the tier. They are
+# applied at creation AND re-asserted on every attach by
+# reconcile_volume_performance: a data volume outlives many instances (the
+# shared master's is reattached on every nightly wake), so a creation-time
+# setting alone would leave every existing volume at whatever it was minted
+# with. The floor only ever raises a volume; it never lowers one.
+#
+# ladybug-shared runs the SEC nightly full rebuild, whose relationship-table
+# COPYs are bound by small random reads (endpoint hash-index probes + CSR
+# rewrites) into this volume. At the 3000-IOPS baseline the volume sat 78-93%
+# busy moving ~20 MB/s and the rebuild took 6.4h; at 12000 IOPS / 500 MB/s the
+# same tables ran ~2.4x faster (2026-08-19). The other tiers stay at baseline.
+TIER_VOLUME_SPEC: dict[str, dict[str, int]] = {
+  "ladybug-standard": {"size": 20, "iops": 3000, "throughput": 125},
+  "ladybug-large": {"size": 50, "iops": 3000, "throughput": 125},
+  "ladybug-xlarge": {"size": 50, "iops": 3000, "throughput": 125},
+  "ladybug-shared": {"size": 200, "iops": 12000, "throughput": 500},
+}
+
+
+def volume_spec_for_tier(tier: str) -> dict[str, int]:
+  return TIER_VOLUME_SPEC.get(
+    tier,
+    {"size": DEFAULT_SIZE, "iops": DEFAULT_IOPS, "throughput": DEFAULT_THROUGHPUT},
+  )
+
 
 # DynamoDB tables
 table = dynamodb.Table(TABLE_NAME)  # Volume registry
@@ -173,7 +211,7 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
       logger.info(f"Claimed existing SEC volume {volume_id} for shared repository")
       try:
         # Preserve the SEC database in the volume's database list
-        return attach_and_register_volume(volume_id, instance_id, ["sec"])
+        return attach_and_register_volume(volume_id, instance_id, ["sec"], tier=tier)
       except Exception:
         release_claim(volume_id, instance_id)
         raise
@@ -235,7 +273,9 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
           f"Claimed volume {volume_id} with databases: {volume.get('databases')} in AZ {az}"
         )
         try:
-          return attach_and_register_volume(volume_id, instance_id, volume_databases)
+          return attach_and_register_volume(
+            volume_id, instance_id, volume_databases, tier=tier
+          )
         except Exception:
           # Put it back so the next launch can use it; the instance still fails,
           # which is the pre-existing behaviour for a genuine attach failure.
@@ -538,10 +578,84 @@ def ordered_volume_candidates(
   return matching + with_data + empty
 
 
+def reconcile_volume_performance(volume_id: str, tier: str) -> dict[str, Any]:
+  """Raise an existing gp3 volume to its tier's IOPS/throughput floor.
+
+  A modify_volume on gp3 is online (the volume stays usable while EBS
+  optimizes it), so this runs on the attach path without blocking anything.
+  It only ever raises: a volume already at or above spec is left alone, and a
+  hand-raised volume is never clamped back down. Every failure is logged and
+  swallowed - the attach must never fail because a performance tweak could
+  not be applied; the next launch simply retries.
+  """
+  spec = volume_spec_for_tier(tier)
+  try:
+    volume = ec2.describe_volumes(VolumeIds=[volume_id])["Volumes"][0]
+  except (ClientError, IndexError, KeyError) as e:
+    logger.warning(f"Could not describe {volume_id} for performance reconcile: {e}")
+    return {"reconciled": False, "reason": "describe_failed"}
+
+  if volume.get("VolumeType") != DEFAULT_TYPE:
+    # Only gp3 provisions IOPS/throughput independently of size.
+    return {"reconciled": False, "reason": f"volume_type_{volume.get('VolumeType')}"}
+
+  current_iops = int(volume.get("Iops") or 0)
+  current_throughput = int(volume.get("Throughput") or 0)
+  target: dict[str, int] = {}
+  if current_iops < spec["iops"]:
+    target["Iops"] = spec["iops"]
+  if current_throughput < spec["throughput"]:
+    target["Throughput"] = spec["throughput"]
+  if not target:
+    return {"reconciled": False, "reason": "at_or_above_spec"}
+
+  try:
+    response = ec2.modify_volume(VolumeId=volume_id, **target)
+  except ClientError as e:
+    code = e.response.get("Error", {}).get("Code", "")
+    # IncorrectModificationState: another modification is still in flight
+    # (a size expansion from the volume monitor, or an earlier change inside
+    # EBS's six-hour cooldown). Nothing to do but try again next launch.
+    logger.warning(
+      f"Performance reconcile for {volume_id} ({tier}) deferred: {code or e}"
+    )
+    return {"reconciled": False, "reason": code or "modify_failed"}
+
+  state = response.get("VolumeModification", {}).get("ModificationState")
+  logger.info(
+    f"Raised {volume_id} ({tier}) to spec {target} from "
+    f"iops={current_iops} throughput={current_throughput} (state={state})"
+  )
+  try:
+    table.update_item(
+      Key={"volume_id": volume_id},
+      UpdateExpression=(
+        "SET iops = :iops, #throughput = :throughput, "
+        "last_performance_reconcile = :timestamp"
+      ),
+      # `throughput` is a DynamoDB reserved word.
+      ExpressionAttributeNames={"#throughput": "throughput"},
+      ExpressionAttributeValues={
+        ":iops": target.get("Iops", current_iops),
+        ":throughput": target.get("Throughput", current_throughput),
+        ":timestamp": datetime.now(UTC).isoformat(),
+      },
+    )
+  except ClientError as e:
+    logger.warning(f"Could not record performance reconcile for {volume_id}: {e}")
+
+  return {"reconciled": True, "modification_state": state, **target}
+
+
 def attach_and_register_volume(
-  volume_id: str, instance_id: str, databases: Any
+  volume_id: str, instance_id: str, databases: Any, tier: str | None = None
 ) -> dict[str, Any]:
-  """Attach a volume to an instance and update registry"""
+  """Attach a volume to an instance and update registry.
+
+  When ``tier`` is given the volume is first raised to that tier's performance
+  floor (see reconcile_volume_performance) - this is the hook that lets an
+  existing, long-lived volume pick up a spec change without being recreated.
+  """
   device = "/dev/xvdf"
 
   # Wait for instance to be running
@@ -569,6 +683,9 @@ def attach_and_register_volume(
     logger.warning(
       f"Volume {volume_id} did not reach available in 2 min: {e}; will attempt attach"
     )
+
+  if tier:
+    reconcile_volume_performance(volume_id, tier)
 
   # Attach the volume with retry logic.
   # Retry both IncorrectState (instance not ready) and VolumeInUse (volume still
@@ -667,24 +784,8 @@ def attach_and_register_volume(
 def create_and_attach_volume(
   instance_id: str, tier: str, az: str, databases: list[str], node_type: str
 ) -> dict[str, Any]:
-  """Create a new volume and attach it to the instance"""
-  # Initial volume sizes. These are starting points, not caps: the volume
-  # monitor expands at 80% usage every 15 minutes, and EBS volumes can grow
-  # but never shrink - so provisioning small and growing on demand costs
-  # strictly less than provisioning for a ceiling most graphs never reach.
-  # The product cap is enforced separately by instance_storage_limit_gb in
-  # .github/configs/graph.yml (20/50/100 GB); these do not need to match it,
-  # since expansion at 80% fires before the write-path cap is reached.
-  # gp3's 3000 IOPS / 125 MBps baseline is size-independent, so a smaller
-  # volume carries no performance penalty.
-  tier_config = {
-    "ladybug-standard": {"size": 20, "iops": 3000},
-    "ladybug-large": {"size": 50, "iops": 3000},
-    "ladybug-xlarge": {"size": 50, "iops": 3000},
-    "ladybug-shared": {"size": 200, "iops": 3000},
-  }
-
-  config = tier_config.get(tier, {"size": DEFAULT_SIZE, "iops": DEFAULT_IOPS})
+  """Create a new volume to the tier's spec and attach it to the instance"""
+  config = volume_spec_for_tier(tier)
 
   # Determine volume name based on node type
   if node_type in ["shared_master", "shared_replica"]:
@@ -698,7 +799,7 @@ def create_and_attach_volume(
     Size=config["size"],
     VolumeType=DEFAULT_TYPE,
     Iops=config["iops"],
-    Throughput=DEFAULT_THROUGHPUT,
+    Throughput=config["throughput"],
     Encrypted=True,
     TagSpecifications=[
       {
@@ -734,6 +835,8 @@ def create_and_attach_volume(
       "databases": databases,
       "created_at": datetime.now(UTC).isoformat(),
       "node_type": node_type,
+      "iops": config["iops"],
+      "throughput": config["throughput"],
     }
   )
 

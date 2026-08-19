@@ -931,3 +931,156 @@ def test_sync_registry_still_corrects_genuine_mismatches(gvm):
   item = _registry_item(volume_id)
   assert item["status"] == "available"
   assert item["instance_id"] == "unattached"
+
+
+# ---------------------------------------------------------------------------
+# Volume performance spec: created to spec, and existing volumes raised to the
+# tier floor on every attach (a volume outlives many instances, so a creation-
+# time setting alone would never reach the long-lived shared master volume).
+# ---------------------------------------------------------------------------
+
+
+def _volume_perf(volume_id: str) -> tuple[int, int]:
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  vol = ec2.describe_volumes(VolumeIds=[volume_id])["Volumes"][0]
+  return vol["Iops"], vol["Throughput"]
+
+
+def _create_test_volume_with_perf(iops: int, throughput: int) -> str:
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  resp = ec2.create_volume(
+    AvailabilityZone="us-east-1c",
+    Size=200,
+    VolumeType="gp3",
+    Iops=iops,
+    Throughput=throughput,
+    Encrypted=True,
+  )
+  return resp["VolumeId"]
+
+
+def test_reconcile_raises_shared_volume_to_tier_floor(gvm):
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_sec_volume(volume_id)
+
+  result = gvm.reconcile_volume_performance(volume_id, "ladybug-shared")
+
+  spec = gvm.TIER_VOLUME_SPEC["ladybug-shared"]
+  assert result["reconciled"] is True
+  assert _volume_perf(volume_id) == (spec["iops"], spec["throughput"])
+  item = _registry_item(volume_id)
+  assert int(item["iops"]) == spec["iops"]
+  assert int(item["throughput"]) == spec["throughput"]
+  assert "last_performance_reconcile" in item
+
+
+def test_reconcile_never_lowers_a_volume_above_spec(gvm):
+  """The spec is a floor: a hand-raised volume must not be clamped down."""
+  volume_id = _create_test_volume_with_perf(16000, 1000)
+  _seed_sec_volume(volume_id)
+
+  result = gvm.reconcile_volume_performance(volume_id, "ladybug-shared")
+
+  assert result == {"reconciled": False, "reason": "at_or_above_spec"}
+  assert _volume_perf(volume_id) == (16000, 1000)
+
+
+def test_reconcile_is_a_noop_for_baseline_tiers(gvm):
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_registry("test-volume-registry", volume_id, ["kg_a"], tier="ladybug-standard")
+
+  result = gvm.reconcile_volume_performance(volume_id, "ladybug-standard")
+
+  assert result["reason"] == "at_or_above_spec"
+  assert _volume_perf(volume_id) == (3000, 125)
+
+
+def test_reconcile_defers_when_a_modification_is_in_flight(gvm):
+  """EBS refuses overlapping modifications (a size expansion, or the six-hour
+  cooldown after an earlier change). The reconcile must log and step aside,
+  never raise into the attach path."""
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_sec_volume(volume_id)
+  err = ClientError(
+    {"Error": {"Code": "IncorrectModificationState", "Message": "in progress"}},
+    "ModifyVolume",
+  )
+
+  with patch.object(gvm.ec2, "modify_volume", side_effect=err):
+    result = gvm.reconcile_volume_performance(volume_id, "ladybug-shared")
+
+  assert result == {"reconciled": False, "reason": "IncorrectModificationState"}
+  assert _volume_perf(volume_id) == (3000, 125)
+
+
+def test_shared_master_launch_raises_existing_sec_volume_on_attach(gvm):
+  """The real target: the persistent SEC volume, minted at baseline long ago,
+  is raised to the current floor when the master next wakes and reattaches."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_sec_volume(volume_id)
+
+  result = gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  spec = gvm.TIER_VOLUME_SPEC["ladybug-shared"]
+  assert result["statusCode"] == 200
+  assert result["volume_id"] == volume_id
+  assert _volume_perf(volume_id) == (spec["iops"], spec["throughput"])
+  assert _registry_item(volume_id)["status"] == "attached"
+
+
+def test_shared_master_launch_still_attaches_when_reconcile_is_deferred(gvm):
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_sec_volume(volume_id)
+  err = ClientError(
+    {"Error": {"Code": "IncorrectModificationState", "Message": "in progress"}},
+    "ModifyVolume",
+  )
+
+  with patch.object(gvm.ec2, "modify_volume", side_effect=err):
+    result = gvm.handle_instance_launch(
+      {
+        "instance_id": instance_id,
+        "node_type": "shared_master",
+        "tier": "ladybug-shared",
+      }
+    )
+
+  assert result["statusCode"] == 200
+  assert result["volume_id"] == volume_id
+  assert _registry_item(volume_id)["status"] == "attached"
+  assert _volume_perf(volume_id) == (3000, 125)
+
+
+def test_new_shared_volume_is_created_to_spec(gvm):
+  instance_id = _create_test_instance()
+
+  result = gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  spec = gvm.TIER_VOLUME_SPEC["ladybug-shared"]
+  assert result["statusCode"] == 200
+  assert _volume_perf(result["volume_id"]) == (spec["iops"], spec["throughput"])
+  item = _registry_item(result["volume_id"])
+  assert int(item["iops"]) == spec["iops"]
+  assert int(item["throughput"]) == spec["throughput"]
+
+
+def test_new_writer_volume_stays_at_baseline(gvm):
+  instance_id = _create_test_instance()
+
+  result = gvm.handle_instance_launch(
+    {
+      "instance_id": instance_id,
+      "node_type": "writer",
+      "tier": "ladybug-standard",
+      "databases": ["kg_new"],
+    }
+  )
+
+  assert result["statusCode"] == 200
+  assert _volume_perf(result["volume_id"]) == (3000, 125)
