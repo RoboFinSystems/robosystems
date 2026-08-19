@@ -190,6 +190,9 @@ def _bind_statement(search_path: str, tenant_schema: str | None) -> str:
   set_local = f"SET LOCAL search_path TO {search_path}"
   if tenant_schema is None:
     return set_local
+  # Validated here as well as by the caller: this is the interpolation, and
+  # the guarantee should not depend on statement order in `extensions_session`.
+  tenant_schema = _sanitize_schema(tenant_schema)
   return (
     "DO $$ BEGIN "
     f"IF to_regnamespace('{tenant_schema}') IS NULL THEN "

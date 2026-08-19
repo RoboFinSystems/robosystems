@@ -256,6 +256,9 @@ def test_bind_statement_guards_tenants_and_not_the_library():
   assert "ERRCODE = '3F000'" in tenant
   assert tenant.endswith(f"SET LOCAL search_path TO {GRAPH_A}, public")
   assert ext._bind_statement("public", None) == "SET LOCAL search_path TO public"
+  # The interpolation validates its own input, independent of the caller.
+  with pytest.raises(ValueError):
+    ext._bind_statement("kg00000000000000aa, public", "kg00000000000000aa') --")
 
 
 def test_no_bypass_of_the_scoped_session_factory():
