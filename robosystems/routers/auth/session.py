@@ -11,6 +11,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from robosystems.security.request_context import publish_principal
+
 from ...config import env
 from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
@@ -92,6 +94,8 @@ async def get_me(
         detail="Token session has been invalidated",
         headers={"WWW-Authenticate": "Bearer"},
       )
+
+    publish_principal(fastapi_request, str(user.id), "jwt_token")
 
     return {
       "id": user.id,
@@ -248,6 +252,8 @@ async def refresh_session(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token session has been invalidated",
       )
+
+    publish_principal(fastapi_request, str(user.id), "jwt_token")
 
     # Revoke the old token before issuing a new one
     revoke_success = revoke_jwt_token(jwt_token, reason="session_refresh")

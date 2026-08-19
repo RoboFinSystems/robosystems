@@ -7,6 +7,7 @@ from robosystems.middleware.sse import (
   build_email_job_config,
   run_and_monitor_dagster_job,
 )
+from robosystems.security.request_context import publish_principal
 
 from ...config.constants import (
   EMAIL_TOKEN_EXPIRY_HOURS,
@@ -73,6 +74,8 @@ async def get_current_user_for_email_verification(
       detail="Token session has been invalidated",
       headers={"WWW-Authenticate": "Bearer"},
     )
+
+  publish_principal(request, str(user.id), "jwt_token")
 
   # Log successful authentication
   client_ip = request.client.host if request.client else None
