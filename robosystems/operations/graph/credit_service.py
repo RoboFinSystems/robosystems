@@ -124,6 +124,7 @@ class CreditService:
     idempotency_key: str | None = None,
     request_id: str | None = None,
     operation_id: str | None = None,
+    drain_on_shortfall: bool = False,
   ) -> dict[str, Any]:
     """Debit ``base_cost`` for an operation, returning the outcome as a dict.
 
@@ -160,15 +161,16 @@ class CreditService:
         metadata=metadata,
         cached=cached,
         base_cost=base_cost,
+        drain_on_shortfall=drain_on_shortfall,
       )
 
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    # No cached pre-reject here, deliberately. This path is reached only after
-    # the billable call has completed, so there is always a real debit to make:
-    # a short pool is drained to zero by the atomic consume below, and an early
-    # return on a stale cached balance would skip exactly that. The cheap
-    # check belongs in the pre-flight (`check_credit_balance`), not here.
+    # No cached pre-reject here, deliberately. When called with
+    # drain_on_shortfall (the post-hoc AI path), an early return on a stale
+    # cached balance would skip the drain the atomic consume below performs.
+    # The cheap balance check belongs in the pre-flight (`check_credit_balance`),
+    # not on this post-charge path.
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
@@ -186,6 +188,7 @@ class CreditService:
       request_id=request_id,
       user_id=user_id,
       metadata=metadata,
+      drain_on_shortfall=drain_on_shortfall,
     )
 
     if consumption_result["success"]:
@@ -802,6 +805,7 @@ class CreditService:
     metadata: dict[str, Any] | None = None,
     cached: bool = False,
     base_cost: Decimal | None = None,
+    drain_on_shortfall: bool = False,
   ) -> dict[str, Any]:
     """Debit a user's repository pool. Missing add-on returns
     ``requires_addon``.
@@ -839,6 +843,7 @@ class CreditService:
       operation_type=operation_type,
       session=self.session,
       metadata=metadata,
+      drain_on_shortfall=drain_on_shortfall,
     )
 
     if success:
@@ -1041,6 +1046,9 @@ class CreditService:
       base_cost=total_cost,
       metadata=token_metadata,
       user_id=user_id,
+      # Post-hoc: the model call already happened, so a short pool drains to
+      # zero and records the shortfall rather than leaving a re-enterable band.
+      drain_on_shortfall=True,
     )
 
 

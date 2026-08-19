@@ -241,6 +241,7 @@ class TestGraphCredits:
       operation_description="AI Agent API call",
       session=self.session,
       user_id=self.user.id,
+      drain_on_shortfall=True,
     )
 
     assert result["success"] is False
@@ -270,6 +271,38 @@ class TestGraphCredits:
     assert meta["drained_to_zero"] is True
     assert Decimal(meta["shortfall"]) == Decimal("50")
 
+  def test_consume_credits_atomic_default_leaves_the_balance(self):
+    """Without drain_on_shortfall (the default / pre-check path), a shortfall
+    refuses and leaves the remainder — draining here would destroy credits the
+    user legitimately holds. This is the invariant the concurrency test relies
+    on."""
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("10"),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    result = credits.consume_credits_atomic(
+      amount=Decimal("15"),
+      operation_type="agent_call",
+      operation_description="cannot afford",
+      session=self.session,
+    )
+
+    assert result["success"] is False
+    assert result.get("drained_to_zero") is not True
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("10")  # untouched
+    assert (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(graph_credits_id=credits.id)
+      .count()
+      == 0
+    )
+
   def test_consume_credits_atomic_on_an_empty_pool_records_nothing(self):
     """Nothing to take: no transaction row, balance stays at zero."""
     credits = GraphCredits(
@@ -286,6 +319,7 @@ class TestGraphCredits:
       operation_type="agent_call",
       operation_description="AI Agent API call",
       session=self.session,
+      drain_on_shortfall=True,
     )
 
     assert result["success"] is False
@@ -321,12 +355,14 @@ class TestGraphCredits:
       operation_type="agent_call",
       operation_description="over-budget call #1",
       session=self.session,
+      drain_on_shortfall=True,
     )
     second = credits.consume_credits_atomic(
       amount=Decimal("200"),
       operation_type="agent_call",
       operation_description="over-budget call #2",
       session=self.session,
+      drain_on_shortfall=True,
     )
 
     assert first["drained_to_zero"] is True and first["credits_consumed"] == 40.0

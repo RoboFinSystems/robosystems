@@ -173,6 +173,7 @@ class TestCreditService:
           request_id=None,
           user_id=None,
           metadata={"test": "data"},
+          drain_on_shortfall=False,
         )
 
         # Verify cache invalidation was called
@@ -786,6 +787,7 @@ class TestCreditConsumptionWritesUsageLedger:
         operation_type="ai_tokens",
         base_cost=Decimal("200.0"),
         user_id="usr_abc",
+        drain_on_shortfall=True,
       )
 
       cache.invalidate_graph_credit_balance.assert_called_once_with("graph123")

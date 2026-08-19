@@ -175,6 +175,7 @@ class UserRepositoryCredits(Base):
     operation_type: str,
     session: Session,
     metadata: dict[str, Any] | None = None,
+    drain_on_shortfall: bool = False,
   ) -> bool:
     """Consume credits for a repository operation.
 
@@ -182,10 +183,11 @@ class UserRepositoryCredits(Base):
     balance check rides inside the UPDATE's WHERE clause, so concurrent callers
     cannot both pass it.
 
-    Billing here is post-hoc (the AI call has already happened), so a short
-    pool is drained to zero rather than left untouched — the shortfall is
-    recorded on the transaction and the call still returns False so the run
-    stops. See ``GraphCredits.consume_credits_atomic`` for the rationale.
+    ``drain_on_shortfall`` (see ``GraphCredits.consume_credits_atomic``):
+    default leaves a short pool untouched and just refuses; set it only on a
+    post-hoc AI charge, where the pool is instead drained to zero and the
+    shortfall recorded. Draining a pre-check would destroy credits the user
+    still holds.
     """
     if not self.is_active:
       logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
@@ -215,14 +217,20 @@ class UserRepositoryCredits(Base):
         logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
         return False
 
-      self._drain_for_shortfall(
-        amount=amount,
-        repository_name=repository_name,
-        operation_type=operation_type,
-        session=session,
-        metadata=metadata,
-        now=now,
-      )
+      if drain_on_shortfall:
+        self._drain_for_shortfall(
+          amount=amount,
+          repository_name=repository_name,
+          operation_type=operation_type,
+          session=session,
+          metadata=metadata,
+          now=now,
+        )
+      else:
+        # Pre-check semantics: refuse, leave the remainder for a cheaper op.
+        logger.warning(
+          f"Insufficient credits in pool {self.id}: need {amount}, have {self.current_balance}"
+        )
       return False
 
     session.refresh(self)

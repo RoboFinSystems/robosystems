@@ -188,21 +188,25 @@ class GraphCredits(Base):
     request_id: str | None = None,
     user_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    drain_on_shortfall: bool = False,
   ) -> dict[str, Any]:
-    """Atomically deduct credits for a completed AI operation.
+    """Atomically deduct credits for a completed operation.
 
     The deduction and its balance check happen in one conditional UPDATE, so
     concurrent callers cannot drive the pool negative. Returns
     ``{"success": False, "error": "Insufficient credits", ...}`` rather than
     raising when the pool cannot cover ``amount``.
 
-    Billing is post-hoc — the model call has already been paid for by the
-    time this runs — so a pool that cannot cover the whole cost is **drained
-    to zero** rather than left untouched: what is there is debited, the
-    shortfall is recorded on the transaction, and the result still reports
-    ``success: False`` so the caller stops the run. Leaving the balance in
-    place would let the same request re-enter the band above the pre-flight
-    estimate and below one call's true cost indefinitely, billed nothing.
+    ``drain_on_shortfall`` selects what happens when the pool is short. By
+    default the balance is **left untouched** — the operation is simply
+    refused, and any remainder stays available for a cheaper one. Set it only
+    on a **post-hoc** charge (an AI call already paid for by the time this
+    runs), where instead the pool is **drained to zero**: what is there is
+    debited, the shortfall is recorded, and the result still reports
+    ``success: False`` so the caller stops. Draining there stops the same
+    request re-entering the band above the pre-flight estimate and below one
+    call's true cost, billed nothing; draining a *pre*-check would wrongly
+    destroy credits the user holds.
 
     ``metadata`` (token counts and the like) is merged into the transaction
     record; the built-in keys win on collision.
@@ -235,16 +239,30 @@ class GraphCredits(Base):
       consumption_result = result.fetchone()
 
       if not consumption_result:
-        return self._drain_for_shortfall(
-          actual_cost=actual_cost,
-          operation_type=operation_type,
-          operation_description=operation_description,
-          session=session,
-          request_id=request_id,
-          user_id=user_id,
-          metadata=metadata,
-          transaction_id=transaction_id,
+        if drain_on_shortfall:
+          return self._drain_for_shortfall(
+            actual_cost=actual_cost,
+            operation_type=operation_type,
+            operation_description=operation_description,
+            session=session,
+            request_id=request_id,
+            user_id=user_id,
+            metadata=metadata,
+            transaction_id=transaction_id,
+          )
+        # Pre-check semantics: refuse, leave the balance for a cheaper op.
+        current_result = session.execute(
+          text("SELECT current_balance FROM graph_credits WHERE id = :credits_id"),
+          {"credits_id": self.id},
         )
+        current_balance = current_result.fetchone()
+        available_balance = float(current_balance[0]) if current_balance else 0
+        return {
+          "success": False,
+          "error": "Insufficient credits",
+          "required_credits": float(actual_cost),
+          "available_credits": available_balance,
+        }
 
       GraphCreditTransaction.create_transaction(
         graph_credits_id=self.id,
