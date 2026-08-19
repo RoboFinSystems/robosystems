@@ -80,6 +80,25 @@ def _session_scope():
   return threading.get_ident()
 
 
+def _connect_args() -> dict[str, str]:
+  # A per-statement ceiling set on the connection, so no single platform query
+  # can hold the (synchronous, loop-bound) session unboundedly. Mirrors the
+  # extensions engine; migrations run on their own engine and are unaffected.
+  #
+  # Engine-wide (workers included) is intentional and safe: `statement_timeout`
+  # bounds a single statement, not a transaction, so a bulk job that issues
+  # many small statements under one commit (e.g. bulk_allocate_monthly_credits)
+  # is unaffected — only an individual query running longer than the ceiling is
+  # cut. The platform DB has no such single bulk statement (that shape lives on
+  # the extensions engine, which opts bulk paths out per-session). SSM-tunable;
+  # `database/STATEMENT_TIMEOUT_MS = 0` disables it without a deploy.
+  timeout_ms = TuningConfig.get_database_statement_timeout_ms()
+  # `options` is a libpq connection parameter; only PostgreSQL drivers accept it.
+  if timeout_ms <= 0 or not (get_database_url() or "").startswith("postgresql"):
+    return {}
+  return {"options": f"-c statement_timeout={timeout_ms}"}
+
+
 engine = create_engine(
   get_database_url(),
   pool_size=TuningConfig.get_database_pool_size(),
@@ -87,6 +106,7 @@ engine = create_engine(
   pool_timeout=TuningConfig.get_database_pool_timeout(),
   pool_recycle=TuningConfig.get_database_pool_recycle(),
   pool_pre_ping=True,
+  connect_args=_connect_args(),
   echo=env.DATABASE_ECHO,
 )
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)

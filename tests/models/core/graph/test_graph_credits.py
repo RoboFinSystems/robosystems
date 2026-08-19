@@ -218,8 +218,14 @@ class TestGraphCredits:
     assert transaction is not None
     assert transaction.amount == Decimal("-100")
 
-  def test_consume_credits_atomic_insufficient(self):
-    """Test atomic credit consumption with insufficient balance."""
+  def test_consume_credits_atomic_insufficient_drains_to_zero(self):
+    """A completed call that costs more than the pool holds drains the pool.
+
+    Billing is post-hoc, so refusing the debit would leave the balance in
+    place for the next request to re-enter the band above the pre-flight
+    estimate and below one call's true cost — billed nothing, indefinitely.
+    The call still reports ``success: False`` so the run stops.
+    """
     credits = GraphCredits(
       graph_id=self.graph.graph_id,
       user_id=self.user.id,
@@ -234,12 +240,136 @@ class TestGraphCredits:
       operation_type="agent_call",
       operation_description="AI Agent API call",
       session=self.session,
+      user_id=self.user.id,
+      drain_on_shortfall=True,
     )
 
     assert result["success"] is False
     assert result["error"] == "Insufficient credits"
     assert result["required_credits"] == 100.0
-    assert result["available_credits"] == 50.0
+    # What was there is taken, the shortfall is reported, the pool is empty.
+    assert result["drained_to_zero"] is True
+    assert result["credits_consumed"] == 50.0
+    assert result["shortfall"] == 50.0
+    assert result["available_credits"] == 0.0
+
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("0")
+
+    # The partial debit is on the ledger, flagged so it can be reconciled.
+    transaction = (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(
+        graph_credits_id=credits.id,
+        transaction_type=CreditTransactionType.CONSUMPTION.value,
+      )
+      .first()
+    )
+    assert transaction is not None
+    assert transaction.amount == Decimal("-50")
+    meta = transaction.get_metadata()
+    assert meta["drained_to_zero"] is True
+    assert Decimal(meta["shortfall"]) == Decimal("50")
+
+  def test_consume_credits_atomic_default_leaves_the_balance(self):
+    """Without drain_on_shortfall (the default / pre-check path), a shortfall
+    refuses and leaves the remainder — draining here would destroy credits the
+    user legitimately holds. This is the invariant the concurrency test relies
+    on."""
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("10"),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    result = credits.consume_credits_atomic(
+      amount=Decimal("15"),
+      operation_type="agent_call",
+      operation_description="cannot afford",
+      session=self.session,
+    )
+
+    assert result["success"] is False
+    assert result.get("drained_to_zero") is not True
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("10")  # untouched
+    assert (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(graph_credits_id=credits.id)
+      .count()
+      == 0
+    )
+
+  def test_consume_credits_atomic_on_an_empty_pool_records_nothing(self):
+    """Nothing to take: no transaction row, balance stays at zero."""
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("0"),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    result = credits.consume_credits_atomic(
+      amount=Decimal("100"),
+      operation_type="agent_call",
+      operation_description="AI Agent API call",
+      session=self.session,
+      drain_on_shortfall=True,
+    )
+
+    assert result["success"] is False
+    assert result["credits_consumed"] == 0.0
+    assert result["shortfall"] == 100.0
+    assert result.get("drained_to_zero") is not True
+
+    count = (
+      self.session.query(GraphCreditTransaction)
+      .filter_by(
+        graph_credits_id=credits.id,
+        transaction_type=CreditTransactionType.CONSUMPTION.value,
+      )
+      .count()
+    )
+    assert count == 0
+
+  def test_drain_closes_the_free_band_for_the_next_call(self):
+    """The reason the drain exists: a second call after a shortfall cannot
+    find a positive balance to sit under. Before, the balance survived every
+    over-budget call untouched and the band was re-enterable forever."""
+    credits = GraphCredits(
+      graph_id=self.graph.graph_id,
+      user_id=self.user.id,
+      billing_admin_id=self.billing_admin.id,
+      current_balance=Decimal("40"),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    first = credits.consume_credits_atomic(
+      amount=Decimal("200"),
+      operation_type="agent_call",
+      operation_description="over-budget call #1",
+      session=self.session,
+      drain_on_shortfall=True,
+    )
+    second = credits.consume_credits_atomic(
+      amount=Decimal("200"),
+      operation_type="agent_call",
+      operation_description="over-budget call #2",
+      session=self.session,
+      drain_on_shortfall=True,
+    )
+
+    assert first["drained_to_zero"] is True and first["credits_consumed"] == 40.0
+    assert second["credits_consumed"] == 0.0
+    assert second["available_credits"] == 0.0
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("0")
 
   def test_allocate_monthly_credits(self):
     """Test monthly credit allocation."""

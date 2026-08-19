@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from robosystems.config import env
+from robosystems.config.constants import DAGSTER_CLIENT_TIMEOUT_SECONDS
 from robosystems.middleware.sse.event_storage import EventType, SSEEventStorage
 
 logger = logging.getLogger(__name__)
@@ -66,9 +67,12 @@ class DagsterRunMonitor:
       try:
         from dagster_graphql import DagsterGraphQLClient
 
+        # Explicit timeout: the library default is 300 s, and these calls run
+        # on the API event loop — a hung webserver must not hold every tenant.
         self._client = DagsterGraphQLClient(
           hostname=self.dagster_host,
           port_number=self.dagster_port,
+          timeout=DAGSTER_CLIENT_TIMEOUT_SECONDS,
         )
       except ImportError:
         logger.error(
@@ -235,7 +239,8 @@ class DagsterRunMonitor:
         }
 
       try:
-        status_info = self.get_run_status(run_id)
+        # Sync HTTP under the hood; keep it off the event loop.
+        status_info = await asyncio.to_thread(self.get_run_status, run_id)
       except Exception as e:
         logger.error(f"Failed to get run status: {e}")
         await asyncio.sleep(self.poll_interval)
@@ -304,7 +309,8 @@ async def run_and_monitor_dagster_job(
   monitor = DagsterRunMonitor()
 
   try:
-    run_id = monitor.submit_job(job_name, run_config, tags)
+    # Sync HTTP submit; runs as a background task on the API loop, so offload.
+    run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
 
     await monitor.emit_started(operation_id, job_name, run_id)
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from robosystems.db.platform import SessionFactory
 from robosystems.logger import logger
-from robosystems.operations.operators.ai_client import AIClient
+from robosystems.operations.operators.ai_client import get_ai_client
 from robosystems.operations.operators.base import (
   OperatorMode,
   enforce_operator_graph_scope,
@@ -64,7 +64,7 @@ async def run_operator_worker(
     preflight_session.close()
 
   tools = DirectToolAccess(graph_id, user_id=user_id)
-  ai_client = AIClient()
+  ai_client = get_ai_client()
   credit_consumer = FactoryCreditConsumer()
 
   tracked_ai = TrackedAIClient(

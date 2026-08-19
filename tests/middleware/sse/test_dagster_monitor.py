@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from robosystems.config.constants import DAGSTER_CLIENT_TIMEOUT_SECONDS
 from robosystems.middleware.sse.dagster_monitor import (
   DAGSTER_STATUS_MAP,
   DagsterRunMonitor,
@@ -172,7 +173,15 @@ class TestGetClient:
       ):
         client = m._get_client()
         assert client is mock_client_instance
-        mock_client_cls.assert_called_once_with(hostname="localhost", port_number=3000)
+        # An explicit, short timeout: the library default is 300 s, and the
+        # call runs on the API event loop. A hung webserver must not hold
+        # every tenant on the task for five minutes per poll.
+        mock_client_cls.assert_called_once_with(
+          hostname="localhost",
+          port_number=3000,
+          timeout=DAGSTER_CLIENT_TIMEOUT_SECONDS,
+        )
+        assert DAGSTER_CLIENT_TIMEOUT_SECONDS < 60
 
   @pytest.mark.unit
   def test_reuses_client_on_subsequent_calls(self, monitor, mock_dagster_client):

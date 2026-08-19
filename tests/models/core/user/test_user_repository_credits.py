@@ -261,11 +261,93 @@ class TestUserRepositoryCredits:
         repository_name="sec",
         operation_type="query",
         session=self.session,
+        drain_on_shortfall=True,
+        # Colliding caller keys must NOT overwrite the audit-critical fields.
+        metadata={"shortfall": "0", "drained_to_zero": False, "note": "keep me"},
       )
 
+    # Billing is post-hoc: the call already happened, so the short pool is
+    # drained to zero (what was there is billed, the shortfall recorded) and
+    # the call still returns False so the run stops.
     assert result is False
-    assert credits.current_balance == Decimal("50")  # Unchanged
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("0")
+    assert credits.credits_consumed_this_month == Decimal("50")
     mock_logger.warning.assert_called()
+
+    drain_tx = (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .order_by(UserRepositoryCreditTransaction.created_at.desc())
+      .first()
+    )
+    assert drain_tx is not None
+    assert drain_tx.amount == Decimal("-50")
+    meta = drain_tx.get_metadata()
+    # Built-ins win over the colliding caller keys; non-colliding keys survive.
+    assert meta["drained_to_zero"] is True
+    assert Decimal(meta["shortfall"]) == Decimal("50")
+    assert meta["note"] == "keep me"
+
+  def test_consume_credits_on_an_empty_pool_records_nothing(self):
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("0"),
+      monthly_allocation=Decimal("1000"),
+      is_active=True,
+    )
+    credits.user_repository = self.repo_access
+    self.session.add(credits)
+    self.session.commit()
+
+    result = credits.consume_credits(
+      amount=Decimal("100"),
+      repository_name="sec",
+      operation_type="query",
+      session=self.session,
+      drain_on_shortfall=True,
+    )
+
+    assert result is False
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("0")
+    assert (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .count()
+      == 0
+    )
+
+  def test_consume_credits_default_leaves_the_remainder(self):
+    """Default (pre-check) path: a short pool refuses and keeps its balance —
+    the invariant the concurrency test in test_credit_race_conditions relies
+    on. Draining here would destroy credits the user still holds."""
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("10"),
+      monthly_allocation=Decimal("1000"),
+      is_active=True,
+    )
+    credits.user_repository = self.repo_access
+    self.session.add(credits)
+    self.session.commit()
+
+    result = credits.consume_credits(
+      amount=Decimal("15"),
+      repository_name="sec",
+      operation_type="query",
+      session=self.session,
+    )
+
+    assert result is False
+    self.session.refresh(credits)
+    assert credits.current_balance == Decimal("10")  # untouched
+    assert (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .count()
+      == 0
+    )
 
   def test_consume_credits_inactive_pool(self):
     """Test credit consumption from inactive pool."""

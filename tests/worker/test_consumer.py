@@ -159,6 +159,36 @@ async def test_error_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
 
 @pytest.mark.asyncio
 @patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_raising_fail_operation_does_not_escape(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """`fail_operation` raises when the operation's SSE metadata has expired
+  (a task outliving its TTL). Raising from inside the except handler used to
+  escape `_process_task` and, with nothing above it in the run loop, exit the
+  worker — so one long task could kill the process. It must be logged and
+  swallowed; cleanup and the inflight removal must still happen."""
+  mock_tracer.return_value = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
+
+  # The real failure shape: the handler raises, then recording the failure
+  # raises too because the metadata key is gone.
+  mock_manager.fail_operation = AsyncMock(
+    side_effect=ValueError("Operation op_01TEST not found (metadata expired)")
+  )
+
+  task_data = _make_task_data(task_type="test_failure")
+  # Must not raise.
+  await _call_process_task(task_data, mock_queue, mock_manager)
+
+  mock_manager.fail_operation.assert_called_once()
+  mock_cleanup.assert_called_once()
+  mock_queue.lrem.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
 async def test_unknown_task_type(mock_cleanup, mock_manager, mock_queue):
   task_data = _make_task_data(task_type="nonexistent_type")
   await _call_process_task(task_data, mock_queue, mock_manager)

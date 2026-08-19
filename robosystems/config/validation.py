@@ -21,6 +21,17 @@ class ConfigValidationError(Exception):
 class EnvValidator:
   """Validates environment configuration at startup."""
 
+  # Flags whose code default is the permissive value, so an individual absence
+  # from SSM in a deployed environment is a silent control failure. Presence
+  # is asserted, not value: `false` is a legitimate setting for any of them.
+  SAFETY_CRITICAL_FEATURE_FLAGS: tuple[str, ...] = (
+    "RATE_LIMIT_ENABLED",
+    "BILLING_ENABLED",
+    "CAPTCHA_ENABLED",
+    "EMAIL_VERIFICATION_ENABLED",
+    "USER_REGISTRATION_ENABLED",
+  )
+
   @staticmethod
   def validate_required_vars(env_config) -> None:
     """
@@ -242,6 +253,23 @@ class EnvValidator:
         errors.append(
           "RATE_LIMIT_ENABLED is false in a deployed environment — this is the "
           "signature of an SSM read that fell back to defaults. Refusing to boot."
+        )
+      # Per-flag, not just per-store: the batched read returns only the
+      # parameters that exist, so a single safety-critical flag missing from
+      # SSM passes both checks above and resolves silently to its permissive
+      # code default (BILLING_ENABLED off is the expensive one). Presence is
+      # what is asserted — the value may legitimately be false.
+      preloaded = getattr(env_config, "PRELOADED_FEATURE_FLAG_NAMES", frozenset())
+      missing = [
+        name
+        for name in EnvValidator.SAFETY_CRITICAL_FEATURE_FLAGS
+        if name not in preloaded
+      ]
+      if missing:
+        errors.append(
+          "Safety-critical feature flag(s) absent from SSM in a deployed "
+          f"environment: {', '.join(missing)} — each would run on its code "
+          "default. Set the parameter(s) under /features/ and redeploy."
         )
 
     # Validate value ranges and formats

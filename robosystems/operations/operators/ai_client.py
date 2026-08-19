@@ -5,7 +5,9 @@ Explorer alongside everything else, emits CloudWatch token metrics, and lets
 IAM rather than a shared API key control who can call a model.
 """
 
+import asyncio
 import json
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -131,6 +133,15 @@ class AIClient:
       messages, system, max_tokens, temperature, model_id, tools
     )
 
+  def _invoke_model_sync(
+    self, model: str, request_body: dict[str, Any]
+  ) -> dict[str, Any]:
+    response = self.client.invoke_model(
+      modelId=model,
+      body=json.dumps(request_body),
+    )
+    return json.loads(response["body"].read())
+
   async def _bedrock_create_message(
     self,
     messages: list[AIMessage],
@@ -154,12 +165,14 @@ class AIClient:
     if tools:
       request_body["tools"] = tools
 
-    response = self.client.invoke_model(
-      modelId=model,
-      body=json.dumps(request_body),
+    # botocore is synchronous and a model call can take minutes; run it on a
+    # worker thread so the event loop — shared by every tenant on this task —
+    # is not held for the duration. The default executor, not `run_off_loop`:
+    # that limiter fronts short OLTP work and must not be exhausted by
+    # minutes-long calls.
+    response_body = await asyncio.to_thread(
+      self._invoke_model_sync, model, request_body
     )
-
-    response_body = json.loads(response["body"].read())
 
     # A response may interleave text and tool_use blocks; the first block
     # is not guaranteed to be text (a pure tool_use turn has none). Join every
@@ -178,3 +191,23 @@ class AIClient:
       stop_reason=response_body.get("stop_reason"),
       content_blocks=blocks,
     )
+
+
+_shared_client: AIClient | None = None
+_shared_client_lock = threading.Lock()
+
+
+def get_ai_client() -> AIClient:
+  """Process-wide `AIClient`.
+
+  boto3 clients are thread-safe, and constructing one per request put a
+  synchronous client build plus an STS round-trip on the event loop every
+  time an operator ran. A failed construction is not cached, so the next
+  call retries.
+  """
+  global _shared_client
+  if _shared_client is None:
+    with _shared_client_lock:
+      if _shared_client is None:
+        _shared_client = AIClient()
+  return _shared_client

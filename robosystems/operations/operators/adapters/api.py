@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
-from robosystems.operations.operators.ai_client import AIClient
+from robosystems.operations.operators.ai_client import get_ai_client
 from robosystems.operations.operators.base import (
   OperatorMode,
   OperatorResult,
@@ -68,7 +68,7 @@ async def run_operator_api(
   tools = HttpToolAccess(
     graph_id, read_only=operator.spec.read_only, user_id=str(user.id)
   )
-  ai_client = AIClient()
+  ai_client = get_ai_client()
 
   if db_session is None:
     logger.error(

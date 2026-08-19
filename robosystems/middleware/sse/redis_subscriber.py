@@ -108,8 +108,12 @@ class RedisEventSubscriber:
           await asyncio.sleep(1.0)
           continue
 
-        message = await asyncio.wait_for(
-          self.pubsub.get_message(ignore_subscribe_messages=True), timeout=1.0
+        # The timeout must be get_message's own: with redis-py's default
+        # (timeout=0.0) it returns immediately and the `continue` below spins
+        # the loop at full speed whenever any stream is open. wait_for around
+        # an instantly-returning call throttles nothing.
+        message = await self.pubsub.get_message(
+          ignore_subscribe_messages=True, timeout=1.0
         )
 
         if message is None:

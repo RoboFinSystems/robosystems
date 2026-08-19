@@ -44,6 +44,11 @@ class MockEnvConfig:
     # in validation.py reads these.
     self.PARAMETER_STORE_AVAILABLE = True
     self.FEATURE_FLAGS_PRELOADED = True
+    # A healthy boot preloaded every safety-critical flag by name. The
+    # per-flag canary asserts membership, not value.
+    self.PRELOADED_FEATURE_FLAG_NAMES = frozenset(
+      EnvValidator.SAFETY_CRITICAL_FEATURE_FLAGS
+    )
 
 
 class TestParameterStoreReachability:
@@ -81,10 +86,35 @@ class TestParameterStoreReachability:
       with pytest.raises(ConfigValidationError):
         EnvValidator.validate_required_vars(cfg)
 
+  def test_one_safety_flag_absent_from_ssm_refuses_boot(self):
+    """The batched SSM read returns only the parameters that exist, so a single
+    safety-critical flag missing (here BILLING_ENABLED) passes the per-store
+    checks and resolves silently to its permissive code default. The per-flag
+    canary must catch it."""
+    cfg = self._prod()
+    cfg.PRELOADED_FEATURE_FLAG_NAMES = frozenset(
+      f for f in EnvValidator.SAFETY_CRITICAL_FEATURE_FLAGS if f != "BILLING_ENABLED"
+    )
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(cfg)
+
+  def test_a_safety_flag_present_but_false_is_accepted(self):
+    """Presence is asserted, not value: `false` is a legitimate setting (e.g.
+    USER_REGISTRATION_ENABLED off on staging). Membership is all that matters."""
+    cfg = self._prod()
+    # Every flag present; the canary must not fire on the values.
+    cfg.PRELOADED_FEATURE_FLAG_NAMES = frozenset(
+      EnvValidator.SAFETY_CRITICAL_FEATURE_FLAGS
+    )
+    with patch("os.getenv", return_value=None):
+      EnvValidator.validate_required_vars(cfg)  # does not raise
+
   def test_dev_is_never_subject_to_the_reachability_assertion(self):
     cfg = MockEnvConfig()  # ENVIRONMENT="dev"
     cfg.PARAMETER_STORE_AVAILABLE = False
     cfg.FEATURE_FLAGS_PRELOADED = False
+    cfg.PRELOADED_FEATURE_FLAG_NAMES = frozenset()
     cfg.RATE_LIMIT_ENABLED = False
     with patch("os.getenv", return_value=None):
       EnvValidator.validate_required_vars(cfg)  # does not raise

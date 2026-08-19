@@ -102,7 +102,7 @@ class TestAdaptersEnforceBeforeToolAccess:
         side_effect=HTTPException(status_code=403, detail="read-only"),
       ),
       patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "AIClient"),
+      patch.object(api, "get_ai_client"),
       patch.object(api, "TrackedAIClient"),
     ):
       with pytest.raises(HTTPException) as exc:
@@ -127,7 +127,7 @@ class TestAdaptersEnforceBeforeToolAccess:
         side_effect=HTTPException(status_code=403, detail="read-only"),
       ),
       patch.object(worker, "DirectToolAccess") as tool_access,
-      patch.object(worker, "AIClient"),
+      patch.object(worker, "get_ai_client"),
       patch.object(worker, "TrackedAIClient"),
       patch.object(worker, "FactoryCreditConsumer"),
     ):
@@ -186,7 +186,7 @@ class TestToolSurfaceMatchesSpec:
       patch.object(api, "enforce_operator_write_role"),
       patch.object(api, "enforce_operator_credits"),
       patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "AIClient"),
+      patch.object(api, "get_ai_client"),
       patch.object(api, "TrackedAIClient"),
     ):
       tool_access.return_value = MagicMock(close=AsyncMock())
@@ -210,7 +210,7 @@ class TestToolSurfaceMatchesSpec:
       patch.object(api, "enforce_operator_write_role"),
       patch.object(api, "enforce_operator_credits"),
       patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "AIClient"),
+      patch.object(api, "get_ai_client"),
       patch.object(api, "TrackedAIClient"),
     ):
       tool_access.return_value = MagicMock(close=AsyncMock())

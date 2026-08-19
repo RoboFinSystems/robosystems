@@ -421,6 +421,78 @@ class TestSubgraphService:
   # was removed from subgraph_service.py as part of S3 bucket restructure
 
   @pytest.mark.asyncio
+  async def test_delete_purges_the_subgraph_from_the_shared_search_index(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    """Documents are indexed under the subgraph id in a tenant-shared index.
+    A standalone delete-subgraph used to leave them there permanently (the
+    parent's teardown purges by iterating rows this path has already removed),
+    and a recreated subgraph of the same reusable name would resurface them.
+    The delete now purges the index, off the event loop."""
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+
+    mock_os_client = Mock()
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ),
+      patch("robosystems.graph_api.client.GraphClient", return_value=mock_lbug_client),
+      patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
+      patch(
+        "robosystems.operations.search.client.OpenSearchClient",
+        return_value=mock_os_client,
+      ) as os_cls,
+    ):
+      mock_env.SEMANTIC_SEARCH_ENABLED = True
+      mock_env.OPENSEARCH_URL = "http://os:9200"
+      mock_env.OPENSEARCH_INDEX = "documents"
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
+
+      result = await service.delete_subgraph_database(
+        "kg5f2e5e0da65d45d69645_analysis", force=True
+      )
+
+    assert result["status"] == "deleted"
+    assert result["search_purged"] is True
+    os_cls.assert_called_once_with("http://os:9200", "documents")
+    mock_os_client.delete_by_graph_id.assert_called_once_with(
+      "kg5f2e5e0da65d45d69645_analysis"
+    )
+
+  @pytest.mark.asyncio
+  async def test_delete_is_a_clean_noop_when_search_disabled(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ),
+      patch("robosystems.graph_api.client.GraphClient", return_value=mock_lbug_client),
+      patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
+    ):
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
+
+      result = await service.delete_subgraph_database(
+        "kg5f2e5e0da65d45d69645_analysis", force=True
+      )
+
+    assert result["status"] == "deleted"
+    assert result["search_purged"] is False
+
+  @pytest.mark.asyncio
   async def test_delete_invalid_subgraph_id(self, service):
     """Test deletion with invalid subgraph ID."""
     with pytest.raises(ValueError) as exc_info:

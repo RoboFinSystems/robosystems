@@ -173,6 +173,7 @@ class TestCreditService:
           request_id=None,
           user_id=None,
           metadata={"test": "data"},
+          drain_on_shortfall=False,
         )
 
         # Verify cache invalidation was called
@@ -736,14 +737,74 @@ class TestCreditConsumptionWritesUsageLedger:
     assert kwargs["credits_consumed"] == Decimal("10.0")
 
   def test_failed_consumption_records_nothing(self, credit_service):
+    """A refusal that deducted nothing (empty pool) writes no usage row."""
     credits = self._credits(
-      {"success": False, "error": "Insufficient credits", "available_credits": 1.0}
+      {
+        "success": False,
+        "error": "Insufficient credits",
+        "available_credits": 0.0,
+        "credits_consumed": 0.0,
+      }
     )
 
     result, record = self._consume(credit_service, credits, user_id="usr_abc")
 
     assert result["success"] is False
     record.assert_not_called()
+
+  def test_drain_to_zero_records_the_partial_debit_and_pins_the_cache(
+    self, credit_service
+  ):
+    """A shortfall drain is real spend: the usage ledger records the drained
+    amount, the result reports it, and the cached balance is pinned at zero
+    rather than merely invalidated — the pre-flight prefers the cache, and a
+    stale positive figure there would re-admit the request the drain stops."""
+    credits = self._credits(
+      {
+        "success": False,
+        "error": "Insufficient credits",
+        "credits_consumed": 40.0,
+        "shortfall": 160.0,
+        "drained_to_zero": True,
+        "available_credits": 0.0,
+        "required_credits": 200.0,
+        "base_cost": 200.0,
+        "transaction_id": "t-drain",
+      }
+    )
+
+    with (
+      patch("robosystems.middleware.billing.cache.credit_cache") as cache,
+      patch.object(GraphCredits, "get_by_graph_id", return_value=credits),
+      patch.object(GraphUsage, "record_credit_consumption") as record,
+    ):
+      cache.get_cached_graph_credit_balance.return_value = (
+        Decimal("40.0"),
+        "ladybug-standard",
+      )
+      result = credit_service.consume_credits(
+        graph_id="graph123",
+        operation_type="ai_tokens",
+        base_cost=Decimal("200.0"),
+        user_id="usr_abc",
+        drain_on_shortfall=True,
+      )
+
+      cache.invalidate_graph_credit_balance.assert_called_once_with("graph123")
+      cache.cache_graph_credit_balance.assert_called_once()
+      pinned = cache.cache_graph_credit_balance.call_args.kwargs
+      assert pinned["graph_id"] == "graph123"
+      assert pinned["balance"] == Decimal("0")
+
+    assert result["success"] is False
+    assert result["drained_to_zero"] is True
+    assert result["credits_consumed"] == 40.0
+    assert result["shortfall"] == 160.0
+
+    record.assert_called_once()
+    kwargs = record.call_args.kwargs
+    assert kwargs["credits_consumed"] == Decimal("40.0")
+    assert kwargs["operation_type"] == "ai_tokens"
 
   def test_unattributed_consumption_is_skipped_not_forged(self, credit_service):
     """`GraphUsage.user_id` is NOT NULL and usage is attributed per user, so a

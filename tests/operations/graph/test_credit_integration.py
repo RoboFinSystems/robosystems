@@ -295,34 +295,52 @@ class TestCreditSystemIntegration:
         assert summary["usage_percentage"] == 25.0
 
   def test_credit_enforcement_prevents_overuse(self, credit_service, mock_session):
-    """Test that credit system prevents operations when balance is insufficient."""
+    """An over-budget spend reports insufficient credits — from the atomic
+    debit, not from a cached shortcut.
+
+    Billing is post-hoc, so the service must always reach the atomic consume
+    (which drains a short pool to zero); a stale cached balance must never
+    short-circuit it. This test pins the cache at a balance below the cost and
+    asserts the debit path still ran.
+    """
     graph_id = "kg1a2b3c"
 
-    # Create mock credits with low balance
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("5.0")  # Only 5 credits left
     mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
+    mock_credits.consume_credits_atomic = Mock(
+      return_value={
+        "success": False,
+        "error": "Insufficient credits",
+        "required_credits": 100.0,
+        "available_credits": 0.0,
+        "credits_consumed": 5.0,
+        "shortfall": 95.0,
+        "drained_to_zero": True,
+      }
+    )
 
-    # Mock cache
-    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
+    with (
+      patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache,
+      patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits),
+    ):
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("5.0"),
         "standard",
       )
 
-      # Mock query
-      mock_session.query().filter_by().first.return_value = mock_credits
-
-      # Try to consume more AI credits than available
       result = credit_service.consume_credits(
         graph_id=graph_id,
         operation_type="agent_call",  # AI operation
         base_cost=Decimal("100.0"),
       )
 
-      # Verify operation was blocked
+      # The atomic debit ran despite the cache already showing a shortfall.
+      mock_credits.consume_credits_atomic.assert_called_once()
+
       assert result["success"] is False
       assert "Insufficient credits" in result["error"]
       assert result["required_credits"] == 100.0
-      assert result["available_credits"] == 5.0
+      assert result["drained_to_zero"] is True
+      assert result["credits_consumed"] == 5.0

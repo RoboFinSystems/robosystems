@@ -876,9 +876,17 @@ class DuckDBTableManager:
     """
     import time
 
+    from robosystems.security.error_handling import redact_connection_secrets
+
     start_time = time.time()
 
-    logger.info(f"Executing write for graph {request.graph_id}: {request.sql[:100]}...")
+    # postgres_scan() statements carry the extensions DSN in their leading
+    # characters; redact before the preview rather than relying on the
+    # truncation to happen to cut ahead of the password.
+    logger.info(
+      f"Executing write for graph {request.graph_id}: "
+      f"{redact_connection_secrets(request.sql)[:100]}..."
+    )
 
     pool = get_duckdb_pool()
 
