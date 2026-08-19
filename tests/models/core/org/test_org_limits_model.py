@@ -128,9 +128,13 @@ class TestOrgLimitsModel:
     # Create default limits
     limits = OrgLimits.create_default_limits("new_org_id", mock_session)
 
-    # Check that defaults were applied
+    # Check that defaults were applied. Assert against the configured default
+    # rather than a literal — the safe code default is intentionally the floor
+    # (1) so an SSM blip cannot durably over-provision an org.
+    from robosystems.config.tuning import TuningConfig
+
     assert limits.org_id == "new_org_id"
-    assert limits.max_graphs == 10  # env.ORG_GRAPHS_DEFAULT_LIMIT
+    assert limits.max_graphs == TuningConfig.get_org_graphs_default_limit()
 
     # Verify database operations were called
     mock_session.add.assert_called_once()
