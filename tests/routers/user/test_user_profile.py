@@ -39,7 +39,10 @@ class TestUserProfile:
   def client_with_user(self, mock_user):
     """Create test client with mocked user authentication."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+      get_optional_jwt_user,
+    )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
       auth_rate_limit_dependency,
@@ -54,8 +57,10 @@ class TestUserProfile:
       user_management_rate_limit_dependency,
     )
 
-    # Mock the authentication dependency
+    # Mock the authentication dependency. The profile PUT route is JWT-only
+    # (get_optional_jwt_user); GET still takes get_current_user.
     app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_optional_jwt_user] = lambda: mock_user
 
     # Disable rate limiting during tests
     app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
@@ -141,7 +146,10 @@ class TestUserProfile:
     """Create test client with real test user authentication."""
     from main import app
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+      get_optional_jwt_user,
+    )
     from robosystems.middleware.rate_limits import (
       subscription_aware_rate_limit_dependency,
       user_management_rate_limit_dependency,
@@ -157,6 +165,7 @@ class TestUserProfile:
 
     # Override dependencies
     app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_optional_jwt_user] = lambda: mock_user
     app.dependency_overrides[user_management_rate_limit_dependency] = lambda: None
     app.dependency_overrides[subscription_aware_rate_limit_dependency] = lambda: None
 
@@ -172,45 +181,171 @@ class TestUserProfile:
     # Reset the dependency overrides
     app.dependency_overrides = {}
 
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
   @patch("robosystems.routers.user.main.get_endpoint_metrics")
   @patch("robosystems.security.audit_logger.SecurityAuditLogger.log_security_event")
   def test_update_user_profile_success(
     self,
     mock_log_security_event,
     mock_get_endpoint_metrics,
+    mock_verify_reauth,
     client_with_real_user: TestClient,
     db_session,
     test_user,
   ):
-    """Test successful user profile update."""
+    """A name + email update with a valid reauth proof succeeds, stores the
+    address lowercased, and notifies the previous address of the change."""
     import uuid
+
+    from robosystems.dagster.jobs.notifications import (
+      build_email_job_config as real_build_email_job_config,
+    )
 
     # Ensure test_user is in the database
     db_session.merge(test_user)
     db_session.commit()
+    previous_email = test_user.email
 
     # Mock the metrics instance
     mock_metrics_instance = Mock()
     mock_metrics_instance.record_business_event = Mock()
     mock_get_endpoint_metrics.return_value = mock_metrics_instance
 
-    # Create unique email for update
-    new_email = f"updated-test+{str(uuid.uuid4())[:8]}@example.com"
-    update_data = {"name": "Updated Test User", "email": new_email}
+    # Create unique email for update (mixed case: must be stored lowercase)
+    new_email = f"Updated-Test+{str(uuid.uuid4())[:8]}@Example.com"
+    update_data = {
+      "name": "Updated Test User",
+      "email": new_email,
+      "reauth_password": "irrelevant-because-verify-is-mocked",
+    }
 
-    response = client_with_real_user.put("/v1/user/", json=update_data)
+    # The autouse mock_email_dagster_jobs fixture mocks both the job runner and
+    # build_email_job_config in this module; restore the real config builder so
+    # the queued run_config can be inspected.
+    with (
+      patch(
+        "robosystems.routers.user.main.build_email_job_config",
+        real_build_email_job_config,
+      ),
+      patch(
+        "robosystems.routers.user.main.run_and_monitor_dagster_job"
+      ) as mock_run_job,
+    ):
+      response = client_with_real_user.put("/v1/user/", json=update_data)
 
     assert response.status_code == 200
     data = response.json()
 
-    # Check updated data
     assert data["name"] == "Updated Test User"
-    assert data["email"] == new_email
+    assert data["email"] == new_email.lower()
+    mock_verify_reauth.assert_called_once()
 
-    # Verify the user was actually updated in the database
+    # Verify the user was actually updated in the database, lowercased
     db_session.refresh(test_user)
     assert test_user.name == "Updated Test User"
-    assert test_user.email == new_email
+    assert test_user.email == new_email.lower()
+
+    # The previous address was notified with the email_changed job
+    changed_jobs = [
+      c
+      for c in mock_run_job.call_args_list
+      if c.kwargs["run_config"]["ops"]["send_email_op"]["config"]["email_type"]
+      == "email_changed"
+    ]
+    assert len(changed_jobs) == 1
+    cfg = changed_jobs[0].kwargs["run_config"]["ops"]["send_email_op"]["config"]
+    assert cfg["to_email"] == previous_email
+    assert cfg["new_email"].startswith(new_email[0].lower())
+    assert cfg["new_email"].endswith("@example.com")
+
+  def test_email_change_from_api_key_is_refused(
+    self, client_with_real_user: TestClient, db_session, test_user
+  ):
+    """A programmatic key must never reach the email-change path — the route is
+    JWT-only. With no interactive session, the request is 401 before any write.
+
+    This is the account-takeover block: email change + the public reset flow
+    would otherwise be a full takeover from a key that lives in CI configs.
+    """
+    from main import app
+    from robosystems.middleware.auth.dependencies import get_optional_jwt_user
+
+    db_session.merge(test_user)
+    db_session.commit()
+    original_email = test_user.email
+
+    # Simulate an API-key caller: the JWT-only dependency yields no user.
+    app.dependency_overrides[get_optional_jwt_user] = lambda: None
+    try:
+      response = client_with_real_user.put(
+        "/v1/user/", json={"email": "attacker@evil.example"}
+      )
+    finally:
+      app.dependency_overrides.pop(get_optional_jwt_user, None)
+
+    assert response.status_code == 401
+    db_session.refresh(test_user)
+    assert test_user.email == original_email
+
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
+  def test_email_change_without_reauth_is_refused(
+    self, mock_verify_reauth, client_with_real_user: TestClient, db_session, test_user
+  ):
+    """Even with an interactive session, changing email without a valid proof
+    is refused — a hijacked session must not be able to change the address."""
+    from robosystems.operations.passkeys import ReauthInvalidError
+
+    mock_verify_reauth.side_effect = ReauthInvalidError("nope")
+    db_session.merge(test_user)
+    db_session.commit()
+    original_email = test_user.email
+
+    response = client_with_real_user.put(
+      "/v1/user/", json={"email": "someone-else@example.com"}
+    )
+
+    assert response.status_code == 401
+    db_session.refresh(test_user)
+    assert test_user.email == original_email
+
+  @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
+  def test_own_email_in_different_case_is_a_noop(
+    self,
+    mock_verify_reauth,
+    mock_run_job,
+    client_with_real_user: TestClient,
+    db_session,
+    test_user,
+  ):
+    """Submitting your own address in a different case must not prompt reauth
+    or 409 against your own row — it is not a change."""
+    db_session.merge(test_user)
+    db_session.commit()
+
+    response = client_with_real_user.put(
+      "/v1/user/", json={"email": test_user.email.upper()}
+    )
+
+    assert response.status_code == 200
+    mock_verify_reauth.assert_not_called()
+    assert mock_run_job.call_count == 0
+    db_session.refresh(test_user)
+    assert test_user.email == test_user.email.lower()
+
+  @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
+  def test_name_only_update_needs_no_reauth(
+    self, mock_run_job, client_with_real_user: TestClient, db_session, test_user
+  ):
+    """A name-only change needs no reauth and queues no email jobs."""
+    db_session.merge(test_user)
+    db_session.commit()
+
+    response = client_with_real_user.put("/v1/user/", json={"name": "Just A Name"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Just A Name"
+    assert mock_run_job.call_count == 0
 
   def test_update_user_profile_empty_data(self, client_with_user: TestClient):
     """Test user profile update with no data."""
@@ -221,12 +356,17 @@ class TestUserProfile:
     # Handle structured error response
     assert "no fields provided" in data["detail"]["detail"].lower()
 
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
   @patch("robosystems.models.core.User.get_by_id")
   @patch("robosystems.models.core.User.get_by_email")
   def test_update_user_profile_email_conflict(
-    self, mock_get_by_email, mock_get_by_id, client_with_user: TestClient
+    self,
+    mock_get_by_email,
+    mock_get_by_id,
+    mock_verify_reauth,
+    client_with_user: TestClient,
   ):
-    """Test user profile update with email already in use."""
+    """Test user profile update with email already in use (past reauth)."""
     # Mock the user lookup to return our mock user
     mock_get_by_id.return_value = client_with_user.mock_user
 
@@ -236,7 +376,7 @@ class TestUserProfile:
     existing_user.email = "existing@example.com"
     mock_get_by_email.return_value = existing_user
 
-    update_data = {"email": "existing@example.com"}
+    update_data = {"email": "existing@example.com", "reauth_password": "pw"}
 
     response = client_with_user.put("/v1/user/", json=update_data)
 
@@ -529,7 +669,9 @@ class TestUserAPIKeys:
   def client_with_api_keys(self, mock_user_with_api_keys):
     """Create test client with mocked user that has API keys."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+    )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
       auth_rate_limit_dependency,
@@ -830,7 +972,9 @@ class TestUserPasswordUpdate:
   def client_with_password_user(self, mock_user_with_password):
     """Create test client with mocked user for password tests."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+    )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
       auth_rate_limit_dependency,
@@ -917,6 +1061,43 @@ class TestUserPasswordUpdate:
     client_with_password_user.mock_user.invalidate_sessions.assert_called_once_with(
       mock_db
     )
+
+  @patch("robosystems.models.core.User.get_by_id")
+  def test_update_password_hashes_at_policy_cost(
+    self, mock_get_by_id, client_with_password_user: TestClient
+  ):
+    """A password change must hash at the policy work factor (BCRYPT_ROUNDS=14),
+    not bcrypt's default cost 12 — a bare gensalt() silently downgraded every
+    changed password to a quarter of the offline-cracking cost."""
+    from unittest.mock import MagicMock
+
+    from main import app
+    from robosystems.database import get_db_session
+    from robosystems.security.password import PasswordSecurity
+
+    mock_db = MagicMock()
+
+    def mock_get_db():
+      yield mock_db
+
+    app.dependency_overrides[get_db_session] = mock_get_db
+    user = client_with_password_user.mock_user
+    mock_get_by_id.return_value = user
+
+    response = client_with_password_user.put(
+      "/v1/user/password",
+      json={
+        "current_password": "originalPassword123",
+        "new_password": "Tr0pic@lBreeze#99",
+        "confirm_password": "Tr0pic@lBreeze#99",
+      },
+    )
+    del app.dependency_overrides[get_db_session]
+
+    assert response.status_code == 200
+    stored = user.password_hash
+    assert stored.startswith(f"$2b${PasswordSecurity.BCRYPT_ROUNDS:02d}$"), stored
+    assert PasswordSecurity.verify_password("Tr0pic@lBreeze#99", stored)
 
   @patch("robosystems.models.core.User.get_by_id")
   def test_update_password_wrong_current(
@@ -1021,7 +1202,9 @@ class TestUserEndpointsMetrics:
   def client_with_metrics_user(self, mock_user_for_metrics):
     """Create test client with mocked user for metrics tests."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+    )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
       auth_rate_limit_dependency,
