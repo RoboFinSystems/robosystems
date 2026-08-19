@@ -102,10 +102,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that download requires subscription for shared repositories."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -128,8 +132,8 @@ class TestBackupDownloadEndpoint:
       assert response.status_code == 403
       assert "subscription required" in response.json()["detail"].lower()
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -166,10 +170,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that starter plan users get 403 (downloads not available)."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -200,8 +208,8 @@ class TestBackupDownloadEndpoint:
       mock_check_limit.assert_not_called()
       mock_increment.assert_not_called()
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -238,10 +246,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that exceeding download rate limit returns 429."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -274,8 +286,8 @@ class TestBackupDownloadEndpoint:
       assert "X-RateLimit-Remaining" in response.headers
       assert response.headers["X-RateLimit-Remaining"] == "0"
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -312,10 +324,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that download is allowed when under rate limit."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -360,8 +376,8 @@ class TestBackupDownloadEndpoint:
         resource_id="sec",
       )
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -393,10 +409,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that user graph downloads are allowed when under tier limit."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -428,8 +448,8 @@ class TestBackupDownloadEndpoint:
       # Verify download count was incremented (standard tier has limit > 0)
       mock_increment.assert_called_once()
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -456,10 +476,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that exceeding tier download limit returns 429 for user graphs."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -482,8 +506,8 @@ class TestBackupDownloadEndpoint:
       assert "limit" in response.json()["detail"].lower()
       assert "X-RateLimit-Remaining" in response.headers
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -515,10 +539,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that xlarge tier downloads work and count is tracked."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -548,8 +576,8 @@ class TestBackupDownloadEndpoint:
       # All tiers now track download count
       mock_increment.assert_called_once()
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -576,10 +604,14 @@ class TestBackupDownloadEndpoint:
   ):
     """Test that 404 is returned when backup doesn't exist."""
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -607,8 +639,8 @@ class TestBackupDownloadEndpoint:
       assert response.status_code == 404
       assert "not found" in response.json()["detail"].lower()
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]
 
@@ -654,10 +686,14 @@ class TestBackupDownloadEndpoint:
     resource.
     """
     from robosystems.database import get_db_session
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user_with_deprovisioned_graph,
+    )
 
     mock_session = MagicMock()
-    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
+      mock_auth_user
+    )
     app.dependency_overrides[get_db_session] = lambda: mock_session
 
     try:
@@ -696,7 +732,7 @@ class TestBackupDownloadEndpoint:
         resource_id="sec",
       )
     finally:
-      if get_current_user_with_graph in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user_with_graph]
+      if get_current_user_with_deprovisioned_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_deprovisioned_graph]
       if get_db_session in app.dependency_overrides:
         del app.dependency_overrides[get_db_session]

@@ -364,3 +364,54 @@ class TestBackupDownloadRequiresAdmin:
 
     assert response.status_code == 404
     manager.get_backup_download_url.assert_awaited_once()
+
+  async def test_admin_can_download_from_a_deprovisioned_graph(
+    self, async_client, test_db, test_user
+  ):
+    """The export grace period: after teardown, an org admin can still reach a
+    torn-down graph's backups. The real verify_admin_access(allow_deprovisioned)
+    runs here — the dependency override does not cover it."""
+    from robosystems.models.core import GraphStatus
+
+    graph = self._graph_with_grant(test_db, test_user, GraphRole.ADMIN)
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    manager = MagicMock()
+    manager.get_backup_download_url = AsyncMock(return_value=None)
+    with (
+      patch(
+        "robosystems.routers.graphs.backups.download.get_backup_manager",
+        return_value=manager,
+      ),
+      patch(
+        "robosystems.routers.graphs.backups.download.DownloadRateLimiter"
+        ".check_graph_download_limit",
+        new=AsyncMock(return_value=(True, 1, datetime.now(UTC))),
+      ),
+    ):
+      response = await async_client.get(
+        f"/v1/graphs/{graph.graph_id}/backups/bk_x/download"
+      )
+
+    # Past the gate (reaches the stubbed-missing backup), not 403'd out.
+    assert response.status_code == 404
+    manager.get_backup_download_url.assert_awaited_once()
+
+  async def test_viewer_still_denied_on_a_deprovisioned_graph(
+    self, async_client, test_db, test_user
+  ):
+    """The grace period is admin-only: allow_deprovisioned relaxes the gone-graph
+    denial, it does not grant a viewer admin."""
+    from robosystems.models.core import GraphStatus
+
+    graph = self._graph_with_grant(test_db, test_user, GraphRole.VIEWER)
+    graph.status = GraphStatus.DEPROVISIONED.value
+    test_db.commit()
+
+    response = await async_client.get(
+      f"/v1/graphs/{graph.graph_id}/backups/bk_x/download"
+    )
+
+    assert response.status_code == 403
+    assert "Admin access required" in response.json()["detail"]

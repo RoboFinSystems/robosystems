@@ -568,6 +568,82 @@ class TestDeprovisionService:
       assert test_graph.deleted_at is not None
 
   @pytest.mark.asyncio
+  async def test_deprovision_converges_when_the_database_is_already_gone(
+    self, service, db_session, test_graph
+  ):
+    """A 404 from delete_database (the .lbug is already absent) must count as
+    success so teardown converges.
+
+    The stranding case: run #1 deletes the file, the Dagster daemon restarts
+    before the status flip, and every retry then gets the same 404. Treating
+    it as a failure would re-select the graph every 5 minutes forever. The
+    invariant that gates the rest of teardown is *the file is not on the
+    instance*, not *we removed it*.
+    """
+    from robosystems.graph_api.client.exceptions import GraphClientError
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+    ):
+      mock_client = AsyncMock()
+      mock_client.delete_database.side_effect = GraphClientError(
+        "Database not found", status_code=404
+      )
+      mock_get_client.return_value = mock_client
+
+      mock_alloc = AsyncMock()
+      mock_alloc_cls.return_value = mock_alloc
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+      # Converged: the delete counted, the registry was freed, the status flipped.
+      assert result.database_deleted is True
+      assert not any("Database deletion failed" in e for e in result.errors)
+      db_session.refresh(test_graph)
+      assert test_graph.status == GraphStatus.DEPROVISIONED.value
+
+  @pytest.mark.asyncio
+  async def test_deprovision_still_strands_on_a_non_404_graph_api_error(
+    self, service, db_session, test_graph
+  ):
+    """A 500 (or any non-404 GraphAPIError) is a real failure — the file may
+    still be on the instance, so teardown must NOT converge."""
+    from robosystems.graph_api.client.exceptions import GraphServerError
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+    ):
+      mock_client = AsyncMock()
+      mock_client.delete_database.side_effect = GraphServerError(
+        "boom", status_code=500
+      )
+      mock_get_client.return_value = mock_client
+      mock_alloc_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+      assert result.status == "partial"
+      assert result.database_deleted is False
+      db_session.refresh(test_graph)
+      assert test_graph.status != GraphStatus.DEPROVISIONED.value
+
+  @pytest.mark.asyncio
   async def test_deprovision_registry_deallocation_failure_continues(
     self, service, db_session, test_graph
   ):
@@ -1024,3 +1100,89 @@ class TestOrphanTenantSchemas:
     ):
       assert purge_orphan_tenant_schemas(db_session) == [ghost]
     drop.assert_called_once_with(ghost)
+
+
+class TestStagedUploadPurge:
+  """user-staging/{user_id}/{graph_id}/ is the last customer-data store, indexed
+  only by the GraphUser rows. It must be purged BEFORE _clean_pg_records drops
+  those rows, or the platform can no longer enumerate what it holds."""
+
+  @pytest.mark.asyncio
+  async def test_staged_uploads_are_deleted_before_the_rows_that_index_them(
+    self, service, db_session, test_graph, test_user, stub_bundle_purge
+  ):
+    from robosystems.models.core.graph.graph_user import GraphUser
+
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=test_graph.graph_id,
+      role="admin",
+      session=db_session,
+    )
+
+    staged_key = (
+      f"user-staging/{test_user.id}/{test_graph.graph_id}/Entity/f1/data.parquet"
+    )
+
+    def iter_keys(bucket, prefix):
+      # Only the staging prefix for this (user, graph) yields an object.
+      if prefix == f"user-staging/{test_user.id}/{test_graph.graph_id}/":
+        return iter([staged_key])
+      return iter([])
+
+    stub_bundle_purge.iter_object_keys.side_effect = iter_keys
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    # The staged object was found (via the GraphUser row) and deleted.
+    assert result.staged_objects_deleted >= 1
+    deleted_keys = [
+      call.args[1] for call in stub_bundle_purge.delete_object.call_args_list
+    ]
+    assert staged_key in deleted_keys
+    # And the rows that indexed it are gone afterward — the purge ran first.
+    from robosystems.models.core.graph.graph_user import GraphUser as GU
+
+    remaining = db_session.query(GU).filter(GU.graph_id == test_graph.graph_id).count()
+    assert remaining == 0
+
+  @pytest.mark.asyncio
+  async def test_purge_is_best_effort_and_never_strands_teardown(
+    self, service, db_session, test_graph, test_user, stub_bundle_purge
+  ):
+    from robosystems.models.core.graph.graph_user import GraphUser
+
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=test_graph.graph_id,
+      role="admin",
+      session=db_session,
+    )
+    stub_bundle_purge.iter_object_keys.side_effect = RuntimeError("s3 down")
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    # Teardown converged despite the purge failure; the failure was recorded.
+    db_session.refresh(test_graph)
+    assert test_graph.status == GraphStatus.DEPROVISIONED.value
+    assert any("Staged upload purge failed" in e for e in result.errors)

@@ -204,6 +204,8 @@ def validate_api_key_with_graph(
   graph_id: str,
   db_session: Session | None = None,
   require_scoped: bool = False,
+  *,
+  allow_deprovisioned: bool = False,
 ) -> User | None:
   """Validate an API key against a graph and return its user.
 
@@ -215,6 +217,11 @@ def validate_api_key_with_graph(
 
   Returns None for an invalid key or an unauthorized graph, without
   distinguishing the two.
+
+  ``allow_deprovisioned`` is threaded only from the backup export path: it
+  relaxes the gone-graph denial in ``get_effective_role`` and bypasses the
+  cached graph-access decision (which was made under the default, gone →
+  denied), so the relaxation can never be written back into the cache.
   """
   if not api_key or not graph_id:
     return None
@@ -232,8 +239,10 @@ def validate_api_key_with_graph(
     logger.debug(f"Cached API key is inactive: {api_key_hash[:8]}...")
     return None
 
-  cached_graph_access = _safe_cache_call(
-    "get_cached_graph_access", api_key_hash, graph_id
+  cached_graph_access = (
+    None
+    if allow_deprovisioned
+    else _safe_cache_call("get_cached_graph_access", api_key_hash, graph_id)
   )
 
   if cached_api_key and cached_graph_access is not None:
@@ -347,7 +356,12 @@ def validate_api_key_with_graph(
         "read",
       )
     else:
-      has_access = GraphUser.user_has_access(key_record.user_id, graph_id, sess)
+      has_access = GraphUser.user_has_access(
+        key_record.user_id,
+        graph_id,
+        sess,
+        allow_deprovisioned=allow_deprovisioned,
+      )
     if not has_access:
       # Key is valid; only the graph decision is negative. Cache both.
       try:
@@ -358,7 +372,10 @@ def validate_api_key_with_graph(
           user_data,
           is_active=key_record.is_active,
         )
-        _safe_cache_call("cache_graph_access", api_key_hash, graph_id, has_access=False)
+        if not allow_deprovisioned:
+          _safe_cache_call(
+            "cache_graph_access", api_key_hash, graph_id, has_access=False
+          )
       except Exception as e:
         logger.error(f"Failed to cache API key + graph validation result: {e}")
       return None
@@ -373,7 +390,11 @@ def validate_api_key_with_graph(
         user_data,
         is_active=key_record.is_active,
       )
-      _safe_cache_call("cache_graph_access", api_key_hash, graph_id, has_access=True)
+      # Do not persist a positive decision reached under allow_deprovisioned:
+      # a later default-path request would read it and grant access to a graph
+      # that is gone.
+      if not allow_deprovisioned:
+        _safe_cache_call("cache_graph_access", api_key_hash, graph_id, has_access=True)
     except Exception as e:
       logger.error(f"Failed to cache API key + graph validation result: {e}")
 

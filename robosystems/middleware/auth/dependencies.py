@@ -110,18 +110,23 @@ def _db_get_user_by_id(user_id: str) -> User | None:
     sess.close()
 
 
-def _db_check_graph_access(user_id: str, graph_id: str) -> bool:
+def _db_check_graph_access(
+  user_id: str, graph_id: str, *, allow_deprovisioned: bool = False
+) -> bool:
   """Check graph access using a short-lived session.
 
   Same rationale as ``_db_get_user_by_id`` — avoid holding a pool
-  connection for the entire request duration.
+  connection for the entire request duration. ``allow_deprovisioned`` is
+  threaded only from the backup export path (see ``get_effective_role``).
   """
   from ...database import SessionFactory
   from ...models.core import GraphUser
 
   sess = SessionFactory()
   try:
-    return GraphUser.user_has_access(user_id, graph_id, sess)
+    return GraphUser.user_has_access(
+      user_id, graph_id, sess, allow_deprovisioned=allow_deprovisioned
+    )
   finally:
     sess.close()
 
@@ -372,10 +377,12 @@ async def get_current_user(
   )
 
 
-async def get_current_user_with_graph(
+async def _resolve_user_with_graph(
   request: Request,
   graph_id: str,
-  api_key: str = Security(API_KEY_HEADER),
+  api_key: str,
+  *,
+  allow_deprovisioned: bool = False,
 ) -> User:
   """Authenticate the caller and confirm they have access to `graph_id`.
 
@@ -383,7 +390,10 @@ async def get_current_user_with_graph(
   `require_graph_write_role`, since a viewer passes this check.
 
   Raises 401 when authentication fails and 403 when the graph is not the
-  caller's.
+  caller's. ``allow_deprovisioned`` is set only by the backup export routes so
+  a departing customer's org OWNER/ADMIN can still reach a torn-down graph's
+  backups during the grace period; it bypasses the cached access decision and
+  is not persisted back into the cache, so it can never leak to another route.
   """
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
@@ -405,7 +415,14 @@ async def get_current_user_with_graph(
       user = _get_user_for_verified_jwt(user_id, token_session_version)
 
       if user and bool(user.is_active):
-        has_access = api_key_cache.get_cached_jwt_graph_access(str(user_id), graph_id)
+        # The deprovisioned-allowed path computes fresh: a cached decision was
+        # made under the default (gone → denied), and the result must not be
+        # written back or a later default-path request would see it.
+        has_access = (
+          None
+          if allow_deprovisioned
+          else api_key_cache.get_cached_jwt_graph_access(str(user_id), graph_id)
+        )
 
         if has_access is None:
           from robosystems.config.shared_repositories import (
@@ -416,15 +433,19 @@ async def get_current_user_with_graph(
 
           if is_shared_repository_or_subgraph(graph_id):
             # Resolves a subgraph to its parent repository before checking.
+            # Shared repositories are never deprovisioned, so the flag is moot.
             has_access = MultiTenantUtils.validate_repository_access(
               graph_id,
               user_id,
               "read",
             )
           else:
-            has_access = _db_check_graph_access(user_id, graph_id)
+            has_access = _db_check_graph_access(
+              user_id, graph_id, allow_deprovisioned=allow_deprovisioned
+            )
 
-          api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
+          if not allow_deprovisioned:
+            api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
 
         if has_access:
           _publish_jwt_identity(request, user_id)
@@ -464,7 +485,9 @@ async def get_current_user_with_graph(
     )
 
   if api_key:
-    user = validate_api_key_with_graph(api_key, graph_id)
+    user = validate_api_key_with_graph(
+      api_key, graph_id, allow_deprovisioned=allow_deprovisioned
+    )
     if user:
       _stash_api_key_identity(request, api_key, user)
       SecurityAuditLogger.log_auth_success(
@@ -504,6 +527,41 @@ async def get_current_user_with_graph(
     detail="Authentication required",
     headers={"WWW-Authenticate": "Bearer, ApiKey"},
   )
+
+
+def require_graph_access(allow_deprovisioned: bool = False):
+  """Build the graph-membership dependency.
+
+  The default instance (``get_current_user_with_graph``) denies a torn-down
+  graph. ``allow_deprovisioned=True`` is used by exactly the backup-list and
+  backup-download routes so a departing org's OWNER/ADMIN can export during the
+  grace period; it must not be applied to any other route (see
+  ``GraphUser.get_effective_role``).
+  """
+
+  async def dependency(
+    request: Request,
+    graph_id: str,
+    api_key: str = Security(API_KEY_HEADER),
+  ) -> User:
+    return await _resolve_user_with_graph(
+      request, graph_id, api_key, allow_deprovisioned=allow_deprovisioned
+    )
+
+  return dependency
+
+
+# Default graph-membership dependency: denies deprovisioned graphs. Every
+# existing `Depends(get_current_user_with_graph)` keeps its behavior.
+get_current_user_with_graph = require_graph_access()
+
+# The one sanctioned deprovisioned-tolerant variant, used by exactly the
+# backup-list and backup-download routes so a departing org's OWNER/ADMIN can
+# export during the grace period. A named singleton (not an inline
+# `require_graph_access(True)`) so it is a stable, overridable dependency.
+get_current_user_with_deprovisioned_graph = require_graph_access(
+  allow_deprovisioned=True
+)
 
 
 async def get_current_user_with_graph_or_url_token(

@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user_with_deprovisioned_graph,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
@@ -75,7 +77,9 @@ async def get_backup_download_url(
   expires_in: int = Query(
     3600, ge=300, le=86400, description="URL expiration time in seconds"
   ),
-  current_user: User = Depends(get_current_user_with_graph),
+  # Export grace period: see list_backups. Both the dependency and the
+  # in-handler admin check below allow a torn-down graph for org OWNER/ADMIN.
+  current_user: User = Depends(get_current_user_with_deprovisioned_graph),
   session: Session = Depends(get_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BackupDownloadUrlResponse:
@@ -105,7 +109,7 @@ async def get_backup_download_url(
   minutes to 24 hours.
   """
   try:
-    # Access validated by get_current_user_with_graph dependency
+    # Access validated by the require_graph_access dependency
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     has_tier_limit = False
     # The single id the monthly counter is keyed on. Both the check and the
@@ -168,7 +172,7 @@ async def get_backup_download_url(
       # require admin on the graph; taking one out does too. Shared
       # repositories are gated by subscription plan above instead — there is
       # no per-graph role there.
-      verify_admin_access(current_user, graph_id, session)
+      verify_admin_access(current_user, graph_id, session, allow_deprovisioned=True)
 
       # Dedicated graph: check tier-based download limits.
       # Deprovisioned graphs are included deliberately. The final backup is

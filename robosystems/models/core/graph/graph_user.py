@@ -179,7 +179,12 @@ class GraphUser(Model):
 
   @classmethod
   def get_effective_role(
-    cls, user_id: str, graph_id: str, session: Session
+    cls,
+    user_id: str,
+    graph_id: str,
+    session: Session,
+    *,
+    allow_deprovisioned: bool = False,
   ) -> tuple[GraphRole | None, bool]:
     """Resolve the user's effective role on a graph, as ``(role, implicit)``.
 
@@ -198,6 +203,13 @@ class GraphUser(Model):
     so every surface that authorizes through this resolver (REST, GraphQL,
     MCP, the extensions registrar) denies in one place. A subgraph row that
     exists is held to the same standard as its parent.
+
+    ``allow_deprovisioned`` is the one sanctioned exception, passed only from
+    the backup-list and backup-download paths so a departing customer's org
+    OWNER/ADMIN can still export during the published grace period. It relaxes
+    the gone-graph denial *only*; a missing graph still resolves to no role,
+    and every other authorizer keeps the default. Do not widen its use — the
+    gone-graph denial is a tenant-isolation control.
     """
     from robosystems.middleware.graph.types import parse_graph_id
     from robosystems.models.core.graph.graph import Graph, GraphStatus
@@ -214,9 +226,10 @@ class GraphUser(Model):
     parent_row = by_id.get(parent_id)
     if parent_row is None:
       return None, False
-    for row in by_id.values():
-      if row.status == GraphStatus.DEPROVISIONED.value or row.deleted_at is not None:
-        return None, False
+    if not allow_deprovisioned:
+      for row in by_id.values():
+        if row.status == GraphStatus.DEPROVISIONED.value or row.deleted_at is not None:
+          return None, False
 
     explicit_role: GraphRole | None = None
     membership = (
@@ -244,14 +257,23 @@ class GraphUser(Model):
     return explicit_role, False
 
   @classmethod
-  def user_has_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
+  def user_has_access(
+    cls,
+    user_id: str,
+    graph_id: str,
+    session: Session,
+    *,
+    allow_deprovisioned: bool = False,
+  ) -> bool:
     """
     Check if a user has access to a specific graph.
 
     Access comes from an explicit GraphUser row (on the parent graph for
     subgraphs) or implicitly from OWNER/ADMIN role in the owning org.
     """
-    role, _ = cls.get_effective_role(user_id, graph_id, session)
+    role, _ = cls.get_effective_role(
+      user_id, graph_id, session, allow_deprovisioned=allow_deprovisioned
+    )
     return role is not None
 
   @classmethod
@@ -265,9 +287,18 @@ class GraphUser(Model):
     return role is not None and role.at_least(GraphRole.MEMBER)
 
   @classmethod
-  def user_has_admin_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
+  def user_has_admin_access(
+    cls,
+    user_id: str,
+    graph_id: str,
+    session: Session,
+    *,
+    allow_deprovisioned: bool = False,
+  ) -> bool:
     """Check if a user has admin access to a specific graph."""
-    role, _ = cls.get_effective_role(user_id, graph_id, session)
+    role, _ = cls.get_effective_role(
+      user_id, graph_id, session, allow_deprovisioned=allow_deprovisioned
+    )
     return role is not None and role.at_least(GraphRole.ADMIN)
 
   def update_role(self, role: str | GraphRole, session: Session) -> None:
