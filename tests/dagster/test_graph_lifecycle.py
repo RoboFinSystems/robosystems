@@ -44,6 +44,48 @@ class TestSuspendedGraphDeprovisioningSensor:
 
       assert len(runs) == 0
 
+  def test_re_selects_graphs_stranded_mid_teardown(self):
+    """A graph whose teardown started (deleted_at set) but never reached
+    DEPROVISIONED is excluded by the retention query (deleted_at IS NULL); the
+    sensor's second query re-selects it so it is retried rather than stranded
+    forever with its .lbug / registry entry / tenant rows intact."""
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      # No subscription-driven graphs...
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+      # ...but one stranded graph (query(Graph.graph_id).filter(...).all()).
+      mock_session.query.return_value.filter.return_value.all.return_value = [
+        ("kg_stranded",)
+      ]
+
+      context = build_sensor_context()
+      runs = list(suspended_graph_deprovisioning_sensor(context))
+
+      assert len(runs) == 1
+      config = runs[0].run_config["ops"]["deprovision_suspended_graphs"]["config"]
+      assert config["graph_ids"] == ["kg_stranded"]
+
+  def test_dedups_a_graph_that_is_both_ready_and_stranded(self):
+    mock_sub = MagicMock()
+    mock_sub.resource_id = "kg_both"
+    with patch("robosystems.database.session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+        mock_sub
+      ]
+      mock_session.query.return_value.filter.return_value.all.return_value = [
+        ("kg_both",)
+      ]
+
+      context = build_sensor_context()
+      runs = list(suspended_graph_deprovisioning_sensor(context))
+
+      assert len(runs) == 1
+      config = runs[0].run_config["ops"]["deprovision_suspended_graphs"]["config"]
+      assert config["graph_ids"] == ["kg_both"]
+
   def test_session_cleanup(self):
     """Database session is always cleaned up."""
     with patch("robosystems.database.session") as mock_db:

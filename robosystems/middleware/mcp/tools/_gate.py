@@ -23,7 +23,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from robosystems.database import get_db_session
 from robosystems.middleware.extensions import (
   GraphExtensionContext,
   load_graph_metadata,
@@ -56,15 +55,15 @@ def _load_with_short_lived_session(graph_id: str) -> GraphExtensionContext:
   gate opens its own. The session lifetime is one lookup — no concurrency
   concerns, no long-held connections.
   """
-  db_gen = get_db_session()
-  session: Session = next(db_gen)
+  # Independent session — the scoped session would be the request's own
+  # (this runs inside a request), and closing it here would close it mid-flight.
+  from robosystems.database import SessionFactory
+
+  session: Session = SessionFactory()
   try:
     return load_graph_metadata(graph_id, session)
   finally:
-    try:
-      next(db_gen)
-    except StopIteration:
-      pass
+    session.close()
 
 
 def require_graph_extension_mcp(

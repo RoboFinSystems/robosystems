@@ -187,24 +187,39 @@ class TestMCPExtensionGateError:
 
 
 class TestLoadWithShortLivedSession:
-  """The helper opens a platform-DB session via a generator, runs one
-  lookup, and closes the session. Generator-based DB helpers are easy
-  to leak if the finally/close path isn't wired right."""
+  """The helper opens an INDEPENDENT platform-DB session (SessionFactory,
+  never the request-scoped registry — it runs inside a request), runs one
+  lookup, and closes it. §2.5: driving the scoped session here would close
+  the endpoint's own session mid-request."""
 
-  def test_generator_is_exhausted_on_success(self) -> None:
+  def test_independent_session_is_opened_and_closed(self) -> None:
     from robosystems.middleware.mcp.tools import _gate
 
     mock_session = MagicMock()
 
-    def _gen():
-      yield mock_session
-      # Second `next()` raises StopIteration, simulating normal close
-
     with (
-      patch.object(_gate, "get_db_session", _gen),
+      patch(
+        "robosystems.database.SessionFactory", return_value=mock_session
+      ) as factory,
       patch.object(_gate, "load_graph_metadata", return_value=_entity_meta()) as loader,
     ):
       result = _gate._load_with_short_lived_session("kg01ABC")
 
+    factory.assert_called_once_with()
     loader.assert_called_once_with("kg01ABC", mock_session)
+    mock_session.close.assert_called_once_with()
     assert "roboledger" in result.schema_extensions
+
+  def test_session_is_closed_even_when_the_lookup_raises(self) -> None:
+    from robosystems.middleware.mcp.tools import _gate
+
+    mock_session = MagicMock()
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch.object(_gate, "load_graph_metadata", side_effect=RuntimeError("boom")),
+    ):
+      with pytest.raises(RuntimeError):
+        _gate._load_with_short_lived_session("kg01ABC")
+
+    mock_session.close.assert_called_once_with()

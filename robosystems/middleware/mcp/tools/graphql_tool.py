@@ -396,15 +396,12 @@ class GraphqlQueryTool(BaseTool):
     if not user_id:
       return None
 
-    from robosystems.database import get_db_session
+    from robosystems.database import SessionFactory
     from robosystems.models.core import User
 
-    db_gen = get_db_session()
-    db = next(db_gen)
+    # Independent session (see platform_session docs).
+    db = SessionFactory()
     try:
       return db.get(User, user_id)
     finally:
-      try:
-        next(db_gen)
-      except StopIteration:
-        pass
+      db.close()

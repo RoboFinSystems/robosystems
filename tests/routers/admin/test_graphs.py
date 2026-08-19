@@ -164,10 +164,12 @@ class TestDeprovisionGraph:
     assert response.status_code == 403
     assert "shared repository" in response.json()["detail"].lower()
 
-  def test_deprovision_database_deletion_fails_gracefully(
+  def test_deprovision_database_deletion_leaves_graph_stranded_for_retry(
     self, client, db_session, test_graph, mock_admin_auth
   ):
-    """Test that DB deletion failure still succeeds with database_deleted=False."""
+    """A DB-delete failure must not report the graph as deprovisioned: the
+    graph is left stranded (status not flipped, registry not freed, deleted_at
+    set) for the teardown sensor to retry, and the response says so."""
     with (
       patch(
         "robosystems.graph_api.client.factory.get_graph_client",
@@ -192,13 +194,14 @@ class TestDeprovisionGraph:
       assert response.status_code == 200
       data = response.json()
       assert data["database_deleted"] is False
-      assert data["status"] == "deprovisioned"
+      # Honest status — the graph is NOT deprovisioned.
+      assert data["status"] == "partial"
       assert data["warnings"] is not None
       assert any("Database deletion failed" in w for w in data["warnings"])
-      assert "not found or already removed" in data["message"]
 
       db_session.refresh(test_graph)
-      assert test_graph.status == GraphStatus.DEPROVISIONED.value
+      assert test_graph.status != GraphStatus.DEPROVISIONED.value
+      assert test_graph.deleted_at is not None
 
   def test_deprovision_with_skip_backup(
     self, client, db_session, test_graph, mock_admin_auth

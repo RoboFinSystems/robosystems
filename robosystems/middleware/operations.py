@@ -686,10 +686,36 @@ async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
   QuickBooks or a bounded lock wait sits on a busy row: the API runs one
   uvicorn worker, and before this every operation's SQL and HTTP ran inline
   on the loop.
+
+  The worker-thread run is **shielded** from native asyncio cancellation.
+  ``anyio.to_thread.run_sync`` shields only anyio-flavoured cancellation;
+  ``asyncio.wait_for`` / ``asyncio.timeout`` / ``Task.cancel()`` — which the
+  MCP transports and the worker's operator budget use — raise straight
+  through it, and anyio then releases the ``CapacityLimiter`` token while the
+  thread (and its still-open DB connection) runs on to completion. That
+  uncouples the limiter from the real thread count: under timeouts the pool
+  overflows into ``pool_timeout`` failures, and a "timed out" write still
+  commits later. Shielding ties the token's lifetime to the thread's, not the
+  caller's — a timeout means *abandoned, still running*, and the limiter keeps
+  bounding runner threads. (A Python thread cannot be cancelled anyway, so
+  this only makes the accounting honest.) Matches ``execute_operation``'s use
+  of ``asyncio.shield``.
   """
   if inspect.iscoroutinefunction(func):
     return await func(*args)
-  result = await anyio.to_thread.run_sync(func, *args, limiter=_get_runner_limiter())
+  work = asyncio.ensure_future(
+    anyio.to_thread.run_sync(func, *args, limiter=_get_runner_limiter())
+  )
+  try:
+    result = await asyncio.shield(work)
+  except asyncio.CancelledError:
+    # The worker thread keeps running to completion (a Python thread cannot be
+    # cancelled), and nothing awaits `work` any more — retrieve its outcome
+    # when it lands so a late failure reaches the structured logger rather than
+    # surfacing as an "exception was never retrieved" stderr traceback from a
+    # task nobody holds. Same handling as `execute_operation`.
+    work.add_done_callback(_log_abandoned_outcome)
+    raise
   if inspect.isawaitable(result):
     result = await result
   return result

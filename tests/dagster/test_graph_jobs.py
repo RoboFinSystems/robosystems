@@ -171,3 +171,49 @@ class TestRestoreBackupOpFailsClosed:
 
     with pytest.raises(Failure, match="Safety backup failed"):
       self._run(backup_raises=True)
+
+
+class TestDeprovisionSuspendedGraphsSessionIsolation:
+  """One graph's DBAPI failure must not poison the shared session for the
+  graphs after it. The op rolls the session back per-failure so each graph is
+  independent; the failed one is left stranded for the sensor to retry."""
+
+  @pytest.mark.unit
+  def test_a_failed_graph_rolls_back_and_the_next_graph_still_runs(self):
+    from dagster import build_op_context
+
+    from robosystems.dagster.jobs.graph_lifecycle import (
+      DeprovisionGraphsConfig,
+      deprovision_suspended_graphs,
+    )
+
+    session = MagicMock()
+    db = MagicMock()
+    db.get_session.return_value.__enter__ = lambda *_: session
+    db.get_session.return_value.__exit__ = lambda *_: False
+
+    ok = MagicMock()
+    ok.status = "success"
+    ok.errors = []
+
+    async def _deprovision(graph_id, _sess, create_backup=True):
+      if graph_id == "kg_poison":
+        raise RuntimeError("PG delete blew up mid-transaction")
+      return ok
+
+    with patch(
+      "robosystems.operations.graph.deprovision_service.GraphDeprovisionService"
+    ) as svc_cls:
+      svc_cls.return_value.deprovision_graph = _deprovision
+
+      result = deprovision_suspended_graphs(
+        build_op_context(),
+        db,
+        DeprovisionGraphsConfig(graph_ids=["kg_poison", "kg_ok"]),
+      )
+
+    # The poison graph failed → the session was reset before the next graph,
+    # and the next graph was still deprovisioned.
+    session.rollback.assert_called_once()
+    assert result["deprovisioned_count"] == 1
+    assert any("kg_poison" in e for e in result["errors"])

@@ -120,20 +120,17 @@ def resolve_schema_extensions(graph_id: str) -> list[str]:
 
   # User graph: query PostgreSQL
   try:
-    from robosystems.database import get_db_session
+    from robosystems.database import SessionFactory
     from robosystems.models.core import Graph
 
-    db_gen = get_db_session()
-    db = next(db_gen)
+    # Independent session (see platform_session docs).
+    db = SessionFactory()
     try:
       graph = Graph.get_by_id(graph_id, db)
       if graph and graph.schema_extensions:
         return list(graph.schema_extensions)
     finally:
-      try:
-        next(db_gen)
-      except StopIteration:
-        pass
+      db.close()
   except Exception:
     logger.warning(f"Could not resolve schema extensions for {graph_id}")
 
@@ -539,18 +536,16 @@ class GraphMCPTools:
     if self._cached_meta is not None:
       return self._cached_meta
     try:
-      from robosystems.database import get_db_session
+      # Independent session (see platform_session docs): the scoped session
+      # would resolve to the request's own and closing it here would close it.
+      from robosystems.database import SessionFactory
       from robosystems.middleware.extensions import load_graph_metadata
 
-      db_gen = get_db_session()
-      session = next(db_gen)
+      session = SessionFactory()
       try:
         self._cached_meta = load_graph_metadata(self.client.graph_id, session)
       finally:
-        try:
-          next(db_gen)
-        except StopIteration:
-          pass
+        session.close()
     except Exception:
       logger.debug(
         "Graph metadata preload failed for %s; registrar tools will fall back to per-call load",

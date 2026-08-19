@@ -206,6 +206,25 @@ class GraphDeprovisionService:
     # graph can finish what a partial teardown left behind.
     self._dispose_residual_data(graph_id, result)
 
+    # If the graph database itself could not be deleted, the `.lbug` is still
+    # on the instance. Freeing the registry slot now would strand it: the
+    # instance/volume would read as empty to the allocator while carrying the
+    # departed tenant's file, poisoning the next tenant that lands there (see
+    # `graph_api` on-disk vs registry counting). So leave the registry entry
+    # and the status alone — deleted_at is already stamped, so the graph is
+    # closed to callers, and the teardown sensor re-selects a stranded graph
+    # (deleted_at set, status not yet deprovisioned) to retry the whole
+    # sequence. Every step above is idempotent on re-run.
+    if not result.database_deleted:
+      result.status = "partial"
+      logger.warning(
+        f"Graph {graph_id} database delete failed; leaving registry, PG records "
+        "and status intact for the teardown sensor to retry (avoids stranding "
+        "the .lbug on a freed instance)",
+        extra={"graph_id": graph_id, "errors": result.errors},
+      )
+      return result
+
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
 
@@ -244,6 +263,41 @@ class GraphDeprovisionService:
   ) -> None:
     """Create a final backup before teardown, and register it for retrieval."""
     try:
+      from ...models.core.graph.graph_backup import (
+        BackupStatus,
+        BackupType,
+        GraphBackup,
+      )
+
+      # Idempotency for the stranded-graph retry: the sensor re-selects a graph
+      # whose database delete keeps failing every cycle, and a fresh full S3
+      # dump on each pass buys nothing. If THIS teardown already produced a
+      # completed final backup — one created since `deleted_at` was stamped at
+      # step 0 (an older backup would be a nightly/on-demand one, not the final
+      # snapshot) — reuse it and skip the re-dump.
+      if graph.deleted_at is not None:
+        deleted_at = graph.deleted_at
+        if deleted_at.tzinfo is None:
+          deleted_at = deleted_at.replace(tzinfo=UTC)
+        for prior in GraphBackup.get_by_graph_id(
+          graph.graph_id,
+          session=session,
+          backup_type=BackupType.FULL.value,
+          status=BackupStatus.COMPLETED.value,
+        ):
+          created = prior.created_at
+          if created is not None and created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+          if created is not None and created >= deleted_at:
+            result.backup_created = True
+            result.backup_path = prior.s3_key
+            logger.info(
+              f"Final backup from this teardown already exists for "
+              f"{graph.graph_id}; skipping re-dump on retry",
+              extra={"graph_id": graph.graph_id},
+            )
+            return
+
       from .engine.backup_manager import (
         BackupFormat,
         BackupJob,

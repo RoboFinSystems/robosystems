@@ -27,6 +27,7 @@ if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
 
 from robosystems.logger import logger
+from robosystems.security.error_handling import redact_connection_secrets
 
 # Association types the graph renderer needs. Anything omitted here exists in
 # OLTP but is invisible to the graph — dropping `mapping`, for instance, empties
@@ -1389,7 +1390,9 @@ class ExtensionsMaterializer:
     except Exception as e:
       logger.error(f"Failed to get graph client for {graph_id}: {e}")
       result.status = "error"
-      result.errors.append(f"Graph client initialization failed: {e!s}")
+      result.errors.append(
+        redact_connection_secrets(f"Graph client initialization failed: {e!s}")
+      )
       result.duration_ms = (time.time() - start_time) * 1000
       return result
 
@@ -1417,7 +1420,7 @@ class ExtensionsMaterializer:
     except Exception as e:
       logger.error(f"Ledger materialization failed for {graph_id}: {e}", exc_info=True)
       result.status = "error"
-      result.errors.append(str(e))
+      result.errors.append(redact_connection_secrets(str(e)))
     finally:
       await end_destructive_op(busy_instance_id, OP_KIND_EXTENSIONS_MATERIALIZE)
 
@@ -1670,7 +1673,10 @@ class ExtensionsMaterializer:
         await client.execute_write(graph_id, sql.strip(), timeout=120.0)
         result.tables_staged.append(table_name)
       except Exception as e:
-        error_msg = f"Failed to stage {table_name}: {e!s}"
+        # The staging SQL carries the extensions DSN; a DuckDB error can echo
+        # it, so scrub the credential before it reaches the log or the
+        # tenant-visible result.
+        error_msg = redact_connection_secrets(f"Failed to stage {table_name}: {e!s}")
         logger.warning(error_msg)
         if table_name in RELATIONSHIP_TABLES and "DIMENSION" in table_name:
           logger.info(f"Skipping {table_name} (no dimension data)")
@@ -1712,7 +1718,9 @@ class ExtensionsMaterializer:
         result.tables_materialized.append(table_name)
         logger.info(f"Materialized {rows} rows for {table_name}")
       except Exception as e:
-        error_msg = f"Failed to materialize {table_name}: {e!s}"
+        error_msg = redact_connection_secrets(
+          f"Failed to materialize {table_name}: {e!s}"
+        )
         logger.error(error_msg)
         result.errors.append(error_msg)
         if table_name in node_tables:

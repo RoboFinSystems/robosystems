@@ -106,7 +106,7 @@ async def test_create_subgraph_with_fork():
 
   with patch.object(service, "create_subgraph_database") as mock_create_db:
     with patch.object(service, "fork_parent_data") as mock_fork:
-      with patch("robosystems.database.get_db_session") as mock_get_db:
+      with patch("robosystems.database.SessionFactory") as mock_factory:
         # Setup mocks
         mock_create_db.return_value = {"status": "created", "instance_id": "i-12345"}
 
@@ -116,8 +116,10 @@ async def test_create_subgraph_with_fork():
           "row_count": 1000,
         }
 
+        # create_subgraph opens its own independent session (SessionFactory,
+        # not the request-scoped get_db_session) to persist the subgraph row.
         mock_db = Mock()
-        mock_get_db.return_value = iter([mock_db])
+        mock_factory.return_value = mock_db
         mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
         mock_db.commit = Mock()
         mock_db.refresh = Mock()

@@ -118,14 +118,23 @@ from contextlib import contextmanager  # noqa: E402
 
 @contextmanager
 def platform_session():
-  """Context-manager wrapper around the FastAPI dependency-style generator.
+  """Independent platform-DB session for code OUTSIDE FastAPI's dependency
+  machinery — GraphQL resolvers, MCP tools, runner threads, scripts, Dagster
+  jobs.
 
-  `get_db_session()` is implemented as a generator so it can serve as a
-  FastAPI dependency. Code that runs OUTSIDE FastAPI's dependency
-  machinery — GraphQL resolvers, MCP tools, scripts, Dagster jobs —
-  shouldn't have to drive the generator protocol manually. Wrap the
-  same machinery in a normal `with` block so callers get standard
-  context-manager semantics.
+  It opens a fresh ``SessionFactory()`` session, NOT the request-scoped
+  registry, and that distinction is load-bearing. The scoped ``session`` is
+  keyed by the request (``_session_scope``: request contextvar → task →
+  thread), and a runner thread spawned by a request inherits the request's
+  contextvars — so a scoped session opened *inside* a request, or inside a
+  worker thread it started, resolves to the endpoint's own Session. Were this
+  context manager to drive ``get_db_session()`` (the scoped path), its
+  ``finally`` close would then tear down the endpoint's session mid-flight:
+  objects expunged, pending ``add()``s silently discarded, the next use
+  auto-beginning a fresh empty transaction. An independent session has its own
+  lifecycle and cannot reach across into the request's. The scoped registry
+  stays for FastAPI ``Depends`` (``get_db_session`` / ``get_async_db_session``)
+  only.
 
   Usage:
 
@@ -137,12 +146,11 @@ def platform_session():
   This replaces ad-hoc `gen = get_db_session(); next(gen); ...; gen.close()`
   patterns that used to live in the GraphQL resolvers and MCP tools.
   """
-  gen = get_db_session()
-  db = next(gen)
+  db = SessionFactory()
   try:
     yield db
   finally:
-    gen.close()
+    db.close()
 
 
 async def get_async_db_session():

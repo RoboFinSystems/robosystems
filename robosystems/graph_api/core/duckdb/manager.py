@@ -846,10 +846,16 @@ class DuckDBTableManager:
     except HTTPException:
       raise
     except Exception as e:
-      logger.error(f"Write failed for graph {request.graph_id}: {e}")
+      from robosystems.security.error_handling import redact_connection_secrets
+
+      # postgres_scan() statements carry the extensions DSN; a failure can echo
+      # the statement, so scrub the credential before it goes to the log or the
+      # 400 detail returned to the caller.
+      safe = redact_connection_secrets(str(e))
+      logger.error(f"Write failed for graph {request.graph_id}: {safe}")
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Query failed: {e!s}",
+        detail=f"Query failed: {safe}",
       )
 
   def query_table_streaming(self, request: TableQueryRequest, chunk_size: int = 1000):
