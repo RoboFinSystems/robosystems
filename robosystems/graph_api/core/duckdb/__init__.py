@@ -8,6 +8,8 @@ from .manager import (
   TableInfo,
   TableQueryRequest,
   TableQueryResponse,
+  quote_identifier,
+  validate_column_names,
   validate_table_name,
 )
 from .pool import (
@@ -28,5 +30,7 @@ __all__ = [
   "TableQueryResponse",
   "get_duckdb_pool",
   "initialize_duckdb_pool",
+  "quote_identifier",
+  "validate_column_names",
   "validate_table_name",
 ]

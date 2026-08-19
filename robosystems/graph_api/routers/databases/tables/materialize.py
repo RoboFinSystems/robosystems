@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from fastapi import status as http_status
 
 from robosystems.config import env
+from robosystems.graph_api.core.duckdb import quote_identifier
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.models.fork import (
   ForkFromParentRequest,
@@ -184,12 +185,13 @@ def _build_type_safe_select(
   for col_name, duck_type in source_columns:
     if col_name in exclude:
       continue
+    quoted = quote_identifier(col_name)
     if col_name in nullify:
-      parts.append(f'NULL::{duck_type} AS "{col_name}"')
+      parts.append(f"NULL::{duck_type} AS {quoted}")
     elif duck_type.upper().startswith("DECIMAL"):
-      parts.append(f'CAST("{col_name}" AS DOUBLE) AS "{col_name}"')
+      parts.append(f"CAST({quoted} AS DOUBLE) AS {quoted}")
     else:
-      parts.append(f'"{col_name}"')
+      parts.append(quoted)
   return ", ".join(parts)
 
 
@@ -220,18 +222,19 @@ def _build_reconciled_select(
   # rel tables but COPY requires them. DuckDB uses src/dst (from/to are reserved).
   for implicit_col in ("from", "to", "src", "dst"):
     if implicit_col in source_set and implicit_col not in target_name_set:
-      parts.append(f'"{implicit_col}"')
+      parts.append(quote_identifier(implicit_col))
 
   for col_name, lbug_type in target_columns:
     if col_name in exclude:
       continue
     duck_type = _lbug_type_to_duck(lbug_type)
+    quoted = quote_identifier(col_name)
     if col_name in nullify:
-      parts.append(f"NULL::{duck_type} AS {col_name}")
+      parts.append(f"NULL::{duck_type} AS {quoted}")
     elif col_name in source_set:
-      parts.append(f"TRY_CAST({col_name} AS {duck_type}) AS {col_name}")
+      parts.append(f"TRY_CAST({quoted} AS {duck_type}) AS {quoted}")
     else:
-      parts.append(f"NULL::{duck_type} AS {col_name}")
+      parts.append(f"NULL::{duck_type} AS {quoted}")
   return ", ".join(parts)
 
 

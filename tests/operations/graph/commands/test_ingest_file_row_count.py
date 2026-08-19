@@ -324,3 +324,64 @@ async def test_object_grown_past_size_gate_is_rejected_not_estimated():
 
   assert exc.value.status_code == 400
   assert str(MAX_FILE_SIZE_MB) in str(exc.value.detail)
+
+
+# ── Column names: identifiers in the staging layer ──────────────────────
+
+
+def _parquet_with_columns(names: list[str]) -> bytes:
+  table = pa.table({name: [1, 2, 3] for name in names})
+  buf = io.BytesIO()
+  pq.write_table(table, buf)
+  return buf.getvalue()
+
+
+def test_parquet_column_names_outside_the_identifier_class_are_refused():
+  from robosystems.operations.graph.commands.ingest_file import _InvalidColumnName
+
+  hostile = 'identifier") AS "benign", (SELECT 42) AS "injected" --'
+  data = _parquet_with_columns(["identifier", hostile])
+  with pytest.raises(_InvalidColumnName) as exc:
+    _parquet_row_count(_RangeS3(data), "bucket", "k.parquet", len(data), BYTE_LIMIT)
+  assert exc.value.name == hostile
+
+
+def test_parquet_list_and_struct_columns_are_judged_by_their_top_level_name():
+  """Leaf paths like ``embedding.list.element`` must not trip the check."""
+  table = pa.table(
+    {"identifier": ["a"], "embedding": [[1.0, 2.0]], "nested": [{"x": 1}]}
+  )
+  buf = io.BytesIO()
+  pq.write_table(table, buf)
+  data = buf.getvalue()
+  assert (
+    _parquet_row_count(_RangeS3(data), "bucket", "k.parquet", len(data), BYTE_LIMIT)
+    == 1
+  )
+
+
+def test_invalid_column_name_is_not_swallowed_into_an_estimate():
+  """Unlike a malformed file, a hostile column name must surface, not degrade
+  to the bytes-per-row fallback and proceed to staging."""
+  from robosystems.operations.graph.commands.ingest_file import _InvalidColumnName
+
+  data = _parquet_with_columns(["identifier", "a b"])
+  with pytest.raises(_InvalidColumnName):
+    _measure_row_count(
+      _RangeS3(data), "bucket", "k.parquet", "parquet", len(data), MAX_ROWS_PER_FILE
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_with_invalid_column_name_gets_a_400_naming_it():
+  data = _parquet_with_columns(["identifier", "has-hyphen"])
+  s3, files, s3_patch, graph, storage = _cmd_mocks("parquet", len(data))
+  s3.s3_client.get_object.side_effect = _RangeS3(data).get_object
+
+  with files, s3_patch, graph, storage:
+    with pytest.raises(HTTPException) as exc:
+      await _run()
+
+  assert exc.value.status_code == 400
+  assert "'has-hyphen'" in str(exc.value.detail)
+  assert "file.parquet" in str(exc.value.detail)

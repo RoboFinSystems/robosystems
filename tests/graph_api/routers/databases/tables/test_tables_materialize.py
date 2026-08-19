@@ -240,6 +240,6 @@ def test_build_reconciled_select_nulls_missing_target_cols():
   ]
   source = ["identifier", "type"]
   expr = materialize._build_reconciled_select(target, source, "Classification")
-  assert "NULL::VARCHAR AS category" in expr
-  assert "TRY_CAST(identifier AS VARCHAR)" in expr
-  assert "TRY_CAST(type AS VARCHAR)" in expr
+  assert 'NULL::VARCHAR AS "category"' in expr
+  assert 'TRY_CAST("identifier" AS VARCHAR)' in expr
+  assert 'TRY_CAST("type" AS VARCHAR)' in expr
