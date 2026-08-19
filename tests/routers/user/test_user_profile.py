@@ -309,6 +309,31 @@ class TestUserProfile:
     assert test_user.email == original_email
 
   @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
+  def test_own_email_in_different_case_is_a_noop(
+    self,
+    mock_verify_reauth,
+    mock_run_job,
+    client_with_real_user: TestClient,
+    db_session,
+    test_user,
+  ):
+    """Submitting your own address in a different case must not prompt reauth
+    or 409 against your own row — it is not a change."""
+    db_session.merge(test_user)
+    db_session.commit()
+
+    response = client_with_real_user.put(
+      "/v1/user/", json={"email": test_user.email.upper()}
+    )
+
+    assert response.status_code == 200
+    mock_verify_reauth.assert_not_called()
+    assert mock_run_job.call_count == 0
+    db_session.refresh(test_user)
+    assert test_user.email == test_user.email.lower()
+
+  @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
   def test_name_only_update_needs_no_reauth(
     self, mock_run_job, client_with_real_user: TestClient, db_session, test_user
   ):

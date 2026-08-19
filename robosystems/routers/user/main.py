@@ -156,7 +156,14 @@ async def update_user_profile(
     sanitized_email = None
     email_changed = False
 
-    if "email" in update_data and update_data["email"] != current_user.email:
+    # Case-insensitive so submitting your own current address (in any case) is a
+    # no-op rather than prompting reauth and then 409-ing against your own row
+    # (User.get_by_email lowercases its lookup).
+    current_email_lower = (current_user.email or "").lower()
+    if (
+      "email" in update_data
+      and update_data["email"].strip().lower() != current_email_lower
+    ):
       if not validate_email(update_data["email"]):
         raise create_error_response(
           status_code=status.HTTP_400_BAD_REQUEST,
@@ -237,12 +244,13 @@ async def update_user_profile(
     db.commit()
     db.refresh(user_in_session)
 
+    app_source = detect_app_source(fastapi_request) if email_changed else None
+
     # Tell the PREVIOUS address its account's email was changed — the one
     # signal the account owner still receives if this change was hostile. Sent
     # regardless of EMAIL_VERIFICATION_ENABLED; a fire-and-forget notice whose
     # failure never fails the request (the Dagster op's own send is best-effort).
     if email_changed and previous_email:
-      app = detect_app_source(fastapi_request)
       background_tasks.add_task(
         run_and_monitor_dagster_job,
         job_name="send_email_job",
@@ -252,7 +260,7 @@ async def update_user_profile(
           to_email=previous_email,
           user_name=user_in_session.name or "there",
           new_email=_mask_email(user_in_session.email),
-          app=app,
+          app=app_source or "roboledger",
         ),
       )
 
@@ -270,7 +278,7 @@ async def update_user_profile(
         user_agent=user_agent,
       )
 
-      app = detect_app_source(fastapi_request)
+      app = app_source or detect_app_source(fastapi_request)
 
       run_config = build_email_job_config(
         email_type="email_verification",

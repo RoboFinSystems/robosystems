@@ -54,6 +54,7 @@ class TestUserRegistrationWorkflow:
       call for call in business_calls if call[1]["event_type"] == "user_registered"
     ]
     assert len(registration_events) >= 1
+    jwt_token = register_response.json()["token"]
 
     # Step 2: Create API key for the user
     api_key, plain_key = UserAPIKey.create(
@@ -77,13 +78,20 @@ class TestUserRegistrationWorkflow:
     assert profile_data["email"] == "integration@example.com"
     assert profile_data["name"] == "Integration Test User"
 
-    # Step 4: Update user profile
+    # Step 4: Update user profile. The route is interactive-session-only, so the
+    # API key is refused; the web session (JWT) updates the profile, and an
+    # email change carries a re-auth proof.
     update_data = {
       "name": "Updated Integration User",
       "email": "updated-integration@example.com",
+      "reauth_password": "S3cur3P@ssw0rd!2024",
     }
 
-    update_response = client.put("/v1/user/", json=update_data, headers=headers)
+    refused = client.put("/v1/user/", json=update_data, headers=headers)
+    assert refused.status_code == 401
+
+    session_headers = {"Authorization": f"Bearer {jwt_token}"}
+    update_response = client.put("/v1/user/", json=update_data, headers=session_headers)
     assert update_response.status_code == 200
 
     updated_data = update_response.json()
