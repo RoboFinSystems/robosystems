@@ -590,6 +590,7 @@ class PeriodCloseService:
               connection_id=qb_connection_id,
             ),
             created_by=actor_id,
+            graph_id=graph_id,
             acquire_period_fence=False,
           )
         if result.status == "pending":

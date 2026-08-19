@@ -70,8 +70,17 @@ class TestGetUserIdentifier:
 
   def test_api_key_returns_hashed(self):
     request = _make_request(headers={"X-API-Key": "test-key"})
-    result = get_user_identifier(request)
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=True):
+      result = get_user_identifier(request)
     assert result.startswith("apikey:")
+
+  def test_an_unverified_api_key_falls_through_to_ip(self):
+    """A header the auth cache has never validated is not an identity —
+    otherwise every junk key would be a fresh, un-limited caller."""
+    request = _make_request(headers={"X-API-Key": "junk"})
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=False):
+      result = get_user_identifier(request)
+    assert result.startswith("ip:")
 
   def test_jwt_bearer_returns_user_id(self):
     request = _make_request(headers={"Authorization": "Bearer valid_token"})
@@ -185,9 +194,15 @@ class TestGetUserFromRequest:
 
   def test_api_key_returns_hashed(self):
     request = _make_request(headers={"X-API-Key": "test-key"})
-    result = get_user_from_request(request)
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=True):
+      result = get_user_from_request(request)
     assert result is not None
     assert result.startswith("apikey_")
+
+  def test_an_unverified_api_key_is_anonymous(self):
+    request = _make_request(headers={"X-API-Key": "junk"})
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=False):
+      assert get_user_from_request(request) is None
 
 
 @pytest.mark.unit
@@ -576,10 +591,23 @@ class TestPublishedPrincipalIdentity:
     assert get_user_from_request(request) == "user-42"
 
   def test_header_credentials_still_take_precedence(self):
+    """A validated header key names the caller more precisely (per key,
+    not per user) than the published principal, so it wins."""
     request = _make_request(headers={"X-API-Key": "rfs" + "a" * 64})
     request.state = self._State("user-42")
-    assert get_user_identifier(request).startswith("apikey:")
-    assert "user-42" not in get_user_identifier(request)
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=True):
+      assert get_user_identifier(request).startswith("apikey:")
+      assert "user-42" not in get_user_identifier(request)
+
+  def test_an_unvalidated_header_yields_to_the_published_principal(self):
+    """The published principal is set only after successful validation, so
+    it is the better evidence when the header itself is not cached-valid
+    (a URL-carried key the auth dependency validated by another path)."""
+    request = _make_request(headers={"X-API-Key": "rfs" + "a" * 64})
+    request.state = self._State("user-42")
+    with patch(f"{MODULE}._api_key_is_cached_valid", return_value=False):
+      assert get_user_identifier(request) == "apikey:user:user-42"
+      assert get_user_from_request(request) == "user-42"
 
   def test_absent_principal_falls_back_to_ip(self):
     request = _make_request(host="10.0.0.9")

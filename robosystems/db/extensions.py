@@ -38,6 +38,17 @@ IDLE_IN_TRANSACTION_TIMEOUT_MS = 5 * 60 * 1000
 # all sentinel call sites share one string and renames don't drift.
 LIBRARY_GRAPH_ID = "library"
 
+# The schema extensions that give a graph an OLTP tenant schema. A graph
+# carrying any of these must have its schema provisioned at creation — an
+# extensions-flagged graph with no schema is not "empty", it is a session
+# whose bind is refused (see `_bind_statement`).
+TENANT_SCHEMA_EXTENSIONS: tuple[str, ...] = ("roboledger", "roboinvestor")
+
+
+def needs_tenant_schema(schema_extensions) -> bool:
+  """Whether a graph with these schema extensions gets a tenant schema."""
+  return any(ext in TENANT_SCHEMA_EXTENSIONS for ext in (schema_extensions or ()))
+
 
 def get_extensions_database_url() -> str:
   """Get extensions database URL with SSL for staging/prod."""
@@ -161,7 +172,40 @@ def _search_path_for(graph_id: str) -> str:
   return f"{_sanitize_schema(graph_id)}, public"
 
 
-def bind_search_path(session: Session, search_path: str) -> None:
+def _bind_statement(search_path: str, tenant_schema: str | None) -> str:
+  """The SQL that binds one transaction to ``search_path``.
+
+  For a tenant, the bind is guarded: PostgreSQL accepts a ``search_path``
+  whose first entry does not exist and silently skips it, and ``public``
+  holds a live copy of every tenant table (it is the template new tenants
+  are copied from). A session bound to a schema that was never provisioned,
+  or that teardown has already dropped, would therefore run every
+  unqualified statement against the shared template tables — no error, no
+  audit trail, one tenant's rows landing where every tenant's session can
+  read them. So the schema is required to exist, in the same round trip as
+  the ``SET LOCAL``, and its absence raises ``invalid_schema_name``
+  (``3F000``): the same failure a genuinely missing schema produces, which
+  the surfaces already translate to "not initialized" (404).
+  """
+  set_local = f"SET LOCAL search_path TO {search_path}"
+  if tenant_schema is None:
+    return set_local
+  # Validated here as well as by the caller: this is the interpolation, and
+  # the guarantee should not depend on statement order in `extensions_session`.
+  tenant_schema = _sanitize_schema(tenant_schema)
+  return (
+    "DO $$ BEGIN "
+    f"IF to_regnamespace('{tenant_schema}') IS NULL THEN "
+    f"RAISE EXCEPTION 'tenant schema \"{tenant_schema}\" does not exist' "
+    "USING ERRCODE = '3F000'; "
+    "END IF; END $$; "
+    f"{set_local}"
+  )
+
+
+def bind_search_path(
+  session: Session, search_path: str, *, tenant_schema: str | None = None
+) -> None:
   """Bind ``session`` to ``search_path`` for every transaction it opens.
 
   ``SET search_path`` is connection state, and a ``Session`` does not keep
@@ -177,8 +221,13 @@ def bind_search_path(session: Session, search_path: str) -> None:
   gone at commit or rollback, never left on a pooled connection for the
   next borrower to inherit. Nested (savepoint) transactions inherit the
   outer transaction's setting and are skipped.
+
+  When ``tenant_schema`` is given the bind is fail-closed: it refuses to
+  begin a transaction on a schema that does not exist — see
+  :func:`_bind_statement` for why falling through to ``public`` is the
+  failure being prevented.
   """
-  stmt = text(f"SET LOCAL search_path TO {search_path}")
+  stmt = text(_bind_statement(search_path, tenant_schema))
 
   @event.listens_for(session, "after_begin")
   def _stamp(_session: Session, transaction: SessionTransaction, connection) -> None:
@@ -195,6 +244,9 @@ def extensions_session(graph_id: str):
   resolve in the graph_id schema and shared tables resolve from public. The
   binding holds for the life of the session, across any commit inside it —
   see :func:`bind_search_path` for why that is not the same as one ``SET``.
+  The bind is fail-closed: a graph whose schema does not exist (never
+  provisioned, or already torn down) raises ``invalid_schema_name`` on the
+  session's first statement instead of falling through to ``public``.
 
   Special case: `graph_id="library"` routes to the taxonomy library
   (read-only; library content currently lives in the `public` schema,
@@ -216,8 +268,9 @@ def extensions_session(graph_id: str):
       A SQLAlchemy Session scoped to the tenant schema (or library).
   """
   search_path = _search_path_for(graph_id)
+  tenant_schema = None if graph_id == LIBRARY_GRAPH_ID else graph_id
   session: Session = _get_session_factory()()
-  bind_search_path(session, search_path)
+  bind_search_path(session, search_path, tenant_schema=tenant_schema)
   try:
     yield session
     session.commit()
@@ -488,12 +541,13 @@ def list_tenant_schemas() -> list[str]:
 def tenant_schema_exists(graph_id: str) -> bool:
   """Whether ``graph_id`` still has a tenant schema in the extensions DB.
 
-  Cross-graph paths need this because ``extensions_session`` cannot tell
-  them: ``SET search_path`` to a schema that does not exist is legal in
-  PostgreSQL and only fails later, on the first query, as an ordinary
-  ``ProgrammingError`` indistinguishable from a genuine schema fault. Code
-  that must distinguish "the recipient was deprovisioned" from "something is
-  broken" has to ask up front — see ``_delete_shared_copy``.
+  ``extensions_session`` refuses to bind to a missing schema (see
+  ``_bind_statement``), so a session on a deprovisioned graph fails on its
+  first statement with ``invalid_schema_name``. Cross-graph paths that must
+  distinguish "the recipient was deprovisioned" from "something is broken"
+  before opening a session at all — and report it as a per-target outcome
+  rather than an error — ask up front with this; see ``_delete_shared_copy``
+  and ``_share_to_target``.
 
   Returns ``False`` when no extension domain is enabled or when ``graph_id``
   is not a tenant-schema id (subgraphs share their parent's schema).

@@ -128,7 +128,22 @@ class LadybugConnectionPool:
       return self._create_new_connection(database_name, read_only)
 
   def _release_connection(self, database_name: str, connection_info: ConnectionInfo):
-    """Mark a connection as done with. Connections stay in the pool for reuse."""
+    """Mark a connection as done with. Connections stay in the pool for reuse.
+
+    A manual transaction left open on the connection would be inherited by
+    the next borrower — a read-only one refuses their writes, a write one
+    holds locks against everyone else on the database. The query validators
+    refuse `BEGIN` before it reaches the engine; this is the backstop for
+    anything that gets past them. The engine raises when there is nothing to
+    roll back, so that (the common case) is silent.
+    """
+    try:
+      connection_info.connection.execute("ROLLBACK")
+      logger.warning(
+        f"Rolled back a transaction left open on a pooled connection for {database_name}"
+      )
+    except Exception:
+      pass
     logger.debug(f"Released connection for {database_name}")
 
   def invalidate_connection(self, database_name: str):

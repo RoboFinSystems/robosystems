@@ -150,6 +150,7 @@ def test_sync_batch_lock_blocks_an_approval(tenant):
           approval_session,
           UpdateEventBlockRequest(event_id=EVENT_ID, transition_to="committed"),
           created_by="usr_approver",
+          graph_id=GRAPH,
         )
     waited = time.monotonic() - started
 
@@ -210,6 +211,7 @@ def test_approval_that_waits_out_a_lock_sees_the_committed_row(tenant):
           approval_session,
           UpdateEventBlockRequest(event_id=EVENT_ID, transition_to="voided"),
           created_by="usr_approver",
+          graph_id=GRAPH,
         )
   finally:
     t.join(timeout=10)
@@ -347,6 +349,7 @@ class TestPublishLock:
               publish_session,
               ExecuteEventBlockRequest(event_id=EVENT_ID),
               created_by="usr_operator",
+              graph_id=GRAPH,
             )
       post.assert_not_called()
 
@@ -423,6 +426,7 @@ class TestSharedSessionRefresh:
         session,
         ExecuteEventBlockRequest(event_id=EVENT_ID),
         created_by="usr_operator",
+        graph_id=GRAPH,
       )
 
       assert event.description == "set by the close loop, not yet committed"

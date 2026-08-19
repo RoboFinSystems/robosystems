@@ -628,6 +628,7 @@ class TestDeprovisionService:
       patch(
         "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
       ) as mock_alloc_cls,
+      patch("robosystems.middleware.auth.cache.api_key_cache") as cache,
     ):
       mock_client = AsyncMock()
       mock_get_client.return_value = mock_client
@@ -640,6 +641,15 @@ class TestDeprovisionService:
       )
 
       assert result.records_cleaned is True
+
+      # Members' cached access decisions go with their rows, so a warm entry
+      # cannot carry a request onto the half-dropped graph.
+      cache.invalidate_user_jwt_graph_access.assert_any_call(
+        test_user.id, test_graph.graph_id
+      )
+      cache.invalidate_user_graph_access.assert_called_once_with(
+        "*", test_graph.graph_id
+      )
 
       # Records should be deleted
       remaining_users = (

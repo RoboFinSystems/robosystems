@@ -82,7 +82,9 @@ class TestSupersedeChain:
       transition_to="superseded",
       superseded_by_id="evt_b",
     )
-    envelope = update_event_block(session, body, created_by="usr_test")
+    envelope = update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
     assert predecessor.status == "superseded"
     assert predecessor.replaced_by_event_id == "evt_b"
@@ -97,7 +99,9 @@ class TestSupersedeChain:
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="superseded")
     with pytest.raises(InvalidEventTransitionError, match="superseded_by_id"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert predecessor.status == "classified"
     assert predecessor.replaced_by_event_id is None
@@ -114,7 +118,9 @@ class TestSupersedeChain:
       superseded_by_id="evt_a",
     )
     with pytest.raises(InvalidEventTransitionError, match="cannot supersede itself"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert predecessor.status == "classified"
     session.commit.assert_not_called()
@@ -130,7 +136,9 @@ class TestSupersedeChain:
       superseded_by_id="evt_missing",
     )
     with pytest.raises(EventNotFoundError, match="evt_missing"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert predecessor.status == "classified"
     assert predecessor.replaced_by_event_id is None
@@ -148,7 +156,9 @@ class TestSupersedeChain:
       superseded_by_id="evt_b",
     )
     with pytest.raises(InvalidEventTransitionError, match="terminal"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert predecessor.status == "fulfilled"
     assert predecessor.replaced_by_event_id is None
@@ -167,7 +177,9 @@ class TestSupersedeChain:
         transition_to="superseded",
         superseded_by_id="evt_b",
       )
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
       assert predecessor.status == "superseded", f"failed from {source_status}"
       assert predecessor.replaced_by_event_id == "evt_b"
@@ -184,7 +196,9 @@ class TestDualityLateBinding:
       event_id="evt_payment",
       discharges_event_id="evt_invoice",
     )
-    envelope = update_event_block(session, body, created_by="usr_test")
+    envelope = update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
     assert payment.discharges_event_id == "evt_invoice"
     assert envelope.discharges_event_id == "evt_invoice"
@@ -198,7 +212,9 @@ class TestDualityLateBinding:
       event_id="evt_dep",
       obligated_by_event_id="evt_asset",
     )
-    envelope = update_event_block(session, body, created_by="usr_test")
+    envelope = update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
     assert schedule_entry.obligated_by_event_id == "evt_asset"
     assert envelope.obligated_by_event_id == "evt_asset"
@@ -242,7 +258,9 @@ class TestApproveFiresHandler:
       "robosystems.operations.event_block.commands.get_python_handler",
       return_value=fake_handler,
     ) as get_handler:
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     get_handler.assert_called_once_with("journal_entry_recorded")
     fake_handler.dispatch.assert_called_once_with(
@@ -280,7 +298,9 @@ class TestApproveFiresHandler:
         return_value=None,
       ),
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fence.assert_called_once()
     assert order == ["fence", "row_lock"], order
@@ -309,7 +329,9 @@ class TestApproveFiresHandler:
         return_value=None,
       ),
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fence.assert_called_once()
     assert fence.call_args.args[1:] == (date(2026, 3, 1), date(2026, 4, 30))
@@ -322,7 +344,9 @@ class TestApproveFiresHandler:
     with patch(
       "robosystems.operations.event_block.commands.assert_period_not_closed"
     ) as fence:
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fence.assert_not_called()
     assert event.status == "voided"
@@ -339,7 +363,9 @@ class TestApproveFiresHandler:
       "robosystems.operations.event_block.commands.get_python_handler",
       return_value=fake_handler,
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fake_handler.dispatch.assert_called_once()
 
@@ -355,7 +381,9 @@ class TestApproveFiresHandler:
       "robosystems.operations.event_block.commands.get_python_handler",
       return_value=fake_handler,
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fake_handler.dispatch.assert_not_called()
     assert event.status == "fulfilled"
@@ -372,7 +400,9 @@ class TestApproveFiresHandler:
       "robosystems.operations.event_block.commands.get_python_handler",
       return_value=fake_handler,
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     fake_handler.dispatch.assert_not_called()
     assert event.status == "voided"
@@ -389,7 +419,9 @@ class TestApproveFiresHandler:
       "robosystems.operations.event_block.commands.get_python_handler",
       return_value=None,
     ):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert event.status == "committed"
     session.commit.assert_called_once()
@@ -421,7 +453,9 @@ class TestApproveFiresHandler:
       return_value=fake_handler,
     ):
       with pytest.raises(HandlerMetadataValidationError) as exc:
-        update_event_block(session, body, created_by="usr_test")
+        update_event_block(
+          session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+        )
 
     assert "evt_qb_001" in str(exc.value)
     assert "journal_entry_recorded" in str(exc.value)
@@ -441,7 +475,9 @@ class TestTransitionRowLock:
     session = _session_with_events(event)
 
     body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
-    update_event_block(session, body, created_by="usr_test")
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
     locked_q = session.query.return_value.filter.return_value
     locked_q.with_for_update.assert_called()
@@ -465,6 +501,7 @@ class TestTransitionRowLock:
         event_id="evt_a", transition_to="superseded", superseded_by_id="evt_b"
       ),
       created_by="usr_test",
+      graph_id="kg00000000000000aa",
     )
 
     locked_q = session.query.return_value.filter.return_value
@@ -490,7 +527,9 @@ class TestLockContention:
     session = _session_with_events(event)
 
     body = UpdateEventBlockRequest(event_id="evt_a", description="corrected")
-    update_event_block(session, body, created_by="usr_test")
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
     statements = [str(c.args[0]) for c in session.execute.call_args_list if c.args]
     assert any("lock_timeout" in s for s in statements)
@@ -503,7 +542,9 @@ class TestLockContention:
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
     with pytest.raises(RowLockedError, match="evt_a"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     session.commit.assert_not_called()
 
@@ -520,7 +561,9 @@ class TestLockContention:
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
     with pytest.raises(RowLockedError, match="evt_a"):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     session.commit.assert_not_called()
 
@@ -534,4 +577,6 @@ class TestLockContention:
 
     body = UpdateEventBlockRequest(event_id="evt_a", transition_to="committed")
     with pytest.raises(OperationalError):
-      update_event_block(session, body, created_by="usr_test")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )

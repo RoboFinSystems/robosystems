@@ -408,6 +408,28 @@ class TestGraphModel:
     not_found = Graph.get_by_id("nonexistent", db_session)
     assert not_found is None
 
+  def test_get_by_id_treats_a_soft_deleted_graph_as_gone(self, test_org, db_session):
+    """Teardown stamps `deleted_at` first and flips `status` last; between
+    the two the schema is being dropped, so readers must not see the graph.
+    Only callers that opt in (`include_deprovisioned=True`) still can."""
+    from datetime import UTC, datetime
+
+    graph = Graph.create(
+      graph_id="kg_mid_teardown",
+      graph_name="Mid Teardown",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+    )
+    graph.deleted_at = datetime.now(UTC)
+    db_session.commit()
+
+    assert Graph.get_by_id("kg_mid_teardown", db_session) is None
+    opted_in = Graph.get_by_id(
+      "kg_mid_teardown", db_session, include_deprovisioned=True
+    )
+    assert opted_in is not None and opted_in.status != "deprovisioned"
+
   def test_get_by_extension(self, test_org, db_session):
     """Test getting graphs by schema extension."""
     # Clean up any existing graphs to ensure test isolation

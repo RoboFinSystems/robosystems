@@ -1375,14 +1375,23 @@ def _share_to_target(
   publication_artifacts: dict[str, str] | None = None,
 ) -> ShareResultItem:
   """Copy report definition + FactSets + facts to a target tenant schema."""
-  from robosystems.db.extensions import extensions_session
+  from robosystems.db.extensions import extensions_session, tenant_schema_exists
   from robosystems.db.platform import SessionFactory
   from robosystems.models.core import Graph
+  from robosystems.models.core.graph import GraphStatus
 
   try:
     with SessionFactory() as platform_session:
+      # A deprovisioned (or mid-teardown) recipient reads as absent: its
+      # schema is gone or going, and teardown never prunes it from senders'
+      # publish lists, so a re-share to the list would otherwise be attempted
+      # against a schema that does not exist.
       target_graph = platform_session.execute(
-        select(Graph).where(Graph.graph_id == target_graph_id)
+        select(Graph).where(
+          Graph.graph_id == target_graph_id,
+          Graph.status != GraphStatus.DEPROVISIONED.value,
+          Graph.deleted_at.is_(None),
+        )
       ).scalar_one_or_none()
 
       if not target_graph:
@@ -1415,6 +1424,17 @@ def _share_to_target(
       target_graph_id=target_graph_id,
       status="error",
       error="Failed to validate target graph.",
+    )
+
+  # The row can outlive the schema (a torn-down recipient, or one that never
+  # provisioned). The session bind refuses a missing schema, so this only
+  # decides the *message*: a per-target outcome the sender can act on rather
+  # than a generic failure — the same courtesy `_delete_shared_copy` extends.
+  if not tenant_schema_exists(target_graph_id):
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="error",
+      error="Target graph has no extensions tenant schema.",
     )
 
   try:

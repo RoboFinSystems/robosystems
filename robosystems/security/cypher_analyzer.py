@@ -174,6 +174,12 @@ class CypherSecurityAnalyzer:
     # no parentheses, so the procedure pattern above never sees it.
     self.call_assignment_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*=", re.IGNORECASE)
 
+    # Statement-leading transaction control / checkpoint — see
+    # `_find_admin_operations`.
+    self.transaction_control_pattern = re.compile(
+      r"(?:^|;)\s*(BEGIN|COMMIT|ROLLBACK|CHECKPOINT)\b", re.IGNORECASE
+    )
+
     # Comments, string literals, and backtick identifiers are masked by the
     # single-pass scanner in `_clean_query` (not by regex) so an in-string
     # comment marker can't hide a trailing write keyword.
@@ -517,6 +523,16 @@ class CypherSecurityAnalyzer:
     if re.search(r"\bDETACH\s+DATABASE\b", query, re.IGNORECASE):
       found_operations.add("DETACH_DATABASE")
 
+    # Transaction control and CHECKPOINT. Every request runs in its own
+    # auto-transaction; a manual BEGIN leaves a transaction open on a pooled
+    # engine connection that the next borrower inherits — a read-only one
+    # refuses their writes, a write one holds locks against ingestion and
+    # every other tenant of a shared database — and CHECKPOINT is an
+    # engine-level maintenance verb. Matched at statement start (or after a
+    # `;`) so a property named `begin` or `commit` in a read is untouched.
+    if self.transaction_control_pattern.search(query):
+      found_operations.add("TRANSACTION_CONTROL")
+
     return found_operations
 
   def _find_system_calls(self, query: str) -> set[str]:
@@ -569,6 +585,13 @@ class CypherSecurityAnalyzer:
     # Check for RENAME TABLE
     if re.search(r"\bRENAME\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("RENAME_TABLE")
+
+    # COMMENT ON is a catalog write: it changes what `CALL show_tables()`
+    # returns to every reader of the database, and the write keyword set
+    # never sees it (`comment` is far too common a property name to match
+    # bare). The two-word form is unambiguous.
+    if re.search(r"\bCOMMENT\s+ON\b", query, re.IGNORECASE):
+      found_operations.add("COMMENT_ON")
 
     return found_operations
 

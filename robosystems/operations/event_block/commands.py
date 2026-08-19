@@ -182,6 +182,37 @@ def _flush_new_event(
     raise
 
 
+class ConnectionNotOnGraphError(ValueError):
+  """A ``connection_id`` that is not one of this graph's connections.
+
+  Connection ids are platform-wide, so an id alone says nothing about which
+  tenant owns it. Every place an event names a connection — the routing
+  ``metadata.connection_id`` at capture, a patch to it, the override on
+  execute — must resolve to a connection registered on the *calling* graph,
+  or the publish would post into (and refresh the tokens of) another
+  tenant's source-of-truth system.
+  """
+
+
+def _require_connection_on_graph(connection_id: str, graph_id: str) -> None:
+  from robosystems.database import SessionFactory as _PlatformSessionFactory
+  from robosystems.models.core.connection.connection import Connection
+
+  with _PlatformSessionFactory() as platform_session:
+    connection = Connection.get_by_id(connection_id, platform_session)
+    if connection is None or str(connection.graph_id) != str(graph_id):
+      raise ConnectionNotOnGraphError(
+        f"Connection {connection_id!r} is not registered on this graph."
+      )
+
+
+def _validate_routed_connection(metadata: dict | None, graph_id: str) -> None:
+  """Validate ``metadata.connection_id`` when an event carries one."""
+  connection_id = (metadata or {}).get("connection_id")
+  if connection_id:
+    _require_connection_on_graph(str(connection_id), graph_id)
+
+
 def _validate_event_source(source: str, graph_id: str) -> None:
   """A source is valid iff it's platform-emitted or registered on the graph.
 
@@ -279,6 +310,7 @@ def create_event_block(
   rolls back.
   """
   _validate_event_source(body.source, graph_id)
+  _validate_routed_connection(body.metadata, graph_id)
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
@@ -404,6 +436,8 @@ def update_event_block(
   session: Session,
   body: UpdateEventBlockRequest,
   created_by: str,
+  *,
+  graph_id: str,
 ) -> EventBlockEnvelope:
   """Apply a status transition and/or field corrections to an event block.
 
@@ -526,6 +560,7 @@ def update_event_block(
     event.effective_at = body.effective_at
 
   if body.metadata_patch:
+    _validate_routed_connection(body.metadata_patch, graph_id)
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
     event.metadata_ = merged
@@ -743,6 +778,7 @@ def execute_event_block(
   body: ExecuteEventBlockRequest,
   created_by: str,
   *,
+  graph_id: str,
   acquire_period_fence: bool = True,
 ) -> ExecuteEventBlockResponse:
   """Publish an event to its connection's source-of-truth system.
@@ -881,6 +917,12 @@ def execute_event_block(
         status=str(event.status),
         qb_external_id=None,
         qb_error=None,
+      )
+    # The id came from the request or from client-editable metadata; only a
+    # connection registered on *this* graph may be published to.
+    if str(connection.graph_id) != str(graph_id):
+      raise ConnectionNotOnGraphError(
+        f"Connection {connection_id!r} is not registered on this graph."
       )
 
     if connection.write_policy == "native":

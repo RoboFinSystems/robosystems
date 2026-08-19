@@ -209,6 +209,17 @@ def _stash_api_key_identity(
     request.state.auth_method = auth_method
 
 
+def _publish_graph_authorization(request: Request, graph_id: str) -> None:
+  """Record that the caller was authorized on ``graph_id`` for this request.
+
+  Read by the subscription-aware rate limiter: a graph's own budget may only
+  be charged by a caller authorized on that graph, and this attribute is the
+  cheap, in-request evidence. It is set after the access check passes and
+  never before.
+  """
+  request.state.auth_graph_id = graph_id
+
+
 def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
@@ -413,6 +424,7 @@ async def get_current_user_with_graph(
             user_agent=user_agent,
             auth_method="jwt_token",
           )
+          _publish_graph_authorization(request, graph_id)
           return user
         else:
           SecurityAuditLogger.log_authorization_denied(
@@ -451,6 +463,7 @@ async def get_current_user_with_graph(
         user_agent=user_agent,
         auth_method="api_key",
       )
+      _publish_graph_authorization(request, graph_id)
       return user
     else:
       SecurityAuditLogger.log_security_event(

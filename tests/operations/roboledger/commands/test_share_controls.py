@@ -331,12 +331,53 @@ def _patched_share(*, blocked: bool):
   extensions = MagicMock()
   extensions.return_value.__enter__.return_value = target_session
 
+  # The recipient's schema is checked up front so a dead target gets a
+  # per-target message rather than a bind failure; provisioned here.
+  ext_p = patch("robosystems.db.extensions.extensions_session", extensions)
+  exists_p = patch("robosystems.db.extensions.tenant_schema_exists", return_value=True)
+
+  class _Both:
+    def __enter__(self):
+      exists_p.__enter__()
+      return ext_p.__enter__()
+
+    def __exit__(self, *exc):
+      ext_p.__exit__(*exc)
+      exists_p.__exit__(*exc)
+
   return (
     patch("robosystems.db.platform.SessionFactory", return_value=platform),
-    patch("robosystems.db.extensions.extensions_session", extensions),
+    _Both(),
     patch(f"{_REPORTS_CMD}.is_source_blocked", return_value=blocked),
     target_session,
   )
+
+
+def test_share_to_a_deprovisioned_recipient_is_reported_not_attempted() -> None:
+  """Teardown never prunes a dead graph from senders' publish lists. The row
+  can still be there (soft-deleted) and the schema gone; the share must
+  bounce with a per-target message before any tenant session is opened."""
+  platform = MagicMock()
+  platform.__enter__.return_value.execute.return_value.scalar_one_or_none.return_value = _target_graph_row()
+  extensions = MagicMock()
+
+  with (
+    patch("robosystems.db.platform.SessionFactory", return_value=platform),
+    patch("robosystems.db.extensions.tenant_schema_exists", return_value=False),
+    patch("robosystems.db.extensions.extensions_session", extensions),
+  ):
+    result = _share_to_target(
+      source_graph_id=_SOURCE_GRAPH,
+      report_snapshot={"id": "rpt_source", "name": "Q1", "taxonomy_id": "tax_01"},
+      source_fact_sets=[],
+      source_facts=[],
+      target_graph_id=_TARGET_GRAPH,
+      shared_by="user_sender",
+    )
+
+  assert result.status == "error"
+  assert "no extensions tenant schema" in (result.error or "").lower()
+  extensions.assert_not_called()
 
 
 def test_share_to_a_blocking_recipient_returns_an_error_and_writes_nothing() -> None:
