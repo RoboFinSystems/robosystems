@@ -40,7 +40,7 @@ class DagsterJobMonitorTask(BaseTask):
     monitor = DagsterRunMonitor()
 
     try:
-      run_id = monitor.submit_job(job_name, run_config, tags)
+      run_id = await asyncio.to_thread(monitor.submit_job, job_name, run_config, tags)
       await self.report_progress(f"Submitted {job_name}", percent=5)
 
       # Poll with cancellation checks between iterations.
@@ -52,7 +52,7 @@ class DagsterJobMonitorTask(BaseTask):
           logger.info(f"Dagster job monitor cancelled: {job_name} (run_id={run_id})")
           return {"status": "cancelled", "run_id": run_id, "job_name": job_name}
 
-        status_info = monitor.get_run_status(run_id)
+        status_info = await asyncio.to_thread(monitor.get_run_status, run_id)
         current_status = status_info["status"]
 
         if current_status == "completed":

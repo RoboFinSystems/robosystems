@@ -69,6 +69,11 @@ try:
   # than silently run with permissive fallbacks. Always {} (→ False) outside
   # prod/staging by design; the validator only asserts on it when deployed.
   FEATURE_FLAGS_PRELOADED = bool(_preloaded_flags)
+  # The names that were actually present in SSM. `FEATURE_FLAGS_PRELOADED`
+  # is per-store (any flag came back); the validator also needs per-flag,
+  # because a flag individually absent from SSM resolves silently to its code
+  # default and the resolved bool cannot say which of "absent" or "false" it is.
+  PRELOADED_FEATURE_FLAG_NAMES = frozenset(_preloaded_flags or ())
   if _preloaded_flags:
     print(f"Preloaded {len(_preloaded_flags)} feature flags from SSM")
   elif os.getenv("ENVIRONMENT", "dev") in ("prod", "staging"):
@@ -78,6 +83,7 @@ except Exception as _e:
   # Catch all exceptions (not just ImportError) to handle transitive failures
   PARAMETER_STORE_AVAILABLE = False
   FEATURE_FLAGS_PRELOADED = False
+  PRELOADED_FEATURE_FLAG_NAMES = frozenset()
   print(
     f"WARNING: Parameter store unavailable ({type(_e).__name__}: {_e}). "
     "All feature flags will use defaults (false)."
@@ -374,6 +380,7 @@ class EnvConfig:
   # not read SSM would serve its whole life on code defaults.
   PARAMETER_STORE_AVAILABLE = PARAMETER_STORE_AVAILABLE
   FEATURE_FLAGS_PRELOADED = FEATURE_FLAGS_PRELOADED
+  PRELOADED_FEATURE_FLAG_NAMES = PRELOADED_FEATURE_FLAG_NAMES
 
   # Environment and debugging
   ENVIRONMENT = get_str_env("ENVIRONMENT", "dev")

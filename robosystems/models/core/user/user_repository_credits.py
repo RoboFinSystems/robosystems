@@ -181,6 +181,11 @@ class UserRepositoryCredits(Base):
     Returns False rather than raising when the pool is inactive or short. The
     balance check rides inside the UPDATE's WHERE clause, so concurrent callers
     cannot both pass it.
+
+    Billing here is post-hoc (the AI call has already happened), so a short
+    pool is drained to zero rather than left untouched — the shortfall is
+    recorded on the transaction and the call still returns False so the run
+    stops. See ``GraphCredits.consume_credits_atomic`` for the rationale.
     """
     if not self.is_active:
       logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
@@ -208,10 +213,16 @@ class UserRepositoryCredits(Base):
       session.refresh(self)
       if not self.is_active:
         logger.warning(f"Attempted to consume credits from inactive pool {self.id}")
-      else:
-        logger.warning(
-          f"Insufficient credits in pool {self.id}: need {amount}, have {self.current_balance}"
-        )
+        return False
+
+      self._drain_for_shortfall(
+        amount=amount,
+        repository_name=repository_name,
+        operation_type=operation_type,
+        session=session,
+        metadata=metadata,
+        now=now,
+      )
       return False
 
     session.refresh(self)
@@ -249,6 +260,82 @@ class UserRepositoryCredits(Base):
     )
 
     return True
+
+  def _drain_for_shortfall(
+    self,
+    *,
+    amount: Decimal,
+    repository_name: str,
+    operation_type: str,
+    session: Session,
+    metadata: dict[str, Any] | None,
+    now: datetime,
+  ) -> None:
+    """Debit whatever an active-but-short pool still holds, down to zero.
+
+    Records the shortfall on the transaction so the call is billed for what
+    was there and the next pre-flight, reading an empty pool, denies. A pool
+    already at zero records nothing.
+    """
+    from sqlalchemy import text
+
+    drain = session.execute(
+      text("""
+        WITH prev AS (
+          SELECT current_balance AS old_balance
+          FROM user_repository_credits
+          WHERE id = :credit_id
+          FOR UPDATE
+        )
+        UPDATE user_repository_credits
+        SET current_balance = 0,
+            credits_consumed_this_month = credits_consumed_this_month + prev.old_balance,
+            last_consumption_at = :now,
+            updated_at = :now
+        FROM prev
+        WHERE user_repository_credits.id = :credit_id
+          AND user_repository_credits.is_active = true
+          AND prev.old_balance > 0
+          AND prev.old_balance < :amount
+        RETURNING prev.old_balance AS drained
+      """),
+      {"amount": float(amount), "now": now, "credit_id": self.id},
+    )
+    drained_row = drain.fetchone()
+    session.refresh(self)
+
+    if not drained_row:
+      logger.warning(
+        f"Insufficient credits in pool {self.id}: need {amount}, have {self.current_balance}"
+      )
+      return
+
+    drained = Decimal(str(drained_row.drained))
+    shortfall = amount - drained
+
+    transaction_metadata = {
+      "repository": repository_name,
+      "operation_type": operation_type,
+      "drained_to_zero": True,
+      "true_cost": str(amount),
+      "shortfall": str(shortfall),
+    }
+    if metadata:
+      transaction_metadata.update(metadata)
+
+    UserRepositoryCreditTransaction.create_transaction(
+      credit_pool_id=cast(str, self.id),
+      transaction_type=UserRepositoryCreditTransactionType.CONSUMPTION,
+      amount=-drained,
+      description=f"{repository_name} {operation_type} (pool drained; shortfall {shortfall})",
+      metadata=transaction_metadata,
+      session=session,
+    )
+
+    logger.warning(
+      f"Credit pool {self.id} drained to zero: call cost {amount}, "
+      f"billed {drained}, shortfall {shortfall}"
+    )
 
   def allocate_monthly_credits(self, session: Session) -> bool:
     """Allocate monthly credits if due. Credits do not roll over.

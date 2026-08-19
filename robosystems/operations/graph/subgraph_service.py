@@ -480,10 +480,13 @@ class SubgraphService:
       ]
       if database_name not in existing_database_ids:
         logger.warning(f"Database {database_name} does not exist on instance")
+        # The subgraph is still going away — its indexed documents go with it.
+        search_purged = await self._purge_subgraph_search_index(subgraph_id)
         return {
           "status": "not_found",
           "graph_id": subgraph_id,
           "message": "Subgraph database does not exist",
+          "search_purged": search_purged,
         }
 
       if is_local:
@@ -504,6 +507,8 @@ class SubgraphService:
 
       logger.info(f"Successfully deleted subgraph database {subgraph_id}")
 
+      search_purged = await self._purge_subgraph_search_index(subgraph_id)
+
       return {
         "status": "deleted",
         "graph_id": subgraph_id,
@@ -511,11 +516,42 @@ class SubgraphService:
         "parent_graph_id": parent_graph_id,
         "instance_id": instance_id,
         "deleted_at": datetime.now(UTC).isoformat(),
+        "search_purged": search_purged,
       }
 
     except Exception as e:
       logger.error(f"Failed to delete subgraph database {subgraph_id}: {e}")
       raise GraphAllocationError(f"Failed to delete subgraph: {e!s}")
+
+  async def _purge_subgraph_search_index(self, subgraph_id: str) -> bool:
+    """Drop a subgraph's documents from the shared OpenSearch index.
+
+    Documents are indexed under the subgraph id, and the index is shared
+    across tenants with only an application-level graph_id filter as the
+    boundary — so a subgraph deleted ahead of its parent's teardown would
+    otherwise leave its content indexed indefinitely, and a recreated subgraph
+    of the same (user-chosen, reusable) name would surface it. The parent's
+    teardown cannot catch it: it purges by iterating subgraph rows that this
+    path has already removed. Best-effort, guarded on the search flag, and
+    run off the event loop because the OpenSearch client is synchronous.
+    """
+    if not env.SEMANTIC_SEARCH_ENABLED:
+      return False
+    try:
+      import asyncio
+
+      from ...operations.search.client import OpenSearchClient
+
+      client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
+      await asyncio.to_thread(client.delete_by_graph_id, subgraph_id)
+      logger.info(f"Purged search index for subgraph {subgraph_id}")
+      return True
+    except Exception as e:
+      logger.warning(
+        f"Search index purge failed for subgraph {subgraph_id}: {e}",
+        extra={"graph_id": subgraph_id},
+      )
+      return False
 
   async def list_subgraph_databases(
     self,

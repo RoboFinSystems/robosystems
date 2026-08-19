@@ -92,9 +92,18 @@ async def run() -> None:
         await queue.lrem(inflight_key, 1, task_json)
         continue
 
-      await _process_task(
-        task_data, task_json, queue, inflight_key, manager, worker_id, protection
-      )
+      try:
+        await _process_task(
+          task_data, task_json, queue, inflight_key, manager, worker_id, protection
+        )
+      except Exception:
+        # A task must never take the worker down with it. `_process_task`
+        # handles its own failure reporting; anything that escapes it is
+        # logged and the loop moves on to the next task.
+        logger.exception(
+          f"Unhandled error processing task {task_data.get('task_id')}; "
+          f"worker continues"
+        )
   finally:
     logger.info(f"Worker shutting down: {worker_id}")
     depth_publisher.stop()
@@ -106,6 +115,22 @@ async def run() -> None:
       # server-side close will release any remaining resources.
       logger.debug(f"Connection error during queue close (expected on shutdown): {exc}")
     logger.info(f"Worker terminated: {worker_id}")
+
+
+async def _fail_quietly(manager: OperationManager, task_id: str, **kwargs: Any) -> None:
+  """Record a task failure without letting the recording itself raise.
+
+  `fail_operation` raises when the operation's metadata has already expired
+  (a task outliving its SSE TTL). Raising from inside an `except` handler
+  would escape `_process_task` and, with nothing above it, exit the worker —
+  so one expired long task would kill the process. Log and carry on instead.
+  """
+  try:
+    await manager.fail_operation(task_id, **kwargs)
+  except Exception as exc:
+    logger.error(
+      f"Could not record failure for task {task_id}: {type(exc).__name__}: {exc}"
+    )
 
 
 async def _process_task(
@@ -189,7 +214,8 @@ async def _process_task(
           "duration_ms": duration_ms,
         },
       )
-      await manager.fail_operation(
+      await _fail_quietly(
+        manager,
         task_id,
         error=f"Task timed out after {timeout}s",
         error_details={"error_type": "TimeoutError", "timeout_seconds": timeout},
@@ -205,7 +231,8 @@ async def _process_task(
           "graph_id": graph_id,
         },
       )
-      await manager.fail_operation(
+      await _fail_quietly(
+        manager,
         task_id,
         error=str(e),
         error_details={"error_type": type(e).__name__},

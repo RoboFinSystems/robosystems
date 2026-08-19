@@ -164,24 +164,11 @@ class CreditService:
 
     parent_graph_id = self._get_parent_graph_id(graph_id)
 
-    from ...middleware.billing.cache import credit_cache
-
-    cached_data = credit_cache.get_cached_graph_credit_balance(parent_graph_id)
-
-    if cached_data:
-      # Cheap reject before touching the database; the authoritative check is
-      # inside the atomic consume below.
-      balance, graph_tier = cached_data
-
-      if balance < base_cost:
-        return {
-          "success": False,
-          "error": "Insufficient credits",
-          "credits_consumed": 0,
-          "required_credits": float(base_cost),
-          "available_credits": float(balance),
-        }
-
+    # No cached pre-reject here, deliberately. This path is reached only after
+    # the billable call has completed, so there is always a real debit to make:
+    # a short pool is drained to zero by the atomic consume below, and an early
+    # return on a stale cached balance would skip exactly that. The cheap
+    # check belongs in the pre-flight (`check_credit_balance`), not here.
     credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
@@ -276,18 +263,58 @@ class CreditService:
         "transaction_id": consumption_result["transaction_id"],
       }
     else:
-      # Drop the cached balance so the next check re-reads the database.
+      drained = Decimal(str(consumption_result.get("credits_consumed", 0) or 0))
+
+      # Drop the cached balance so the next check re-reads the database. On a
+      # drain-to-zero, pin the cache at zero as well: the pre-flight prefers
+      # the cached figure, and a stale positive balance there would re-admit
+      # the very request the drain exists to stop.
       try:
         from ...middleware.billing.cache import credit_cache
 
         credit_cache.invalidate_graph_credit_balance(parent_graph_id)
+        if consumption_result.get("drained_to_zero"):
+          credit_cache.cache_graph_credit_balance(
+            graph_id=parent_graph_id,
+            balance=Decimal("0"),
+            graph_tier=(
+              credits.graph_tier.value
+              if hasattr(credits.graph_tier, "value")
+              else str(credits.graph_tier)
+            ),
+          )
       except Exception as e:
-        logger.warning(f"Failed to invalidate credit cache: {e}")
+        logger.warning(f"Failed to update credit cache after shortfall: {e}")
+
+      # A drain is real spend, so the usage ledger records it like any other
+      # debit — otherwise the dashboards under-report exactly the calls that
+      # exhausted the pool.
+      if drained > 0 and user_id:
+        try:
+          GraphUsage.record_credit_consumption(
+            user_id=user_id,
+            graph_id=graph_id,
+            graph_tier=(
+              credits.graph_tier.value
+              if hasattr(credits.graph_tier, "value")
+              else str(credits.graph_tier)
+            ),
+            operation_type=operation_type,
+            credits_consumed=drained,
+            base_credit_cost=base_cost,
+            session=self.session,
+            cached_operation=cached,
+            metadata=metadata,
+          )
+        except Exception as e:
+          logger.warning(f"Failed to record drained credit usage for {graph_id}: {e}")
 
       return {
         "success": False,
         "error": consumption_result.get("error", "Credit consumption failed"),
-        "credits_consumed": 0,
+        "credits_consumed": float(drained),
+        "shortfall": consumption_result.get("shortfall"),
+        "drained_to_zero": bool(consumption_result.get("drained_to_zero", False)),
         "required_credits": consumption_result.get(
           "required_credits",
           float(base_cost),

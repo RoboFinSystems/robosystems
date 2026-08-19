@@ -362,3 +362,19 @@ class TestDatabaseQueryRouter:
       data = response.json()
       assert data["count"] == 10000
       assert data.get("truncated") is True
+
+
+@pytest.mark.unit
+def test_execute_query_handler_is_sync_for_threadpool_offload():
+  """The handler must be a plain `def`, not `async def`.
+
+  Its body is entirely synchronous (the engine call, plus a Postgres read in
+  `_is_graph_rebuilding`). As `async def` it ran on the single event loop, so a
+  long query against the shared `sec` repo held every caller on the instance.
+  A plain `def` is run on Starlette's threadpool instead.
+  """
+  import inspect
+
+  from robosystems.graph_api.routers.databases.query import execute_query
+
+  assert not inspect.iscoroutinefunction(execute_query)

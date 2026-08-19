@@ -150,7 +150,7 @@ class TestAdaptersRunThePreflight:
         side_effect=InsufficientOperatorCreditsError("Test Operator", 10.0, 1.0),
       ),
       patch.object(api, "HttpToolAccess") as tool_access,
-      patch.object(api, "AIClient"),
+      patch.object(api, "get_ai_client"),
       patch.object(api, "TrackedAIClient"),
     ):
       with pytest.raises(InsufficientOperatorCreditsError):
@@ -172,7 +172,7 @@ class TestAdaptersRunThePreflight:
       ),
       patch.object(worker, "SessionFactory"),
       patch.object(worker, "DirectToolAccess") as tool_access,
-      patch.object(worker, "AIClient"),
+      patch.object(worker, "get_ai_client"),
       patch.object(worker, "TrackedAIClient"),
       patch.object(worker, "FactoryCreditConsumer"),
     ):

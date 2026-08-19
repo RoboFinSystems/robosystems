@@ -196,6 +196,14 @@ class GraphCredits(Base):
     ``{"success": False, "error": "Insufficient credits", ...}`` rather than
     raising when the pool cannot cover ``amount``.
 
+    Billing is post-hoc — the model call has already been paid for by the
+    time this runs — so a pool that cannot cover the whole cost is **drained
+    to zero** rather than left untouched: what is there is debited, the
+    shortfall is recorded on the transaction, and the result still reports
+    ``success: False`` so the caller stops the run. Leaving the balance in
+    place would let the same request re-enter the band above the pre-flight
+    estimate and below one call's true cost indefinitely, billed nothing.
+
     ``metadata`` (token counts and the like) is merged into the transaction
     record; the built-in keys win on collision.
     """
@@ -227,19 +235,16 @@ class GraphCredits(Base):
       consumption_result = result.fetchone()
 
       if not consumption_result:
-        current_result = session.execute(
-          text("SELECT current_balance FROM graph_credits WHERE id = :credits_id"),
-          {"credits_id": self.id},
+        return self._drain_for_shortfall(
+          actual_cost=actual_cost,
+          operation_type=operation_type,
+          operation_description=operation_description,
+          session=session,
+          request_id=request_id,
+          user_id=user_id,
+          metadata=metadata,
+          transaction_id=transaction_id,
         )
-        current_balance = current_result.fetchone()
-        available_balance = float(current_balance[0]) if current_balance else 0
-
-        return {
-          "success": False,
-          "error": "Insufficient credits",
-          "required_credits": float(actual_cost),
-          "available_credits": available_balance,
-        }
 
       GraphCreditTransaction.create_transaction(
         graph_credits_id=self.id,
@@ -281,6 +286,118 @@ class GraphCredits(Base):
         "success": False,
         "error": f"Credit consumption failed: {e!s}",
       }
+
+  def _drain_for_shortfall(
+    self,
+    *,
+    actual_cost: Decimal,
+    operation_type: str,
+    operation_description: str,
+    session: Session,
+    request_id: str | None,
+    user_id: str | None,
+    metadata: dict[str, Any] | None,
+    transaction_id: str,
+  ) -> dict[str, Any]:
+    """The insufficient-balance branch of :meth:`consume_credits_atomic`.
+
+    Debits whatever the pool still holds (to exactly zero) and records the
+    shortfall, so a completed call is never billed nothing and the next
+    pre-flight — which reads the now-empty balance — denies. A pool already
+    at zero records nothing. The ``FOR UPDATE`` read and the conditional
+    ``UPDATE`` run as one statement so a concurrent drain cannot double-take.
+    """
+    from sqlalchemy import text
+
+    drain = session.execute(
+      text("""
+        WITH prev AS (
+          SELECT current_balance AS old_balance
+          FROM graph_credits
+          WHERE id = :credits_id
+          FOR UPDATE
+        )
+        UPDATE graph_credits
+        SET current_balance = 0,
+            updated_at = :updated_at
+        FROM prev
+        WHERE graph_credits.id = :credits_id
+          AND prev.old_balance > 0
+          AND prev.old_balance < :actual_cost
+        RETURNING prev.old_balance AS drained
+      """),
+      {
+        "actual_cost": actual_cost,
+        "updated_at": datetime.now(UTC),
+        "credits_id": self.id,
+      },
+    )
+    drained_row = drain.fetchone()
+
+    if not drained_row:
+      # Nothing to take: the pool was already empty (or a concurrent caller
+      # drained it first). Report the balance as it stands.
+      current_result = session.execute(
+        text("SELECT current_balance FROM graph_credits WHERE id = :credits_id"),
+        {"credits_id": self.id},
+      )
+      current_balance = current_result.fetchone()
+      available_balance = float(current_balance[0]) if current_balance else 0
+
+      return {
+        "success": False,
+        "error": "Insufficient credits",
+        "required_credits": float(actual_cost),
+        "available_credits": available_balance,
+        "credits_consumed": 0.0,
+        "shortfall": float(actual_cost) - available_balance,
+      }
+
+    drained = Decimal(str(drained_row.drained))
+    shortfall = actual_cost - drained
+
+    GraphCreditTransaction.create_transaction(
+      graph_credits_id=self.id,
+      transaction_type=CreditTransactionType.CONSUMPTION,
+      amount=-drained,
+      description=operation_description,
+      metadata={
+        **(metadata or {}),
+        "operation_type": operation_type,
+        "base_cost": str(actual_cost),
+        "transaction_id": transaction_id,
+        "drained_to_zero": True,
+        "shortfall": str(shortfall),
+      },
+      session=session,
+      idempotency_key=f"consume_{transaction_id}",
+      request_id=request_id,
+      operation_id=transaction_id,
+      graph_id=self.graph_id,
+      user_id=user_id or self.user_id,
+    )
+
+    self.current_balance = Decimal("0")
+    self.updated_at = datetime.now(UTC)
+
+    session.commit()
+
+    logger.warning(
+      f"Credit pool for graph {self.graph_id} drained to zero: "
+      f"call cost {actual_cost}, billed {drained}, shortfall {shortfall}"
+    )
+
+    return {
+      "success": False,
+      "error": "Insufficient credits",
+      "required_credits": float(actual_cost),
+      "available_credits": 0.0,
+      "credits_consumed": float(drained),
+      "shortfall": float(shortfall),
+      "drained_to_zero": True,
+      "base_cost": float(actual_cost),
+      "transaction_id": transaction_id,
+    }
 
   def _expire_unspent(
     self,

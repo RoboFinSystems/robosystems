@@ -77,7 +77,7 @@ def track_connection(admission_controller, database_name):
 
 
 @router.post("/{graph_id}/query")
-async def execute_query(
+def execute_query(
   request: QueryRequest,
   graph_id: str = Path(..., description="Graph database identifier"),
   streaming: bool = False,
@@ -102,6 +102,11 @@ async def execute_query(
   Raises:
       HTTPException: 503 if server is overloaded (admission control)
       HTTPException: 503 if graph is rebuilding
+
+  Deliberately a plain ``def``: the body is entirely synchronous (the engine
+  call, and a Postgres read in ``_is_graph_rebuilding``), so Starlette runs it
+  on the threadpool. As ``async def`` it ran on the single event loop, where a
+  long query against the shared repository held every caller on the instance.
   """
   if _is_graph_rebuilding(graph_id):
     logger.warning(f"Query rejected for {graph_id}: graph is rebuilding")

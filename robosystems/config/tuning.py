@@ -368,6 +368,13 @@ class TuningConfig:
     )
 
   @classmethod
+  def get_database_statement_timeout_ms(cls) -> int:
+    """Per-statement ceiling (ms) for the platform engine; 0 = none."""
+    return cls.get_int(
+      "database/STATEMENT_TIMEOUT_MS", DatabaseDefaults.STATEMENT_TIMEOUT_MS
+    )
+
+  @classmethod
   def get_database_pool_timeout(cls) -> int:
     """Get seconds to wait for a connection from the pool."""
     return cls.get_int("database/POOL_TIMEOUT", DatabaseDefaults.POOL_TIMEOUT)

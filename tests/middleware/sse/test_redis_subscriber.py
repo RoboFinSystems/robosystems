@@ -32,7 +32,7 @@ def mock_pubsub():
   pubsub.subscribe = AsyncMock()
   pubsub.unsubscribe = AsyncMock()
   pubsub.close = AsyncMock()
-  pubsub.get_message = AsyncMock(return_value=None)
+  pubsub.get_message = AsyncMock(return_value=None)  # accepts timeout= kwarg
   return pubsub
 
 
@@ -266,6 +266,30 @@ class TestUnsubscribeFromOperation:
 
 class TestListenForEvents:
   @pytest.mark.unit
+  async def test_get_message_carries_its_own_blocking_timeout(
+    self, started_subscriber, mock_pubsub
+  ):
+    """The timeout must be `get_message`'s own argument. With redis-py's default
+    (`timeout=0.0`) the call returns immediately, and the `continue` on a None
+    message spins the listener at full speed whenever any stream is open —
+    ~37% of a core, measured. Wrapping an instantly-returning call in
+    `wait_for` throttles nothing, which is how this ran for months."""
+    seen: list[dict] = []
+
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
+      seen.append({"ignore": ignore_subscribe_messages, "timeout": timeout})
+      started_subscriber._running = False
+      return None
+
+    mock_pubsub.get_message = mock_get_message
+    started_subscriber.subscriptions["sse:events:op-123"] = True
+
+    await started_subscriber._listen_for_events()
+
+    assert seen, "listener never polled"
+    assert seen[0]["timeout"] is not None and seen[0]["timeout"] > 0
+
+  @pytest.mark.unit
   async def test_processes_valid_message(self, started_subscriber, mock_pubsub):
     """Test that a valid Redis message is parsed and broadcast."""
     event_dict = _make_sse_event_dict()
@@ -277,7 +301,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:
@@ -316,7 +340,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:
@@ -348,7 +372,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:
@@ -381,7 +405,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:
@@ -410,7 +434,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       # Should not be called since there are no subscriptions
       raise AssertionError("get_message should not be called with no subscriptions")
 
@@ -471,7 +495,7 @@ class TestListenForEvents:
     """Test that TimeoutError from get_message is handled gracefully."""
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count <= 1:
@@ -495,7 +519,7 @@ class TestListenForEvents:
   async def test_handles_cancelled_error(self, started_subscriber, mock_pubsub):
     """Test that CancelledError exits the listener cleanly."""
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       raise asyncio.CancelledError()
 
     mock_pubsub.get_message = mock_get_message
@@ -517,7 +541,7 @@ class TestListenForEvents:
     """Test that general exceptions cause a brief sleep and retry."""
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:
@@ -544,7 +568,7 @@ class TestListenForEvents:
     """Test that None messages from get_message are skipped."""
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count <= 2:
@@ -581,7 +605,7 @@ class TestListenForEvents:
 
     call_count = 0
 
-    async def mock_get_message(ignore_subscribe_messages=True):
+    async def mock_get_message(ignore_subscribe_messages=True, timeout=None):
       nonlocal call_count
       call_count += 1
       if call_count == 1:

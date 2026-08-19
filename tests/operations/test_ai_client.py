@@ -655,3 +655,79 @@ class TestAIClientBedrockEndpoint:
       call_args = mock_boto3_client.call_args
       assert call_args[1]["region_name"] == "ap-southeast-1"
       assert "ap-southeast-1" in call_args[1]["endpoint_url"]
+
+
+class TestAIClientOffloadsBedrock:
+  """The synchronous botocore call must run off the event loop.
+
+  `_bedrock_create_message` is `async def` and a model call can take minutes;
+  running `invoke_model` inline held the single-worker loop — and every tenant
+  on the task — for the whole call. It now goes through `asyncio.to_thread`.
+  """
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_invoke_model_runs_in_a_thread(self):
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    client, mock_bedrock = _make_ai_client()
+
+    body = MagicMock()
+    body.read.return_value = json.dumps(
+      {
+        "content": [{"type": "text", "text": "hi"}],
+        "usage": {"input_tokens": 3, "output_tokens": 1},
+        "stop_reason": "end_turn",
+      }
+    )
+    mock_bedrock.invoke_model.return_value = {"body": body}
+
+    with patch(f"{AI_CLIENT_MODULE}.asyncio.to_thread") as mock_to_thread:
+
+      async def _fake_to_thread(fn, *args, **kwargs):
+        # Prove the blocking call is the one being offloaded, and run it.
+        assert fn == client._invoke_model_sync
+        return fn(*args, **kwargs)
+
+      mock_to_thread.side_effect = _fake_to_thread
+
+      resp = await client.create_message(
+        messages=[AIMessage(role="user", content="hi")]
+      )
+
+    mock_to_thread.assert_called_once()
+    assert resp.content == "hi"
+    assert resp.input_tokens == 3 and resp.output_tokens == 1
+
+
+class TestSharedAIClient:
+  """`get_ai_client` returns one process-wide instance, so operator requests do
+  not each rebuild a boto3 client + STS call on the loop."""
+
+  @pytest.mark.unit
+  def test_returns_a_singleton(self):
+    import robosystems.operations.operators.ai_client as mod
+
+    mod._shared_client = None
+    with patch.object(mod, "AIClient") as cls:
+      cls.side_effect = lambda: MagicMock()
+      a = mod.get_ai_client()
+      b = mod.get_ai_client()
+    assert a is b
+    cls.assert_called_once()
+    mod._shared_client = None
+
+  @pytest.mark.unit
+  def test_a_failed_build_is_not_cached(self):
+    import robosystems.operations.operators.ai_client as mod
+
+    mod._shared_client = None
+    with patch.object(mod, "AIClient", side_effect=ValueError("no creds")):
+      with pytest.raises(ValueError):
+        mod.get_ai_client()
+    # Next call retries rather than returning a broken/cached client.
+    with patch.object(mod, "AIClient") as cls:
+      cls.side_effect = lambda: MagicMock()
+      client = mod.get_ai_client()
+    assert client is not None
+    mod._shared_client = None

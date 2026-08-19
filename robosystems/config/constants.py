@@ -33,6 +33,13 @@ MAX_ERROR_MESSAGE_LENGTH = 1000  # characters
 PUBLIC_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10 MB
 WEBHOOK_MAX_REQUEST_SIZE = 512 * 1024  # 512 KB
 
+# Per-request timeout for the Dagster GraphQL client (submit / status poll).
+# The library default is 300 s; a status poll that takes longer than a few
+# seconds is a hung webserver, and the call runs from the API's own event
+# loop (background tasks, SSE monitors), so the default would hold every
+# tenant on the task for five minutes per hang.
+DAGSTER_CLIENT_TIMEOUT_SECONDS = 15
+
 # Batch Processing
 DEFAULT_BATCH_SIZE = 5000  # Optimized for Graph API bulk ingestion
 MIN_BATCH_SIZE = 1

@@ -32,6 +32,12 @@ class DatabaseDefaults:
   MAX_OVERFLOW = 10  # Additional connections above pool_size (burst)
   POOL_TIMEOUT = 30  # Seconds to wait for a connection from the pool
   POOL_RECYCLE = 3600  # Recycle connections after 1 hour (handles RDS drops)
+  # Per-statement ceiling for the platform engine, applied at connect time.
+  # The platform session is synchronous and called from async handlers, so a
+  # statement that runs unbounded holds the event loop — and every tenant on
+  # the task — for its whole duration. Migrations use their own engine and
+  # are unaffected. 0 disables.
+  STATEMENT_TIMEOUT_MS = 30_000
 
   # Extensions OLTP database — a separate engine/pool from the platform DB.
   # The per-graph OLTP write path (journal entries, etc.) is the hot path, so
@@ -280,6 +286,7 @@ SSM_TUNING_PATHS = {
   "database/MAX_OVERFLOW": DatabaseDefaults.MAX_OVERFLOW,
   "database/POOL_TIMEOUT": DatabaseDefaults.POOL_TIMEOUT,
   "database/POOL_RECYCLE": DatabaseDefaults.POOL_RECYCLE,
+  "database/STATEMENT_TIMEOUT_MS": DatabaseDefaults.STATEMENT_TIMEOUT_MS,
   "database/EXTENSIONS_POOL_SIZE": DatabaseDefaults.EXTENSIONS_POOL_SIZE,
   "database/EXTENSIONS_MAX_OVERFLOW": DatabaseDefaults.EXTENSIONS_MAX_OVERFLOW,
   "database/EXTENSIONS_STATEMENT_TIMEOUT_MS": (
