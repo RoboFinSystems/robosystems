@@ -1,6 +1,6 @@
 """Tests for extensions materialization pipeline."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -699,20 +699,21 @@ class TestPartialStatusAndSwapGate:
 
     assert result.status == "failed"
 
-  async def _run_blue_green(self, final_status: str):
+  async def _run_blue_green(self, final_status: str, lock=None):
     """Drive _materialize_blue_green with a stubbed pipeline."""
     materializer = self._materializer()
     result = MaterializeResult(graph_id=GRAPH_ID)
 
-    async def fake_materialize_tables(client, graph_id, res, source_graph_id=None):
+    async def fake_materialize_tables(
+      client, graph_id, res, source_graph_id=None, lock=None
+    ):
       res.status = final_status
 
     client = AsyncMock()
     client.database_exists.return_value = False
 
-    lock = AsyncMock()
-    lock.acquire.return_value = True
-    lock.acquired = True
+    if lock is None:
+      lock = _held_lock()
 
     with (
       patch.object(materializer, "_ensure_database", new=AsyncMock()),
@@ -725,16 +726,10 @@ class TestPartialStatusAndSwapGate:
         "robosystems.operations.extensions.materialize.build_postgres_connstr",
         return_value=CONNSTR,
       ),
-      patch(
-        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
-        return_value=lock,
-      ),
-      patch(
-        "robosystems.config.valkey_registry.create_async_redis_client",
-        return_value=AsyncMock(),
-      ),
     ):
-      await materializer._materialize_blue_green(client, GRAPH_ID, ENTITY_ID, result)
+      await materializer._materialize_blue_green(
+        client, GRAPH_ID, ENTITY_ID, result, lock
+      )
 
     return client
 
@@ -754,6 +749,269 @@ class TestPartialStatusAndSwapGate:
   async def test_error_build_does_not_swap(self):
     client = await self._run_blue_green("error")
     client.swap_database.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_clean_build_passes_lock_token_to_swap(self):
+    lock = _held_lock(token="tok-123")
+    client = await self._run_blue_green("success", lock=lock)
+    client.swap_database.assert_called_once_with(GRAPH_ID, lock_token="tok-123")
+
+  @pytest.mark.asyncio
+  async def test_lapsed_lock_aborts_before_swap(self):
+    """A lock that lapsed mid-run (extend sees a token mismatch) must abort
+    the run and abandon the WIP rather than swap with a stale token — another
+    run may now hold the lock and be building against the same graph."""
+    from robosystems.operations.extensions.materialize import (
+      MaterializationLockError,
+    )
+
+    lock = _held_lock()
+    lock.extend.return_value = False
+
+    with pytest.raises(MaterializationLockError):
+      await self._run_blue_green("success", lock=lock)
+
+  @pytest.mark.asyncio
+  async def test_lapsed_lock_abandons_wip(self):
+    from robosystems.operations.extensions.materialize import (
+      MaterializationLockError,
+    )
+
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    lock = _held_lock(token="tok-abc")
+    lock.extend.return_value = False
+
+    async def fake_materialize_tables(
+      client, graph_id, res, source_graph_id=None, lock=None
+    ):
+      res.status = "success"
+
+    client = AsyncMock()
+    # WIP does not exist before the build; exists once the build is abandoned.
+    client.database_exists.side_effect = [False, True]
+
+    with (
+      patch.object(materializer, "_ensure_database", new=AsyncMock()),
+      patch.object(
+        materializer, "_get_graph_extensions", new=AsyncMock(return_value=[])
+      ),
+      patch.object(materializer, "_stage_tables", new=AsyncMock()),
+      patch.object(materializer, "_materialize_tables", new=fake_materialize_tables),
+      patch(
+        "robosystems.operations.extensions.materialize.build_postgres_connstr",
+        return_value=CONNSTR,
+      ),
+      pytest.raises(MaterializationLockError),
+    ):
+      await materializer._materialize_blue_green(
+        client, GRAPH_ID, ENTITY_ID, result, lock
+      )
+
+    client.swap_database.assert_not_called()
+    client.delete_database.assert_called_once_with(
+      f"{GRAPH_ID}-wip", preserve_duckdb=True, lock_token="tok-abc"
+    )
+
+  @pytest.mark.asyncio
+  async def test_extend_backend_error_is_tolerated(self):
+    """A Valkey blip during extend is not a lost lock: the key still carries
+    its remaining TTL and competing acquires fail closed while Valkey is down."""
+    lock = _held_lock()
+    lock.extend.side_effect = ConnectionError("valkey blip")
+
+    client = await self._run_blue_green("success", lock=lock)
+    client.swap_database.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_lock_refreshed_per_materialized_table(self):
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity", "Element", "ENTRY_HAS_LINE_ITEM"]
+    lock = _held_lock()
+
+    client = AsyncMock()
+    client.materialize_table.return_value = {"rows_ingested": 1}
+
+    await materializer._materialize_tables(client, GRAPH_ID, result, lock=lock)
+
+    assert lock.extend.await_count == 3
+
+  @pytest.mark.asyncio
+  async def test_lapsed_lock_stops_materialize_tables_before_next_copy(self):
+    from robosystems.operations.extensions.materialize import (
+      MaterializationLockError,
+    )
+
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity", "Element"]
+    lock = _held_lock()
+    lock.extend.side_effect = [True, False]
+
+    client = AsyncMock()
+    client.materialize_table.return_value = {"rows_ingested": 1}
+
+    with pytest.raises(MaterializationLockError):
+      await materializer._materialize_tables(client, GRAPH_ID, result, lock=lock)
+
+    # The second table never COPYs once the lock is known to be gone.
+    assert client.materialize_table.await_count == 1
+
+
+def _held_lock(token: str = "tok"):
+  """A MaterializationLock stand-in that is held and extends cleanly."""
+  lock = AsyncMock()
+  lock.token = token
+  lock.lock_key = f"materialize_lock:{GRAPH_ID}"
+  lock.acquired = True
+  lock.acquire.return_value = True
+  lock.extend.return_value = True
+  lock.release.return_value = True
+  lock.last_backend_error = None
+  return lock
+
+
+class TestMaterializeLockGate:
+  """``materialize`` takes the per-graph lock around BOTH build paths and
+  fails closed when it cannot — an unlocked double-writer silently duplicates
+  relationship-table edges, whereas a refused run is retried by the sensor."""
+
+  def _client(self, db_exists: bool):
+    client = AsyncMock()
+    client.database_exists.return_value = db_exists
+    client.execute_write.return_value = {"success": True}
+    client.materialize_table.return_value = {"rows_ingested": 1}
+    client.create_database.return_value = {"success": True}
+    client.install_schema.return_value = {"success": True}
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client._instance_id = "i-test"
+    return client
+
+  async def _run(self, db_exists: bool, lock):
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    client = self._client(db_exists)
+    schema_loader = MagicMock()
+    schema_loader.return_value.nodes = {}
+    schema_loader.return_value.relationships = {}
+    materializer = ExtensionsMaterializer()
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        return_value=client,
+      ),
+      patch.object(
+        _env(),
+        "EXTENSIONS_DATABASE_URL",
+        "postgresql://postgres:postgres@pg:5432/extensions",
+      ),
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        MagicMock(return_value=lock),
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=AsyncMock(),
+      ),
+      patch(
+        "robosystems.middleware.graph.instance_busy.begin_destructive_op",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.middleware.graph.instance_busy.end_destructive_op",
+        new=AsyncMock(),
+      ),
+      patch("robosystems.schemas.loader.get_contextual_schema_loader", schema_loader),
+    ):
+      result = await materializer.materialize(GRAPH_ID)
+
+    return client, result
+
+  @pytest.mark.asyncio
+  async def test_first_build_path_acquires_lock(self):
+    lock = _held_lock()
+    client, result = await self._run(db_exists=False, lock=lock)
+
+    lock.acquire.assert_awaited_once()
+    lock.release.assert_awaited_once()
+    # No database yet -> direct path (create + COPY in place), no swap.
+    client.create_database.assert_awaited()
+    client.swap_database.assert_not_called()
+    assert result.status == "success"
+
+  @pytest.mark.asyncio
+  async def test_rebuild_path_acquires_lock_and_passes_token(self):
+    lock = _held_lock(token="tok-bg")
+    client, result = await self._run(db_exists=True, lock=lock)
+
+    lock.acquire.assert_awaited_once()
+    lock.release.assert_awaited_once()
+    client.swap_database.assert_awaited_once_with(GRAPH_ID, lock_token="tok-bg")
+    assert result.status == "success"
+
+  @pytest.mark.asyncio
+  async def test_lock_held_by_another_run_fails_closed(self):
+    lock = _held_lock()
+    lock.acquire.return_value = False
+    lock.acquired = False
+    client, result = await self._run(db_exists=False, lock=lock)
+
+    assert result.status == "error"
+    assert "held by another run" in result.errors[0]
+    client.create_database.assert_not_called()
+    client.execute_write.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_lock_backend_outage_fails_closed(self):
+    """A Valkey outage must NOT degrade to an unlocked run, and the message
+    must say the lock service is unavailable, not that another run holds it."""
+    lock = _held_lock()
+    lock.acquire.return_value = False
+    lock.acquired = False
+    lock.last_backend_error = "Connection refused"
+    client, result = await self._run(db_exists=True, lock=lock)
+
+    assert result.status == "error"
+    assert "lock service unavailable" in result.errors[0]
+    assert "held by another run" not in result.errors[0]
+    client.execute_write.assert_not_called()
+    client.swap_database.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_lock_construction_failure_fails_closed(self):
+    """A lock that cannot even be constructed (Valkey client factory raising)
+    used to proceed unlocked; it must now refuse the run."""
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    client = self._client(db_exists=False)
+    materializer = ExtensionsMaterializer()
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        return_value=client,
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        side_effect=RuntimeError("no valkey"),
+      ),
+      patch(
+        "robosystems.middleware.graph.instance_busy.begin_destructive_op",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.middleware.graph.instance_busy.end_destructive_op",
+        new=AsyncMock(),
+      ),
+    ):
+      result = await materializer.materialize(GRAPH_ID)
+
+    assert result.status == "error"
+    assert "lock service unavailable" in result.errors[0]
+    client.create_database.assert_not_called()
 
 
 class TestScenarioExclusion:

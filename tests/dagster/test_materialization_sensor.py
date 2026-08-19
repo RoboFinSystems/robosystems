@@ -57,6 +57,27 @@ class TestStaleGraphSensor:
     # run_key uses graph_stale_at, not now — enables Dagster deduplication
     assert stale_at.isoformat() in result[0].run_key
 
+  def test_run_request_carries_per_graph_concurrency_tag(self):
+    """dagster.yaml serializes runs on ``materialize_db`` (limit 1 per unique
+    value). Without the tag, a stale-sensor run and a manual launch for the
+    same graph could COPY into it concurrently."""
+    stale_at = datetime.now(UTC) - timedelta(seconds=60)
+    graphs = [_make_graph("kg123", stale_at=stale_at)]
+
+    with patch(
+      "robosystems.dagster.sensors.materialization.db_session_factory"
+    ) as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = mock_session
+      mock_session.query.return_value.filter.return_value.all.return_value = graphs
+
+      context = build_sensor_context()
+      result = list(stale_graph_materialization_sensor(context))
+
+    assert result[0].tags["materialize_db"] == "kg123"
+    assert result[0].tags["graph_id"] == "kg123"
+    assert result[0].tags["trigger"] == "stale_sensor"
+
   def test_skips_in_progress_graph(self):
     stale_at = datetime.now(UTC) - timedelta(seconds=60)
     graphs = [_make_graph("kg123", stale_at=stale_at)]

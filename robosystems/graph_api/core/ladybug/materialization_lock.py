@@ -9,6 +9,8 @@ Key design:
 - 1-hour TTL: safety net for crashed processes
 - 5s acquire timeout: fail fast if another materialization is running
 - Compare-and-delete via Lua: prevents releasing a lock re-acquired by another process
+- Compare-and-extend via Lua: long runs refresh the TTL at checkpoints, and learn
+  when the lock has lapsed under them instead of continuing to the swap
 - Lock passthrough: callers pass token via X-Materialization-Lock-Token header
 """
 
@@ -33,6 +35,17 @@ DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 5
 _RELEASE_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
+# Lua script for atomic compare-and-extend
+# Only refreshes the TTL if the value matches (a lapsed lock re-acquired by
+# another process must not be extended by its previous holder)
+_EXTEND_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], ARGV[2])
 else
     return 0
 end
@@ -65,6 +78,10 @@ class MaterializationLock:
     self.ttl_seconds = ttl_seconds
     self.token = str(uuid.uuid4())
     self._acquired = False
+    # The last backend error seen by ``acquire`` (None when the final attempt
+    # reached Valkey). Lets a caller tell "held by another run" apart from
+    # "lock service unavailable" when acquire returns False.
+    self.last_backend_error: str | None = None
 
   @property
   def acquired(self) -> bool:
@@ -83,6 +100,7 @@ class MaterializationLock:
 
     deadline = time.monotonic() + timeout_seconds
     attempt = 0
+    self.last_backend_error = None
 
     while time.monotonic() < deadline:
       try:
@@ -92,11 +110,13 @@ class MaterializationLock:
           nx=True,
           ex=self.ttl_seconds,
         )
+        self.last_backend_error = None
         if result:
           self._acquired = True
           logger.info(f"Materialization lock acquired: {self.lock_key}")
           return True
       except Exception as e:
+        self.last_backend_error = str(e)
         logger.warning(f"Lock acquire attempt failed: {e}")
 
       attempt += 1
@@ -104,7 +124,46 @@ class MaterializationLock:
       if wait > 0:
         await asyncio.sleep(wait)
 
-    logger.info(f"Materialization lock acquire timed out: {self.lock_key}")
+    if self.last_backend_error:
+      logger.warning(
+        f"Materialization lock acquire gave up on backend errors: "
+        f"{self.lock_key} ({self.last_backend_error})"
+      )
+    else:
+      logger.info(f"Materialization lock acquire timed out: {self.lock_key}")
+    return False
+
+  async def extend(self, ttl_seconds: int | None = None) -> bool:
+    """Reset the TTL to a full window, returning False if the lock is no
+    longer ours.
+
+    A materialization can outlive the TTL that was meant as a crash safety
+    net; refreshing at checkpoints keeps the lock alive for as long as the run
+    is demonstrably still making progress. A False return means the key has
+    expired or been re-acquired by another process — the caller must abort
+    rather than continue to the swap. Backend errors are raised, not swallowed:
+    the caller decides whether a blip is tolerable given the TTL still on the
+    key.
+    """
+    if not self._acquired:
+      return False
+
+    new_ttl = ttl_seconds if ttl_seconds is not None else self.ttl_seconds
+    result = await self.redis.eval(
+      _EXTEND_SCRIPT,
+      1,
+      self.lock_key,
+      self.token,
+      str(new_ttl),
+    )
+    if result == 1:
+      logger.debug(f"Materialization lock extended: {self.lock_key} ({new_ttl}s)")
+      return True
+
+    logger.warning(
+      f"Materialization lock extend failed (token mismatch or expired): {self.lock_key}"
+    )
+    self._acquired = False
     return False
 
   async def release(self) -> bool:
