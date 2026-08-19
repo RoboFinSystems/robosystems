@@ -84,6 +84,14 @@ def _connect_args() -> dict[str, str]:
   # A per-statement ceiling set on the connection, so no single platform query
   # can hold the (synchronous, loop-bound) session unboundedly. Mirrors the
   # extensions engine; migrations run on their own engine and are unaffected.
+  #
+  # Engine-wide (workers included) is intentional and safe: `statement_timeout`
+  # bounds a single statement, not a transaction, so a bulk job that issues
+  # many small statements under one commit (e.g. bulk_allocate_monthly_credits)
+  # is unaffected — only an individual query running longer than the ceiling is
+  # cut. The platform DB has no such single bulk statement (that shape lives on
+  # the extensions engine, which opts bulk paths out per-session). SSM-tunable;
+  # `database/STATEMENT_TIMEOUT_MS = 0` disables it without a deploy.
   timeout_ms = TuningConfig.get_database_statement_timeout_ms()
   # `options` is a libpq connection parameter; only PostgreSQL drivers accept it.
   if timeout_ms <= 0 or not (get_database_url() or "").startswith("postgresql"):
