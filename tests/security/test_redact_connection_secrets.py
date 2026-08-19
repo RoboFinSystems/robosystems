@@ -45,3 +45,24 @@ class TestRedactConnectionSecrets:
     assert "password=a" not in out
     assert "password=b" not in out
     assert out.count("password=***") == 2
+
+  def test_max_length_rds_password_still_redacted(self):
+    # RDS master passwords max out at 128 chars; the bounded quantifiers
+    # (256) must keep redacting the longest credential we can hold.
+    secret = "x" * 128
+    raw = (
+      f"error in postgres_scan('user=postgres password={secret} host=h') "
+      f"and postgresql://postgres:{secret}@rds.aws:5432/extensions"
+    )
+    out = redact_connection_secrets(raw)
+    assert secret not in out
+    assert "password=***" in out
+    assert "postgresql://postgres:***@rds.aws" in out
+
+  @pytest.mark.timeout(10)
+  def test_adversarial_repetition_stays_fast(self):
+    # Many credential-shaped prefixes with no terminating '@' previously
+    # made the URL regex rescan to end-of-string from every prefix
+    # (quadratic). Bounded quantifiers keep this linear-ish.
+    raw = "postgres://!:" * 20_000
+    assert redact_connection_secrets(raw) == raw

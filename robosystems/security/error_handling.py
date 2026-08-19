@@ -251,8 +251,11 @@ def is_safe_to_expose(detail_message: str) -> bool:
   return not any(pattern in detail_lower for pattern in sensitive_patterns)
 
 
-_CONNSTR_PASSWORD_RE = re.compile(r"password=\S+")
-_URL_CRED_RE = re.compile(r"(postgres(?:ql)?://[^:/@\s]+:)[^@\s]+@")
+# Bounded quantifiers: the credential here is always our own RDS secret
+# (128 chars max), and unbounded runs let crafted error text drive the
+# scan quadratic (CodeQL py/polynomial-redos).
+_CONNSTR_PASSWORD_RE = re.compile(r"password=\S{1,256}")
+_URL_CRED_RE = re.compile(r"(postgres(?:ql)?://[^:/@\s]{1,256}:)[^@\s]{1,256}@")
 
 
 def redact_connection_secrets(text: str) -> str:
