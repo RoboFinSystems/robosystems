@@ -134,6 +134,11 @@ class TestGetMe:
     assert args[0] == "valid_jwt_token"
     assert "user_agent" in args[1]  # Device fingerprint dict
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
+    # This endpoint authenticates inline rather than through the shared
+    # dependency, so it must publish the principal itself or the access log
+    # records the request as anonymous.
+    assert mock_request.state.user_id == "user_123"
+    assert mock_request.state.auth_method == "jwt_token"
 
   async def test_get_me_no_token(self):
     """Test getting current user with no token."""

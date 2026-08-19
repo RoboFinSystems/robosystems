@@ -18,6 +18,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from robosystems.security.request_context import publish_principal
+
 from ...config import env
 from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
@@ -106,6 +108,8 @@ async def generate_sso_token(
         detail="Token session has been invalidated",
         headers={"WWW-Authenticate": "Bearer"},
       )
+
+    publish_principal(request, str(user.id), "jwt_token")
 
     # Create temporary SSO token
     sso_token, token_id = create_sso_token(user.id, session=session)
