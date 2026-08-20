@@ -1,6 +1,6 @@
 """Tests for password reset endpoints."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -198,7 +198,10 @@ class TestPasswordResetEndpoints:
   @pytest.mark.asyncio
   @patch.object(UserToken, "verify_token")
   @patch.object(User, "get_by_id")
-  @patch("robosystems.routers.auth.password_reset.hash_password")
+  @patch(
+    "robosystems.routers.auth.password_reset.hash_password_async",
+    new_callable=AsyncMock,
+  )
   async def test_reset_password_success(
     self, mock_hash_password, mock_get_user, mock_verify_token, client, test_db
   ):

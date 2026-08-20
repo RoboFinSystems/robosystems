@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
+from robosystems.security.error_handling import safe_error_message
 
 from ._errors import database_failure
 
@@ -247,8 +248,14 @@ class CreateDocumentTool:
     except SQLAlchemyError as e:
       return database_failure("create-document", e, not_initialized_message=None)
     except Exception as e:
-      logger.error(f"create-document failed for graph_id={graph_id}: {e}")
-      return {"error": "create_failed", "message": str(e)}
+      logger.error(
+        f"create-document failed for graph_id={graph_id}: {e}", exc_info=True
+      )
+      return {
+        "error": "create_failed",
+        "message": safe_error_message(e)
+        or "create-document failed on a backend error; see server logs",
+      }
     finally:
       session.close()
 
@@ -354,8 +361,14 @@ Content changes are automatically re-indexed in OpenSearch.""",
     except SQLAlchemyError as e:
       return database_failure("update-document", e, not_initialized_message=None)
     except Exception as e:
-      logger.error(f"update-document failed for graph_id={graph_id}: {e}")
-      return {"error": "update_failed", "message": str(e)}
+      logger.error(
+        f"update-document failed for graph_id={graph_id}: {e}", exc_info=True
+      )
+      return {
+        "error": "update_failed",
+        "message": safe_error_message(e)
+        or "update-document failed on a backend error; see server logs",
+      }
     finally:
       session.close()
 
@@ -431,8 +444,12 @@ class GetDocumentTool:
     except SQLAlchemyError as e:
       return database_failure("get-document", e, not_initialized_message=None)
     except Exception as e:
-      logger.error(f"get-document failed for graph_id={graph_id}: {e}")
-      return {"error": "retrieval_failed", "message": str(e)}
+      logger.error(f"get-document failed for graph_id={graph_id}: {e}", exc_info=True)
+      return {
+        "error": "retrieval_failed",
+        "message": safe_error_message(e)
+        or "get-document failed on a backend error; see server logs",
+      }
     finally:
       session.close()
 
@@ -499,8 +516,14 @@ from OpenSearch. This is permanent — use get-document to review before deletin
     except SQLAlchemyError as e:
       return database_failure("delete-document", e, not_initialized_message=None)
     except Exception as e:
-      logger.error(f"delete-document failed for graph_id={graph_id}: {e}")
-      return {"error": "delete_failed", "message": str(e)}
+      logger.error(
+        f"delete-document failed for graph_id={graph_id}: {e}", exc_info=True
+      )
+      return {
+        "error": "delete_failed",
+        "message": safe_error_message(e)
+        or "delete-document failed on a backend error; see server logs",
+      }
     finally:
       session.close()
 
@@ -584,7 +607,11 @@ class ListDocumentsTool:
     except SQLAlchemyError as e:
       return database_failure("list-documents", e, not_initialized_message=None)
     except Exception as e:
-      logger.error(f"list-documents failed for graph_id={graph_id}: {e}")
-      return {"error": "list_failed", "message": str(e)}
+      logger.error(f"list-documents failed for graph_id={graph_id}: {e}", exc_info=True)
+      return {
+        "error": "list_failed",
+        "message": safe_error_message(e)
+        or "list-documents failed on a backend error; see server logs",
+      }
     finally:
       session.close()

@@ -12,11 +12,14 @@ from sqlalchemy.orm import sessionmaker
 from main import app
 from robosystems.database import Model as Base
 
-# Speed up password hashing for tests by reducing bcrypt rounds
-# Production uses 14 rounds, but that's too slow for tests
+# Speed up bcrypt hashing for tests by reducing rounds. Production uses cost 14
+# for passwords and cost 12 for API keys (~250ms each — API-key hashing alone is
+# paid by ~15 test files); both are too slow for the suite.
+from robosystems.models.core.user.user_api_key import UserAPIKey as _UserAPIKey
 from robosystems.security import password as password_module
 
 password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
+_UserAPIKey.BCRYPT_ROUNDS = 4  # Fast for tests
 
 
 @pytest.fixture(autouse=True)
@@ -441,7 +444,7 @@ def test_user(test_db):
 
   unique_id = str(uuid.uuid4())[:8]
   password = "T3stP@ssw0rd!"
-  salt = bcrypt.gensalt()
+  salt = bcrypt.gensalt(rounds=4)  # fast for tests
   password_hash = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
   org = Org(
@@ -951,7 +954,7 @@ def other_user(test_db):
 
   unique_id = str(uuid.uuid4())[:8]
   password = "0th3rP@ssw0rd!"
-  salt = bcrypt.gensalt()
+  salt = bcrypt.gensalt(rounds=4)  # fast for tests
   password_hash = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
   user = User(

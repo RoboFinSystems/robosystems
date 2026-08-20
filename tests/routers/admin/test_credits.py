@@ -652,6 +652,16 @@ class TestAddBonusCreditsToRepository:
     mock_query = mock_session.query.return_value
     mock_query.filter.return_value.first.return_value = pool
 
+    # refresh() reloads the server-computed balance from the DB — simulate that,
+    # capturing what was assigned before the reload.
+    captured = {}
+
+    def fake_refresh(obj):
+      captured["pre_reload"] = obj.current_balance
+      obj.current_balance = Decimal("900.0")
+
+    mock_session.refresh.side_effect = fake_refresh
+
     with (
       patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])),
       patch(f"{MODULE}.UserRepositoryCreditTransaction") as MockTransaction,
@@ -662,8 +672,14 @@ class TestAddBonusCreditsToRepository:
         data=bonus_request,
       )
 
-    # Balance should have been incremented
-    assert pool.current_balance == Decimal("700.0") + Decimal("200.0")
+    # The fix: balance is incremented server-side (SET current_balance =
+    # current_balance + :amount), not by a Python read-modify-write that could
+    # revert a concurrent debit — so what was assigned before the reload is a
+    # SQLAlchemy expression, not a pre-computed Decimal. The arithmetic itself is
+    # exercised by the model tests against a real DB.
+    assert not isinstance(captured["pre_reload"], Decimal)
+    assert "current_balance" in str(captured["pre_reload"])
+    assert result.current_balance == 900.0
     MockTransaction.create_transaction.assert_called_once()
     call_kwargs = MockTransaction.create_transaction.call_args.kwargs
     assert call_kwargs["credit_pool_id"] == "crd_pool_001"
@@ -807,6 +823,7 @@ class TestCheckCreditHealth:
     mock_session.query.return_value = query_mock
     # First .all() returns graph pools, second returns repo pools
     query_mock.all.side_effect = [[pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -818,6 +835,31 @@ class TestCheckCreditHealth:
     assert result.graph_health["negative_balance_pools"] == []
     assert result.graph_health["low_balance_pools"] == []
     mock_session.close.assert_called_once()
+
+  @pytest.mark.unit
+  async def test_missing_pool_triggers_critical(self, mock_request, mock_session):
+    """An active graph with no credit pool is invisible to per-pool scans yet
+    has every AI run denied — it must surface as a critical missing_pools row."""
+    from robosystems.routers.admin.credits import check_credit_health
+
+    orphan = MagicMock()
+    orphan.graph_id = "kg_orphan"
+    orphan.org_id = "org_1"
+    orphan.graph_tier = "ladybug-standard"
+
+    query_mock = MagicMock()
+    mock_session.query.return_value = query_mock
+    query_mock.all.side_effect = [[], []]  # no pools of either kind
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = [orphan]
+
+    with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
+      result = await check_credit_health(request=mock_request)
+
+    assert result.status == "critical"
+    assert result.graph_health["missing_pools"] == [
+      {"graph_id": "kg_orphan", "org_id": "org_1", "tier": "ladybug-standard"}
+    ]
+    assert result.pools_with_issues >= 1
 
   @pytest.mark.unit
   async def test_critical_with_negative_balance(self, mock_request, mock_session):
@@ -833,6 +875,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[negative_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -858,6 +901,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[low_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -879,6 +923,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[zero_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -903,6 +948,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], [repo_pool]]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -925,6 +971,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], [inactive_pool]]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -943,6 +990,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     before = datetime.now(UTC)
 

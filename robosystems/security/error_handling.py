@@ -290,3 +290,28 @@ def sanitize_error_detail(detail_message: str) -> str:
 
   # Return generic message for potentially sensitive errors
   return "An error occurred while processing your request"
+
+
+def safe_error_message(exc: BaseException) -> str | None:
+  """The exception's own message when it is safe to show the caller, else None.
+
+  Safe means the message is about the caller's own input — a query syntax
+  error, a client-side rejection from the graph API, or a domain validation
+  ``ValueError`` — scrubbed of connection secrets. Driver and infrastructure
+  exceptions (boto3, psycopg2, httpx, opensearch-py, redis, …) return None:
+  their text names hosts, indexes, SQL, and internals, and belongs in server
+  logs only. Callers substitute their sink's generic message on None.
+  """
+  from robosystems.graph_api.client.exceptions import (
+    GraphClientError,
+    GraphSyntaxError,
+  )
+
+  if isinstance(exc, GraphSyntaxError | GraphClientError):
+    return redact_connection_secrets(str(exc))
+  # Plain ValueError is domain-validation text throughout the operations
+  # kernel; subclasses from third-party libs are excluded so a driver that
+  # subclasses ValueError cannot ride the whitelist.
+  if type(exc) is ValueError:
+    return redact_connection_secrets(str(exc))
+  return None

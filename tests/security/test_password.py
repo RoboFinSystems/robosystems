@@ -737,3 +737,47 @@ class TestConfigurationValidation:
     obvious_weak = ["password123", "admin123"]
     for weak_pwd in obvious_weak:
       assert weak_pwd in PasswordSecurity.COMMON_PASSWORDS
+
+
+class TestAsyncBcryptOffload:
+  """The async wrappers and the login-miss timing equalizer."""
+
+  @pytest.mark.asyncio
+  async def test_hash_and_verify_async_roundtrip(self):
+    # (conftest patches BCRYPT_ROUNDS to 4 for speed, so the cost prefix is not
+    # asserted here — the roundtrip behavior is what matters.)
+    hashed = await PasswordSecurity.hash_password_async("MyStr0ng!P@ss2024")
+    assert hashed.startswith("$2b$")
+    assert await PasswordSecurity.verify_password_async("MyStr0ng!P@ss2024", hashed)
+    assert not await PasswordSecurity.verify_password_async("wrong", hashed)
+
+  @pytest.mark.asyncio
+  async def test_async_offload_uses_a_thread(self):
+    """The point of the wrapper is that bcrypt runs off the event loop."""
+    import asyncio
+
+    called = {}
+    real_to_thread = asyncio.to_thread
+
+    async def spy(fn, *a, **kw):
+      called["hit"] = True
+      return await real_to_thread(fn, *a, **kw)
+
+    with patch("asyncio.to_thread", spy):
+      await PasswordSecurity.hash_password_async("MyStr0ng!P@ss2024")
+    assert called.get("hit") is True
+
+  @pytest.mark.asyncio
+  async def test_timing_equalizer_runs_a_real_bcrypt(self):
+    """The equalizer must actually spend a verification's worth of work, so a
+    login miss is indistinguishable from a wrong password."""
+    import time
+
+    start = time.perf_counter()
+    await PasswordSecurity.equalize_verify_timing()
+    elapsed = time.perf_counter() - start
+    # cost-14 bcrypt is hundreds of ms; a no-op would be ~microseconds.
+    assert elapsed > 0.05
+
+  def test_timing_equalizer_hash_is_cost_14(self):
+    assert PasswordSecurity._TIMING_EQUALIZER_HASH.startswith("$2b$14$")

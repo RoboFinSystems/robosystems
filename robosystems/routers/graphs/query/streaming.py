@@ -23,6 +23,7 @@ from robosystems.models.api.graphs.query import (
   CypherStatementRequest,
 )
 from robosystems.models.core import User
+from robosystems.security.error_handling import safe_error_message
 
 # Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
@@ -173,9 +174,11 @@ async def stream_ndjson_response(
       )
 
     except Exception as e:
-      # Stream error as NDJSON
+      # Stream error as NDJSON. Headers are already sent, so in-band is the
+      # only channel — sanitize at the yield: infrastructure exception text
+      # stays in server logs, the caller's own query errors pass through.
       error_chunk = {
-        "error": str(e),
+        "error": safe_error_message(e) or "Query streaming failed",
         "error_type": type(e).__name__,
         "graph_id": graph_id,
         "timestamp": datetime.now(UTC).isoformat(),
@@ -184,7 +187,7 @@ async def stream_ndjson_response(
 
       # Record failure metrics
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
-      logger.error(f"NDJSON streaming failed: {e}")
+      logger.error(f"NDJSON streaming failed: {e}", exc_info=True)
 
   return StreamingResponse(
     generate_ndjson(),
@@ -385,13 +388,13 @@ async def stream_sse_response(
         "event": "error",
         "data": json.dumps(
           {
-            "error": str(e),
+            "error": safe_error_message(e) or "Query streaming failed",
             "error_type": type(e).__name__,
           }
         ),
       }
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
-      logger.error(f"SSE streaming failed: {e}")
+      logger.error(f"SSE streaming failed: {e}", exc_info=True)
 
   return EventSourceResponse(
     sse_generator(),
@@ -595,12 +598,12 @@ async def stream_sse_with_queue(
           break
 
     except Exception as e:
-      logger.error(f"Queue SSE error: {e}")
+      logger.error(f"Queue SSE error: {e}", exc_info=True)
       yield {
         "event": "error",
         "data": json.dumps(
           {
-            "error": str(e),
+            "error": safe_error_message(e) or "Query streaming failed",
             "query_id": query_id,
           }
         ),

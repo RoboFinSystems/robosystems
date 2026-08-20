@@ -30,6 +30,21 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 logger = logging.getLogger(__name__)
 
 
+def _first_of_next_month(now: datetime) -> datetime:
+  """Midnight UTC on the 1st of the month after ``now``.
+
+  The allocation cron runs on the 1st; any other due date is one the cron
+  never lands on.
+  """
+  if now.month == 12:
+    return now.replace(
+      year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+  return now.replace(
+    month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0
+  )
+
+
 def safe_float(value: Any) -> float:
   """Safely convert SQLAlchemy model attributes to float."""
   return float(value) if value is not None else 0.0
@@ -131,8 +146,6 @@ class UserRepositoryCredits(Base):
     session: Session,
   ) -> "UserRepositoryCredits":
     """Create credit pool for a new access record."""
-    from datetime import timedelta
-
     allows_rollover = False
     max_rollover = Decimal("0")
 
@@ -145,7 +158,10 @@ class UserRepositoryCredits(Base):
       allows_rollover=allows_rollover,
       max_rollover_credits=max_rollover,
       last_allocation_date=now,
-      next_allocation_date=now + timedelta(days=30),
+      # Aligned with the 1st-of-month allocation cron — a +30d seed lands
+      # mid-month, where the cron never fires, and the first refill silently
+      # skips a month.
+      next_allocation_date=_first_of_next_month(now),
     )
 
     session.add(credits)
@@ -355,12 +371,18 @@ class UserRepositoryCredits(Base):
     The balance is replaced by ``monthly_allocation``, matching ``GraphCredits``
     and the no-rollover promise on the offering page.
     """
-    from datetime import timedelta
-
     now = datetime.now(UTC)
 
-    if self.next_allocation_date and now < self.next_allocation_date:
-      return False
+    # One allocation per calendar month, matching the 1st-of-month cron that
+    # drives it (GraphCredits carries the same gate). The previous day-count
+    # gate (now < next_allocation_date, re-armed at +30 days) drifted off the
+    # 1st: a mid-month purchase re-armed to a mid-month date the cron never
+    # runs on, silently skipping that month's refill — and a 1-Feb allocation
+    # re-armed to 3-Mar, skipping March for every active pool, every year.
+    if self.last_allocation_date is not None:
+      last = self.last_allocation_date
+      if (last.year, last.month) == (now.year, now.month):
+        return False
 
     self.credits_consumed_this_month = Decimal("0")
 
@@ -378,7 +400,9 @@ class UserRepositoryCredits(Base):
     self.current_balance = new_balance
     self.rollover_credits = Decimal("0")
     self.last_allocation_date = now
-    self.next_allocation_date = now + timedelta(days=30)
+    # Kept for the Dagster op's due-pool filter and its index; pinned to the
+    # 1st so the date can never drift away from the cron again.
+    self.next_allocation_date = _first_of_next_month(now)
     self.updated_at = now
 
     UserRepositoryCreditTransaction.create_transaction(
@@ -591,8 +615,12 @@ class UserRepositoryCredits(Base):
         session=session,
       )
 
-      self.current_balance = reservation_result.new_balance
-      self.updated_at = datetime.now(UTC)
+      # The atomic UPDATE already persisted the reservation debit. Writing the
+      # RETURNING value back through the ORM would emit an absolute SET on
+      # commit and revert any concurrent movement (lost update) — expire so
+      # the next access reloads instead.
+      if self in session:
+        session.expire(self, ["current_balance", "updated_at"])
 
       session.commit()
 
@@ -748,7 +776,7 @@ class UserRepositoryCredits(Base):
         },
       )
 
-      refund_result = result.fetchone()
+      result.fetchone()
 
       UserRepositoryCreditTransaction.create_transaction(
         credit_pool_id=self.id,
@@ -777,9 +805,10 @@ class UserRepositoryCredits(Base):
 
         reservation_transaction.transaction_metadata = json.dumps(metadata)
 
-      if refund_result:
-        self.current_balance = refund_result.new_balance
-      self.updated_at = datetime.now(UTC)
+      # Refund already applied by the atomic UPDATE — expire, never write the
+      # absolute value back (same lost-update hazard as the reserve path).
+      if self in session:
+        session.expire(self, ["current_balance", "updated_at"])
 
       session.commit()
 

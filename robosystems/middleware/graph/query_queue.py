@@ -20,6 +20,7 @@ from robosystems.middleware.graph.admission_control import (
   get_admission_controller,
 )
 from robosystems.middleware.otel.metrics import record_query_queue_metrics
+from robosystems.security.error_handling import safe_error_message
 
 
 class QueryStatus(str, Enum):
@@ -408,8 +409,9 @@ class QueryQueueManager:
 
     except Exception as e:
       query.status = QueryStatus.FAILED
-      query.error = str(e)
-      logger.error(f"Query {query.id} failed: {e}")
+      # query.error surfaces to the caller through status polls and SSE.
+      query.error = safe_error_message(e) or f"Query failed — reference {query.id}"
+      logger.error(f"Query {query.id} failed: {e}", exc_info=True)
 
     finally:
       # Clean up

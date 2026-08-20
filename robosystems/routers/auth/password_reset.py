@@ -40,7 +40,7 @@ from ...security.input_validation import (
   validate_email,
 )
 from ...security.password import PasswordSecurity
-from .utils import detect_app_source, hash_password, require_password_auth
+from .utils import detect_app_source, hash_password_async, require_password_auth
 
 # Create router for password reset endpoints
 router = APIRouter()
@@ -248,7 +248,7 @@ async def reset_password(
       detail=f"Password requirements not met: {', '.join(password_result.errors)}",
     )
 
-  password_hash = hash_password(request.new_password)
+  password_hash = await hash_password_async(request.new_password)
 
   # Update user's password
   user.update(session, password_hash=password_hash)

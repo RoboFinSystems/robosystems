@@ -233,6 +233,42 @@ class PasswordSecurity:
       return False
 
   @classmethod
+  async def hash_password_async(cls, password: str) -> str:
+    """hash_password off the event loop — cost-14 bcrypt is ~0.5-1 s of CPU
+    that would otherwise stall every tenant sharing the loop."""
+    import asyncio
+
+    return await asyncio.to_thread(cls.hash_password, password)
+
+  @classmethod
+  async def verify_password_async(cls, password: str, hashed: str) -> bool:
+    """verify_password off the event loop; see hash_password_async."""
+    import asyncio
+
+    return await asyncio.to_thread(cls.verify_password, password, hashed)
+
+  # A fixed cost-14 hash whose only purpose is burning the same bcrypt work as
+  # a real verification. The candidate string below never matches it — the
+  # result is discarded; only the wall-clock parity matters.
+  _TIMING_EQUALIZER_HASH = (
+    "$2b$14$QZqnSEVBjqfiGXIKfN1osuDqkogiNCpSZW3UFxutpEGp1hB7VxkZe"
+  )
+
+  @classmethod
+  async def equalize_verify_timing(cls) -> None:
+    """Burn one bcrypt verification's worth of work, off the loop.
+
+    The login miss path (unknown email, inactive user, null hash) returns 401
+    having done zero bcrypt work, while a real account pays the full cost-14
+    hash — a ~0.7 s wall-clock difference that defeats the deliberately
+    generic "Invalid email or password". Calling this on the miss path makes
+    both branches cost the same.
+    """
+    await cls.verify_password_async(
+      "timing-equalizer-candidate", cls._TIMING_EQUALIZER_HASH
+    )
+
+  @classmethod
   def _bcrypt_bytes(cls, password: str) -> bytes:
     """Encode a password to bcrypt's 72-byte input, truncating if needed.
 

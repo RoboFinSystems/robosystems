@@ -626,3 +626,64 @@ class TestIntegrationScenarios:
     with pytest.raises(HTTPException) as exc_info:
       raise_secure_error(ErrorType.VALIDATION_ERROR)
     assert exc_info.value.detail == "Invalid request data"
+
+
+class TestSafeErrorMessage:
+  """The whitelist that decides which exception text may reach a caller."""
+
+  def test_value_error_passes_through(self):
+    from robosystems.security.error_handling import safe_error_message
+
+    assert safe_error_message(ValueError("period must be YYYY-MM")) == (
+      "period must be YYYY-MM"
+    )
+
+  def test_graph_syntax_error_passes_through(self):
+    from robosystems.graph_api.client.exceptions import GraphSyntaxError
+    from robosystems.security.error_handling import safe_error_message
+
+    assert (
+      safe_error_message(GraphSyntaxError("Parser error at line 1"))
+      == "Parser error at line 1"
+    )
+
+  def test_graph_client_error_passes_through(self):
+    from robosystems.graph_api.client.exceptions import GraphClientError
+    from robosystems.security.error_handling import safe_error_message
+
+    assert safe_error_message(GraphClientError("not found")) == "not found"
+
+  def test_driver_exception_is_withheld(self):
+    """boto3/psycopg2/opensearch text names hosts and internals — None."""
+    from robosystems.security.error_handling import safe_error_message
+
+    class ConnectionTimeout(Exception):
+      pass
+
+    assert (
+      safe_error_message(
+        ConnectionTimeout(
+          "ConnectionTimeout: vpc-os-abc.us-east-1.es.amazonaws.com:443 timed out"
+        )
+      )
+      is None
+    )
+
+  def test_value_error_subclass_from_a_library_is_withheld(self):
+    """Only exact ValueError rides the whitelist; a lib subclass does not."""
+    from robosystems.security.error_handling import safe_error_message
+
+    class WeirdDriverError(ValueError):
+      pass
+
+    assert safe_error_message(WeirdDriverError("host=10.0.0.5 refused")) is None
+
+  def test_connection_secret_is_redacted_from_passed_through_text(self):
+    from robosystems.security.error_handling import safe_error_message
+
+    msg = safe_error_message(
+      ValueError("scan failed: postgresql://u:s3cr3t@db.internal:5432/x")
+    )
+    assert msg is not None
+    assert "s3cr3t" not in msg
+    assert "***" in msg

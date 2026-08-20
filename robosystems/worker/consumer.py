@@ -27,6 +27,7 @@ from robosystems.middleware.sse.operation_manager import (
   OperationManager,
   get_operation_manager,
 )
+from robosystems.security.error_handling import safe_error_message
 from robosystems.worker.cleanup import cleanup_connections
 from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 from robosystems.worker.metrics import QueueDepthPublisher
@@ -231,10 +232,13 @@ async def _process_task(
           "graph_id": graph_id,
         },
       )
+      # The stored error replays to the customer via SSE and operation status;
+      # infrastructure exception text (boto3/psycopg2/httpx internals) stays in
+      # the server log above and the customer gets a reference id instead.
       await _fail_quietly(
         manager,
         task_id,
-        error=str(e),
+        error=safe_error_message(e) or f"Operation failed — reference {task_id}",
         error_details={"error_type": type(e).__name__},
       )
 

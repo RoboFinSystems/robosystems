@@ -22,6 +22,10 @@ class UserAPIKey(Model):
 
   __tablename__ = "user_api_keys"
 
+  # bcrypt cost for hashing API keys (~250ms at cost 12). A class constant so
+  # the test suite can patch it down, the way it patches PasswordSecurity.
+  BCRYPT_ROUNDS = 12
+
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("uak"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   name = Column(String, nullable=False)  # User-friendly name for the key
@@ -315,9 +319,9 @@ class UserAPIKey(Model):
 
   @staticmethod
   def _hash_api_key(plain_key: str) -> str:
-    """Hash an API key with bcrypt at cost 12 (~250ms on current hardware)."""
+    """Hash an API key with bcrypt at cost ``BCRYPT_ROUNDS`` (~250ms at 12)."""
     try:
-      salt = bcrypt.gensalt(rounds=12)
+      salt = bcrypt.gensalt(rounds=UserAPIKey.BCRYPT_ROUNDS)
       hashed = bcrypt.hashpw(plain_key.encode("utf-8"), salt)
       return hashed.decode("utf-8")
     except Exception as e:

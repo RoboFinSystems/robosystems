@@ -411,14 +411,13 @@ class TestUserRepositoryCredits:
     assert transaction.amount == Decimal("1000")
 
   def test_allocate_monthly_credits_not_due(self):
-    """Test allocation when not due yet."""
-    future_date = datetime.now(UTC) + timedelta(days=15)
-
+    """Not due = already allocated this calendar month (the gate keys on
+    last_allocation_date, matching the 1st-of-month cron)."""
     credits = UserRepositoryCredits(
       user_repository_id=self.repo_access.id,
       current_balance=Decimal("500"),
       monthly_allocation=Decimal("1000"),
-      next_allocation_date=future_date,
+      last_allocation_date=datetime.now(UTC),  # allocated this month already
     )
     self.session.add(credits)
     self.session.commit()
@@ -427,6 +426,43 @@ class TestUserRepositoryCredits:
 
     assert result is False
     assert credits.current_balance == Decimal("500")  # Unchanged
+
+  def test_allocate_does_not_skip_the_next_calendar_month(self):
+    """Regression: a mid-month allocation used to re-arm next_allocation_date
+    to +30 days — a date the 1st-of-month cron never runs on — so the very
+    next month was silently skipped. With the calendar-month gate, a pool
+    allocated last month is due this month regardless of the day."""
+    last_month = datetime.now(UTC).replace(day=15) - timedelta(days=31)
+
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("100"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=last_month,
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    assert credits.allocate_monthly_credits(self.session) is True
+    assert credits.current_balance == Decimal("1000")
+
+  def test_next_allocation_date_is_pinned_to_the_first(self):
+    """The re-armed date must land on the 1st so it can never drift off the
+    cron again."""
+    last_month = datetime.now(UTC).replace(day=10) - timedelta(days=31)
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("100"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=last_month,
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    credits.allocate_monthly_credits(self.session)
+
+    assert credits.next_allocation_date.day == 1
+    assert credits.next_allocation_date > datetime.now(UTC)
 
   def test_allocate_monthly_credits_overflow_protection(self):
     """Test overflow protection during allocation."""

@@ -25,7 +25,8 @@ from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.device_fingerprinting import extract_device_fingerprint
 from ...security.input_validation import sanitize_string, validate_email
-from .utils import require_password_auth, verify_password
+from ...security.password import PasswordSecurity
+from .utils import require_password_auth, verify_password_async
 
 # Create router for login endpoint
 router = APIRouter()
@@ -126,6 +127,12 @@ async def login(
   # Find user by email
   user = User.get_by_email(sanitized_email, session)
   if not user or not user.password_hash or not user.is_active:
+    # Burn one bcrypt verification so this branch costs the same wall-clock
+    # as a wrong password against a real account — otherwise the ~0.7 s
+    # difference is an account-enumeration oracle that defeats the generic
+    # message below.
+    await PasswordSecurity.equalize_verify_timing()
+
     # Record failed attempt for protection system
     if client_ip:
       AdvancedAuthProtection.record_auth_attempt(
@@ -147,7 +154,7 @@ async def login(
       status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
     )
 
-  if not verify_password(request.password, user.password_hash):
+  if not await verify_password_async(request.password, user.password_hash):
     # Record failed attempt for protection system
     if client_ip:
       AdvancedAuthProtection.record_auth_attempt(
