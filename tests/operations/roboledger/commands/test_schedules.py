@@ -824,6 +824,13 @@ def _terminate_structure() -> MagicMock:
     },
     "schedule_metadata": {"original_amount": 131_508},
   }
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_prepaid",
+    },
+    "schedule_metadata": {"original_amount": 131_508},
+  }
   return structure
 
 
@@ -935,6 +942,7 @@ def test_terminate_schedule_truncation_guard_stops_everything() -> None:
 
 def test_rewrite_sum_equals_rule_reanchors_to_remaining_curve() -> None:
   from decimal import Decimal
+  from unittest.mock import patch
 
   from robosystems.operations.roboledger.commands.schedules import (
     _rewrite_sum_equals_rule,
@@ -945,6 +953,7 @@ def test_rewrite_sum_equals_rule_reanchors_to_remaining_curve() -> None:
   rule = MagicMock()
   rule.id = "rule_sum"
   rule.rule_expression = "sum($periodic_amount) = 1315.08"
+  rule.metadata_ = {"expected_total": 1315.08}
 
   rule_result = MagicMock()
   rule_result.scalars.return_value.first.return_value = rule
@@ -956,8 +965,16 @@ def test_rewrite_sum_equals_rule_reanchors_to_remaining_curve() -> None:
   deleted_models: list[type] = []
   session.query.side_effect = lambda model: _Query(model, deleted_models)
 
-  assert _rewrite_sum_equals_rule(session, structure) is True
+  with patch("robosystems.operations.roboledger.commands.schedules.flag_modified"):
+    assert _rewrite_sum_equals_rule(session, structure) is True
+
+  # `expected_total` is what the evaluator compares against — asserting only
+  # the expression is what let the original bug ship green.
+  assert rule.metadata_["expected_total"] == 182.65
   assert rule.rule_expression == "sum($periodic_amount) = 182.65"
+  # The stored basis has to follow, or `rebuild-schedule` redistributes the
+  # pre-truncation total across the surviving months and rewrites posted history.
+  assert structure.metadata_["schedule_metadata"]["original_amount"] == 18_265
   assert VerificationResult in deleted_models
 
 

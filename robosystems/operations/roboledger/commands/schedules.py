@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
@@ -565,7 +566,37 @@ def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
     {"sid": structure.id, "eid": debit_element_id},
   ).scalar()
   new_total = round(float(remaining or 0), 2)
+
+  # `expected_total` is the value the evaluator actually compares against
+  # (`rules/evaluators.py::_evaluate_sum_equals`); `rule_expression` is the
+  # human-readable form. Rewriting only the expression leaves the rule
+  # failing against the pre-truncation total while reading as re-anchored —
+  # which is exactly what shipped and was caught on live books.
   rule.rule_expression = f"sum($periodic_amount) = {new_total}"
+  rule_metadata = dict(rule.metadata_ or {})
+  rule_metadata["expected_total"] = new_total
+  rule.metadata_ = rule_metadata
+  flag_modified(rule, "metadata_")
+
+  # The stored definition has to describe the truncated curve too. Generation
+  # derives `expected_total` from `schedule_metadata.original_amount`, so
+  # leaving the original basis behind makes `rebuild-schedule` redistribute it
+  # across only the surviving months — silently rewriting closed, posted
+  # history. The pre-truncation basis stays in the `truncations` audit log.
+  mechanics_metadata = dict(structure.metadata_ or {})
+  schedule_meta = dict(mechanics_metadata.get("schedule_metadata") or {})
+  if schedule_meta.get("original_amount"):
+    schedule_meta["original_amount"] = round(new_total * 100)
+    mechanics_metadata["schedule_metadata"] = schedule_meta
+    structure.metadata_ = mechanics_metadata
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": mechanics_metadata.get("entry_template", {}),
+      "schedule_metadata": schedule_meta,
+    }
+    flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
+
   session.query(VerificationResult).filter(
     VerificationResult.rule_id == rule.id
   ).delete(synchronize_session=False)
