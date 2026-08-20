@@ -101,18 +101,22 @@ _SENSITIVE_PATH_PREFIXES = (
 )
 
 
-def csp_variant_for_path(path: str) -> str:
+def csp_variant_for_path(path: str, *, graphiql_enabled: bool = False) -> str:
   """Which CSP variant a path gets.
 
   - "docs": Swagger UI / ReDoc pages and their assets, self-hosted from
     /static — no third-party script origins and no 'unsafe-inline' script.
   - "graphiql": the GraphiQL playground, which loads React/GraphiQL from
-    CDNs and needs the historical relaxed policy.
+    CDNs and needs the historical relaxed policy. Returned only while the
+    playground is actually served (``graphiql_enabled`` — development
+    only); elsewhere the graph-scoped GraphQL path answers with JSON and
+    gets the strict policy like every other API route. The default is
+    closed so a caller that omits the flag can never relax production.
   - "api": everything else — strict policy.
   """
   if path in ("/", "/docs") or path.startswith("/static"):
     return "docs"
-  if path.startswith("/extensions/") and path.endswith("/graphql"):
+  if graphiql_enabled and path.startswith("/extensions/") and path.endswith("/graphql"):
     return "graphiql"
   return "api"
 
@@ -356,9 +360,10 @@ def create_app() -> FastAPI:
       )
 
     # Path-based CSP — strict for API, self-hosted policy for docs,
-    # relaxed (CDN) policy only for the GraphiQL playground.
+    # relaxed (CDN) policy only for the GraphiQL playground, and only
+    # where it is served (development — see the GraphQLRouter mount).
     path = request.url.path
-    csp_variant = csp_variant_for_path(path)
+    csp_variant = csp_variant_for_path(path, graphiql_enabled=env.is_development())
     if csp_variant == "docs":
       # Swagger UI / ReDoc served entirely from this origin (/static/vendor).
       # Both UIs inject inline <style> at runtime, so style-src keeps
