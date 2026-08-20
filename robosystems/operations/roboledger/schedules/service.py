@@ -1057,7 +1057,12 @@ class ScheduleService:
     period_start: date,
     period_end: date,
   ) -> PeriodCloseStatus:
-    """Get close status for all schedules in a fiscal period."""
+    """Get close status for the schedules that have work in a fiscal period.
+
+    Scoped to schedules carrying a fact or an entry in the period, so the
+    pending count agrees with the obligation gate. Terminated, run-to-term
+    and not-yet-started schedules are absent rather than listed at zero.
+    """
     # Get all schedule structures with their facts and best entry status for this period.
     # The best_entry CTE picks the most-advanced entry per structure
     # (posted > draft > reversed, via CASE ordering).
@@ -1106,6 +1111,14 @@ class ScheduleService:
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
         WHERE s.block_type = 'schedule'
           AND s.is_active = true
+          -- A schedule with neither a fact nor an entry in this period has no
+          -- work in it: it was terminated before the period, has run to term,
+          -- or has not started yet. Without this the LEFT JOIN renders all
+          -- three as `pending` at amount 0.00 forever, so the close summary
+          -- disagreed with the obligation gate (39 "pending" against 30 real
+          -- obligations on the tenant that surfaced it) and the operator had
+          -- to know which rows were phantom.
+          AND (f.id IS NOT NULL OR be.entry_id IS NOT NULL)
         ORDER BY s.name
       """),
       {"period_start": period_start, "period_end": period_end},
