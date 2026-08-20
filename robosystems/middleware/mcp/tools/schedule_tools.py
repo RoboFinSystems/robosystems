@@ -17,8 +17,12 @@ within one. Where the per-schedule operations live:
 - Closing-entry drafting → ``create-event-block``, with
   ``event_type='schedule_entry_due'`` for schedule-derived drafts and
   ``event_type='journal_entry_recorded'`` for free-form manual entries.
-- Schedule termination (truncate forward facts) → internal to the
-  ``asset_disposed`` event handler; there is no public op.
+- Schedule termination → ``terminate-schedule`` (no-entry: truncate
+  forward facts + void remaining obligations), or
+  ``create-event-block(event_type='asset_disposed')`` when the
+  derecognition entry still needs to be booked (the handler voids the
+  remaining obligations and posts the disposal entry atomically;
+  facts stay as history).
 """
 
 from datetime import date

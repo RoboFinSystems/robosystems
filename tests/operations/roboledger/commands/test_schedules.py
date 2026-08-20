@@ -808,3 +808,169 @@ def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
   assert n == 5
   _stmt, params = session.execute.call_args[0]
   assert params == {"closed_through": None}
+
+
+# ── terminate_schedule ─────────────────────────────────────────────────────
+
+
+def _terminate_structure() -> MagicMock:
+  structure = MagicMock()
+  structure.id = "struct_term"
+  structure.name = "AWS RI 2026-02 Prepaid Amortization"
+  structure.artifact_mechanics = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_prepaid",
+    },
+    "schedule_metadata": {"original_amount": 131_508},
+  }
+  return structure
+
+
+def test_terminate_schedule_truncates_then_voids_scoped() -> None:
+  from datetime import date
+  from unittest.mock import patch
+
+  from robosystems.models.api.extensions.schedules import TerminateScheduleRequest
+  from robosystems.operations.roboledger.commands import schedules as sched_cmds
+
+  structure = _terminate_structure()
+  session = MagicMock()
+  session.execute.return_value.scalar_one_or_none.return_value = structure
+
+  call_order: list[str] = []
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.truncate_schedule",
+      side_effect=lambda *a, **k: (
+        call_order.append("truncate")
+        or {
+          "structure_id": "struct_term",
+          "new_end_date": date(2026, 6, 30),
+          "facts_deleted": 62,
+          "reason": k["reason"],
+        }
+      ),
+    ) as truncate,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      side_effect=lambda *a, **k: call_order.append("void") or 31,
+    ) as void,
+    patch.object(sched_cmds, "_rewrite_sum_equals_rule", return_value=True) as rewrite,
+  ):
+    resp = sched_cmds.terminate_schedule(
+      session,
+      TerminateScheduleRequest(
+        structure_id="struct_term",
+        new_end_date=date(2026, 6, 30),
+        reason="RI transferred to RFS LLC",
+      ),
+      created_by="usr_admin",
+    )
+
+  # Truncation (with its guards) runs BEFORE the obligation void.
+  assert call_order == ["truncate", "void"]
+  tkwargs = truncate.call_args.kwargs
+  assert tkwargs["structure_id"] == "struct_term"
+  assert tkwargs["new_end_date"] == date(2026, 6, 30)
+  assert tkwargs["updated_by"] == "usr_admin"
+
+  # The void is scoped past the cutoff and reaches classified strays.
+  vkwargs = void.call_args.kwargs
+  assert vkwargs["structure"] is structure
+  assert vkwargs["period_start_after"] == date(2026, 6, 30)
+  assert vkwargs["include_classified"] is True
+  assert vkwargs["void_reason"] == "schedule_terminated: RI transferred to RFS LLC"
+
+  rewrite.assert_called_once()
+  session.commit.assert_called_once()
+
+  assert resp.structure_id == "struct_term"
+  assert resp.new_end_date == date(2026, 6, 30)
+  assert resp.facts_deleted == 62
+  assert resp.obligations_voided == 31
+  assert resp.rule_updated is True
+
+
+def test_terminate_schedule_truncation_guard_stops_everything() -> None:
+  from datetime import date
+  from unittest.mock import patch
+
+  import pytest
+
+  from robosystems.models.api.extensions.schedules import TerminateScheduleRequest
+  from robosystems.operations.roboledger.commands import schedules as sched_cmds
+
+  structure = _terminate_structure()
+  session = MagicMock()
+  session.execute.return_value.scalar_one_or_none.return_value = structure
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.truncate_schedule",
+      side_effect=ValueError("Cannot truncate: 3 posted entries exist"),
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations"
+    ) as void,
+  ):
+    with pytest.raises(ValueError, match="posted entries"):
+      sched_cmds.terminate_schedule(
+        session,
+        TerminateScheduleRequest(
+          structure_id="struct_term",
+          new_end_date=date(2026, 6, 30),
+          reason="early end",
+        ),
+      )
+
+  void.assert_not_called()
+  session.commit.assert_not_called()
+
+
+def test_rewrite_sum_equals_rule_reanchors_to_remaining_curve() -> None:
+  from decimal import Decimal
+
+  from robosystems.operations.roboledger.commands.schedules import (
+    _rewrite_sum_equals_rule,
+  )
+
+  structure = _terminate_structure()
+
+  rule = MagicMock()
+  rule.id = "rule_sum"
+  rule.rule_expression = "sum($periodic_amount) = 1315.08"
+
+  rule_result = MagicMock()
+  rule_result.scalars.return_value.first.return_value = rule
+  sum_result = MagicMock()
+  sum_result.scalar.return_value = Decimal("182.65")
+
+  session = MagicMock()
+  session.execute.side_effect = [rule_result, sum_result]
+  deleted_models: list[type] = []
+  session.query.side_effect = lambda model: _Query(model, deleted_models)
+
+  assert _rewrite_sum_equals_rule(session, structure) is True
+  assert rule.rule_expression == "sum($periodic_amount) = 182.65"
+  assert VerificationResult in deleted_models
+
+
+def test_rewrite_sum_equals_rule_noops_without_rule() -> None:
+  from robosystems.operations.roboledger.commands.schedules import (
+    _rewrite_sum_equals_rule,
+  )
+
+  structure = _terminate_structure()
+  rule_result = MagicMock()
+  rule_result.scalars.return_value.first.return_value = None
+  session = MagicMock()
+  session.execute.return_value = rule_result
+
+  assert _rewrite_sum_equals_rule(session, structure) is False
+  session.query.assert_not_called()

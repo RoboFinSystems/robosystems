@@ -19,6 +19,8 @@ from robosystems.models.api.extensions.schedules import (
   PromoteObligationsResponse,
   RebuildScheduleRequest,
   ScheduleCreatedResponse,
+  TerminateScheduleRequest,
+  TerminateScheduleResponse,
   UpdateScheduleRequest,
 )
 from robosystems.models.extensions import (
@@ -521,6 +523,129 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   session.commit()
 
   return {"deleted": True}
+
+
+def _rewrite_sum_equals_rule(session: Session, structure: Structure) -> bool:
+  """Re-anchor the schedule's native SumEquals rule to the truncated curve.
+
+  The rule proves sum(periodic facts) == the schedule's original amount;
+  truncation deletes forward facts, so the old total can never be
+  satisfied again. The remaining curve is still worth proving — the
+  expression is rewritten to its current sum, and verification results
+  proved against the old expression are cleared for re-evaluation.
+
+  Returns False (no-op) when the schedule has no native SumEquals rule
+  or its entry template carries no debit element to sum.
+  """
+  rule = (
+    session.execute(
+      select(Rule).where(
+        Rule.target_structure_id == structure.id,
+        Rule.rule_pattern == "SumEquals",
+        Rule.rule_origin == "native",
+      )
+    )
+    .scalars()
+    .first()
+  )
+  if rule is None:
+    return False
+
+  mechanics = structure.artifact_mechanics or {}
+  template = mechanics.get("entry_template") or {}
+  debit_element_id = template.get("debit_element_id")
+  if not debit_element_id:
+    return False
+
+  remaining = session.execute(
+    text(
+      "SELECT COALESCE(SUM(value), 0) FROM facts "
+      "WHERE structure_id = :sid AND element_id = :eid"
+    ),
+    {"sid": structure.id, "eid": debit_element_id},
+  ).scalar()
+  new_total = round(float(remaining or 0), 2)
+  rule.rule_expression = f"sum($periodic_amount) = {new_total}"
+  session.query(VerificationResult).filter(
+    VerificationResult.rule_id == rule.id
+  ).delete(synchronize_session=False)
+  return True
+
+
+def terminate_schedule(
+  session: Session,
+  body: TerminateScheduleRequest,
+  created_by: str = "system",
+) -> TerminateScheduleResponse:
+  """End a schedule early at a month-end cutoff — no entry is booked.
+
+  The no-entry half of schedule retirement, for terminations whose GL
+  effect is already booked (an asset transferred via a manual journal
+  entry, a prepaid refunded in the source system) or where none is
+  wanted. In one transaction:
+
+  1. ``truncate_schedule`` deletes facts with period_start past the
+     cutoff (guards: month-end cutoff only; refuses when posted entries
+     exist past it; deletes stale draft entries past it).
+  2. The remaining obligation chain past the cutoff is voided —
+     ``pending`` and ``classified`` rows both. A ``classified`` row here
+     can only be an undrafted stray: drafted entries past the cutoff
+     were deleted in step 1 and posted ones blocked it.
+  3. The schedule's SumEquals rule is rewritten to prove the truncated
+     curve.
+
+  Obligations and facts at or before the cutoff are untouched, so open
+  months the schedule still covers close normally.
+
+  When the derecognition entry still needs to be booked, use
+  ``create-event-block(event_type='asset_disposed')`` instead — the
+  disposal handler posts it atomically with the same obligation void.
+
+  Raises ``ScheduleNotFoundError`` if the schedule does not exist, and
+  ``ValueError`` on the truncation guards (mid-month cutoff, posted
+  entries past the cutoff, cutoff before the schedule's first fact).
+  """
+  structure = _load_schedule_or_404(session, body.structure_id)
+  service = ScheduleService()
+
+  truncation = service.truncate_schedule(
+    session,
+    structure_id=structure.id,
+    new_end_date=body.new_end_date,
+    reason=body.reason,
+    updated_by=created_by,
+  )
+
+  # The void locks the same pending rows the promotion sweep holds —
+  # bound the wait rather than hold this request for the length of a
+  # background tick (mirrors delete_schedule).
+  from robosystems.operations.locking import bounded_lock_wait
+
+  with bounded_lock_wait(
+    session,
+    "This schedule's pending obligations are being written by another "
+    "process. Retry in a moment.",
+  ):
+    obligations_voided = service.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason=f"schedule_terminated: {body.reason}",
+      period_start_after=body.new_end_date,
+      include_classified=True,
+    )
+
+  rule_updated = _rewrite_sum_equals_rule(session, structure)
+  session.commit()
+
+  return TerminateScheduleResponse(
+    structure_id=structure.id,
+    name=structure.name,
+    new_end_date=truncation["new_end_date"],
+    facts_deleted=truncation["facts_deleted"],
+    obligations_voided=obligations_voided,
+    rule_updated=rule_updated,
+    reason=body.reason,
+  )
 
 
 def _reconstruct_schedule_definition(

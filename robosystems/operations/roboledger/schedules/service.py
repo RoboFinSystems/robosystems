@@ -815,10 +815,12 @@ class ScheduleService:
     structure: Structure,
     void_reason: str,
     voided_by_event_id: str | None = None,
+    period_start_after: date | None = None,
+    include_classified: bool = False,
   ) -> int:
     """Void all `pending` schedule_entry_due events for a schedule.
 
-    Shared helper for the two lifecycle paths that retire a schedule's
+    Shared helper for the lifecycle paths that retire a schedule's
     remaining obligations:
 
     - **Disposal** (asset_disposed handler): pass ``voided_by_event_id``
@@ -830,6 +832,17 @@ class ScheduleService:
       event row is about to be deleted along with the schedule, so the
       pending children are voided pre-emptively to keep them from
       tripping the close-period gate after their parent disappears.
+    - **Termination** (cmd_terminate_schedule): pass
+      ``period_start_after`` = the truncation cutoff so obligations for
+      periods the schedule still covers are left alone, and
+      ``include_classified=True`` so matured-but-undrafted strays past
+      the cutoff are retired too (the terminate command deletes draft
+      entries past the cutoff first and is blocked by posted ones, so a
+      classified row it reaches can only be an undrafted stray).
+
+    ``period_start_after`` filters on the obligation's
+    ``metadata.period_start`` (ISO date string comparison): only rows
+    whose period starts strictly after the given date are voided.
 
     Returns the number of voided rows. Returns 0 (no-op) when the
     schedule has no ``schedule_created_event_id`` stamped (rows from
@@ -873,13 +886,23 @@ class ScheduleService:
     # surface at flush, outside any lock-wait translation. The status
     # predicate stays on the UPDATE: it is the invariant that a row this
     # call did not lock as `pending` is never voided.
+    voidable_statuses = (
+      ("pending", "classified") if include_classified else ("pending",)
+    )
+    select_filters = [
+      Event.obligated_by_event_id == schedule_created_event_id,
+      Event.status.in_(voidable_statuses),
+    ]
+    if period_start_after is not None:
+      # Obligation periods live in metadata as ISO date strings, so a
+      # lexicographic comparison IS a date comparison.
+      select_filters.append(
+        Event.metadata_["period_start"].astext > period_start_after.isoformat()
+      )
     pending_ids = list(
       session.execute(
         select(Event.id)
-        .where(
-          Event.obligated_by_event_id == schedule_created_event_id,
-          Event.status == "pending",
-        )
+        .where(*select_filters)
         .order_by(ordered_lock_column())
         .with_for_update()
       ).scalars()
@@ -893,7 +916,7 @@ class ScheduleService:
 
     result = session.execute(
       update(Event)
-      .where(Event.id.in_(pending_ids), Event.status == "pending")
+      .where(Event.id.in_(pending_ids), Event.status.in_(voidable_statuses))
       .values(**update_values)
     )
     voided_count = int(result.rowcount or 0)

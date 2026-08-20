@@ -49,7 +49,19 @@ _RECURRING_SEQUENCE: list[str] = [
   "(reopen → re-close) when no external reporting binds them — the usual "
   "default inside the current fiscal year — or book a CATCH-UP entry in "
   "the open period when the reporting cadence has locked prior months. "
-  "Don't close over unreviewed reconciling items.",
+  "A catch-up/alignment JE that mirrors an edit ALREADY MADE in the source "
+  "system must post locally only — create it with source='system' "
+  "(source='manual' publishes to QB at close and would double-apply the "
+  "edit upstream). Don't close over unreviewed reconciling items.",
+  "Schedules ending this period? (an asset sold or transferred, a prepaid "
+  "cancelled or refunded): terminate BEFORE promoting obligations, or the "
+  "sweep drafts entries the termination says should not exist. "
+  "terminate-schedule ends a schedule at a month-end cutoff with no entry "
+  "(truncates forward facts + voids the remaining obligation chain) — use "
+  "it when the GL effect is already booked or none is wanted. "
+  "create-event-block(event_type='asset_disposed') additionally posts the "
+  "disposal/derecognition entry atomically — use it when that entry still "
+  "needs to be booked.",
   "get-period-close-status (period_start/period_end as YYYY-MM-DD) — see "
   "which schedules are pending / drafted / posted and their amounts.",
   "promote-obligations (dispatch_handlers=true) — draft every matured "
@@ -71,7 +83,11 @@ _RECURRING_SEQUENCE: list[str] = [
   "balance-sheet equation check, advances closed_through. Use "
   "allow_stale_sync=true only when the user has verified QB is complete "
   "despite a stale sync — normally run sync-connection instead (see the "
-  "sync_stale step above).",
+  "sync_stale step above). The call can outlive a client tool timeout "
+  "while the outbox publishes; the close is atomic server-side, so NEVER "
+  "retry on a timeout — verify with get-fiscal-calendar (period closed, "
+  "closed_through advanced) and reconstruct the receipt from "
+  "get-period-close-status.",
   "Post-close verification — read the receipt back to the user, don't "
   "assume: entries_posted should equal the reviewed draft count "
   "(entries_published_to_qb / entries_posted_locally carry the split); "
@@ -202,6 +218,19 @@ _KEY_RULES: list[str] = [
   "close would otherwise silently omit; promote-obligations with "
   "dispatch_handlers=true drafts them, or void the obligation). Resolve "
   "before close-period; get-fiscal-calendar reports them.",
+  "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
+  "publish to QuickBooks at close through the outbox; source='system' posts "
+  "locally only. Use 'system' for alignment/catch-up entries that mirror "
+  "edits already made in the source system — publishing those would "
+  "double-apply the edit upstream. list-period-drafts shows the split "
+  "(will_publish_to_qb per draft) before anything commits.",
+  "SCHEDULE TERMINATION: terminate-schedule ends a schedule early at a "
+  "month-end cutoff with no entry (truncates forward facts + voids the "
+  "remaining obligation chain past the cutoff); "
+  "create-event-block(event_type='asset_disposed') does the same void and "
+  "also posts the disposal/derecognition entry atomically. Terminate "
+  "BEFORE promote-obligations. delete-information-block is NOT a "
+  "termination — it erases the schedule's history.",
   "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
   "'close procedures' / 'month-end' document before authoring or closing. It "
   "captures this company's specifics and should reference this playbook.",
