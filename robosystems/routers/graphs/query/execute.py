@@ -671,7 +671,7 @@ async def execute_cypher_query(
         )
         raise HTTPException(
           status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"Failed to queue query: {queue_error!s}",
+          detail=safe_error_message(queue_error) or "Failed to queue query",
         )
 
     # Continue with the successfully queued query_id and status
@@ -895,7 +895,6 @@ async def execute_cypher_query(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
           "error": "Query execution failed",
-          "error_type": type(e).__name__,
           "error_message": safe_error_message(e)
           or "An unexpected error occurred while processing your query",
           "suggestion": "Please check your query syntax and try again",
