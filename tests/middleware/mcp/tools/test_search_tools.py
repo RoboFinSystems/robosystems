@@ -161,3 +161,29 @@ class TestToolRegistration:
 
     assert search_tool.get_tool_definition()["name"] == "search-documents"
     assert section_tool.get_tool_definition()["name"] == "get-document-section"
+
+
+class TestSearchToolErrorSanitization:
+  """opensearch-py exception text (endpoint hostnames, index internals) must
+  not reach the LLM through a tool result."""
+
+  @pytest.mark.asyncio
+  async def test_backend_error_is_withheld_from_the_llm(self, mock_graph_client):
+    tool = SearchDocumentsTool(mock_graph_client)
+
+    class ConnectionTimeout(Exception):
+      pass
+
+    mock_service = MagicMock()
+    mock_service.search_documents.side_effect = ConnectionTimeout(
+      "ConnectionTimeout caused by vpc-os-abc.us-east-1.es.amazonaws.com:443"
+    )
+    with patch(
+      "robosystems.operations.search.get_search_service",
+      return_value=mock_service,
+    ):
+      result = await tool.execute({"query": "anything"})
+
+    assert result["error"] == "search_failed"
+    assert "amazonaws.com" not in result["message"]
+    assert "see server logs" in result["message"]

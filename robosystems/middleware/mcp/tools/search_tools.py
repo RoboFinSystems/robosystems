@@ -11,6 +11,7 @@ similarity (KNN) via a normalization pipeline for balanced scoring.
 from typing import Any
 
 from robosystems.logger import logger
+from robosystems.security.error_handling import safe_error_message
 
 
 class _SearchToolMixin:
@@ -151,8 +152,14 @@ class SearchDocumentsTool(_SearchToolMixin):
       response = service.search_documents(graph_id, request)
       return response.model_dump()
     except Exception as e:
-      logger.error(f"search-documents failed: {e}")
-      return {"error": f"Search failed: {e}"}
+      # opensearch-py exception text embeds the endpoint hostname and query
+      # internals — the LLM-facing result gets the fixed message instead.
+      logger.error(f"search-documents failed: {e}", exc_info=True)
+      return {
+        "error": "search_failed",
+        "message": safe_error_message(e)
+        or "search failed on a backend error; see server logs",
+      }
 
 
 class GetDocumentSectionTool(_SearchToolMixin):
@@ -206,5 +213,9 @@ class GetDocumentSectionTool(_SearchToolMixin):
         return {"error": f"Document {document_id} not found"}
       return result.model_dump()
     except Exception as e:
-      logger.error(f"get-document-section failed: {e}")
-      return {"error": f"Retrieval failed: {e}"}
+      logger.error(f"get-document-section failed: {e}", exc_info=True)
+      return {
+        "error": "retrieval_failed",
+        "message": safe_error_message(e)
+        or "retrieval failed on a backend error; see server logs",
+      }

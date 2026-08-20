@@ -91,6 +91,16 @@ def verify_password(password: str, hashed: str) -> bool:
   return PasswordSecurity.verify_password(password, hashed)
 
 
+async def hash_password_async(password: str) -> str:
+  """hash_password off the event loop — bcrypt at cost 14 blocks ~0.5-1 s."""
+  return await PasswordSecurity.hash_password_async(password)
+
+
+async def verify_password_async(password: str, hashed: str) -> bool:
+  """verify_password off the event loop; see hash_password_async."""
+  return await PasswordSecurity.verify_password_async(password, hashed)
+
+
 # JWT token functions are now imported from middleware.auth.jwt
 
 

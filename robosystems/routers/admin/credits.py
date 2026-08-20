@@ -629,6 +629,26 @@ async def check_credit_health(request: Request):
     graph_pools = session.query(GraphCredits).all()
     repo_pools = session.query(UserRepositoryCredits).all()
 
+    # Active parent graphs with NO credit pool at all. Iterating pools can
+    # never see these — yet the AI pre-flight denies every run on them, and
+    # admin add-bonus/reset both 404 on the missing row. Subgraphs share the
+    # parent's pool and shared repositories have none by design, so both are
+    # excluded.
+    graph_missing_pools = [
+      {"graph_id": g.graph_id, "org_id": g.org_id, "tier": g.graph_tier}
+      for g in (
+        session.query(Graph)
+        .outerjoin(GraphCredits, GraphCredits.graph_id == Graph.graph_id)
+        .filter(
+          GraphCredits.id.is_(None),
+          Graph.parent_graph_id.is_(None),
+          Graph.graph_type != "repository",
+          Graph.status == "active",
+        )
+        .all()
+      )
+    ]
+
     graph_low_balance = []
     graph_negative_balance = []
     graph_allocation_issues = []
@@ -720,6 +740,7 @@ async def check_credit_health(request: Request):
       len(graph_low_balance)
       + len(graph_negative_balance)
       + len(graph_allocation_issues)
+      + len(graph_missing_pools)
     )
     repo_issues = (
       len(repo_low_balance)
@@ -732,7 +753,7 @@ async def check_credit_health(request: Request):
     total_pools = len(graph_pools) + len(repo_pools)
 
     status_value = "healthy"
-    if graph_negative_balance or repo_negative_balance:
+    if graph_negative_balance or repo_negative_balance or graph_missing_pools:
       status_value = "critical"
     elif total_issues > total_pools * 0.1:
       status_value = "warning"
@@ -756,6 +777,7 @@ async def check_credit_health(request: Request):
         "low_balance_pools": graph_low_balance,
         "negative_balance_pools": graph_negative_balance,
         "allocation_issues": graph_allocation_issues,
+        "missing_pools": graph_missing_pools,
       },
       repository_health={
         "total_pools": len(repo_pools),

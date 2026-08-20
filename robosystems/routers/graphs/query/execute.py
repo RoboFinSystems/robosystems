@@ -60,6 +60,7 @@ from robosystems.models.api.graphs.query import (
   CypherStatementResponse,
 )
 from robosystems.models.core import User
+from robosystems.security.error_handling import safe_error_message
 
 from .handlers import (
   get_query_operation_type,
@@ -840,9 +841,12 @@ async def execute_cypher_query(
       },
       user_id=current_user.id if current_user else None,
     )
+    # Transient-rejection text can name factory internals (pool state, the
+    # shared master) — the caller only needs "at capacity, back off".
     raise HTTPException(
       status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail=str(e),
+      detail=safe_error_message(e)
+      or "Graph API is temporarily unavailable; retry shortly",
       headers={"Retry-After": str(retry_after)},
     )
 
@@ -883,14 +887,17 @@ async def execute_cypher_query(
 
     logger.error(f"Unexpected error in query execution: {e}")
 
-    # Provide helpful error for testing tools
+    # Provide helpful error for testing tools. is_interactive is caller-
+    # controlled (test_mode / User-Agent), so it confers verbosity of shape
+    # only — the message itself is sanitized like every other sink.
     if client_info.get("is_interactive"):
       return JSONResponse(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
           "error": "Query execution failed",
           "error_type": type(e).__name__,
-          "error_message": str(e),
+          "error_message": safe_error_message(e)
+          or "An unexpected error occurred while processing your query",
           "suggestion": "Please check your query syntax and try again",
         },
       )

@@ -1020,3 +1020,72 @@ class TestSingleBalanceDefinition:
     summary = self.credits.get_usage_summary(self.session)
     assert summary["current_balance"] == 700.0
     assert summary["consumed_this_month"] == 300.0
+
+  def test_consume_does_not_revert_a_concurrent_debit(self):
+    """Regression: the ORM write-back after the atomic UPDATE used to flush an
+    absolute balance, clobbering any debit that committed concurrently (the
+    lock is released by create_transaction's internal commit). A second debit
+    landing in that window must survive."""
+    from unittest.mock import patch
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from robosystems.models.core.graph.graph_credits import GraphCreditTransaction
+
+    credits = self.credits
+    credits.current_balance = Decimal("100")
+    self.session.commit()
+    credits_id = credits.id
+
+    engine = self.session.get_bind()
+    real_create = GraphCreditTransaction.create_transaction.__func__
+    fired = {"done": False}
+
+    def create_then_inject_concurrent_debit(cls, *args, **kwargs):
+      # The real call commits the atomic debit and releases the row lock.
+      txn = real_create(cls, *args, **kwargs)
+      # Exactly here, a concurrent request debits the same pool in its own
+      # committed transaction — the interleaving the write-back used to lose.
+      if not fired["done"]:
+        fired["done"] = True
+        other = Session(bind=engine)
+        try:
+          other.execute(
+            text(
+              "UPDATE graph_credits SET current_balance = current_balance - 5 "
+              "WHERE id = :cid"
+            ),
+            {"cid": credits_id},
+          )
+          other.commit()
+        finally:
+          other.close()
+      return txn
+
+    with patch.object(
+      GraphCreditTransaction,
+      "create_transaction",
+      classmethod(create_then_inject_concurrent_debit),
+    ):
+      result = credits.consume_credits_atomic(
+        amount=Decimal("10"),
+        operation_type="agent_call",
+        operation_description="AI call",
+        session=self.session,
+        user_id=self.user.id,
+      )
+
+    assert result["success"] is True
+
+    # 100 - 10 (this consume) - 5 (concurrent) = 85. A revert-to-absolute bug
+    # would leave 90 (the concurrent -5 lost).
+    verify = Session(bind=engine)
+    try:
+      db_balance = verify.execute(
+        text("SELECT current_balance FROM graph_credits WHERE id = :cid"),
+        {"cid": credits_id},
+      ).scalar()
+    finally:
+      verify.close()
+    assert Decimal(str(db_balance)) == Decimal("85")

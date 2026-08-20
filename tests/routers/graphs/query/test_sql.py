@@ -71,3 +71,68 @@ async def test_execute_sql_shared_repo_blocked():
       )
   assert e.value.status_code == 403
   assert "Shared repositories do not allow direct SQL" in e.value.detail
+
+
+async def test_execute_sql_driver_error_is_sanitized():
+  """A backend/driver exception must not put its text (hostnames, internals)
+  in front of the caller — the detail collapses to a generic message."""
+  req = SqlStatementRequest(sql="SELECT 1")
+
+  class FakeDriverError(Exception):
+    pass
+
+  client = MagicMock()
+  client.query_table = AsyncMock(
+    side_effect=FakeDriverError(
+      "could not connect to db.internal:5432 password=hunter2"
+    )
+  )
+  with (
+    patch(f"{MOD}.get_universal_repository", new=AsyncMock(return_value=MagicMock())),
+    patch(
+      "robosystems.graph_api.client.factory.get_graph_client",
+      new=AsyncMock(return_value=client),
+    ),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await sql_module.execute_sql(
+        full_request=MagicMock(),
+        graph_id="kg1234567890abcdef",
+        request=req,
+        current_user=_user(),
+        _rate_limit=None,
+        db=MagicMock(),
+      )
+  assert e.value.status_code == 400
+  assert e.value.detail == "Query failed"
+  assert "db.internal" not in e.value.detail
+  assert "hunter2" not in e.value.detail
+
+
+async def test_execute_sql_syntax_error_passes_through():
+  """A caller-facing query error (GraphSyntaxError) keeps its message."""
+  from robosystems.graph_api.client.exceptions import GraphSyntaxError
+
+  req = SqlStatementRequest(sql="SELECT bad")
+  client = MagicMock()
+  client.query_table = AsyncMock(
+    side_effect=GraphSyntaxError("Binder Error: column x not found")
+  )
+  with (
+    patch(f"{MOD}.get_universal_repository", new=AsyncMock(return_value=MagicMock())),
+    patch(
+      "robosystems.graph_api.client.factory.get_graph_client",
+      new=AsyncMock(return_value=client),
+    ),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await sql_module.execute_sql(
+        full_request=MagicMock(),
+        graph_id="kg1234567890abcdef",
+        request=req,
+        current_user=_user(),
+        _rate_limit=None,
+        db=MagicMock(),
+      )
+  assert e.value.status_code == 400
+  assert "Binder Error: column x not found" in e.value.detail

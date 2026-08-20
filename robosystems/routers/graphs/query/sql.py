@@ -36,6 +36,7 @@ from robosystems.models.api.graphs.tables import (
   SqlStatementResponse,
 )
 from robosystems.models.core import User
+from robosystems.security.error_handling import safe_error_message
 
 router = APIRouter()
 
@@ -197,7 +198,11 @@ async def execute_sql(
       exc_info=True,
     )
 
+    # The caller's own statement errors keep their message; infrastructure
+    # exceptions (boto3/redis/driver text naming hosts and internals) collapse
+    # to a generic detail — the full text is in the log line above.
+    safe_message = safe_error_message(e)
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"Query failed: {e!s}",
+      detail=f"Query failed: {safe_message}" if safe_message else "Query failed",
     )

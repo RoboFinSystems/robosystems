@@ -38,7 +38,7 @@ from ...security.input_validation import (
   validate_email,
 )
 from ...security.password import PasswordSecurity
-from .utils import detect_app_source, hash_password, require_password_auth
+from .utils import detect_app_source, hash_password_async, require_password_auth
 
 # Create router for register endpoint
 router = APIRouter()
@@ -293,7 +293,7 @@ async def register(
         detail="This invitation was issued for a different email address.",
       )
 
-  password_hash = hash_password(request.password)
+  password_hash = await hash_password_async(request.password)
 
   # Verification policy: possession of the emailed invitation token proves
   # control of the invited mailbox, and dev environments skip verification

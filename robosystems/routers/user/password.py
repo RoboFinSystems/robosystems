@@ -70,7 +70,7 @@ async def update_user_password(
         code=ErrorCode.INVALID_INPUT,
       )
 
-    if not PasswordSecurity.verify_password(
+    if not await PasswordSecurity.verify_password_async(
       request.current_password, user_with_password.password_hash
     ):
       metrics_instance = get_endpoint_metrics()
@@ -114,7 +114,7 @@ async def update_user_password(
     # registration and reset both hash at the policy cost, and a bare
     # bcrypt.gensalt() defaults to cost 12, silently downgrading every account
     # that changes its password below the configured work factor.
-    new_password_hash = PasswordSecurity.hash_password(request.new_password)
+    new_password_hash = await PasswordSecurity.hash_password_async(request.new_password)
 
     user_in_session = User.get_by_id(user_id, db)
     if not user_in_session:

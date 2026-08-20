@@ -807,6 +807,7 @@ class TestCheckCreditHealth:
     mock_session.query.return_value = query_mock
     # First .all() returns graph pools, second returns repo pools
     query_mock.all.side_effect = [[pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -818,6 +819,31 @@ class TestCheckCreditHealth:
     assert result.graph_health["negative_balance_pools"] == []
     assert result.graph_health["low_balance_pools"] == []
     mock_session.close.assert_called_once()
+
+  @pytest.mark.unit
+  async def test_missing_pool_triggers_critical(self, mock_request, mock_session):
+    """An active graph with no credit pool is invisible to per-pool scans yet
+    has every AI run denied — it must surface as a critical missing_pools row."""
+    from robosystems.routers.admin.credits import check_credit_health
+
+    orphan = MagicMock()
+    orphan.graph_id = "kg_orphan"
+    orphan.org_id = "org_1"
+    orphan.graph_tier = "ladybug-standard"
+
+    query_mock = MagicMock()
+    mock_session.query.return_value = query_mock
+    query_mock.all.side_effect = [[], []]  # no pools of either kind
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = [orphan]
+
+    with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
+      result = await check_credit_health(request=mock_request)
+
+    assert result.status == "critical"
+    assert result.graph_health["missing_pools"] == [
+      {"graph_id": "kg_orphan", "org_id": "org_1", "tier": "ladybug-standard"}
+    ]
+    assert result.pools_with_issues >= 1
 
   @pytest.mark.unit
   async def test_critical_with_negative_balance(self, mock_request, mock_session):
@@ -833,6 +859,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[negative_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -858,6 +885,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[low_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -879,6 +907,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[zero_pool], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -903,6 +932,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], [repo_pool]]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -925,6 +955,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], [inactive_pool]]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
       result = await check_credit_health(request=mock_request)
@@ -943,6 +974,7 @@ class TestCheckCreditHealth:
     query_mock = MagicMock()
     mock_session.query.return_value = query_mock
     query_mock.all.side_effect = [[], []]
+    query_mock.outerjoin.return_value.filter.return_value.all.return_value = []
 
     before = datetime.now(UTC)
 

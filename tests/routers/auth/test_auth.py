@@ -228,6 +228,25 @@ class TestAuthLogin:
     data = response.json()
     assert data["detail"] == "Invalid email or password"
 
+  def test_login_unknown_email_burns_bcrypt_to_equalize_timing(
+    self, client: TestClient
+  ):
+    """The miss path must spend a verification's worth of work so it is
+    indistinguishable from a wrong password (no enumeration oracle)."""
+    from unittest.mock import AsyncMock
+
+    with patch(
+      "robosystems.security.password.PasswordSecurity.equalize_verify_timing",
+      new=AsyncMock(),
+    ) as equalizer:
+      response = client.post(
+        "/v1/auth/login",
+        json={"email": "no-such-user@example.com", "password": "whatever123"},
+      )
+
+    assert response.status_code == 401
+    equalizer.assert_awaited_once()
+
   @patch.object(
     __import__("robosystems.config", fromlist=["env"]).env,
     "USER_REGISTRATION_ENABLED",

@@ -436,7 +436,11 @@ class CreditService:
     if not credits:
       return {"error": "No credit pool found for graph"}
 
-    credits.current_balance += amount
+    # Server-side increment: `+= amount` in Python is a read-modify-write that
+    # flushes an absolute value, silently reverting any debit that lands
+    # concurrently. The SQL-expression assignment emits
+    # `SET current_balance = current_balance + :amount` instead.
+    credits.current_balance = GraphCredits.current_balance + amount
     credits.updated_at = datetime.now(UTC)
 
     import uuid

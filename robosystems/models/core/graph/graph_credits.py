@@ -283,8 +283,15 @@ class GraphCredits(Base):
         user_id=user_id or self.user_id,
       )
 
-      self.current_balance = consumption_result.new_balance
-      self.updated_at = datetime.now(UTC)
+      # The conditional UPDATE above already persisted the debit. Never write
+      # the RETURNING value back through the ORM: create_transaction commits
+      # internally (releasing the row lock), so a concurrent debit can land
+      # before this method's final commit — an absolute
+      # `SET current_balance = <this session's view>` would then revert it
+      # (lost update: balance inflates while the ledger stays correct).
+      # Expire instead, so the next attribute access reloads from the DB.
+      if self in session:
+        session.expire(self, ["current_balance", "updated_at"])
 
       session.commit()
 
@@ -395,8 +402,12 @@ class GraphCredits(Base):
       user_id=user_id or self.user_id,
     )
 
-    self.current_balance = Decimal("0")
-    self.updated_at = datetime.now(UTC)
+    # The CTE UPDATE above already zeroed the row; an ORM write-back of the
+    # absolute value would clobber a concurrent allocation/bonus landing after
+    # create_transaction's internal commit (same lost-update as the consume
+    # path). Expire so the next access reloads.
+    if self in session:
+      session.expire(self, ["current_balance", "updated_at"])
 
     session.commit()
 

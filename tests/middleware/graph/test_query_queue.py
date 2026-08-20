@@ -629,7 +629,11 @@ class TestQueryQueueManager:
 
     assert query.status == QueryStatus.FAILED
     assert query.error is not None
-    assert "Query executor not configured" in query.error
+    # Internal config text ("executor not configured") is not a caller-safe
+    # message — it is withheld and replaced with a reference id, the full text
+    # going to the server log only.
+    assert "executor not configured" not in query.error
+    assert query.id in query.error
 
   def test_cleanup_completed_queries(self, queue_manager):
     """Test cleanup of completed queries cache."""

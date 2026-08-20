@@ -18,6 +18,7 @@ from typing import Any
 from robosystems.dagster.reporting import report_asset_materialization
 from robosystems.logger import logger
 from robosystems.middleware.sse.operation_manager import get_operation_manager
+from robosystems.security.error_handling import safe_error_message
 
 
 def _finalize_graph_provisioning(
@@ -251,11 +252,16 @@ async def run_graph_provisioning(
         pass
 
   except Exception as e:
-    logger.error(f"Graph provisioning failed for subscription {subscription_id}: {e}")
+    logger.error(
+      f"Graph provisioning failed for subscription {subscription_id}: {e}",
+      exc_info=True,
+    )
     if operation_id:
+      # Replays to the customer via SSE/status — sanitize at the write.
       await manager.fail_operation(
         operation_id,
-        error=str(e),
+        error=safe_error_message(e)
+        or f"Provisioning failed — reference {operation_id}",
         error_details={"error_type": type(e).__name__},
       )
 
@@ -437,12 +443,14 @@ async def run_user_repository_provisioning(
 
   except Exception as e:
     logger.error(
-      f"Repository provisioning failed for subscription {subscription_id}: {e}"
+      f"Repository provisioning failed for subscription {subscription_id}: {e}",
+      exc_info=True,
     )
     if operation_id:
       await manager.fail_operation(
         operation_id,
-        error=str(e),
+        error=safe_error_message(e)
+        or f"Provisioning failed — reference {operation_id}",
         error_details={"error_type": type(e).__name__},
       )
 

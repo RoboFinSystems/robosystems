@@ -171,7 +171,7 @@ class GraphCreationService:
           entity_dict = await self._provision_entity(graph_id, config)
 
       self._emit(config, "Creating credit pool...", 92)
-      self._create_credits(graph_id, config)
+      await self._create_credits(graph_id, config)
 
       result = GraphCreationResult(
         graph_id=graph_id,
@@ -517,32 +517,50 @@ class GraphCreationService:
       "database": graph_id,
     }
 
-  def _create_credits(self, graph_id: str, config: GraphCreationConfig) -> None:
-    """Create credit pool. Non-blocking — failures are logged, not raised."""
-    try:
-      from robosystems.database import get_db_session
+  async def _create_credits(self, graph_id: str, config: GraphCreationConfig) -> None:
+    """Create credit pool. Non-blocking — failures are logged, not raised.
 
-      from .credit_service import CreditService
+    Retried, because a graph without a pool has every AI run denied by the
+    unconditional pre-flight, admin add-bonus/reset both 404 on the missing
+    row, and the monthly allocation iterates existing pools only — a single
+    transient failure here used to be a permanent, invisible gap.
+    """
+    import asyncio
 
-      db_gen = get_db_session()
-      db = next(db_gen)
+    last_error: Exception | None = None
+    for attempt in range(3):
       try:
-        credit_service = CreditService(db)
-        credit_service.create_graph_credits(
-          graph_id=graph_id,
-          user_id=config.user_id,
-          billing_admin_id=config.user_id,
-          subscription_tier=config.tier.lower(),
-          graph_tier=config.graph_tier,
-        )
-        logger.info(f"Credit pool created for {graph_id}")
-      finally:
+        from robosystems.database import get_db_session
+
+        from .credit_service import CreditService
+
+        db_gen = get_db_session()
+        db = next(db_gen)
         try:
-          next(db_gen)
-        except StopIteration:
-          pass
-    except Exception as e:
-      logger.error(f"Failed to create credit pool for {graph_id}: {e}")
+          credit_service = CreditService(db)
+          credit_service.create_graph_credits(
+            graph_id=graph_id,
+            user_id=config.user_id,
+            billing_admin_id=config.user_id,
+            subscription_tier=config.tier.lower(),
+            graph_tier=config.graph_tier,
+          )
+          logger.info(f"Credit pool created for {graph_id}")
+          return
+        finally:
+          try:
+            next(db_gen)
+          except StopIteration:
+            pass
+      except Exception as e:
+        last_error = e
+        logger.warning(
+          f"Credit pool creation attempt {attempt + 1}/3 failed for {graph_id}: {e}"
+        )
+        await asyncio.sleep(attempt + 1)
+    logger.error(
+      f"Failed to create credit pool for {graph_id} after 3 attempts: {last_error}"
+    )
 
   async def _cleanup_within_budget(
     self,
