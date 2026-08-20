@@ -652,6 +652,16 @@ class TestAddBonusCreditsToRepository:
     mock_query = mock_session.query.return_value
     mock_query.filter.return_value.first.return_value = pool
 
+    # refresh() reloads the server-computed balance from the DB — simulate that,
+    # capturing what was assigned before the reload.
+    captured = {}
+
+    def fake_refresh(obj):
+      captured["pre_reload"] = obj.current_balance
+      obj.current_balance = Decimal("900.0")
+
+    mock_session.refresh.side_effect = fake_refresh
+
     with (
       patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])),
       patch(f"{MODULE}.UserRepositoryCreditTransaction") as MockTransaction,
@@ -662,8 +672,14 @@ class TestAddBonusCreditsToRepository:
         data=bonus_request,
       )
 
-    # Balance should have been incremented
-    assert pool.current_balance == Decimal("700.0") + Decimal("200.0")
+    # The fix: balance is incremented server-side (SET current_balance =
+    # current_balance + :amount), not by a Python read-modify-write that could
+    # revert a concurrent debit — so what was assigned before the reload is a
+    # SQLAlchemy expression, not a pre-computed Decimal. The arithmetic itself is
+    # exercised by the model tests against a real DB.
+    assert not isinstance(captured["pre_reload"], Decimal)
+    assert "current_balance" in str(captured["pre_reload"])
+    assert result.current_balance == 900.0
     MockTransaction.create_transaction.assert_called_once()
     call_kwargs = MockTransaction.create_transaction.call_args.kwargs
     assert call_kwargs["credit_pool_id"] == "crd_pool_001"

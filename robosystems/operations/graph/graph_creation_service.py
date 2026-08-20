@@ -552,6 +552,11 @@ class GraphCreationService:
             next(db_gen)
           except StopIteration:
             pass
+      except ValueError as e:
+        # Deterministic config error (unknown tier, disallowed graph-tier combo)
+        # — retrying cannot help, so log and stop rather than burn the backoff.
+        logger.error(f"Failed to create credit pool for {graph_id}: {e}")
+        return
       except Exception as e:
         last_error = e
         logger.warning(

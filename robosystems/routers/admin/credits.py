@@ -425,7 +425,13 @@ async def add_bonus_credits_to_repository(
       }
     )
 
-    pool.current_balance += Decimal(str(data.amount))
+    # Server-side increment (not `+= amount`, a read-modify-write): the ORM
+    # read-modify-write flushes an absolute value that would revert a debit
+    # landing concurrently — the same lost-update this release closed on the
+    # graph pool's add_bonus_credits and the consume/reserve paths.
+    pool.current_balance = UserRepositoryCredits.current_balance + Decimal(
+      str(data.amount)
+    )
     pool.updated_at = datetime.now(UTC)
 
     UserRepositoryCreditTransaction.create_transaction(
