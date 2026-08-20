@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -2143,3 +2144,55 @@ def test_sumequals_rule_generates_for_coa_debit_with_null_qname() -> None:
   rule = rules[0]
   assert rule.rule_pattern == "SumEquals"
   assert rule.rule_variables[0]["variable_element_id"] == "elem_insurance"
+
+
+class TestPeriodCloseStatusScope:
+  """The close summary lists work, not every schedule that has ever existed.
+
+  The query LEFT JOINs the period's facts onto every active schedule, so a
+  schedule with no fact in the period used to fall through to `pending` at
+  amount 0.00 — indistinguishable from real outstanding work. Three
+  populations land there: terminated schedules (their forward facts are
+  deleted), schedules that have run to term, and schedules that start later.
+
+  That put the summary at odds with the obligation gate, which counts only
+  matured obligations. On the tenant that surfaced it the close summary said
+  39 pending against 30 real obligations, and the operator had to know which
+  nine were phantom.
+  """
+
+  def test_query_excludes_schedules_with_neither_fact_nor_entry(self) -> None:
+    """Regression guard, not a behavioural proof.
+
+    The logic lives entirely in raw SQL and every extensions test in this
+    suite mocks ``extensions_session``, so there is no in-suite path that
+    executes it. This asserts the predicate is present — it catches removal,
+    not misbehaviour. Behaviour was verified against the tenant after deploy
+    (39 listed / 30 real obligations, reconciled to 30).
+    """
+    from robosystems.operations.roboledger.schedules import service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    start = source.index("def get_period_close_status")
+    body = source[start : start + 4000]
+
+    assert "AND (f.id IS NOT NULL OR be.entry_id IS NOT NULL)" in body, (
+      "the close-status query must exclude schedules with no fact and no "
+      "entry in the period, or terminated and expired schedules render as "
+      "pending work forever"
+    )
+
+  def test_pending_rows_still_require_a_fact_to_be_counted(self) -> None:
+    """The filter must not also drop real pending work.
+
+    A schedule with a fact in the period and no entry yet IS pending — that
+    is the normal pre-draft state every close starts from — so the predicate
+    is an OR on (fact present, entry present), never an AND.
+    """
+    from robosystems.operations.roboledger.schedules import service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    start = source.index("def get_period_close_status")
+    body = source[start : start + 4000]
+
+    assert "AND (f.id IS NOT NULL AND be.entry_id IS NOT NULL)" not in body
