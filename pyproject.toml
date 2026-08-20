@@ -164,6 +164,14 @@ lambda = [
     "urllib3>=2.7.0,<3.0",          # HTTP client (graph-volume-monitor)
 ]
 
+[tool.uv]
+# sqlparse 0.6.0 (2026-08-13) fixes CVE-2026-59893 / CVE-2026-54284 /
+# CVE-2026-71491 (lexer and grouping DoS). dbt-core pins sqlparse<0.6.0 even
+# at its latest release, and it is the only consumer here (robosystems does not
+# import sqlparse; dbt parses only its own compiled SQL). Override until
+# dbt-core lifts the ceiling, then delete this block.
+override-dependencies = ["sqlparse>=0.6.0"]
+
 [tool.setuptools]
 packages = ["robosystems"]
 
