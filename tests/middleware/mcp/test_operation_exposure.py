@@ -13,6 +13,16 @@ observed in this codebase:
    never gets a matching MCP tool. Because nothing declares which operations
    are meant to reach MCP, this is indistinguishable from a deliberate hold.
 
+**There are two dispatchers for tool classes, and only one knows about the
+registrar.** ``GraphMCPTools.call_tool`` resolves registrar-generated tools at
+Layer 0, so a remote MCP client never reaches a hand-written class of the same
+name. ``DirectToolAccess`` (``operations/operators/tool_access.py``, the worker
+path behind ``MappingOperator`` / ``auto-map-elements``) instantiates tool
+classes in process and calls ``.execute()`` directly, never consulting the
+registrar. A class can therefore be dead on one path and load-bearing on the
+other, and "the registrar publishes this name" does **not** imply the class is
+dead — asserting that it did deleted a live write path once already.
+
 Operations registered through ``OperationRegistrar`` are immune: one
 ``OperationSpec`` mounts the REST route and auto-generates the MCP tool, so
 they cannot drift. These tests cover everything that does not use it, and push
@@ -104,6 +114,55 @@ def _instantiated_tool_classes() -> set[str]:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
       if node.func.id.endswith("Tool"):
         names.add(node.func.id)
+  return names
+
+
+OPERATORS_DIR = REPO_ROOT / "robosystems/operations/operators"
+
+
+def _operator_referenced_tool_classes() -> set[str]:
+  """Tool classes the operator layer names.
+
+  ``DirectToolAccess.get_tool_instance(SomeTool)`` takes the class itself, so
+  a class reachable only this way appears nowhere in ``manager.py``. Counting
+  it as orphaned is the mistake this scan exists to avoid.
+  """
+  names: set[str] = set()
+  for path in OPERATORS_DIR.rglob("*.py"):
+    for node in ast.walk(_parse(path)):
+      if isinstance(node, ast.Name) and node.id.endswith("Tool"):
+        names.add(node.id)
+      elif isinstance(node, ast.alias) and node.name.endswith("Tool"):
+        names.add(node.name)
+  return names
+
+
+def _tool_class_marks_stale(path: Path, class_name: str) -> bool:
+  """Does this class call ``mark_graph_stale`` itself?"""
+  for node in _parse(path).body:
+    if isinstance(node, ast.ClassDef) and node.name == class_name:
+      for inner in ast.walk(node):
+        if (
+          isinstance(inner, ast.Call)
+          and isinstance(inner.func, ast.Name)
+          and inner.func.id == "mark_graph_stale"
+        ):
+          return True
+  return False
+
+
+def _registrar_specs_with_stale_reason() -> set[str]:
+  """Operation names whose spec sets ``mark_stale_reason``."""
+  names: set[str] = set()
+  for path in ROUTERS_DIR.rglob("*.py"):
+    for node in ast.walk(_parse(path)):
+      if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+        continue
+      if node.func.id != "OperationSpec":
+        continue
+      kwargs = {kw.arg: kw.value for kw in node.keywords}
+      if "mark_stale_reason" in kwargs and isinstance(kwargs.get("name"), ast.Constant):
+        names.add(str(kwargs["name"].value))  # type: ignore[union-attr]
   return names
 
 
@@ -204,20 +263,26 @@ def _mcp_tool_names() -> set[str]:
 # ── Layer 1: the class exists but nothing reaches it ────────────────────────
 
 
-def test_every_tool_class_is_instantiated():
-  """A ``*Tool`` class not constructed in ``manager.py`` is unreachable."""
+def test_every_tool_class_is_reachable():
+  """A ``*Tool`` class reached by neither dispatcher is unreachable.
+
+  Two paths count: constructed in ``manager.py`` (the MCP wire), or named by
+  the operator layer, which passes the class itself to
+  ``DirectToolAccess.get_tool_instance``. Checking only the first is what made
+  a live worker-path write tool look dead.
+  """
   classes = _tool_classes()
   assert len(classes) >= MIN_TOOL_CLASSES, (
     f"only found {len(classes)} tool classes — the scan is probably broken"
   )
 
-  instantiated = _instantiated_tool_classes()
-  orphaned = sorted(set(classes) - instantiated)
+  reachable = _instantiated_tool_classes() | _operator_referenced_tool_classes()
+  orphaned = sorted(set(classes) - reachable)
   assert not orphaned, (
-    "MCP tool classes defined but never instantiated in manager.py — they "
-    "cannot be listed or called, so the capability is unreachable: "
-    f"{orphaned}. Wire them into GraphMCPTools.__init__ (and the matching "
-    "definition builder + call_tool branch), or delete them."
+    "MCP tool classes reached by neither dispatcher — not constructed in "
+    "manager.py and not named by the operator layer, so nothing can call "
+    f"them: {orphaned}. Wire them into GraphMCPTools.__init__ (plus the "
+    "matching definition builder and call_tool branch), or delete them."
   )
 
 
@@ -225,6 +290,8 @@ def test_every_instantiated_tool_is_listed():
   """A tool nobody lists is invisible, however well it works."""
   assigned = _assigned_tool_attributes()
   listed = _listed_tool_attributes()
+  # Only classes the manager itself constructs are expected in a tool list;
+  # an operator-only class is reached by class reference, never advertised.
   unlisted = sorted(attr for attr in assigned if attr not in listed)
   assert not unlisted, (
     "tools instantiated in manager.py whose get_tool_definition() is never "
@@ -239,17 +306,27 @@ def test_every_declared_tool_name_is_dispatchable():
   registrar_names = _registrar_operation_names()
   dispatchable = _dispatchable_tool_names()
 
+  operator_classes = _operator_referenced_tool_classes()
+  manager_classes = _instantiated_tool_classes()
+
   for class_name, path in sorted(_tool_classes().items()):
     declared = _declared_tool_name(path, class_name)
     if declared is None:
       continue
     if declared in registrar_names:
-      # Registrar-generated: dispatched at Layer 0 by name lookup, and a
-      # hand-written class for the same name would be dead code.
-      undispatchable.append(
-        f"{class_name} duplicates registrar operation '{declared}' "
-        "(registrar dispatch wins, so this class is unreachable)"
-      )
+      # The registrar owns this name on the wire (Layer 0), so the class is
+      # not what a remote client reaches. That makes it dead ONLY if nothing
+      # drives it in process — DirectToolAccess executes the class directly.
+      if class_name not in operator_classes:
+        undispatchable.append(
+          f"{class_name} declares '{declared}', which the registrar already "
+          "publishes, and no operator drives the class in process — nothing "
+          "can reach it"
+        )
+      continue
+    if class_name not in manager_classes:
+      # Operator-only class: reached by class, never by name. Nothing to
+      # assert about the dispatch ladder.
       continue
     if declared not in dispatchable:
       undispatchable.append(f"{class_name} declares '{declared}' with no branch")
@@ -317,4 +394,38 @@ def test_every_hold_gives_a_real_reason(operation: str):
   assert len(reason) >= 40 or cross_referenced, (
     f"hold for '{operation}' needs a reason a future reader can evaluate — "
     f"either spell it out or point at the hold it follows. Got: {reason!r}"
+  )
+
+
+def test_operator_driven_write_tools_mark_staleness_themselves():
+  """A class the operator layer executes cannot inherit ``mark_stale_reason``.
+
+  ``mark_stale_reason`` on an ``OperationSpec`` fires in the registrar, and
+  ``DirectToolAccess`` never goes through the registrar — it calls the tool
+  class directly. So when a hand-written class shares its name with a
+  registrar operation that marks the graph stale, the class has to make that
+  call itself or a worker run writes rows LadybugDB never rebuilds from.
+
+  This is the subtle half of the two-dispatcher trap: deleting such a class
+  breaks an import loudly, but *forgetting the stale mark* fails silently.
+  """
+  stale_marking_ops = _registrar_specs_with_stale_reason()
+  operator_classes = _operator_referenced_tool_classes()
+
+  missing = []
+  for class_name, path in sorted(_tool_classes().items()):
+    if class_name not in operator_classes:
+      continue
+    declared = _declared_tool_name(path, class_name)
+    if declared not in stale_marking_ops:
+      continue
+    if not _tool_class_marks_stale(path, class_name):
+      missing.append(
+        f"{class_name} is executed in process by the operator layer and its "
+        f"registrar twin '{declared}' sets mark_stale_reason, but the class "
+        "never calls mark_graph_stale"
+      )
+
+  assert not missing, (
+    f"operator-driven write tools that would leave the graph unmarked: {missing}"
   )

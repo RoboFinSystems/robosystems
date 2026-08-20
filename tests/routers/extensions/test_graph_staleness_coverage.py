@@ -20,10 +20,12 @@ Asserted over the registrars' real specs rather than a fixed list, so an
 operation added later is covered on the day it is written.
 
 **And over the hand-written routes too.** Enumerating only `OperationSpec`s
-covers 26 of roboledger's 48 operations; the other 22 are hand-written
+covers 29 of roboledger's 48 operations; the other 19 are hand-written
 `@router.post` handlers the registrar never sees, which is how `update-entity`
 kept writing materialized Entity columns without ever marking its graph while
-this file read as though it held the whole surface. Every hand-written route
+this file read as though it held the whole surface. (`update-entity` is a
+registrar spec as of 2026-08-20, along with `create-report` and
+`regenerate-report`; the hand-written half shrank by three accordingly.) Every hand-written route
 must be classified below — marking stale in its handler, marking stale in the
 command or tool it delegates to, or exempt with the reason — so a new one
 cannot land undeclared.
@@ -88,15 +90,16 @@ _OPERATION_ROUTERS = {
 
 # The handler itself calls `mark_graph_stale` (directly or via the
 # `on_fresh_success` hook it passes to `_dispatch`).
+# `create-report`, `regenerate-report` and `update-entity` used to live here.
+# They became registrar specs, so `mark_stale_reason` on the spec is what
+# covers them now and `test_every_write_op_marks_the_graph_stale` above is the
+# assertion that holds them to it.
 _STALE_IN_HANDLER = {
   "bind-text-block",
   "block-source-graph",
-  "create-report",
   "delete-report",
-  "regenerate-report",
   "revoke-report-share",
   "share-report",
-  "update-entity",
 }
 
 # The handler delegates, and the mark lives in the callee. Recorded as a
@@ -224,7 +227,10 @@ class TestGraphStalenessCoverage:
     invisible to the spec enumeration above, so it could write materialized
     tables and mark nothing while the suite stayed green."""
     hand_written = _hand_written()
-    assert len(hand_written) >= 20, (
+    # Floor sits just under the real count (19 after `create-report`,
+    # `regenerate-report` and `update-entity` moved to the registrar) so a
+    # scan that silently stops matching fails instead of passing vacuously.
+    assert len(hand_written) >= 17, (
       f"expected the hand-written operation surface, got {len(hand_written)} "
       "— route wiring or a feature flag changed"
     )

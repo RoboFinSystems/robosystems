@@ -13,9 +13,20 @@ MCP, GraphQL, and the REST read surface share one source of truth.
 Mapping **writes** are registrar-generated from the roboledger
 `OperationSpec` declarations (`create-mapping-association`,
 `delete-mapping-association`, …) — one registration mounts both the REST
-route and the MCP tool. Do not hand-write a tool for an operation the
-registrar already publishes: registrar dispatch is Layer 0 in
-`call_tool`, so the hand-written class would be unreachable.
+route and the MCP tool.
+
+`CreateMappingAssociationTool` below shares a name with one of those
+operations anyway, and that is load-bearing rather than duplication.
+**There are two dispatchers, and only one of them knows about the
+registrar.** `GraphMCPTools.call_tool` resolves registrar tools first
+(Layer 0), so a remote MCP client never reaches the class. But
+`DirectToolAccess` — the worker path, used by `MappingOperator` and hence
+by `auto-map-elements` — instantiates tool classes in process and calls
+`.execute()` on them directly, never consulting the registrar at all.
+
+So "the registrar publishes this name" does **not** imply "this class is
+dead". Check `operations/operators/tool_access.py` before deleting a tool
+class on that reasoning; deleting this one broke the worker mapping path.
 """
 
 from typing import Any
@@ -25,6 +36,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
+from robosystems.models.api.extensions.taxonomies import (
+  CreateMappingAssociationOperation,
+)
+from robosystems.operations.extensions.staleness import mark_graph_stale
+from robosystems.operations.roboledger.commands.taxonomies import (
+  create_mapping_association,
+)
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
   get_element,
@@ -377,4 +395,108 @@ class GetMappingSummaryTool:
       return database_failure("get-mapping-summary", exc)
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
+      return {"error": str(exc)}
+
+
+class CreateMappingAssociationTool:
+  """Write a CoA → rs-gaap mapping association.
+
+  Shares its name with the ``create-mapping-association`` registrar
+  operation, and that is deliberate rather than duplication: the two serve
+  different dispatchers. On the MCP wire, ``GraphMCPTools.call_tool``
+  resolves registrar tools at Layer 0, so *this* class is not what a remote
+  client reaches. On the worker path, ``DirectToolAccess`` instantiates tool
+  classes in process and executes them directly — it never consults the
+  registrar — so this class is the live write path for ``auto-map-elements``
+  and every MappingOperator run.
+
+  Consequence worth keeping: the ``mark_graph_stale`` call below is not
+  redundant with the spec's ``mark_stale_reason``. That only fires on the
+  registrar path; without the call here a worker mapping run would never
+  reach LadybugDB.
+  """
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-mapping-association",
+      "description": """Write a confirmed CoA → rs-gaap mapping association.
+
+**WHEN TO USE:**
+- After choosing the best rs-gaap candidate for a CoA element (`association_type='mapping'` — the canonical arc the renderer follows)
+- Confidence ≥ 0.70 is required; skip below that threshold
+
+**INPUTS:**
+- mapping_id: The coa_mapping structure ID (from get-unmapped-elements)
+- from_element_id: CoA element ID (source)
+- to_element_id: rs-gaap element ID (the reporting concept)
+- confidence: Float 0.0–1.0 (AI confidence in the match)
+- association_type: 'mapping' (CoA→rs-gaap, the primary arc the renderer follows) or 'equivalence' (alternate cross-taxonomy arc). Defaults to 'mapping'.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "description": "The coa_mapping structure ID",
+          },
+          "from_element_id": {
+            "type": "string",
+            "description": "CoA element ID (source)",
+          },
+          "to_element_id": {
+            "type": "string",
+            "description": "rs-gaap element ID (the reporting concept)",
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence score 0.0–1.0",
+          },
+          "association_type": {
+            "type": "string",
+            "enum": ["mapping", "equivalence"],
+            "description": "'mapping' = CoA→rs-gaap (primary, what the renderer follows); 'equivalence' = alternate cross-taxonomy arc. Defaults to 'mapping'.",
+          },
+        },
+        "required": ["mapping_id", "from_element_id", "to_element_id", "confidence"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+    try:
+      body = CreateMappingAssociationOperation(
+        mapping_id=arguments["mapping_id"],
+        from_element_id=arguments["from_element_id"],
+        to_element_id=arguments["to_element_id"],
+        confidence=float(arguments["confidence"]),
+        association_type=arguments.get("association_type", "mapping"),
+        suggested_by="mapping-agent",
+      )
+      # `suggested_by` names the suggester (the mapping operator); `created_by`
+      # is the accountable user — the caller when one is threaded through,
+      # otherwise the operator's own tag.
+      created_by = str(getattr(self.client, "user_id", None) or "mapping-agent")
+      with extensions_session(graph_id) as session:
+        result = create_mapping_association(session, body, created_by=created_by)
+      # The registrar-published tools get this from `OperationSpec`; this one
+      # is hand-written and reaches the command directly, so it has to mark
+      # the graph itself. Associations are materialized, and `auto-map-elements`
+      # writes its whole mapping run through this tool — without the mark the
+      # operator's work never reaches LadybugDB.
+      mark_graph_stale(graph_id, "mapping_association_created")
+      return {
+        "association_id": result.id,
+        "from_element_id": result.from_element_id,
+        "to_element_id": result.to_element_id,
+        "confidence": result.confidence,
+      }
+    except SQLAlchemyError as exc:
+      return database_failure("create-mapping-association", exc)
+    except Exception as exc:
+      logger.warning(f"create-mapping-association failed: {exc}")
       return {"error": str(exc)}
