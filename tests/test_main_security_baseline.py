@@ -99,6 +99,30 @@ class TestResponseHeaderBaseline:
       "max-age=31536000; includeSubDomains"
     )
 
+  def test_graphql_path_strict_outside_development(self, client, monkeypatch):
+    """The GraphiQL playground is dev-only, so its relaxed CSP must be too.
+
+    Outside development the graph-scoped GraphQL path serves no page —
+    only JSON refusals — and nothing on it needs CDN, inline, or eval'd
+    script. The header on those responses must be the strict API policy;
+    the playground's policy carries exactly the directives the external
+    assessment flagged and would read as an unremediated finding.
+    """
+    monkeypatch.setattr(env, "is_development", lambda: False)
+    response = client.get("/extensions/kg0123456789abcdef0000/graphql")
+    csp = response.headers["content-security-policy"]
+    assert "'unsafe-inline'" not in csp
+    assert "'unsafe-eval'" not in csp
+    assert "https://" not in csp
+    assert "script-src 'self';" in csp
+
+  def test_graphql_path_relaxed_in_development(self, client, monkeypatch):
+    """The playground keeps its CDN policy where it is actually served."""
+    monkeypatch.setattr(env, "is_development", lambda: True)
+    response = client.get("/extensions/kg0123456789abcdef0000/graphql")
+    csp = response.headers["content-security-policy"]
+    assert "'unsafe-eval'" in csp
+
 
 class TestAuthenticationEnforcement:
   """Protected endpoints refuse unauthenticated requests with a clean 401."""

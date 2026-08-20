@@ -9,7 +9,9 @@ The matcher decides which Content-Security-Policy header a path gets:
   CDNs and needs the relaxed policy. The post-cutover URL change
   (graph-scoping the GraphQL endpoint) silently broke the original
   `startswith("/extensions/graphql")` check, so the URL shapes are pinned
-  here.
+  here. The playground is served in development only, so the variant is
+  too: the matcher returns it only when the caller says the playground is
+  enabled, and the default is closed.
 - "api": everything else — strict policy.
 
 These tests pin the matcher contract so future URL changes that move
@@ -42,15 +44,35 @@ class TestCspVariantForPath:
     (the pre-cutover shape) and would have served the strict API CSP
     on the new URL, blocking the CDN-hosted GraphiQL bundle.
     """
-    assert csp_variant_for_path("/extensions/kg01234567890abcdef/graphql") == (
-      "graphiql"
-    )
+    assert csp_variant_for_path(
+      "/extensions/kg01234567890abcdef/graphql", graphiql_enabled=True
+    ) == ("graphiql")
     # Subgraph IDs (with underscores) work too
-    assert csp_variant_for_path("/extensions/kg01a2b3c_dev/graphql") == "graphiql"
+    assert (
+      csp_variant_for_path("/extensions/kg01a2b3c_dev/graphql", graphiql_enabled=True)
+      == "graphiql"
+    )
 
   def test_legacy_graphql_path_still_relaxed(self) -> None:
     """The pre-cutover URL is kept defensively in case anything still hits it."""
-    assert csp_variant_for_path("/extensions/graphql") == "graphiql"
+    assert csp_variant_for_path("/extensions/graphql", graphiql_enabled=True) == (
+      "graphiql"
+    )
+
+  def test_graphql_paths_strict_when_playground_disabled(self) -> None:
+    """Where the playground is not served, neither is its policy.
+
+    Outside development the graph-scoped GraphQL path answers with JSON
+    only, so it must get the strict variant like every other API route.
+    The default is closed: a caller that omits the flag cannot relax it.
+    """
+    for path in (
+      "/extensions/kg01234567890abcdef/graphql",
+      "/extensions/kg01a2b3c_dev/graphql",
+      "/extensions/graphql",
+    ):
+      assert csp_variant_for_path(path, graphiql_enabled=False) == "api"
+      assert csp_variant_for_path(path) == "api"
 
   def test_api_routes_strict(self) -> None:
     """Core platform API routes use the strict CSP."""
@@ -65,20 +87,12 @@ class TestCspVariantForPath:
     They must NOT get a relaxed CSP — those routes never serve HTML
     and shouldn't be loading scripts from CDNs.
     """
-    assert (
-      csp_variant_for_path("/extensions/roboledger/kg01a2b3c/operations/update-entity")
-      == "api"
-    )
-    assert (
-      csp_variant_for_path("/extensions/roboledger/kg01a2b3c/operations/close-period")
-      == "api"
-    )
-    assert (
-      csp_variant_for_path(
-        "/extensions/roboinvestor/kg01a2b3c/operations/create-portfolio"
-      )
-      == "api"
-    )
+    for path in (
+      "/extensions/roboledger/kg01a2b3c/operations/update-entity",
+      "/extensions/roboledger/kg01a2b3c/operations/close-period",
+      "/extensions/roboinvestor/kg01a2b3c/operations/create-portfolio",
+    ):
+      assert csp_variant_for_path(path, graphiql_enabled=True) == "api"
 
   def test_arbitrary_paths_strict(self) -> None:
     assert csp_variant_for_path("/openapi.json") == "api"
@@ -87,8 +101,11 @@ class TestCspVariantForPath:
 
   def test_path_traversal_does_not_bypass(self) -> None:
     """Defense in depth: a `/graphql` suffix anywhere else shouldn't relax CSP."""
-    assert csp_variant_for_path("/v1/auth/graphql") == "api"
-    assert csp_variant_for_path("/extensions-evil/foo/graphql") == "api"
+    assert csp_variant_for_path("/v1/auth/graphql", graphiql_enabled=True) == "api"
+    assert (
+      csp_variant_for_path("/extensions-evil/foo/graphql", graphiql_enabled=True)
+      == "api"
+    )
 
 
 class TestDocsPagesSelfHosted:
