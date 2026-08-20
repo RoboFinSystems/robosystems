@@ -77,15 +77,25 @@ def compute_disposal_plan(
   if not asset_element_id:
     raise ValueError(
       "Disposal requires schedule_metadata.asset_element_id "
-      "(the balance-sheet asset element). Update the schedule first."
+      "(the balance-sheet asset element). Update the schedule first — "
+      "for prepaid-amortization schedules, this is the credited prepaid "
+      "element itself (the same element as entry_template.credit_element_id)."
     )
   if not credit_element_id:
     raise ValueError("Disposal requires entry_template.credit_element_id.")
 
-  # Accumulated depreciation = most recent cumulative in-scope instant fact
-  # up to disposal_date. fact_scope='in_scope' parity with schedule_entry_due:
+  # Most recent cumulative in-scope instant fact up to disposal_date on the
+  # credited element. fact_scope='in_scope' parity with schedule_entry_due:
   # post-truncation / amendment chains can leave out-of-scope instant facts
   # behind, and picking one would produce a wrong NBV silently.
+  #
+  # What that fact MEANS depends on the schedule shape:
+  # - Depreciation-style (credit element is a contra account, e.g.
+  #   Accumulated Depreciation): the instant fact is the RISING cumulative
+  #   accumulated balance.
+  # - Prepaid-style ("self-carried": the credited element IS the asset,
+  #   e.g. Prepaid Expenses): the instant fact is the DECLINING remaining
+  #   balance — reading it as "accumulated" inverts NBV.
   acc_row = session.execute(
     text(
       "SELECT value FROM facts "
@@ -96,10 +106,17 @@ def compute_disposal_plan(
     ),
     {"sid": structure_id, "eid": credit_element_id, "d": disposal_date},
   ).fetchone()
-  accumulated_dollars = float(acc_row.value) if acc_row else 0.0
-  accumulated_depreciation = round(accumulated_dollars * 100)
+  carried_dollars = float(acc_row.value) if acc_row else 0.0
+  carried_cents = round(carried_dollars * 100)
 
-  nbv = original_amount - accumulated_depreciation
+  self_carried = asset_element_id == credit_element_id
+  if self_carried:
+    # Prepaid-style: the instant fact is the remaining balance = NBV.
+    nbv = carried_cents
+    accumulated_depreciation = max(original_amount - nbv, 0)
+  else:
+    accumulated_depreciation = carried_cents
+    nbv = original_amount - accumulated_depreciation
   gain_loss = sale_proceeds - nbv
 
   if sale_proceeds > 0 and not proceeds_element_id:
@@ -110,22 +127,42 @@ def compute_disposal_plan(
       "the disposal produces a gain or loss."
     )
 
-  line_items: list[dict] = [
-    # DR accumulated depreciation (remove the contra account)
-    {
-      "element_id": credit_element_id,
-      "debit_amount": accumulated_depreciation,
-      "credit_amount": 0,
-      "description": "Remove accumulated depreciation",
-    },
-    # CR asset at cost
-    {
-      "element_id": asset_element_id,
-      "debit_amount": 0,
-      "credit_amount": original_amount,
-      "description": "Remove asset at cost",
-    },
-  ]
+  if self_carried:
+    if nbv == 0 and sale_proceeds == 0:
+      raise ValueError(
+        "Nothing to dispose: the schedule's remaining balance is zero "
+        "and no proceeds were supplied."
+      )
+    # One credit derecognizes the asset at its remaining balance — a
+    # DR-accumulated/CR-cost pair on the SAME element would net to the
+    # same amount while doubling the gross line traffic.
+    line_items: list[dict] = []
+    if nbv > 0:
+      line_items.append(
+        {
+          "element_id": asset_element_id,
+          "debit_amount": 0,
+          "credit_amount": nbv,
+          "description": "Derecognize asset at remaining balance",
+        }
+      )
+  else:
+    line_items = [
+      # DR accumulated depreciation (remove the contra account)
+      {
+        "element_id": credit_element_id,
+        "debit_amount": accumulated_depreciation,
+        "credit_amount": 0,
+        "description": "Remove accumulated depreciation",
+      },
+      # CR asset at cost
+      {
+        "element_id": asset_element_id,
+        "debit_amount": 0,
+        "credit_amount": original_amount,
+        "description": "Remove asset at cost",
+      },
+    ]
   if sale_proceeds > 0 and proceeds_element_id:
     line_items.append(
       {

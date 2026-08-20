@@ -241,9 +241,11 @@ class UpdateScheduleRequest(BaseModel):
   Structure row / its metadata_ JSONB column).
 
   NOT editable via this op: period_start, period_end, monthly_amount.
-  Those require fact regeneration — fire an event block that terminates
-  the schedule (e.g., `asset_disposed`) and create a fresh schedule via
-  `create-information-block` (`block_type='schedule'`).
+  Those require fact regeneration — end the schedule early via
+  `terminate-schedule` (no entry) or
+  `create-event-block(event_type='asset_disposed')` (with a disposal
+  entry), then create a fresh schedule via `create-information-block`
+  (`block_type='schedule'`).
 
   Omitted fields are left unchanged.
   """
@@ -259,12 +261,56 @@ class DeleteScheduleRequest(BaseModel):
 
   Hard deletes the Structure, all Facts tied to it, and all
   Associations tied to it. This is a permanent, irreversible
-  operation. For ending a schedule early without removing history,
-  fire `create-event-block(event_type='asset_disposed')` instead — the
-  handler truncates the schedule + posts the disposal entry atomically.
+  operation. For ending a schedule early without removing history, use
+  `terminate-schedule` (no entry) or
+  `create-event-block(event_type='asset_disposed')` (the handler voids
+  the remaining obligation chain + posts the disposal entry atomically;
+  recognized facts stay as history).
   """
 
   structure_id: str
+
+
+class TerminateScheduleRequest(BaseModel):
+  """End a schedule early at a month-end cutoff — no entry is booked.
+
+  The no-entry half of schedule retirement, for terminations whose GL
+  effect is already booked (an asset transferred via a manual journal
+  entry, a prepaid refunded in the source system) or where none is
+  wanted. In one transaction: deletes forward facts past the cutoff,
+  voids the remaining obligation chain past it (pending and classified
+  rows), and rewrites the SumEquals rule to prove the truncated curve.
+  History at or before the cutoff is untouched.
+
+  When the derecognition entry still needs to be booked, use
+  `create-event-block(event_type='asset_disposed')` instead — the
+  disposal handler posts it atomically with the same obligation void.
+  """
+
+  structure_id: str = Field(..., description="The schedule structure to terminate.")
+  new_end_date: date = Field(
+    ...,
+    description=(
+      "Last date the schedule covers — must be the last day of a month "
+      "(schedule facts are whole-month). Facts and obligations for periods "
+      "starting after this date are removed/voided."
+    ),
+  )
+  reason: str = Field(
+    ...,
+    min_length=1,
+    description="Why the schedule is ending early — captured in the audit log.",
+  )
+
+
+class TerminateScheduleResponse(BaseModel):
+  structure_id: str
+  name: str
+  new_end_date: date
+  facts_deleted: int
+  obligations_voided: int
+  rule_updated: bool
+  reason: str
 
 
 class RebuildScheduleRequest(BaseModel):

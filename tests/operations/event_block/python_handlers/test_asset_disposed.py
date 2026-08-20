@@ -310,12 +310,12 @@ class TestVoidPendingObligationsForSchedule:
     lock_stmt = session.execute.call_args_list[0].args[0]
     lock_sql = str(lock_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "events.obligated_by_event_id = 'evt_schedule_created'" in lock_sql
-    assert "events.status = 'pending'" in lock_sql
+    assert "events.status IN ('pending')" in lock_sql
     assert "FOR UPDATE" in lock_sql and "ORDER BY events.id" in lock_sql
     update_stmt = session.execute.call_args_list[1].args[0]
     rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "events.id IN (" in rendered
-    assert "events.status = 'pending'" in rendered
+    assert "events.status IN ('pending')" in rendered
     assert "status='voided'" in rendered.replace(" = ", "=")
     assert "replaced_by_event_id='evt_disposal'" in rendered.replace(" = ", "=")
 
@@ -359,3 +359,132 @@ class TestVoidPendingObligationsForSchedule:
     assert voided == 0
     # The fallback recovery select ran; no UPDATE followed.
     assert session.execute.call_count == 1
+
+
+class TestComputeDisposalPlanShapes:
+  """Direct compute_disposal_plan coverage for the two schedule shapes.
+
+  Depreciation-style schedules carry a RISING cumulative instant fact on
+  the contra credit element; prepaid-style ("self-carried") schedules
+  carry the DECLINING remaining balance on the credited asset itself.
+  Reading the latter as "accumulated" inverts NBV — the July 2026 close
+  regression this class pins down.
+  """
+
+  @staticmethod
+  def _structure(
+    asset_element_id: str, credit_element_id: str, original_amount: int
+  ) -> MagicMock:
+    structure = MagicMock()
+    structure.artifact_mechanics = {
+      "schedule_metadata": {
+        "asset_element_id": asset_element_id,
+        "original_amount": original_amount,
+      },
+      "entry_template": {"credit_element_id": credit_element_id},
+    }
+    return structure
+
+  @staticmethod
+  def _session(structure: MagicMock, instant_value: float | None) -> MagicMock:
+    structure_result = MagicMock()
+    structure_result.scalar_one_or_none.return_value = structure
+    fact_result = MagicMock()
+    if instant_value is None:
+      fact_result.fetchone.return_value = None
+    else:
+      row = MagicMock()
+      row.value = instant_value
+      fact_result.fetchone.return_value = row
+    session = MagicMock()
+    session.execute.side_effect = [structure_result, fact_result]
+    return session
+
+  def test_depreciation_shape_reads_instant_as_accumulated(self) -> None:
+    from datetime import date
+
+    from robosystems.operations.event_block.python_handlers._disposal_plan import (
+      compute_disposal_plan,
+    )
+
+    structure = self._structure("elem_ppe", "elem_accum", 120_000)
+    session = self._session(structure, 300.00)
+
+    plan = compute_disposal_plan(
+      session,
+      structure_id="struct_depr",
+      disposal_date=date(2026, 7, 1),
+      sale_proceeds=90_000,
+      proceeds_element_id="elem_cash",
+      gain_loss_element_id=None,
+    )
+
+    assert plan.accumulated_depreciation == 30_000
+    assert plan.nbv == 90_000
+    assert plan.gain_loss == 0
+    # DR accumulated / CR asset-at-cost / DR proceeds
+    assert [
+      (li["element_id"], li["debit_amount"], li["credit_amount"])
+      for li in plan.line_items
+    ] == [
+      ("elem_accum", 30_000, 0),
+      ("elem_ppe", 0, 120_000),
+      ("elem_cash", 90_000, 0),
+    ]
+
+  def test_self_carried_prepaid_reads_instant_as_remaining_balance(self) -> None:
+    from datetime import date
+
+    from robosystems.operations.event_block.python_handlers._disposal_plan import (
+      compute_disposal_plan,
+    )
+
+    # The July 2026 regression: AWS RI 2026-02, original 1,315.08, remaining
+    # 1,132.43 at 6/30. The old code computed NBV = 182.65 (inverted).
+    structure = self._structure("elem_prepaid", "elem_prepaid", 131_508)
+    session = self._session(structure, 1132.43)
+
+    plan = compute_disposal_plan(
+      session,
+      structure_id="struct_ri",
+      disposal_date=date(2026, 7, 1),
+      sale_proceeds=113_243,
+      proceeds_element_id="elem_other_services",
+      gain_loss_element_id=None,
+    )
+
+    assert plan.nbv == 113_243
+    assert plan.accumulated_depreciation == 18_265
+    assert plan.gain_loss == 0
+    # Single derecognition credit on the self-carried asset + proceeds.
+    assert [
+      (li["element_id"], li["debit_amount"], li["credit_amount"])
+      for li in plan.line_items
+    ] == [
+      ("elem_prepaid", 0, 113_243),
+      ("elem_other_services", 113_243, 0),
+    ]
+    # Balanced.
+    assert sum(li["debit_amount"] for li in plan.line_items) == sum(
+      li["credit_amount"] for li in plan.line_items
+    )
+
+  def test_self_carried_with_nothing_left_raises(self) -> None:
+    from datetime import date
+
+    from robosystems.operations.event_block.python_handlers._disposal_plan import (
+      compute_disposal_plan,
+    )
+
+    structure = self._structure("elem_prepaid", "elem_prepaid", 131_508)
+    session = self._session(structure, 0.0)
+
+    with pytest.raises(ValueError, match="Nothing to dispose"):
+      compute_disposal_plan(
+        session,
+        structure_id="struct_ri",
+        disposal_date=date(2026, 7, 1),
+        sale_proceeds=0,
+        proceeds_element_id=None,
+        gain_loss_element_id=None,
+      )

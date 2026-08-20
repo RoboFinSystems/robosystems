@@ -28,8 +28,10 @@ Registered operations, in workflow order:
   dispatches on event type: `journal_entry_recorded` (manual entry, draft
   or posted), `journal_entry_reversed` (offsetting reversal of a posted
   entry), `schedule_entry_due` (a schedule period matured), and
-  `asset_disposed` (atomic disposal plus schedule termination and
-  truncate).
+  `asset_disposed` (books the disposal entry and voids the schedule's
+  remaining obligations atomically; recognized facts stay as history).
+  For a no-entry early ending — truncate forward facts + void the
+  remaining obligations — use the `terminate-schedule` operation.
 - Journal Entries: `update-journal-entry`, `delete-journal-entry`. These
   are the draft-correction CRUD surface; all GL-write origination goes
   through `create-event-block`.
@@ -163,6 +165,8 @@ from robosystems.models.api.extensions.schedules import (
   PromoteObligationsResponse,
   RebuildScheduleRequest,
   ScheduleCreatedResponse,
+  TerminateScheduleRequest,
+  TerminateScheduleResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
@@ -403,6 +407,9 @@ from robosystems.operations.roboledger.commands.schedules import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   rebuild_schedule as cmd_rebuild_schedule,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  terminate_schedule as cmd_terminate_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
@@ -1842,6 +1849,42 @@ rebuild_schedule_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="schedule_rebuilt",
+  )
+)
+
+
+terminate_schedule_op = _registrar.register(
+  OperationSpec(
+    name="terminate-schedule",
+    summary="Terminate Schedule Early (No Entry)",
+    description=(
+      "End a schedule early at a month-end cutoff without booking any "
+      "entry. In one transaction: deletes forward facts past the cutoff "
+      "(refusing when posted entries exist past it; stale drafts past it "
+      "are deleted), voids the remaining obligation chain past the cutoff "
+      "(pending and classified rows), and rewrites the SumEquals rule to "
+      "prove the truncated curve. History at or before the cutoff is "
+      "untouched, so open months the schedule still covers close "
+      "normally. Use this when the termination's GL effect is already "
+      "booked (an asset transferred via a manual entry, a prepaid "
+      "refunded in the source system) or none is wanted; when the "
+      "derecognition entry still needs to be booked, use "
+      "create-event-block(event_type='asset_disposed') instead — the "
+      "disposal handler posts it atomically with the same obligation "
+      "void. Run BEFORE promote-obligations at close so terminated "
+      "periods are never drafted."
+    ),
+    command=cmd_terminate_schedule,
+    request_model=TerminateScheduleRequest,
+    result_type=TerminateScheduleResponse,
+    error_map={
+      ScheduleNotFoundError: 404,
+      # The void locks the same pending rows the promotion sweep holds.
+      # Retryable.
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="schedule_terminated",
   )
 )
 

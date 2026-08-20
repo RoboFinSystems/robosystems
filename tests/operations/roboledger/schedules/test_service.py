@@ -1168,7 +1168,7 @@ class TestCreateScheduleMaterializesObligations:
     update_stmt = session.execute.call_args_list[1].args[0]
     update_sql = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "events.id IN (" in update_sql
-    assert "events.status = 'pending'" in update_sql
+    assert "events.status IN ('pending')" in update_sql
     assert originator.metadata_["pending_event_count"] == 0
     assert len(originator.metadata_["void_history"]) == 1
     assert originator.metadata_["void_history"][0]["voided_count"] == 12
