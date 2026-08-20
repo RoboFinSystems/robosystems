@@ -42,6 +42,7 @@ from robosystems.models.api.extensions.reports import (
   ShareReportResponse,
   ShareResultItem,
 )
+from robosystems.operations.roboledger.commands.entity import ParentEntityNotFoundError
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   BlockSourceGraphOperation,
@@ -160,15 +161,11 @@ class TestUpdateEntityOp:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+        "robosystems.operations.roboledger.commands.entity.update_entity",
         return_value=entity_resp,
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
-      ) as mark,
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -200,15 +197,11 @@ class TestUpdateEntityOp:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
-        return_value=None,
+        "robosystems.operations.roboledger.commands.entity.update_entity",
+        side_effect=ParentEntityNotFoundError(),
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.mark_graph_stale"
-      ) as mark,
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -244,14 +237,15 @@ class TestUpdateEntityOp:
   async def test_404_when_no_entity_exists(self) -> None:
     body = UpdateEntityRequest(name="New Name")
 
+    # Patches the inner writer, not the command, so the real
+    # `update_entity` runs and its None → ParentEntityNotFoundError → 404
+    # translation is what gets asserted.
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+        "robosystems.operations.roboledger.commands.entity.update_parent_entity",
         return_value=None,
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
+      _mock_session_ctx() as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -275,7 +269,7 @@ class TestUpdateEntityOp:
     body = UpdateEntityRequest(name="New Name")
 
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.extensions_session",
+      "robosystems.db.extensions.extensions_session",
       side_effect=ProgrammingError(
         "stmt", {}, Exception('relation "entities" does not exist')
       ),
@@ -301,7 +295,7 @@ class TestUpdateEntityOp:
     body = UpdateEntityRequest(name="New Name")
 
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.extensions_session",
+      "robosystems.db.extensions.extensions_session",
       side_effect=OperationalError(
         "UPDATE entities SET name = %(n)s",
         {"n": "secret"},
@@ -331,7 +325,7 @@ class TestUpdateEntityOp:
     body = UpdateEntityRequest(name="New Name")
 
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.extensions_session",
+      "robosystems.db.extensions.extensions_session",
       side_effect=ProgrammingError(
         "stmt", {}, Exception('column "nope" does not exist')
       ),
@@ -350,7 +344,7 @@ class TestUpdateEntityOp:
     body = UpdateEntityRequest(name="New Name")
 
     with patch(
-      "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+      "robosystems.operations.roboledger.commands.entity.update_parent_entity",
       side_effect=ValueError("ticker must be uppercase"),
     ):
       with pytest.raises(HTTPException) as exc:
@@ -373,12 +367,10 @@ class TestUpdateEntityOp:
 
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.update_parent_entity",
+        "robosystems.operations.roboledger.commands.entity.update_parent_entity",
         return_value=entity_resp,
       ) as mock_cmd,
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
+      patch("robosystems.db.extensions.extensions_session") as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -943,15 +935,13 @@ class TestCreateReportOp:
     body = _make_create_report_body()
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_create_report",
+        "robosystems.operations.roboledger.commands.reports.create_report",
         side_effect=BundleUploadError(
           "Failed to upload JSON-LD bundle for report rpt_01 to "
           "s3://test-bucket/graph-bundles/kg.../rpt_01/g1.jsonld; aborting publish."
         ),
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
+      patch("robosystems.db.extensions.extensions_session") as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -972,13 +962,11 @@ class TestCreateReportOp:
     body = _make_create_report_body()
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_create_report",
+        "robosystems.operations.roboledger.commands.reports.create_report",
         return_value=_make_published_report_response(),
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
-      patch("robosystems.routers.extensions.roboledger.operations.mark_graph_stale"),
+      patch("robosystems.db.extensions.extensions_session") as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale"),
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -1008,15 +996,13 @@ class TestRegenerateReportOp:
     body = RegenerateReportOperation(report_id="rpt_01")
     with (
       patch(
-        "robosystems.routers.extensions.roboledger.operations.cmd_regenerate_report",
+        "robosystems.operations.roboledger.commands.reports.regenerate_report",
         side_effect=BundleUploadError(
           "Failed to upload JSON-LD bundle for report rpt_01 to "
           "s3://test-bucket/graph-bundles/kg.../rpt_01/g2.jsonld; aborting publish."
         ),
       ),
-      patch(
-        "robosystems.routers.extensions.roboledger.operations.extensions_session"
-      ) as mock_session,
+      patch("robosystems.db.extensions.extensions_session") as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)

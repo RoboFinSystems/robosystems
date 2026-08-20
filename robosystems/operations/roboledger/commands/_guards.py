@@ -69,28 +69,6 @@ def assert_not_library_origin(row: Any) -> None:
     raise LibraryImmutableError(kind, identifier)
 
 
-def assert_tenant_taxonomy(session: Session, taxonomy_id: str | None) -> None:
-  """Raise :class:`LibraryImmutableError` if the taxonomy is library-seeded.
-
-  Tenants can author elements / structures / associations into taxonomies
-  they own, but not into library taxonomies. This guard gates writes at
-  the ``create_*`` boundary where the row doesn't exist yet (so
-  :func:`assert_not_library_origin` doesn't apply).
-
-  No-op if ``taxonomy_id`` is None (some commands accept an optional
-  taxonomy reference) or if the taxonomy doesn't exist (caller handles
-  that separately — we don't preempt not-found errors here).
-  """
-  if taxonomy_id is None:
-    return
-  row = session.execute(
-    text("SELECT created_by FROM taxonomies WHERE id = :id LIMIT 1"),
-    {"id": taxonomy_id},
-  ).fetchone()
-  if row is not None and row.created_by == _LIBRARY_SEEDER:
-    raise LibraryImmutableError("taxonomy", taxonomy_id)
-
-
 class ClosedPeriodError(ValueError):
   """Raised when a write targets a posting_date inside a closed fiscal period.
 

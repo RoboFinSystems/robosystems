@@ -285,7 +285,12 @@ from robosystems.operations.roboledger.commands.blocked_source_graphs import (
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
   unblock_source_graph as cmd_unblock_source_graph,
 )
-from robosystems.operations.roboledger.commands.entity import update_parent_entity
+from robosystems.operations.roboledger.commands.entity import (
+  ParentEntityNotFoundError,
+)
+from robosystems.operations.roboledger.commands.entity import (
+  update_entity as cmd_update_entity,
+)
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
   TemplateValidationError,
@@ -866,61 +871,36 @@ async def initialize_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-@router.post(
-  "/update-entity",
-  response_model=OperationEnvelope[LedgerEntityResponse],
-  operation_id="updateEntity",
-  summary="Update Entity",
-  description=(
-    "Update the graph's primary entity. Only provided (non-null) fields "
-    "are updated. The graph is implicit in the URL — the operation "
-    "always targets the graph's primary entity."
-  ),
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/update-entity",
-  method="POST",
-  business_event_type="ledger_update_entity",
-)
-async def update_entity_op(
-  body: UpdateEntityRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="update-entity",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-  updates = body.model_dump(exclude_none=True)
+def _require_entity_updates(body: UpdateEntityRequest) -> None:
+  if not body.model_dump(exclude_none=True):
+    raise HTTPException(status_code=400, detail="No fields provided for update.")
 
-  def _runner():
-    if not updates:
-      raise HTTPException(status_code=400, detail="No fields provided for update.")
-    with extensions_session(graph_id) as session:
-      result = update_parent_entity(session, updates)
-    if result is None:
-      raise HTTPException(
-        status_code=404, detail="No entity found. Create an entity graph first."
-      )
-    return result
 
-  # `name`, `legal_name`, `ticker`, `cik` and the rest of the updatable fields
-  # are columns of the materialized Entity node, so an edit that never marks
-  # the graph leaves LadybugDB answering with the old company details.
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "entity_updated"),
+# `name`, `legal_name`, `ticker`, `cik` and the rest of the updatable fields are
+# columns of the materialized Entity node, so an edit that never marks the graph
+# leaves LadybugDB answering with the old company details.
+update_entity_op = _registrar.register(
+  OperationSpec(
+    name="update-entity",
+    summary="Update Entity",
+    description=(
+      "Update the graph's primary entity. Only provided (non-null) fields "
+      "are updated. The graph is implicit in the URL — the operation "
+      "always targets the graph's primary entity."
+    ),
+    command=cmd_update_entity,
+    request_model=UpdateEntityRequest,
+    result_type=LedgerEntityResponse,
+    business_event_type="ledger_update_entity",
+    # Runs on both surfaces before any session is opened, and preserves the
+    # 400 this operation has always returned for an empty body. Mapping
+    # ValueError to 400 instead would swallow genuine validation failures
+    # from the command, which stay 422.
+    pre_validate=_require_entity_updates,
+    error_map={ParentEntityNotFoundError: 404},
+    mark_stale_reason="entity_updated",
   )
+)
 
 
 change_reporting_style_op = _registrar.register(
@@ -2271,130 +2251,67 @@ async def backfill_plan_history_op(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.post(
-  "/create-report",
-  response_model=OperationEnvelope[ReportResponse],
-  operation_id="createReport",
-  summary="Create Report",
-  description="Generates report facts from the ledger and marks the report as published.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-report",
-  method="POST",
-  business_event_type="ledger_create_report",
-)
-async def create_report_op(
-  body: CreateReportRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-report",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
+def _validate_report_window(body: CreateReportRequest) -> None:
   if body.period_end < body.period_start:
     raise HTTPException(status_code=422, detail="period_end must be >= period_start")
 
-  def _runner():
-    with extensions_session(graph_id) as session:
-      try:
-        return cmd_create_report(session, graph_id, body, created_by=str(user.id))
-      except TaxonomyNotFoundError as e:
-        raise HTTPException(status_code=422, detail=f"Taxonomy '{e}' not found.")
-      except NoEntityError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-      except BundleUploadError as e:
-        # S3 unavailable during the publish-time bundle stamp. Publish
-        # aborted by ``_stamp_report_bundle`` to keep the invariant
-        # "every published Report has a stored bundle artifact"; surface
-        # as 502 (upstream failure) so the client can retry.
-        raise HTTPException(status_code=502, detail=str(e))
 
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_generated"),
+create_report_op = _registrar.register(
+  OperationSpec(
+    name="create-report",
+    summary="Create Report",
+    description=(
+      "Generates report facts from the ledger and marks the report as published."
+    ),
+    command=cmd_create_report,
+    request_model=CreateReportRequest,
+    result_type=ReportResponse,
+    business_event_type="ledger_create_report",
+    requires_graph_id=True,
+    pre_validate=_validate_report_window,
+    error_map={
+      TaxonomyNotFoundError: (422, lambda e: f"Taxonomy '{e}' not found."),
+      NoEntityError: 422,
+      # S3 unavailable during the publish-time bundle stamp. Publish aborted
+      # by ``_stamp_report_bundle`` to keep the invariant "every published
+      # Report has a stored bundle artifact"; surface as 502 (upstream
+      # failure) so the client can retry.
+      BundleUploadError: 502,
+    },
+    mark_stale_reason="report_generated",
   )
-
-
-@router.post(
-  "/regenerate-report",
-  response_model=OperationEnvelope[ReportResponse],
-  operation_id="regenerateReport",
-  summary="Regenerate Report",
-  description=(
-    "Re-runs fact generation for an existing Report against the latest "
-    "ledger state. Pass `period_start`/`period_end`/`periods` only if "
-    "you want to change the reporting window."
-  ),
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
 )
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/regenerate-report",
-  method="POST",
-  business_event_type="ledger_regenerate_report",
+
+
+regenerate_report_op = _registrar.register(
+  OperationSpec(
+    name="regenerate-report",
+    summary="Regenerate Report",
+    description=(
+      "Re-runs fact generation for an existing Report against the latest "
+      "ledger state. Pass `period_start`/`period_end`/`periods` only if "
+      "you want to change the reporting window."
+    ),
+    command=cmd_regenerate_report,
+    request_model=RegenerateReportOperation,
+    result_type=ReportResponse,
+    business_event_type="ledger_regenerate_report",
+    requires_graph_id=True,
+    error_map={
+      # A concurrent writer holds the rows this needs. Retryable, and the
+      # same 409 the registrar-driven operations return.
+      RowLockedError: 409,
+      ReportNotFoundError: (404, lambda e: f"Report '{e}' not found."),
+      NotAuthorizedError: (403, lambda _e: "Not authorized to modify this report."),
+      InvalidFilingTransitionError: 422,
+      # Same fail-loud semantics as create-report: a regenerate without a
+      # stamped bundle would publish a Report whose ``bundle_url`` lags the
+      # regenerated facts.
+      BundleUploadError: 502,
+    },
+    mark_stale_reason="report_generated",
+  )
 )
-async def regenerate_report_op(
-  body: RegenerateReportOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="regenerate-report",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    with extensions_session(graph_id) as session:
-      try:
-        return cmd_regenerate_report(
-          session, graph_id, body.report_id, body, acting_user_id=str(user.id)
-        )
-      except RowLockedError as e:
-        # A concurrent writer holds the rows this needs. Retryable, and the
-        # same 409 the registrar-driven operations return.
-        raise HTTPException(status_code=409, detail=str(e))
-      except ReportNotFoundError:
-        raise HTTPException(
-          status_code=404, detail=f"Report '{body.report_id}' not found."
-        )
-      except NotAuthorizedError:
-        raise HTTPException(
-          status_code=403, detail="Not authorized to modify this report."
-        )
-      except InvalidFilingTransitionError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-      except BundleUploadError as e:
-        # Same fail-loud semantics as create-report: a regenerate
-        # without a stamped bundle would publish a Report whose
-        # ``bundle_url`` lags the regenerated facts.
-        raise HTTPException(status_code=502, detail=str(e))
-      except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-  return await _dispatch(
-    ctx,
-    _runner,
-    cache,
-    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "report_generated"),
-  )
 
 
 @router.post(

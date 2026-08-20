@@ -17,12 +17,6 @@ class OrgBase(BaseModel):
 
 
 # Request models
-class CreateOrgRequest(OrgBase):
-  """Request to create an organization."""
-
-  pass
-
-
 class UpdateOrgRequest(BaseModel):
   """Request to update organization details."""
 

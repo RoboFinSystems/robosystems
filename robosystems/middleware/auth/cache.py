@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ...config import env
+from ...config.constants import JWT_REVOCATION_KEY_PREFIX
 from ...config.defaults import CacheDefaults
 from ...config.tuning import TuningConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
@@ -44,7 +45,6 @@ class APIKeyCache:
   AUDIT_LOG_RATE_LIMIT_TTL = CacheDefaults.SHORT  # only log once per user per 5 minutes
   JWT_CACHE_KEY_PREFIX = "jwt:"
   JWT_GRAPH_CACHE_KEY_PREFIX = "jwt_graph:"
-  JWT_BLACKLIST_PREFIX = "jwt_blacklist:"
 
   # Rate limiting configuration
   RATE_LIMIT_PREFIX = "rate_limit:"
@@ -132,10 +132,6 @@ class APIKeyCache:
   def _get_jwt_graph_cache_key(self, user_id: str, graph_id: str) -> str:
     """Get cache key for JWT user + graph access."""
     return f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}{user_id}:{graph_id}"
-
-  def _get_jwt_blacklist_key(self, jwt_hash: str) -> str:
-    """Get cache key for JWT blacklist."""
-    return f"{self.JWT_BLACKLIST_PREFIX}{jwt_hash}"
 
   def _hash_jwt_token(self, token: str) -> str:
     """Create a hash of the JWT token for caching."""
@@ -949,35 +945,6 @@ class APIKeyCache:
       logger.error(f"Failed to get cached JWT graph access: {e}")
       return None
 
-  def blacklist_jwt_token(self, jwt_token: str, exp_timestamp: int) -> None:
-    """Blacklist a JWT until its own expiry.
-
-    The TTL matches the remaining token lifetime, so the entry costs nothing
-    once the token would have expired anyway.
-    """
-    try:
-      jwt_hash = self._hash_jwt_token(jwt_token)
-      cache_key = self._get_jwt_blacklist_key(jwt_hash)
-
-      ttl = max(0, exp_timestamp - int(time.time()))
-      if ttl > 0:
-        self.redis.setex(cache_key, ttl, "blacklisted")
-        logger.info(f"Blacklisted JWT token: {jwt_hash[:8]}... (TTL: {ttl}s)")
-
-    except Exception as e:
-      logger.error(f"Failed to blacklist JWT token: {e}")
-
-  def is_jwt_blacklisted(self, jwt_token: str) -> bool:
-    """Return True if this JWT has been blacklisted."""
-    try:
-      jwt_hash = self._hash_jwt_token(jwt_token)
-      cache_key = self._get_jwt_blacklist_key(jwt_hash)
-      return cast(bool, self.redis.exists(cache_key))
-
-    except Exception as e:
-      logger.error(f"Failed to check JWT blacklist: {e}")
-      return False
-
   def invalidate_user_jwt_graph_access(
     self, user_id: str, graph_id: str | None = None
   ) -> bool:
@@ -1111,8 +1078,11 @@ class APIKeyCache:
       jwt_graph_count = len(
         cast(list[str], self.redis.keys(f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}*"))
       )
-      jwt_blacklist_count = len(
-        cast(list[str], self.redis.keys(f"{self.JWT_BLACKLIST_PREFIX}*"))
+      # Revocations are written by `middleware/auth/jwt.revoke_jwt_token` on
+      # the same AUTH database, keyed by `jti`. Counted from the shared prefix
+      # constant so this metric cannot drift off the store it reports on.
+      jwt_revoked_count = len(
+        cast(list[str], self.redis.keys(f"{JWT_REVOCATION_KEY_PREFIX}*"))
       )
 
       signature_count = len(
@@ -1135,7 +1105,7 @@ class APIKeyCache:
           "graph_access": graph_access_count,
           "jwt_tokens": jwt_count,
           "jwt_graph_access": jwt_graph_count,
-          "jwt_blacklisted": jwt_blacklist_count,
+          "jwt_revoked": jwt_revoked_count,
           "signatures": signature_count,
           "validations": validation_count,
         },

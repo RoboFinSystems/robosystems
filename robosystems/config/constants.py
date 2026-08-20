@@ -95,6 +95,11 @@ TOKEN_GRACE_PERIOD_MINUTES = 5  # Grace period for expired token refresh
 JWT_REVOCATION_GRACE_SECONDS = (
   5  # Grace period for in-flight requests during token refresh
 )
+# Valkey key prefix for revoked JWTs (`{prefix}{jti}`). Shared so the writer
+# (`middleware/auth/jwt.revoke_jwt_token`), the reader
+# (`is_jwt_token_revoked`), and the occupancy metric in
+# `middleware/auth/cache.get_cache_stats` cannot drift onto different keys.
+JWT_REVOCATION_KEY_PREFIX = "revoked_jwt:"
 JWT_DEVICE_FINGERPRINT_ENABLED = True  # Enable device fingerprinting for token binding
 
 # Rate Limiting Defaults

@@ -809,7 +809,7 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
 async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, Any]:
   """Raise memory limits for staging (``duckdb``) or materialization (``ladybug``).
 
-  The boost stays active until :func:`restore_graph_memory`. Never raises — a
+  The boost stays active until :func:`release_graph_memory`. Never raises — a
   failed boost degrades to default limits rather than blocking the operation.
 
   Example:
@@ -817,7 +817,7 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
       # ... run staging ...
       await boost_graph_memory("sec", target="ladybug")
       # ... run materialization ...
-      await restore_graph_memory("sec")
+      await release_graph_memory("sec", target="both")
   """
   client = await get_graph_client(graph_id, operation_type="write")
 
@@ -836,38 +836,16 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
     }
 
 
-async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
-  """Restore memory limits to their defaults.
-
-  Reconfigures limits only — connections stay open and buffers stay allocated.
-  Use :func:`release_graph_memory` to actually hand memory back. Never raises;
-  this is cleanup and must not fail the operation it follows.
-  """
-  client = await get_graph_client(graph_id, operation_type="write")
-
-  try:
-    result = await client.restore_memory(graph_id)
-    logger.info(f"Memory restore for {graph_id}: {result.get('message', 'done')}")
-    return result
-  except Exception as e:
-    logger.warning(f"Failed to restore memory for {graph_id}: {e}")
-    return {
-      "graph_id": graph_id,
-      "duckdb_restored": False,
-      "ladybug_restored": False,
-      "message": f"Restore failed: {e}",
-    }
-
-
 async def release_graph_memory(
   graph_id: str, target: str = "both", aggressive: bool = True
 ) -> dict[str, Any]:
   """Close connections and return buffer memory to the OS.
 
-  Closing connections is what forces the engines to give buffers back;
-  :func:`restore_graph_memory` only lowers the configured ceiling.
-  ``aggressive`` additionally runs GC and ``malloc_trim`` on the LadybugDB
-  side. Never raises; this is cleanup.
+  Closing connections is what forces the engines to give buffers back; the
+  graph API's ``restore-memory`` endpoint (:meth:`GraphClient.restore_memory`)
+  only lowers the configured ceiling, which is why every boost in the SEC
+  pipeline pairs with *this* function. ``aggressive`` additionally runs GC and
+  ``malloc_trim`` on the LadybugDB side. Never raises; this is cleanup.
 
   Example:
       await release_graph_memory("sec", target="duckdb")

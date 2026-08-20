@@ -31,6 +31,7 @@ GUARDED = [
   "robosystems/operations/information_block/rollforward.py",
   "robosystems/operations/information_block/forecast.py",
   "robosystems/operations/roboledger/commands/schedules.py",
+  "robosystems/operations/roboledger/commands/entity.py",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

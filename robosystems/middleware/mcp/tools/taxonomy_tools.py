@@ -1,12 +1,6 @@
 """Taxonomy mapping read tools for CoA → GAAP mapping workflows.
 
-Four registered read-side tools, listed below. `ExpandToRsGaapCandidatesTool`
-is a fifth read class defined here but registered nowhere, so
-`expand-to-rs-gaap-candidates` is currently unreachable.
-
-Most writes (`delete-mapping-association`, `create-associations`, etc.) are
-registrar-generated from the roboledger OperationSpec declarations, but
-`CreateMappingAssociationTool` is hand-written in this module.
+Four read-side tools, all registered in `manager.py`:
 
 1. list-mapping-structures: List `coa_mapping` structures with their OLTP ids
 2. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy
@@ -15,6 +9,24 @@ registrar-generated from the roboledger OperationSpec declarations, but
 
 All four route through `operations/roboledger/reads/taxonomies.py` so
 MCP, GraphQL, and the REST read surface share one source of truth.
+
+Mapping **writes** are registrar-generated from the roboledger
+`OperationSpec` declarations (`create-mapping-association`,
+`delete-mapping-association`, …) — one registration mounts both the REST
+route and the MCP tool.
+
+`CreateMappingAssociationTool` below shares a name with one of those
+operations anyway, and that is load-bearing rather than duplication.
+**There are two dispatchers, and only one of them knows about the
+registrar.** `GraphMCPTools.call_tool` resolves registrar tools first
+(Layer 0), so a remote MCP client never reaches the class. But
+`DirectToolAccess` — the worker path, used by `MappingOperator` and hence
+by `auto-map-elements` — instantiates tool classes in process and calls
+`.execute()` on them directly, never consulting the registrar at all.
+
+So "the registrar publishes this name" does **not** imply "this class is
+dead". Check `operations/operators/tool_access.py` before deleting a tool
+class on that reasoning; deleting this one broke the worker mapping path.
 """
 
 from typing import Any
@@ -33,7 +45,6 @@ from robosystems.operations.roboledger.commands.taxonomies import (
 )
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
-  expand_to_rs_gaap_candidates,
   get_element,
   get_mapping_coverage,
   list_mappings,
@@ -387,70 +398,23 @@ class GetMappingSummaryTool:
       return {"error": str(exc)}
 
 
-class ExpandToRsGaapCandidatesTool:
-  """Follow FAC → rs-gaap equivalence + rs-gaap-type-subtype to get specific filing candidates."""
-
-  def __init__(self, graph_client):
-    self.client = graph_client
-
-  def get_tool_definition(self) -> dict[str, Any]:
-    return {
-      "name": "expand-to-rs-gaap-candidates",
-      "description": """Follow a FAC element's fac-to-rs-gaap equivalence arc to its
-rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-level candidates.
-
-**WHEN TO USE:**
-- When you have a FAC concept and want its specific rs-gaap filing candidates
-- To drill from a FAC summary level down to the rs-gaap-type-subtype variants
-
-**RETURNS:**
-- rs_gaap_parent: the direct rs-gaap equivalent of the FAC concept
-- candidates: rs-gaap-type-subtype children (more specific filing variants)""",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "fac_element_id": {
-            "type": "string",
-            "description": "The FAC element ID from the first mapping pass",
-          },
-        },
-        "required": ["fac_element_id"],
-      },
-    }
-
-  async def execute(self, arguments: dict[str, Any]) -> Any:
-    return await run_off_loop(self._execute_sync, arguments)
-
-  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.roboledger.reports.network_picker import (
-      load_primary_reporting_style,
-    )
-
-    graph_id = self.client.graph_id
-    fac_element_id = arguments["fac_element_id"]
-    try:
-      with extensions_session(graph_id) as session:
-        # Resolve the entity's Style from this session; soft-fail to the
-        # wider filter when the tenant has no entity yet.
-        try:
-          reporting_style_id = load_primary_reporting_style(session)
-        except LookupError:
-          reporting_style_id = None
-        result = expand_to_rs_gaap_candidates(
-          session, fac_element_id, reporting_style_id=reporting_style_id
-        )
-        if result is None:
-          return {"error": f"No fac-to-rs-gaap equivalence found for {fac_element_id}"}
-        return result
-    except SQLAlchemyError as exc:
-      return database_failure("expand-to-rs-gaap-candidates", exc)
-    except Exception as exc:
-      logger.warning(f"expand-to-rs-gaap-candidates failed: {exc}")
-      return {"error": str(exc)}
-
-
 class CreateMappingAssociationTool:
-  """Write a CoA → rs-gaap mapping association."""
+  """Write a CoA → rs-gaap mapping association.
+
+  Shares its name with the ``create-mapping-association`` registrar
+  operation, and that is deliberate rather than duplication: the two serve
+  different dispatchers. On the MCP wire, ``GraphMCPTools.call_tool``
+  resolves registrar tools at Layer 0, so *this* class is not what a remote
+  client reaches. On the worker path, ``DirectToolAccess`` instantiates tool
+  classes in process and executes them directly — it never consults the
+  registrar — so this class is the live write path for ``auto-map-elements``
+  and every MappingOperator run.
+
+  Consequence worth keeping: the ``mark_graph_stale`` call below is not
+  redundant with the spec's ``mark_stale_reason``. That only fires on the
+  registrar path; without the call here a worker mapping run would never
+  reach LadybugDB.
+  """
 
   def __init__(self, graph_client):
     self.client = graph_client

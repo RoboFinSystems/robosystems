@@ -71,7 +71,7 @@ def cleanup_jwt_cache_expired() -> dict:
 
     return {
       "jwt_tokens_cached": stats.get("cache_counts", {}).get("jwt_tokens", 0),
-      "jwt_blacklisted": stats.get("cache_counts", {}).get("jwt_blacklisted", 0),
+      "jwt_revoked": stats.get("cache_counts", {}).get("jwt_revoked", 0),
       "cleanup_method": "automatic_ttl",
     }
 
@@ -79,7 +79,7 @@ def cleanup_jwt_cache_expired() -> dict:
     logger.error(f"Error checking JWT cache: {exc}", exc_info=True)
     return {
       "jwt_tokens_cached": 0,
-      "jwt_blacklisted": 0,
+      "jwt_revoked": 0,
       "cleanup_method": "error",
       "error": str(exc),
     }

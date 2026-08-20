@@ -163,12 +163,3 @@ class DocumentDetailResponse(BaseModel):
   sections_indexed: int
   created_at: str
   updated_at: str
-
-
-class DocumentUpdateRequest(BaseModel):
-  """Update a document's metadata and/or content."""
-
-  title: str | None = Field(None, max_length=500)
-  content: str | None = Field(None, max_length=500_000)
-  tags: list[str] | None = None
-  folder: str | None = None

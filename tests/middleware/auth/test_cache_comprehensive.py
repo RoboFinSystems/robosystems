@@ -99,7 +99,6 @@ class TestAPIKeyCacheInitialization:
       cache._get_jwt_graph_cache_key(user_id, graph_id)
       == f"jwt_graph:{user_id}:{graph_id}"
     )
-    assert cache._get_jwt_blacklist_key(jwt_hash) == f"jwt_blacklist:{jwt_hash}"
 
 
 class TestEncryptionDecryption:

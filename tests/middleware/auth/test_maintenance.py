@@ -132,13 +132,13 @@ class TestCleanupJWTCacheExpired:
   def test_successful_cache_stats_retrieval(self, mock_cache):
     """Test successful retrieval of cache statistics."""
     mock_cache.get_cache_stats.return_value = {
-      "cache_counts": {"jwt_tokens": 42, "jwt_blacklisted": 5}
+      "cache_counts": {"jwt_tokens": 42, "jwt_revoked": 5}
     }
 
     result = cleanup_jwt_cache_expired()
 
     assert result["jwt_tokens_cached"] == 42
-    assert result["jwt_blacklisted"] == 5
+    assert result["jwt_revoked"] == 5
     assert result["cleanup_method"] == "automatic_ttl"
     mock_cache.get_cache_stats.assert_called_once()
 
@@ -150,7 +150,7 @@ class TestCleanupJWTCacheExpired:
     result = cleanup_jwt_cache_expired()
 
     assert result["jwt_tokens_cached"] == 0
-    assert result["jwt_blacklisted"] == 0
+    assert result["jwt_revoked"] == 0
     assert result["cleanup_method"] == "automatic_ttl"
 
   @patch("robosystems.middleware.auth.cache.api_key_cache")
@@ -159,14 +159,14 @@ class TestCleanupJWTCacheExpired:
     mock_cache.get_cache_stats.return_value = {
       "cache_counts": {
         "jwt_tokens": 10
-        # jwt_blacklisted is missing
+        # jwt_revoked is missing
       }
     }
 
     result = cleanup_jwt_cache_expired()
 
     assert result["jwt_tokens_cached"] == 10
-    assert result["jwt_blacklisted"] == 0
+    assert result["jwt_revoked"] == 0
     assert result["cleanup_method"] == "automatic_ttl"
 
   @patch("robosystems.middleware.auth.cache.api_key_cache")
@@ -178,7 +178,7 @@ class TestCleanupJWTCacheExpired:
       result = cleanup_jwt_cache_expired()
 
       assert result["jwt_tokens_cached"] == 0
-      assert result["jwt_blacklisted"] == 0
+      assert result["jwt_revoked"] == 0
       assert result["cleanup_method"] == "error"
       assert result["error"] == "Redis connection failed"
 
@@ -209,7 +209,7 @@ class TestCleanupJWTCacheExpired:
     assert result["cleanup_method"] == "error"
     assert "Invalid cache state" in result["error"]
     assert result["jwt_tokens_cached"] == 0
-    assert result["jwt_blacklisted"] == 0
+    assert result["jwt_revoked"] == 0
 
 
 class TestBackwardCompatibility:
@@ -296,7 +296,7 @@ class TestIntegrationScenarios:
     mock_filter.all.return_value = []
 
     mock_cache.get_cache_stats.return_value = {
-      "cache_counts": {"jwt_tokens": 15, "jwt_blacklisted": 3}
+      "cache_counts": {"jwt_tokens": 15, "jwt_revoked": 3}
     }
 
     # Run both cleanup operations
@@ -307,4 +307,4 @@ class TestIntegrationScenarios:
     assert api_key_result["expired_user_keys_deactivated"] == 0
     assert api_key_result["expired_by_date"] == 0
     assert jwt_result["jwt_tokens_cached"] == 15
-    assert jwt_result["jwt_blacklisted"] == 3
+    assert jwt_result["jwt_revoked"] == 3
