@@ -193,8 +193,11 @@ class TestCreditCache:
     # Operation cost should still be there
     assert cache_instance.get_cached_operation_cost("query") == Decimal("1.0")
 
-  def test_ttl_expiry(self, cache_instance):
+  def test_ttl_expiry(self, cache_instance, monkeypatch):
     """Test that entries expire based on TTL."""
+    import time as _t
+    from types import SimpleNamespace
+
     cache_key = "test_key"
     # Set with 1-second TTL
     cache_instance._setex(cache_key, 1, "test_value")
@@ -202,8 +205,12 @@ class TestCreditCache:
     # Should exist immediately
     assert cache_instance._get(cache_key) == "test_value"
 
-    # Wait for expiry
-    time.sleep(1.1)
+    # Advance the cache's clock past expiry instead of sleeping.
+    future = _t.time() + 2
+    monkeypatch.setattr(
+      "robosystems.middleware.billing.cache.time",
+      SimpleNamespace(time=lambda: future),
+    )
 
     # Should be gone
     assert cache_instance._get(cache_key) is None

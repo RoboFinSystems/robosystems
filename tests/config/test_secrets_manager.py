@@ -3,7 +3,6 @@ Tests for the improved secrets manager with TTL caching and better error handlin
 """
 
 import json
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +18,7 @@ from robosystems.config.secrets_manager import (
 class TestSecretsManagerTTL:
   """Test TTL-based caching functionality."""
 
-  def test_cache_ttl_respects_expiry(self):
+  def test_cache_ttl_respects_expiry(self, monkeypatch):
     """Test that cached secrets expire after TTL."""
     with patch("boto3.client") as mock_boto:
       mock_client = MagicMock()
@@ -43,8 +42,15 @@ class TestSecretsManagerTTL:
       assert result2["TEST_KEY"] == "test_value"
       assert mock_client.get_secret_value.call_count == 1
 
-      # Wait for TTL to expire
-      time.sleep(1.1)
+      # Advance the manager's clock past the TTL instead of sleeping.
+      import time as _t
+      from types import SimpleNamespace
+
+      future = _t.time() + manager.cache_ttl_seconds + 1
+      monkeypatch.setattr(
+        "robosystems.config.secrets_manager.time",
+        SimpleNamespace(time=lambda: future),
+      )
 
       # Next call should hit AWS again
       result3 = manager.get_secret()

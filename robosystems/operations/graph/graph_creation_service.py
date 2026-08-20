@@ -30,6 +30,11 @@ logger = get_logger(__name__)
 # The worker's per-task budget must exceed the pipeline's waits *and* this.
 CLEANUP_TIMEOUT_SECONDS = 180
 
+# Base backoff between credit-pool creation retries (multiplied by the attempt).
+# A module constant so a test exercising the transient-retry path can zero it
+# instead of paying real wall-clock.
+CREDIT_POOL_RETRY_BACKOFF_SECONDS = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Config / Result dataclasses
@@ -562,7 +567,7 @@ class GraphCreationService:
         logger.warning(
           f"Credit pool creation attempt {attempt + 1}/3 failed for {graph_id}: {e}"
         )
-        await asyncio.sleep(attempt + 1)
+        await asyncio.sleep(CREDIT_POOL_RETRY_BACKOFF_SECONDS * (attempt + 1))
     logger.error(
       f"Failed to create credit pool for {graph_id} after 3 attempts: {last_error}"
     )

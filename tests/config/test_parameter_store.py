@@ -4,7 +4,6 @@ Tests for the SSM Parameter Store integration for feature flags.
 These are pure unit tests that mock AWS SSM, requiring no database or external services.
 """
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +22,7 @@ pytestmark = pytest.mark.unit
 class TestParameterStoreManagerCaching:
   """Test TTL-based caching functionality."""
 
-  def test_cache_ttl_respects_expiry(self):
+  def test_cache_ttl_respects_expiry(self, monkeypatch):
     """Test that cached parameters expire after TTL."""
     with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
       mock_client = MagicMock()
@@ -45,8 +44,15 @@ class TestParameterStoreManagerCaching:
       assert result2 == "true"
       assert mock_client.get_parameter.call_count == 1
 
-      # Wait for TTL to expire
-      time.sleep(1.1)
+      # Advance the manager's clock past the TTL instead of sleeping.
+      import time as _t
+      from types import SimpleNamespace
+
+      future = _t.time() + manager.cache_ttl_seconds + 1
+      monkeypatch.setattr(
+        "robosystems.config.parameter_store.time",
+        SimpleNamespace(time=lambda: future),
+      )
 
       # Next call should hit AWS again
       result3 = manager.get_parameter("RATE_LIMIT_ENABLED")
