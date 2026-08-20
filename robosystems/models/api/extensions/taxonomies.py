@@ -43,22 +43,6 @@ class TaxonomyListResponse(BaseModel):
   taxonomies: list[TaxonomyResponse]
 
 
-class CreateTaxonomyRequest(BaseModel):
-  name: str
-  description: str | None = None
-  taxonomy_type: Literal[
-    "chart_of_accounts",
-    "reporting_standard",
-    "reporting_extension",
-    "custom_ontology",
-    "mapping",
-    "schedule",
-  ]
-  version: str | None = None
-  source_taxonomy_id: str | None = None
-  target_taxonomy_id: str | None = None
-
-
 # ── Structure ─────────────────────────────────────────────────────────────
 
 
@@ -83,26 +67,6 @@ class StructureListResponse(BaseModel):
   """Flat list of structures within a taxonomy."""
 
   structures: list[StructureResponse]
-
-
-class CreateStructureRequest(BaseModel):
-  name: str
-  description: str | None = None
-  # `cash_flow_statement` and `comprehensive_income` are deliberately omitted
-  # even though the DB CHECK constraint allows them: the roboledger CF and CI
-  # renderers do not exist, so creating those structures is refused here at the
-  # Pydantic layer. Reads are unaffected — response models type block_type as
-  # `str`. Add both back when the renderers land.
-  block_type: Literal[
-    "chart_of_accounts",
-    "income_statement",
-    "balance_sheet",
-    "equity_statement",
-    "coa_mapping",
-    "schedule",
-    "custom",
-  ]
-  taxonomy_id: str
 
 
 # ── Association ───────────────────────────────────────────────────────────
@@ -446,41 +410,7 @@ class EntityTaxonomyResponse(BaseModel):
 # ── Taxonomy update / delete ──────────────────────────────────────────────
 
 
-class UpdateTaxonomyRequest(BaseModel):
-  """Update mutable fields on a taxonomy. `taxonomy_type` is immutable —
-  changing it is not the same operation as editing a taxonomy; deactivate
-  and create a new one instead. Only provided (non-null) fields are
-  applied."""
-
-  taxonomy_id: str
-  name: str | None = None
-  description: str | None = None
-  version: str | None = None
-
-
-class DeleteTaxonomyRequest(BaseModel):
-  """Soft delete — sets `is_active=false`. Historical references remain
-  valid."""
-
-  taxonomy_id: str
-
-
 # ── Structure update / delete ─────────────────────────────────────────────
-
-
-class UpdateStructureRequest(BaseModel):
-  """Update mutable fields on a structure. `block_type` and
-  `taxonomy_id` are immutable."""
-
-  structure_id: str
-  name: str | None = None
-  description: str | None = None
-
-
-class DeleteStructureRequest(BaseModel):
-  """Soft delete — sets `is_active=false`."""
-
-  structure_id: str
 
 
 # ── Element create / update / delete ──────────────────────────────────────
@@ -590,18 +520,6 @@ class DeleteElementRequest(BaseModel):
   inactive element."""
 
   element_id: str
-
-
-class UpdateAssociationRequest(BaseModel):
-  """Update mutable fields on an association. `from_element_id`,
-  `to_element_id`, and `association_type` are immutable — delete and
-  recreate instead."""
-
-  association_id: str
-  order_value: float | None = None
-  weight: float | None = None
-  confidence: float | None = None
-  approved_by: str | None = None
 
 
 class DeleteAssociationRequest(BaseModel):

@@ -1,13 +1,23 @@
-"""Write operations for taxonomies, structures, and mappings.
+"""Write operations for mapping associations and entity↔taxonomy links.
 
 These commands are pure functions: take an open extensions `Session`
 and validated Pydantic request bodies, return Pydantic response models.
 Callers own session lifetime and translate domain exceptions into
 transport errors.
 
-They are the single source of truth for taxonomy-layer writes. The
-REST operation surface, MCP tools, agents, and seeders (roboledger_demo)
-all delegate here.
+**Blocks, not atoms.** Row-level writers for taxonomies and structures
+(`create_taxonomy`, `update_structure`, `delete_taxonomy`, …) are
+deliberately absent: tenant taxonomy writes go through the taxonomy
+*block* surface — `create-taxonomy-block` / `update-taxonomy-block` /
+`delete-taxonomy-block` in `operations/taxonomy_block/` — which mutates
+a whole envelope (taxonomy + structures + elements + associations +
+rules) in one transaction and runs the block validators. An atomic
+row writer bypasses those validators, so don't reintroduce one; extend
+the block handlers instead.
+
+Removed 2026-08-20: seven such atoms existed here, unreferenced by any
+route, tool, or test, while their docstrings claimed the block surface
+invoked them indirectly. It never did.
 """
 
 from __future__ import annotations
@@ -21,19 +31,10 @@ from robosystems.models.api.common import DeleteResult
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   CreateMappingAssociationOperation,
-  CreateStructureRequest,
-  CreateTaxonomyRequest,
   DeleteAssociationRequest,
   DeleteMappingAssociationOperation,
-  DeleteStructureRequest,
-  DeleteTaxonomyRequest,
   EntityTaxonomyResponse,
   LinkEntityTaxonomyRequest,
-  StructureResponse,
-  TaxonomyResponse,
-  UpdateAssociationRequest,
-  UpdateStructureRequest,
-  UpdateTaxonomyRequest,
 )
 from robosystems.models.extensions import (
   Association,
@@ -48,7 +49,6 @@ from robosystems.models.extensions import (
 from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
-  assert_tenant_taxonomy,
 )
 from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -59,19 +59,11 @@ __all__ = [
   "LibraryImmutableError",
   "MappingAssociationExistsError",
   "MappingStructureNotFoundError",
-  "StructureNotFoundError",
   "TaxonomyNotFoundError",
   "create_mapping_association",
-  "create_structure",
-  "create_taxonomy",
   "delete_association",
   "delete_mapping_association",
-  "delete_structure",
-  "delete_taxonomy",
   "link_entity_taxonomy",
-  "update_association",
-  "update_structure",
-  "update_taxonomy",
 ]
 
 
@@ -89,14 +81,6 @@ class TaxonomyNotFoundError(LookupError):
   def __init__(self, taxonomy_id: str) -> None:
     super().__init__(f"Taxonomy not found: {taxonomy_id}")
     self.taxonomy_id = taxonomy_id
-
-
-class StructureNotFoundError(LookupError):
-  """Raised when a structure is not found by id."""
-
-  def __init__(self, structure_id: str) -> None:
-    super().__init__(f"Structure not found: {structure_id}")
-    self.structure_id = structure_id
 
 
 class AssociationNotFoundError(LookupError):
@@ -138,82 +122,6 @@ class MappingAssociationExistsError(ValueError):
     self.mapping_id = mapping_id
     self.from_element_id = from_element_id
     self.to_element_id = to_element_id
-
-
-def _taxonomy_to_response(row: Taxonomy) -> TaxonomyResponse:
-  return TaxonomyResponse(
-    id=row.id,
-    name=row.name,
-    description=row.description,
-    taxonomy_type=row.taxonomy_type,
-    version=row.version,
-    standard=row.standard,
-    namespace_uri=row.namespace_uri,
-    is_shared=row.is_shared,
-    is_active=row.is_active,
-    is_locked=row.is_locked,
-    source_taxonomy_id=row.source_taxonomy_id,
-    target_taxonomy_id=row.target_taxonomy_id,
-  )
-
-
-def _structure_to_response(row: Structure) -> StructureResponse:
-  return StructureResponse(
-    id=row.id,
-    name=row.name,
-    description=row.description,
-    block_type=row.block_type,
-    taxonomy_id=row.taxonomy_id,
-    is_active=row.is_active,
-  )
-
-
-def create_taxonomy(
-  session: Session, body: CreateTaxonomyRequest, created_by: str
-) -> TaxonomyResponse:
-  """Insert a new taxonomy row and return its response representation.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
-  invoked indirectly by those operations.
-  """
-  taxonomy = Taxonomy(
-    id=generate_prefixed_ulid("tax"),
-    name=body.name,
-    description=body.description,
-    taxonomy_type=body.taxonomy_type,
-    version=body.version,
-    source_taxonomy_id=body.source_taxonomy_id,
-    target_taxonomy_id=body.target_taxonomy_id,
-    created_by=created_by,
-  )
-  session.add(taxonomy)
-  session.flush()
-  return _taxonomy_to_response(taxonomy)
-
-
-def create_structure(
-  session: Session, body: CreateStructureRequest, created_by: str
-) -> StructureResponse:
-  """Insert a new structure row and return its response representation.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
-  invoked indirectly by those operations.
-  """
-  # Tenants can only add structures to tenant-origin taxonomies.
-  assert_tenant_taxonomy(session, body.taxonomy_id)
-  structure = Structure(
-    id=generate_prefixed_ulid("struct"),
-    name=body.name,
-    description=body.description,
-    block_type=body.block_type,
-    taxonomy_id=body.taxonomy_id,
-    created_by=created_by,
-  )
-  session.add(structure)
-  session.flush()
-  return _structure_to_response(structure)
 
 
 def create_mapping_association(
@@ -370,160 +278,10 @@ def _delete_association_dependents(
 # ─── Taxonomy update / delete ─────────────────────────────────────────────
 
 
-def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyResponse:
-  """Update mutable fields on a taxonomy.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
-  invoked indirectly by those operations.
-
-  Uses `model_dump(exclude_unset=True)` — omitted fields are left
-  unchanged, explicit nulls are applied. `taxonomy_type` is immutable
-  and is not in the request model.
-
-  Raises `TaxonomyNotFoundError` if the taxonomy does not exist.
-  """
-  taxonomy = session.execute(
-    select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
-  ).scalar_one_or_none()
-  if taxonomy is None:
-    raise TaxonomyNotFoundError(body.taxonomy_id)
-  assert_not_library_origin(taxonomy)
-
-  updates = body.model_dump(exclude_unset=True)
-  updates.pop("taxonomy_id", None)
-  for key, value in updates.items():
-    setattr(taxonomy, key, value)
-  session.flush()
-  return _taxonomy_to_response(taxonomy)
-
-
-def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyResponse:
-  """Soft delete — sets `is_active=false`.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``delete-taxonomy-block``); this is invoked indirectly by that
-  operation.
-
-  Historical references (structures, elements, associations) remain
-  valid. The taxonomy is simply no longer offered for new writes.
-
-  Raises `TaxonomyNotFoundError` if the taxonomy does not exist.
-  """
-  taxonomy = session.execute(
-    select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)
-  ).scalar_one_or_none()
-  if taxonomy is None:
-    raise TaxonomyNotFoundError(body.taxonomy_id)
-  assert_not_library_origin(taxonomy)
-  taxonomy.is_active = False
-  session.flush()
-  return _taxonomy_to_response(taxonomy)
-
-
 # ─── Structure update / delete ────────────────────────────────────────────
 
 
-def update_structure(
-  session: Session, body: UpdateStructureRequest
-) -> StructureResponse:
-  """Update mutable fields on a structure.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
-  invoked indirectly by those operations.
-
-  `block_type` and `taxonomy_id` are immutable.
-  Raises `StructureNotFoundError` if the structure does not exist.
-  """
-  structure = session.execute(
-    select(Structure).where(Structure.id == body.structure_id)
-  ).scalar_one_or_none()
-  if structure is None:
-    raise StructureNotFoundError(body.structure_id)
-  assert_not_library_origin(structure)
-
-  updates = body.model_dump(exclude_unset=True)
-  updates.pop("structure_id", None)
-  for key, value in updates.items():
-    setattr(structure, key, value)
-  session.flush()
-  return _structure_to_response(structure)
-
-
-def delete_structure(
-  session: Session, body: DeleteStructureRequest
-) -> StructureResponse:
-  """Soft delete — sets `is_active=false`.
-
-  Internal helper. Tenant writes go through the taxonomy block surface
-  (``delete-taxonomy-block``); this is invoked indirectly by that
-  operation.
-
-  Raises `StructureNotFoundError` if the structure does not exist.
-  """
-  structure = session.execute(
-    select(Structure).where(Structure.id == body.structure_id)
-  ).scalar_one_or_none()
-  if structure is None:
-    raise StructureNotFoundError(body.structure_id)
-  assert_not_library_origin(structure)
-  structure.is_active = False
-  session.flush()
-  return _structure_to_response(structure)
-
-
 # ─── Association bulk create / update / delete ───────────────────────────
-
-
-def _association_to_response(
-  row: Association,
-  from_elem: Element | None = None,
-  to_elem: Element | None = None,
-) -> AssociationResponse:
-  return AssociationResponse(
-    id=row.id,
-    structure_id=row.structure_id,
-    from_element_id=row.from_element_id,
-    from_element_name=from_elem.name if from_elem else None,
-    from_element_qname=from_elem.qname if from_elem else None,
-    to_element_id=row.to_element_id,
-    to_element_name=to_elem.name if to_elem else None,
-    to_element_qname=to_elem.qname if to_elem else None,
-    association_type=row.association_type,
-    order_value=row.order_value,
-    weight=row.weight,
-    confidence=row.confidence,
-    suggested_by=row.suggested_by,
-    approved_by=row.approved_by,
-  )
-
-
-def update_association(
-  session: Session, body: UpdateAssociationRequest
-) -> AssociationResponse:
-  """Update mutable fields on an association. `from_element_id`,
-  `to_element_id`, `association_type`, and `structure_id` are
-  immutable — delete and recreate instead.
-
-  Raises `AssociationNotFoundError` if the association does not exist.
-  """
-  assoc = session.execute(
-    select(Association).where(Association.id == body.association_id)
-  ).scalar_one_or_none()
-  if assoc is None:
-    raise AssociationNotFoundError(body.association_id)
-  assert_not_library_origin(assoc)
-
-  updates = body.model_dump(exclude_unset=True)
-  updates.pop("association_id", None)
-  for key, value in updates.items():
-    setattr(assoc, key, value)
-  session.flush()
-
-  from_elem = session.get(Element, assoc.from_element_id)
-  to_elem = session.get(Element, assoc.to_element_id)
-  return _association_to_response(assoc, from_elem, to_elem)
 
 
 def delete_association(session: Session, body: DeleteAssociationRequest) -> dict:

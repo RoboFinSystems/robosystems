@@ -43,13 +43,3 @@ def list_portfolios(
     portfolios=[portfolio_to_response(r) for r in rows],
     pagination=create_pagination_info(total, limit, offset),
   )
-
-
-def get_portfolio(session: Session, portfolio_id: str) -> PortfolioResponse | None:
-  """Return a single portfolio by id, or None if not found."""
-  row = session.execute(
-    select(Portfolio).where(Portfolio.id == portfolio_id)
-  ).scalar_one_or_none()
-  if row is None:
-    return None
-  return portfolio_to_response(row)

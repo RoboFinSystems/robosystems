@@ -31,7 +31,6 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass
-from typing import Any
 
 EQUALITY_TOLERANCE: float = 0.01
 
@@ -340,18 +339,6 @@ def lhs_variable_names(parsed: ParsedExpression) -> list[str]:
   return variable_names_in(require_single_equality(parsed.tree.body).left)
 
 
-def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> float:
-  """Evaluate a single arithmetic expression (no equality) to a float.
-
-  The numeric-result counterpart to :func:`evaluate_equality`, for
-  callers that need a value rather than a pass/fail outcome.
-  """
-  mapped: dict[str, Any] = {
-    f"_var_{name}": values[name] for name in parsed.variable_names
-  }
-  return _eval_arith(parsed.tree.body, mapped)
-
-
 def evaluate_derivation(parsed: ParsedExpression, values: dict[str, float]) -> float:
   """Evaluate the RHS of a ``$Target = (expression)`` rule to a float.
 
@@ -404,7 +391,6 @@ __all__ = [
   "build_rollup_expression",
   "desugar_aggregates",
   "desugar_priors",
-  "evaluate_arithmetic",
   "evaluate_derivation",
   "evaluate_equality",
   "lhs_variable_names",

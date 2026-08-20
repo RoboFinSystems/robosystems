@@ -711,6 +711,17 @@ class _FakeReport:
     self.source_graph_id = source_graph_id
 
 
+def _body_with_id(body, report_id: str):
+  """Stamp `report_id` onto a request body.
+
+  `regenerate_report` reads the target from `body.report_id` (the registrar
+  passes only session + body + kwargs), so these tests set it rather than
+  passing a separate positional.
+  """
+  body.report_id = report_id
+  return body
+
+
 def _session_with_report(report: _FakeReport | None) -> MagicMock:
   session = MagicMock()
   session.get.return_value = report
@@ -721,7 +732,12 @@ def test_regenerate_report_raises_not_found_when_missing() -> None:
   session = _session_with_report(None)
   body = MagicMock()
   with pytest.raises(ReportNotFoundError):
-    regenerate_report(session, "kg_demo", "rpt_missing", body, "usr_test")
+    regenerate_report(
+      session,
+      _body_with_id(body, "rpt_missing"),
+      graph_id="kg_demo",
+      created_by="usr_test",
+    )
 
 
 def test_regenerate_report_raises_not_authorized_when_owner_mismatch() -> None:
@@ -729,7 +745,9 @@ def test_regenerate_report_raises_not_authorized_when_owner_mismatch() -> None:
   session = _session_with_report(report)
   body = MagicMock()
   with pytest.raises(NotAuthorizedError):
-    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_other")
+    regenerate_report(
+      session, _body_with_id(body, "rpt_01"), graph_id="kg_demo", created_by="usr_other"
+    )
 
 
 def test_regenerate_report_refuses_a_shared_in_copy_even_for_its_sender() -> None:
@@ -741,7 +759,12 @@ def test_regenerate_report_refuses_a_shared_in_copy_even_for_its_sender() -> Non
   )
   session = _session_with_report(report)
   with pytest.raises(NotAuthorizedError) as exc:
-    regenerate_report(session, "kg_demo", "rpt_copy", MagicMock(), "usr_sender")
+    regenerate_report(
+      session,
+      _body_with_id(MagicMock(), "rpt_copy"),
+      graph_id="kg_demo",
+      created_by="usr_sender",
+    )
   assert "shared in" in str(exc.value)
 
 
@@ -752,7 +775,9 @@ def test_regenerate_report_raises_on_filed_report() -> None:
   session = _session_with_report(report)
   body = MagicMock()
   with pytest.raises(InvalidFilingTransitionError) as exc:
-    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+    regenerate_report(
+      session, _body_with_id(body, "rpt_01"), graph_id="kg_demo", created_by="usr_test"
+    )
   assert "filed" in str(exc.value)
   assert "supersedes_id" in str(exc.value)
 
@@ -764,7 +789,9 @@ def test_regenerate_report_raises_on_archived_report() -> None:
   session = _session_with_report(report)
   body = MagicMock()
   with pytest.raises(InvalidFilingTransitionError):
-    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+    regenerate_report(
+      session, _body_with_id(body, "rpt_01"), graph_id="kg_demo", created_by="usr_test"
+    )
 
 
 def test_regenerate_report_allows_draft() -> None:
@@ -781,7 +808,9 @@ def test_regenerate_report_allows_draft() -> None:
   # require a real extensions schema. Assert the gate passed by asserting
   # the failure is NOT the gate error.
   with pytest.raises(Exception) as exc:
-    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+    regenerate_report(
+      session, _body_with_id(body, "rpt_01"), graph_id="kg_demo", created_by="usr_test"
+    )
   assert not isinstance(exc.value, InvalidFilingTransitionError)
   assert not isinstance(exc.value, ReportNotFoundError)
   assert not isinstance(exc.value, NotAuthorizedError)

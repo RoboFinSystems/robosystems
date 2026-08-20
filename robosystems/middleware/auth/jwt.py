@@ -17,7 +17,11 @@ import redis
 from fastapi import HTTPException, status
 
 from ...config import env
-from ...config.constants import JWT_EXPIRY_HOURS, JWT_REVOCATION_GRACE_SECONDS
+from ...config.constants import (
+  JWT_EXPIRY_HOURS,
+  JWT_REVOCATION_GRACE_SECONDS,
+  JWT_REVOCATION_KEY_PREFIX,
+)
 from ...config.logging import get_logger
 from ...config.valkey_registry import (
   ValkeyDatabase,
@@ -87,7 +91,7 @@ def is_jwt_token_revoked(token: str) -> bool:
 
     try:
       redis_client = get_redis_client()
-      revocation_key = f"revoked_jwt:{jti}"
+      revocation_key = f"{JWT_REVOCATION_KEY_PREFIX}{jti}"
 
       revocation_data = redis_client.hgetall(revocation_key)
 
@@ -388,7 +392,7 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       return True
 
     redis_client = get_redis_client()
-    revocation_key = f"revoked_jwt:{jti}"
+    revocation_key = f"{JWT_REVOCATION_KEY_PREFIX}{jti}"
     revocation_data = {
       "revoked_at": datetime.now(UTC).isoformat(),
       "reason": reason,

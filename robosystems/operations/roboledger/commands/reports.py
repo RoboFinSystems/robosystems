@@ -356,8 +356,9 @@ def _stamp_report_bundle(
 
 def create_report(
   session: Session,
-  graph_id: str,
   body: CreateReportRequest,
+  *,
+  graph_id: str,
   created_by: str,
 ) -> ReportResponse:
   """Create a report definition, generate facts, and mark as published.
@@ -501,10 +502,10 @@ def _assert_report_mutable_by(
 
 def regenerate_report(
   session: Session,
-  graph_id: str,
-  report_id: str,
   body: RegenerateReportRequest,
-  acting_user_id: str,
+  *,
+  graph_id: str,
+  created_by: str,
 ) -> ReportResponse:
   """Regenerate a report with new period dates.
 
@@ -522,7 +523,7 @@ def regenerate_report(
   gated this way; this check brings ``regenerate_report`` in line.
 
   Raises:
-    ReportNotFoundError: report_id doesn't resolve.
+    ReportNotFoundError: ``body.report_id`` doesn't resolve.
     NotAuthorizedError: caller doesn't own the report.
     InvalidFilingTransitionError: report is ``filed`` or ``archived``
       — restate instead of regenerating.
@@ -538,15 +539,15 @@ def regenerate_report(
   report_def = lock_by_id(
     session,
     Report,
-    report_id,
-    f"Report {report_id} is being written by another process. Retry in a moment.",
+    body.report_id,
+    f"Report {body.report_id} is being written by another process. Retry in a moment.",
   )
   if report_def is None:
-    raise ReportNotFoundError(report_id)
-  _assert_report_mutable_by(report_def, acting_user_id, "modify")
+    raise ReportNotFoundError(body.report_id)
+  _assert_report_mutable_by(report_def, created_by, "modify")
   if report_def.filing_status in {"filed", "archived"}:
     raise InvalidFilingTransitionError(
-      f"Report '{report_id}' is in '{report_def.filing_status}'; "
+      f"Report '{body.report_id}' is in '{report_def.filing_status}'; "
       f"create a restatement (new Report with supersedes_id) instead of "
       f"regenerating."
     )
@@ -600,7 +601,7 @@ def regenerate_report(
     session,
     report_def.id,
     entity_id,
-    acting_user_id,
+    created_by,
     periods,
     structure_to_factset,
     report_def.mapping_id or "",
@@ -617,7 +618,7 @@ def regenerate_report(
     session,
     report_def.id,
     entity_id,
-    acting_user_id,
+    created_by,
     report_def.taxonomy_id,
     periods,
   )
@@ -628,7 +629,7 @@ def regenerate_report(
     structure_to_factset,
     report_def.period_start,
     report_def.period_end,
-    acting_user_id,
+    created_by,
   )
 
   _stamp_report_bundle(session, graph_id, report_def)
