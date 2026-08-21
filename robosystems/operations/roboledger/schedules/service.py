@@ -94,6 +94,11 @@ class PeriodCloseStatus:
   schedules: list[PeriodCloseItem]
   total_draft: int
   total_posted: int
+  # The receipt stamped by the close that locked this period, when there
+  # is one. None for an open period, and also for a period closed before
+  # receipts shipped — "closed with no receipt" is a real state, not an
+  # error, and callers must not read its absence as a failed close.
+  close_receipt: dict | None = None
 
 
 @dataclass
@@ -1126,7 +1131,7 @@ class ScheduleService:
 
     fp_result = session.execute(
       text("""
-        SELECT status FROM fiscal_periods
+        SELECT status, close_receipt FROM fiscal_periods
         WHERE start_date <= :period_start AND end_date >= :period_end
         LIMIT 1
       """),
@@ -1134,6 +1139,7 @@ class ScheduleService:
     )
     fp_row = fp_result.fetchone()
     period_status = fp_row.status if fp_row else "open"
+    close_receipt = fp_row.close_receipt if fp_row else None
 
     items: list[PeriodCloseItem] = []
     total_draft = 0
@@ -1168,6 +1174,7 @@ class ScheduleService:
       schedules=items,
       total_draft=total_draft,
       total_posted=total_posted,
+      close_receipt=close_receipt,
     )
 
   def create_closing_entry(
