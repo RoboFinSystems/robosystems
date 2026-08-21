@@ -31,6 +31,26 @@ from robosystems.logger import logger
 
 from .pool import initialize_connection_pool
 
+# Transient databases the blue-green materialization swap builds alongside a
+# live graph. Never primaries, so they neither consume nor are charged a slot.
+BLUE_GREEN_SUFFIXES = ("-wip", "-prev")
+
+
+def counts_toward_capacity(db_name: str) -> bool:
+  """Whether ``db_name`` occupies one of a node's ``max_databases`` slots.
+
+  The single predicate behind both halves of capacity accounting: what
+  ``list_databases`` counts, and what ``create_database`` charges. They must
+  not diverge — a name exempt from the cap but present in the count would let
+  a node overfill, and a name counted but not exempt would be refused a slot
+  it already effectively holds.
+
+  Not a primary: a subgraph (``{parent}_{name}``) or a shared repository
+  (``sec_historical``), both of which ride their parent's slot, and the
+  blue-green temporaries, which exist only for the length of a swap.
+  """
+  return "_" not in db_name and not db_name.endswith(BLUE_GREEN_SUFFIXES)
+
 
 def validate_database_path(base_path: Path, db_name: str) -> Path:
   """Build the ``.lbug`` path for ``db_name``, rejecting directory traversal.
@@ -106,22 +126,19 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_400_BAD_REQUEST, detail="Graph ID is required"
       )
 
-    # Subgraphs are exempt from the cap: they share the parent's slot. Both
-    # sides of that accounting derive from the same thing — the "_" in the
-    # name — so the exemption cannot be claimed for a database the count
-    # would still charge against the cap.
-    exempt_from_cap = "_" in request.graph_id
+    # One predicate decides both halves of the capacity accounting, so a
+    # database can never be exempt from a cap the count would still charge it
+    # against.
     all_databases = self.list_databases()
-    current_count = len([db for db in all_databases if "_" not in db])
+    current_count = len([db for db in all_databases if counts_toward_capacity(db)])
+    exempt_from_cap = not counts_toward_capacity(request.graph_id)
     if not exempt_from_cap and current_count >= self.max_databases:
       raise HTTPException(
         status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
         detail=f"Maximum database capacity reached ({self.max_databases})",
       )
     elif exempt_from_cap:
-      logger.info(
-        f"Creating {request.graph_id} against the parent's slot (not counted toward max_databases)"
-      )
+      logger.info(f"Creating {request.graph_id}: not counted toward max_databases")
 
     db_path = validate_database_path(self.base_path, request.graph_id)
     if db_path.exists():
@@ -431,7 +448,7 @@ class LadybugDatabaseManager:
       for item in self.base_path.iterdir():
         if item.is_file() and item.name.endswith(".lbug"):
           db_name = item.name[:-5]
-          if db_name.endswith("-wip") or db_name.endswith("-prev"):
+          if db_name.endswith(BLUE_GREEN_SUFFIXES):
             continue
           databases.append(db_name)
 

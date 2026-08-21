@@ -104,6 +104,40 @@ class TestLadybugDatabaseManagerCreateDatabase:
       manager.create_database(request)
     assert exc_info.value.status_code == 507
 
+  def test_blue_green_wip_is_exempt_on_a_full_node(self):
+    """The swap builds a WIP beside a live primary on a one-slot instance.
+
+    ``max_databases`` is 1 on every tier, so the live graph already fills the
+    node. If the WIP were charged a slot the swap could never start, and
+    blue-green materialization would fail for every graph.
+    """
+    manager = _make_manager(self.temp_dir, max_databases=1)
+    (Path(self.temp_dir) / "kg1234567890abcdef.lbug").touch()
+
+    request = DatabaseCreateRequest(
+      graph_id="kg1234567890abcdef-wip",
+      schema_type="entity",
+      is_subgraph=True,
+    )
+
+    with (
+      patch("robosystems.graph_api.core.ladybug.manager.lbug.Database"),
+      patch(
+        "robosystems.graph_api.core.ladybug.manager.lbug.Connection"
+      ) as mock_conn_cls,
+      patch.object(manager, "_apply_schema", return_value=True),
+      patch("robosystems.graph_api.core.ladybug.manager.env") as mock_env,
+      patch(
+        "robosystems.graph_api.core.ladybug.config.get_database_memory_config",
+        return_value=256,
+      ),
+    ):
+      mock_conn_cls.return_value = MagicMock()
+      mock_env.is_development.return_value = False
+
+      result = manager.create_database(request)
+      assert result.status == "success"
+
   def test_create_database_subgraph_bypasses_capacity(self):
     """Subgraph should bypass max_databases check."""
     manager = _make_manager(self.temp_dir, max_databases=1)
