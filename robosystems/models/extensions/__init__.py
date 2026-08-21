@@ -40,8 +40,11 @@ from .roboinvestor import (
 # RoboLedger extension (imports COA_SOURCES + ledger-specific models)
 from .roboledger import (
   COA_SOURCES,
+  Agent,
   BlockedSourceGraph,
   Entry,
+  Event,
+  EventHandler,
   Fact,
   FactSet,
   FiscalCalendar,
@@ -54,6 +57,7 @@ from .roboledger import (
   ReportShare,
   Transaction,
   entry_dimensions,
+  event_dimensions,
   line_item_dimensions,
   transaction_dimensions,
 )
@@ -65,10 +69,11 @@ from .trait import Trait
 from .verification_result import VerificationResult
 
 __all__ = [
-  # RoboLedger
   "COA_SOURCES",
   # Base ontology
   "Account",
+  # RoboLedger
+  "Agent",
   "Association",
   "AssociationClassification",
   "BlockedSourceGraph",
@@ -82,6 +87,8 @@ __all__ = [
   "Entity",
   "EntityTaxonomy",
   "Entry",
+  "Event",
+  "EventHandler",
   "Fact",
   "FactSet",
   "FiscalCalendar",
@@ -108,6 +115,7 @@ __all__ = [
   "Transaction",
   "VerificationResult",
   "entry_dimensions",
+  "event_dimensions",
   "line_item_dimensions",
   "transaction_dimensions",
 ]
