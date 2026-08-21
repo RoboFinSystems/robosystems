@@ -9,7 +9,6 @@ from fastapi import HTTPException
 from robosystems.middleware.rate_limits.rate_limiting import (
   _verify_jwt_for_rate_limiting,
   create_custom_rate_limit_dependency,
-  get_int_env,
   get_rate_limit_config,
   get_user_from_request,
   get_user_identifier,
@@ -31,37 +30,6 @@ def _make_request(headers=None, cookies=None, host="127.0.0.1", path="/test"):
   mock_request.state = MagicMock()
   mock_request.state.current_time = None
   return mock_request
-
-
-@pytest.mark.unit
-class TestGetIntEnv:
-  """Tests for get_int_env helper."""
-
-  def test_returns_int_from_env(self):
-    from robosystems.config import env
-
-    try:
-      with patch.object(env, "RATE_LIMIT_API_KEY", "500"):
-        result = get_int_env("RATE_LIMIT_API_KEY", "1000")
-    except (AttributeError, TypeError):
-      with patch.object(env, "RATE_LIMIT_API_KEY", "500", create=True):
-        result = get_int_env("RATE_LIMIT_API_KEY", "1000")
-    assert result == 500
-
-  def test_strips_inline_comments(self):
-    from robosystems.config import env
-
-    try:
-      with patch.object(env, "RATE_LIMIT_API_KEY", "500 # some comment"):
-        result = get_int_env("RATE_LIMIT_API_KEY", "1000")
-    except (AttributeError, TypeError):
-      with patch.object(env, "RATE_LIMIT_API_KEY", "500 # some comment", create=True):
-        result = get_int_env("RATE_LIMIT_API_KEY", "1000")
-    assert result == 500
-
-  def test_uses_default_when_missing(self):
-    result = get_int_env("NONEXISTENT_RATE_LIMIT_KEY_XYZ", "100")
-    assert result == 100
 
 
 @pytest.mark.unit
@@ -158,20 +126,17 @@ class TestGetRateLimitConfig:
   """Tests for get_rate_limit_config."""
 
   def test_api_key_limits(self):
-    with patch(f"{MODULE}.get_int_env", return_value=1000):
-      limit, window = get_rate_limit_config("apikey:abc123")
+    limit, window = get_rate_limit_config("apikey:abc123")
     assert limit == 1000
     assert window == 60
 
   def test_jwt_limits(self):
-    with patch(f"{MODULE}.get_int_env", return_value=500):
-      limit, window = get_rate_limit_config("jwt:usr_123")
+    limit, window = get_rate_limit_config("jwt:usr_123")
     assert limit == 500
     assert window == 60
 
   def test_anonymous_limits(self):
-    with patch(f"{MODULE}.get_int_env", return_value=10):
-      limit, window = get_rate_limit_config("ip:1.2.3.4")
+    limit, window = get_rate_limit_config("ip:1.2.3.4")
     assert limit == 10
     assert window == 60
 
@@ -211,10 +176,7 @@ class TestRateLimitDependency:
 
   def test_allowed_sets_state(self):
     request = _make_request(headers={"X-API-Key": "test-key"})
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=1000),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (True, 99)
       rate_limit_dependency(request)
     assert request.state.rate_limit_remaining == 99
@@ -223,7 +185,6 @@ class TestRateLimitDependency:
     request = _make_request(headers={"X-API-Key": "test-key"})
     with (
       patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=1000),
       patch(f"{MODULE}.SecurityAuditLogger"),
     ):
       mock_cache.check_rate_limit.return_value = (False, 0)
@@ -286,10 +247,7 @@ class TestAuthRateLimitDependency:
     )
 
     request = _make_request(path="/v1/auth/login")
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=300),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (True, 4)
       auth_rate_limit_dependency(request)
       assert request.state.auth_rate_limit_remaining == 4
@@ -302,7 +260,6 @@ class TestAuthRateLimitDependency:
     request = _make_request(path="/v1/auth/login")
     with (
       patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=300),
       patch(f"{MODULE}.SecurityAuditLogger"),
     ):
       mock_cache.check_rate_limit.return_value = (False, 0)
@@ -317,10 +274,7 @@ class TestAuthRateLimitDependency:
     )
 
     request = _make_request(path="/v1/auth/register")
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=3600),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (True, 2)
       auth_rate_limit_dependency(request)
 
@@ -330,10 +284,7 @@ class TestAuthRateLimitDependency:
     )
 
     request = _make_request(path="/v1/auth/verify-email")
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=300),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (True, 8)
       auth_rate_limit_dependency(request)
 
@@ -350,10 +301,7 @@ class TestBillingRateLimitDependency:
     request = _make_request(
       headers={"X-API-Key": "test-key"}, path="/v1/billing/checkout"
     )
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=60),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (True, 55)
       billing_rate_limit_dependency(request)
       assert request.state.billing_rate_limit_remaining == 55
@@ -364,10 +312,7 @@ class TestBillingRateLimitDependency:
     )
 
     request = _make_request(path="/v1/billing/checkout")
-    with (
-      patch(f"{MODULE}.rate_limit_cache") as mock_cache,
-      patch(f"{MODULE}.get_int_env", return_value=60),
-    ):
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
       mock_cache.check_rate_limit.return_value = (False, 0)
       with pytest.raises(HTTPException) as exc_info:
         billing_rate_limit_dependency(request)
@@ -384,8 +329,7 @@ class TestScimRateLimitDependency:
   """
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=120)
-  def test_bearer_gets_full_limit_not_anonymous_tenth(self, mock_env, mock_cache):
+  def test_bearer_gets_full_limit_not_anonymous_tenth(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       scim_rate_limit_dependency,
     )
@@ -403,8 +347,7 @@ class TestScimRateLimitDependency:
     assert call_args[0][0].startswith("apikey:scim:")
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=120)
-  def test_two_tokens_same_ip_get_separate_buckets(self, mock_env, mock_cache):
+  def test_two_tokens_same_ip_get_separate_buckets(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       scim_rate_limit_dependency,
     )
@@ -426,8 +369,7 @@ class TestNamedRateLimitDependencies:
   """Tests for named rate limit dependency functions."""
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=600)
-  def test_user_management(self, mock_env, mock_cache):
+  def test_user_management(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       user_management_rate_limit_dependency,
     )
@@ -437,8 +379,7 @@ class TestNamedRateLimitDependencies:
     user_management_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=50)
-  def test_sync_operations(self, mock_env, mock_cache):
+  def test_sync_operations(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       sync_operations_rate_limit_dependency,
     )
@@ -448,8 +389,7 @@ class TestNamedRateLimitDependencies:
     sync_operations_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=30)
-  def test_connection_management(self, mock_env, mock_cache):
+  def test_connection_management(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       connection_management_rate_limit_dependency,
     )
@@ -459,8 +399,7 @@ class TestNamedRateLimitDependencies:
     connection_management_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=100)
-  def test_analytics(self, mock_env, mock_cache):
+  def test_analytics(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       analytics_rate_limit_dependency,
     )
@@ -470,8 +409,7 @@ class TestNamedRateLimitDependencies:
     analytics_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=10)
-  def test_backup_operations(self, mock_env, mock_cache):
+  def test_backup_operations(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       backup_operations_rate_limit_dependency,
     )
@@ -481,8 +419,7 @@ class TestNamedRateLimitDependencies:
     backup_operations_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=60)
-  def test_sensitive_auth(self, mock_env, mock_cache):
+  def test_sensitive_auth(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       sensitive_auth_rate_limit_dependency,
     )
@@ -492,8 +429,7 @@ class TestNamedRateLimitDependencies:
     sensitive_auth_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=300)
-  def test_logout(self, mock_env, mock_cache):
+  def test_logout(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       logout_rate_limit_dependency,
     )
@@ -503,8 +439,7 @@ class TestNamedRateLimitDependencies:
     logout_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=200)
-  def test_tasks_management(self, mock_env, mock_cache):
+  def test_tasks_management(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       tasks_management_rate_limit_dependency,
     )
@@ -514,8 +449,7 @@ class TestNamedRateLimitDependencies:
     tasks_management_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=600)
-  def test_auth_status(self, mock_env, mock_cache):
+  def test_auth_status(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       auth_status_rate_limit_dependency,
     )
@@ -525,8 +459,7 @@ class TestNamedRateLimitDependencies:
     auth_status_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=100)
-  def test_sso(self, mock_env, mock_cache):
+  def test_sso(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       sso_rate_limit_dependency,
     )
@@ -536,8 +469,7 @@ class TestNamedRateLimitDependencies:
     sso_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=200)
-  def test_general_api(self, mock_env, mock_cache):
+  def test_general_api(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       general_api_rate_limit_dependency,
     )
@@ -547,8 +479,7 @@ class TestNamedRateLimitDependencies:
     general_api_rate_limit_dependency(request)
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=600)
-  def test_public_api(self, mock_env, mock_cache):
+  def test_public_api(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       public_api_rate_limit_dependency,
     )
@@ -639,8 +570,7 @@ class TestScimIpRateLimitDependency:
   """
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=300)
-  def test_rotating_bearers_share_the_ip_bucket(self, mock_env, mock_cache):
+  def test_rotating_bearers_share_the_ip_bucket(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       scim_ip_rate_limit_dependency,
     )
@@ -658,8 +588,7 @@ class TestScimIpRateLimitDependency:
     assert keys[0].startswith("apikey:scim-ip:10.0.0.9")
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=300)
-  def test_ip_bucket_gets_the_full_limit(self, mock_env, mock_cache):
+  def test_ip_bucket_gets_the_full_limit(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       scim_ip_rate_limit_dependency,
     )
@@ -675,8 +604,7 @@ class TestScimBucketsFailClosed:
   """A limiter-backend outage must not silently disable SCIM's throttles."""
 
   @patch(f"{MODULE}.rate_limit_cache")
-  @patch(f"{MODULE}.get_int_env", return_value=120)
-  def test_both_scim_buckets_pass_fail_closed(self, mock_env, mock_cache):
+  def test_both_scim_buckets_pass_fail_closed(self, mock_cache):
     from robosystems.middleware.rate_limits.rate_limiting import (
       scim_ip_rate_limit_dependency,
       scim_rate_limit_dependency,

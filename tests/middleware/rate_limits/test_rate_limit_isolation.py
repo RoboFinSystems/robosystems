@@ -20,18 +20,6 @@ class TestRateLimitIsolation:
   def setup(self, monkeypatch):
     """Setup test environment."""
 
-    # Mock the get_int_env function to return our test values
-    def mock_get_int_env(key, default):
-      values = {
-        "RATE_LIMIT_LOGOUT": "300",
-        "RATE_LIMIT_SENSITIVE_AUTH": "60",
-      }
-      return int(values.get(key, default))
-
-    monkeypatch.setattr(
-      "robosystems.middleware.rate_limits.rate_limiting.get_int_env", mock_get_int_env
-    )
-
     # Mock JWT secret key
     monkeypatch.setattr("robosystems.config.env.JWT_SECRET_KEY", "test-secret-key")
 
@@ -276,18 +264,6 @@ class TestRateLimitIsolation:
     from robosystems.middleware.rate_limits.rate_limiting import (
       general_api_rate_limit_dependency,
       public_api_rate_limit_dependency,
-    )
-
-    # Mock the get_int_env function to return our test values
-    def mock_get_int_env(key, default):
-      values = {
-        "RATE_LIMIT_PUBLIC_API": "600",  # High limit for public endpoints
-        "RATE_LIMIT_GENERAL_API": "200",  # Lower limit for general endpoints
-      }
-      return int(values.get(key, default))
-
-    monkeypatch.setattr(
-      "robosystems.middleware.rate_limits.rate_limiting.get_int_env", mock_get_int_env
     )
 
     # Mock JWT verification for authenticated user

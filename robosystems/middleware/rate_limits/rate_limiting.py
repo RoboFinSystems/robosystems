@@ -13,6 +13,7 @@ from ...config.constants import (
   RATE_LIMIT_SSE_CONNECTIONS,
   RATE_LIMIT_SSE_CONNECTIONS_WINDOW,
 )
+from ...config.rate_limits import BURST_LIMITS
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import rate_limit_cache
 from .subscription_rate_limits import (
@@ -20,14 +21,6 @@ from .subscription_rate_limits import (
   get_subscription_rate_limit,
   should_use_subscription_limits,
 )
-
-
-def get_int_env(key: str, default: str) -> int:
-  """Get integer environment variable, stripping any inline comments."""
-  value = str(getattr(env, key, default))
-  # Strip inline comments (anything after #)
-  value = value.split("#")[0].strip()
-  return int(value)
 
 
 def _verify_jwt_for_rate_limiting(token: str) -> str | None:
@@ -148,15 +141,15 @@ def get_rate_limit_config(identifier: str) -> tuple[int, int]:
   # Environment-based rate limits - BURST PROTECTION ONLY
   if identifier.startswith("apikey:"):
     # API key users get very high burst limits
-    limit = get_int_env("RATE_LIMIT_API_KEY", "1000")  # 1k/minute default
+    limit = BURST_LIMITS["api_key"]  # 1k/minute default
     window = 60  # 1 minute (60k/hour possible)
   elif identifier.startswith("jwt:"):
     # JWT users get high burst limits
-    limit = get_int_env("RATE_LIMIT_JWT", "500")  # 500/minute default
+    limit = BURST_LIMITS["jwt"]  # 500/minute default
     window = 60  # 1 minute (30k/hour possible)
   else:
     # IP-based (unauthenticated) users still get restricted
-    limit = get_int_env("RATE_LIMIT_ANONYMOUS", "10")  # 10/minute default
+    limit = BURST_LIMITS["anonymous"]  # 10/minute default
     window = 60  # 1 minute (600/hour possible)
 
   return limit, window
@@ -231,14 +224,14 @@ def auth_rate_limit_dependency(request: Request):
   path = request.url.path
   if "/login" in path:
     limit = AUTH_RATE_LIMIT_LOGIN_DEFAULT
-    window = get_int_env("RATE_LIMIT_LOGIN_WINDOW", "300")  # 5 minutes
+    window = BURST_LIMITS["login_window"]  # 5 minutes
   elif "/register" in path:
     limit = AUTH_RATE_LIMIT_REGISTER_DEFAULT
-    window = get_int_env("RATE_LIMIT_REGISTER_WINDOW", "3600")  # 1 hour
+    window = BURST_LIMITS["register_window"]  # 1 hour
   else:
     # Default auth endpoint limits
-    limit = get_int_env("RATE_LIMIT_AUTH", "10")  # 10 attempts
-    window = get_int_env("RATE_LIMIT_AUTH_WINDOW", "300")  # 5 minutes
+    limit = BURST_LIMITS["auth_attempts"]  # 10 attempts
+    window = BURST_LIMITS["auth_window"]  # 5 minutes
 
   # Auth endpoints fail CLOSED: if the limiter backend is down, deny rather
   # than silently disable brute-force protection on login/register.
@@ -412,62 +405,62 @@ def create_custom_rate_limit_dependency(
 
 def user_management_rate_limit_dependency(request: Request):
   """Rate limiting for user profile and settings endpoints."""
-  limit = get_int_env("RATE_LIMIT_USER_MANAGEMENT", "600")  # 600/minute (10/second)
+  limit = BURST_LIMITS["user_management"]  # 600/minute (10/second)
   return create_custom_rate_limit_dependency(limit, 60, "user_management")(request)
 
 
 def sync_operations_rate_limit_dependency(request: Request):
   """Rate limiting for external sync operations (QB, SEC)."""
-  limit = get_int_env("RATE_LIMIT_SYNC_OPS", "50")  # 50/minute
+  limit = BURST_LIMITS["sync_ops"]  # 50/minute
   return create_custom_rate_limit_dependency(limit, 60, "sync_operations")(request)
 
 
 def connection_management_rate_limit_dependency(request: Request):
   """Rate limiting for external connection setup/management."""
-  limit = get_int_env("RATE_LIMIT_CONNECTION_MGMT", "30")  # 30/minute
+  limit = BURST_LIMITS["connection_mgmt"]  # 30/minute
   return create_custom_rate_limit_dependency(limit, 60, "connection_mgmt")(request)
 
 
 def analytics_rate_limit_dependency(request: Request):
   """Rate limiting for graph analytics and metrics endpoints."""
-  limit = get_int_env("RATE_LIMIT_ANALYTICS", "100")  # 100/minute
+  limit = BURST_LIMITS["analytics"]  # 100/minute
   return create_custom_rate_limit_dependency(limit, 60, "analytics")(request)
 
 
 def backup_operations_rate_limit_dependency(request: Request):
   """Rate limiting for backup creation and export operations."""
-  limit = get_int_env("RATE_LIMIT_BACKUP_OPS", "10")  # 10/minute (expensive operations)
+  limit = BURST_LIMITS["backup_ops"]  # 10/minute (expensive operations)
   return create_custom_rate_limit_dependency(limit, 60, "backup_operations")(request)
 
 
 def sensitive_auth_rate_limit_dependency(request: Request):
   """Rate limiting for sensitive auth operations (refresh, SSO)."""
-  limit = get_int_env("RATE_LIMIT_SENSITIVE_AUTH", "60")  # 60/minute
+  limit = BURST_LIMITS["sensitive_auth"]  # 60/minute
   return create_custom_rate_limit_dependency(limit, 60, "sensitive_auth")(request)
 
 
 def logout_rate_limit_dependency(request: Request):
   """Rate limiting for logout endpoint - more generous to handle expired tokens."""
   # 300/minute for authenticated, 30/minute for anonymous (after division by 10)
-  limit = get_int_env("RATE_LIMIT_LOGOUT", "300")
+  limit = BURST_LIMITS["logout"]
   return create_custom_rate_limit_dependency(limit, 60, "logout")(request)
 
 
 def tasks_management_rate_limit_dependency(request: Request):
   """Rate limiting for task monitoring and management."""
-  limit = get_int_env("RATE_LIMIT_TASKS", "200")  # 200/minute
+  limit = BURST_LIMITS["tasks"]  # 200/minute
   return create_custom_rate_limit_dependency(limit, 60, "tasks")(request)
 
 
 def auth_status_rate_limit_dependency(request: Request):
   """Rate limiting for auth status check endpoints (like /auth/me)."""
-  limit = get_int_env("RATE_LIMIT_AUTH_STATUS", "600")  # 600/minute (10/second)
+  limit = BURST_LIMITS["auth_status"]  # 600/minute (10/second)
   return create_custom_rate_limit_dependency(limit, 60, "auth_status")(request)
 
 
 def sso_rate_limit_dependency(request: Request):
   """Rate limiting for SSO operations (token generation/exchange)."""
-  limit = get_int_env("RATE_LIMIT_SSO", "100")  # 100/minute
+  limit = BURST_LIMITS["sso"]  # 100/minute
   return create_custom_rate_limit_dependency(limit, 60, "sso")(request)
 
 
@@ -478,7 +471,7 @@ def oidc_rate_limit_dependency(request: Request):
   requests (login → callback). Anonymous callers get limit//10, so the
   default keeps ~12/min per IP — several complete flows plus retries.
   """
-  limit = get_int_env("RATE_LIMIT_OIDC", "120")  # 120/minute (2 per flow)
+  limit = BURST_LIMITS["oidc"]  # 120/minute (2 per flow)
   return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
 
 
@@ -493,7 +486,7 @@ def mfa_rate_limit_dependency(request: Request):
   Fails closed: this is an authentication surface, and its throttle must
   not silently vanish with the limiter backend (the SCIM precedent).
   """
-  limit = get_int_env("RATE_LIMIT_MFA", "120")  # 120/minute (2 per handshake)
+  limit = BURST_LIMITS["mfa"]  # 120/minute (2 per handshake)
   return create_custom_rate_limit_dependency(limit, 60, "mfa", fail_closed=True)(
     request
   )
@@ -502,7 +495,7 @@ def mfa_rate_limit_dependency(request: Request):
 def passkey_management_rate_limit_dependency(request: Request):
   """Rate limiting for authenticated passkey lifecycle endpoints
   (list/enroll/remove/recovery-codes)."""
-  limit = get_int_env("RATE_LIMIT_PASSKEY_MANAGEMENT", "60")  # 60/minute
+  limit = BURST_LIMITS["passkey_management"]  # 60/minute
   return create_custom_rate_limit_dependency(
     limit, 60, "passkey_management", fail_closed=True
   )(request)
@@ -533,7 +526,7 @@ def scim_rate_limit_dependency(request: Request):
   Fails closed: SCIM is an authentication surface, and its throttles must
   not silently vanish with the limiter backend. The IdP retries a denial.
   """
-  limit = get_int_env("RATE_LIMIT_SCIM", "120")  # 120/minute per token
+  limit = BURST_LIMITS["scim"]  # 120/minute per token
   return create_custom_rate_limit_dependency(
     limit, 60, "scim", identifier_fn=_scim_rate_limit_identifier, fail_closed=True
   )(request)
@@ -555,7 +548,7 @@ def scim_ip_rate_limit_dependency(request: Request):
   RATE_LIMIT_SCIM so a legitimate IdP burst exhausts its per-token budget
   first, never this one.
   """
-  limit = get_int_env("RATE_LIMIT_SCIM_IP", "300")  # 300/minute per IP
+  limit = BURST_LIMITS["scim_ip"]  # 300/minute per IP
   return create_custom_rate_limit_dependency(
     limit, 60, "scim_ip", identifier_fn=_scim_ip_identifier, fail_closed=True
   )(request)
@@ -563,7 +556,7 @@ def scim_ip_rate_limit_dependency(request: Request):
 
 def general_api_rate_limit_dependency(request: Request):
   """General rate limiting for standard API endpoints."""
-  limit = get_int_env("RATE_LIMIT_GENERAL_API", "200")  # 200/minute
+  limit = BURST_LIMITS["general_api"]  # 200/minute
   return create_custom_rate_limit_dependency(limit, 60, "general_api")(request)
 
 
@@ -574,9 +567,7 @@ def billing_rate_limit_dependency(request: Request):
   All user types (JWT, API key, IP) get the same generous limit
   because checkout redirects from Stripe may not carry auth cookies.
   """
-  limit = get_int_env(
-    "RATE_LIMIT_BILLING", "60"
-  )  # 60/minute (checkout polls at ~20/min)
+  limit = BURST_LIMITS["billing"]  # 60/minute (checkout polls at ~20/min)
   identifier = get_user_identifier(request)
   cache_key = f"{identifier}:billing"
 
@@ -614,7 +605,7 @@ def webhook_rate_limit_dependency(request: Request):
   security control, this is DoS defense in depth. Generous, because Stripe
   legitimately bursts redeliveries.
   """
-  limit = get_int_env("RATE_LIMIT_WEBHOOK", "1200")  # anonymous → 120/min per IP
+  limit = BURST_LIMITS["webhook"]  # anonymous → 120/min per IP
   return create_custom_rate_limit_dependency(limit, 60, "webhook")(request)
 
 
@@ -622,7 +613,7 @@ def public_api_rate_limit_dependency(request: Request):
   """Rate limiting for public API endpoints (no auth required)."""
   # More generous for anonymous users since these endpoints are meant to be public
   # 600/minute for authenticated, 60/minute for anonymous (after division by 10)
-  limit = get_int_env("RATE_LIMIT_PUBLIC_API", "600")
+  limit = BURST_LIMITS["public_api"]
   return create_custom_rate_limit_dependency(limit, 60, "public_api")(request)
 
 
