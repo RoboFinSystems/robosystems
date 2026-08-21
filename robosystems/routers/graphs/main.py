@@ -675,7 +675,7 @@ async def get_available_graph_tiers(
   "/capacity",
   response_model=GraphCapacityResponse,
   summary="Get Graph Tier Capacity",
-  description="Status per tier: `ready` (slot available), `scalable` (can provision, 3-5 min), `at_capacity` (contact support). Cached 60s.",
+  description="Status per tier: `ready` (slot available) or `at_capacity` (contact support).",
   operation_id="getGraphCapacity",
   responses={**AUTHENTICATED_ERROR_RESPONSES},
 )

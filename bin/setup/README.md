@@ -605,7 +605,8 @@ See the [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Boo
 
 ## Security Notes
 
-- **No long-term AWS credentials stored** - Uses SSO and OIDC
+- **No long-term AWS credentials for deploy or runtime** - Uses SSO and OIDC
+  (`bedrock.sh` mints a scoped IAM key for local AI development only)
 - **Secrets auto-generated** - JWT keys, encryption keys created automatically
 - **Resources never overwritten** - Re-running scripts is safe
 - **Production/staging isolation** - Separate secrets and SSM params per environment

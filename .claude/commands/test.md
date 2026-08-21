@@ -13,9 +13,9 @@ Run `just test-all` and fix failures to 100% completion.
 
 ## What `just test-all` actually runs
 
-In order: `just test` (pytest) → `just test-dbt quickbooks` → `just lint fix` → `just lint` → `just format` → `just typecheck` → `just cf-lint-all`.
+In order: `just test` (pytest) → `just test-dbt quickbooks` → `just lint fix` → `just lint` → `just format` → `just typecheck` → `just cf-lint-all` → `just lint-actions`.
 
-That matters for reading the output: **only the first stage produces a pytest summary.** A dbt build failure, a ruff/basedpyright failure, or a CloudFormation lint failure will not produce a `failed` count — it surfaces as a recipe failure line instead. So a green pytest count alone is *not* proof the gate passed.
+That matters for reading the output: **only the first stage produces a pytest summary.** A dbt build failure, a ruff/basedpyright failure, or a CloudFormation/workflow lint failure will not produce a `failed` count — it surfaces as a recipe failure line instead. So a green pytest count alone is *not* proof the gate passed.
 
 For the code-quality half without the ~6-minute test run, use `just test-code` — that's the combination the git hooks enforce.
 

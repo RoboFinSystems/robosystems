@@ -34,7 +34,7 @@ Parameters:
   InstanceType:
     Type: String
     Default: r7g.large
-    Description: EC2 instance type for replicas (16GB+ memory-optimized; must hold the sec buffer pool + working set under the 85% admission guard)
+    Description: EC2 instance type for replicas (16GB+ memory-optimized; must hold the sec buffer pool + working set while leaving the admission guard's memory headroom free)
     AllowedValues:
       - m7g.large # 8GB — staging/legacy only; under-provisioned for prod sec reads
       - m7g.xlarge # 16GB

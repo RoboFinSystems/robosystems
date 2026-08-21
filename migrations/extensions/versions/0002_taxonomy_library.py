@@ -1,10 +1,10 @@
 """Taxonomy library — XBRL-faithful model.
 
 Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
-artifacts loaded from ``taxonomy/frameworks/rs-gaap/packages/`` and
-``taxonomy/frameworks/rs-gaap/bridges/`` (composed via the framework
-manifest at ``taxonomy/frameworks/rs-gaap/v1.json``, which depends_on
-``taxonomy/frameworks/fac/v1.json`` for the universal substrate),
+artifacts loaded from ``frameworks/rs-gaap/packages/`` and
+``frameworks/rs-gaap/bridges/`` (composed via the framework
+manifest at ``frameworks/rs-gaap/v1.json``, which depends_on
+``frameworks/fac/v1.json`` for the universal substrate),
 aligned with
 XBRL's association model: elements carry only XBRL-intrinsic attributes
 (balance, periodType, abstract, monetary, elementType,

@@ -1,6 +1,6 @@
 """Extensions GraphQL package.
 
-Strawberry-based GraphQL schema served at /extensions/graphql. Used for
+Strawberry-based GraphQL schema served at /extensions/{graph_id}/graphql. Used for
 read-heavy extensions queries (roboledger, roboinvestor) while mutations and
 core platform concerns remain on the /v1/* REST surface.
 
