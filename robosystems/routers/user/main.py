@@ -122,11 +122,11 @@ async def update_user_profile(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserResponse:
-  # Interactive session only. A programmatic API key must never reach a route
-  # that can change the sign-in address — changing email plus the public
-  # password-reset flow would otherwise be a full account takeover from a key
-  # that legitimately lives in CI configs and connector URLs. Same rule the
-  # passkey surfaces enforce (middleware/auth/dependencies.py get_optional_jwt_user).
+  # Interactive session only: a programmatic API key must never reach a route
+  # that can change the sign-in address. Keys are long-lived and widely
+  # copied — CI config, connector URLs — so they are not proof of presence.
+  # Same rule the passkey surfaces enforce
+  # (middleware/auth/dependencies.py get_optional_jwt_user).
   if current_user is None:
     raise create_error_response(
       status_code=status.HTTP_401_UNAUTHORIZED,

@@ -114,9 +114,8 @@ async def get_backup_download_url(
     has_tier_limit = False
     # The single id the monthly counter is keyed on. Both the check and the
     # increment must use it: the shared path resolves a subgraph to its parent
-    # for the *check* (`sec_historical` → `sec`), so incrementing under the
-    # requested id instead left the checked counter permanently at zero and the
-    # quota unenforced for every subgraph download.
+    # for the check (`sec_historical` → `sec`), so the increment has to resolve
+    # the same way or the two halves count different things.
     quota_resource_id = graph_id
 
     # Check download rate limits based on graph type

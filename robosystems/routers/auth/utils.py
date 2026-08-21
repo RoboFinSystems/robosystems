@@ -52,9 +52,9 @@ def require_password_auth() -> None:
 
   ``PASSWORD_AUTH_ENABLED=false`` (SSO-primary deployments) must disable the
   whole credential surface — login, registration, reset, change — not just
-  its advertisement in ``/auth/providers``. A login that the UI hides but the
-  API still accepts is posture drift, not a posture: it would let a password
-  bypass the IdP's MFA and conditional-access policies.
+  its advertisement in ``/auth/providers``. The IdP is the authority in that
+  configuration, so every credential path has to defer to it, not merely be
+  hidden from the UI.
   """
   if not env.PASSWORD_AUTH_ENABLED:
     raise HTTPException(

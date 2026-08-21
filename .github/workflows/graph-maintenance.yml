@@ -290,7 +290,7 @@ jobs:
       # One tag-targeted command per environment instead of a serial loop that
       # issued an SSM command per instance and waited on each in turn. Same
       # defect the graph container refresh had: O(n) API calls and wall-clock
-      # linear in fleet size, on a fleet where customer count is instance count.
+      # linear in fleet size.
       #
       # `aws ssm wait command-executed` is deliberately not used here either —
       # its botocore waiter is delay:5 x maxAttempts:20, so it gives up after 100

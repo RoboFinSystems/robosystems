@@ -149,10 +149,8 @@ def _raise_ledger_not_initialized() -> NoReturn:
   Uses `raise ... from None` so that when called from inside an
   `except (ValueError, ProgrammingError):` block, Python doesn't set
   `__context__` on the new exception. Strawberry's error serializer
-  can otherwise leak the raw `ProgrammingError` (which contains schema
-  and table names from the failing SQL statement) through the
-  `extensions` field of the GraphQL error response — a tenant-isolation
-  leak.
+  surfaces a chained cause through the `extensions` field, and driver
+  output must not reach a client response.
   """
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Ledger not initialized. Connect a data source first.",

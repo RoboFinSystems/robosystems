@@ -175,11 +175,9 @@ class RateLimitConfig:
       EndpointCategory.TABLE_MANAGEMENT: (5, RateLimitPeriod.MINUTE),
     },
     # ladybug-standard: m7g.medium (4GB, 1 vCPU) — the anchor the other tiers
-    # multiply from. These values were originally sized for m7g.large and are
-    # deliberately left as-is after the resize rather than halved: observed
-    # production load is ~1% CPU, nowhere near binding, and cutting limits on
-    # existing customers to match a smaller box would be a service regression
-    # in exchange for protection admission control already provides.
+    # multiply from. Sized for m7g.large and deliberately retained after the
+    # resize: cutting limits on existing customers would be a service
+    # regression in exchange for protection admission control already provides.
     "ladybug-standard": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),

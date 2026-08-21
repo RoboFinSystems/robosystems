@@ -121,10 +121,10 @@ Things worth knowing before touching this path:
   `resolve_oidc_user` looks up the `user_identities` link on `(issuer, sub)`. On
   a miss there is exactly one fallback: an active user whose email matches, who
   carries a SCIM `external_id`, and who has no identity for this issuer yet. The
-  `external_id` predicate is load-bearing — without it anyone controlling a
-  matching mailbox in the customer's IdP could bind onto a locally-created
-  account. An explicit `email_verified: false` is refused (a missing claim is
-  tolerated; Entra omits it).
+  `external_id` predicate is load-bearing: a matching mailbox is not
+  provenance on its own, so an IdP login binds only to an account the IdP
+  provisioned. An explicit `email_verified: false` is refused (a missing claim
+  is tolerated; Entra omits it).
 - **`is_active` is re-checked even on a valid link**, because IdP assignment and
   SCIM assignment drift apart (Okta runs them as two apps).
 - **Failures redirect, they do not return JSON** — `?reason=` on the login home,
@@ -142,9 +142,8 @@ independently of OIDC, since a deployment may run either alone. The surface is
 Users CRUD (`GET`/`POST /Users`, `GET`/`PUT`/`PATCH`/`DELETE /Users/{id}`) plus
 the `ServiceProviderConfig` / `ResourceTypes` / `Schemas` conformance probes,
 all `include_in_schema=False`. Every route sits behind two rate buckets and then
-`require_scim_org`: an IP bucket first, because each presented bearer keys its
-own token bucket and a caller inventing a new bearer per request would otherwise
-never be metered, then the per-token bucket for legitimate IdP traffic.
+`require_scim_org`: an IP bucket first, so metering does not depend on the
+presented bearer, then the per-token bucket for legitimate IdP traffic.
 SCIM-provisioned users join the org with `SSO_DEFAULT_ROLE`.
 
 ### Deployment posture
@@ -156,9 +155,10 @@ config instead of hardcoding it.
 
 Posture is enforced, not merely advertised: `require_password_auth` in
 `routers/auth/utils.py` guards *every* password-credential endpoint (login,
-registration, reset, change) with a 403 when `PASSWORD_AUTH_ENABLED=false`. A
-login the UI hides but the API still accepts would let a password bypass the
-IdP's MFA and conditional-access policies. `require_passkeys_enabled` applies
+registration, reset, change) with a 403 when `PASSWORD_AUTH_ENABLED=false`.
+In that configuration the IdP is the authority, so every credential path has
+to defer to it rather than merely be hidden from the UI.
+`require_passkeys_enabled` applies
 the same rule to the passkey/MFA surface (`routers/auth/passkeys.py`,
 `routers/auth/mfa.py`) when `PASSKEYS_ENABLED=false`. `config/validation.py`
 refuses to boot a deployment that disables password auth without another
@@ -231,8 +231,8 @@ call it, and the MCP surface enforces the same through
 `AuthorizationDenied` audit event. Any new write path must go through it.
 
 Failed API-key validation and failed graph access return the *same* 403 with
-the same message. That conflation is intentional — it denies an attacker an
-oracle for whether a key is valid.
+the same message. The two cases are deliberately indistinguishable to the
+caller.
 
 **Read denials are audited too.** The GraphQL gate (`graphql/auth.py`) and the
 MCP gate (`validate_mcp_access(..., "read")`) emit `AuthorizationDenied` when

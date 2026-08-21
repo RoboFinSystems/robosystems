@@ -258,11 +258,11 @@ class PasswordSecurity:
   async def equalize_verify_timing(cls) -> None:
     """Burn one bcrypt verification's worth of work, off the loop.
 
-    The login miss path (unknown email, inactive user, null hash) returns 401
-    having done zero bcrypt work, while a real account pays the full cost-14
-    hash — a ~0.7 s wall-clock difference that defeats the deliberately
-    generic "Invalid email or password". Calling this on the miss path makes
-    both branches cost the same.
+    The login miss path (unknown email, inactive user, null hash) would
+    otherwise return 401 having done zero bcrypt work, while a real account
+    pays the full cost-14 hash — a ~0.7 s gap. The generic "Invalid email or
+    password" is only generic if both branches cost the same, so the miss
+    path calls this. Re-measure if the cost factor changes.
     """
     await cls.verify_password_async(
       "timing-equalizer-candidate", cls._TIMING_EQUALIZER_HASH

@@ -245,8 +245,8 @@ async def create_repository_subscription(
     # Only the subscriber's own subscription conflicts — repository access is
     # per user, so a colleague's subscription is an upsell, not a duplicate.
     # And only a subscription still in force conflicts: canceled and failed
-    # rows are kept as history, and an unfiltered check here turned one
-    # declined card into a permanent 409.
+    # rows are kept as history, so the check must filter on status or a past
+    # failure would block every retry.
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
       resource_id=parent_repo_id,

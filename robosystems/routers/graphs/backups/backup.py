@@ -181,8 +181,9 @@ async def list_backups(
 
     # Check if this is a shared repository and get download quota.
     # Subgraph-aware, and the quota keys on the parent repository — matching
-    # the download endpoint, which enforces against the parent's counter. The
-    # exact-only check made list and download disagree about sec_historical.
+    # the download endpoint, which enforces against the parent's counter. List
+    # and download must resolve a subgraph identically or they report and
+    # enforce different numbers.
     is_shared_repo = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     download_quota = None
 

@@ -9,10 +9,8 @@ from fastapi import Request
 
 def extract_device_fingerprint(request: Request) -> dict[str, Any]:
   """Extract device fingerprint components from a request."""
-  # NOTE: We intentionally exclude client_ip from the fingerprint hash.
-  # IPs change frequently due to VPNs, mobile networks, load balancer routing,
-  # and network reconnections - causing false positive logouts.
-  # Browser headers provide sufficient device binding security.
+  # client_ip is deliberately excluded: it changes too often (VPNs, mobile
+  # networks, load-balancer routing) to be a stable binding signal.
 
   fingerprint = {
     "user_agent": request.headers.get("user-agent", ""),

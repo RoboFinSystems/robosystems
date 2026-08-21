@@ -28,8 +28,7 @@ MAX_ERROR_MESSAGE_LENGTH = 1000  # characters
 # S3, so request bodies to the public API are JSON/form payloads and small; the
 # limit bounds an unbounded-body allocation on the internet-facing surface,
 # which auth and rate limiting cannot — FastAPI reads the body before solving
-# dependencies. The webhook limit is tighter because a Stripe event is small
-# and its body is read (await request.body()) before the signature is checked.
+# dependencies. The webhook limit is tighter because a Stripe event is small.
 PUBLIC_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10 MB
 WEBHOOK_MAX_REQUEST_SIZE = 512 * 1024  # 512 KB
 

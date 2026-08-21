@@ -12,11 +12,9 @@ one-call version of doing that correctly. This module also holds the half of the
 policy about *waiting*: how long a request-facing caller waits for a conflicting
 writer before giving up, and what the failure is called.
 
-It lives at `operations/` root deliberately. It began under `event_block/`, which
-made it invisible to every other subsystem with the same shape — and the second
-and third instances of this bug were found in `roboledger/` only after someone
-went looking. A shared discipline filed inside one of its consumers is a
-discipline the next consumer will not find.
+It lives at `operations/` root deliberately: the same read-decide-write shape
+recurs across subsystems, and a shared discipline filed inside one of its
+consumers is a discipline the next consumer will not find.
 
 The split that matters: **background jobs wait, request handlers do not.** A
 sync or a Dagster sweep should block behind a conflicting approval rather than

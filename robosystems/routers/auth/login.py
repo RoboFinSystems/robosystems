@@ -128,9 +128,8 @@ async def login(
   user = User.get_by_email(sanitized_email, session)
   if not user or not user.password_hash or not user.is_active:
     # Burn one bcrypt verification so this branch costs the same wall-clock
-    # as a wrong password against a real account — otherwise the ~0.7 s
-    # difference is an account-enumeration oracle that defeats the generic
-    # message below.
+    # as a wrong password against a real account (~0.7 s at cost 14). The
+    # generic message below is only generic if the timing is too.
     await PasswordSecurity.equalize_verify_timing()
 
     # Record failed attempt for protection system

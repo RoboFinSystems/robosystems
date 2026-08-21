@@ -1041,7 +1041,7 @@ Resources:
         - CertificateArn: !Ref ApiCertificate
 
   # Webhooks Allow Rule - Allow external webhook providers (Stripe, etc.) to reach webhook endpoints
-  # These endpoints are secured via signature verification, not network-level blocking
+  # These endpoints authenticate the caller by verifying the provider's signature
   # Must have higher priority (lower number) than AdminApiDenyRule
   WebhooksAllowRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule

@@ -494,8 +494,8 @@ class _RegistrarMCPTool(BaseTool):
     duration_ms = (time.monotonic() - start) * 1000
 
     # One audit line per tool call, the same shape and stream as the REST
-    # operation routes — a write reached through MCP was previously invisible
-    # to the "who did what" review.
+    # operation routes, so a write is attributable regardless of which surface
+    # carried it.
     failed = isinstance(result, dict) and "error" in result
     log_operation_audit(
       operation_name=self.spec.name,

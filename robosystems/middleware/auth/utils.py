@@ -163,9 +163,8 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
     # Load while the session is live so the lazy relationship resolves once.
     user = key_record.user
 
-    # Reject keys whose owning user is deactivated. UserAPIKey.get_by_key only
-    # filters on the key's own is_active flag, not the user's — without this a
-    # deactivated user retains full API access via any existing key.
+    # Reject keys whose owning user is deactivated. The key's own is_active
+    # flag does not imply the owner's, so both must be checked here.
     if not user.is_active:
       logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
       return None
