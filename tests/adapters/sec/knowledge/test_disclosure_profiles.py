@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from robosystems.adapters.sec.knowledge.artifact import DisclosureProfileBuilder
 from robosystems.adapters.sec.knowledge.extractors import ArcExtractor
@@ -150,11 +151,25 @@ class TestDisclosureProfileBuilder:
       table = pq.read_table(f)
     cols = table.to_pydict()
 
-    # Check that weighted_score >= frequency for elements with pagerank >= 0
-    for i in range(len(cols["qname"])):
-      freq = cols["frequency"][i]
-      ws = cols["weighted_score"][i]
-      assert ws >= freq - 0.001
+    # `weighted_score = freq * (1 + pagerank)`, so a loaded PageRank makes the
+    # score STRICTLY greater than frequency. The previous assertion here was
+    # `ws >= freq - 0.001`, which the degraded path (weighted == frequency)
+    # satisfies too — so this test and `test_weighted_score_degrades_without_
+    # pagerank` below were asserting the same output, and both passed for as
+    # long as `_load_pagerank_scores` was returning {} on every call.
+    scored = {
+      cols["qname"][i]: (cols["frequency"][i], cols["weighted_score"][i])
+      for i in range(len(cols["qname"]))
+    }
+    expected_pr = {"us-gaap:Liabilities": 0.8, "us-gaap:StockholdersEquity": 0.3}
+    matched = {q: v for q, v in scored.items() if q in expected_pr}
+    # Guard against a vacuous pass if the fixture stops emitting these elements.
+    assert matched, f"none of {sorted(expected_pr)} present in {sorted(scored)}"
+
+    for qname, (freq, ws) in matched.items():
+      pr = expected_pr[qname]
+      assert ws == pytest.approx(freq * (1.0 + pr), abs=1e-6)
+      assert ws > freq, f"{qname}: pagerank {pr} did not raise the weighted score"
 
   def test_weighted_score_degrades_without_pagerank(
     self, sec_duckdb, tmp_path, monkeypatch
