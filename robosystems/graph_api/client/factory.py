@@ -759,7 +759,7 @@ async def get_graph_client_for_instance(
   exists on it for the router to find.
 
   Example:
-      client = await get_graph_client_for_instance("10.0.1.123")
+      client = await get_graph_client_for_instance("<instance-private-ip>")
       await client.create_database("entity_456")
   """
   if api_key is None:

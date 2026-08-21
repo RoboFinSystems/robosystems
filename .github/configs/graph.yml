@@ -158,7 +158,7 @@ production:
       tier: ladybug-xlarge
 
       # Subgraph configuration
-      max_subgraphs: 25 # Practical limit of 25 subgraphs (marketed as "unlimited")
+      max_subgraphs: 25 # Up to 25 subgraphs
       # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
 
       # Copy operation limits

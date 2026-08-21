@@ -1347,7 +1347,7 @@ class TestPerformanceAndCaching:
 
 
 class TestRequireGraphWriteRole:
-  """The shared write-role gate used by the command surfaces (appsec F1)."""
+  """The shared write-role gate used by the command surfaces."""
 
   def test_viewer_denied(self):
     with (

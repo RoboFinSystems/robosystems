@@ -2,8 +2,8 @@
 
 That script decides whether to bounce a customer's graph container, so its
 fail-open branches, its refusal branches, and its no-op branch all need pinning
-down. `instance_busy` is a coordination signal rather than a guard
-(ref/data-plane.md §4), which means every one of the "proceed anyway" paths is
+down. `instance_busy` is a coordination signal rather than a guard,
+which means every one of the "proceed anyway" paths is
 deliberate — and a well-meaning future edit that tightens one into a real guard
 would look like a bug fix. These tests are what make that edit fail.
 
@@ -205,7 +205,7 @@ class TestEnvironmentContract:
 
 
 class TestBusyCounterFailsOpen:
-  """Every one of these paths is deliberate; see ref/data-plane.md §4.
+  """Every one of these paths is deliberate.
 
   The counter reports, it does not decide. A broken or absent counter must never
   block a refresh, and tightening any of these into a real guard is the mistake

@@ -205,7 +205,7 @@ class TestValidateCypherQuery:
 
 @pytest.mark.unit
 class TestValidateCypherQueryEngineVerbs:
-  """F4: engine-adjacent verbs (bulk load / attach / install / schema DDL) are
+  """Engine-adjacent verbs (bulk load / attach / install / schema DDL) are
   blocked via the shared analyzer, while ordinary graph writes still pass so
   writer instances keep working."""
 
@@ -241,7 +241,7 @@ class TestValidateCypherQueryEngineVerbs:
     assert exc_info.value.status_code == 403
 
   def test_in_string_comment_marker_cannot_hide_engine_verb(self):
-    """F2 + F4 compose: an in-string `//` must not mask a trailing COPY."""
+    """An in-string `//` must not mask a trailing COPY."""
     with pytest.raises(HTTPException) as exc_info:
       validate_cypher_query("MATCH (n) WHERE n.note = '//' COPY t FROM '/x'")
     assert exc_info.value.status_code == 403
@@ -902,7 +902,7 @@ class TestLadybugServiceStreamingQuery:
     )
 
   def test_streaming_row_cap_truncates(self, service):
-    """F5: pulling past MAX_STREAMING_ROWS stops the stream and flags truncated."""
+    """Pulling past MAX_STREAMING_ROWS stops the stream and flags truncated."""
     from robosystems.graph_api.models.database import QueryRequest
 
     mock_query_result = MagicMock()
@@ -957,7 +957,7 @@ class TestLadybugServiceStreamingQuery:
     assert delivered == 3
 
   def test_streaming_timeout_yields_timeout_chunk(self, service):
-    """F5: a query that exceeds the timeout yields a QueryTimeout error chunk."""
+    """A query that exceeds the timeout yields a QueryTimeout error chunk."""
     from robosystems.graph_api.models.database import QueryRequest
 
     self._wire_streaming_result(service, MagicMock())

@@ -886,7 +886,7 @@ class TestPendingObligationsGate:
 
 
 class TestStrandedObligationsGate:
-  """Gate 4b (F9): a matured `classified` obligation whose (schedule, period)
+  """Gate 4b: a matured `classified` obligation whose (schedule, period)
   has no drafted closing entry blocks close — those are adjusting entries the
   close would otherwise silently omit. Bypassable with
   allow_stranded_obligations; the count still populates for the audit trail.

@@ -106,8 +106,6 @@ def cleanup_orphaned_backups(
   was never written — or was removed — is invisible to it, and survives until
   the 90-day S3 lifecycle rule regardless of the graph's tier. A standard-tier
   orphan therefore outlives its 7-day retention by more than twelve weeks.
-  Observed in prod: a 2026-06-06 object under ``kg19dcbe757481af06fc9b`` with
-  no row at all.
 
   Retention comes from the owning graph's tier, parsed out of the key, so an
   orphan expires on the same clock its tracked siblings would have. Unknown or

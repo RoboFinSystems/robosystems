@@ -320,7 +320,7 @@ class TestDerivedCashFlow:
 
 
 class TestScheduleInstantRouting:
-  """Contra polarity on the direct route (June-close F14).
+  """Contra polarity on the direct route.
 
   A Net-only presentation maps its contra CoA account straight onto the
   Net anchor; the schedule's running balance is stored positive, so a +1

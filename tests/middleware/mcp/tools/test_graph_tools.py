@@ -661,7 +661,7 @@ class TestGetGraphSyncStatusExecute:
   async def test_connection_health_and_last_sync_result_ride_along(
     self, mock_db: MagicMock
   ) -> None:
-    """F8: the source→OLTP edge is legible — connection status (incl.
+    """The source→OLTP edge is legible — connection status (incl.
     needs_reauth) and the last sync attempt's outcome summary."""
     graph = MagicMock()
     graph.graph_stale = False

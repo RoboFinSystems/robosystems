@@ -9,8 +9,8 @@ user, and the one-time email-match fallback is gated on SCIM provenance
 
 Contract: session-in, dataclass-out, domain exceptions — the router
 translates to redirects. Connection config is env-backed behind
-``get_oidc_connection()``; a per-org DB lookup slots in behind the same
-resolver if shared-SaaS enterprise SSO is ever wanted.
+``get_oidc_connection()``; the resolver is the single seam any other
+connection source would slot in behind.
 """
 
 import hashlib

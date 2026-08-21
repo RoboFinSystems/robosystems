@@ -4,13 +4,11 @@ Everything here is checked through the product surface — GraphQL reads,
 the graph health endpoint, and Cypher against the materialized graph — so
 a failure means a customer would see it too.
 
-The invariants come from ``ref/roboinvestor.md`` §7 plus the platform
-staleness rule in ``ref/extensions.md`` §8. Two of them exist specifically
-because their absence went unnoticed for six months:
+Two invariants carry most of the weight:
 
-- **Every operation marks its graph stale.** RoboInvestor shipped with
-  zero of six doing so. Nothing reached LadybugDB, and no test could see
-  it because no test and no demo ever created a pure-investor graph.
+- **Every operation marks its graph stale.** An operation that writes OLTP
+  rows without flagging staleness leaves the graph silently behind, and only
+  a pure-investor graph exercises the path.
 - **The pre-association is a first-class state.** ``source_graph_id`` is
   meaningful before ``entity_id`` exists, and anything reading issuer
   attribution must prefer the security's own column — reading it off the
@@ -76,10 +74,14 @@ class Checks:
     return condition
 
   def equal(self, label: str, actual: Any, expected: Any) -> bool:
-    return self.check(label, actual == expected, f"expected {expected!r}, got {actual!r}")
+    return self.check(
+      label, actual == expected, f"expected {expected!r}, got {actual!r}"
+    )
 
 
-def _first_row(query: Any, graph_id: str, cypher: str, checks: Checks) -> dict[str, Any]:
+def _first_row(
+  query: Any, graph_id: str, cypher: str, checks: Checks
+) -> dict[str, Any]:
   """Run a Cypher check, turning a query failure into a recorded failure.
 
   A gate that dies mid-run prints no summary, so an unrelated hiccup —
@@ -176,11 +178,14 @@ def validate_run(
     len(active_positions or []),
     EXPECTED_ACTIVE_POSITIONS,
   )
-  checks.equal("disposed position retained, not deleted", len(disposed_positions or []), 1)
+  checks.equal(
+    "disposed position retained, not deleted", len(disposed_positions or []), 1
+  )
 
   # Money is integer cents in storage; dollars are a boundary concern.
   cents_ok = all(
-    _field(p, "cost_basis", 0) == round((_field(p, "cost_basis_dollars", 0.0) or 0.0) * 100)
+    _field(p, "cost_basis", 0)
+    == round((_field(p, "cost_basis_dollars", 0.0) or 0.0) * 100)
     for p in (active_positions or [])
   )
   checks.check("cost basis cents ↔ dollars agree on every position", cents_ok)
@@ -249,7 +254,9 @@ def validate_run(
       for r in (ledger.list_reports(investor_graph) or [])
       if _field(r, "source_graph_id", None) == issuer_graph
     ]
-    if checks.equal("shared report copied into the fund's schema", len(shared_reports), 1):
+    if checks.equal(
+      "shared report copied into the fund's schema", len(shared_reports), 1
+    ):
       copy = shared_reports[0]
       checks.equal(
         "shared copy is published",
@@ -331,7 +338,9 @@ def validate_run(
       EXPECTED_ACTIVE_POSITIONS,
     )
     checks.equal(
-      "POSITION_IN_SECURITY edges", edge_row.get("in_security"), EXPECTED_ACTIVE_POSITIONS
+      "POSITION_IN_SECURITY edges",
+      edge_row.get("in_security"),
+      EXPECTED_ACTIVE_POSITIONS,
     )
     checks.equal("ENTITY_HAS_PORTFOLIO edge", edge_row.get("owns_portfolio"), 1)
 

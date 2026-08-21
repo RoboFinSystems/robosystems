@@ -467,7 +467,7 @@ class TestOrphanGuard:
 
 
 class TestStrandedObligations:
-  """F9: matured `classified` obligations with no drafted closing entry are
+  """Matured `classified` obligations with no drafted closing entry are
   reachable by the sweep — dispatched in autopilot, surfaced in co-pilot.
   A co-pilot background sweep flips pending → classified without dispatch,
   so these are the adjusting entries a close would otherwise silently omit.

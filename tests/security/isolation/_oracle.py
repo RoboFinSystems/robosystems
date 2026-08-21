@@ -51,7 +51,7 @@ def _strip_volatile(obj):
 
 # Structural / metadata keys that don't count as tenant content. Anything
 # NOT in this set — e.g. `org_name` — is content, so `{"org_name": "...",
-# "lists": []}` (the publish_lists.py F5 leak shape) is data, not empty.
+# "lists": []}` is data, not empty.
 _ENVELOPE_KEYS = {
   "status",
   "message",

@@ -1,7 +1,7 @@
 """`platform_session()` must be independent of the request-scoped session.
 
-Regression for the tier-B robustness review §2.5: `platform_session()` used to
-drive `get_db_session()`, which returns the request-scoped Session (keyed by
+`platform_session()` previously drove
+`get_db_session()`, which returns the request-scoped Session (keyed by
 the request contextvar → task → thread). Opened *inside* a request — a GraphQL
 resolver, an MCP tool, a runner thread that inherited the request's
 contextvars — it resolved to the endpoint's own Session, and its `finally`

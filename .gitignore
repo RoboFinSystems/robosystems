@@ -144,3 +144,6 @@ GEMINI.md
 robosystems/adapters/sec/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
 robosystems/adapters/sec/arelle/cache/
+
+# dbt per-machine state (anonymous usage id)
+**/dbt/.user.yml

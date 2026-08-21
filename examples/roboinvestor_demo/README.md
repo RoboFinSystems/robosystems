@@ -118,8 +118,4 @@ and `saas_startup` slots, so re-runs reuse both graphs.
 
 ## Related
 
-- `ref/roboinvestor.md` — the domain model, the maturity ground truth, and
-  the invariants this demo asserts
-- `ref/extensions.md` — the platform contract: tenancy, the operation
-  envelope, the staleness rule, and the cross-graph seam
 - [`examples/saas_startup_demo/`](../saas_startup_demo/) — the issuer

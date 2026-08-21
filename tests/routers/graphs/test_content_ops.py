@@ -342,7 +342,7 @@ async def test_create_file_upload_op():
 
 async def test_create_file_upload_op_enforces_write_role():
   # A read-only viewer must be rejected by the write-role gate BEFORE the
-  # command runs — create-file-upload previously skipped this gate (CO-F1).
+  # command runs — create-file-upload previously skipped this gate.
   body = FileUploadRequest(
     file_name="x.parquet", table_name="t", content_type="application/x-parquet"
   )
