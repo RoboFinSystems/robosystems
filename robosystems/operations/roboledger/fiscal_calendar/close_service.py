@@ -167,6 +167,45 @@ class PeriodCloseResult:
   statement_rule_summary: dict[str, int] | None = None
 
 
+# Bump when the receipt's shape changes so a reader can tell an old receipt
+# from a new one rather than inferring it from which keys are present.
+CLOSE_RECEIPT_VERSION = 1
+
+
+def _build_close_receipt(
+  result: PeriodCloseResult,
+  *,
+  actor_id: str,
+  actor_type: str,
+  closed_at: datetime,
+) -> dict:
+  """Render a `PeriodCloseResult` as the JSON receipt stored on the period.
+
+  Deliberately a projection, not a dump: `calendar` is a live ORM-backed
+  object whose state moves on with the ledger, and a receipt that changes
+  after the fact is not a receipt. Everything here is a scalar captured at
+  close time.
+  """
+  return {
+    "version": CLOSE_RECEIPT_VERSION,
+    "period": result.period,
+    "closed_at": closed_at.isoformat(),
+    "closed_by": actor_id,
+    "actor_type": actor_type,
+    "was_reclose": result.was_reclose,
+    "entries_posted": result.entries_posted,
+    "entries_published_to_qb": result.entries_published_to_qb,
+    "entries_posted_locally": result.entries_posted_locally,
+    "target_auto_advanced": result.target_auto_advanced,
+    "rule_summary": result.rule_summary,
+    "evaluated_structure_ids": list(result.evaluated_structure_ids),
+    "statements_stamped": result.statements_stamped,
+    "statement_stamp_note": result.statement_stamp_note,
+    "stamped_statement_sets": dict(result.stamped_statement_sets),
+    "statement_rule_summary": result.statement_rule_summary,
+  }
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Service
 # ────────────────────────────────────────────────────────────────────────────
@@ -420,7 +459,7 @@ class PeriodCloseService:
       f"rule_summary={rule_summary}"
     )
 
-    return PeriodCloseResult(
+    result = PeriodCloseResult(
       period=period,
       entries_posted=entries_posted,
       target_auto_advanced=target_auto_advanced,
@@ -435,6 +474,18 @@ class PeriodCloseService:
       stamped_statement_sets=stamp.fact_set_ids,
       statement_rule_summary=stamp.rule_summary,
     )
+
+    # 7. Stamp the receipt onto the period row. This assignment rides the
+    # SAME transaction as the `status='closed'` flip in step 5, so a
+    # committed close always carries its receipt and a rolled-back one
+    # carries none — the two can never disagree. Everything above is
+    # already computed; nothing here can fail the close.
+    fp.close_receipt = _build_close_receipt(
+      result, actor_id=actor_id, actor_type=actor_type, closed_at=now
+    )
+    session.flush()
+
+    return result
 
   # ── Private helpers ────────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ from sqlalchemy import (
   String,
   UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -52,6 +53,16 @@ class FiscalPeriod(ExtensionsBase):
   status = Column(String, nullable=False, default="open")
   closed_at = Column(DateTime, nullable=True)
   closed_by = Column(String, nullable=True)
+
+  # The close receipt, stamped in the same transaction as the status flip
+  # above. Without it the close result exists only in the HTTP response,
+  # so a transport failure on a close that SUCCEEDED leaves the operator
+  # reconstructing what happened from four separate state reads. Written
+  # by PeriodCloseService.close(); read back by get-period-close-status
+  # and the fiscal-calendar response. Nullable because periods closed
+  # before this shipped (and those seeded closed by initialize_ledger)
+  # have no receipt.
+  close_receipt = Column(JSONB, nullable=True)
 
   # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))

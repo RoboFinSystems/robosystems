@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from datetime import date
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions.schedules import (
+  CloseReceiptResponse,
   PeriodCloseItemResponse,
   PeriodCloseStatusResponse,
 )
@@ -43,4 +46,27 @@ def get_period_close_status(
     ],
     total_draft=status.total_draft,
     total_posted=status.total_posted,
+    # The stored receipt is validated on the way out rather than trusted:
+    # rows written by an older shape (or hand-edited) surface as no receipt
+    # instead of failing the whole close-status read.
+    close_receipt=_parse_receipt(status.close_receipt),
   )
+
+
+def _parse_receipt(raw: dict | None) -> CloseReceiptResponse | None:
+  """Project a stored close receipt onto its typed response model.
+
+  Returns None for a missing or unreadable receipt. `get-period-close-status`
+  is the read an operator runs when a close's response was lost, so it must
+  not be the thing that breaks on a receipt it cannot parse.
+  """
+  if not raw:
+    return None
+  try:
+    return CloseReceiptResponse.model_validate(raw)
+  except ValidationError:
+    logger.warning(
+      "Stored close receipt failed validation; reporting no receipt",
+      extra={"period": raw.get("period"), "version": raw.get("version")},
+    )
+    return None

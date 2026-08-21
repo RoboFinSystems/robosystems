@@ -154,6 +154,7 @@ def build_fiscal_calendar_response(
         end_date=p.end_date,
         status=p.status,
         closed_at=p.closed_at,
+        has_close_receipt=p.close_receipt is not None,
       )
       for p in periods
     ],
