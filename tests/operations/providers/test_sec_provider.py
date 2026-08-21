@@ -424,6 +424,9 @@ class TestSyncSECConnection:
       "credentials": {"cik": "0001234567"},
     }
 
+    # Patched at its source module, not as an attribute of sec_provider: the
+    # submission was made through a function-local import, so this is what
+    # would catch the call coming back.
     with patch(
       "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync"
     ) as mock_submit:

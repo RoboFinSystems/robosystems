@@ -605,6 +605,29 @@ async def resolve_sync_connection(
   return pool[0]
 
 
+def _release_sync_lock(connection_id: str, sync_lock_id: str) -> None:
+  """Best-effort release of the per-connection sync lock.
+
+  Never raises: the lock's TTL is the fallback, and a release failure must not
+  turn a successful dispatch into an error.
+  """
+  try:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+
+    release_lock_by_id(
+      create_redis_client(ValkeyDatabase.LOCKS),
+      lock_key=f"qb_sync:{connection_id}",
+      lock_id=sync_lock_id,
+    )
+  except Exception as release_exc:
+    logger.warning(
+      "Failed to release sync lock for connection %s (TTL is the fallback): %s",
+      connection_id,
+      release_exc,
+    )
+
+
 async def dispatch_connection_sync(
   *,
   graph_id: str,
@@ -720,22 +743,14 @@ async def dispatch_connection_sync(
     # lock 409s every sync attempt on this connection for its full
     # 30-minute TTL. Best-effort, mirroring qb_load's release.
     if sync_lock_id:
-      try:
-        from robosystems.middleware.auth.distributed_lock import release_lock_by_id
-
-        release_lock_by_id(
-          create_redis_client(ValkeyDatabase.LOCKS),
-          lock_key=f"qb_sync:{connection_id}",
-          lock_id=sync_lock_id,
-        )
-      except Exception as release_exc:
-        logger.warning(
-          "Failed to release sync lock for connection %s after dispatch "
-          "failure (TTL is the fallback): %s",
-          connection_id,
-          release_exc,
-        )
+      _release_sync_lock(connection_id, sync_lock_id)
     raise
+
+  # A provider that returns synchronously has already done whatever it does —
+  # there is no run coming that will release the lock, so holding it until the
+  # TTL would 409 every later attempt on this connection for 30 minutes.
+  if sync_lock_id and not provider_registry.starts_async_run(provider):
+    _release_sync_lock(connection_id, sync_lock_id)
 
   logger.info(f"Sync initiated for connection {connection_id}: task_id={task_id}")
 

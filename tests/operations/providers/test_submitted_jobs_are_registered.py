@@ -43,6 +43,20 @@ SUBMITTED = _submitted_job_names()
 
 
 @pytest.mark.unit
+def test_the_scan_finds_something_to_guard():
+  """A parametrize over an empty set collects zero cases and reports success.
+
+  That is the same green-for-the-wrong-reason failure this module exists to
+  catch, one level up: if a ``job_name=`` argument stops being a literal, or the
+  provider modules move, the guard below would silently stop guarding.
+  """
+  assert SUBMITTED, (
+    f"no literal job_name= arguments found under {PROVIDERS_DIR.name}/ — either "
+    "no provider submits a job any more, or the scan stopped matching."
+  )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("job_name", sorted(SUBMITTED))
 def test_submitted_job_is_registered(job_name):
   from robosystems.dagster.definitions import all_jobs

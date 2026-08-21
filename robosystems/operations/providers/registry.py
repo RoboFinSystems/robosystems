@@ -72,6 +72,7 @@ class ProviderRegistry:
         "sync": sync_sec_connection,
         "cleanup": cleanup_sec_connection,
         "config_class": SECConnectionConfig,
+        "starts_async_run": False,
       }
 
     if env.CONNECTION_QUICKBOOKS_ENABLED:
@@ -80,6 +81,8 @@ class ProviderRegistry:
         "sync": sync_quickbooks_connection,
         "cleanup": cleanup_quickbooks_connection,
         "config_class": QuickBooksConnectionConfig,
+        # `qb_load` releases the per-connection sync lock when the run ends.
+        "starts_async_run": True,
       }
 
     # "external" is source-namespace registration only — see external_provider.py
@@ -89,6 +92,7 @@ class ProviderRegistry:
         "sync": sync_external_connection,
         "cleanup": cleanup_external_connection,
         "config_class": ExternalConnectionConfig,
+        "starts_async_run": False,
       }
 
   def _record_feature_flag_status(self):
@@ -120,6 +124,17 @@ class ProviderRegistry:
   def is_enabled(self, provider_type: str) -> bool:
     """Whether a provider is registered (feature-flag enabled)."""
     return provider_type.lower() in self._providers
+
+  def starts_async_run(self, provider_type: str) -> bool:
+    """Whether this provider's ``sync`` hands off to a run that outlives it.
+
+    The per-connection sync lock is released by whoever finishes the work. A
+    provider that starts a Dagster run releases it there; one that returns
+    synchronously has already finished, so the caller must release it or the
+    lock sits until its TTL and 409s every later attempt.
+    """
+    provider = self._providers.get(provider_type.lower())
+    return bool(provider and provider.get("starts_async_run"))
 
   def get_provider(self, provider_type: str) -> dict[str, Any]:
     """Look up a provider's handler dict.

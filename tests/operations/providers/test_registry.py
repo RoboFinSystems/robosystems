@@ -125,7 +125,11 @@ class TestProviderRegistryInit:
       "sync",
       "cleanup",
       "config_class",
+      "starts_async_run",
     }
+    # External writes through the public API on its own schedule, so its sync
+    # returns immediately and the dispatcher, not a run, releases the lock.
+    assert registry._providers["external"]["starts_async_run"] is False
 
   def test_registry_does_not_register_external_when_disabled(self):
     """External provider is absent when CONNECTION_EXTERNAL_ENABLED=False."""
