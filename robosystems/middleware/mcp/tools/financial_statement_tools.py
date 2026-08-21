@@ -50,20 +50,19 @@ class LiveFinancialStatementTool(BaseTool):
 - Live, up-to-the-minute data (no materialization required)
 - Only available on RoboLedger tenant entity graphs (not SEC shared repo)
 
-**STATEMENT TYPES:**
+**PARAMETERS:**
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - equity_statement — Equity components and changes
 - cash_flow_statement — Operating (indirect: net income + non-cash add-backs + working-capital deltas), investing, financing. Investing/financing leaves resolve from each line's explicit flow tag when present, else from the mapped rs-gaap element's default-flow derivation arc — so untagged QB data renders too, provided the relevant accounts are mapped at the grain the arcs key on (e.g. PP&E Gross for capex). Needs ≥2 periods (current + prior) for the indirect deltas.
-
-**INPUTS:**
 - Explicit `period_start` / `period_end` (YYYY-MM-DD) win over everything else
 - `period_type="annual"` + `fiscal_year=2025` → window anchored on the graph's FiscalCalendar
 - `period_type="quarterly"` → current calendar quarter
 - `period_type="instant"` / unset → current calendar month
 
 **RETURNS:**
-Facts with element qnames, names, classifications, values across current + prior periods (equal duration). Subtotal rows and all-zero rows are filtered out. Capped at `limit` rows.""",
+Facts with element qnames, names, classifications, values across current + prior periods (equal duration). Subtotal rows and all-zero rows are filtered out. Capped at `limit` rows.
+""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -177,14 +176,12 @@ class FinancialStatementAnalysisTool(BaseTool):
 - RoboLedger tenant graph post-materialization: historical analytical queries against the materialized ledger
 - Use when you want cross-period or cross-entity analytical views rather than the current live books (use live-financial-statement for the latter)
 
-**ROUTING:**
+**NOTES:**
 - Shared-repo (SEC): `ticker` REQUIRED. If no `report_id`, auto-resolves the latest matching filing by form type (10-K/10-Q/20-F/40-F).
 - Tenant graph: `report_id` REQUIRED.
 
-**STATEMENT TYPES:**
+**PARAMETERS:**
 - income_statement, balance_sheet, cash_flow_statement, equity_statement
-
-**PERIOD TYPES:**
 - annual — 10-K/20-F/40-F forms, duration facts
 - quarterly — 10-Q + annuals (international filers), duration facts
 - instant — point-in-time facts (balance sheet default)
@@ -192,7 +189,8 @@ class FinancialStatementAnalysisTool(BaseTool):
 **RETURNS:**
 - Deduplicated facts (qname, name, value, end_date) ordered by end_date DESC
 - resolved_report info when auto-resolution was used
-- Dimensional/segment breakdowns are filtered out (consolidated totals only)""",
+- Dimensional/segment breakdowns are filtered out (consolidated totals only)
+""",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -112,10 +112,13 @@ class WriteCypherTool(BaseTool):
     return {
       "name": "write-graph-cypher",
       "description": (
-        "Execute a write Cypher query on the active subgraph. "
-        "Creates, updates, or deletes data in the subgraph. "
-        "Only works on subgraphs, not the parent graph.\n\n"
-        "**Allowed operations:** CREATE, MERGE, SET, DELETE, REMOVE\n\n"
+        "Execute a write Cypher query on the active subgraph.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To create, update or delete data in a subgraph\n"
+        "- Only on subgraphs — the parent graph is not writable here\n\n"
+        "**PARAMETERS:**\n"
+        "- ``query``: Cypher limited to CREATE, MERGE, SET, DELETE, REMOVE\n\n"
+        "**RETURNS:** The write result, including rows affected.\n\n"
         "**Examples:**\n"
         "```cypher\n"
         "// Create a node\n"
@@ -185,10 +188,13 @@ class AddNodeTableTool(BaseTool):
     return {
       "name": "add-node-table",
       "description": (
-        "Add a new node type to the subgraph schema. "
-        "Only works on subgraphs, not the parent graph. "
-        "Uses IF NOT EXISTS so it's safe to call multiple times.\n\n"
-        "**Example:** Add a CompanyProfile node type:\n"
+        "Add a new node type to the subgraph schema.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To extend a subgraph's schema with a new node table\n"
+        "- Only on subgraphs — the parent graph's schema is fixed\n\n"
+        "**RETURNS:** Confirmation that the node table exists.\n\n"
+        "**NOTES:** Uses IF NOT EXISTS, so repeat calls are safe. Example — "
+        "add a CompanyProfile node type:\n"
         "```json\n"
         '{"table_name": "CompanyProfile", "properties": [\n'
         '  {"name": "identifier", "type": "STRING", "is_primary_key": true},\n'
@@ -322,10 +328,13 @@ class AddRelationshipTableTool(BaseTool):
     return {
       "name": "add-relationship-table",
       "description": (
-        "Add a new relationship type to the subgraph schema. "
-        "Only works on subgraphs, not the parent graph. "
-        "Uses IF NOT EXISTS so it's safe to call multiple times.\n\n"
-        "**Example:** Add a FINDING_SUPPORTS relationship:\n"
+        "Add a new relationship type to the subgraph schema.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To extend a subgraph's schema with a new relationship table\n"
+        "- Only on subgraphs — the parent graph's schema is fixed\n\n"
+        "**RETURNS:** Confirmation that the relationship table exists.\n\n"
+        "**NOTES:** Uses IF NOT EXISTS, so repeat calls are safe. Example — "
+        "add a FINDING_SUPPORTS relationship:\n"
         "```json\n"
         '{"table_name": "FINDING_SUPPORTS", "from_node": "ResearchFinding", '
         '"to_node": "Concept", "properties": [\n'

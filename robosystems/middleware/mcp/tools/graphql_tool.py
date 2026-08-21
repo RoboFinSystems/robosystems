@@ -186,15 +186,18 @@ class GraphqlSchemaTool(BaseTool):
     return {
       "name": "get-graphql-schema",
       "description": (
-        "Return the GraphQL schema for the extensions endpoint. "
-        "Call this before query-graphql to discover types, fields, and input "
-        "arguments. The schema is per-deployment — fields depend on which "
-        "extensions (roboledger, roboinvestor) are enabled.\n\n"
-        "**format options:**\n"
-        "- ``sdl`` (default) — human-readable Schema Definition Language; "
-        "best for scanning types and writing queries.\n"
-        "- ``introspection`` — full JSON introspection result; useful for "
-        "programmatic tooling that consumes the standard introspection format."
+        "Return the GraphQL schema for the extensions endpoint.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Before query-graphql, to discover types, fields and input arguments\n"
+        "- When a query fails on an unknown field — the schema is "
+        "per-deployment and depends on which extensions (roboledger, "
+        "roboinvestor) are enabled\n\n"
+        "**PARAMETERS:**\n"
+        "- ``format``: ``sdl`` (default) is human-readable Schema Definition "
+        "Language, best for scanning types and writing queries; "
+        "``introspection`` is the full JSON introspection result, for tooling "
+        "that consumes the standard format.\n\n"
+        "**RETURNS:** The schema in the requested format."
       ),
       "inputSchema": {
         "type": "object",
@@ -261,19 +264,20 @@ class GraphqlQueryTool(BaseTool):
     return {
       "name": "query-graphql",
       "description": (
-        "Execute a read-only GraphQL query against the extensions endpoint. "
-        "Call get-graphql-schema first to discover types and fields. "
-        "Mutations and subscriptions are rejected.\n\n"
-        "**Usage pattern:**\n"
-        "1. Call get-graphql-schema to get the SDL.\n"
-        "2. Write a query against the SDL.\n"
-        "3. Call query-graphql with the query string.\n\n"
-        "**graph_id is always set from context** — do not pass it as a "
-        "query argument. The schema reflects the graph_id from the URL.\n\n"
-        "**Example:**\n"
-        "```graphql\n"
-        "{ fiscalCalendar { closedThrough closeTarget } }\n"
-        "```"
+        "Execute a read-only GraphQL query against the extensions "
+        "endpoint.\n\n"
+        "**WHEN TO USE:**\n"
+        "- For typed reads of extensions data (roboledger, roboinvestor)\n"
+        "- After get-graphql-schema, which gives the types and fields to "
+        "query against\n\n"
+        "**PARAMETERS:**\n"
+        "- ``query``: the GraphQL query string. Mutations and subscriptions "
+        "are rejected.\n"
+        "- **graph_id is set from context** — never pass it as a query "
+        "argument. The schema already reflects the graph_id from the URL.\n\n"
+        "**RETURNS:** The query result, shaped by the fields requested.\n\n"
+        "**NOTES:** A minimal query looks like "
+        "``{ fiscalCalendar { closedThrough closeTarget } }``."
       ),
       "inputSchema": {
         "type": "object",

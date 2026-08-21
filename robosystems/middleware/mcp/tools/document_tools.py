@@ -140,21 +140,20 @@ class CreateDocumentTool:
 - To record observations, analysis notes, or research findings (use folder="memory")
 - To create any persistent document that should be searchable via search-documents
 
-**DOCUMENT TYPES:**
-- **Policy documents**: Accounting policies, close procedures, depreciation methods (folder="policies")
-- **Memory/notes**: Analysis, observations, key findings (folder="memory")
-- **General**: Any markdown document
+**PARAMETERS:**
+- `folder` groups the document: "policies" for accounting policies, close
+  procedures and depreciation methods; "memory" for analysis, observations and
+  findings; omit it for general documents
+- `content` is markdown. Use `## Section` headings — sections are split on them
+  and become individually searchable
+- YAML frontmatter sets title, tags and folder inline
 
-**FEATURES:**
-- Content is stored in PostgreSQL and automatically indexed in OpenSearch
-- Documents are searchable via the search-documents tool after creation
-- Supports markdown formatting with heading-based section splitting
-- Tags and folders help organize and filter documents
+**RETURNS:** The created document's id and metadata.
 
-**TIPS:**
-- Use markdown headings (## Section) to create searchable sections
-- Use YAML frontmatter for metadata (title, tags, folder)
-- Documents with folder="memory" replace the old remember-text pattern""",
+**NOTES:**
+- Stored in PostgreSQL and indexed in OpenSearch, so it is reachable via
+  search-documents once created
+- Tags and folders are the filters available to list-documents""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -276,8 +275,10 @@ class UpdateDocumentTool:
 - To append notes to an existing memory document
 - To update tags or folder for organization
 
-Only provided fields are updated — omit fields you don't want to change.
-Content changes are automatically re-indexed in OpenSearch.""",
+**RETURNS:** The updated document's metadata.
+
+**NOTES:** Only provided fields are updated — omit fields you don't want to
+change. Content changes are re-indexed in OpenSearch.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -389,10 +390,12 @@ class GetDocumentTool:
 - To review a document before updating it
 - When you know the document ID (from list-documents or a previous interaction)
 
-**HOW IT DIFFERS FROM get-document-section:**
-- get-document returns the FULL document from PostgreSQL (the source of truth)
-- get-document-section returns a single search-indexed section from OpenSearch
-- Use get-document for reading/editing, use get-document-section for search drill-in""",
+**RETURNS:** The full document — content, title, tags, folder and metadata.
+
+**RELATED TOOLS:**
+- get-document-section returns one search-indexed section from OpenSearch; use
+  it to drill into a search hit. This tool reads the whole document from
+  PostgreSQL, which is the source of truth, so use it for reading and editing""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -469,8 +472,10 @@ class DeleteDocumentTool:
 - To remove an outdated or incorrect policy/procedure document
 - To clean up a memory note that is no longer relevant
 
-Removes the document from PostgreSQL (source of truth) and its indexed sections
-from OpenSearch. This is permanent — use get-document to review before deleting.""",
+**RETURNS:** Confirmation of the deletion.
+
+**NOTES:** Removes the document from PostgreSQL and its indexed sections from
+OpenSearch. Permanent — read it with get-document first.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -544,10 +549,12 @@ class ListDocumentsTool:
 - To find a specific document by title when you don't have the ID
 - To see all policy documents (folder="policies") or memory notes (folder="memory")
 
-**HOW IT DIFFERS FROM search-documents:**
-- list-documents is a direct browse of PostgreSQL (no search ranking)
-- search-documents uses hybrid search (BM25 + KNN) for discovery by content
-- list-documents shows all docs including empty ones; search-documents only returns matches""",
+**RETURNS:** Document ids, titles, folders and tags — metadata, not content.
+
+**RELATED TOOLS:**
+- search-documents ranks by content using hybrid search (BM25 + KNN) and
+  returns only matches. This tool browses PostgreSQL directly with no ranking
+  and lists every document, including empty ones""",
       "inputSchema": {
         "type": "object",
         "properties": {

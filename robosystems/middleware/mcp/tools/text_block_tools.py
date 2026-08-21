@@ -38,15 +38,17 @@ class BindTextBlockTool:
 - To attach an accounting-policy or footnote narrative (stored as a document via create-document) to a disclosure structure so it renders in reports
 - After authoring a text-block disclosure structure via create-taxonomy-block (block_type='regulatory_disclosure', concept_arrangement='text_block')
 
-**HOW IT WORKS:**
+**NOTES:**
 - The document stays the editable source of truth; the bind snapshots its text into a standing 'disclosure' FactSet with document provenance (document_id + section + content_hash)
 - Reports generated afterward snapshot the standing set, so filed reports stay immutable even if the document is later edited
 - Re-binding the same element + period replaces the fact and refreshes the content hash (the drift signal)
-
-**TIPS:**
 - Use section_id (the slugified heading ids search-documents returns) to bind one section of a larger document; omit it to bind the whole document
 - The element must be a concrete (non-abstract) concept on the disclosure structure; provide element_qname or element_id
-- period_start/period_end should span the reporting period the narrative covers""",
+- period_start/period_end should span the reporting period the narrative covers
+
+**RETURNS:** The bound fact's id, the element it was bound to, and the content
+hash used as the drift signal.
+""",
       "inputSchema": {
         "type": "object",
         "properties": {

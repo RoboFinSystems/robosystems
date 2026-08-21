@@ -299,7 +299,7 @@ class GetClosePlaybookTool:
 - Before running a monthly close → mode="recurring"
 - Any time the close workflow is unclear → mode="overview" (default)
 
-**ALSO READ:** call `search-documents` for this company's own "close procedures" document — it captures tenant-specific accounts/quirks and references this generic playbook.
+**RELATED TOOLS:** call `search-documents` for this company's own "close procedures" document — it captures tenant-specific accounts/quirks and references this generic playbook.
 
 **RETURNS:** the close overview, the ordered tool sequence for the chosen mode, schedule-authoring rules (incl. one-schedule-per-debit/credit-pair), and key gotchas (period-identifier shapes, amounts-in-cents, which block types 501, close blockers).""",
       "inputSchema": {

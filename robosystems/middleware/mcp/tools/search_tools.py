@@ -55,7 +55,7 @@ class SearchDocumentsTool(_SearchToolMixin):
 - To discover any document content by topic or keyword
 - For cross-company topic search on shared repositories (e.g., "which companies mention tariff risk?")
 
-**DOCUMENT TYPES SEARCHED:**
+**PARAMETERS:**
 - User-uploaded documents (policies, procedures, notes) — created via create-document
 - SEC filing text blocks and narrative sections
 - iXBRL disclosure sections with embedded XBRL facts
@@ -76,7 +76,7 @@ class SearchDocumentsTool(_SearchToolMixin):
 - Use resolve-element to look up details, then read-graph-cypher for structured values
 - Bridges unstructured narrative context ↔ structured financial facts
 
-**TIPS:**
+**NOTES:**
 - Natural language queries work well ("depreciation policy", "month end close procedures")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections""",

@@ -90,6 +90,7 @@ Graph API (FastAPI on EC2:8001)
 - `databases/restore.py` - Restore operations
 - `databases/tables/` - DuckDB staging tables
 - `databases/tables/materialize.py` - Stage to graph ingestion
+- `metrics.py` - Prometheus metrics endpoint
 - `databases/vector_search.py` - LanceDB vector search
 - `databases/semantic_memory.py` - Semantic memory operations
 - `databases/schema.py` - Schema introspection
@@ -171,7 +172,7 @@ Confirm the set with `ls .github/workflows/ | grep graph` before acting on it �
 
 `.github/configs/graph.yml` is the source of truth — **read it rather than quoting sizes from memory**, since instance types and RAM have been resized more than once. Its `instance:` block per tier carries `instance_ram_gb` and `databases_per_instance`; ASG min/max counts come from GitHub variables (`just gha-list LBUG`).
 
-Shape as of this writing (verify before relying on it):
+Shape (read `.github/configs/graph.yml` for current values):
 
 ```
 ladybug-standard: dedicated instance, 3 subgraphs max
@@ -201,13 +202,9 @@ CLUSTER_TIER=ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
 LBUG_DATABASE_PATH=/data/lbug-dbs
 
 # Capacity Settings
-LBUG_MAX_DATABASES_PER_NODE=10
-LBUG_MAX_MEMORY_MB=2048
-LBUG_MAX_MEMORY_PER_DB_MB=0  # 0 = auto-calculate
-
-# Connection Management
-LBUG_MAX_CONNECTIONS_PER_DB=10
-LBUG_CONNECTION_TTL_MINUTES=30.0
+LBUG_MAX_DATABASES_PER_NODE
+LBUG_MAX_MEMORY_MB
+LBUG_MAX_MEMORY_PER_DB_MB  # 0 = auto-calculate
 
 # Admission Control
 LBUG_ADMISSION_MEMORY_THRESHOLD=0.85
@@ -303,7 +300,9 @@ curl http://{instance}:8001/metrics
 **Connection Pool Exhaustion:**
 
 - Check `/metrics` endpoint for pool stats
-- Increase `LBUG_MAX_CONNECTIONS_PER_DB` if needed
+- `LBUG_MAX_CONNECTIONS_PER_DB` and `LBUG_CONNECTION_TTL_MINUTES` are code
+  constants in `config/constants.py`, not environment variables — changing
+  either needs a deploy
 - Check for connection leaks in client code
 
 **Memory Pressure:**
@@ -356,7 +355,8 @@ async def get_graph_client(graph_id: str):
 ## Known Limitations
 
 1. **Sequential Ingestion**: One file at a time per database
-2. **Connection Limit**: Configurable, default 10 per database
+2. **Connection Limit**: per-database pool, capped at a small fixed size —
+   read `graph_api/core/ladybug/pool.py` for the current value
 3. **Single Writer**: One write operation per database at a time
 4. **No Cross-DB Queries**: Complete database isolation
 5. **Volume Attachment**: One EBS per database

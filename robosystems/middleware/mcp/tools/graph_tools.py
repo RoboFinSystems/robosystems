@@ -316,9 +316,13 @@ class DeleteSubgraphTool:
     return {
       "name": "delete-subgraph",
       "description": (
-        "Hard-delete a subgraph and all its data. Cannot target the parent "
-        "graph. Requires admin role on the parent. Use `backup_first=true` "
-        "to create a safety snapshot before deletion.\n\n"
+        "Hard-delete a subgraph and all its data.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To permanently remove a subgraph that is no longer needed\n"
+        "- Requires admin role on the parent, and cannot target the parent "
+        "graph itself\n\n"
+        "**RETURNS:** Confirmation of the deletion, and the backup id when "
+        "`backup_first` is set.\n\n"
         "**PARAMETERS:**\n"
         "- subgraph_id: Full id like `{parent_id}_{name}`\n"
         "- force: Delete even if the subgraph contains data (default false)\n"
@@ -436,8 +440,14 @@ class ListSubgraphsTool:
       "name": "list-subgraphs",
       "description": (
         "List every subgraph under this parent graph, plus the parent itself "
-        "as the `primary` entry. Each row carries `connector_url` — the MCP "
-        "endpoint that serves that graph.\n\n"
+        "as the `primary` entry.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To discover what subgraphs exist and how to reach each one\n"
+        "- Before working in a subgraph, to get its `connector_url`\n\n"
+        "**RETURNS:** One row per graph — the parent as `primary` plus each "
+        "subgraph — each carrying `connector_url`, the MCP endpoint that "
+        "serves that graph.\n\n"
+        "**NOTES:**\n"
         "A subgraph is a separate endpoint, not a mode of this one: this "
         "connector is anchored to its own graph by URL and cannot be "
         "retargeted. To work in a subgraph, add its `connector_url` as its "
@@ -620,7 +630,9 @@ class CreateBackupTool:
         "- On a scheduled basis for disaster-recovery hygiene\n"
         "- Before running large agent-driven workflows\n\n"
         "**PARAMETERS:**\n"
-        "- retention_days: How long to keep the backup (default 30, capped at tier max)."
+        "- retention_days: How long to keep the backup (default 30, capped at "
+        "tier max).\n\n"
+        "**RETURNS:** An `operation_id` to track the enqueued backup."
       ),
       "inputSchema": {
         "type": "object",
@@ -905,8 +917,9 @@ class SyncConnectionTool:
         "incremental refresh is the common case.\n"
         "- since_date: Bounded incremental window (YYYY-MM-DD); ignored "
         "when full_rebuild=true.\n\n"
-        "**COMPLETION:** returns `task_id` once dispatched; the sync runs "
-        "in the background. Poll `get-fiscal-calendar` until "
+        "**RETURNS:** A `task_id` once dispatched; the sync runs in the "
+        "background.\n\n"
+        "**NOTES:** Poll `get-fiscal-calendar` until "
         "`last_sync_at` advances past the dispatch time (and any "
         "`sync_stale` blocker clears) before proceeding with a close. A "
         "`sync_in_progress` error means a sync is already running — wait "
@@ -1036,7 +1049,7 @@ class SetWritePolicyTool:
       "description": (
         "Set whether a connection writes back to its source system — the "
         "explicit opt-in for outbound write-back.\n\n"
-        "**WHAT IT CONTROLS:**\n"
+        "**NOTES:**\n"
         "- `native`: RoboSystems is the source of truth. No write-back; "
         "RoboSystems-originated entries (manual JEs, schedule drafts) post "
         "locally only.\n"
@@ -1045,8 +1058,7 @@ class SetWritePolicyTool:
         "(`execute-event-block`) or at period close, then post locally.\n\n"
         "**WHEN TO USE:** Flip a QuickBooks connection to `qb_authoritative` "
         "before relying on write-back so drafts round-trip into QB; flip "
-        "back to `native` to disable write-back. (`hybrid` is not yet "
-        "supported.)\n\n"
+        "back to `native` to disable write-back.\n\n"
         "**RETURNS:** the updated connection (including `write_policy`)."
       ),
       "inputSchema": {
