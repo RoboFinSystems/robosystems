@@ -1,4 +1,4 @@
-"""SEC connection provider — CIK registration and EDGAR filing sync."""
+"""SEC connection provider — CIK registration and validation against EDGAR."""
 
 from typing import Any
 
@@ -182,60 +182,18 @@ async def create_sec_connection(
 async def sync_sec_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Submit the `sec_entity_sync` Dagster job; returns its run id.
+  """SEC filings arrive through the shared nightly pipeline, not per connection.
 
-  The job discovers the CIK's filings in the shared raw S3 bucket, processes
-  XBRL into parquet, and loads it into `graph_id` — which must already exist
-  with the RoboLedger schema. `sync_options` accepts `form_types` and
-  `skip_enrichment`.
+  A SEC connection records which CIK a graph follows. The filings themselves are
+  downloaded, processed and materialized once into the shared SEC repository on
+  a nightly schedule and read from there, so there is no per-connection pull to
+  run.
   """
-  from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
-
-  metadata = connection.get("metadata", {}) or {}
-  options = sync_options or {}
-
-  cik = metadata.get("cik", "")
-  connection_id = connection.get("connection_id", "")
-  user_id = connection.get("user_id", "")
-
-  if not cik:
-    raise ValueError("SEC CIK not found in connection metadata")
-
-  # Every asset in the job shares one SECEntitySyncConfig, so the same dict
-  # is bound to each op below.
-  sync_config = {
-    "graph_id": graph_id,
-    "connection_id": connection_id,
-    "user_id": user_id,
-    "cik": cik,
-    "form_types": options.get("form_types", ["10-K", "10-Q", "20-F", "40-F"]),
-    "skip_enrichment": options.get("skip_enrichment", True),
-  }
-
-  run_config = {
-    "ops": {
-      "sec_entity_extract": {"config": sync_config},
-      "sec_entity_transform": {"config": sync_config},
-      "sec_entity_load": {"config": sync_config},
-    }
-  }
-
-  run_id = submit_dagster_job_sync(
-    job_name="sec_entity_sync",
-    run_config=run_config,
-    tags={
-      "graph_id": graph_id,
-      "connection_id": connection_id,
-      "cik": cik,
-      "pipeline": "sec_entity",
-    },
+  return (
+    "SEC filings are refreshed nightly into the shared SEC repository and read "
+    "from there; a SEC connection records the CIK to follow and has nothing to "
+    "sync on its own."
   )
-
-  logger.info(
-    f"SEC entity sync submitted for graph={graph_id}, "
-    f"cik={cik}, connection={connection_id}, run_id={run_id}"
-  )
-  return run_id
 
 
 async def cleanup_sec_connection(connection: dict[str, Any], graph_id: str) -> None:
