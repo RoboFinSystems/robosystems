@@ -51,7 +51,7 @@ REQUIRED_SECTIONS = ("WHEN TO USE", "RETURNS")
 
 # Tools whose description is a single declarative line and needs no skeleton:
 # the name plus one sentence already answers both selection questions.
-_SINGLE_LINE_EXEMPT = frozenset({"forget", "update-memory"})
+_SINGLE_LINE_EXEMPT: frozenset[str] = frozenset()
 
 
 def _tool_descriptions() -> dict[str, tuple[str, str]]:
@@ -72,7 +72,12 @@ def _tool_descriptions() -> dict[str, tuple[str, str]]:
         if isinstance(k, ast.Constant) and isinstance(k.value, str)
       }
       name_node, desc_node = keys.get("name"), keys.get("description")
-      if name_node is None or desc_node is None:
+      # ``inputSchema`` is what distinguishes a tool definition from a
+      # parameter definition — both carry name/description, and keying off
+      # anything else (length, whether the string is multi-line) silently
+      # drops the short tool descriptions, which are the ones most likely to
+      # be missing a section in the first place.
+      if name_node is None or desc_node is None or "inputSchema" not in keys:
         continue
       if not (isinstance(name_node, ast.Constant) and isinstance(name_node.value, str)):
         continue
@@ -80,7 +85,7 @@ def _tool_descriptions() -> dict[str, tuple[str, str]]:
         description = ast.literal_eval(desc_node)
       except ValueError:
         continue  # an f-string or a computed value; not a static contract
-      if isinstance(description, str) and "\n" in description.strip():
+      if isinstance(description, str):
         found[name_node.value] = (description, path.name)
   return found
 

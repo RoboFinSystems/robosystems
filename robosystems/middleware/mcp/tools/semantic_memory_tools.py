@@ -73,11 +73,17 @@ class SemanticRememberTool(_SemanticMemoryToolMixin, BaseTool):
     return {
       "name": "remember",
       "description": (
-        "Store a durable semantic memory for the active graph. The text is "
-        "embedded and can be recalled later with the `recall` tool. Use for "
-        "facts, decisions, preferences, and context worth persisting across "
-        "sessions. This is vector memory — distinct from write-graph-cypher, "
-        "which builds structural graph data on subgraphs."
+        "Store a durable semantic memory for the active graph.\n\n"
+        "**WHEN TO USE:**\n"
+        "- For facts, decisions, preferences and context worth persisting "
+        "across sessions\n"
+        "- When something learned in this session should survive it\n\n"
+        "**RETURNS:** The stored memory's id, for later `update-memory` or "
+        "`forget`.\n\n"
+        "**RELATED TOOLS:**\n"
+        "- `recall` retrieves what this stores\n"
+        "- write-graph-cypher builds structural graph data on subgraphs; this "
+        "is vector memory and does not put anything in the graph"
       ),
       "inputSchema": {
         "type": "object",
@@ -134,9 +140,14 @@ class SemanticRecallTool(_SemanticMemoryToolMixin, BaseTool):
     return {
       "name": "recall",
       "description": (
-        "Recall previously stored semantic memories for the active graph by "
-        "meaning (not keywords). Returns the top-k most relevant memories with "
-        "similarity scores. Use before answering to retrieve remembered context."
+        "Recall stored semantic memories for the active graph by meaning "
+        "rather than keywords.\n\n"
+        "**WHEN TO USE:**\n"
+        "- Before answering, to retrieve remembered context\n"
+        "- When the user refers to something established in an earlier "
+        "session\n\n"
+        "**RETURNS:** The top-k most relevant memories with their ids and "
+        "similarity scores."
       ),
       "inputSchema": {
         "type": "object",
@@ -198,11 +209,15 @@ class SemanticUpdateMemoryTool(_SemanticMemoryToolMixin, BaseTool):
     return {
       "name": "update-memory",
       "description": (
-        "Update a previously stored semantic memory in place by its id (from a "
-        "prior `remember`/`recall`). Only the fields you supply change; the "
-        "memory is re-embedded when `text` changes. Use to correct or refine a "
-        "memory instead of forgetting and re-remembering (which would mint a new "
-        "id and drop its history)."
+        "Update a stored semantic memory in place by its id.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To correct or refine a memory — prefer this over forget plus "
+        "remember, which mints a new id and drops the memory's history\n\n"
+        "**PARAMETERS:**\n"
+        "- memory_id: from a prior `remember` or `recall`\n"
+        "- Only the fields supplied change; the memory is re-embedded when "
+        "`text` changes\n\n"
+        "**RETURNS:** The updated memory."
       ),
       "inputSchema": {
         "type": "object",
@@ -270,8 +285,14 @@ class SemanticForgetTool(_SemanticMemoryToolMixin, BaseTool):
     return {
       "name": "forget",
       "description": (
-        "Delete a semantic memory by its id (from a prior `remember`/`recall`). "
-        "Use to remove outdated or incorrect memories."
+        "Delete a semantic memory by its id.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To remove an outdated or incorrect memory\n"
+        "- To correct one instead, prefer `update-memory`, which keeps the id "
+        "and its history\n\n"
+        "**PARAMETERS:**\n"
+        "- memory_id: from a prior `remember` or `recall`\n\n"
+        "**RETURNS:** Confirmation of the deletion."
       ),
       "inputSchema": {
         "type": "object",
