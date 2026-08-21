@@ -459,11 +459,16 @@ BURST_LIMITS: dict[str, int] = {
   "api_key": 1000,  # 60k/hour possible
   "jwt": 500,  # 30k/hour possible
   "anonymous": 10,  # 600/hour possible
-  # Authentication. Windows are seconds, not counts.
+  # Authentication. Each attempt count is followed by its window in seconds —
+  # keeping the pair adjacent is the point, since a count and a window that live
+  # apart get changed apart.
   "auth_attempts": 10,
   "auth_window": 300,
+  "login_attempts": 5,
   "login_window": 300,
+  "register_attempts": 3,
   "register_window": 3600,
+  "jwt_refresh": 20,  # per minute; deliberately stricter than sensitive_auth
   "sensitive_auth": 60,
   "auth_status": 600,  # 10/second — polled by the login screen
   "logout": 300,
@@ -485,4 +490,8 @@ BURST_LIMITS: dict[str, int] = {
   "backup_ops": 10,  # expensive operations
   "billing": 60,  # checkout polls at ~20/min
   "webhook": 1200,  # anonymous → 120/min per IP
+  # Server-Sent Events. A fallback: the per-tier limits above are consulted
+  # first, and these apply only when that lookup returns nothing.
+  "sse_connections": 10,
+  "sse_connections_window": 60,
 }

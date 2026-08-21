@@ -6,13 +6,6 @@ import jwt
 from fastapi import HTTPException, Request, status
 
 from ...config import env
-from ...config.constants import (
-  AUTH_RATE_LIMIT_LOGIN_DEFAULT,
-  AUTH_RATE_LIMIT_REGISTER_DEFAULT,
-  JWT_REFRESH_RATE_LIMIT_DEFAULT,
-  RATE_LIMIT_SSE_CONNECTIONS,
-  RATE_LIMIT_SSE_CONNECTIONS_WINDOW,
-)
 from ...config.rate_limits import BURST_LIMITS
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import rate_limit_cache
@@ -223,10 +216,10 @@ def auth_rate_limit_dependency(request: Request):
   # Get endpoint-specific limits (security constants)
   path = request.url.path
   if "/login" in path:
-    limit = AUTH_RATE_LIMIT_LOGIN_DEFAULT
+    limit = BURST_LIMITS["login_attempts"]
     window = BURST_LIMITS["login_window"]  # 5 minutes
   elif "/register" in path:
-    limit = AUTH_RATE_LIMIT_REGISTER_DEFAULT
+    limit = BURST_LIMITS["register_attempts"]
     window = BURST_LIMITS["register_window"]  # 1 hour
   else:
     # Default auth endpoint limits
@@ -619,8 +612,7 @@ def public_api_rate_limit_dependency(request: Request):
 
 def jwt_refresh_rate_limit_dependency(request: Request):
   """Very strict rate limiting for JWT refresh operations."""
-  # More restrictive than general sensitive auth limits (security constant)
-  limit = JWT_REFRESH_RATE_LIMIT_DEFAULT
+  limit = BURST_LIMITS["jwt_refresh"]
   return create_custom_rate_limit_dependency(limit, 60, "jwt_refresh")(request)
 
 
@@ -792,9 +784,9 @@ def sse_connection_rate_limit_dependency(request: Request):
   if rate_limit:
     limit, window = rate_limit
   else:
-    # Fallback to constants if not configured in subscription rate limits
-    limit = RATE_LIMIT_SSE_CONNECTIONS
-    window = RATE_LIMIT_SSE_CONNECTIONS_WINDOW
+    # Fallback when the tier is not configured in the subscription limits.
+    limit = BURST_LIMITS["sse_connections"]
+    window = BURST_LIMITS["sse_connections_window"]
 
   identifier = get_user_identifier(request)
 

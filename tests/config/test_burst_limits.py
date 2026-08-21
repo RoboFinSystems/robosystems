@@ -67,6 +67,37 @@ def test_every_key_defined_is_read():
 
 
 @pytest.mark.unit
+def test_rate_limits_do_not_reappear_in_constants():
+  """``constants.py`` is not a second home for rate limits.
+
+  It held five of them until the pair split became visible at the call site: a
+  login attempt *count* in one module and its *window* in the other, changed
+  independently. Two more windows sat there dead, duplicating values that were
+  already here. One home per concept is what keeps a count and its window in
+  step, so this fails if a rate limit is added back to the other one.
+  """
+  source = (
+    Path(__file__).resolve().parents[2] / "robosystems/config/constants.py"
+  ).read_text(encoding="utf-8")
+  offenders = [
+    node.target.id
+    for node in ast.parse(source).body
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    if "RATE_LIMIT" in node.target.id
+  ] + [
+    target.id
+    for node in ast.parse(source).body
+    if isinstance(node, ast.Assign)
+    for target in node.targets
+    if isinstance(target, ast.Name) and "RATE_LIMIT" in target.id
+  ]
+  assert not offenders, (
+    f"config/constants.py defines rate limits {sorted(offenders)}. They belong "
+    "in BURST_LIMITS, next to the windows they pair with."
+  )
+
+
+@pytest.mark.unit
 def test_limits_are_positive_integers():
   bad = {k: v for k, v in BURST_LIMITS.items() if not isinstance(v, int) or v <= 0}
   assert not bad, f"non-positive or non-integer burst limits: {bad}"
