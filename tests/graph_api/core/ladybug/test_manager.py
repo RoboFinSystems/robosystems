@@ -84,7 +84,21 @@ class TestLadybugDatabaseManagerCreateDatabase:
     # Create one database to fill capacity
     (Path(self.temp_dir) / "existing.lbug").touch()
 
-    request = DatabaseCreateRequest(graph_id="new_db", schema_type="entity")
+    # No "_": a top-level graph id, which is what the cap counts.
+    request = DatabaseCreateRequest(graph_id="newdb", schema_type="entity")
+
+    with pytest.raises(HTTPException) as exc_info:
+      manager.create_database(request)
+    assert exc_info.value.status_code == 507
+
+  def test_capacity_exemption_ignores_the_request_flag(self):
+    """The exemption derives from the graph id, matching how the cap counts."""
+    manager = _make_manager(self.temp_dir, max_databases=1)
+    (Path(self.temp_dir) / "existing.lbug").touch()
+
+    request = DatabaseCreateRequest(
+      graph_id="newdb", schema_type="entity", is_subgraph=True
+    )
 
     with pytest.raises(HTTPException) as exc_info:
       manager.create_database(request)

@@ -680,9 +680,10 @@ class GraphClient(BaseGraphClient):
     """Create a database.
 
     ``schema_type`` is one of ``entity``/``shared``/``custom``;
-    ``repository_name`` applies to shared databases. ``is_subgraph`` bypasses
-    the node's ``max_databases`` check, since a subgraph is accounted against
-    its parent's tier limit rather than the instance's.
+    ``repository_name`` applies to shared databases. ``is_subgraph`` tells the
+    node to skip schema application, since a subgraph inherits its parent's
+    schema through the fork. Capacity accounting is derived from ``graph_id``
+    on the node, not from this flag.
     """
     payload = {
       "graph_id": graph_id,

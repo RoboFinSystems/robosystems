@@ -106,18 +106,21 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_400_BAD_REQUEST, detail="Graph ID is required"
       )
 
-    # Subgraphs are exempt from the cap: they share the parent's slot, and are
-    # identified by the "_" in their name.
+    # Subgraphs are exempt from the cap: they share the parent's slot. Both
+    # sides of that accounting derive from the same thing — the "_" in the
+    # name — so the exemption cannot be claimed for a database the count
+    # would still charge against the cap.
+    exempt_from_cap = "_" in request.graph_id
     all_databases = self.list_databases()
     current_count = len([db for db in all_databases if "_" not in db])
-    if not request.is_subgraph and current_count >= self.max_databases:
+    if not exempt_from_cap and current_count >= self.max_databases:
       raise HTTPException(
         status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
         detail=f"Maximum database capacity reached ({self.max_databases})",
       )
-    elif request.is_subgraph:
+    elif exempt_from_cap:
       logger.info(
-        f"Creating subgraph database {request.graph_id} (bypassing max_databases check)"
+        f"Creating {request.graph_id} against the parent's slot (not counted toward max_databases)"
       )
 
     db_path = validate_database_path(self.base_path, request.graph_id)
