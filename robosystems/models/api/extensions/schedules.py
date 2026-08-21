@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -199,6 +199,54 @@ class PeriodCloseItemResponse(BaseModel):
   reversal_status: str | None = None
 
 
+class CloseReceiptResponse(BaseModel):
+  """What a close actually did, stamped on the period row that close locked.
+
+  The close result used to exist only in the HTTP response, so a close
+  that SUCCEEDED but whose transport failed left no record and the
+  operator reconstructed it from separate state reads. This is that
+  record. Written in the same transaction as the period's `status='closed'`
+  flip, so a closed period and its receipt can never disagree.
+
+  Typed rather than a free dict because it is a contract: the GraphQL
+  schema and both SDKs derive from it, and an opaque blob would push the
+  shape onto every reader to rediscover.
+  """
+
+  version: int = Field(
+    ..., description="Receipt schema version; 1 is the first shipped shape"
+  )
+  period: str = Field(..., description="Period this receipt is for (YYYY-MM)")
+  closed_at: datetime
+  closed_by: str = Field(..., description="Actor id that ran the close")
+  actor_type: str = Field(
+    ..., description="'user' for REST callers, 'agent' for MCP-driven closes"
+  )
+  was_reclose: bool = Field(
+    False, description="Whether this close re-closed a previously closed period"
+  )
+  entries_posted: int = Field(
+    0,
+    description=(
+      "Total entries the close transitioned to posted, across both post "
+      "paths — the sum of the two fields below"
+    ),
+  )
+  entries_published_to_qb: int = 0
+  entries_posted_locally: int = 0
+  target_auto_advanced: bool = False
+  rule_summary: dict[str, int] | None = Field(
+    None, description="Schedule rule outcomes: pass/fail/error/skipped counts"
+  )
+  evaluated_structure_ids: list[str] = Field(default_factory=list)
+  statements_stamped: bool = False
+  statement_stamp_note: str | None = None
+  stamped_statement_sets: dict[str, str] = Field(
+    default_factory=dict, description="structure_id -> minted fact_set_id"
+  )
+  statement_rule_summary: dict[str, int] | None = None
+
+
 class PeriodCloseStatusResponse(BaseModel):
   """Period-close dashboard view — every schedule in scope for the
   period plus drafted/posted entry totals.
@@ -214,6 +262,18 @@ class PeriodCloseStatusResponse(BaseModel):
   schedules: list[PeriodCloseItemResponse]
   total_draft: int
   total_posted: int
+  close_receipt: CloseReceiptResponse | None = Field(
+    None,
+    description=(
+      "Receipt stamped by the close that locked this period: entries_posted, "
+      "the entries_published_to_qb / entries_posted_locally split, statement "
+      "stamping and rule summaries, closed_at/closed_by. Null while the "
+      "period is open, and null for periods closed before receipts shipped "
+      "(a closed period without a receipt is not a failed close). This is "
+      "the authoritative record of what a close did — read it rather than "
+      "retrying when a close's response was lost in transport."
+    ),
+  )
 
 
 class ScheduleCreatedResponse(BaseModel):

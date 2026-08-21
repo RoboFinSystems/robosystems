@@ -278,6 +278,15 @@ class FiscalPeriodSummary(BaseModel):
   end_date: date
   status: str = Field(..., description="'open' | 'closing' | 'closed'")
   closed_at: datetime | None = None
+  has_close_receipt: bool = Field(
+    False,
+    description=(
+      "Whether this period carries a close receipt. A flag rather than the "
+      "receipt itself keeps the calendar listing compact; fetch the receipt "
+      "from `get-period-close-status` for the period. False on open periods "
+      "and on periods closed before receipts shipped."
+    ),
+  )
 
 
 class PendingObligationDetailResponse(BaseModel):

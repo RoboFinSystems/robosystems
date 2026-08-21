@@ -45,7 +45,18 @@ class _OneConnectionPool:
 
 
 def _write_parquet(path, columns: dict[str, list]) -> str:
-  pq.write_table(pa.table(columns), str(path))
+  # Write through an open handle, never a path string. `pq.write_table(t, str(p))`
+  # resolves the path by constructing `pyarrow.fs.LocalFileSystem()`, and once
+  # anything in the process has imported networkit that constructor raises
+  # ``ArrowKeyError: Attempted to register factory for scheme 'file'`` — icebug
+  # bundles its own libarrow alongside pyarrow's, and the second copy collides on
+  # Arrow's process-global filesystem registry. The whole test suite shares one
+  # process, so `tests/adapters/sec/knowledge/` (which imports networkit at module
+  # level) poisoned every test here that touched a local parquet file. Passing a
+  # file object skips filesystem resolution entirely. This is the same convention
+  # the production writers follow — see `adapters/sec/knowledge/__init__.py`.
+  with open(path, "wb") as f:
+    pq.write_table(pa.table(columns), f)
   return str(path)
 
 

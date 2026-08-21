@@ -190,7 +190,15 @@ def sec_entity_transform(
     # key format: "nodes/Entity" or "relationships/ENTITY_HAS_REPORT"
     entity_type, table_name = key.split("/", 1)
     out_file = output_dir / f"sec_{table_name}.parquet"
-    pq.write_table(combined, str(out_file))
+    # Handle, not a path string: `write_table(t, str(p))` resolves the path by
+    # constructing `pyarrow.fs.LocalFileSystem()`, which raises ArrowKeyError in
+    # any process that has imported networkit (icebug bundles a second libarrow
+    # that collides with pyarrow's on Arrow's global filesystem registry — see
+    # `adapters/sec/knowledge/__init__.py`). Nothing pulls networkit into this
+    # asset's process today, but that rests on job layout and Dagster's default
+    # per-step subprocess rather than on anything enforced here.
+    with open(out_file, "wb") as f:
+      pq.write_table(combined, f)
     tables_output += 1
 
     context.log.info(f"Wrote {key}: {combined.num_rows} rows → {out_file.name}")

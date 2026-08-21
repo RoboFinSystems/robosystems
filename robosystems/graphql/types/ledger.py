@@ -133,6 +133,9 @@ from robosystems.models.api.extensions.reports import (
   ValidationCheckResponse as PydanticValidationCheckResponse,
 )
 from robosystems.models.api.extensions.schedules import (
+  CloseReceiptResponse as PydanticCloseReceiptResponse,
+)
+from robosystems.models.api.extensions.schedules import (
   PeriodCloseItemResponse as PydanticPeriodCloseItemResponse,
 )
 from robosystems.models.api.extensions.schedules import (
@@ -612,6 +615,18 @@ class PeriodDrafts:
 @pydantic_type(model=PydanticPeriodCloseItemResponse, all_fields=True)
 class PeriodCloseItem:
   """Single schedule's close state within a fiscal period."""
+
+
+@pydantic_type(model=PydanticCloseReceiptResponse, all_fields=True)
+class CloseReceipt:
+  """What a close did, stamped on the period it locked."""
+
+  # The three dict-typed fields need the JSON scalar — Strawberry's pydantic
+  # derivation can't map dict[str, ...] to a GraphQL type (same reason as
+  # Report.rule_summary below).
+  rule_summary: strawberry.scalars.JSON | None
+  stamped_statement_sets: strawberry.scalars.JSON
+  statement_rule_summary: strawberry.scalars.JSON | None
 
 
 @pydantic_type(model=PydanticPeriodCloseStatusResponse, all_fields=True)
