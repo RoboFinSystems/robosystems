@@ -1,18 +1,20 @@
-"""
-Request size limiting middleware for Graph API.
+"""Request size limiting for the Graph API.
 
-Prevents DoS attacks by limiting request body sizes.
+The body handling — header check, streamed byte count, buffer-and-replay — is
+:class:`~robosystems.middleware.request_size.BodySizeLimitMiddleware`. This
+module supplies only the limit, which varies by endpoint family.
 """
 
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from __future__ import annotations
+
+from starlette.types import ASGIApp
 
 from robosystems.config.constants import GRAPH_MAX_REQUEST_SIZE, MAX_QUERY_LENGTH
 from robosystems.logger import logger
+from robosystems.middleware.request_size import BodySizeLimitMiddleware
 
 
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+class RequestSizeLimitMiddleware(BodySizeLimitMiddleware):
   """Reject oversized request bodies before they are read into memory.
 
   The limit is chosen per endpoint family — queries, schema DDL, everything
@@ -22,14 +24,13 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
   def __init__(
     self,
-    app,
+    app: ASGIApp,
     max_body_size: int | None = None,
     max_query_size: int | None = None,
     max_schema_size: int | None = None,
-  ):
-    super().__init__(app)
+  ) -> None:
     # All limits in bytes.
-    self.max_body_size = max_body_size or GRAPH_MAX_REQUEST_SIZE
+    super().__init__(app, max_body_size=max_body_size or GRAPH_MAX_REQUEST_SIZE)
     # MAX_QUERY_LENGTH counts characters; 10x leaves room for multi-byte ones.
     self.max_query_size = max_query_size or MAX_QUERY_LENGTH * 10
     self.max_schema_size = max_schema_size or 1 * 1024 * 1024
@@ -41,39 +42,9 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
       f"Max schema: {self.max_schema_size:,} bytes"
     )
 
-  async def dispatch(self, request: Request, call_next):
-    """Reject the request with 413 if its Content-Length exceeds the limit."""
-    content_length_str = request.headers.get("content-length")
-    if content_length_str:
-      content_length = int(content_length_str)
-
-      path = request.url.path
-
-      if "/query" in path:
-        max_size = self.max_query_size
-        limit_type = "query"
-      elif "/schema" in path:
-        max_size = self.max_schema_size
-        limit_type = "schema"
-      else:
-        max_size = self.max_body_size
-        limit_type = "body"
-
-      if content_length > max_size:
-        logger.warning(
-          f"Request body too large: {content_length:,} bytes "
-          f"(max {limit_type}: {max_size:,} bytes) from {request.client.host if request.client else 'unknown'}"
-        )
-        return JSONResponse(
-          status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-          content={
-            "detail": f"Request {limit_type} too large. "
-            f"Size: {content_length:,} bytes, "
-            f"Max allowed: {max_size:,} bytes"
-          },
-        )
-
-    # Enforcement here is on the declared Content-Length. Bounding a streamed
-    # body requires counting it as it arrives, which the internet-facing edge
-    # middleware does before a request can reach this service.
-    return await call_next(request)
+  def _limit_for(self, path: str) -> tuple[int, str]:
+    if "/query" in path:
+      return self.max_query_size, "query"
+    if "/schema" in path:
+      return self.max_schema_size, "schema"
+    return self.max_body_size, "body"

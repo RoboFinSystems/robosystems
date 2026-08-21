@@ -1,8 +1,11 @@
 """The public-app request-body size limit rejects oversized bodies with a 413,
-by Content-Length and — the gap the graph-API version leaves open — by the
-streamed bytes of a chunked request with no Content-Length. It enforces the cap
-in the middleware, before the app is invoked, so it does not depend on how a
-downstream route handles a mid-read failure.
+by Content-Length and by the streamed bytes of a chunked request that declares
+none. It enforces the cap in the middleware, before the app is invoked, so it
+does not depend on how a downstream route handles a mid-read failure.
+
+The per-path override is this app's own; the body handling it inherits is
+covered against the Graph API's per-family limits in
+``tests/graph_api/test_request_limits.py``.
 """
 
 from __future__ import annotations
