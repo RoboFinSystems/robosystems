@@ -67,7 +67,7 @@ Ten block types are registered. Not all of them are authored through `create-inf
 
 Each `build_envelope` follows the same pattern: load the structure, count runtime state, load atoms, call the helpers, assemble the envelope.
 
-**N+1 note**: `list_information_blocks` calls `build_envelope` per row (roughly nine queries per block), so this is the path to batch if listing latency becomes a concern.
+**N+1 note**: `list_information_blocks` calls `build_envelope` per row (roughly nine queries per block). Fine at current graph sizes; this is the path to batch before dozens of blocks per graph.
 
 ## Rule evaluation engine
 
