@@ -19,7 +19,7 @@ from robosystems.routers.graphs.mcp.execute import (
 
 
 class TestWriteClassificationFailClosed:
-  """appsec F1: write-intent must default to write. Any tool NOT on the
+  """Write-intent must default to write. Any tool NOT on the
   read-only allowlist is classified as a write and requires the member/admin
   role, so a viewer can't reach the command surface."""
 

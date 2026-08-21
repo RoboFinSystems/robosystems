@@ -42,7 +42,7 @@ Only when the automatic path can't run and the user has confirmed. There are two
 1. **Tunnel + per-database migrate recipe** — covers **both** databases (`just migrate-up` for platform, `just migrate-up extensions` for extensions, each against its own config). **This is the working path — prefer it.**
 2. **Bastion-run helper** — targets the **platform** database only, with credentials handled for you.
 
-⚠️ **Verify the bastion helper before relying on it.** It predates the two-database split and has been observed invoking Alembic without naming a per-database config (the repo has no single top-level config anymore — only per-database ones), and resolving a container image tag that the build pipeline does not publish to the registry it pulls from. Either fault makes it fail or run a stale migration set. Before using it in an incident, confirm both: that it passes an explicit config, and that the tag it resolves matches what's actually deployed. If it hasn't been fixed, use path 1.
+⚠️ **Verify the bastion helper before relying on it.** It predates the two-database split and invokes Alembic without naming a per-database config — the repo has no single top-level config anymore, only per-database ones (`migrations/platform.ini`, `migrations/extensions.ini`). That makes it fail, or run against the wrong history. Before using it in an incident, confirm it passes an explicit config; if it hasn't been fixed, use path 1.
 
 Check the current revision before and after, on whichever database you touched. Exact commands are in the runbook.
 

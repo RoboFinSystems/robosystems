@@ -1,4 +1,4 @@
-"""Carry-over (a): the F1 fail-closed write-role gate is wired into the
+"""The fail-closed write-role gate is wired into the
 hand-written REST lifecycle ops that authenticate on graph membership only.
 
 `require_graph_write_role` itself is unit-tested in

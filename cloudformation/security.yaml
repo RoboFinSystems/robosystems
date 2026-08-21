@@ -517,8 +517,8 @@ Resources:
   # failed-notification datapoint, and the alarm is silent straight through the
   # scenario people assume it covers. **The check for that state is the
   # subscription list itself** — `aws sns list-subscriptions-by-topic` for a
-  # `PendingConfirmation` ARN or a missing subscriber. See the periodic
-  # verification in `runbooks/incident-triage.md`.
+  # `PendingConfirmation` ARN or a missing subscriber. Verify it
+  # periodically.
   #
   # **This alarm cannot report its own brokenness.** SNS publishes
   # `NumberOfNotificationsFailed` only on failure — healthy is *no data*, which

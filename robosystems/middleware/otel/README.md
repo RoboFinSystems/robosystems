@@ -32,8 +32,7 @@ Before that it was read via `getattr(env, ...)` against an attribute
 off. It now gates only the OTLP *span* exporter; metrics never depended on it.
 Turning it on is not enough on its own — the deployed ADOT collector has no
 traces pipeline and there is no traces backend yet, so spans would be exported
-to a collector that drops them. The plan for both is
-`local/RoboSystems/specs/security/observability-tracing.md`.
+to a collector that drops them.
 
 A tracer provider and span processors are still installed whenever
 `OTEL_ENABLED` is true, so spans are produced and redacted — they just have

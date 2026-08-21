@@ -1,6 +1,6 @@
 """`run_off_loop` must keep the runner limiter honest under native timeouts.
 
-Regression for the tier-B robustness review §2.4: anyio's `to_thread.run_sync`
+anyio's `to_thread.run_sync`
 shields only anyio cancellation, so `asyncio.wait_for` / `asyncio.timeout`
 raise straight through it and anyio releases the `CapacityLimiter` token while
 the worker thread — and its DB connection — is still running. That uncouples

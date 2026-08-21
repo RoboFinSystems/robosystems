@@ -34,9 +34,9 @@ from robosystems.operations.locking import ordered_lock_column
 #
 # Only flip a source to ``True`` once its adapter has been tested
 # end-to-end with auto-commit — otherwise every event for that source
-# auto-commits silently on first sync, with no inbox review. Future
-# adapters (xero, netsuite, ...) start at ``False`` and graduate
-# explicitly when their handler dispatch is verified against real data.
+# auto-commits silently on first sync, with no inbox review. A new
+# adapter starts at ``False`` and graduates explicitly once its handler
+# dispatch is verified against real data.
 _SOURCE_AUTO_COMMITS: dict[str, bool] = {
   "quickbooks": True,
 }
@@ -65,8 +65,8 @@ def _source_auto_commits_on_sync(source: str) -> bool:
 # the IS sub-classification (operating-expense vs. COGS) is captured
 # separately under ``activityType`` and isn't load-bearing here.
 #
-# When we layer in Xero / NetSuite, each gets its own dict keyed off
-# its native classification taxonomy and the same target identifiers.
+# Each additional accounting source gets its own dict keyed off its
+# native classification taxonomy and the same target identifiers.
 _QB_ACCOUNT_TYPE_TO_TRAIT: dict[str, str] = {
   # Assets
   "Bank": "asset",

@@ -92,13 +92,12 @@ uv run python -m examples.saas_startup_demo.data
 #### Loading an episode into a deployed environment
 
 Because every step but the reset is an ordinary API call, an episode can load
-into a deployed environment as easily as the local stack — which is how these
-two become demo tenants a prospect can be shown, rather than something that
-only exists on a laptop. Point `DEMO_API_URL` at the API and pass the graph id
-of an already-provisioned graph:
+into a deployed environment as easily as the local stack, rather than being
+something that only exists on a laptop. Point `DEMO_API_URL` at the API and
+pass the graph id of an already-provisioned graph:
 
 ```bash
-DEMO_API_URL=https://api.robosystems.ai just demo-coffee-roaster kg…
+DEMO_API_URL=https://<your-api-host> just demo-coffee-roaster kg…
 ```
 
 Three things differ off-local, all deliberate:

@@ -2,20 +2,19 @@
 
 Every grant in the platform is fronted by an auth cache with a TTL of minutes,
 so a revocation is only real once both halves are gone — the grant row in the
-database and every cache entry that was derived from it. Three findings
-(spec: security/org-multi-user-hardening.md, the "revocation cluster") were
-each an instance of one half being withdrawn while the other kept authorizing.
+database and every cache entry that was derived from it. Withdrawing one half
+while the other keeps authorizing is the failure this pins down.
 
 Each test below seeds the cache in the exact shape the production write paths
 produce, revokes through one of the platform's revocation surfaces, and then
 asserts the same thing: no grant row and no cache entry still authorizes the
-revoked user. The revocation surfaces are the ones the spec enumerates:
+revoked user. The revocation surfaces covered:
 
 - graph membership removal (router)
-- org membership removal, including the F15 grant a period-end cancel leaves
+- org membership removal, including the grant a period-end cancel leaves
   alive (router)
-- immediate repository-subscription cancellation (F8, operation)
-- administrative account deletion (F7, operation)
+- immediate repository-subscription cancellation (operation)
+- administrative account deletion (operation)
 """
 
 from __future__ import annotations
@@ -229,7 +228,7 @@ class TestOrgMembershipRevocation:
   async def test_removing_an_org_member_revokes_period_end_repository_grant(
     self, cache, async_client, test_db, test_user
   ):
-    """F15: a period-end cancel leaves the grant alive to ``expires_at`` while
+    """A period-end cancel leaves the grant alive to ``expires_at`` while
     the billing row is already terminal. Off-boarding must revoke it anyway —
     the grant, not the billing row, is what authorization reads."""
     _ensure_sec(test_db)
@@ -304,7 +303,7 @@ class TestRepositorySubscriptionRevocation:
   def test_immediate_cancel_leaves_nothing_authorizing(
     self, cache, test_db, test_user, test_org
   ):
-    """F8: the endpoint promises ``immediate=true`` stops access immediately;
+    """The endpoint promises ``immediate=true`` stops access immediately;
     that is only true once the cached decisions go with the grant."""
     _ensure_sec(test_db)
     member = _create_user(test_db, test_user.password_hash)
@@ -343,7 +342,7 @@ class TestRepositorySubscriptionRevocation:
   def test_offboarding_sweep_revokes_grants_without_live_subscriptions(
     self, cache, test_db, test_user, test_org
   ):
-    """F15 at the operation level: a grant with no billing row behind it at
+    """At the operation level, a grant with no billing row behind it at
     all (a comped or legacy grant) is still revoked by the off-boarding sweep."""
     _ensure_sec(test_db)
     member = _create_user(test_db, test_user.password_hash)
@@ -371,7 +370,7 @@ class TestAccountDeletionRevocation:
   def test_deleting_an_account_leaves_nothing_authenticating(
     self, cache, test_db, test_user
   ):
-    """F7: the bulk delete bypasses ``UserAPIKey.delete``, so without an
+    """The bulk delete bypasses ``UserAPIKey.delete``, so without an
     explicit sweep a deleted account keeps authenticating from cache."""
     user = _create_user(test_db, test_user.password_hash)
     org = Org.create(

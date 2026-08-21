@@ -119,7 +119,7 @@ class TestGetContextAuthContract:
     mock_scoped.assert_called_once()
 
   async def test_graph_scoped_key_accepted_via_graph_validation(self):
-    """Case 2a', the F6 fix: a graph-scoped (`rfsc…`) key is refused by the
+    """Case 2a': a graph-scoped (`rfsc…`) key is refused by the
     account-wide validator (it has no graph context there) but is valid for
     its OWN graph. This endpoint's URL scopes us to that graph, so the
     graph-aware retry authenticates it — matching the REST-operations and MCP

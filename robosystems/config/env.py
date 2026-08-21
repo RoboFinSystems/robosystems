@@ -499,7 +499,7 @@ class EnvConfig:
   )
   # Span export is a separate switch under OTEL_ENABLED: metrics have flowed
   # to AMP for a long time, but no traces backend or collector pipeline exists
-  # yet, so this stays off until one does (specs/security/observability-tracing).
+  # yet, so this stays off until one does.
   OTEL_TRACES_ENABLED = get_bool_env(
     "OTEL_TRACES_ENABLED",
     get_parameter_value("OTEL_TRACES_ENABLED", "false").lower() == "true",

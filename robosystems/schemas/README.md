@@ -116,13 +116,11 @@ Selected relationships:
 - `EVENT_REPLACES_EVENT` — correction chain
 
 Parent–subsidiary ownership has **no edge**: nothing writes one on either path
-(SEC or OLTP materialization), so `base.py` deliberately defers
-`ENTITY_OWNS_ENTITY` until multi-entity consolidation ships. The designated
-source when it does is OLTP `entities.parent_entity_id`, mirrored today on the
-`Entity.parent_entity_id` property.
+(SEC or OLTP materialization), so `base.py` declares no `ENTITY_OWNS_ENTITY`.
+Ownership is carried today by the `Entity.parent_entity_id` property, sourced
+from OLTP `entities.parent_entity_id`.
 
-`Agent` and `Event` are universal REA primitives; every planned RoboX extension
-needs them. `Event.event_action` carries the canonical action vocabulary
+`Agent` and `Event` are universal REA primitives. `Event.event_action` carries the canonical action vocabulary
 (`models/extensions/roboledger/event.py:EVENT_ACTIONS`), refining the coarser
 `event_category`. SEC-flavored repositories get these tables with no rows.
 
@@ -132,9 +130,8 @@ Operators query period membership through `Entry.posting_date` ranges.
 
 ## Extensions
 
-Three extension modules exist. Everything else in the RoboX portfolio is
-unbuilt: those schemas land alongside their OLTP models and adapters when the
-product is designed, not as speculative placeholders.
+Three extension modules exist. An extension's schema lands alongside its OLTP
+models and adapters, never as a speculative placeholder.
 
 | Module | Nodes | Domain |
 | --- | --- | --- |

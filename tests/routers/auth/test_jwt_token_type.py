@@ -1,4 +1,4 @@
-"""F3: token-type enforcement in verify_jwt_claims.
+"""Token-type enforcement in verify_jwt_claims.
 
 Single-use SSO handoff tokens (``create_sso_token`` → {"sso": true}, no jti,
 unrevocable) must never authenticate as a full session bearer. They are

@@ -142,7 +142,7 @@ test-full:
 test-cov:
     uv run pytest --cov=robosystems tests/
 
-# Run the tenant-isolation harness (R-11) against a deployment (default: local stack)
+# Run the tenant-isolation harness against a deployment (default: local stack)
 test-isolation target="http://localhost:8000":
     TARGET_API_URL={{ target }} uv run pytest tests/security/isolation -m isolation \
         -o addopts="-v -ra" -s

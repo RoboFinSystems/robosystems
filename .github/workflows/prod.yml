@@ -484,7 +484,6 @@ jobs:
       # storage-format-breaking engine upgrade, so a boot can't pull a new engine
       # before the new-format sec.lbug is published — set a
       # SHARED_REPLICA_IMAGE_TAG_PROD var for the migration window, then clear it.
-      # See runbooks/sec-reprocessing.md §"storage-format engine upgrade".
       shared_replica_image_tag: ${{ vars.SHARED_REPLICA_IMAGE_TAG_PROD || '' }}
       # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}

@@ -198,7 +198,7 @@ class TestUpdateDocument:
 
   @patch.object(Document, "get_by_id_and_graph")
   def test_raises_on_oversized_content(self, mock_get):
-    # F11: the kernel caps content so the MCP update-document tool (which
+    # The kernel caps content so the MCP update-document tool (which
     # forwards raw content with no length check) can't bypass the 500k limit.
     mock_get.return_value = _mock_document()
     service = DocumentService(MagicMock())

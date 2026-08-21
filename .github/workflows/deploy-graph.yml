@@ -54,7 +54,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Optional pin for the SEC shared replicas ONLY. Empty (default) → falls back to ecr_image_tag (the moving prod/staging tag), so ECRImageTag stays constant across deploys and CloudFormation does not cycle the replica fleet — the daily shared_replicas_refresh is the only routine boot. Set to a specific build git tag ONLY during a storage-format-breaking engine upgrade, so a scale/spot/health boot can't pull a new engine before the new-format sec.lbug is published; clear it once the fleet is on the new engine. Driven via SHARED_REPLICA_IMAGE_TAG_{PROD,STAGING} vars. See runbooks/sec-reprocessing.md."
+        description: "Optional pin for the SEC shared replicas ONLY. Empty (default) → falls back to ecr_image_tag (the moving prod/staging tag), so ECRImageTag stays constant across deploys and CloudFormation does not cycle the replica fleet — the daily shared_replicas_refresh is the only routine boot. Set to a specific build git tag ONLY during a storage-format-breaking engine upgrade, so a scale/spot/health boot can't pull a new engine before the new-format sec.lbug is published; clear it once the fleet is on the new engine. Driven via SHARED_REPLICA_IMAGE_TAG_{PROD,STAGING} vars."
       # Infrastructure inputs (from graph infrastructure deployment)
       secret_arn:
         required: true

@@ -16,8 +16,10 @@
 # MEMORY SIZING: LadybugDB buffer pools are lazily filled caps, not reservations,
 # so nominal (parent + subgraphs) may exceed max_memory_mb — subgraphs are rarely
 # all active at once. The hard ceiling is the admission-control guard, which
-# trips at 85% of *instance* RAM (graph_api/core/admission_control.py), so size
-# parent + duckdb_memory_limit to stay under that even when both are hot.
+# rejects once *absolute available* memory falls under min_available_mb
+# (graph_api/core/admission_control.py), so size parent + duckdb_memory_limit to
+# leave that headroom free even when both are hot. The percent-used figure the
+# same module reports is telemetry, not the gate.
 
 production:
   writers:
@@ -62,8 +64,9 @@ production:
         instance_ram_gb: 4 # Physical instance RAM (customer-facing; max_memory_mb is the LadybugDB budget)
 
         # Memory configuration
-        # Admission control trips at 85% of 4GB = ~3.4GB. Worst concurrent case
-        # is parent buffer pool (1GB) + DuckDB staging (1GB) = 2GB, leaving
+        # Admission control rejects once absolute available memory drops under
+        # min_available_mb, so the budget must leave that free. Worst concurrent
+        # case is parent buffer pool (1GB) + DuckDB staging (1GB) = 2GB, leaving
         # headroom for the OS and the API container.
         max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
         memory_per_db_mb: 1024 # 1GB for the parent database
@@ -158,7 +161,7 @@ production:
       tier: ladybug-xlarge
 
       # Subgraph configuration
-      max_subgraphs: 25 # Practical limit of 25 subgraphs (marketed as "unlimited")
+      max_subgraphs: 25 # Up to 25 subgraphs
       # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
 
       # Copy operation limits
@@ -290,16 +293,15 @@ production:
       # Memory overrides for replica hardware (r7g.large = 16GB RAM)
       # These override the writer's 10GB settings which exceed container capacity
       instance:
-        # r7g.large (16GB) memory-optimized. The prior m7g.large (8GB) tripped the
-        # admission-control guard (85% of *instance* RAM, psutil-based — see
-        # graph_api/core/admission_control.py) during full-report reads on
-        # LadybugDB 0.18: buffer pool + query working set + OS crossed ~6.8GB and
-        # latched into 503s that /health never reflected, so the ALB kept routing.
-        # 16GB leaves ~3GB of working-set headroom above an 8GB buffer pool.
+        # r7g.large (16GB) memory-optimized. Full-report reads on LadybugDB 0.18
+        # need buffer pool + query working set + OS to stay inside the instance
+        # with the admission guard's headroom (min_available_mb) still free; 8GB
+        # is not enough. 16GB leaves ~3GB of working-set headroom above an 8GB
+        # buffer pool.
         # Replicas serve sec ONLY (SHARED_REPOSITORIES=sec); sec_historical stays
         # on the shared master.
         type: r7g.large # 16GB RAM, 2 vCPUs, memory-optimized ARM64 - read-only replica
-        max_memory_mb: 10240 # 10GB LadybugDB cap (pool + query exec); keeps the instance under the 85% guard (~13.6GB of 16GB)
+        max_memory_mb: 10240 # 10GB LadybugDB cap (pool + query exec); leaves the admission guard's headroom free on a 16GB instance
         memory_per_db_mb: 8192 # 8GB buffer pool for sec (was 3.5GB) - 2.3x cache for the ~110GB graph
         duckdb_memory_limit: "0" # No DuckDB queries on replicas
         duckdb_max_threads: 0 # No DuckDB queries on replicas

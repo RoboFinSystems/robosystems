@@ -13,10 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# Bounds the tenant-controlled AI input. Without a cap, a single oversized
-# message (or a long history) can drive a Bedrock call whose true cost exceeds
-# the balance, which the post-hoc conditional debit then bills at zero — the
-# free-spend band. See specs/security/operation-lifecycle-budgets.md §3.1.
+# Bounds the tenant-controlled AI input so a single oversized message or a long
+# history cannot drive a Bedrock call the balance check cannot price up front.
 MAX_OPERATOR_MESSAGE_CHARS = 100_000
 MAX_OPERATOR_HISTORY_MESSAGES = 100
 

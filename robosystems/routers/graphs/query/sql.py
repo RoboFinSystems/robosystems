@@ -48,7 +48,7 @@ circuit_breaker = CircuitBreakerManager()
   response_model=SqlStatementResponse,
   operation_id="executeSql",
   summary="Execute SQL Statement",
-  description="SQL over the graph's columnar tables (DuckDB) — a relational lens on the same graph-centric data, often ahead of the materialized graph. Use `?` placeholders with the `parameters` array to prevent injection. Read-only (SELECT only), 30s timeout, 10K row limit. Not available on shared repositories.",
+  description="SQL over the graph's columnar tables (DuckDB) — a relational lens on the same graph-centric data, often ahead of the materialized graph. Use `?` placeholders with the `parameters` array to prevent injection. Read-only (SELECT only). Not available on shared repositories.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     408: {"description": "Query timeout"},

@@ -144,6 +144,9 @@ GEMINI.md
 robosystems/adapters/sec/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
 robosystems/adapters/sec/arelle/cache/
+
+# dbt per-machine state (anonymous usage id)
+**/dbt/.user.yml
 # Collateral of the line above: ArelleClient._setup_cache_directory sets the
 # process-global XDG_CACHE_HOME to robosystems/adapters/sec so Arelle resolves
 # its own cache, and every other XDG-respecting library in that process then

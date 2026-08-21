@@ -197,7 +197,7 @@ class TestExpiredGraphSubscriptionSensor:
       mock_db.remove.assert_called_once()
 
   def test_query_includes_immediate_cancellation_bypass(self):
-    """F7 defense-in-depth: the suspend query must OR
+    """Defense-in-depth: the suspend query must OR
     `cancellation_type == 'immediate'` against `ends_at < now`, so an immediate
     cancel suspends even if a downstream event (e.g. the Stripe
     subscription.deleted handler) pushed ends_at into the future. Mirrors the

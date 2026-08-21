@@ -53,8 +53,7 @@ def test_read_any_data_for_non_owned_graph_is_leak():
   assert classify_read(victim, attacker)[0] is Verdict.LEAK
 
 
-def test_read_leak_shape_org_name(  # the publish_lists.py F5 shape
-):
+def test_read_leak_shape_org_name():
   """A 200 carrying another tenant's org_name is the known real leak shape."""
   victim = _resp(200, json={"org_name": "Victim Corp", "lists": []})
   attacker = _resp(200, json={"org_name": "Victim Corp", "lists": []})

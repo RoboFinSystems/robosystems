@@ -8,8 +8,8 @@ auto-generated from the same declaration, so the two cannot drift.
 
 Operations mounted as hand-written ``@router.post`` blocks have no such
 guarantee. For those, *absence from MCP is indistinguishable from a decision
-not to expose* — which is how capabilities have ended up built, complete, and
-unreachable. This module removes the ambiguity: every hand-written operation
+not to expose*, so a complete capability can sit unreachable without anyone
+noticing. This module removes the ambiguity: every hand-written operation
 without an MCP tool must appear in :data:`MCP_EXPOSURE_HOLDS` with a reason,
 and ``tests/middleware/mcp/test_operation_exposure.py`` fails the build
 otherwise.

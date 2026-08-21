@@ -1781,7 +1781,7 @@ class TestCreateManualClosingEntry:
       )
 
   def test_rejects_posting_date_in_closed_period(self):
-    """F4: refuse to draft a manual entry whose posting_date falls in a
+    """Refuse to draft a manual entry whose posting_date falls in a
     closed fiscal period — the draft would be orphaned because close-period
     won't re-close a closed month.
     """
@@ -1963,7 +1963,7 @@ class TestTruncateSchedule:
       )
 
   def test_rejects_mid_month_new_end_date(self):
-    """F5: truncate_schedule must require the last day of the month to avoid
+    """truncate_schedule must require the last day of the month to avoid
     ambiguous 'keep partial March' semantics — schedule facts are full-month.
     """
     session = _mock_session()
@@ -1978,7 +1978,7 @@ class TestTruncateSchedule:
       )
 
   def test_accepts_february_non_leap_28th(self):
-    """F5: Feb 28 (non-leap) is the last day of February → accepted."""
+    """Feb 28 (non-leap) is the last day of February → accepted."""
     session = _mock_session()
     session.get.return_value = self._mock_schedule_structure()
     session.execute.side_effect = [
@@ -2006,7 +2006,7 @@ class TestTruncateSchedule:
     assert result["new_end_date"] == date(2026, 2, 28)
 
   def test_accepts_february_leap_29th(self):
-    """F5: Feb 29 (leap year) is the last day of February → accepted."""
+    """Feb 29 (leap year) is the last day of February → accepted."""
     session = _mock_session()
     session.get.return_value = self._mock_schedule_structure()
     session.execute.side_effect = [
@@ -2034,7 +2034,7 @@ class TestTruncateSchedule:
     assert result["new_end_date"] == date(2028, 2, 29)
 
   def test_rejects_february_non_leap_29th(self):
-    """F5: Feb 29 in a non-leap year isn't a valid date at all, but if it
+    """Feb 29 in a non-leap year isn't a valid date at all, but if it
     were constructed somehow, the tool would reject it because it's not
     the last day. We use Feb 28 in 2026 (non-leap) and confirm Feb 27 is
     rejected as mid-month.

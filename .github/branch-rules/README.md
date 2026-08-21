@@ -75,6 +75,6 @@ All rules include bypass for:
 ## Notes
 
 - Release branches are treated as permanent artifacts
-- Only main requires PR reviews and status checks
+- Only main requires a pull request and passing status checks; no approval count is enforced
 - Feature/bugfix/hotfix branches have minimal protection for flexibility
 - Organization admins can always bypass rules for emergency situations

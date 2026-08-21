@@ -1,4 +1,4 @@
-"""Horizontal axis — cross-tenant isolation (R-11).
+"""Horizontal axis — cross-tenant isolation.
 
 A principal in one tenant attempts to read or write another tenant's graph,
 across REST, GraphQL, and MCP. Run in both directions so an asymmetric bug

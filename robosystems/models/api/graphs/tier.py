@@ -81,9 +81,7 @@ class TierCapacity(BaseModel):
 
   tier: str = Field(..., description="Tier identifier (e.g. ladybug-standard)")
   display_name: str = Field(..., description="Human-readable tier name")
-  status: str = Field(
-    ..., description="Capacity status: ready, scalable, or at_capacity"
-  )
+  status: str = Field(..., description="Capacity status: ready or at_capacity")
   message: str = Field(
     ..., description="Human-readable status message for frontend display"
   )

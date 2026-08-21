@@ -1418,7 +1418,7 @@ class TestUpdateEventBlockOp:
 
 
 class TestRegistrarWriteRoleGate:
-  """appsec F1: every registrar command handler enforces the member/admin
+  """Every registrar command handler enforces the member/admin
   write role, so a read-only viewer can't reach the OLTP command surface."""
 
   @pytest.mark.asyncio

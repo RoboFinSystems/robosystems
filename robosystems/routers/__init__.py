@@ -188,7 +188,7 @@ admin_router_v1.include_router(admin_orgs_router)
 
 # NOTE: The old /v1/ledger/{graph_id} and /v1/investor/{graph_id} REST
 # surfaces were deleted in the extensions cutover. Reads now live at
-# /extensions/graphql; writes live at
+# /extensions/{graph_id}/graphql; writes live at
 # POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/{op_name}.
 # Both are mounted directly in main.py (no intermediate router_v1 wrapper).
 

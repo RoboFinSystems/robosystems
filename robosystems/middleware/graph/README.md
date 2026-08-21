@@ -64,7 +64,8 @@ Constraints that bite:
 - Single level only — a subgraph cannot have subgraphs.
 - Subgraphs inherit the parent's tier, instance, credit pool, and permissions.
   Only the data is isolated.
-- Shared repositories cannot have subgraphs.
+- Customers cannot create subgraphs on shared repositories; the platform can
+  (e.g. `sec_historical`).
 
 ## Getting a repository
 

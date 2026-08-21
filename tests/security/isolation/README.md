@@ -3,12 +3,7 @@
 A **black-box** authorization harness: it provisions real test tenants and
 fires a cross-tenant + privilege-escalation matrix at a *live deployment* over
 HTTP, classifying each response as PASS / LEAK / … . It is the internal,
-repeatable "simulated pentest" for **R-11 (multi-tenant isolation)** — the
-load-bearing claim of the product and, until this, the one HIGH-inherent risk
-never tested by anyone.
-
-Design + rationale: `local/RoboSystems/specs/security/tenant-isolation-harness.md`.
-Execution runbook: `local/RoboSystems/runbooks/simulated-pentest.md`.
+repeatable "simulated pentest" for multi-tenant isolation.
 
 ## Running it
 
@@ -28,12 +23,11 @@ uv run pytest tests/security/isolation/test_oracle.py
 ```
 
 A JSON report lands at `.local/isolation-report.json` (override with
-`ISOLATION_REPORT`). That file is the artifact to attach to SOC 2 evidence and
-to hand the paid gray-box tester as the scope fixture.
+`ISOLATION_REPORT`).
 
 ## What it tests
 
-- **Horizontal (R-11)** — `test_horizontal.py`. A principal in tenant A attempts
+- **Horizontal** — `test_horizontal.py`. A principal in tenant A attempts
   to read/write tenant B's graph, in **both directions**, across:
   - REST reads (`/info`, `/schema`, `/members`, `/limits`, `/credits`, `/tables`,
     `/backups`, `/subgraphs`),
@@ -64,9 +58,9 @@ to hand the paid gray-box tester as the scope fixture.
 ## The oracle (why a status code isn't enough)
 
 Isolation is judged from **API responses only, never the database**. A status
-code cannot tell a leak from a correctly-scoped empty result, and it passes the
-known real leak shape — a `200` carrying another tenant's `org_name` with empty
-collections. So the verdict compares the attacker's response against what the
+code cannot tell a leak from a correctly-scoped empty result: a `200` carrying
+another tenant's org metadata with empty collections is indistinguishable from a
+scoped empty response by status alone. So the verdict compares the attacker's response against what the
 **owner** legitimately sees (the positive control is the truth source):
 
 - **PASS** — attacker denied (401/403/404), or a 2xx that carries no content.
@@ -78,18 +72,18 @@ collections. So the verdict compares the attacker's response against what the
   leaked), or a validation-rejected write — worth a human look.
 
 `test_oracle.py` feeds the classifier synthetic **leaks** and asserts it fires —
-including the `org_name` F5 shape — so a green live run (where the attacker is
-always denied and the LEAK path never executes) isn't the only evidence the
-classifier works.
+including the empty-collections shape above — so a green live run (where the
+attacker is always denied and the LEAK path never executes) isn't the only
+evidence the classifier works.
 
 ## Connection model (for a prod run)
 
-Two legs, only one is the test — see the runbook. The **API leg** is public
+Two legs, only one is the test. The **API leg** is public
 HTTPS from the operator's machine (the whole matrix). The **DB leg** is an SSM
 tunnel used *outside* the matrix only, for teardown-disposal verification and
 provisioning fallback. The harness here uses the API leg exclusively.
 
-## Vertical-axis provisioning (spec OQ1, resolved)
+## Vertical-axis provisioning
 
 The vertical axis needs a second principal inside one org, added by email
 invitation — and the **raw invite token is neither returned by the API nor

@@ -1726,7 +1726,7 @@ class TestHandleSubscriptionDeleted:
   async def test_immediate_cancel_not_pushed_to_period_end(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """F7 regression: an IMMEDIATE cancel's ends_at must NOT be moved out to the
+    """An IMMEDIATE cancel's ends_at must NOT be moved out to the
     Stripe period end by the deleted-webhook. Otherwise the suspend sensor
     (ends_at < now) never fires and the graph lingers until period end despite
     the user asking for immediate teardown."""

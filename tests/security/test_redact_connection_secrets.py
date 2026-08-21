@@ -1,9 +1,8 @@
 """Credentials must never reach a tenant-visible error or the logs.
 
-Regression for the tier-B robustness review §2.8: the extensions materializer
-interpolates a libpq connstr (`password=...`) into every postgres_scan()
-statement; a DuckDB error that echoes the failing statement would otherwise
-carry the RDS master credential into `result.errors` and the graph_api logs.
+Statements the materializer builds can carry connection credentials, so any
+error text derived from them is scrubbed before it reaches `result.errors` or
+the logs.
 """
 
 from __future__ import annotations

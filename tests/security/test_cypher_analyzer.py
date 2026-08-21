@@ -548,7 +548,7 @@ class TestKeywordContextValidation:
 
 class TestInStringCommentMarkerBypass:
   """Regression: a comment marker (// or /*) inside a string literal must not
-  hide a real write keyword that follows the closed string (appsec F2).
+  hide a real write keyword that follows the closed string.
 
   The old `_clean_query` stripped comments *before* strings, so an in-string
   ``//`` ate everything to end-of-line — including a trailing CREATE/SET/etc —

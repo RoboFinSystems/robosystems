@@ -321,7 +321,7 @@ class TestUpdateLastSync:
 
 @pytest.mark.unit
 class TestSyncResultPersistence:
-  """F8: the loader's outcome summary persists on the Connection instead of
+  """The loader's outcome summary persists on the Connection instead of
   living only in a worker log line."""
 
   def test_summary_shape(self):

@@ -67,8 +67,8 @@ pipeline:
 - `client/api.py` — `QBClient`, the OAuth-authenticated QuickBooks Online API
   client. The only symbol exported from the package `__init__.py`.
 - `pipeline/` — Dagster ELT: `extract.py` (CDC plus SyncToken delta sync),
-  `transform.py` (invokes the dbt models), `load.py` (materializes the resulting
-  DuckDB tables into the user's LadybugDB graph), `event_action_mapping.py` (QB
+  `transform.py` (invokes the dbt models), `load.py` (inserts the resulting
+  DuckDB tables into the extensions PostgreSQL tenant schema), `event_action_mapping.py` (QB
   transaction types → REA event/action), `configs.py`, `jobs.py` (`qb_sync_job`),
   `utils.py`.
 - `dbt/` — staging and ledger models transforming raw QuickBooks data into the

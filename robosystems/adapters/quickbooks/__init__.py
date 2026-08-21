@@ -7,7 +7,7 @@ This adapter provides:
 Data pipeline architecture:
   1. Extract: QBClient fetches accounts, journal entries, company info
   2. Transform: dbt-duckdb models transform raw QB data to RoboLedger schema
-  3. Materialize: DuckDB tables materialized to user's LadybugDB graph
+  3. Load: DuckDB tables inserted into the extensions PostgreSQL tenant schema
 """
 
 from robosystems.adapters.quickbooks.client import QBClient

@@ -138,8 +138,8 @@ class TestClosePeriodResponseMapping:
 
   def test_close_marks_graph_stale(self):
     """The close's writes change graph-materialized state — without the
-    marker the graph serves pre-close data while reporting fresh
-    (June-close F11)."""
+     marker the graph serves pre-close data while reporting fresh
+    ."""
     with patch(
       "robosystems.operations.extensions.staleness.mark_graph_stale"
     ) as mark_stale:

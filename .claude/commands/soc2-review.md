@@ -48,5 +48,5 @@ A SOC 2 report attests to *an organization operating a system over time* — not
 ## SOC 2 posture notes (weave into the narrative)
 
 - Only a licensed CPA firm can issue the report; compliance platforms (Vanta / Drata / Secureframe) automate evidence collection and connect you to a partner audit firm — the common fast path.
-- **Fork inheritance:** a fork inherits control *design* (a Type I head start), never Type II operating evidence — the forker runs their own audit. See `local/RoboSystems/` specs on the managed-BYOC model, where an operator running client deployments carries the SOC 2 and clients inherit it as a subservice organization (enables a fleet audit + audit-firm partnership).
+- **Fork inheritance:** a fork inherits control *design* (a Type I head start), never Type II operating evidence — the forker runs their own audit.
 - Keep the framing **modest and honest** — "audit-ready design + evidence infrastructure," never "SOC 2 certified."

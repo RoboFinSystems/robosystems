@@ -53,7 +53,9 @@ This is the whole point — ground the description in what actually happened:
   - **Summary** — 1–3 sentences: what this PR does and why.
   - **Changes** — bullets grouped by area/module/file, describing real edits. Call out anything reviewers should look at closely.
   - **Breaking Changes** — "None" if there are none, and say so explicitly rather than omitting the section. See the SDK contract below; this is where it goes.
-  - **Testing** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt quickbooks`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`); `just test-code` is the code-quality half without the ~6-minute test run. If you ran any of these this session, say which and give the result. The test portion needs a local env and is often not runnable in-session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
+  - **Testing** — state truthfully what was run. The repo gate is `just test-all` (runs `just test`, `just test-dbt quickbooks`, `just lint`, `just format`, `just typecheck`, `just cf-lint-all`, `just lint-actions`); `just test-code` is the code-quality half without the ~6-minute test run. If you ran any of these this session, say which and give the result. The test portion needs a local env and is often not runnable in-session — if you couldn't run it, say so plainly. If nothing was run, say "Not run" — never claim passing tests that weren't executed.
+
+  - **Certification** — reproduce the template's checkbox verbatim and tick it: `- [x] I have the right to submit this work under the Apache 2.0 license, and do so. Where any part of it is owned by my employer, I have their permission.` Because `--body-file` bypasses prefill, omitting this section silently drops a required provenance assertion.
 
   The template has no Related Issues section — put `Closes #123` / `Fixes #456` as the last line of the Summary. GitHub links it from anywhere in the body.
 

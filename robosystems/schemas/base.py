@@ -11,9 +11,8 @@ from .models import Node, Property, Relationship
 # INVARIANT 1 (Aspirational base): Base contains concepts that are universally
 # applicable to the ontology regardless of current consumer count. Period, Unit,
 # Element, Taxonomy, Dimension, Association, Structure are declared here even
-# though only roboledger currently populates most of them, because future
-# extensions (roboinvestor, plus the planned RoboX operational suite when each
-# product's design and OLTP land) will grow into them. The rule for promoting a
+# though only roboledger currently populates most of them, because further
+# extensions grow into them. The rule for promoting a
 # concept into base is "is it universally applicable" — NOT "do two extensions
 # use it today." Waiting for a second consumer before promoting turns every
 # promotion into a breaking refactor against materialized data.
@@ -260,12 +259,10 @@ BASE_NODES = [
     ],
   ),
   # ── REA primitives ──────────────────────────────────────────────────
-  # Agent + Event are universal across every planned RoboX extension.
-  # Promoted to base per INVARIANT 1. Today only roboledger populates
-  # them; future extensions (RoboFO, RoboSCM, RoboHRM, RoboEPM,
-  # RoboWorkflow) will use the same primitives. Shared-repository graphs
-  # (e.g. SEC) get empty node tables — harmless, materialization writes
-  # no rows.
+  # Agent + Event are universal REA primitives, promoted to base per
+  # INVARIANT 1. Today only roboledger populates them. Shared-repository
+  # graphs (e.g. SEC) get empty node tables — harmless, materialization
+  # writes no rows.
   Node(
     name="Agent",
     description="REA counterparty — the external actor a business event is exchanged with "

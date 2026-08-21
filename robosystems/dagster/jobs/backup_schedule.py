@@ -98,7 +98,8 @@ def _run_config_for(graph_id: str, retention_days: int) -> dict[str, Any]:
 
 @schedule(
   job=backup_graph_job,
-  # Deep night in the founder's timezone: the fleet is quietest and a backup
+  # Deep night in the platform's primary operating timezone: the fleet is
+  # quietest and a backup
   # checkpoints and copies the whole database. Pinned to a zone rather than a
   # fixed UTC hour so it stays at 3am local across daylight-saving changes
   # instead of drifting an hour twice a year.
