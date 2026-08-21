@@ -10,67 +10,96 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `robosystems/middleware/auth/jwt.py`
 
-- 30-minute access token expiration (configurable via `JWT_EXPIRY_HOURS`)
-- JTI-based token revocation tracked in Valkey with TTL
-- Automatic token refresh at `/v1/auth/refresh` with 5-second grace period for in-flight requests
+- 30-minute access token expiration (`JWT_EXPIRY_HOURS` in `robosystems/config/constants.py`; a code constant, not an environment variable)
+- JTI-based token revocation tracked in Valkey, with TTL equal to the token's remaining lifetime
+- Token refresh at `/v1/auth/refresh`: the old token is revoked with a 5-second grace period for in-flight requests; tokens expired by up to 5 minutes are still accepted for refresh, subject to device-fingerprint and revocation checks
 - Issuer and audience claim validation
+- Token purpose enforcement: single-use SSO handoff tokens and MFA challenge tokens are refused as session bearers
+- Every token carries the user's `session_version`; password change, password reset, and account deactivation bump it, invalidating all outstanding tokens (deactivation also revokes the user's API keys)
 - Fails closed on Valkey errors (treats token as revoked)
 
 ### Device Fingerprinting
 
 **Implementation:** `robosystems/security/device_fingerprinting.py`
 
-- Browser binding via user-agent and Sec-CH-UA headers (SHA256 hash)
+- Browser binding: a SHA256 hash of the `User-Agent`, `Accept-Language`, `Accept-Encoding`, `Sec-CH-UA`, and `Sec-CH-UA-Platform` headers is embedded in the JWT at issuance
 - Intentionally excludes IP address (VPN/mobile/load balancer changes)
-- Detects suspicious changes in browser client hints
+- Any change to the bound headers invalidates the token, including on grace-period refresh
 
 ### API Key Management
 
 **Implementation:** `robosystems/models/core/user/user_api_key.py`
 
-- Cryptographically secure generation (`rfs` prefix + 64 hex characters)
-- Bcrypt hashing with cost factor 12 for storage
+- Cryptographically secure generation (`secrets.token_hex`): `rfs` prefix + 64 hex characters; graph-scoped keys use the `rfsc` prefix
+- Bcrypt hashing with cost factor 12 for storage; the plaintext is returned once at creation and never stored
+- Optional graph scoping (`graph_id`): a scoped key is valid only for that graph and its subgraphs
 - Optional per-key expiration (`expires_at`)
 - Usage tracking via `last_used_at` timestamp
+- Validation results are cached in Valkey (encrypted and signed; see Application-Level Encryption); deactivating or deleting a key invalidates its cache entry
 
 ### Authentication Protection
 
 **Implementation:** `robosystems/security/auth_protection.py`
 
-- Progressive delays on failed attempts (1s, 2s, 5s, 10s, 30s, 1m, 5m, 15m cap)
+- Progressive delays on failed attempts (1s, 2s, 5s, 10s, 30s, 1m, 5m, 15m cap), enforced as `429` responses with `Retry-After`
 - IP-based threat assessment with four levels:
   - LOW: <5 failures
   - MEDIUM: 5+ failures (15-minute block)
   - HIGH: 10+ failures (1-hour block)
   - CRITICAL: 20+ failures (24-hour block)
-- Blocks automatically expire; 24-hour sliding window per IP
-- Stored in Valkey with SHA256-hashed keys; graceful degradation on cache failure
+- Blocks automatically expire; the per-IP failure count decrements by one on each successful login, and the record expires 25 hours after the last attempt
+- Stored in Valkey under SHA256-hashed IP keys; graceful degradation on cache failure
+- Applied to the login, registration, and MFA endpoints; passkey login failures count toward the same per-IP record
+
+### Passkeys (WebAuthn) and MFA
+
+**Implementation:** `robosystems/routers/auth/passkeys.py`, `robosystems/routers/auth/mfa.py`, `robosystems/operations/passkeys.py`, `robosystems/models/core/user/user_passkey.py`
+
+- WebAuthn passkeys serve as a second factor after password login (`/v1/auth/mfa/*`) and as a passwordless first factor (`/v1/auth/passkeys/login/*`)
+- Gated by `PASSKEYS_ENABLED`; `MFA_ENFORCEMENT_ENABLED` additionally requires org owners and admins to enroll a passkey before a password login yields a session
+- Enrollment requires a fresh re-authentication proof on top of the session (API keys are refused), or a purpose-scoped `enroll` MFA token in the forced-enrollment lane
+- MFA challenge tokens are short-lived (5 minutes), purpose-scoped (`login` vs `enroll`), and refused as session bearers
+- Ten single-use recovery codes back the second factor (stored as SHA256 hashes; regenerable at `/v1/auth/mfa/recovery-codes/regenerate`)
+- Relying Party ID and origin derive from the deployment's root domain (`PASSKEY_RP_ID` / `PASSKEY_ORIGIN` override); stored credentials hold only the public key, sign counter, transports, and backup flags
+
+### Enterprise SSO (OIDC) and SCIM Provisioning
+
+**Implementation:** `robosystems/routers/auth/oidc.py`, `robosystems/operations/oidc.py`, `robosystems/routers/scim/`, `robosystems/middleware/auth/scim.py`, `robosystems/models/core/user/scim_token.py`
+
+- OIDC authorization-code login against one configured identity provider (`SSO_OIDC_ENABLED`, `SSO_OIDC_ISSUER`, `SSO_OIDC_CLIENT_ID`), with provider discovery, single-use 10-minute flow state carrying a nonce and PKCE verifier, and ID-token validation
+- Link-only: SSO never creates accounts; first login binds to the SCIM-provisioned user through a configurable ID-token claim (`SSO_OIDC_BINDING_CLAIM`, default `sub`) and requires membership in the pinned enterprise org (`ENTERPRISE_ORG_ID`)
+- SCIM 2.0 user provisioning at `/scim/v2` (`SCIM_ENABLED`, gated independently of OIDC): `/Users` CRUD plus `ServiceProviderConfig`, `ResourceTypes`, and `Schemas`
+- SCIM bearer tokens are per-org, bcrypt-hashed, shown once at mint, expiring (365-day default), and rotated by overlap; they authenticate provisioning only — never accepted by the normal auth dependencies, while user JWTs and API keys are never accepted at the SCIM surface
+- `/v1/auth/providers` publishes which auth methods a deployment offers (`PASSWORD_AUTH_ENABLED`, `SSO_OIDC_ENABLED`) so clients render the login page from runtime config
 
 ### CAPTCHA Verification
 
 **Implementation:** `robosystems/security/captcha.py`
 
 - Cloudflare Turnstile server-side token verification
-- Configurable via `CAPTCHA_ENABLED` environment variable
-- Applied to registration and authentication endpoints
+- Configurable via `CAPTCHA_ENABLED` environment variable; when enabled in staging or production without a Turnstile secret configured, verification fails closed
+- Applied to registration (`/v1/auth/register`); `/v1/auth/captcha/config` tells clients whether a token is required and which site key to use
 
 ### Password Security
 
 **Implementation:** `robosystems/security/password.py`
 
-- Bcrypt hashing with 14 rounds
+- Bcrypt hashing with 14 rounds, run off the event loop
 - Score-based strength validation (min 60/100 to pass)
-- Pattern detection: sequential chars, repeated chars, common passwords
-- Requirements: 12+ chars, uppercase, lowercase, digit, special character, 8+ unique characters
+- Pattern detection: sequential chars, repeated chars, keyboard patterns, common passwords, and substrings of the user's own email address
+- Requirements: 12+ chars (128 max), uppercase, lowercase, digit, special character, 8+ unique characters
+- Login timing is equalized: a miss (unknown email, inactive account) performs the same bcrypt work as a real verification, so response time does not reveal whether an address is registered
 
 ### Multi-Tenant Access Control
 
-**Implementation:** `robosystems/models/core/graph/graph_user.py`
+**Implementation:** `robosystems/models/core/graph/graph_user.py`, `robosystems/models/core/org/org_user.py`
 
-- Roles: admin (full control), member (read/write, default), viewer (read-only)
-- Complete tenant isolation via separate LadybugDB databases
+- Graphs are owned by organizations; org roles are owner, admin, and member
+- Graph roles: admin (full control), member (read/write, default), viewer (read-only); org owners and admins hold implicit admin on every graph their org owns
+- One role resolver (`GraphUser.get_effective_role`) backs REST, GraphQL, MCP, and the extensions surface; a deprovisioned or deleted graph resolves to no access for everyone, including org owners and admins
+- Graph data: a separate LadybugDB database per graph (and per subgraph); extensions OLTP data (RoboLedger/RoboInvestor): a dedicated PostgreSQL schema per graph, selected with `SET search_path`
 - Subgraph permissions inherited from parent graph
-- All endpoints scoped by `graph_id`
+- All graph endpoints scoped by `graph_id`
 
 ## Data Security
 
