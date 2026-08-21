@@ -32,7 +32,6 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 - Bcrypt hashing with cost factor 12 for storage
 - Optional per-key expiration (`expires_at`)
 - Usage tracking via `last_used_at` timestamp
-- Monthly rotation via GitHub Actions (`secrets-rotation.yml`) using AWS Secrets Manager Lambda functions
 
 ### Authentication Protection
 
