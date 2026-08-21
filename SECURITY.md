@@ -194,8 +194,8 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   every tier
 - Per-endpoint category limits (22 categories: auth, graph_read, graph_write, etc.)
 - User identification: API key (SHA256 hash) > JWT (user_id) > IP (fallback)
-- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Tier`, `X-RateLimit-Category`; `Retry-After` on 429
-- Sensitive auth endpoints: login (5/5min), register (3/hour), JWT refresh (20/min), keyed by client IP
+- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Tier`, `X-RateLimit-Category`; a 429 additionally carries `X-RateLimit-Reset` and `Retry-After`
+- Sensitive auth endpoints: login (5/5min) and register (3/hour), keyed by client IP; JWT refresh (20/min), keyed by the caller's identity while its token still parses and by client IP once it does not
 - Auth endpoints fail closed: if the limiter backend is unavailable, login and registration are denied rather than left unprotected
 
 ### Admission Control
