@@ -1655,10 +1655,12 @@ class ExtensionsMaterializer:
   ) -> None:
     """Ensure the LadybugDB database exists with the graph schema.
 
-    ``is_subgraph=True`` makes the create bypass the per-node max_databases cap
-    (graph_api exempts is_subgraph creations in manager.py). Used for the
-    transient blue-green WIP so it can be built alongside the live primary on a
-    dedicated single-database instance; the primary still counts against the cap.
+    ``is_subgraph=True`` tells the node to skip schema application, since the
+    WIP inherits its schema from the source graph. Its exemption from the
+    per-node max_databases cap comes from the ``-wip`` suffix, not from this
+    flag — see ``counts_toward_capacity`` in the node's database manager — so
+    the transient can be built alongside the live primary on a dedicated
+    single-database instance while the primary still holds the slot.
     """
     from robosystems.schemas.loader import get_contextual_schema_loader
 

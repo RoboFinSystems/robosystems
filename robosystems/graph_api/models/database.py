@@ -147,7 +147,7 @@ class DatabaseCreateRequest(BaseModel):
   )
   is_subgraph: bool = Field(
     default=False,
-    description="Whether this is a subgraph (bypasses max_databases check for higher tiers)",
+    description="Whether this is a subgraph. Controls schema application only — a subgraph inherits its parent's schema via the fork. Capacity accounting derives from the graph id, not from this flag.",
   )
   tenant_tier: str = Field(
     default="ladybug-standard",

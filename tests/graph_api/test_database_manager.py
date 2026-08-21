@@ -223,8 +223,10 @@ class TestLadybugDatabaseManager:
     # Mock list_databases to return max capacity
     manager.list_databases = MagicMock(return_value=["db1", "db2"])
 
+    # A top-level graph id carries no "_" — that is what separates it from a
+    # subgraph, and what the capacity count on both sides keys off.
     request = DatabaseCreateRequest(
-      graph_id="test_db",
+      graph_id="testdb",
       schema_type="entity",
       repository_name=None,
       custom_schema_ddl=None,
@@ -235,6 +237,35 @@ class TestLadybugDatabaseManager:
 
     assert exc_info.value.status_code == 507  # Insufficient Storage
     assert "Maximum database capacity reached" in str(exc_info.value.detail)
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_capacity_exemption_derives_from_the_graph_id_not_the_request(
+    self, mock_init_pool
+  ):
+    """The cap counts by name shape, so the exemption must too.
+
+    Both halves of the accounting read the same signal. A caller cannot claim
+    the subgraph exemption for a database the count would still charge against
+    the cap.
+    """
+    from fastapi import HTTPException
+
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), max_databases=2)
+    manager.list_databases = MagicMock(return_value=["db1", "db2"])
+
+    request = DatabaseCreateRequest(
+      graph_id="testdb",
+      schema_type="entity",
+      repository_name=None,
+      custom_schema_ddl=None,
+      is_subgraph=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+      manager.create_database(request)
+
+    assert exc_info.value.status_code == 507
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_create_database_already_exists(self, mock_init_pool):
