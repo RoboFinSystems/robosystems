@@ -447,3 +447,42 @@ class RateLimitConfig:
         return EndpointCategory.GRAPH_READ
 
     return None
+
+
+# Per-endpoint burst limits, in requests per window. These bound how fast a
+# single caller can hit one endpoint family; the per-tier limits above bound
+# volume. They are constants on purpose — a limit that can be raised at runtime
+# is a limit an attacker benefits from raising, and the safe direction (down)
+# is already reachable by deploying. Nothing reads these from the environment.
+BURST_LIMITS: dict[str, int] = {
+  # Identity-based limits for the general API bucket, per minute.
+  "api_key": 1000,  # 60k/hour possible
+  "jwt": 500,  # 30k/hour possible
+  "anonymous": 10,  # 600/hour possible
+  # Authentication. Windows are seconds, not counts.
+  "auth_attempts": 10,
+  "auth_window": 300,
+  "login_window": 300,
+  "register_window": 3600,
+  "sensitive_auth": 60,
+  "auth_status": 600,  # 10/second — polled by the login screen
+  "logout": 300,
+  "sso": 100,
+  "oidc": 120,  # 2 per flow
+  "mfa": 120,  # 2 per handshake
+  "passkey_management": 60,
+  # SCIM provisioning, which bursts during a directory's initial sync.
+  "scim": 120,  # per token
+  "scim_ip": 300,  # per IP
+  # Ordinary API surfaces, per minute.
+  "general_api": 200,
+  "public_api": 600,  # divided by 10 for anonymous callers
+  "user_management": 600,  # 10/second
+  "tasks": 200,
+  "analytics": 100,
+  "connection_mgmt": 30,
+  "sync_ops": 50,
+  "backup_ops": 10,  # expensive operations
+  "billing": 60,  # checkout polls at ~20/min
+  "webhook": 1200,  # anonymous → 120/min per IP
+}
