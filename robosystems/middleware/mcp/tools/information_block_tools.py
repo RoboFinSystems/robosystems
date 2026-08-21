@@ -75,16 +75,15 @@ A typed envelope with:
 - information_model (concept + member arrangement)
 - artifact (topic, mechanics — typed per block_type)
 - elements, connections, facts (bundled atoms)
-- rules, dimensions, fact_set, verification_results (populated as
-  the rule engine + FactSet expand work progresses)
+- rules, dimensions, fact_set, verification_results (empty when the block
+  has none)
 
 **RELATED TOOLS:**
 - list-information-blocks — browse available blocks
 - create-information-block — build a new block
 
-Note: This is the generic reader for every block type; the old
-schedule-specific readers (list-schedule-structures, get-schedule-facts)
-were retired in favor of this pair.""",
+**NOTES:** This is the generic reader for every block type, schedules
+included.""",
       "inputSchema": {
         "type": "object",
         "properties": {

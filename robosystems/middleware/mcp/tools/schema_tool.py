@@ -47,23 +47,7 @@ class SchemaTool(BaseTool):
 - **Property Details**: Name, data type (STRING, INT64, DOUBLE, etc.), nullable flags
 - **Metadata**: Descriptions and additional context when available
 
-**SCHEMA TYPES:**
-The database may use different schema configurations:
-1. **Base Schema**: Standard RoboSystems entities (Entity, User, etc.)
-2. **Extended Schema**: Base + domain-specific extensions
-3. **Custom Schema**: Custom entities and relationships
-4. **Hybrid Schema**: Custom schema extending the base
-
-**DATA TYPES:**
-Common property types you'll encounter:
-- STRING: Text values
-- INT64/INT32: Integer numbers
-- DOUBLE/FLOAT: Decimal numbers
-- BOOLEAN: True/false values
-- TIMESTAMP: Date/time values
-- JSON: Complex nested data
-
-**USAGE TIPS:**
+**NOTES:**
 - Look for node labels ending in specific patterns (Entity, Fact, etc.)
 - Check relationship direction: ->() vs <-()
 - Property names are case-sensitive

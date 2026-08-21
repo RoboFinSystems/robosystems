@@ -35,12 +35,11 @@ class ResolveElementTool(BaseTool):
 - Top matching XBRL elements with qnames, labels, and fact counts
 - A ready-to-use Cypher query hint
 
-**EXAMPLES:**
+**NOTES:**
 - concept: "revenue" → finds us-gaap:Revenues, us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax, etc.
 - concept: "total debt" → finds us-gaap:LongTermDebt, us-gaap:DebtAndCapitalLeaseObligations, etc.
-
-**TIP:**
-Use the returned query_hint directly in read-graph-cypher for immediate results.""",
+Use the returned query_hint directly in read-graph-cypher for immediate results.
+""",
       "inputSchema": {
         "type": "object",
         "properties": {

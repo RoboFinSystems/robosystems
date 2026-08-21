@@ -145,7 +145,7 @@ class GetFiscalCalendarTool:
    re-check
 6. If `gap_periods > 1`, the user is behind — acknowledge and plan a catch-up
 
-**READ-ONLY**: safe to call repeatedly, no side effects.""",
+**NOTES:** Read-only — safe to call repeatedly, no side effects.""",
       "inputSchema": {"type": "object", "properties": {}, "required": []},
     }
 
@@ -448,7 +448,7 @@ class ReopenPeriodTool:
 - A correcting entry is needed for a prior period adjustment
 - The user wants to re-run the close workflow for a closed period
 
-**WHAT IT DOES:**
+**NOTES:**
 1. Transitions FiscalPeriod from 'closed' → 'closing' (drafts may still exist)
 2. If this was the latest closed period, decrements closed_through
 3. Retracts the month's canonical statement FactSets (a reopened month is
@@ -456,6 +456,13 @@ class ReopenPeriodTool:
 4. Does NOT modify close_target — that's a separate user decision
 5. Does NOT modify existing posted entries — they stay posted
 6. Emits a period_reopened audit event with the required reason
+- Period must be in 'closed' status (422 otherwise)
+- Reason must be non-empty (422 otherwise)
+- Posted entries stay posted. To "undo" a posted entry, create a reversing
+  entry via create-event-block(event_type='journal_entry_recorded',
+  metadata.type='reversing'), or reopen + correct + re-close.
+- Reopening older periods (not the most recently closed) is allowed but
+  does not decrement closed_through.
 
 **PARAMETERS:**
 - period (required): YYYY-MM format
@@ -464,18 +471,8 @@ class ReopenPeriodTool:
 **RETURNS:**
 - Updated fiscal_calendar state
 - statement_sets_retracted: how many canonical statement FactSets the
-  reopen deleted (0 for months closed before close-time stamping existed)
-
-**GUARDS:**
-- Period must be in 'closed' status (422 otherwise)
-- Reason must be non-empty (422 otherwise)
-
-**NOTES:**
-- Posted entries stay posted. To "undo" a posted entry, create a reversing
-  entry via create-event-block(event_type='journal_entry_recorded',
-  metadata.type='reversing'), or reopen + correct + re-close.
-- Reopening older periods (not the most recently closed) is allowed but
-  does not decrement closed_through.""",
+  reopen deleted (0 for months whose statement sets were never stamped)
+""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -586,7 +583,7 @@ class BackfillPlanHistoryTool:
 
 **WHEN TO USE:**
 - The Plan page shows only annual (or missing) columns because historical
-  months were closed before close-time statement stamping existed, or were
+  months have no stamped statement sets — either never stamped, or
   baseline-closed at calendar initialization and never really closed
 - A tenant with deep ledger history (QB sync) wants monthly statement
   columns further back than the calendar currently covers
@@ -605,7 +602,7 @@ class BackfillPlanHistoryTool:
 4. Stops after max_periods months and reports the rest in
    remaining_periods — call again to continue (chunked, resumable)
 
-**IDEMPOTENT / SAFE:**
+**NOTES:**
 - Months that already have canonical statement sets are never touched
   (unless restamp=true — the deliberate healing pass that re-derives them)
 - Months holding draft entries are SKIPPED, never posted — the backfill

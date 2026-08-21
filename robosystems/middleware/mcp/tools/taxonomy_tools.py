@@ -198,24 +198,20 @@ class SuggestMappingTool:
 - When deciding which reporting concept a CoA account should map to
 - Narrows by classification (asset→Assets subtree, revenue→Revenues subtree, etc.)
 
-**HOW IT WORKS:**
-- Queries rs-gaap elements filtered by the EFS trait (FASB
-  elementsOfFinancialStatements) matching the source element's
-  classification.
-- Restricts to concepts that appear in at least one rs-gaap-presentation
-  Network — any picked target is guaranteed to render on the standard
-  BS / IS / CF / SE reports under the active Reporting Style.
-- Excludes statement-level subtotals whose value comes from rendering
-  (e.g., rs-gaap:Assets, rs-gaap:LiabilitiesCurrent) — those are
-  computed by the calc DAG, not by a leaf fact.
+**RETURNS:** Candidate rs-gaap concepts with element id, qname, label and
+depth. Every candidate appears in at least one rs-gaap-presentation Network,
+so any target picked from here is guaranteed to render on the standard
+BS / IS / CF / SE reports under the active Reporting Style.
 
-**TIPS:**
-- The classification filter (asset / liability / equity / revenue /
-  expense / gain / loss) narrows candidates by ~80%.
-- Depth 1 = high-level line items; depth 2+ = detail items.
-- rs-gaap is the canonical render target (per the active Reporting
-  Style); there is no target_taxonomy parameter — only one taxonomy
-  renders.""",
+**NOTES:**
+- Candidates are filtered by the EFS trait (FASB
+  elementsOfFinancialStatements) matching the source element's
+  classification, which narrows by roughly 80%.
+- Statement-level subtotals are excluded (e.g. rs-gaap:Assets,
+  rs-gaap:LiabilitiesCurrent) — the calc DAG computes those, not a leaf fact.
+- Depth 1 is high-level line items; depth 2+ is detail.
+- rs-gaap is the only render target, so there is no target_taxonomy
+  parameter.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -428,12 +424,14 @@ class CreateMappingAssociationTool:
 - After choosing the best rs-gaap candidate for a CoA element (`association_type='mapping'` — the canonical arc the renderer follows)
 - Confidence ≥ 0.70 is required; skip below that threshold
 
-**INPUTS:**
+**PARAMETERS:**
 - mapping_id: The coa_mapping structure ID (from get-unmapped-elements)
 - from_element_id: CoA element ID (source)
 - to_element_id: rs-gaap element ID (the reporting concept)
 - confidence: Float 0.0–1.0 (AI confidence in the match)
-- association_type: 'mapping' (CoA→rs-gaap, the primary arc the renderer follows) or 'equivalence' (alternate cross-taxonomy arc). Defaults to 'mapping'.""",
+- association_type: 'mapping' (CoA→rs-gaap, the primary arc the renderer follows) or 'equivalence' (alternate cross-taxonomy arc). Defaults to 'mapping'.
+
+**RETURNS:** The written association's id, and the resulting mapping coverage.""",
       "inputSchema": {
         "type": "object",
         "properties": {

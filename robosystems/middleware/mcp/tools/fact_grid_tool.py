@@ -53,7 +53,7 @@ class BuildFactGridTool:
 - live-financial-statement returns ALL line items for a standard statement from the tenant's live OLTP ledger
 - build-fact-grid returns SPECIFIC elements you choose, across any combination of periods and entities
 
-**INPUTS:**
+**PARAMETERS:**
 - elements: XBRL qnames (e.g., 'us-gaap:Assets'). Use resolve-element to find qnames.
 - canonical_concepts: Normalized concept names (e.g., 'revenue', 'net_income'). Matches ALL element qnames mapped to each concept across companies. Can be combined with elements.
 - periods: End dates in YYYY-MM-DD format
@@ -67,11 +67,10 @@ class BuildFactGridTool:
 - Only consolidated totals (dimensional breakdowns excluded)
 - `truncated: true` when more facts matched than `limit` allowed; the ones returned are the most recent by period
 
-**IMPORTANT:**
+**NOTES:**
 On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
-
-**TIP:**
-For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.""",
+For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.
+""",
       "inputSchema": {
         "type": "object",
         "properties": {

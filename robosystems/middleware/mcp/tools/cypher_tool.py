@@ -68,7 +68,7 @@ Query the graph using Cypher syntax. Use `get-graph-schema` first to discover av
 - No write operations (CREATE, SET, DELETE, etc.)
 - Query complexity is automatically monitored
 
-**EXAMPLES:**
+**NOTES:**
 ```cypher
 // Count nodes by type
 MATCH (n)
@@ -83,7 +83,7 @@ MATCH (a)-[r]->(b)
 RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS to_type
 ```
 
-**TIP:** Use `get-graph-schema` to understand what's in the graph before writing complex queries."""
+**NOTES:** Use `get-graph-schema` to understand what's in the graph before writing complex queries."""
 
     if self._has_ledger_spine():
       description += "\n\n" + LEDGER_STATUS_GUIDANCE
