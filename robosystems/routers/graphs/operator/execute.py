@@ -66,13 +66,13 @@ router = APIRouter()
 async def _enforce_shared_repository_agent_limits(
   graph_id: str, current_user: User, db: Session
 ) -> None:
-  """Apply the graph lifecycle gate, then shared-repository agent limits.
+  """Apply the graph lifecycle gate, then shared-repository operator limits.
 
-  Repository plans advertise agent_calls_per_* limits; until this hook,
-  nothing ever checked them (query/mcp/search had their equivalents, the
-  operator surface did not), so the advertised numbers were unenforced. The
-  lifecycle gate is the same one: a suspended or expired graph refused the
-  operator on no surface until this ran here.
+  Repository plans advertise ``agent_calls_per_*`` limits, and this is where
+  the operator surface enforces them — the counterpart to the equivalent
+  hooks on query, mcp and search. The lifecycle gate is the shared one, so a
+  suspended or expired graph is refused here as it is everywhere else. Every
+  entry point to a metered surface needs both; neither is optional.
   """
   from robosystems.middleware.billing.enforcement import require_graph_access
   from robosystems.routers.graphs.query.execute import (

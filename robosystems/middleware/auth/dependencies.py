@@ -626,7 +626,8 @@ async def get_current_user_with_graph_or_url_token(
     },
     risk_level="high",
   )
-  # Same deliberate conflation as the header path: no validity oracle.
+  # Same deliberate conflation as the header path: the two cases are
+  # indistinguishable to the caller.
   raise HTTPException(
     status_code=status.HTTP_403_FORBIDDEN,
     detail="Invalid API key or access denied to graph",

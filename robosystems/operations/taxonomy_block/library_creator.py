@@ -158,10 +158,9 @@ def rule_variables_json(variables: Iterable[RuleVariableSpec]) -> list[dict[str,
   """Serialize a rule's variables for the ``rules.rule_variables`` JSONB column.
 
   Every writer — the library seeder and any migration that rewrites the
-  column — must go through here. Migration 0030 hand-rolled the dict with
-  the JSON-LD spelling and broke evaluation for all 21 seeded RollUp rules
-  across public and every tenant; 0031 repaired the data and this function
-  exists so the shape has one definition to drift from.
+  column — must go through here, so the persisted shape has exactly one
+  definition. Hand-rolling the dict elsewhere risks the JSON-LD spelling
+  reaching the column, which rule evaluation does not read.
   """
   return [
     {

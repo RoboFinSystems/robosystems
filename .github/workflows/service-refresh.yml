@@ -162,10 +162,9 @@ jobs:
   # One job, one Lambda invocation, one tag-targeted SSM command per node-type
   # group. This replaced a collector that enumerated every instance into a
   # GitHub Actions matrix and gave each its own runner job. That design had a
-  # hard ceiling — a matrix caps at 256 jobs, and `databases_per_instance: 1`
-  # makes customer count equal instance count — and it paid runner-minutes to
-  # sleep through a 30-minute busy-wait. Runner time here is now bounded and
-  # independent of fleet size.
+  # hard ceiling — a matrix caps at 256 jobs, and the fleet runs one database
+  # per instance — and it paid runner-minutes to sleep through a 30-minute
+  # busy-wait. Runner time here is now bounded and independent of fleet size.
   refresh-graph:
     needs: [graph-refresh-budget]
     if: ${{ inputs.graph_refresh_enabled == true || inputs.graph_refresh_enabled == 'true' }}

@@ -70,12 +70,10 @@ def _actual_set_ids(structure_id: str):
   stamped with the *statement* structure's id, because that is how a
   scenario column renders through the same structure as its actuals.
 
-  The consequence is worse than a widened scope, because the unpinned
-  binder takes the newest fact per element. The newest fact on a graph
-  carrying a forecast is a month that has not happened, so a check of the
-  books would answer about the plan — and write the verdict onto the
-  books. Invisible until a graph has its first forecast, which is why it
-  survived the engine's whole life.
+  So the scenario pin is required, not merely tightening: the unpinned
+  binder takes the newest fact per element, and on a graph carrying a
+  forecast the newest fact is a month that has not happened. Rules
+  evaluate the books, which means actuals only — ``scenario_id IS NULL``.
   """
   return select(FactSet.id).where(
     FactSet.structure_id == structure_id,

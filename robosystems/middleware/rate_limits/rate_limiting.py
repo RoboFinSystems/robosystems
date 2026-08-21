@@ -76,9 +76,9 @@ def _caller_is_authorized_on_graph(
 ) -> bool:
   """Whether the identified caller is known to be authorized on the graph.
 
-  A graph's budget belongs to its members; charging it from a request that
-  merely names the graph in its URL would let anyone drain a tenant's
-  throughput without credentials. Evidence, cheapest first: the graph auth
+  A graph's budget belongs to its members, so it is charged only on proven
+  authorization — never on a request that merely names the graph in its
+  URL. Evidence, cheapest first: the graph auth
   dependency already ran and published its decision on ``request.state``;
   otherwise the auth cache holds a positive decision for this principal on
   the graph (or its parent) from an earlier request. Absent both, the
@@ -319,10 +319,9 @@ def get_user_from_request(request: Request) -> str | None:
 
   # API key: an identity only once the key is known to be valid. The auth
   # cache is keyed by the same digest and is populated by every successful
-  # validation, so this is one cache read and no re-validation. A header
-  # that is not cached-valid mints no identity — otherwise any string in
-  # the header would be "a user" with a fresh budget of its own, and the
-  # limiter would be trivially bypassed by rotating garbage keys.
+  # validation, so this is one cache read and no re-validation. Identity
+  # requires a cache-validated key; an unvalidated header mints none, so a
+  # budget is always tied to a principal the platform has authenticated.
   api_key = request.headers.get("X-API-Key")
   if api_key:
     api_key_hash = _api_key_digest(api_key)

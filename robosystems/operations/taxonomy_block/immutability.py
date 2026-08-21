@@ -10,8 +10,8 @@ reopen is the only path to a closed month's canonical sets.
 
 The taxonomy-block cascade (``delete-taxonomy-block cascade_facts=true``,
 ``update-taxonomy-block structures_to_remove``) deletes facts by element and
-by structure, and reached both kinds of set with no guard. This module is the
-single check both paths run before deleting anything.
+by structure, so it can reach both kinds of set. This module is the single
+check both paths run before deleting anything.
 """
 
 from __future__ import annotations

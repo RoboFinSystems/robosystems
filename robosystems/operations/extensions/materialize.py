@@ -1749,9 +1749,8 @@ class ExtensionsMaterializer:
         await client.execute_write(graph_id, sql.strip(), timeout=120.0)
         result.tables_staged.append(table_name)
       except Exception as e:
-        # The staging SQL carries the extensions DSN; a DuckDB error can echo
-        # it, so scrub the credential before it reaches the log or the
-        # tenant-visible result.
+        # Error text derived from the staging SQL is scrubbed before it
+        # reaches the log or the tenant-visible result.
         error_msg = redact_connection_secrets(f"Failed to stage {table_name}: {e!s}")
         logger.warning(error_msg)
         if table_name in RELATIONSHIP_TABLES and "DIMENSION" in table_name:

@@ -11,9 +11,7 @@ This ASGI middleware enforces the cap in two places:
 1. the ``Content-Length`` header (every conforming client sets it), rejected
    before the app is invoked; and
 2. the streamed body itself, byte-counted as the middleware buffers it, so a
-   chunked request with no ``Content-Length`` cannot slip an unbounded body
-   past the header check. The graph-API size middleware documents this second
-   gap and does not close it; this one does.
+   chunked request with no ``Content-Length`` is bounded by the same cap.
 
 The body is buffered in the middleware and replayed to the app, so the cap is
 enforced without depending on how a downstream route or middleware handles a

@@ -393,14 +393,12 @@ class CypherSecurityAnalyzer:
       # Backtick-quoted identifier. Kuzu/openCypher do NOT use backslash
       # escaping inside backtick identifiers: a backslash is a literal
       # character and the identifier closes at the next backtick (an escaped
-      # backtick is written by doubling it). Treating backslash as an escape
-      # here diverged from the engine lexer, letting ``... AS `x\` SET ...``
-      # mask a trailing write keyword — the analyzer swallowed everything
-      # after the escaped backtick while Kuzu closed the identifier and
-      # executed the rest. Close at the FIRST backtick and do not honour
-      # backslash. This is conservative w.r.t. doubled-backtick identifiers
-      # (the analyzer may split them into two tokens), which only ever
-      # over-classifies a write, never hides one.
+      # backtick is written by doubling it). This tokenizer must match the
+      # engine lexer exactly, so close at the FIRST backtick and do not
+      # honour backslash. Any divergence here changes which keywords the
+      # classifier can see. The rule is conservative w.r.t. doubled-backtick
+      # identifiers (the analyzer may split them into two tokens), which only
+      # ever over-classifies a write, never hides one.
       if ch == "`":
         i += 1
         while i < n:

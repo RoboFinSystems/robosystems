@@ -449,13 +449,13 @@ def update_event_block(
   """
   # Lock the row for the life of the transaction. The transition check below
   # is read-decide-write, and the decision is only sound if nothing else can
-  # move the event in between. The live race is an inbox approval against the
-  # sync's auto-commit pass (`extensions/loader.py`, which locks its batch for
-  # the same reason): both read `captured`, both fire the handler, and the
-  # event ends up with two sets of GL rows — a ledger that still foots and is
-  # still wrong. Under READ COMMITTED the blocked reader re-reads the committed
-  # row once the lock releases, sees the new status, and raises
-  # InvalidEventTransitionError as it should.
+  # move the event in between. More than one path can advance the same event —
+  # inbox approval and the sync's auto-commit pass (`extensions/loader.py`,
+  # which locks its batch for the same reason) — and each fires the handler
+  # once, so the transition must be decided under the lock. Under READ
+  # COMMITTED the blocked reader re-reads the committed row once the lock
+  # releases, sees the new status, and raises InvalidEventTransitionError as
+  # it should.
   #
   # Bounded, because the conflicting writer is usually a sync or a promotion
   # sweep that runs long — see `locking.bounded_lock_wait`.

@@ -410,11 +410,10 @@ def resolve_oidc_user(
   equals ``binding_value`` (the ID-token claim named by
   ``SSO_OIDC_BINDING_CLAIM`` — ``sub`` by default; Okta sends the same user id
   in both channels) AND who has no identity for this issuer yet — then the
-  link is written and is the lookup forever after. Equality, not mere
-  presence, is load-bearing twice over: presence alone let anyone controlling
-  a matching mailbox in the customer's IdP bind onto a locally-created
-  account, and it accepted an empty-string ``external_id`` as provenance.
-  A missing/empty ``binding_value`` never links.
+  link is written and is the lookup forever after. Equality is required, not
+  mere presence: a matching mailbox is not provenance on its own, and an
+  empty ``external_id`` is not a match. A missing or empty ``binding_value``
+  never links.
 
   When ``ENTERPRISE_ORG_ID`` pins the deployment's org, membership is
   required on *every* resolution, not only at link time: an identity linked

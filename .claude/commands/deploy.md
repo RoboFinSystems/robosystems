@@ -13,7 +13,7 @@ Most deploys (~95%) go green untouched and need no attention. The real use case 
 
 - **`gh` reads are free; the deploy trigger is not.** Reading runs, jobs, and logs (`gh run list/view/watch`) needs no confirmation. **Triggering or re-triggering a deploy** (`gh workflow run`, `just deploy`) is an outward-facing action — confirm the target (env + ref) with the user first, and default to watching a run they already started.
 - **AWS is read-only here.** `describe-*` / `list-*` only. CloudFormation changes and stack deletions are the user's to run — never `create-stack`/`update-stack`/`delete-stack` directly.
-- **Never deploy the default branch to prod.** Production should ride a version tag / release branch produced by the release workflow. **Nothing in the pipeline enforces this** — the prod workflow has no ref guard, and the deploy helper will accept a branch without complaint. So check the ref *before* triggering, and when reviewing history (`gh run list --json headBranch,displayTitle`), flag any past prod run that rode a branch rather than a tag.
+- **Never deploy the default branch to prod.** Production should ride a version tag / release branch produced by the release workflow. Verify the ref *before* triggering rather than assuming the pipeline will reject a bad one, and when reviewing history (`gh run list --json headBranch,displayTitle`), flag any past prod run that rode a branch rather than a tag.
 - **`just deploy` defaults are dangerous if you're not explicit.** The recipe defaults to the **prod** environment and the **current branch**. Always pass both arguments.
 - **Output can be sensitive.** Failure logs name internal hostnames, stack names, and resource IDs. Don't paste raw infra detail into anything public; summarize.
 

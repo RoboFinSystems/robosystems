@@ -1,13 +1,11 @@
 """Database-fault translation for hand-written MCP tools.
 
 The registrar-published tools already answer a missing tenant schema with
-``not_initialized`` and any other database fault with a fixed message. The
-hand-written tools each carried a catch-all that returned ``str(exc)`` — for a
-DBAPI error that string carries the SQL and its bound parameters, which is not
-something to put in front of the LLM. Every hand-written tool routes its
-``SQLAlchemyError`` arm through here so both tool families answer alike; the
-domain catch-alls that follow keep their messages, since those are domain
-text, not driver output.
+``not_initialized`` and any other database fault with a fixed message. Driver
+output must never reach the LLM, so every hand-written tool routes its
+``SQLAlchemyError`` arm through here and both tool families answer alike. The
+domain catch-alls that follow keep their own messages, since those are domain
+text rather than driver output.
 """
 
 from __future__ import annotations

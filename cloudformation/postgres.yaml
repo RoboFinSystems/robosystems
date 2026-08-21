@@ -642,10 +642,8 @@ Resources:
         # IAMAuth: DISABLED is intentional. Flipping to REQUIRED would force app-side
         # IAM token generation (short-lived tokens via rds-db:connect), which this app
         # does not implement — the app reads POSTGRES_PASSWORD from Secrets Manager
-        # and builds a standard postgres:// URL. The trade-off: DISABLED accepts any
-        # VPC-reachable client with the correct password; REQUIRED would require a
-        # valid IAM identity *plus* the password. Revisit if threat model demands
-        # defense-in-depth against leaked DB credentials alone.
+        # and builds a standard postgres:// URL. Revisit if the threat model calls
+        # for an identity check layered on top of the secret.
         - AuthScheme: SECRETS
           SecretArn: !Ref DBPasswordSecret
           IAMAuth: DISABLED

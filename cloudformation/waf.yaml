@@ -204,9 +204,8 @@ Resources:
                 # Body size guard. WAF only inspects the first 8KB of the
                 # body on regional (ALB) resources, so OversizeHandling MUST be
                 # CONTINUE here — MATCH would treat *any* body over 8KB as a hit
-                # and block it with a 413 (the Size: 8388608 / 8MB threshold is
-                # never actually reached because WAF can't see past 8KB). Real
-                # large-payload limits are enforced at the application layer.
+                # and block it with a 413. Real large-payload limits are
+                # enforced at the application layer.
                 - SizeConstraintStatement:
                     FieldToMatch:
                       Body:

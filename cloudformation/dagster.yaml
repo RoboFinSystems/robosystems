@@ -1070,9 +1070,8 @@ Resources:
       TreatMissingData: notBreaching
 
   # The stalled-provisioning reaper writes off a subscription whose
-  # provisioning never finished. That row is a customer who paid and has no
-  # working resource, and the reaper's log line was the only place it was
-  # ever recorded — this makes it a page.
+  # provisioning never finished. Such a row needs operator follow-up, so it is
+  # surfaced as an alarm rather than left to a log line.
   StalledProvisioningWriteOffMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:

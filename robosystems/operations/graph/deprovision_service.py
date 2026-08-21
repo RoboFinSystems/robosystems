@@ -156,13 +156,13 @@ class GraphDeprovisionService:
       return result
 
     if graph.status == GraphStatus.DEPROVISIONED.value:
-      # The status flipped even when a data-disposal step failed (`partial`),
-      # and there was no way back in: a ghost tenant schema, index documents,
-      # or report bundles stayed behind for good, and every per-tenant
-      # migration kept operating on the ghost. Re-running the disposal steps
-      # is idempotent — DROP SCHEMA IF EXISTS, delete-by-graph, prefix
-      # delete — so an already-deprovisioned graph re-runs exactly those and
-      # nothing else (no backup, no database, no registry, no status change).
+      # The status flips even when a data-disposal step fails (`partial`), so
+      # this path has to stay re-enterable or a tenant schema, index documents
+      # or report bundles could be left behind with no way to finish the job.
+      # The disposal steps are idempotent — DROP SCHEMA IF EXISTS,
+      # delete-by-graph, prefix delete — so an already-deprovisioned graph
+      # re-runs exactly those and nothing else (no backup, no database, no
+      # registry, no status change).
       result.status = "already_deprovisioned"
       result.previous_status = graph.status
       self._dispose_residual_data(graph_id, result)
@@ -778,8 +778,8 @@ class GraphDeprovisionService:
       # the creator. So the graph's teardown is what removes them — nothing
       # else does. Credentials go first and by id, because
       # connection_credentials.connection_id carries no foreign key, so no
-      # cascade can ever reach it; dropping the connection rows first would
-      # strand a live encrypted OAuth token with no row left to find it by.
+      # cascade can ever reach it, and the connection row is the only way to
+      # enumerate its credentials. Order is therefore load-bearing.
       # Soft-deleted connections are included — deleted_at is unset here on
       # purpose, since the graph is going away either way.
       connection_ids = [

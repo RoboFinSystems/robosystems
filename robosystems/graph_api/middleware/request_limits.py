@@ -73,6 +73,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
           },
         )
 
-    # A chunked request carries no Content-Length and so passes unchecked;
-    # enforcing a limit there requires validating the body as it streams.
+    # Enforcement here is on the declared Content-Length. Bounding a streamed
+    # body requires counting it as it arrives, which the internet-facing edge
+    # middleware does before a request can reach this service.
     return await call_next(request)

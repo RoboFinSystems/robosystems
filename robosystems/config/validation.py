@@ -229,9 +229,9 @@ class EnvValidator:
 
     # Parameter Store reachability. In a deployed environment, a boot that
     # could not read SSM serves its entire life on code defaults — flags are
-    # resolved once at import — which means registration open, no CAPTCHA, no
-    # email verification, and (below) no rate limiting. Refuse to boot instead
-    # of silently serving inert controls.
+    # resolved once at import — so security-relevant toggles would run at
+    # their permissive defaults. Refuse to boot instead of silently serving
+    # inert controls.
     if deployed:
       if not getattr(env_config, "PARAMETER_STORE_AVAILABLE", False):
         errors.append(

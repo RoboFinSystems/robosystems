@@ -199,9 +199,9 @@ class User(Model):
     security boundary, and we don't want suspended/banned/restored accounts
     to be revivable just by replaying an old token or a still-valid API key.
 
-    API-key revocation is essential: keys don't carry ``session_version`` and
-    ``UserAPIKey.get_by_key`` filters only on the key's own active flag, so
-    without this a deactivated user would keep full programmatic access.
+    API-key revocation is part of the same act: keys carry no
+    ``session_version``, so deactivation has to reach them directly rather
+    than through the session-version bump that covers tokens.
 
     Idempotent and re-asserting: calling this on an already-inactive user
     re-runs the cache invalidation and key sweep, which is exactly what a
@@ -318,14 +318,12 @@ class User(Model):
     next legitimate request is one extra DB hit per invalidation event
     (password reset / deactivate / logout-everywhere) — cheap.
 
-    Tradeoff: if BOTH retries against Redis fail, the prior cache entry
-    persists until its TTL expires (~30 min). The DB session_version is
-    the source of truth, but the cache hit path doesn't re-read the DB,
-    so during this window an attacker holding a token with the prior
-    session_version would continue to authenticate. This is bounded by
-    JWT TTL (30 min) and Redis recovery time, and is the standard
-    cache-invalidation tradeoff. For stronger guarantees, move the
-    version-of-record into a no-TTL Redis key (or back to per-request DB).
+    Returns False when the delete could not be confirmed after retries, so
+    a failed invalidation is visible to the caller rather than assumed to
+    have taken. A cache entry that outlives its delete is bounded by its
+    TTL; the DB session_version stays the source of truth. If that bound
+    ever needs to be tighter, hold the version of record in a no-TTL key
+    rather than relying on cache expiry.
     """
     import importlib
 

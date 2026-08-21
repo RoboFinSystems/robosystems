@@ -60,8 +60,7 @@ class TestRedactConnectionSecrets:
 
   @pytest.mark.timeout(10)
   def test_adversarial_repetition_stays_fast(self):
-    # Many credential-shaped prefixes with no terminating '@' previously
-    # made the URL regex rescan to end-of-string from every prefix
-    # (quadratic). Bounded quantifiers keep this linear-ish.
+    # Bounded quantifiers keep the URL regex linear-ish on input that never
+    # terminates a match.
     raw = "postgres://!:" * 20_000
     assert redact_connection_secrets(raw) == raw

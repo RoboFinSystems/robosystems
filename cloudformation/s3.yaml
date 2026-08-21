@@ -204,17 +204,12 @@ Resources:
         Status: Enabled
       LifecycleConfiguration:
         Rules:
-          # Pre-ingestion uploads expire after 30 days. The prefix is
-          # user-staging/, not staging/: S3 prefix matching is literal, so the
-          # two rules this replaces (staging/ 7d and exports/ 30d) matched no
-          # object that has ever existed in this bucket, and source files sat
-          # here indefinitely — including a departed customer's, since
-          # deprovisioning does not touch S3. The objects are ingestion input,
-          # not a system of record; the graph holds the result. 30 days rather
-          # than the old rule's 7 because that number was written against a
-          # prefix nothing wrote to, so it was never sized against a real
-          # upload-to-ingest gap. Note GraphFile rows outlive the object and
-          # still report s3_key, so expiry leaves that metadata dangling.
+          # Pre-ingestion uploads expire after 30 days. S3 prefix matching is
+          # literal, so this must name the prefix the upload path actually
+          # writes — user-staging/, not staging/. The objects are ingestion
+          # input, not a system of record; the graph holds the result. Note
+          # GraphFile rows outlive the object and still report s3_key, so
+          # expiry leaves that metadata dangling.
           - Id: ExpireUserStagingData
             Status: Enabled
             Prefix: user-staging/

@@ -78,10 +78,9 @@ async def register(
   # an org admin deliberately invited. That composition — closed registration
   # plus invitations — is invite-only mode.
   #
-  # The token is resolved here rather than trusted as a mere presence check:
-  # otherwise any string would buy an attacker passage to the checks below,
-  # including the duplicate-email probe that closed registration is meant to
-  # deny. It is validated again in full (email match, expiry) further down.
+  # The token is resolved here rather than trusted as a mere presence check,
+  # so nothing downstream of this gate runs on an unverified token. It is
+  # validated again in full (email match, expiry) further down.
   if not env.USER_REGISTRATION_ENABLED:
     has_valid_invitation = (
       request.invite_token is not None

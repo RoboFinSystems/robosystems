@@ -104,8 +104,8 @@ class HttpToolAccess:
     itself; here it is a handle that routes back through
     :meth:`call_tool`, so execution still goes through ``GraphMCPTools`` —
     which is what applies the ``read_only`` gating and the registrar
-    dispatch. Instantiating the tool class and executing it in-process
-    would work and would bypass both, so the handle is the point.
+    dispatch. Routing every execution through that one path is the point of
+    the handle; a tool object must never be executed directly.
 
     The class is instantiated once here purely to read its declared name;
     that instance is discarded and never executed.

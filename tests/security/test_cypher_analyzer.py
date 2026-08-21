@@ -453,15 +453,15 @@ class TestCleanQuery:
     assert result == CypherOperationType.READ
 
 
-class TestBacktickIdentifierBypass:
-  """Regression tests for the backtick-identifier lexer-differential bypass.
+class TestBacktickIdentifierTokenizing:
+  """The tokenizer must close a backtick identifier where the engine does.
 
-  ``_clean_query`` used to treat backslash as an escape inside backtick-quoted
-  identifiers, so ``... AS `x\\` SET ...`` masked the trailing write while Kuzu
-  closed the identifier at the backtick and executed the write. The analyzer
-  now closes a backtick identifier at the FIRST backtick (backslash is a
-  literal char), matching the engine lexer, so a masked write can no longer
-  slip past classification. Each masked payload below must trip its predicate.
+  Kuzu closes a backtick-quoted identifier at the first backtick and treats
+  backslash as a literal character. ``_clean_query`` must agree, because any
+  divergence changes which keywords remain visible to classification. Each
+  fixture below places a keyword after a backtick sequence that the two
+  tokenizers could disagree about; every one must still classify as its
+  predicate says.
   """
 
   MASKED_SET = "MATCH (e) WITH e, 1 AS `y\\` SET e.name = 'x' RETURN e"
