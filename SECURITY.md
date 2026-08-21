@@ -10,83 +10,116 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `robosystems/middleware/auth/jwt.py`
 
-- 30-minute access token expiration (configurable via `JWT_EXPIRY_HOURS`)
-- JTI-based token revocation tracked in Valkey with TTL
-- Automatic token refresh at `/v1/auth/refresh` with 5-second grace period for in-flight requests
+- 30-minute access token expiration (`JWT_EXPIRY_HOURS` in `robosystems/config/constants.py`; a code constant, not an environment variable)
+- JTI-based token revocation tracked in Valkey, with TTL equal to the token's remaining lifetime
+- Token refresh at `/v1/auth/refresh`: the old token is revoked with a 5-second grace period for in-flight requests; tokens expired by up to 5 minutes are still accepted for refresh, subject to device-fingerprint and revocation checks
 - Issuer and audience claim validation
+- Token purpose enforcement: single-use SSO handoff tokens and MFA challenge tokens are refused as session bearers
+- Every token carries the user's `session_version`; password change, password reset, and account deactivation bump it, invalidating all outstanding tokens (deactivation also revokes the user's API keys)
 - Fails closed on Valkey errors (treats token as revoked)
 
 ### Device Fingerprinting
 
 **Implementation:** `robosystems/security/device_fingerprinting.py`
 
-- Browser binding via user-agent and Sec-CH-UA headers (SHA256 hash)
+- Browser binding: a SHA256 hash of the `User-Agent`, `Accept-Language`, `Accept-Encoding`, `Sec-CH-UA`, and `Sec-CH-UA-Platform` headers is embedded in the JWT at issuance
 - Intentionally excludes IP address (VPN/mobile/load balancer changes)
-- Detects suspicious changes in browser client hints
+- Any change to the bound headers invalidates the token, including on grace-period refresh
 
 ### API Key Management
 
 **Implementation:** `robosystems/models/core/user/user_api_key.py`
 
-- Cryptographically secure generation (`rfs` prefix + 64 hex characters)
-- Bcrypt hashing with cost factor 12 for storage
+- Cryptographically secure generation (`secrets.token_hex`): `rfs` prefix + 64 hex characters; graph-scoped keys use the `rfsc` prefix
+- Bcrypt hashing with cost factor 12 for storage; the plaintext is returned once at creation and never stored
+- Optional graph scoping (`graph_id`): a scoped key is valid only for that graph and its subgraphs
 - Optional per-key expiration (`expires_at`)
 - Usage tracking via `last_used_at` timestamp
+- Validation results are cached in Valkey (encrypted and signed; see Application-Level Encryption); deactivating or deleting a key invalidates its cache entry
 
 ### Authentication Protection
 
 **Implementation:** `robosystems/security/auth_protection.py`
 
-- Progressive delays on failed attempts (1s, 2s, 5s, 10s, 30s, 1m, 5m, 15m cap)
+- Progressive delays on failed attempts (1s, 2s, 5s, 10s, 30s, 1m, 5m, 15m cap), enforced as `429` responses with `Retry-After`
 - IP-based threat assessment with four levels:
   - LOW: <5 failures
   - MEDIUM: 5+ failures (15-minute block)
   - HIGH: 10+ failures (1-hour block)
   - CRITICAL: 20+ failures (24-hour block)
-- Blocks automatically expire; 24-hour sliding window per IP
-- Stored in Valkey with SHA256-hashed keys; graceful degradation on cache failure
+- Blocks automatically expire; the per-IP failure count decrements by one on each successful login, and the record expires 25 hours after the last attempt
+- Stored in Valkey under SHA256-hashed IP keys; graceful degradation on cache failure
+- Applied to the login, registration, and MFA endpoints; passkey login failures count toward the same per-IP record
+
+### Passkeys (WebAuthn) and MFA
+
+**Implementation:** `robosystems/routers/auth/passkeys.py`, `robosystems/routers/auth/mfa.py`, `robosystems/operations/passkeys.py`, `robosystems/models/core/user/user_passkey.py`
+
+- WebAuthn passkeys serve as a second factor after password login (`/v1/auth/mfa/*`) and as a passwordless first factor (`/v1/auth/passkeys/login/*`)
+- Gated by `PASSKEYS_ENABLED`; `MFA_ENFORCEMENT_ENABLED` additionally requires org owners and admins to enroll a passkey before a password login yields a session
+- Enrollment requires a fresh re-authentication proof on top of the session (API keys are refused), or a purpose-scoped `enroll` MFA token in the forced-enrollment lane
+- MFA challenge tokens are short-lived (5 minutes), purpose-scoped (`login` vs `enroll`), and refused as session bearers
+- Ten single-use recovery codes back the second factor (stored as SHA256 hashes; regenerable at `/v1/auth/mfa/recovery-codes/regenerate`)
+- Relying Party ID and origin derive from the deployment's root domain (`PASSKEY_RP_ID` / `PASSKEY_ORIGIN` override); stored credentials hold only the public key, sign counter, transports, and backup flags
+
+### Enterprise SSO (OIDC) and SCIM Provisioning
+
+**Implementation:** `robosystems/routers/auth/oidc.py`, `robosystems/operations/oidc.py`, `robosystems/routers/scim/`, `robosystems/middleware/auth/scim.py`, `robosystems/models/core/user/scim_token.py`
+
+- OIDC authorization-code login against one configured identity provider (`SSO_OIDC_ENABLED`, `SSO_OIDC_ISSUER`, `SSO_OIDC_CLIENT_ID`), with provider discovery, single-use 10-minute flow state carrying a nonce and PKCE verifier, and ID-token validation
+- Link-only: SSO never creates accounts; first login binds to the SCIM-provisioned user through a configurable ID-token claim (`SSO_OIDC_BINDING_CLAIM`, default `sub`) and requires membership in the pinned enterprise org (`ENTERPRISE_ORG_ID`)
+- SCIM 2.0 user provisioning at `/scim/v2` (`SCIM_ENABLED`, gated independently of OIDC): `/Users` CRUD plus `ServiceProviderConfig`, `ResourceTypes`, and `Schemas`
+- SCIM bearer tokens are per-org, bcrypt-hashed, shown once at mint, expiring (365-day default), and rotated by overlap; they authenticate provisioning only — never accepted by the normal auth dependencies, while user JWTs and API keys are never accepted at the SCIM surface
+- `/v1/auth/providers` publishes which auth methods a deployment offers (`PASSWORD_AUTH_ENABLED`, `SSO_OIDC_ENABLED`) so clients render the login page from runtime config
 
 ### CAPTCHA Verification
 
 **Implementation:** `robosystems/security/captcha.py`
 
 - Cloudflare Turnstile server-side token verification
-- Configurable via `CAPTCHA_ENABLED` environment variable
-- Applied to registration and authentication endpoints
+- Configurable via `CAPTCHA_ENABLED` environment variable; when enabled in staging or production without a Turnstile secret configured, verification fails closed
+- Applied to registration (`/v1/auth/register`); `/v1/auth/captcha/config` tells clients whether a token is required and which site key to use
 
 ### Password Security
 
 **Implementation:** `robosystems/security/password.py`
 
-- Bcrypt hashing with 14 rounds
+- Bcrypt hashing with 14 rounds, run off the event loop
 - Score-based strength validation (min 60/100 to pass)
-- Pattern detection: sequential chars, repeated chars, common passwords
-- Requirements: 12+ chars, uppercase, lowercase, digit, special character, 8+ unique characters
+- Pattern detection: sequential chars, repeated chars, keyboard patterns, common passwords, and substrings of the user's own email address
+- Requirements: 12+ chars (128 max), uppercase, lowercase, digit, special character, 8+ unique characters
+- Login timing is equalized: a miss (unknown email, inactive account) performs the same bcrypt work as a real verification, so response time does not reveal whether an address is registered
 
 ### Multi-Tenant Access Control
 
-**Implementation:** `robosystems/models/core/graph/graph_user.py`
+**Implementation:** `robosystems/models/core/graph/graph_user.py`, `robosystems/models/core/org/org_user.py`
 
-- Roles: admin (full control), member (read/write, default), viewer (read-only)
-- Complete tenant isolation via separate LadybugDB databases
+- Graphs are owned by organizations; org roles are owner, admin, and member
+- Graph roles: admin (full control), member (read/write, default), viewer (read-only); org owners and admins hold implicit admin on every graph their org owns
+- One role resolver (`GraphUser.get_effective_role`) backs REST, GraphQL, MCP, and the extensions surface; a deprovisioned or deleted graph resolves to no access for everyone, including org owners and admins
+- Graph data: a separate LadybugDB database per graph (and per subgraph); extensions OLTP data (RoboLedger/RoboInvestor): a dedicated PostgreSQL schema per graph, selected with `SET search_path`
 - Subgraph permissions inherited from parent graph
-- All endpoints scoped by `graph_id`
+- All graph endpoints scoped by `graph_id`
 
 ## Data Security
 
 ### Encryption at Rest
 
-- PostgreSQL: AES-256 encryption via AWS RDS
+- PostgreSQL: AES-256 encryption via AWS RDS; 30-day automated backups; Multi-AZ optional (`DATABASE_MULTI_AZ_ENABLED_{PROD,STAGING}`, off by default)
 - LadybugDB: EBS volume encryption
-- S3: AES256 server-side encryption (SSE-S3) on all buckets
+- S3: AES256 server-side encryption (SSE-S3) and public-access block on all buckets; Object Lock (governance mode, 400 days) on the audit and CloudTrail buckets, applied through the S3 API (see the template notes)
+- OpenSearch: encryption at rest and node-to-node encryption
+- Valkey: encryption at rest and in transit (default on), AUTH token from Secrets Manager
 - Graph backups: SSE-AES256 on the stored object; served only over TLS through
-  short-lived signed URLs. Not additionally encrypted at the application layer —
+  signed URLs (1-hour default; caller-selectable from 5 minutes to 24 hours); 90-day
+  retention by default. Not additionally encrypted at the application layer —
   a backup download is a usable `.lbug` database by design.
 
 ### Encryption in Transit
 
-- TLS 1.2+ enforced on CloudFront distributions
-- SSL/TLS required for all database connections (`rds.force_ssl: 1`)
+- API load balancer: HTTPS-only listener, TLS 1.2/1.3 (`ELBSecurityPolicy-TLS13-1-2-FIPS-2023-04`)
+- CloudFront: `TLSv1.2_2021` minimum protocol when a custom domain is configured; HTTPS redirect always
+- SSL/TLS required for all database connections (`rds.force_ssl: 1`; RDS Proxy `RequireTLS`); OpenSearch enforces HTTPS with a TLS 1.2 minimum
 - Certificate management via AWS Certificate Manager
 
 ### Application-Level Encryption
@@ -103,8 +136,8 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - AWS Secrets Manager integration with hierarchical secret organization
 - Base secret (`robosystems/{env}`) plus extension secrets (`robosystems/{env}/{component}`)
-- TTL-based caching (1-hour default) with two-level LRU + timestamp cache
-- 40+ secrets mapped (JWT, database, S3, Stripe, Intuit, etc.)
+- TTL-based caching (1-hour default) with explicit `refresh()` invalidation
+- ~36 secrets mapped (JWT, database, S3, Stripe, Intuit, etc.); feature flags live in SSM Parameter Store, not Secrets Manager
 - Graceful fallback to environment variables in development
 
 ### Secrets Rotation
@@ -112,10 +145,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 **Implementation:** `.github/workflows/secrets-rotation.yml`
 
 - Monthly schedule via GitHub Actions (staging: 1st of month, prod: 2nd of month)
-- Lambda-based rotation functions for each secret type
+- Lambda-based rotation functions (PostgreSQL, Valkey, and one shared API-key function for the Graph API and Admin keys)
 - Rotated secrets: PostgreSQL password, Valkey auth token, Graph API key, Admin API key
 - Pre-rotation cleanup for stuck AWSPENDING versions
-- Post-rotation verification with timeout handling (5 min for Postgres/API keys, 12 min for Valkey)
+- Post-rotation verification with timeout handling (5 min for Postgres/API keys, 30 min for Valkey)
 - Automatic service refresh after successful rotation
 - SNS email notifications on completion
 - Controlled by `SECRETS_ROTATION_ENABLED_STAGING` and `SECRETS_ROTATION_ENABLED_PROD` GitHub variables (disabled by default)
@@ -128,7 +161,6 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - HTML escape and dangerous character removal (`<>"\'\0\r\n`)
 - Email, username, UUID, URL, and SQL identifier validation
-- Password strength validation with entropy scoring
 - Recursive sanitization of nested dicts/lists
 - Pydantic `EmailStr`, `min_length`/`max_length` constraints, and custom validators at API boundaries
 
@@ -137,8 +169,8 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 **Implementation:** `robosystems/security/cypher_analyzer.py`
 
 - AST-based Cypher query analysis (comment/string removal before keyword detection)
-- Write operation detection (44 keywords: CREATE, MERGE, SET, DELETE, etc.)
-- Operation classification: READ, WRITE, MIXED, BULK, ADMIN, SCHEMA_DDL
+- Keyword detection across four sets — write (CREATE, MERGE, SET, DELETE, …), bulk, admin, and schema DDL — plus procedure calls outside a read-only allowlist
+- Operation classification: READ, WRITE, or MIXED; bulk, admin, and schema-DDL statements are flagged by separate checks
 - Suspicious pattern detection (USER creation, DATABASE drops, `dbms.*` calls)
 - Query length limit (100KB max) for DoS prevention
 - Fails closed: analysis failure defaults to `is_write_operation=True`
@@ -162,8 +194,9 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   every tier
 - Per-endpoint category limits (22 categories: auth, graph_read, graph_write, etc.)
 - User identification: API key (SHA256 hash) > JWT (user_id) > IP (fallback)
-- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
-- Sensitive auth endpoints: login (5/5min), register (3/hour), JWT refresh (20/min)
+- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Tier`, `X-RateLimit-Category`; a 429 additionally carries `X-RateLimit-Reset` and `Retry-After`
+- Sensitive auth endpoints: login (5/5min) and register (3/hour), keyed by client IP; JWT refresh (20/min), keyed by the caller's identity while its token still parses and by client IP once it does not
+- Auth endpoints fail closed: if the limiter backend is unavailable, login and registration are denied rather than left unprotected
 
 ### Admission Control
 
@@ -175,12 +208,12 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### File Upload Security
 
-**Implementation:** `robosystems/routers/graphs/files/upload.py`
+**Implementation:** `robosystems/operations/graph/commands/create_file_upload.py`, `robosystems/operations/graph/commands/ingest_file.py` (routed through `robosystems/routers/graphs/content_ops.py`)
 
 - Presigned S3 URLs for time-limited direct uploads (no API bottleneck)
 - File format validation (parquet, csv, json)
-- Per-file size limits and tier-based storage caps
-- Row count validation for parquet files
+- Per-file size limit (`MAX_FILE_SIZE_MB`) checked at upload; tier storage cap enforced at ingest
+- Parquet row counts read from the file footer at ingest (the object is never fully decoded)
 
 ## Infrastructure Security
 
@@ -188,10 +221,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `cloudformation/vpc.yaml`
 
-- Private/public subnet segmentation across 2-5 availability zones
+- Private/public subnet segmentation across 2–6 availability zones (default 5)
 - NAT Gateway for private subnet outbound access
 - Security groups with least-privilege access
-- VPC endpoints for S3, DynamoDB (gateway, free), Secrets Manager, ECR (interface)
+- VPC endpoints for S3 and DynamoDB (gateway, free); Secrets Manager, ECR API, and ECR Docker (interface)
 - No direct internet access to application/data tiers
 
 ### Web Application Firewall (WAF)
@@ -210,7 +243,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 ### Application Load Balancer
 
 - SSL termination with health checks
-- Multi-AZ deployment support (optional, off by default)
+- Admin API paths answered with a fixed `403` at the listener; the admin surface is reachable only through the SSM bastion tunnel
 
 ### CI/CD Security (OIDC)
 
@@ -218,7 +251,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - GitHub OIDC federation (no long-term AWS credentials)
 - Federated role restricted to `main` branch, `release/*` branches, and `v*` tags
-- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app)
+- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app, robosystems-holon-viewer)
 - 1-hour maximum session duration
 - Permission scoping: ECR limited to `robosystems*`, S3 limited to `robosystems-*`
 
@@ -234,11 +267,12 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `robosystems/security/audit_logger.py`
 
-- Structured JSON logging with 15+ event types:
+- Structured JSON logging with 46 event types, including:
   - Authentication: success, failure, token expired/invalid
   - Authorization: denied, privilege escalation attempt
   - Security: injection attempt, rate limit exceeded, suspicious activity
   - Operations: data import, timeout, financial transaction
+  - Identity lifecycle: OIDC login denied, SCIM provisioning, org and graph membership changes, passkey enrollment, MFA challenges
 - Risk level classification: LOW, MEDIUM, HIGH, CRITICAL
 - Controlled by `SECURITY_AUDIT_ENABLED` environment variable
 - Centralized collection via CloudWatch; emits custom security metrics off the request path (see CloudWatch Integration)
@@ -253,6 +287,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   - `AuthFailureSpikeAlarm`: `AuthFailure` > 50 in 5 minutes
   - `InjectionAttemptAlarm`: `InjectionAttempt` > 0
   - `PrivilegeEscalationAlarm`: `PrivilegeEscalationAttempt` > 0
+  - `AuthorizationDeniedAlarm`: `AuthorizationDenied` > 20 in 5 minutes
 - Optional Container Insights for deeper metrics
 
 ### Managed Monitoring
@@ -265,7 +300,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### SNS Alerting
 
-- Infrastructure alert topics per component (PostgreSQL, graph, shared replicas)
+- Infrastructure alert topics per component (API security, PostgreSQL, Valkey, OpenSearch, graph writer tiers, graph infrastructure and volumes, shared replicas, Dagster, worker)
 - Email subscriptions for each topic
 - Secrets rotation notifications
 
@@ -284,7 +319,7 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 | `DataEventsEnabled` | Enable S3 data events logging | `false` |
 
 - Multi-region trail with log file validation
-- S3 storage with AES256 encryption and Intelligent-Tiering
+- S3 storage with AES256 encryption, Intelligent-Tiering, and Object Lock (governance mode, 400 days)
 - Automatic lifecycle rules for retention enforcement
 - SSM Session Manager command logging: the `SSM-SessionManagerRunShell` document streams bastion session commands to the `/robosystems/ssm-sessions` CloudWatch log group (400-day retention); deployed with the trail, gated on `EnableCloudTrail`
 - Tagged as SOC2-Compliance
@@ -333,7 +368,7 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 | `AUDIT_RETENTION_DAYS` (`RetentionDays`) | Days to retain audit records in S3 | `400` |
 
 - CloudWatch Logs subscription filter on `/robosystems/{environment}/api` forwards only compliance records (`SECURITY_AUDIT:` marker and structured operation-audit entries) to Kinesis Data Firehose → a dedicated S3 bucket
-- Bucket is versioned, AES256-encrypted, public-access-blocked, with ~13-month retention (`RetentionDays`)
+- Bucket is versioned, AES256-encrypted, public-access-blocked, Object-Locked (governance mode, 400 days), with ~13-month retention (`RetentionDays`)
 - Preserves security evidence beyond the short operational-log retention; entirely log-side (no request-path impact)
 - Tagged as SOC2-Compliance
 
@@ -374,7 +409,7 @@ aws logs describe-log-groups --log-group-name-prefix /robosystems/ssm-sessions
 - AWS Config: `s3://robosystems-config-{account-id}`
 - Audit retention: `s3://robosystems-audit-{environment}-{account-id}`
 - SSM sessions: CloudWatch `/robosystems/ssm-sessions`
-- Application: CloudWatch `/aws/ecs/{service-name}`
+- Application: CloudWatch `/robosystems/{environment}/{api,worker,dagster,graph-api,bastion-host}`
 
 ## Startup Validation
 
@@ -415,5 +450,6 @@ Production environment enforces at startup:
 
 - CloudFormation template validation in CI/CD
 - Security-focused test markers (`@pytest.mark.security`)
-- Code quality and security linting via Ruff
+- Black-box tenant-isolation harness (`@pytest.mark.isolation`), run against a deployed environment
+- Code quality and security linting via Ruff, including the bandit (`S`) rule set
 - Security-focused pull request reviews
