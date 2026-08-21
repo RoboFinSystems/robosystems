@@ -127,7 +127,7 @@ def initialize_ledger(
     note=body.note,
   )
 
-  # Seed FiscalPeriod rows. Matches the old router's logic exactly.
+  # Seed FiscalPeriod rows.
   current = current_month_period()
   default_start = add_months(current, -23)
   start_period = body.earliest_data_period or default_start

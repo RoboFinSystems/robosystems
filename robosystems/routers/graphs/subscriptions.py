@@ -235,7 +235,7 @@ async def create_repository_subscription(
     # subscriber — not the caller — is what determines who gets access. Owners
     # and admins may subscribe another member of their org; everyone else
     # resolves to themselves. Same rule (and same helper) as plan changes and
-    # cancellation, which have accepted a target user since Phase 3.
+    # cancellation, which also accept a target user.
     target_user_id, org_id = _resolve_subscription_target(
       current_user, request.user_id, db
     )

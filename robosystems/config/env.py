@@ -779,11 +779,9 @@ class EnvConfig:
   #
   # Defaults to TRUE alongside the per-domain ROBOLEDGER/ROBOINVESTOR flags
   # so a fresh deployment with extensions on automatically gets the read
-  # surface (legacy /v1/ledger/* and /v1/investor/* routers are gone — this
-  # GraphQL endpoint is the only way to read extensions data). Kept as an
-  # independent kill switch for incident response (e.g. lock down
-  # introspection without disabling write operations). Prod/staging
-  # currently override to `false` via SSM during the staged rollout.
+  # surface — this GraphQL endpoint is the only way to read extensions data.
+  # Kept as an independent kill switch for incident response (e.g. lock down
+  # introspection without disabling write operations).
   EXTENSIONS_GRAPHQL_ENABLED = get_bool_env(
     "EXTENSIONS_GRAPHQL_ENABLED",
     get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",

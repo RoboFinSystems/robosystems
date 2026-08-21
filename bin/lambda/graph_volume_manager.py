@@ -93,8 +93,8 @@ DEFAULT_THROUGHPUT = 125  # MB/s
 # ladybug-shared runs the SEC nightly full rebuild, whose relationship-table
 # COPYs are bound by small random reads (endpoint hash-index probes + CSR
 # rewrites) into this volume. At the 3000-IOPS baseline the volume sat 78-93%
-# busy moving ~20 MB/s and the rebuild took 6.4h; at 12000 IOPS / 500 MB/s the
-# same tables ran ~2.4x faster (2026-08-19). The other tiers stay at baseline.
+# busy at the 3000-IOPS baseline, so the shared tier is provisioned well above
+# it. The other tiers stay at baseline.
 TIER_VOLUME_SPEC: dict[str, dict[str, int]] = {
   "ladybug-standard": {"size": 20, "iops": 3000, "throughput": 125},
   "ladybug-large": {"size": 50, "iops": 3000, "throughput": 125},

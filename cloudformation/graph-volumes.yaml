@@ -66,10 +66,8 @@ Resources:
   # ========================================
   # EBS SNAPSHOT LIFECYCLE
   # ========================================
-  # DLM (Data Lifecycle Manager) was removed because its TargetTags filtering
-  # proved unreliable — it snapshotted ALL volumes in the account regardless of
-  # tag filters, including shared replica root volumes and bastion volumes.
-  # This persisted across 4 fix attempts (Jan-Mar 2026).
+  # DLM (Data Lifecycle Manager) is deliberately not used: its TargetTags
+  # filtering snapshots every volume in the account regardless of tag filters.
   #
   # Snapshot strategy without DLM:
   # - Writer data volumes: Final snapshot on termination (graph-lifecycle.sh)
@@ -622,15 +620,14 @@ Resources:
       AlarmDescription: Disk usage exceeded 75% on any graph database data volume (/mnt/ladybug-data)
       # Metrics Insights, not a MetricStat with a partial dimension set. The CloudWatch
       # agent publishes DISK_USED_PERCENT with six dimensions (path, InstanceId,
-      # AutoScalingGroupName, InstanceType, device, fstype); a MetricStat must match the
-      # dimension set *exactly*, so the previous `Dimensions: [path=/mnt/ladybug-data]`
-      # matched nothing and sat OK on "no datapoints received" for the life of the
-      # stack. An Insights query aggregates across dimension sets while keeping the
-      # path filter, which is load-bearing: this ladder feeds VolumeMonitorFunction,
-      # and only attached data volumes are in the volume registry and expandable.
-      # Shared replicas keep the database on the root volume (DeleteOnTermination, no
-      # autoscaling) and are alarmed separately in graph-ladybug-replicas.yaml.
-      # Verified live against prod before commit.
+      # AutoScalingGroupName, InstanceType, device, fstype), and a MetricStat must
+      # match the dimension set *exactly* — a partial set matches nothing and reads
+      # as OK on no data. An Insights query aggregates across dimension sets while
+      # keeping the path filter, which is load-bearing: this ladder feeds
+      # VolumeMonitorFunction, and only attached data volumes are in the volume
+      # registry and expandable. Shared replicas keep the database on the root
+      # volume (DeleteOnTermination, no autoscaling) and are alarmed separately in
+      # graph-ladybug-replicas.yaml.
       Metrics:
         - Id: worst_disk
           Expression: !Sub 'SELECT MAX(DISK_USED_PERCENT) FROM "RoboSystems/Graph/${Environment}" WHERE path = ''/mnt/ladybug-data'''

@@ -32,7 +32,7 @@ for route in subgraph_router.routes:
   router.routes.append(route)
 
 # Include other sub-routers
-# Note: delete_router removed — delete lives at POST .../operations/delete-subgraph
+# Delete lives at POST .../operations/delete-subgraph
 router.include_router(info_router)
 
 __all__ = ["router"]

@@ -6,8 +6,7 @@ downstream, one forward month at a time from the walk's **anchor**.
 
 The anchor is not the block's ``base_period``. ``base_period`` is the origin
 of the authored window — every lever is keyed to a month inside it, so moving
-it means restating all of them, which is why advancing a scenario's base by
-hand meant deleting and rebuilding it. The anchor is derived instead: with
+it would mean restating all of them. The anchor is derived instead: with
 ``base_anchor='seam'`` (the default) it advances to the newest closed month
 inside the horizon, so a scenario survives a period close untouched and its
 first forward month opens on real balances rather than on a base several

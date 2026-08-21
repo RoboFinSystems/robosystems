@@ -545,9 +545,9 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   un-refreshed mutable Entity attributes), and its streaming COPY into an empty
   database has a far smaller memory working set than incremental mode, whose
   keyset-export + anti-join scales with the accumulated graph. Incremental
-  (per-table keyset anti-join, no rebuild) is parked as of 2026-08-13 — at
-  current corpus scale it exceeds the shared master's memory budget and
-  OOM-kills the Graph API mid-run — but remains available for manual runs via
+  (per-table keyset anti-join, no rebuild) is not used nightly — at current
+  corpus scale it exceeds the shared master's memory budget and OOM-kills the
+  Graph API mid-run — but remains available for manual runs via
   SECMaterializeConfig. The chain — wake → stage → materialize → publish →
   sleep — is unchanged. S3 publishes are handled by
   sec_post_materialize_publish_sensor (which keys off the mode:incremental tag,
@@ -579,7 +579,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     )
     return
 
-  # Full rebuild every night. Incremental mode is parked (2026-08-13): at
+  # Full rebuild every night; incremental mode is manual-only. At
   # current corpus scale its keyset-export + anti-join phase runs DuckDB and
   # LadybugDB hot simultaneously and exceeds the shared master's memory budget,
   # OOM-killing the Graph API mid-run. The machinery remains available for

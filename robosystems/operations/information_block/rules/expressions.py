@@ -140,10 +140,10 @@ def require_single_equality(
 
   The whitelist walker permits ``ast.Compare`` and ``ast.Eq`` without
   bounding how many of each, so ``$A = $B = $C`` is structurally legal
-  while every consumer here requires exactly one operator. This was
-  open-coded in four places — parse, equality evaluation, derivation
-  evaluation, and LHS extraction — which is why the parser never grew the
-  check the other three all assumed. ``what`` keeps each caller's wording.
+  while every consumer here requires exactly one operator. All four call
+  sites — parse, equality evaluation, derivation evaluation, LHS extraction —
+  share this one check rather than open-coding it. ``what`` keeps each
+  caller's wording.
   """
   if (
     not isinstance(body, ast.Compare)
@@ -250,9 +250,9 @@ def _eval_arith(
   bound value, so the walk checks only whether the tree is *evaluable*.
   That is how :func:`parse_arithmetic_expression` validates at authoring
   time — by running this function rather than by maintaining a second
-  description of the same grammar. The two used to be separate, and every
-  shape one accepted and the other rejected produced a rule that saved
-  cleanly and then raised on every evaluation, forever.
+  description of the same grammar. Keep it that way: a second grammar would
+  drift, and any shape it accepted that this one rejects would save cleanly
+  and then raise on every evaluation.
   """
   if isinstance(node, ast.Constant):
     # bool first: isinstance(True, int) is True in Python, so without this

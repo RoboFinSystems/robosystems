@@ -914,8 +914,7 @@ async def run_off_loop(func: Callable[..., Any], *args: Any) -> Any:
 
   This is what keeps ``/v1/status`` answering while a close posts to
   QuickBooks or a bounded lock wait sits on a busy row: the API runs one
-  uvicorn worker, and before this every operation's SQL and HTTP ran inline
-  on the loop.
+  uvicorn worker, so an operation's SQL and HTTP must not run on the loop.
 
   The worker-thread run is **shielded** from native asyncio cancellation.
   ``anyio.to_thread.run_sync`` shields only anyio-flavoured cancellation;

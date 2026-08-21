@@ -83,7 +83,7 @@ packages/
 ├── rs-gaap-reporting-styles/v1/      native  — vertical / filer-profile composition surface
 │                                               (v1 ships Default, Partnership, LLC)
 ├── rs-gaap-rollup-rules/v1/          native  — L2 rollup-shaped consistency rules
-├── rs-gaap-rules/v1/                 native  — L1 cross-tree consistency rules (moved from fac)
+├── rs-gaap-rules/v1/                 native  — L1 cross-tree consistency rules
 ├── rs-metric/v1/                     native  — metric catalog: one concept + one Derive rule per
 │                                               metric, plus the standing Key Financial Metrics
 │                                               block (block_type `metric`) compute-metrics fills

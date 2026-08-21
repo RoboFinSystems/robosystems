@@ -231,9 +231,9 @@ def discover_lbug_instances() -> list[dict]:
 
   `writer` is the only value the writer launch template ever puts on
   `LadybugRole`, across every tier — the tier is carried separately on
-  `WriterTier`. This filter previously also listed `shared_master` and
-  `shared_replica`, which are `NODE_TYPE` values and never appear on
-  `LadybugRole`, so they matched nothing.
+  `WriterTier`. Do not add `shared_master` / `shared_replica` here: those are
+  `NODE_TYPE` values and never appear on `LadybugRole`, so they would match
+  nothing.
 
   Do not widen this to match any `LadybugRole` value. Replicas carry no
   `LadybugRole` today and are slated to get `replica` (deliberately not

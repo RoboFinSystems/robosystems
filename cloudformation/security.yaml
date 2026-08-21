@@ -303,10 +303,9 @@ Resources:
   #
   # What belongs in this stack is the account-global detective baseline only.
   # Alarms on API-stack resources (ALB health, the security metric namespace,
-  # the rotation Lambda) used to live here because api.yaml had run out of
-  # inline-template room; api.yaml now deploys from S3, so they sit beside the
-  # resources they watch and reference them directly. Resist adding per-env
-  # application alarms back here — the size pressure that justified it is gone.
+  # the rotation Lambda) belong beside the resources they watch, in api.yaml,
+  # which deploys from S3 and has the room. Do not add per-env application
+  # alarms here.
   #
   # Precondition: the topic must already exist (api stack deployed with
   # SNSAlertEmail set), or the topic-policy attachment fails this stack.

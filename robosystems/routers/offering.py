@@ -218,7 +218,7 @@ async def get_service_offerings(
       repository_subscriptions={
         # Per USER, not per organization: access, credits, and volume limits
         # all key on the subscribing user (UserRepository / UserRepositoryCredits).
-        # This copy once claimed org-level sharing the implementation never had.
+        # There is no org-level sharing of repository access.
         "description": "Per-user shared repository access subscriptions",
         "pricing_model": "per_user",
         "repositories": repositories,

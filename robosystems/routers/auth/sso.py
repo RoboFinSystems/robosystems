@@ -65,7 +65,7 @@ router = APIRouter()
 )
 async def generate_sso_token(
   request: Request,
-  auth_token: str | None = Cookie(None, alias="auth-token"),  # Backward compatibility
+  auth_token: str | None = Cookie(None, alias="auth-token"),
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOTokenResponse:

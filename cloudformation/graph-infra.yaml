@@ -878,10 +878,9 @@ Resources:
   # AWS-RunShellScript, for three reasons that are one fact — the document name
   # is the only environment- or purpose-specific field an SSM invocation event
   # carries:
-  #   1. The failure rule below filters on it. Matching bare Failed/TimedOut
-  #      invocation events made every failed SSM command in the account page
-  #      BOTH environments' topics, each stamping its own environment name into
-  #      the message.
+  #   1. The failure rule below filters on it. Bare Failed/TimedOut invocation
+  #      events carry no such field, so every failed SSM command in the account
+  #      would page both environments' topics.
   #   2. The Lambda role's SendCommand collapses to this one document: the role
   #      can trigger a refresh on this environment's fleet, not run arbitrary
   #      shell on it.
@@ -900,10 +899,9 @@ Resources:
   # Output forwarding: the script's output is captured to an on-instance log
   # and only the REFRESH_RESULT line plus a bounded tail are echoed back. SSM
   # truncates a plugin's inline Output after 2500 characters keeping the head,
-  # and the script prints its marker last — after docker-pull progress — so on
-  # a real image refresh the marker fell outside the window and the Lambda
-  # classified nothing (empty refresh_results on this document's first
-  # fleet-wide prod run). Marker first + 2000-byte tail fits by construction.
+  # so a marker printed last — after docker-pull progress — falls outside the
+  # window and the Lambda classifies nothing. Marker first + 2000-byte tail
+  # fits by construction.
   GraphRefreshDocument:
     Type: AWS::SSM::Document
     Properties:
@@ -1054,16 +1052,14 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Failure notification is push, not poll. Previously a failed refresh surfaced
-  # only as a red job in a workflow someone had to be watching; nothing paged.
-  # This fires regardless of whether anyone is looking at the run.
+  # Failure notification is push, not poll: it fires regardless of whether
+  # anyone is watching the run.
   #
   # Filtered to this stack's own document — the only environment- or
-  # purpose-specific field an SSM invocation event carries. Unfiltered, this
-  # pattern matched every failed SSM command in the account, so one prod
-  # failure paged BOTH environments' topics with each stamping its own
-  # environment name into the message, and unrelated commands (secrets
-  # rotation, maintenance sweeps) paged as "graph container refresh".
+  # purpose-specific field an SSM invocation event carries. Unfiltered, the
+  # pattern matches every failed SSM command in the account, so one failure
+  # pages both environments' topics and unrelated commands (secrets rotation,
+  # maintenance sweeps) page as "graph container refresh".
   GraphRefreshFailureRule:
     Type: AWS::Events::Rule
     Properties:

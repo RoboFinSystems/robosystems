@@ -139,12 +139,11 @@ class RateLimitConfig:
     #                per user, so buying more graphs cannot multiply one
     #                customer's load on a resource others depend on.
     #
-    # An earlier version of this comment described LadybugDB as shared, which
-    # is what kept every tier on identical limits. It is not shared, and that
-    # is the whole reason the dedicated half can differentiate at all.
+    # LadybugDB is dedicated per graph, not shared, which is what lets the
+    # dedicated half differentiate by tier at all.
     #
-    # Admission control (85% of instance CPU/memory) remains the real overload
-    # backstop; these numbers are a product lever, not the safety mechanism.
+    # Admission control remains the real overload backstop; these numbers are a
+    # product lever, not the safety mechanism.
     # -----------------------------------------------------------------------
     "base": {
       # Anonymous / unrecognized tier — tightest limits

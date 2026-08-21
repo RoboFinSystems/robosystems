@@ -415,9 +415,8 @@ jobs:
             SECURITY_ENV="${{ inputs.environment }}"
           fi
 
-          # The API ALB alarms this job used to parameterize now live in api.yaml
-          # and reference the ALB and target group as CloudFormation resources,
-          # so there is nothing to resolve here any more.
+          # The API ALB alarms live in api.yaml and reference the ALB and target
+          # group as CloudFormation resources, so nothing is resolved here.
           SECURITY_PARAMS="ParameterKey=Environment,ParameterValue=$SECURITY_ENV \
                       ParameterKey=EnableConfig,ParameterValue=${{ inputs.security_config_enabled }}"
 

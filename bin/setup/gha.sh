@@ -503,8 +503,8 @@ function setup_full_config() {
         gh variable set SHARED_REPLICAS_SPOT_WEIGHT_STAGING --body "0"
     fi
 
-    # Note: legacy graph backend variables were removed with the Ladybug-only deployment path
-    # If another backend is introduced in future, add its *_ENABLED_* variables here
+    # Ladybug is the only graph backend; a second one would add its
+    # *_ENABLED_* variables here.
 
     # Graph AMI: Auto-initialized by get-graph-ami action on first deploy
     # Stored in SSM: /robosystems/{env}/graph/ami-id
