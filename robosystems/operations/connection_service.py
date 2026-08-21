@@ -718,8 +718,7 @@ async def dispatch_connection_sync(
     # The Dagster job releases the lock on run completion — but a failed
     # DISPATCH never starts a run, so without this release the leaked
     # lock 409s every sync attempt on this connection for its full
-    # 30-minute TTL (observed: a disabled-provider rejection locking the
-    # connection out). Best-effort, mirroring qb_load's release.
+    # 30-minute TTL. Best-effort, mirroring qb_load's release.
     if sync_lock_id:
       try:
         from robosystems.middleware.auth.distributed_lock import release_lock_by_id

@@ -163,8 +163,8 @@ def platform_session():
       with platform_session() as db:
           row = db.query(Connection).first()
 
-  This replaces ad-hoc `gen = get_db_session(); next(gen); ...; gen.close()`
-  patterns that used to live in the GraphQL resolvers and MCP tools.
+  Use this rather than driving `get_db_session()` by hand
+  (`gen = get_db_session(); next(gen); ...; gen.close()`).
   """
   db = SessionFactory()
   try:

@@ -272,9 +272,9 @@ class PasswordSecurity:
   def _bcrypt_bytes(cls, password: str) -> bytes:
     """Encode a password to bcrypt's 72-byte input, truncating if needed.
 
-    bcrypt 5.0 raises on inputs longer than 72 bytes rather than silently
-    truncating like 4.x. Truncating here reproduces the legacy behavior so
-    long passwords still work and hashes stored under 4.x keep verifying.
+    bcrypt raises on inputs longer than 72 bytes, so the truncation has to
+    happen here — and it must stay byte-exact, because stored hashes were
+    produced against the truncated input.
     """
     return password.encode("utf-8")[: cls.BCRYPT_MAX_BYTES]
 

@@ -1,9 +1,8 @@
 """Edit a graph's platform-level metadata — display name, description, tags.
 
-Backs the ``update-graph-metadata`` operation. Before this existed, every
-one of these fields was write-once at provisioning: ``graph_name`` was set
-by ``GraphCreationService`` and never touched again, and ``description`` /
-``tags`` were persisted into ``graph_metadata`` and read by nothing.
+Backs the ``update-graph-metadata`` operation — the only writer for these
+fields after provisioning, where ``GraphCreationService`` sets ``graph_name``
+and persists ``description`` / ``tags`` into ``graph_metadata``.
 
 Scope is deliberately the platform label only. The entity name that appears
 on financial statements lives in the extensions OLTP database and changes

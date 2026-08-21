@@ -59,9 +59,8 @@ class FiscalPeriod(ExtensionsBase):
   # so a transport failure on a close that SUCCEEDED leaves the operator
   # reconstructing what happened from four separate state reads. Written
   # by PeriodCloseService.close(); read back by get-period-close-status
-  # and the fiscal-calendar response. Nullable because periods closed
-  # before this shipped (and those seeded closed by initialize_ledger)
-  # have no receipt.
+  # and the fiscal-calendar response. Nullable: a period can be closed
+  # without one (notably those seeded closed by initialize_ledger).
   close_receipt = Column(JSONB, nullable=True)
 
   # Timestamps

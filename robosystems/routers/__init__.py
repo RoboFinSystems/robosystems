@@ -55,7 +55,7 @@ from .graphs import (
 )
 from .graphs import (
   main_router as graph_router,
-)  # Removed allocation_router - too dangerous for public API
+)
 from .graphs import (
   subscriptions_router as graph_subscriptions_router,
 )
@@ -71,8 +71,6 @@ from .offering import offering_router
 from .operations import router as operations_router
 from .orgs import router as orgs_router
 from .status import router as status_router
-
-# Removed entity router - using query endpoint for all Entity operations
 from .user import router as user_router
 
 # Graph-scoped routes that require an existing graph_id
@@ -186,11 +184,9 @@ admin_router_v1.include_router(admin_graphs_router)
 admin_router_v1.include_router(admin_users_router)
 admin_router_v1.include_router(admin_orgs_router)
 
-# NOTE: The old /v1/ledger/{graph_id} and /v1/investor/{graph_id} REST
-# surfaces were deleted in the extensions cutover. Reads now live at
-# /extensions/{graph_id}/graphql; writes live at
+# Extensions reads live at /extensions/{graph_id}/graphql; writes at
 # POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/{op_name}.
-# Both are mounted directly in main.py (no intermediate router_v1 wrapper).
+# Both mount directly in main.py, with no router_v1 wrapper.
 
 # Export routers for main application
 __all__ = [

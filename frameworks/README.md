@@ -104,7 +104,7 @@ frameworks/
 │   │   ├── rs-gaap-reporting-checklist/v1/
 │   │   ├── rs-gaap-reporting-styles/v1/   ★ vertical / filer-profile surface
 │   │   ├── rs-gaap-rollup-rules/v1/       L2 rollup-shaped consistency rules
-│   │   ├── rs-gaap-rules/v1/              L1 cross-tree consistency rules (rs-gaap-targeted; moved from fac)
+│   │   ├── rs-gaap-rules/v1/              L1 cross-tree consistency rules (rs-gaap-targeted)
 │   │   ├── rs-metric/v1/                  metric catalog + Derive rules (standing `metric` block)
 │   │   └── rs-driver/v1/                  forecast lever catalog + Derive rules (reference Structure)
 │   ├── bridges/

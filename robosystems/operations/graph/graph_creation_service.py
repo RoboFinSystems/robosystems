@@ -527,8 +527,8 @@ class GraphCreationService:
 
     Retried, because a graph without a pool has every AI run denied by the
     unconditional pre-flight, admin add-bonus/reset both 404 on the missing
-    row, and the monthly allocation iterates existing pools only — a single
-    transient failure here used to be a permanent, invisible gap.
+    row, and the monthly allocation iterates existing pools only, so a single
+    transient failure here would be a permanent, invisible gap.
     """
     import asyncio
 

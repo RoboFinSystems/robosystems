@@ -295,7 +295,7 @@ robosystems/
 4. **Two-database split**: Platform (`robosystems`) for IAM/billing/metadata; extensions (`extensions`) for per-graph OLTP. Different `DeclarativeBase` classes, independent migration histories, same shared RDS instance
 5. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
 6. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
-7. **Two `Agent` concepts, disambiguated**: `Agent` (REA party — customer/vendor/employee counterparty) lives in `models/extensions/roboledger/agent.py` and is the canonical ontology term. The AI executor layer (Claude/MCP-driven, used to be called "AI agents") is named **Operator** throughout the codebase: `routers/graphs/operator/`, `operations/operators/`, classes like `CypherOperator` / `MappingOperator`, endpoint `/v1/graphs/{g}/operator`. Marketing-facing copy can still say "AI agent" / "AI assistant" — that's decoupled from internal naming.
+7. **Two `Agent` concepts, disambiguated**: `Agent` (REA party — customer/vendor/employee counterparty) lives in `models/extensions/roboledger/agent.py` and is the canonical ontology term. The AI executor layer (Claude/MCP-driven) is named **Operator** throughout the codebase: `routers/graphs/operator/`, `operations/operators/`, classes like `CypherOperator` / `MappingOperator`, endpoint `/v1/graphs/{g}/operator`. Marketing-facing copy can still say "AI agent" / "AI assistant" — that's decoupled from internal naming.
 
 ## Testing
 
@@ -373,8 +373,8 @@ ROBOINVESTOR_ENABLED=true          # gates roboinvestor ops + GraphQL investor f
 EXTENSIONS_GRAPHQL_ENABLED=true    # kill switch for the GraphQL endpoint
 EXTENSIONS_DATABASE_URL=postgresql://...  # extensions OLTP database
 # EXTENSIONS_ENABLED is a derived property (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)
-# — not a separate env var. Legacy LEDGER_ENABLED / INVESTOR_ENABLED names
-# have been retired; only ROBOLEDGER_ENABLED / ROBOINVESTOR_ENABLED are read.
+# — not a separate env var. Only ROBOLEDGER_ENABLED / ROBOINVESTOR_ENABLED
+# are read.
 ```
 
 ## Configuration System

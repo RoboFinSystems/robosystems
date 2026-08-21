@@ -845,10 +845,10 @@ Resources:
   # log group. Unlike a replica, the master is scaled 0->1 on purpose every
   # night (shared_master_wake), so one start per day is expected and cannot
   # page. What must page is a SECOND start while it is up — the container was
-  # killed and restarted under the nightly materialization (the 2026-08-12/13
-  # OOM kills, which nothing detected until a red Dagster run). A 12-hour
-  # sliding window never holds two nightly wakes but covers the master's whole
-  # waking life, so Sum > 1 is exactly "restarted while working". Homed here
+  # killed and restarted under the nightly materialization, which nothing else
+  # detects until a job fails. A 12-hour sliding window never holds two nightly
+  # wakes but covers the master's whole waking life, so Sum > 1 is exactly
+  # "restarted while working". Homed here
   # with the other shared-repository serving alarms.
   SharedMasterContainerStartMetricFilter:
     Type: AWS::Logs::MetricFilter

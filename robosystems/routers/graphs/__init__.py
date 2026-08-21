@@ -41,10 +41,8 @@ __all__ = [
   "usage_router",
 ]
 
-# NOTE: views_router was relocated to
-# routers/extensions/roboledger/views.py — the fact grid is roboledger
-# schema-specific and now lives on the extensions surface. See main.py
-# for the new mount.
+# The fact grid is roboledger schema-specific, so it lives on the extensions
+# surface: routers/extensions/roboledger/views.py, mounted in main.py.
 
 # Conditionally export search, documents, and memory routers based on flags.
 # The search router hosts both document search and memory `recall`, so it mounts

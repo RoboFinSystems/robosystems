@@ -81,8 +81,7 @@ metamodel publication, but the axes themselves are not us-gaap-specific
 — `elementsOfFinancialStatements`, `liquidity`, `activityType`,
 `recordedValue`, `realizationStatus`, `flowClassification`, etc.
 describe how *any* accounting element is classified, regardless of
-regulatory regime. Hoisted into `fac` so every dependent rs-* framework
-(rs-gaap today; rs-ifrs / rs-call-report / rs-statutory tomorrow)
+regulatory regime. They live in `fac` so every dependent rs-* framework
 inherits the same axes via `depends_on` and no rs-* framework has to
 re-author or duplicate the trait catalog.
 

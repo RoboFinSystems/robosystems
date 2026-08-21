@@ -33,8 +33,8 @@ from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # The `elements.source` vocabulary — the single source for the model CHECK and
-# for the tenant-provisioning widen step (`db.extensions._widen_library_checks`),
-# which used to carry its own copy that drifted from this one.
+# for the tenant-provisioning widen step (`db.extensions._widen_library_checks`).
+# Both read this; neither may keep its own copy.
 #
 # 'system' is reserved for internal FK-anchor elements created by the taxonomy
 # seed (e.g., struct_balance_sheet) and is intentionally NOT in COA_SOURCES so

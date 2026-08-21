@@ -63,7 +63,7 @@ Resources:
       # only calls the sub-APIs for properties present in the template, so
       # PutObjectLockConfiguration is never issued. Retention matches
       # RetentionDays below and the treatment already applied to the CloudTrail
-      # bucket; it applies to objects written after it was set (2026-08-17).
+      # bucket; it applies to objects written after it was set.
       LifecycleConfiguration:
         Rules:
           - Id: AuditRetention

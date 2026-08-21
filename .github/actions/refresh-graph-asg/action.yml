@@ -53,8 +53,8 @@ inputs:
   completion-wait-minutes:
     description: >-
       How long to monitor for completion when wait-for-completion is true.
-      Ignored otherwise. The default of 20 preserves the previously hardcoded
-      1200s; raise it for a large fleet — Dagster's replica equivalent budgets
+      Ignored otherwise. Raise the default of 20 for a large fleet — Dagster's
+      replica equivalent budgets
       2 hours, sized for ~100 instances. Note the job timeout is derived from
       this, so raising it raises the cap rather than fighting it.
     required: false

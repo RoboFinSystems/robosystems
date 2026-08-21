@@ -45,12 +45,11 @@ def cleanup_tracked_backups(
   Covers both customer API backups and SEC pipeline backups,
   since both create GraphBackup records with expires_at.
 
-  Order matters, and it used to be the other way around. Marking the row
-  first drops it out of ``get_expired_backups`` forever, and the orphan sweep
-  skips every key a row still references — so a single transient S3 error
-  meant nothing ever retried the delete and the object rode the 90-day
-  lifecycle rule regardless of the graph's tier. A standard-tier backup
-  outlived its 7-day retention by twelve weeks on one failed API call.
+  Order matters: delete the object first, mark the row EXPIRED second. An
+  un-expired row is what drives the retry. Marking first drops the row out of
+  ``get_expired_backups`` for good, and the orphan sweep skips every key a row
+  still references, so one transient S3 error would leave the object to the
+  90-day lifecycle rule regardless of the graph's tier.
 
   Leaving the row un-expired is the retry: tomorrow's run picks it up again.
   Deleting an absent key is a success in S3, so a row whose object is already

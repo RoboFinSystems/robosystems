@@ -54,8 +54,9 @@ class AdvancedAuthProtection:
 
   # Progressive delay configuration (seconds)
   PROGRESSIVE_DELAYS = {
-    0: 0,  # no failures: no delay (without this, min(0, 8) misses and falls
-    #       back to the 8th-failure value — a fresh IP charged 15 minutes)
+    0: 0,  # no failures: no delay. Explicit — the lookup floors to the
+    #       highest tier at or below the count, so a missing 0 charges a
+    #       fresh caller the 8th-failure delay.
     1: 1,  # 1st failure: 1 second
     2: 2,  # 2nd failure: 2 seconds
     3: 5,  # 3rd failure: 5 seconds

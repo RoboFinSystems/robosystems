@@ -37,11 +37,10 @@ class BackupStatus(str, Enum):
 class BackupType(str, Enum):
   """What shape the backup is.
 
-  ``SYSTEM`` is retained for historical rows only. It used to carry *who*
-  started a backup rather than what it is, which meant the shape axis could not
-  answer "is this a full dump?" for anything the platform produced. That axis
-  now lives on :class:`BackupInitiator`; new rows record shape here and
-  initiator there.
+  This axis is shape only — "is this a full dump?". Who started a backup is a
+  separate axis on :class:`BackupInitiator`; new rows record shape here and
+  initiator there. ``SYSTEM`` is retained for historical rows and is not a
+  shape; do not use it for new rows.
   """
 
   FULL = "full"

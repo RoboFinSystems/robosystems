@@ -124,9 +124,8 @@ def _find_nested_blocks(
 ) -> list[tuple[str, str]]:
   """Find matching open/close tag pairs with nesting-aware matching.
 
-  Uses str.find() instead of regex (.*?) to avoid catastrophic memory
-  usage on large files (the old regex approach caused 7GB+ allocation
-  on 5MB files).
+  Uses str.find() rather than a lazy regex (.*?), which allocates
+  catastrophically on large files — multiple GB on a 5 MB input.
 
   Args:
       html: Raw HTML string to search
