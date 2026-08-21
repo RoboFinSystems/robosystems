@@ -9,6 +9,8 @@ either one.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
@@ -129,8 +131,7 @@ class TestPerFamilyLimits:
     assert "query" in r.json()["detail"].lower()
 
   def test_defaults_come_from_the_shared_constants(self):
-    app = _app()
-    limiter = app.user_middleware[0].cls(app, **app.user_middleware[0].kwargs)
+    limiter = RequestSizeLimitMiddleware(FastAPI())
     assert limiter.max_body_size == GRAPH_MAX_REQUEST_SIZE
     assert limiter.max_query_size == MAX_QUERY_LENGTH * 10
     assert limiter._limit_for("/databases/kg1/query")[0] == MAX_QUERY_LENGTH * 10
@@ -148,3 +149,52 @@ def test_streaming_responses_pass_through():
     assert response.status_code == 200
     body = b"".join(response.iter_bytes())
   assert body == b"chunk;chunk;chunk;50"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+  "messages,expected",
+  [
+    ([{"type": "http.disconnect"}], ["http.disconnect"]),
+    (
+      [
+        {"type": "http.request", "body": b"x" * 10, "more_body": True},
+        {"type": "http.disconnect"},
+      ],
+      ["http.request", "http.disconnect"],
+    ),
+  ],
+)
+async def test_a_disconnect_reaches_the_app_intact(messages, expected):
+  """Buffering must not swallow a disconnect or reorder it behind the body.
+
+  The app decides what a mid-body disconnect means — Starlette raises
+  ``ClientDisconnect`` — so the limiter's job is to replay what arrived, in
+  order, and not to hang waiting for a body that is never coming.
+  """
+  seen: list[str] = []
+
+  async def app(scope, receive, send):
+    while True:
+      message = await receive()
+      seen.append(message["type"])
+      if message["type"] != "http.request" or not message.get("more_body"):
+        break
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b""})
+
+  limiter = RequestSizeLimitMiddleware(app, max_body_size=1000)
+  pending = iter(messages)
+
+  async def receive():
+    return next(pending, {"type": "http.disconnect"})
+
+  async def send(message):
+    return None
+
+  await asyncio.wait_for(
+    limiter({"type": "http", "path": "/x", "headers": []}, receive, send),
+    timeout=5,
+  )
+  assert seen == expected
