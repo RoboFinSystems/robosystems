@@ -105,17 +105,21 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### Encryption at Rest
 
-- PostgreSQL: AES-256 encryption via AWS RDS
+- PostgreSQL: AES-256 encryption via AWS RDS; 30-day automated backups; Multi-AZ optional (`DATABASE_MULTI_AZ_ENABLED_{PROD,STAGING}`, off by default)
 - LadybugDB: EBS volume encryption
-- S3: AES256 server-side encryption (SSE-S3) on all buckets
+- S3: AES256 server-side encryption (SSE-S3) and public-access block on all buckets; Object Lock (governance mode, 400 days) on the audit and CloudTrail buckets, applied through the S3 API (see the template notes)
+- OpenSearch: encryption at rest and node-to-node encryption
+- Valkey: encryption at rest and in transit (default on), AUTH token from Secrets Manager
 - Graph backups: SSE-AES256 on the stored object; served only over TLS through
-  short-lived signed URLs. Not additionally encrypted at the application layer —
+  signed URLs (1-hour default; caller-selectable from 5 minutes to 24 hours); 90-day
+  retention by default. Not additionally encrypted at the application layer —
   a backup download is a usable `.lbug` database by design.
 
 ### Encryption in Transit
 
-- TLS 1.2+ enforced on CloudFront distributions
-- SSL/TLS required for all database connections (`rds.force_ssl: 1`)
+- API load balancer: HTTPS-only listener, TLS 1.2/1.3 (`ELBSecurityPolicy-TLS13-1-2-FIPS-2023-04`)
+- CloudFront: `TLSv1.2_2021` minimum protocol when a custom domain is configured; HTTPS redirect always
+- SSL/TLS required for all database connections (`rds.force_ssl: 1`; RDS Proxy `RequireTLS`); OpenSearch enforces HTTPS with a TLS 1.2 minimum
 - Certificate management via AWS Certificate Manager
 
 ### Application-Level Encryption
@@ -132,8 +136,8 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - AWS Secrets Manager integration with hierarchical secret organization
 - Base secret (`robosystems/{env}`) plus extension secrets (`robosystems/{env}/{component}`)
-- TTL-based caching (1-hour default) with two-level LRU + timestamp cache
-- 40+ secrets mapped (JWT, database, S3, Stripe, Intuit, etc.)
+- TTL-based caching (1-hour default) with explicit `refresh()` invalidation
+- ~36 secrets mapped (JWT, database, S3, Stripe, Intuit, etc.); feature flags live in SSM Parameter Store, not Secrets Manager
 - Graceful fallback to environment variables in development
 
 ### Secrets Rotation
@@ -141,10 +145,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 **Implementation:** `.github/workflows/secrets-rotation.yml`
 
 - Monthly schedule via GitHub Actions (staging: 1st of month, prod: 2nd of month)
-- Lambda-based rotation functions for each secret type
+- Lambda-based rotation functions (PostgreSQL, Valkey, and one shared API-key function for the Graph API and Admin keys)
 - Rotated secrets: PostgreSQL password, Valkey auth token, Graph API key, Admin API key
 - Pre-rotation cleanup for stuck AWSPENDING versions
-- Post-rotation verification with timeout handling (5 min for Postgres/API keys, 12 min for Valkey)
+- Post-rotation verification with timeout handling (5 min for Postgres/API keys, 30 min for Valkey)
 - Automatic service refresh after successful rotation
 - SNS email notifications on completion
 - Controlled by `SECRETS_ROTATION_ENABLED_STAGING` and `SECRETS_ROTATION_ENABLED_PROD` GitHub variables (disabled by default)
@@ -157,7 +161,6 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - HTML escape and dangerous character removal (`<>"\'\0\r\n`)
 - Email, username, UUID, URL, and SQL identifier validation
-- Password strength validation with entropy scoring
 - Recursive sanitization of nested dicts/lists
 - Pydantic `EmailStr`, `min_length`/`max_length` constraints, and custom validators at API boundaries
 
@@ -166,8 +169,8 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 **Implementation:** `robosystems/security/cypher_analyzer.py`
 
 - AST-based Cypher query analysis (comment/string removal before keyword detection)
-- Write operation detection (44 keywords: CREATE, MERGE, SET, DELETE, etc.)
-- Operation classification: READ, WRITE, MIXED, BULK, ADMIN, SCHEMA_DDL
+- Keyword detection across four sets — write (CREATE, MERGE, SET, DELETE, …), bulk, admin, and schema DDL — plus procedure calls outside a read-only allowlist
+- Operation classification: READ, WRITE, or MIXED; bulk, admin, and schema-DDL statements are flagged by separate checks
 - Suspicious pattern detection (USER creation, DATABASE drops, `dbms.*` calls)
 - Query length limit (100KB max) for DoS prevention
 - Fails closed: analysis failure defaults to `is_write_operation=True`
@@ -191,8 +194,9 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   every tier
 - Per-endpoint category limits (22 categories: auth, graph_read, graph_write, etc.)
 - User identification: API key (SHA256 hash) > JWT (user_id) > IP (fallback)
-- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
-- Sensitive auth endpoints: login (5/5min), register (3/hour), JWT refresh (20/min)
+- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Tier`, `X-RateLimit-Category`; `Retry-After` on 429
+- Sensitive auth endpoints: login (5/5min), register (3/hour), JWT refresh (20/min), keyed by client IP
+- Auth endpoints fail closed: if the limiter backend is unavailable, login and registration are denied rather than left unprotected
 
 ### Admission Control
 
@@ -204,12 +208,12 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### File Upload Security
 
-**Implementation:** `robosystems/routers/graphs/files/upload.py`
+**Implementation:** `robosystems/operations/graph/commands/create_file_upload.py`, `robosystems/operations/graph/commands/ingest_file.py` (routed through `robosystems/routers/graphs/content_ops.py`)
 
 - Presigned S3 URLs for time-limited direct uploads (no API bottleneck)
 - File format validation (parquet, csv, json)
-- Per-file size limits and tier-based storage caps
-- Row count validation for parquet files
+- Per-file size limit (`MAX_FILE_SIZE_MB`) checked at upload; tier storage cap enforced at ingest
+- Parquet row counts read from the file footer at ingest (the object is never fully decoded)
 
 ## Infrastructure Security
 
@@ -217,10 +221,10 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `cloudformation/vpc.yaml`
 
-- Private/public subnet segmentation across 2-5 availability zones
+- Private/public subnet segmentation across 2–6 availability zones (default 5)
 - NAT Gateway for private subnet outbound access
 - Security groups with least-privilege access
-- VPC endpoints for S3, DynamoDB (gateway, free), Secrets Manager, ECR (interface)
+- VPC endpoints for S3 and DynamoDB (gateway, free); Secrets Manager, ECR API, and ECR Docker (interface)
 - No direct internet access to application/data tiers
 
 ### Web Application Firewall (WAF)
@@ -239,7 +243,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 ### Application Load Balancer
 
 - SSL termination with health checks
-- Multi-AZ deployment support (optional, off by default)
+- Admin API paths answered with a fixed `403` at the listener; the admin surface is reachable only through the SSM bastion tunnel
 
 ### CI/CD Security (OIDC)
 
@@ -247,7 +251,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 - GitHub OIDC federation (no long-term AWS credentials)
 - Federated role restricted to `main` branch, `release/*` branches, and `v*` tags
-- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app)
+- Scoped to specific repositories (robosystems, robosystems-app, roboledger-app, roboinvestor-app, robosystems-holon-viewer)
 - 1-hour maximum session duration
 - Permission scoping: ECR limited to `robosystems*`, S3 limited to `robosystems-*`
 
@@ -263,11 +267,12 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 **Implementation:** `robosystems/security/audit_logger.py`
 
-- Structured JSON logging with 15+ event types:
+- Structured JSON logging with 46 event types, including:
   - Authentication: success, failure, token expired/invalid
   - Authorization: denied, privilege escalation attempt
   - Security: injection attempt, rate limit exceeded, suspicious activity
   - Operations: data import, timeout, financial transaction
+  - Identity lifecycle: OIDC login denied, SCIM provisioning, org and graph membership changes, passkey enrollment, MFA challenges
 - Risk level classification: LOW, MEDIUM, HIGH, CRITICAL
 - Controlled by `SECURITY_AUDIT_ENABLED` environment variable
 - Centralized collection via CloudWatch; emits custom security metrics off the request path (see CloudWatch Integration)
@@ -282,6 +287,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   - `AuthFailureSpikeAlarm`: `AuthFailure` > 50 in 5 minutes
   - `InjectionAttemptAlarm`: `InjectionAttempt` > 0
   - `PrivilegeEscalationAlarm`: `PrivilegeEscalationAttempt` > 0
+  - `AuthorizationDeniedAlarm`: `AuthorizationDenied` > 20 in 5 minutes
 - Optional Container Insights for deeper metrics
 
 ### Managed Monitoring
@@ -294,7 +300,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 
 ### SNS Alerting
 
-- Infrastructure alert topics per component (PostgreSQL, graph, shared replicas)
+- Infrastructure alert topics per component (API security, PostgreSQL, Valkey, OpenSearch, graph writer tiers, graph infrastructure and volumes, shared replicas, Dagster, worker)
 - Email subscriptions for each topic
 - Secrets rotation notifications
 
@@ -313,7 +319,7 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 | `DataEventsEnabled` | Enable S3 data events logging | `false` |
 
 - Multi-region trail with log file validation
-- S3 storage with AES256 encryption and Intelligent-Tiering
+- S3 storage with AES256 encryption, Intelligent-Tiering, and Object Lock (governance mode, 400 days)
 - Automatic lifecycle rules for retention enforcement
 - SSM Session Manager command logging: the `SSM-SessionManagerRunShell` document streams bastion session commands to the `/robosystems/ssm-sessions` CloudWatch log group (400-day retention); deployed with the trail, gated on `EnableCloudTrail`
 - Tagged as SOC2-Compliance
@@ -362,7 +368,7 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 | `AUDIT_RETENTION_DAYS` (`RetentionDays`) | Days to retain audit records in S3 | `400` |
 
 - CloudWatch Logs subscription filter on `/robosystems/{environment}/api` forwards only compliance records (`SECURITY_AUDIT:` marker and structured operation-audit entries) to Kinesis Data Firehose → a dedicated S3 bucket
-- Bucket is versioned, AES256-encrypted, public-access-blocked, with ~13-month retention (`RetentionDays`)
+- Bucket is versioned, AES256-encrypted, public-access-blocked, Object-Locked (governance mode, 400 days), with ~13-month retention (`RetentionDays`)
 - Preserves security evidence beyond the short operational-log retention; entirely log-side (no request-path impact)
 - Tagged as SOC2-Compliance
 
@@ -403,7 +409,7 @@ aws logs describe-log-groups --log-group-name-prefix /robosystems/ssm-sessions
 - AWS Config: `s3://robosystems-config-{account-id}`
 - Audit retention: `s3://robosystems-audit-{environment}-{account-id}`
 - SSM sessions: CloudWatch `/robosystems/ssm-sessions`
-- Application: CloudWatch `/aws/ecs/{service-name}`
+- Application: CloudWatch `/robosystems/{environment}/{api,worker,dagster,graph-api,bastion-host}`
 
 ## Startup Validation
 
@@ -444,5 +450,6 @@ Production environment enforces at startup:
 
 - CloudFormation template validation in CI/CD
 - Security-focused test markers (`@pytest.mark.security`)
-- Code quality and security linting via Ruff
+- Black-box tenant-isolation harness (`@pytest.mark.isolation`), run against a deployed environment
+- Code quality and security linting via Ruff, including the bandit (`S`) rule set
 - Security-focused pull request reviews
