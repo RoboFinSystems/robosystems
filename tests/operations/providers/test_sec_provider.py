@@ -405,11 +405,17 @@ class TestCreateSECConnection:
 
 
 class TestSyncSECConnection:
-  """Tests for SEC connection sync."""
+  """A SEC connection has nothing to pull.
+
+  Filings are downloaded, processed and materialized once into the shared SEC
+  repository on a nightly schedule; a connection records which CIK a graph
+  follows. These assert the *absence* of a per-connection job submission,
+  because the failure mode is silent: submitting a job name nothing registers
+  fails at the scheduler, far from the code that named it.
+  """
 
   @pytest.mark.asyncio
-  async def test_sync_submits_dagster_job(self):
-    """Test that sync submits sec_entity_sync Dagster job."""
+  async def test_sync_submits_no_job(self):
     connection = {
       "connection_id": "conn123",
       "entity_id": "entity123",
@@ -418,77 +424,40 @@ class TestSyncSECConnection:
       "credentials": {"cik": "0001234567"},
     }
 
+    # Patched at its source module, not as an attribute of sec_provider: the
+    # submission was made through a function-local import, so this is what
+    # would catch the call coming back.
     with patch(
       "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync"
     ) as mock_submit:
-      mock_submit.return_value = "run_abc123"
-
-      run_id = await sync_sec_connection(
+      result = await sync_sec_connection(
         connection=connection, sync_options=None, graph_id="graph123"
       )
 
-      assert run_id == "run_abc123"
-      mock_submit.assert_called_once()
-
-      call_kwargs = mock_submit.call_args[1]
-      assert call_kwargs["job_name"] == "sec_entity_sync"
-      assert call_kwargs["tags"]["graph_id"] == "graph123"
-      assert call_kwargs["tags"]["cik"] == "0001234567"
-      assert call_kwargs["tags"]["pipeline"] == "sec_entity"
-
-      # Verify config passed to all three assets
-      run_config = call_kwargs["run_config"]
-      for asset_name in [
-        "sec_entity_extract",
-        "sec_entity_transform",
-        "sec_entity_load",
-      ]:
-        asset_config = run_config["ops"][asset_name]["config"]
-        assert asset_config["graph_id"] == "graph123"
-        assert asset_config["cik"] == "0001234567"
-        assert asset_config["connection_id"] == "conn123"
-        assert asset_config["user_id"] == "user456"
+    mock_submit.assert_not_called()
+    assert "nightly" in result.lower()
 
   @pytest.mark.asyncio
-  async def test_sync_with_custom_form_types(self):
-    """Test sync passes custom form_types from sync_options."""
-    connection = {
-      "connection_id": "conn123",
-      "entity_id": "entity123",
-      "user_id": "user456",
-      "metadata": {"cik": "0001234567"},
-    }
-
-    with patch(
-      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync"
-    ) as mock_submit:
-      mock_submit.return_value = "run_xyz"
-
-      await sync_sec_connection(
-        connection=connection,
-        sync_options={"form_types": ["10-K"], "skip_enrichment": False},
-        graph_id="graph123",
-      )
-
-      run_config = mock_submit.call_args[1]["run_config"]
-      config = run_config["ops"]["sec_entity_extract"]["config"]
-      assert config["form_types"] == ["10-K"]
-      assert config["skip_enrichment"] is False
+  async def test_sync_options_are_accepted_and_inert(self):
+    """The provider protocol passes sync_options to every provider; SEC takes
+    them without complaint rather than raising on an argument it cannot use."""
+    result = await sync_sec_connection(
+      connection={"connection_id": "conn123", "metadata": {"cik": "0001234567"}},
+      sync_options={"form_types": ["10-K"], "skip_enrichment": False},
+      graph_id="graph123",
+    )
+    assert isinstance(result, str) and result
 
   @pytest.mark.asyncio
-  async def test_sync_missing_cik_raises_error(self):
-    """Test sync raises ValueError when CIK is missing from metadata."""
-    connection = {
-      "connection_id": "conn123",
-      "entity_id": "entity123",
-      "user_id": "user456",
-      "metadata": {},
-    }
-
-    with pytest.raises(ValueError, match="CIK not found"):
-      await sync_sec_connection(
-        connection=connection, sync_options=None, graph_id="graph123"
-      )
+  async def test_sync_without_cik_still_reports_rather_than_raising(self):
+    """Nothing reads the CIK on this path, so a connection missing one is not
+    an error here — it is a create-time concern."""
+    result = await sync_sec_connection(
+      connection={"connection_id": "conn123", "metadata": {}},
+      sync_options=None,
+      graph_id="graph123",
+    )
+    assert isinstance(result, str) and result
 
 
 class TestCleanupSECConnection:
