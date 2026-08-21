@@ -387,7 +387,7 @@ manual_url = ValkeyURLBuilder.build_url(
 )
 
 # DEV: build a URL without authentication (development only)
-legacy_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
+dev_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH)
 """)
 
 

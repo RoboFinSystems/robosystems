@@ -221,14 +221,8 @@ The graph schema is defined in **`schema.json`** - a standalone JSON file that s
 - `PERSON_WORKS_ON_PROJECT`: Project participation relationships
 - `COMPANY_SPONSORS_PROJECT`: Sponsorship relationships between companies and projects
 
-**Customizing the Schema:**
-
-The `schema.json` file is the **official template** for creating custom graph schemas in RoboSystems. To create your own schema:
-
-1. Copy the schema file: `cp schema.json my_schema.json`
-2. Modify the nodes, properties, and relationships for your use case
-3. Update `create_graph.py` to load your custom schema file
-4. Generate data matching your schema structure
+`schema.json` is the template for custom graph schemas — see
+[Customize the Schema](#customize-the-schema) below for how to adapt it.
 
 **Schema Format:**
 
