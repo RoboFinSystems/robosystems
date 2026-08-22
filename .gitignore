@@ -147,10 +147,5 @@ robosystems/adapters/sec/arelle/cache/
 
 # dbt per-machine state (anonymous usage id)
 **/dbt/.user.yml
-# Collateral of the line above: ArelleClient._setup_cache_directory sets the
-# process-global XDG_CACHE_HOME to robosystems/adapters/sec so Arelle resolves
-# its own cache, and every other XDG-respecting library in that process then
-# caches there too. huggingface_hub is the one that shows up locally
-# (.agent_harnesses.json + xet/logs). Ignore the whole tree, not one file —
-# the next such library will land here as well.
+# HF cache — ArelleClient points XDG_CACHE_HOME at this directory's parent
 robosystems/adapters/sec/huggingface/
