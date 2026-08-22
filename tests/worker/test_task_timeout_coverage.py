@@ -156,3 +156,36 @@ def test_tier_upgrade_budget_covers_its_internal_waits() -> None:
     f"its own drain + reattach waits ({internal_waits}s) with headroom for the "
     "snapshot, ASG capacity change, and health verification that follow them."
   )
+
+
+@pytest.mark.unit
+def test_period_close_budget_covers_one_slow_publish_and_the_locks() -> None:
+  """The close's own waits must fit inside its budget, with room to spare.
+
+  Sizing here is decided by the failure mode rather than by how long a close
+  usually takes. `asyncio.wait_for` cancels the coroutine but cannot cancel
+  the thread doing the QuickBooks publish, so an under-budget close is marked
+  FAILED while its thread runs on — and can still commit. Reporting a
+  landed close as a failure is far worse than waiting longer for a slow one.
+
+  Pinned against the constants that actually bound the run: one QuickBooks
+  call's retry ladder, the per-statement ceiling, and the period fence's
+  lock wait. Raising any of them without raising the budget fails here.
+  """
+  from robosystems.config.defaults import DatabaseDefaults
+  from robosystems.operations.locking import _LOCK_TIMEOUT_MS
+
+  # One QuickBooks call that exhausts its retry ladder: 5 attempts with
+  # exponential backoff capped at 60s. The floor below counts only the
+  # backoff between attempts, not the calls themselves.
+  qb_retry_backoff = 1 + 2 + 4 + 8
+  statement_ceiling = DatabaseDefaults.EXTENSIONS_STATEMENT_TIMEOUT_MS / 1000
+  fence_wait = _LOCK_TIMEOUT_MS / 1000
+
+  internal_waits = qb_retry_backoff + statement_ceiling + fence_wait
+  assert TASK_TIMEOUTS["period_close"] > internal_waits * 2, (
+    f"period_close budget ({TASK_TIMEOUTS['period_close']}s) must clear its own "
+    f"waits ({internal_waits}s) with wide headroom: a real month publishes one "
+    "QuickBooks entry per draft, any of which can hit that retry ladder, and a "
+    "cancelled close keeps running in its thread."
+  )

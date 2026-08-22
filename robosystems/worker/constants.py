@@ -47,6 +47,15 @@ TASK_TIMEOUTS: dict[str, int] = {
   # mid-flight. 900 covers those waits plus snapshot, ASG capacity, and
   # verification, with headroom.
   "graph_tier_upgrade": 900,  # 15 minutes
+  # The close publishes one QuickBooks entry per in-period draft, and the
+  # Intuit SDK sets no per-request timeout — a single call that hits the
+  # retry ladder backs off ~31s on its own. A 34-entry month runs ~30s;
+  # a heavier one, or one slow call, runs much longer. The failure mode
+  # decides the size: an under-budget close is cancelled mid-flight while
+  # its thread keeps running and can still commit, so the operation reports
+  # FAILED for a close that landed. Matching the operator's 600s leaves room
+  # for that rather than inviting it.
+  "period_close": 600,  # 10 minutes
 }
 DEFAULT_TASK_TIMEOUT = 120  # 2 minutes
 

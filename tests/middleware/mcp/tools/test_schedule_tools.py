@@ -19,7 +19,7 @@ thin shims that build arguments, call into `operations/roboledger/reads/
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -109,6 +109,53 @@ class TestGetPeriodCloseStatusTool:
     assert result["period_status"] == "open"
     assert result["schedules"]["total"] == 1
     assert result["schedules"]["pending"] == 1
+    # An open period has no receipt, and saying so is the answer rather
+    # than an omission — this is the key an operator polls after a close
+    # hands back `in_progress`.
+    assert result["close_receipt"] is None
+
+  @pytest.mark.asyncio
+  async def test_the_close_receipt_reaches_the_wire(self, mock_graph_client):
+    """This tool is where the playbook sends an operator whose close
+    outlived their client. The receipt was on the ops response and absent
+    from the returned dict, so the instruction pointed at nothing."""
+    from robosystems.models.api.extensions.schedules import CloseReceiptResponse
+
+    receipt = CloseReceiptResponse(
+      version=1,
+      period="2026-01",
+      closed_at=datetime(2026, 2, 1, 3, 35, tzinfo=UTC),
+      closed_by="user_abc",
+      actor_type="agent",
+      was_reclose=False,
+      entries_posted=34,
+      entries_published_to_qb=31,
+      entries_posted_locally=3,
+      target_auto_advanced=True,
+      statements_stamped=True,
+    )
+    response = PeriodCloseStatusResponse(
+      fiscal_period_start=date(2026, 1, 1),
+      fiscal_period_end=date(2026, 1, 31),
+      period_status="closed",
+      schedules=[],
+      total_draft=0,
+      total_posted=34,
+      close_receipt=receipt,
+    )
+    tool = GetPeriodCloseStatusTool(mock_graph_client)
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.ops_get_period_close_status", return_value=response),
+    ):
+      result = await tool.execute(
+        {"period_start": "2026-01-01", "period_end": "2026-01-31"}
+      )
+
+    assert result["period_status"] == "closed"
+    assert result["close_receipt"]["entries_posted"] == 34
+    assert result["close_receipt"]["entries_published_to_qb"] == 31
+    assert result["close_receipt"]["statements_stamped"] is True
 
   @pytest.mark.asyncio
   async def test_includes_reversal_fields(self, mock_graph_client):

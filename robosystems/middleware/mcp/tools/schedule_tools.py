@@ -61,12 +61,17 @@ class GetPeriodCloseStatusTool:
 - At the start of a close session to see what's pending
 - After creating entries to verify progress
 - To generate a close summary for the user
+- To read the receipt after close-period — including when it handed back
+  `status: "in_progress"` and the close is still finishing on the worker
 
 **PARAMETERS:**
 - period_start / period_end (required): The fiscal period dates
 
 **RETURNS:**
 - Period status (open/closed)
+- close_receipt: what the close recorded about itself — entries posted, the
+  QuickBooks/local split, statements stamped, rule outcomes. Null while the
+  period is open, and for months closed before receipts were persisted
 - List of schedules with their status (pending/drafted/posted) and amounts
 - Count of draft and posted entries""",
       "inputSchema": {
@@ -102,6 +107,13 @@ class GetPeriodCloseStatusTool:
           "fiscal_period_start": response.fiscal_period_start.isoformat(),
           "fiscal_period_end": response.fiscal_period_end.isoformat(),
           "period_status": response.period_status,
+          # The record the close wrote about itself. Null while the period
+          # is open, and for months closed before receipts were persisted —
+          # both are real states, not failures. This is what an operator
+          # reads when the close outlived their client's patience.
+          "close_receipt": response.close_receipt.model_dump(mode="json")
+          if response.close_receipt
+          else None,
           "schedules": {
             "total": len(response.schedules),
             "pending": sum(1 for s in response.schedules if s.status == "pending"),

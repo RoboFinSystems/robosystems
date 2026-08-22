@@ -22,6 +22,7 @@ fiscal_calendar.py` so MCP, GraphQL, and the REST operation surface
 share one source of truth for both behavior and wire shape.
 """
 
+import asyncio
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -47,18 +48,15 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   backfill_plan_history as ops_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
-  close_period as ops_close_period,
-)
-from robosystems.operations.roboledger.commands.fiscal_calendar import (
   reopen_period as ops_reopen_period,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
   FiscalCalendarService,
-  PeriodAlreadyClosedError,
-  PeriodNotFoundError,
-  UnbalancedLedgerError,
+)
+from robosystems.operations.roboledger.fiscal_calendar.close_outcomes import (
+  close_error_payload,
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   PeriodCloseService,
@@ -66,9 +64,6 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
   qb_sync_state,
-)
-from robosystems.operations.roboledger.reports.statement_sets import (
-  StatementStampError,
 )
 
 from ._errors import database_failure
@@ -234,6 +229,13 @@ class ClosePeriodTool:
   Prefer resolve-reconciling-item on each first.
 
 **RETURNS:**
+Two shapes. Usually the receipt below, returned once the close lands. If the
+close is still running when this call's budget runs out, you instead get
+`status: "in_progress"` with an `operation_id`, `worker_started`, and
+instructions — see WORKFLOW. That is not a failure and not a timeout: the
+close is running on the worker and is atomic.
+
+The receipt:
 - period: the period that was closed
 - entries_posted: TOTAL drafts transitioned to posted, across both post
   paths; entries_published_to_qb / entries_posted_locally carry the
@@ -266,11 +268,28 @@ class ClosePeriodTool:
   preview-reconciling-item then resolve-reconciling-item on each first
 - Cannot close if BS equation doesn't balance for the period
 
+**WORKFLOW:**
+1. Call close-period once. It dispatches the close to the worker and waits
+   ~18s for it.
+2. If you get the receipt, you are done — read entries_published_to_qb and
+   statements_stamped to summarize for the user.
+3. If you get `status: "in_progress"`, do NOT call close-period again. The
+   close is already running and re-dispatching risks nothing useful. Poll
+   get-period-close-status (period_status flips to closed, close_receipt
+   fills in) or get-fiscal-calendar (has_close_receipt on the period row)
+   every ~10s until it lands, then summarize from the receipt.
+4. `worker_started: false` means the close is queued behind a busy worker
+   rather than running yet. Same instruction — it will run.
+
 **NOTES:**
 - Posted entries cannot be re-drafted — use reopen-period to undo
 - Manual entries (drafted via create-event-block event_type='journal_entry_recorded') are posted alongside schedule drafts
 - Which drafts write back to QuickBooks follows the event's source (schedule/manual publish; system posts locally), unless metadata.publish_to_source overrides it per entry. list-period-drafts previews the split before you close
-- After close, close_target auto-advances to the next period""",
+- After close, close_target auto-advances to the next period
+- The close runs on the worker, so a slow QuickBooks publish can outlast
+  this call. The work is unaffected by that — only who is waiting for it
+- An identical close re-dispatched within 30s returns the same operation
+  rather than starting a second one (`deduplicated: true`)""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -313,145 +332,180 @@ class ClosePeriodTool:
       },
     }
 
+  # Polling budget for the dispatched close. The server cuts a tool call at
+  # 25s, so this has to land inside that with room for the dispatch itself;
+  # what is left over is the handback the operator reads.
+  POLL_INTERVAL_S = 1.0
+  POLL_BUDGET_S = 18.0
+
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    return await run_off_loop(self._execute_sync, arguments)
+    from robosystems.middleware.sse.event_storage import (
+      OperationStatus,
+      get_event_storage,
+    )
+    from robosystems.worker.client import enqueue_task
 
-  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
+    period = arguments["period"]
 
+    gate = await run_off_loop(self._gate_check, arguments)
+    if gate is not None:
+      return gate
+
+    # A real user id, not the graph-scoped sentinel the synchronous path
+    # could fall back to: the operation is readable at
+    # /v1/operations/{id}/status only by the user it was created for, so a
+    # sentinel would enqueue work nobody could then look up.
+    user_id = getattr(self.client, "user_id", None)
+    if not user_id:
+      return {
+        "error": "authentication_required",
+        "message": "User context required to close a period.",
+      }
+
+    try:
+      dispatch = await enqueue_task(
+        task_type="period_close",
+        graph_id=graph_id,
+        user_id=str(user_id),
+        params={
+          "period": period,
+          "actor_id": str(user_id),
+          "actor_type": "agent",
+          "allow_stale_sync": bool(arguments.get("allow_stale_sync", False)),
+          "allow_stranded_obligations": bool(
+            arguments.get("allow_stranded_obligations", False)
+          ),
+          "allow_reconciling_items": bool(
+            arguments.get("allow_reconciling_items", False)
+          ),
+          "note": arguments.get("note"),
+        },
+      )
+    except Exception as exc:
+      # Nothing was queued, which makes this the one failure here that is
+      # safe to retry — and worth saying so, because every other message
+      # this tool returns says the opposite.
+      logger.warning("close-period could not dispatch: %s", exc, exc_info=True)
+      return {
+        "error": "dispatch_failed",
+        "period": period,
+        "message": (
+          "The close could not be handed to the worker, so it has NOT "
+          "started and nothing was written. Retry; if it keeps failing, "
+          "the task queue is unavailable."
+        ),
+      }
+    operation_id = dispatch["operation_id"]
+
+    storage = get_event_storage()
+    # Measured against the clock rather than by summing the intended sleeps:
+    # the budget is "how long the caller has been waiting", and an interval
+    # that rounds to nothing must still exhaust it rather than spin.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + self.POLL_BUDGET_S
+    started_at = loop.time()
+    status = None
+    while loop.time() < deadline:
+      try:
+        metadata = await storage.get_operation_metadata(operation_id)
+      except Exception as exc:
+        # The close is already running. Losing sight of it is a reporting
+        # problem, not a reason to suggest doing it again — fall through to
+        # the handback, which sends the operator to the period itself.
+        logger.warning(
+          "close-period lost track of operation %s: %s",
+          operation_id,
+          exc,
+          exc_info=True,
+        )
+        break
+      status = metadata.status if metadata else None
+      if metadata and status == OperationStatus.COMPLETED:
+        # The task already shaped this — return it as it stands so the
+        # receipt reads the same whether the worker was fast or slow.
+        return metadata.result_data or {}
+      if metadata and status == OperationStatus.FAILED:
+        return {
+          "error": "close_failed",
+          "operation_id": operation_id,
+          "period": period,
+          "message": (
+            f"{metadata.error_message or 'The close failed.'} If it ran out of "
+            "time rather than erroring, the close may still have landed — "
+            "check get-period-close-status before retrying."
+          ),
+        }
+      if metadata and status == OperationStatus.CANCELLED:
+        return {
+          "error": "cancelled",
+          "operation_id": operation_id,
+          "period": period,
+          "message": "The close was cancelled.",
+        }
+      await asyncio.sleep(self.POLL_INTERVAL_S)
+
+    started = status == OperationStatus.RUNNING
+    return {
+      "status": "in_progress",
+      "operation_id": operation_id,
+      "period": period,
+      "worker_started": started,
+      "deduplicated": bool(dispatch.get("deduplicated", False)),
+      "waited_seconds": round(loop.time() - started_at, 1),
+      "message": (
+        (
+          f"The close of {period} is running on the worker and is atomic — "
+          "NEVER call close-period again for this period. "
+        )
+        if started
+        else (
+          f"The close of {period} is queued and has not started yet (the "
+          "worker is busy or scaling). It will run — do not re-dispatch. "
+        )
+      )
+      + "Poll get-period-close-status (period_status and close_receipt) or "
+      "get-fiscal-calendar (has_close_receipt on the period) every ~10s "
+      "until it lands.",
+    }
+
+  def _gate_check(self, arguments: dict[str, Any]) -> Any:
+    """Answer an uncloseable period without burning a worker slot.
+
+    The task re-runs this gate under the period fence, which is the
+    authoritative check; this one only spares the operator a dispatch and a
+    poll to be told something already knowable. A period that becomes
+    uncloseable in between is caught there and comes back as a refusal.
+    """
+    graph_id = self.client.graph_id
     try:
       require_graph_extension_mcp("roboledger", graph_id)
     except MCPExtensionGateError as exc:
       return {"error": exc.code, "message": exc.message}
 
     period = arguments["period"]
-    allow_stale_sync = bool(arguments.get("allow_stale_sync", False))
-    allow_stranded_obligations = bool(
-      arguments.get("allow_stranded_obligations", False)
-    )
-    allow_reconciling_items = bool(arguments.get("allow_reconciling_items", False))
-    note = arguments.get("note")
-
-    # Best-effort user identity from the graph client context; fall back to
-    # a graph-scoped sentinel so audit logs stay traceable to the tenant.
-    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
-
-    svc = FiscalCalendarService()
-    close_svc = PeriodCloseService()
-
     try:
       with extensions_session(graph_id) as session, _platform_session() as platform_db:
-        result = ops_close_period(
+        has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+        gate = FiscalCalendarService().closeable_gate(
           session,
-          platform_db,
           graph_id,
           period,
-          actor_id=actor_id,
-          allow_stale_sync=allow_stale_sync,
-          note=note,
-          service=svc,
-          close_service=close_svc,
-          actor_type="agent",
-          allow_stranded_obligations=allow_stranded_obligations,
-          allow_reconciling_items=allow_reconciling_items,
+          has_sync_connection=has_sync,
+          last_sync_at=last_sync_at,
+          allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
+          allow_stranded_obligations=bool(
+            arguments.get("allow_stranded_obligations", False)
+          ),
+          allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
         )
-        # ops_close_period commits the session internally.
-        fc_payload = result.fiscal_calendar.model_dump(mode="json")
-        # Re-derive `has_sync_connection` so the MCP wire shape stays the
-        # same as before the refactor (the Pydantic response doesn't
-        # carry it).
-        has_sync, _ = qb_sync_state(platform_db, graph_id)
-        fc_payload["has_sync_connection"] = has_sync
-        return {
-          "period": result.period,
-          "entries_posted": result.entries_posted,
-          "entries_published_to_qb": result.entries_published_to_qb,
-          "entries_posted_locally": result.entries_posted_locally,
-          "target_auto_advanced": result.target_auto_advanced,
-          "fiscal_calendar": fc_payload,
-          # Rule eval outcomes from the auto-run on close. Pairs with
-          # the REST `ClosePeriodResponse` shape so agents and REST
-          # consumers see the same surface.
-          "rule_summary": result.rule_summary,
-          "evaluated_structure_ids": list(result.evaluated_structure_ids),
-          # Canonical statement stamping (the close-time pivot). Shaped
-          # by hand here — without these keys agents never see that the
-          # close persisted the month's statements.
-          "statements_stamped": result.statements_stamped,
-          "statement_stamp_note": result.statement_stamp_note,
-          "stamped_statement_sets": dict(result.stamped_statement_sets),
-          "statement_rule_summary": result.statement_rule_summary,
-        }
-    except CloseGateFailed as exc:
-      if exc.no_calendar:
-        return {
-          "error": "calendar_not_initialized",
-          "message": "Fiscal calendar not initialized for this graph.",
-        }
-      payload: dict = {
-        "error": "not_closeable",
-        "message": f"Cannot close period {period!r}.",
-        "blockers": exc.blockers,
-      }
-      if exc.gate.pending_obligation_count:
-        payload["pending_obligation_count"] = exc.gate.pending_obligation_count
-        payload["pending_obligation_sample"] = [
-          {
-            "event_id": d.event_id,
-            "schedule_id": d.schedule_id,
-            "schedule_name": d.schedule_name,
-            "period": d.period,
-          }
-          for d in exc.gate.pending_obligation_sample
-        ]
-        payload["earliest_pending_period"] = exc.gate.earliest_pending_period
-      if exc.gate.stranded_obligation_count:
-        payload["stranded_obligation_count"] = exc.gate.stranded_obligation_count
-        payload["stranded_obligation_sample"] = [
-          {
-            "event_id": d.event_id,
-            "schedule_id": d.schedule_id,
-            "schedule_name": d.schedule_name,
-            "period": d.period,
-          }
-          for d in exc.gate.stranded_obligation_sample
-        ]
-      if exc.gate.reconciling_item_count:
-        payload["reconciling_item_count"] = exc.gate.reconciling_item_count
-        payload["reconciling_item_sample"] = list(exc.gate.reconciling_item_sample)
-      if exc.gate.sync_stale_days is not None:
-        payload["sync_stale_days"] = exc.gate.sync_stale_days
-      return payload
-    except PeriodNotFoundError as exc:
-      return {"error": "period_not_found", "message": str(exc)}
-    except PeriodAlreadyClosedError as exc:
-      return {"error": "already_closed", "message": str(exc)}
-    except RowLockedError as exc:
-      return {"error": "row_locked", "message": str(exc)}
-    except UnbalancedLedgerError as exc:
-      return {
-        "error": "unbalanced",
-        "message": (
-          f"Balance sheet equation broken for period {period!r}: "
-          f"debits={exc.total_debit} credits={exc.total_credit}. "
-          "Review the ledger before closing."
-        ),
-      }
-    except StatementStampError as exc:
-      return {
-        "error": "statement_stamp_failed",
-        "message": (
-          f"{exc} The close rolled back — nothing was committed. Fix the "
-          "mapping/reporting configuration and re-run close-period."
-        ),
-      }
-    except FiscalCalendarError as exc:
-      return {"error": "calendar_error", "message": str(exc)}
+        if gate.is_closeable:
+          return None
+        return close_error_payload(CloseGateFailed(gate), period=period)
     except SQLAlchemyError as exc:
       return database_failure("close-period", exc)
-    except Exception as exc:
-      logger.warning(f"close-period failed: {exc}")
-      return {"error": str(exc)}
+    except FiscalCalendarError as exc:
+      return {"error": "calendar_error", "message": str(exc)}
 
 
 # ────────────────────────────────────────────────────────────────────────────
