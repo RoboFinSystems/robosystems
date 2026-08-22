@@ -625,6 +625,65 @@ class TestCaptureTransactionsAsEvents:
     assert "drift_detected_at" in committed_event.metadata_
     session.add_all.assert_not_called()
 
+  def test_accepting_the_stashed_payload_stops_the_reflagging(self):
+    """Adopting the stashed payload is what makes a resolution stick.
+
+    ``resolve_reconciling_item`` clears the flag by setting the live
+    payload to the one the adapter sent. This re-runs capture with that
+    same payload to confirm the comparison then sees no difference —
+    without it, a dispositioned item re-flags on every sync forever, which
+    is the defect the resolver exists to fix.
+    """
+    from robosystems.operations.extensions.loader import (
+      DRIFT_EXCLUDED_KEYS,
+      OLTPLoader,
+    )
+
+    event = MagicMock()
+    event.external_id = "JE_100"
+    event.status = "fulfilled"
+    event.id = "evt_committed"
+    event.metadata_ = {"status": "posted", "entries": [{"frozen": "by-approval"}]}
+    event.payload_drift = False
+
+    loader = OLTPLoader()
+    session = MagicMock()
+    _stub_existing_lookup(session, [event])
+    first = loader._capture_transactions_as_events(
+      session,
+      self._dbt_data(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    assert first.drift_detected == 1
+
+    # What the resolver writes: the accepted payload, plus the trail.
+    event.metadata_ = {
+      **event.metadata_["drift_payload"],
+      "reconciliation_history": [{"disposition": "acknowledge"}],
+    }
+    event.payload_drift = False
+
+    session = MagicMock()
+    _stub_existing_lookup(session, [event])
+    second = loader._capture_transactions_as_events(
+      session,
+      self._dbt_data(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert second.drift_detected == 0
+    assert event.payload_drift is False
+    # The trail is the reason that holds: it rides on the row and is
+    # excluded from the comparison.
+    assert "reconciliation_history" in DRIFT_EXCLUDED_KEYS
+    assert event.metadata_["reconciliation_history"]
+
   def test_capture_drops_orphan_entries_and_line_items(self):
     """Entries without a matching transaction, and line_items without a
     matching entry, are silently dropped — they have no transaction

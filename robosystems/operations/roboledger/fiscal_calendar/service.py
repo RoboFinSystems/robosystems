@@ -105,6 +105,13 @@ class CloseableGateResult:
     default_factory=list
   )
 
+  # Detail fields for `reconciling_items` — posted events whose source
+  # payload changed afterwards and that nobody has dispositioned yet.
+  # Populated even when bypassed via allow_reconciling_items, so the close
+  # audit trail records what was knowingly closed over.
+  reconciling_item_count: int = 0
+  reconciling_item_sample: list[str] = field(default_factory=list)
+
   # Machine-readable codes
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
@@ -113,6 +120,7 @@ class CloseableGateResult:
   ALREADY_CLOSED = "period_already_closed"
   PENDING_OBLIGATIONS = "pending_obligations"
   STRANDED_OBLIGATIONS = "stranded_obligations"
+  RECONCILING_ITEMS = "reconciling_items"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -639,6 +647,7 @@ class FiscalCalendarService:
     last_sync_at: datetime | None = None,
     allow_stale_sync: bool = False,
     allow_stranded_obligations: bool = False,
+    allow_reconciling_items: bool = False,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed right now.
 
@@ -661,6 +670,12 @@ class FiscalCalendarService:
        count still populates for the audit trail). The remedy is
        `promote-obligations` with `dispatch_handlers=true`, which reaches
        them, or voiding the obligation.
+    4c. **Reconciling items**: no posted event in or before this period is
+       still flagged as changed upstream. Each is a difference between the
+       books and the source system that someone has to decide about;
+       closing over one stamps statements the next sync will contradict.
+       Bypass with `allow_reconciling_items` (the count still populates).
+       The remedy is `resolve-reconciling-item` per item.
 
     Callers fetch `has_sync_connection` and `last_sync_at` from the platform
     DB (connections table). The two are distinct signals — a fresh connection
@@ -806,6 +821,27 @@ class FiscalCalendarService:
         blockers.append(CloseableGateResult.STRANDED_OBLIGATIONS)
       stranded_sample = self._obligation_sample(session, stranded_events[:5])
 
+    # Gate 4c: unresolved reconciling items. A posted event whose source
+    # payload changed afterwards is a known disagreement between the books
+    # and the source system. Scoped to entries posting on or before this
+    # period's end: a later-dated item says nothing about the months being
+    # closed, while an earlier one would have its catch-up entry land here.
+    # Sample the source identifiers so the operator can name what is
+    # blocking without a second call.
+    from robosystems.operations.roboledger.commands.reconciling_items import (
+      find_unresolved_reconciling_items,
+    )
+
+    reconciling_rows = find_unresolved_reconciling_items(session, as_of=period_end)
+    reconciling_count = len(reconciling_rows)
+    reconciling_sample: list[str] = []
+    if reconciling_count > 0:
+      if not allow_reconciling_items:
+        blockers.append(CloseableGateResult.RECONCILING_ITEMS)
+      reconciling_sample = [
+        str(external_id or event_id) for event_id, external_id in reconciling_rows[:5]
+      ]
+
     return CloseableGateResult(
       is_closeable=not blockers,
       blockers=blockers,
@@ -815,6 +851,8 @@ class FiscalCalendarService:
       sync_stale_days=sync_stale_days,
       stranded_obligation_count=stranded_count,
       stranded_obligation_sample=stranded_sample,
+      reconciling_item_count=reconciling_count,
+      reconciling_item_sample=reconciling_sample,
     )
 
   @staticmethod

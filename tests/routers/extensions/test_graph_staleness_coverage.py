@@ -75,6 +75,11 @@ _EXEMPT: dict[str, str] = {
     "Resolves handlers and returns the projected debits and credits. Writes "
     "nothing at all."
   ),
+  "preview-reconciling-item": (
+    "Reads a flagged event's posted entries against its accepted payload and "
+    "returns the difference. Writes nothing at all — resolve-reconciling-item "
+    "is the half that writes, and it marks the graph stale."
+  ),
 }
 
 _EXTENSIONS = ("roboledger", "roboinvestor")

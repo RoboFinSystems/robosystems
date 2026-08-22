@@ -113,9 +113,11 @@ class ListEventBlocksTool:
 - Post-sync reconciliation: is_reconciling_item=true lists reconciling
   items — committed events whose upstream payload changed after posting,
   so the local GL no longer mirrors the source. Each awaits an explicit
-  disposition (restate vs catch-up). The stashed incoming payload is in
-  the event's metadata.drift_payload (fetch via get-event-block or
-  include_metadata=true)
+  disposition: preview-reconciling-item shows the difference,
+  resolve-reconciling-item carries out a restate / catch_up / acknowledge
+  and clears the flag (until it does, the item re-flags on every sync).
+  The stashed incoming payload is in the event's metadata.drift_payload
+  (fetch via get-event-block or include_metadata=true)
 
 **PARAMETERS:**
 - event_type (optional): e.g., 'invoice_issued', 'contract_signed', 'bank_transaction'

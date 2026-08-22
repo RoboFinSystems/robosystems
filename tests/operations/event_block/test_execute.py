@@ -85,6 +85,42 @@ class TestExecuteEventBlockNativeFastPath:
     # Status on the event is unchanged.
     assert evt.status == "classified"
 
+  def test_publish_to_source_false_fast_paths_before_the_platform_lookup(self):
+    """The flag holds even when the caller supplies the connection.
+
+    Close passes its write-back connection to every event in the batch, so
+    a check that ran after resolving `connection_id` would publish exactly
+    the entries the flag exists to hold back. `SessionFactory` is left
+    unpatched here deliberately: reaching the platform DB at all would mean
+    the short-circuit sits too late.
+    """
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    evt = _make_event(
+      metadata={
+        "connection_id": "conn_qb_1",
+        "posting_date": "2026-05-19",
+        "publish_to_source": False,
+      }
+    )
+    session = _make_session(evt)
+
+    with patch("robosystems.database.SessionFactory") as platform_factory:
+      result = execute_event_block(
+        session,
+        # Even an explicit connection override does not overrule the flag.
+        ExecuteEventBlockRequest(event_id="evt_test_abc", connection_id="conn_qb_2"),
+        created_by="user_1",
+        graph_id=GRAPH_ID,
+      )
+
+    platform_factory.assert_not_called()
+    assert result.status == "classified"
+    assert result.qb_external_id is None
+    assert result.qb_error is None
+    assert evt.status == "classified"
+
   def test_native_policy_connection_fast_paths(self):
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
     from robosystems.operations.event_block.commands import execute_event_block

@@ -509,6 +509,7 @@ class TestRestampClosedPeriod:
         actor_type="user",
         allow_stale_sync=False,
         allow_stranded_obligations=False,
+        allow_reconciling_items=False,
       )
     return result, session, reopen_body, close_service, fence
 

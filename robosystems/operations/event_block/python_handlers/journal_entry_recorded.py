@@ -38,7 +38,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictBool, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -131,6 +131,17 @@ class JournalEntryRecordedMetadata(BaseModel):
   # Shared
   status: Literal["draft", "posted"] = "draft"
 
+  # Explicit override of the source-based write-back default. Left unset,
+  # publication follows ``Event.source`` (``schedule``/``manual`` publish;
+  # everything else posts locally). ``False`` pins the entry to the local
+  # lane whatever its source — the lane an alignment entry needs when it
+  # mirrors a change already made upstream, since publishing it would
+  # apply that change twice. ``True`` publishes a source that otherwise
+  # would not. StrictBool because this metadata is persisted as the raw
+  # request dict: a lax bool would store ``"yes"`` and match neither
+  # branch of the SQL predicate, silently choosing the local lane.
+  publish_to_source: StrictBool | None = None
+
   # Nested shape (multi-entry path — QB ingest, future bulk imports)
   entries: list[NestedJournalEntrySpec] | None = None
 
@@ -171,7 +182,7 @@ class ElementResolutionError(Exception):
   """An element_external_id in nested metadata could not be resolved."""
 
 
-def _resolve_external_ids(
+def resolve_external_ids(
   session: Session,
   *,
   external_ids: set[str],
@@ -221,7 +232,7 @@ def _resolve_nested_line_items(
       if line.element_external_id and not line.element_id:
         unresolved_external_ids.add(line.element_external_id)
 
-  resolved = _resolve_external_ids(
+  resolved = resolve_external_ids(
     session,
     external_ids=unresolved_external_ids,
     source=event.source,

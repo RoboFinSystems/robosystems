@@ -308,6 +308,36 @@ def create_event_block(
   On validation failure (no handler, ambiguous, template error, engine error)
   nothing is persisted — the exception propagates and the caller's session
   rolls back.
+
+  Commits. An operation that creates an event as one step of a larger unit
+  of work wants :func:`create_event_block_in_session` instead, so a later
+  failure takes the event down with it.
+  """
+  _event, envelope = create_event_block_in_session(
+    session, body, created_by, graph_id=graph_id
+  )
+  session.commit()
+  return envelope
+
+
+def create_event_block_in_session(
+  session: Session,
+  body: CreateEventBlockRequest,
+  created_by: str,
+  *,
+  graph_id: str,
+) -> tuple[Event, EventBlockEnvelope]:
+  """Persist an event block without committing; return the row and envelope.
+
+  The body of :func:`create_event_block`, minus the commit, for callers
+  that compose event creation with other writes in one transaction —
+  ``resolve_reconciling_item`` posts a catch-up entry and clears the
+  originating event's flag together, and a half-applied version of that
+  pair is a worse state than either whole.
+
+  The envelope is built before the caller commits for the reason the
+  committing wrapper documents: ``commit()`` expires the instance, so
+  reading attributes afterwards can raise on a write that succeeded.
   """
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
@@ -344,8 +374,7 @@ def create_event_block(
       # succeeded. That is the worst failure shape available: the caller is
       # told the write failed, so a retry duplicates a committed event.
       envelope = _to_envelope(event, body.dimension_ids)
-      session.commit()
-      return envelope
+      return event, envelope
 
     # 2. Fall through to the DSL registry
     agent_type = _resolve_agent_type(session, body.agent_id)
@@ -374,8 +403,7 @@ def create_event_block(
 
     # Envelope before commit — see the python-handler path above.
     envelope = _to_envelope(event, body.dimension_ids)
-    session.commit()
-    return envelope
+    return event, envelope
 
   # Capture-only path (apply_handlers=False)
   event = _build_event_row(body, created_by, status="captured")
@@ -390,8 +418,7 @@ def create_event_block(
 
   # Envelope before commit — see the python-handler path above.
   envelope = _to_envelope(event, body.dimension_ids)
-  session.commit()
-  return envelope
+  return event, envelope
 
 
 def fire_handler_on_commit(
@@ -819,6 +846,9 @@ def execute_event_block(
   )
   from robosystems.models.extensions.roboledger.entry import Entry
   from robosystems.models.extensions.roboledger.transaction import Transaction
+  from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    PUBLISH_TO_SOURCE_KEY,
+  )
 
   from .qb_writeback import QBWritebackError, post_event_to_qb
 
@@ -886,6 +916,22 @@ def execute_event_block(
       qb_external_id=None,
       qb_error=None,
     )
+  # An explicit publish_to_source=False pins the event to the local lane,
+  # and outranks the caller-supplied connection: close passes its
+  # writeback connection to every event in the batch, so checking this
+  # after resolving connection_id would publish the very entries the flag
+  # exists to hold back.
+  if metadata.get(PUBLISH_TO_SOURCE_KEY) is False:
+    logger.debug(
+      f"Event {event.id} carries publish_to_source=False — local lane, no QB write."
+    )
+    return ExecuteEventBlockResponse(
+      event_id=str(event.id),
+      status=str(event.status),
+      qb_external_id=None,
+      qb_error=None,
+    )
+
   # Caller can override the connection (used by the close-period batch
   # where schedule events don't carry connection_id in metadata).
   connection_id = body.connection_id or metadata.get("connection_id")

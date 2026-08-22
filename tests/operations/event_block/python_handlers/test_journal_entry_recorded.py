@@ -324,7 +324,7 @@ class TestDispatchNested:
   def _patch_resolution(self, mapping: dict[str, str]):
     """Patch the bulk Element-by-external_id resolution."""
     return patch(
-      "robosystems.operations.event_block.python_handlers.journal_entry_recorded._resolve_external_ids",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.resolve_external_ids",
       return_value=mapping,
     )
 

@@ -147,6 +147,12 @@ from robosystems.models.api.extensions.publish_lists import (
   PublishListResponse,
   UpdatePublishListRequest,
 )
+from robosystems.models.api.extensions.reconciling_items import (
+  PreviewReconcilingItemRequest,
+  ReconcilingItemPlan,
+  ResolveReconcilingItemRequest,
+  ResolveReconcilingItemResponse,
+)
 from robosystems.models.api.extensions.report_package import (
   FileReportRequest,
   TransitionFilingStatusRequest,
@@ -358,6 +364,17 @@ from robosystems.operations.roboledger.commands.publish_lists import (
 )
 from robosystems.operations.roboledger.commands.publish_lists import (
   update_publish_list as cmd_update_publish_list,
+)
+from robosystems.operations.roboledger.commands.reconciling_items import (
+  NotAReconcilingItemError,
+  ReconcilingItemNotFoundError,
+  RestateBlockedError,
+)
+from robosystems.operations.roboledger.commands.reconciling_items import (
+  preview_reconciling_item as cmd_preview_reconciling_item,
+)
+from robosystems.operations.roboledger.commands.reconciling_items import (
+  resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
 from robosystems.operations.roboledger.commands.reporting_style import (
   EntityNotFoundError as ReportingStyleEntityNotFoundError,
@@ -1503,7 +1520,12 @@ create_event_block_op = _registrar.register(
       "apply_handlers=False (default): capture-only, status='captured'. "
       "apply_handlers=True: resolves an event_handler, fires the template, "
       "creates GL entries atomically, status='classified'. "
-      "Use preview-event-block to dry-run before committing."
+      "Use preview-event-block to dry-run before committing. "
+      "For journal_entry_recorded, whether the entry writes back to a "
+      "connected source system follows `source` (schedule/manual publish; "
+      "system does not) unless metadata.publish_to_source says otherwise — "
+      "set it false for an alignment entry mirroring a change already made "
+      "upstream, which would otherwise be applied twice."
     ),
     command=cmd_create_event_block,
     request_model=CreateEventBlockRequest,
@@ -1701,6 +1723,79 @@ preview_event_block_op = _registrar.register(
     request_model=CreateEventBlockRequest,
     result_type=PreviewEventBlockResponse,
     error_map={ValueError: 422},
+  )
+)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Reconciling Items
+#
+# A posted event whose source payload changed afterwards. The sync flags it
+# rather than overwriting approved books; these two operations read the
+# difference and dispose of it. Preview first — the disposition is an
+# accounting judgement about the affected periods, so the operator should
+# see the delta and agree the treatment before anything is written.
+# ═══════════════════════════════════════════════════════════════════════════
+
+preview_reconciling_item_op = _registrar.register(
+  OperationSpec(
+    name="preview-reconciling-item",
+    summary="Preview Reconciling Item",
+    description=(
+      "Read what changed on a reconciling item — an event whose source-system "
+      "payload changed after it was posted (list them with list-event-blocks "
+      "is_reconciling_item=true). Returns the posted entries against the "
+      "accepted payload, the per-account net difference, which disposition "
+      "applies by default, and anything blocking the others. Writes nothing. "
+      "Run this before resolve-reconciling-item and agree the treatment with "
+      "the user — restate moves prior months' figures, catch_up does not."
+    ),
+    command=cmd_preview_reconciling_item,
+    request_model=PreviewReconcilingItemRequest,
+    result_type=ReconcilingItemPlan,
+    requires_created_by=False,
+    requires_graph_id=True,
+    error_map={
+      ReconcilingItemNotFoundError: 404,
+      NotAReconcilingItemError: 409,
+      ValueError: 422,
+    },
+  )
+)
+
+resolve_reconciling_item_op = _registrar.register(
+  OperationSpec(
+    name="resolve-reconciling-item",
+    summary="Resolve Reconciling Item",
+    description=(
+      "Dispose of one reconciling item and clear its flag. Three treatments: "
+      "'restate' regenerates the event's entries from the accepted payload in "
+      "place (prior months' figures change — right when nothing external binds "
+      "them); 'catch_up' leaves history alone and posts the difference as an "
+      "alignment entry in an open period, local-only so it cannot travel back "
+      "to the source system and apply the change twice; 'acknowledge' records "
+      "that the difference was handled elsewhere and clears the flag without "
+      "touching the ledger (a note is required, and reference_event_id should "
+      "name the entry that handled it). Omit disposition to take the default "
+      "from preview-reconciling-item. Clearing the flag means the item stays "
+      "cleared: the event's payload is set to the accepted one, so the next "
+      "sync no longer sees a difference."
+    ),
+    command=cmd_resolve_reconciling_item,
+    request_model=ResolveReconcilingItemRequest,
+    result_type=ResolveReconcilingItemResponse,
+    requires_graph_id=True,
+    error_map={
+      ReconcilingItemNotFoundError: 404,
+      NotAReconcilingItemError: 409,
+      RestateBlockedError: 422,
+      ClosedPeriodError: 422,
+      ElementResolutionError: 422,
+      UnbalancedJournalEntryError: 422,
+      HandlerMetadataValidationError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="reconciling_item_resolved",
   )
 )
 
@@ -2048,6 +2143,9 @@ async def close_period_op(
           ).model_dump()
           for d in e.gate.stranded_obligation_sample
         ]
+      if e.gate.reconciling_item_count:
+        detail["reconciling_item_count"] = e.gate.reconciling_item_count
+        detail["reconciling_item_sample"] = list(e.gate.reconciling_item_sample)
       if e.gate.sync_stale_days is not None:
         detail["sync_stale_days"] = e.gate.sync_stale_days
       raise HTTPException(status_code=422, detail=detail)
