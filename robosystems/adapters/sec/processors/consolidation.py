@@ -154,10 +154,12 @@ def consolidate_parquet_from_disk(
   tables = []
   for pq_file in parquet_files:
     try:
-      table = pq.read_table(pq_file)
+      # Handle, not a path — see adapters/sec/knowledge/__init__.py.
+      with open(pq_file, "rb") as f:
+        table = pq.read_table(f)
       tables.append(table)
     except Exception as e:
-      logger.warning("Skipping corrupted parquet file %s: %s", pq_file, e)
+      logger.warning("Skipping unreadable parquet file %s: %s", pq_file, e)
       continue
 
   if not tables:

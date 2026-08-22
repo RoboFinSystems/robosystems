@@ -581,14 +581,7 @@ class DisclosureProfileBuilder:
       return {}
 
     try:
-      # Read through a handle. This module imports networkit at import time, and
-      # in a process that has done so `pq.read_table(path)` raises ArrowKeyError
-      # from the LocalFileSystem constructor (icebug bundles a second libarrow
-      # that collides with pyarrow's on Arrow's global filesystem registry — see
-      # this package's __init__). Passing a path here meant this function could
-      # never succeed: it raised on every call, the except below swallowed it at
-      # debug level, and disclosure profiles silently fell back to frequency-only
-      # weighting. The writers in this file already take the handle path.
+      # Handle, not a path — see this package's __init__.
       with open(path, "rb") as f:
         table = pq.read_table(f, columns=["qname", "pagerank"])
       cols = table.to_pydict()
@@ -596,8 +589,7 @@ class DisclosureProfileBuilder:
         cols["qname"][i]: cols["pagerank"][i] or 0.0 for i in range(len(cols["qname"]))
       }
     except Exception as e:
-      # Warning, not debug: the empty dict degrades weighting silently, so a
-      # recurring failure here has to be visible in logs to be noticed at all.
+      # Warning, not debug: the empty dict degrades weighting silently.
       logger.warning(f"Failed to load PageRank scores from {path}: {e}")
       return {}
 

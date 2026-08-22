@@ -360,7 +360,8 @@ class SemanticEnricher:
 
       import pyarrow.parquet as pq
 
-      table = pq.read_table(path)
+      with open(path, "rb") as f:
+        table = pq.read_table(f)
       result = {}
 
       # Read columnar and transpose to row dicts
@@ -383,7 +384,7 @@ class SemanticEnricher:
       logger.info(f"Loaded element knowledge artifact: {len(result)} elements")
       return result
     except Exception as e:
-      logger.debug(f"Element knowledge artifact not available: {e}")
+      logger.warning(f"Element knowledge artifact failed to load: {e}")
       return None
 
   def _load_structure_profiles(self) -> dict[str, dict[str, float]] | None:
@@ -396,7 +397,8 @@ class SemanticEnricher:
 
       import pyarrow.parquet as pq
 
-      table = pq.read_table(path)
+      with open(path, "rb") as f:
+        table = pq.read_table(f)
       columns = table.to_pydict()
 
       result: dict[str, dict[str, float]] = {}
@@ -408,7 +410,7 @@ class SemanticEnricher:
       logger.info(f"Loaded structure profiles artifact: {len(result)} types")
       return result
     except Exception as e:
-      logger.debug(f"Structure profiles artifact not available: {e}")
+      logger.warning(f"Structure profiles artifact failed to load: {e}")
       return None
 
   def _load_structure_consensus(self) -> dict[str, dict] | None:
@@ -421,7 +423,8 @@ class SemanticEnricher:
 
       import pyarrow.parquet as pq
 
-      table = pq.read_table(path)
+      with open(path, "rb") as f:
+        table = pq.read_table(f)
       columns = table.to_pydict()
 
       result = {}
@@ -435,7 +438,7 @@ class SemanticEnricher:
       logger.info(f"Loaded structure consensus artifact: {len(result)} entries")
       return result
     except Exception as e:
-      logger.debug(f"Structure consensus artifact not available: {e}")
+      logger.warning(f"Structure consensus artifact failed to load: {e}")
       return None
 
   @property
@@ -462,7 +465,8 @@ class SemanticEnricher:
 
       import pyarrow.parquet as pq
 
-      table = pq.read_table(path)
+      with open(path, "rb") as f:
+        table = pq.read_table(f)
       columns = table.to_pydict()
 
       result: dict[str, dict[str, float]] = {}
@@ -474,7 +478,7 @@ class SemanticEnricher:
       logger.info(f"Loaded disclosure profiles artifact: {len(result)} types")
       return result
     except Exception as e:
-      logger.debug(f"Disclosure profiles artifact not available: {e}")
+      logger.warning(f"Disclosure profiles artifact failed to load: {e}")
       return None
 
   def _load_disclosure_consensus(self) -> dict[str, dict] | None:
@@ -487,7 +491,8 @@ class SemanticEnricher:
 
       import pyarrow.parquet as pq
 
-      table = pq.read_table(path)
+      with open(path, "rb") as f:
+        table = pq.read_table(f)
       columns = table.to_pydict()
 
       result = {}
@@ -501,7 +506,7 @@ class SemanticEnricher:
       logger.info(f"Loaded disclosure consensus artifact: {len(result)} entries")
       return result
     except Exception as e:
-      logger.debug(f"Disclosure consensus artifact not available: {e}")
+      logger.warning(f"Disclosure consensus artifact failed to load: {e}")
       return None
 
   # -- Embedding ------------------------------------------------------------
