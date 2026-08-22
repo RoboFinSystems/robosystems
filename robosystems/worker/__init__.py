@@ -13,6 +13,7 @@ Task registration happens via side-effect imports at module load time:
 # These are imported for side effects only (registration).
 import robosystems.operations.graph.tasks as graph_tasks  # noqa: F401
 import robosystems.operations.operators.adapters.worker_task as worker_task  # noqa: F401
+import robosystems.operations.roboledger.tasks as roboledger_tasks  # noqa: F401
 import robosystems.worker.tasks.dagster_monitoring as dagster_monitoring  # noqa: F401
 from robosystems.worker.tasks import load_adapter_tasks
 

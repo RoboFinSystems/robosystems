@@ -91,11 +91,13 @@ _RECURRING_SEQUENCE: list[str] = [
   "balance-sheet equation check, advances closed_through. Use "
   "allow_stale_sync=true only when the user has verified QB is complete "
   "despite a stale sync — normally run sync-connection instead (see the "
-  "sync_stale step above). The call can outlive a client tool timeout "
-  "while the outbox publishes; the close is atomic server-side, so NEVER "
-  "retry on a timeout — verify with get-fiscal-calendar (period closed, "
-  "closed_through advanced) and reconstruct the receipt from "
-  "get-period-close-status.",
+  "sync_stale step above). The close runs on the worker, so a heavy month "
+  "can outlast the call: if you get status='in_progress' with an "
+  "operation_id, the close is already running and NEVER needs re-calling. "
+  "Poll get-period-close-status (period_status flips to closed and "
+  "close_receipt fills in) or get-fiscal-calendar (has_close_receipt) "
+  "every ~10s, then read the receipt. worker_started=false just means it "
+  "is queued behind a busy worker; the instruction is the same.",
   "Post-close verification — read the receipt back to the user, don't "
   "assume: entries_posted should equal the reviewed draft count "
   "(entries_published_to_qb / entries_posted_locally carry the split); "

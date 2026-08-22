@@ -1,23 +1,23 @@
 """Unit tests for the fiscal calendar MCP tools.
 
-Focus is on ClosePeriodTool — it's the thinnest wrapper over
-PeriodCloseService but the one most likely to drift from the REST path.
-We verify:
+Focus is on ClosePeriodTool, which no longer runs the close itself: it
+dispatches to the worker and waits inside the tool budget. So what is tested
+here is the dispatch and the handback — the arguments that reach the task,
+the receipt coming back untouched, and what the operator is told when the
+close outlives the call.
 
-- Happy path delegates to ops `close_period` with the expected arguments
-- All domain errors map to the right MCP error shape
-- actor_id falls back to "mcp:{graph_id}" when the client has no user identity
-
-Mocks live at the **operations layer boundary** (`ops_close_period`) — the
-MCP tool is now a thin shim that translates exceptions and re-shapes the
-response. Tests against mocked SQLAlchemy internals would only re-test what
-`tests/operations/roboledger/fiscal_calendar/` already covers.
+The outcome *shapes* moved with the shaping, to
+`tests/operations/roboledger/fiscal_calendar/test_close_outcomes.py`, and the
+task's own behaviour lives in `tests/operations/roboledger/tasks/`. Keeping
+them apart is what stops this file re-asserting a payload it no longer
+builds.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -27,6 +27,7 @@ from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
   ClosePeriodTool,
   ReopenPeriodTool,
 )
+from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPeriodOutcome,
   BackfillPlanHistoryResponse,
@@ -36,17 +37,6 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   ReopenPeriodResult,
-)
-from robosystems.operations.roboledger.fiscal_calendar import (
-  CloseGateFailed,
-  PeriodNotFoundError,
-  UnbalancedLedgerError,
-)
-from robosystems.operations.roboledger.fiscal_calendar.service import (
-  CloseableGateResult,
-)
-from robosystems.operations.roboledger.reports.statement_sets import (
-  StatementStampError,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.fiscal_calendar_tools"
@@ -122,271 +112,240 @@ def _close_response(**overrides) -> ClosePeriodResponse:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Happy path
+# close-period — dispatch and poll
 # ────────────────────────────────────────────────────────────────────────────
 
 
-class TestClosePeriodToolHappyPath:
-  @pytest.mark.asyncio
-  async def test_delegates_to_ops_layer(self):
-    tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    response = _close_response(entries_posted=5)
+class _Storage:
+  """Event storage returning a scripted sequence of operation states.
 
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=response) as ops,
-    ):
+  The last state repeats: an operation that is still running stays running
+  however many times it is polled, and a script that ran dry would otherwise
+  read as "no such operation".
+  """
+
+  def __init__(self, *states):
+    self._states = list(states)
+
+  async def get_operation_metadata(self, operation_id):
+    if not self._states:
+      return None
+    state = self._states.pop(0) if len(self._states) > 1 else self._states[0]
+    if state is None:
+      return None
+    status, payload = state
+    return SimpleNamespace(
+      operation_id=operation_id,
+      status=status,
+      result_data=payload if status is OperationStatus.COMPLETED else None,
+      error_message=payload if status is OperationStatus.FAILED else None,
+    )
+
+
+@contextmanager
+def _patch_dispatch(storage, *, deduplicated=False, gate=None):
+  """Patch the tool's dispatch path: gate check, enqueue, and polling."""
+  enqueue = AsyncMock(
+    return_value={"operation_id": "op_close_1", "deduplicated": deduplicated}
+  )
+  with (
+    patch.object(ClosePeriodTool, "_gate_check", return_value=gate),
+    patch("robosystems.worker.client.enqueue_task", enqueue),
+    patch(
+      "robosystems.middleware.sse.event_storage.get_event_storage",
+      return_value=storage,
+    ),
+  ):
+    yield enqueue
+
+
+def _receipt(**overrides) -> dict:
+  payload = {
+    "outcome": "closed",
+    "operation_id": "op_close_1",
+    "period": "2026-01",
+    "entries_posted": 5,
+    "entries_published_to_qb": 4,
+    "entries_posted_locally": 1,
+    "target_auto_advanced": False,
+    "fiscal_calendar": {"closed_through": "2026-01", "has_sync_connection": True},
+    "rule_summary": None,
+    "evaluated_structure_ids": [],
+    "statements_stamped": True,
+    "statement_stamp_note": None,
+    "stamped_statement_sets": {},
+    "statement_rule_summary": None,
+  }
+  payload.update(overrides)
+  return payload
+
+
+class TestClosePeriodToolDispatch:
+  @pytest.mark.asyncio
+  async def test_a_close_that_lands_in_budget_returns_its_receipt(self):
+    """The tool hands back what the task produced, untouched — the receipt
+    must not depend on how quickly the worker answered."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    storage = _Storage((OperationStatus.COMPLETED, _receipt()))
+
+    with _patch_dispatch(storage) as enqueue:
       result = await tool.execute({"period": "2026-01"})
 
     assert result["period"] == "2026-01"
     assert result["entries_posted"] == 5
-    assert result["target_auto_advanced"] is False
-    assert "fiscal_calendar" in result
-    assert "has_sync_connection" in result["fiscal_calendar"]
-    assert ops.call_count == 1
-    call = ops.call_args
-    assert call.kwargs["actor_id"] == "usr_abc"
-    assert call.kwargs["actor_type"] == "agent"
-    assert call.kwargs["allow_stale_sync"] is False
-
-  @pytest.mark.asyncio
-  async def test_response_includes_rule_summary_and_evaluated_structure_ids(self):
-    """The MCP close-period response must carry the same rule eval
-    fields the REST ClosePeriodResponse exposes so agents can report
-    which schedule rules passed / failed after a close."""
-    tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    response = _close_response(
-      rule_summary={"pass": 3, "fail": 0, "error": 0, "skipped": 0},
-      evaluated_structure_ids=["struct_dep", "struct_amort"],
-    )
-
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=response),
-    ):
-      result = await tool.execute({"period": "2026-01"})
-
-    assert result["rule_summary"] == {
-      "pass": 3,
-      "fail": 0,
-      "error": 0,
-      "skipped": 0,
-    }
-    assert result["evaluated_structure_ids"] == ["struct_dep", "struct_amort"]
-
-  @pytest.mark.asyncio
-  async def test_response_handles_null_rule_summary(self):
-    """No schedules with facts in the period → rule_summary is None,
-    evaluated_structure_ids is an empty list. The MCP shape stays stable."""
-    tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    response = _close_response()  # rule_summary defaults to None
-
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=response),
-    ):
-      result = await tool.execute({"period": "2026-01"})
-
-    assert result["rule_summary"] is None
-    assert result["evaluated_structure_ids"] == []
-
-  @pytest.mark.asyncio
-  async def test_response_includes_statement_stamp_fields(self):
-    """The close-time stamping outcome must reach agents — the MCP dict
-    is shaped by hand, so these keys are pinned explicitly."""
-    tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    response = _close_response(
-      statements_stamped=True,
-      statement_stamp_note=None,
-      stamped_statement_sets={"struct_bs": "fs_bs", "struct_is": "fs_is"},
-      statement_rule_summary={"pass": 5, "fail": 0, "error": 0, "skipped": 1},
-    )
-
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=response),
-    ):
-      result = await tool.execute({"period": "2026-01"})
-
     assert result["statements_stamped"] is True
-    assert result["statement_stamp_note"] is None
-    assert result["stamped_statement_sets"] == {
-      "struct_bs": "fs_bs",
-      "struct_is": "fs_is",
-    }
-    assert result["statement_rule_summary"] == {
-      "pass": 5,
-      "fail": 0,
-      "error": 0,
-      "skipped": 1,
-    }
+    assert result["fiscal_calendar"]["has_sync_connection"] is True
+    assert enqueue.await_count == 1
 
   @pytest.mark.asyncio
-  async def test_response_soft_skip_note_surfaces(self):
+  async def test_the_close_is_dispatched_with_the_arguments_it_was_given(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    response = _close_response(
-      statements_stamped=False, statement_stamp_note="no_coa_mapping"
-    )
+    storage = _Storage((OperationStatus.COMPLETED, _receipt()))
 
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=response),
-    ):
+    with _patch_dispatch(storage) as enqueue:
+      await tool.execute(
+        {
+          "period": "2026-01",
+          "allow_stale_sync": True,
+          "allow_reconciling_items": True,
+          "note": "verified",
+        }
+      )
+
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["task_type"] == "period_close"
+    assert kwargs["graph_id"] == GRAPH_ID
+    # A real user id: the operation is readable only by the user it was
+    # created for, so a sentinel would enqueue work nobody could look up.
+    assert kwargs["user_id"] == "usr_abc"
+    params = kwargs["params"]
+    assert params["period"] == "2026-01"
+    assert params["actor_type"] == "agent"
+    assert params["actor_id"] == "usr_abc"
+    assert params["allow_stale_sync"] is True
+    assert params["allow_reconciling_items"] is True
+    assert params["allow_stranded_obligations"] is False
+    assert params["note"] == "verified"
+
+  @pytest.mark.asyncio
+  async def test_a_refused_close_reaches_the_caller_as_the_task_shaped_it(self):
+    """A gate rejection is a completed operation carrying a refusal, not a
+    failed one — the blockers have to survive the trip."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    refusal = {
+      "outcome": "rejected",
+      "error": "not_closeable",
+      "blockers": ["reconciling_items"],
+      "reconciling_item_count": 11,
+    }
+    storage = _Storage((OperationStatus.COMPLETED, refusal))
+
+    with _patch_dispatch(storage):
       result = await tool.execute({"period": "2026-01"})
 
-    assert result["statements_stamped"] is False
-    assert result["statement_stamp_note"] == "no_coa_mapping"
-    assert result["stamped_statement_sets"] == {}
+    assert result["error"] == "not_closeable"
+    assert result["reconciling_item_count"] == 11
 
   @pytest.mark.asyncio
-  async def test_actor_id_falls_back_to_graph_scoped_sentinel(self):
-    """When the MCP client has no user_id, fall back to mcp:{graph_id}
-    so audit logs stay traceable per tenant (matches ReopenPeriodTool)."""
+  async def test_without_a_user_nothing_is_dispatched(self):
     tool = ClosePeriodTool(_client(user_id=None))
+    storage = _Storage()
 
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=_close_response()) as ops,
-    ):
-      await tool.execute({"period": "2026-01"})
+    with _patch_dispatch(storage) as enqueue:
+      result = await tool.execute({"period": "2026-01"})
 
-    call = ops.call_args
-    assert call.kwargs["actor_id"] == f"mcp:{GRAPH_ID}"
+    assert result["error"] == "authentication_required"
+    assert enqueue.await_count == 0
 
   @pytest.mark.asyncio
-  async def test_allow_stale_sync_flag_propagates(self):
+  async def test_an_uncloseable_period_is_answered_without_a_worker(self):
+    """The task re-runs the gate authoritatively; this only spares the
+    operator a dispatch and a poll to learn something already knowable."""
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    storage = _Storage()
+    gate_answer = {"error": "not_closeable", "blockers": ["sequence_violation"]}
 
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", return_value=_close_response()) as ops,
-    ):
-      await tool.execute({"period": "2026-01", "allow_stale_sync": True})
+    with _patch_dispatch(storage, gate=gate_answer) as enqueue:
+      result = await tool.execute({"period": "2026-05"})
 
-    call = ops.call_args
-    assert call.kwargs["allow_stale_sync"] is True
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# Error translation
-# ────────────────────────────────────────────────────────────────────────────
+    assert result == gate_answer
+    assert enqueue.await_count == 0
 
 
-class TestClosePeriodToolErrors:
-  async def _run_with_side_effect(self, side_effect):
+class TestClosePeriodToolHandback:
+  """What the operator is told when the close outlives the call."""
+
+  @pytest.mark.asyncio
+  async def test_a_running_close_is_handed_back_with_where_to_look(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(f"{MODULE}.ops_close_period", side_effect=side_effect),
-    ):
-      return await tool.execute({"period": "2026-03"})
+    tool.POLL_INTERVAL_S = 0
+    tool.POLL_BUDGET_S = 0.01
+    storage = _Storage((OperationStatus.RUNNING, None))
+
+    with _patch_dispatch(storage):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["status"] == "in_progress"
+    assert result["operation_id"] == "op_close_1"
+    assert result["worker_started"] is True
+    # The instruction that matters: the close is atomic and already running.
+    assert "NEVER call close-period again" in result["message"]
+    assert "get-period-close-status" in result["message"]
 
   @pytest.mark.asyncio
-  async def test_gate_failed_returns_not_closeable(self):
-    result = await self._run_with_side_effect(
-      CloseGateFailed(
-        CloseableGateResult(is_closeable=False, blockers=[CloseableGateResult.SEQUENCE])
-      )
-    )
-    assert result["error"] == "not_closeable"
-    assert CloseableGateResult.SEQUENCE in result["blockers"]
-
-  @pytest.mark.asyncio
-  async def test_no_calendar_returns_calendar_not_initialized(self):
-    result = await self._run_with_side_effect(
-      CloseGateFailed(
-        CloseableGateResult(
-          is_closeable=False, blockers=[CloseableGateResult.NO_CALENDAR]
-        )
-      )
-    )
-    assert result["error"] == "calendar_not_initialized"
-
-  @pytest.mark.asyncio
-  async def test_pending_obligations_enriches_detail(self):
-    """pending_obligations blocker surfaces count + sample +
-    earliest_pending_period on the close-period response."""
-    from robosystems.operations.roboledger.fiscal_calendar.service import (
-      PendingObligationDetail,
-    )
-
-    result = await self._run_with_side_effect(
-      CloseGateFailed(
-        CloseableGateResult(
-          is_closeable=False,
-          blockers=[CloseableGateResult.PENDING_OBLIGATIONS],
-          pending_obligation_count=3,
-          pending_obligation_sample=[
-            PendingObligationDetail(
-              event_id="evt_1",
-              schedule_id="struct_dep",
-              schedule_name="Computer Depreciation",
-              period="2026-04",
-            ),
-          ],
-          earliest_pending_period="2026-04",
-        )
-      )
-    )
-    assert result["error"] == "not_closeable"
-    assert result["pending_obligation_count"] == 3
-    assert result["pending_obligation_sample"][0]["schedule_name"] == (
-      "Computer Depreciation"
-    )
-    assert result["earliest_pending_period"] == "2026-04"
-    assert "sync_stale_days" not in result  # only populated when sync blocker active
-
-  @pytest.mark.asyncio
-  async def test_period_not_found_error(self):
-    result = await self._run_with_side_effect(PeriodNotFoundError("2026-03"))
-    assert result["error"] == "period_not_found"
-
-  @pytest.mark.asyncio
-  async def test_unbalanced_ledger_error(self):
-    result = await self._run_with_side_effect(
-      UnbalancedLedgerError(total_debit=1000, total_credit=900)
-    )
-    assert result["error"] == "unbalanced"
-    assert "1000" in result["message"]
-    assert "900" in result["message"]
-
-  @pytest.mark.asyncio
-  async def test_already_closed_error(self):
-    from robosystems.operations.roboledger.fiscal_calendar import (
-      PeriodAlreadyClosedError,
-    )
-
-    result = await self._run_with_side_effect(PeriodAlreadyClosedError("2026-03"))
-    assert result["error"] == "already_closed"
-
-  @pytest.mark.asyncio
-  async def test_row_locked_error(self):
-    from robosystems.operations.locking import RowLockedError
-
-    result = await self._run_with_side_effect(
-      RowLockedError("Period 2026-03 is being closed")
-    )
-    assert result["error"] == "row_locked"
-
-
-class TestStatementStampErrorTranslation:
-  @pytest.mark.asyncio
-  async def test_statement_stamp_failed_error_shape(self):
-    """A stamp hard-fail rolled the close back — the MCP error must say
-    so and encourage a retry after fixing the reporting config."""
+  async def test_a_queued_close_says_so_rather_than_claiming_to_be_running(self):
+    """'Queued behind a busy worker' and 'running now' need different
+    words — the operator's next question is whether anything is happening."""
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(
-        f"{MODULE}.ops_close_period",
-        side_effect=StatementStampError("pivot failed for 2026-03"),
-      ),
-    ):
-      result = await tool.execute({"period": "2026-03"})
+    tool.POLL_INTERVAL_S = 0
+    tool.POLL_BUDGET_S = 0.01
+    storage = _Storage((OperationStatus.PENDING, None))
 
-    assert result["error"] == "statement_stamp_failed"
-    assert "rolled back" in result["message"]
-    assert "pivot failed for 2026-03" in result["message"]
+    with _patch_dispatch(storage):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["status"] == "in_progress"
+    assert result["worker_started"] is False
+    assert "has not started yet" in result["message"]
+    assert "do not re-dispatch" in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_a_deduplicated_dispatch_is_disclosed(self):
+    """Two identical calls inside the dedup window share one operation;
+    saying so stops the agent inferring a second close is running."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    tool.POLL_INTERVAL_S = 0
+    tool.POLL_BUDGET_S = 0.01
+    storage = _Storage((OperationStatus.RUNNING, None))
+
+    with _patch_dispatch(storage, deduplicated=True):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["deduplicated"] is True
+
+  @pytest.mark.asyncio
+  async def test_a_failed_operation_warns_the_close_may_still_have_landed(self):
+    """The worker's timeout cancels the coroutine, not the thread doing the
+    QuickBooks publish — so a FAILED close can still commit afterwards."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    storage = _Storage((OperationStatus.FAILED, "Task timed out after 600s"))
+
+    with _patch_dispatch(storage):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["error"] == "close_failed"
+    assert "may still have landed" in result["message"]
+    assert "get-period-close-status" in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_a_cancelled_operation_says_so(self):
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    storage = _Storage((OperationStatus.CANCELLED, None))
+
+    with _patch_dispatch(storage):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["error"] == "cancelled"
 
 
 class TestReopenPeriodToolResult:
@@ -408,31 +367,6 @@ class TestReopenPeriodToolResult:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Re-close routing (end-to-end through the ops stub)
-# ────────────────────────────────────────────────────────────────────────────
-
-
-class TestClosePeriodToolRecloseRouting:
-  """The tool doesn't surface `was_reclose` directly, but a successful
-  re-close call must round-trip through the wrapper unchanged."""
-
-  @pytest.mark.asyncio
-  async def test_reclose_round_trips(self):
-    tool = ClosePeriodTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(
-        f"{MODULE}.ops_close_period", return_value=_close_response(entries_posted=0)
-      ) as ops,
-    ):
-      result = await tool.execute({"period": "2026-01"})
-
-    ops.assert_called_once()
-    assert "period" in result
-    assert result["entries_posted"] == 0
-
-
-# ────────────────────────────────────────────────────────────────────────────
 # Extension gate — ClosePeriod / ReopenPeriod both reject pre-DB
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -443,7 +377,10 @@ class TestFiscalCalendarGate:
 
   @pytest.mark.asyncio
   async def test_close_rejects_on_repo_graph(self):
+    """The refusal has to come before the dispatch, not after — otherwise a
+    forbidden close still occupies a worker slot to be told no."""
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    enqueue = AsyncMock()
     with (
       patch(
         f"{MODULE}.require_graph_extension_mcp",
@@ -452,12 +389,14 @@ class TestFiscalCalendarGate:
           "roboledger commands are not available on repository graphs",
         ),
       ),
-      patch(f"{MODULE}.ops_close_period") as ops,
+      patch(f"{MODULE}.extensions_session"),
+      patch(f"{MODULE}._platform_session"),
+      patch("robosystems.worker.client.enqueue_task", enqueue),
     ):
       result = await tool.execute({"period": "2026-03"})
 
     assert result["error"] == "repository_write_forbidden"
-    ops.assert_not_called()
+    enqueue.assert_not_awaited()
 
   @pytest.mark.asyncio
   async def test_reopen_rejects_on_unprovisioned_graph(self):
