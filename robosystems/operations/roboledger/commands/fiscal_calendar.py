@@ -193,6 +193,7 @@ def close_period(
   close_service: PeriodCloseService,
   actor_type: str = "user",
   allow_stranded_obligations: bool = False,
+  allow_reconciling_items: bool = False,
 ) -> ClosePeriodResponse:
   """Close a fiscal period — the final commit action.
 
@@ -228,6 +229,7 @@ def close_period(
       last_sync_at=last_sync_at,
       allow_stale_sync=allow_stale_sync,
       allow_stranded_obligations=allow_stranded_obligations,
+      allow_reconciling_items=allow_reconciling_items,
       note=note,
     )
     session.commit()
@@ -536,6 +538,7 @@ def backfill_plan_history(
           actor_type=actor_type,
           allow_stale_sync=body.allow_stale_sync,
           allow_stranded_obligations=body.allow_stranded_obligations,
+          allow_reconciling_items=body.allow_reconciling_items,
         )
       else:
         close_result = close_period(
@@ -550,6 +553,7 @@ def backfill_plan_history(
           close_service=close_service,
           actor_type=actor_type,
           allow_stranded_obligations=body.allow_stranded_obligations,
+          allow_reconciling_items=body.allow_reconciling_items,
         )
       processed.append(
         BackfillPeriodOutcome(
@@ -608,6 +612,7 @@ def _restamp_closed_period(
   actor_type: str,
   allow_stale_sync: bool,
   allow_stranded_obligations: bool,
+  allow_reconciling_items: bool,
 ) -> ClosePeriodResponse:
   """Reopen a closed period and close it again in one transaction.
 
@@ -638,6 +643,7 @@ def _restamp_closed_period(
       last_sync_at=last_sync_at,
       allow_stale_sync=allow_stale_sync,
       allow_stranded_obligations=allow_stranded_obligations,
+      allow_reconciling_items=allow_reconciling_items,
       note=note,
     )
     session.commit()

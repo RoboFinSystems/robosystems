@@ -159,6 +159,17 @@ class ClosePeriodRequest(BaseModel):
       "recorded in the close audit note."
     ),
   )
+  allow_reconciling_items: bool = Field(
+    False,
+    description=(
+      "Override the reconciling-item gate — close even though posted events "
+      "in the period are still flagged as changed in the source system, "
+      "leaving those differences undecided. The next sync will still report "
+      "them, and the statements stamped by this close may disagree with the "
+      "source. Prefer resolve-reconciling-item on each first. The override "
+      "is recorded in the close audit note."
+    ),
+  )
 
 
 class ReopenPeriodRequest(BaseModel):
@@ -234,6 +245,14 @@ class BackfillPlanHistoryRequest(BaseModel):
       "needed when a matured classified obligation without a drafted "
       "entry exists inside the backfill window and you have decided "
       "not to draft or void it first."
+    ),
+  )
+  allow_reconciling_items: bool = Field(
+    False,
+    description=(
+      "Override the reconciling-item gate on each reclose. Only needed "
+      "when an event inside the backfill window is still flagged as "
+      "changed upstream and you have decided not to resolve it first."
     ),
   )
   restamp: bool = Field(
@@ -388,6 +407,23 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Sample of up to 5 stranded obligations (schedule_id, schedule_name, "
       "period, event_id) ordered by occurred_at."
+    ),
+  )
+  reconciling_item_count: int = Field(
+    0,
+    description=(
+      "Posted events in or before this period whose source payload changed "
+      "afterwards and that nobody has dispositioned — differences between "
+      "the books and the source system. Resolve each with "
+      "resolve-reconciling-item, or close over them knowingly with "
+      "allow_reconciling_items."
+    ),
+  )
+  reconciling_item_sample: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Source identifiers (or event ids) of up to 5 unresolved reconciling "
+      "items, so the blocker names what is holding the close."
     ),
   )
   last_close_at: datetime | None = None

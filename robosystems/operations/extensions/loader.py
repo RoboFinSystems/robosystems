@@ -301,6 +301,52 @@ def _classify_dispatch_error(exc: BaseException) -> str:
   return "unknown_error"
 
 
+# Metadata keys that are bookkeeping rather than business payload, and so
+# are excluded when deciding whether an upstream row has changed since it
+# was posted. Each would otherwise report a difference that says nothing
+# about what happened in the source system:
+#
+# - ``drift_payload`` / ``drift_detected_at`` — this mechanism's own notes.
+# - ``qb_sync_token`` — a version counter; a bump alone is not a change.
+# - ``connection_id`` — names the connection that synced the row, so a
+#   reconnect would otherwise flag every committed row in the window.
+# - ``reconciliation_history`` — the disposition trail written by
+#   ``resolve_reconciling_item``. Excluding it is what lets a resolved item
+#   stay resolved: the resolver sets the live payload equal to the accepted
+#   one and appends its record, and this comparison must still see the two
+#   as equal on the next sync.
+DRIFT_EXCLUDED_KEYS: frozenset[str] = frozenset(
+  {
+    "drift_payload",
+    "drift_detected_at",
+    "qb_sync_token",
+    "connection_id",
+    "reconciliation_history",
+  }
+)
+
+# Prefixes excluded for the same reason. ``dispatch_*`` counters are
+# preserved across UPSERT (they accumulate "this has failed N times"), so
+# an event that carried them before it was posted would otherwise differ
+# from every incoming payload forever — the adapter never sends them.
+DRIFT_EXCLUDED_PREFIXES: tuple[str, ...] = ("dispatch_",)
+
+
+def comparable_payload(metadata: dict | None) -> dict:
+  """Strip bookkeeping keys, leaving the payload the drift check compares.
+
+  Shared with ``resolve_reconciling_item``, which builds an accepted
+  payload this function must judge equal to the next incoming one — if the
+  two sides of that contract drifted apart, resolved items would silently
+  re-flag on every sync.
+  """
+  return {
+    k: v
+    for k, v in (metadata or {}).items()
+    if k not in DRIFT_EXCLUDED_KEYS and not k.startswith(DRIFT_EXCLUDED_PREFIXES)
+  }
+
+
 def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
   """SyncToken freshness decision for the UPSERT gate.
 
@@ -1731,19 +1777,10 @@ class OLTPLoader:
           # `connection_id` is excluded for the same reason: it names the
           # connection that synced the row, not what happened upstream.
           # A reconnect that mints a new connection id must not read as
-          # drift on every committed row in the window.
-          _drift_excluded = (
-            "drift_payload",
-            "drift_detected_at",
-            "qb_sync_token",
-            "connection_id",
-          )
-          live_payload = {
-            k: v for k, v in (evt.metadata_ or {}).items() if k not in _drift_excluded
-          }
-          incoming_payload = {
-            k: v for k, v in metadata_blob.items() if k not in _drift_excluded
-          }
+          # drift on every committed row in the window. The full exclusion
+          # list, and why each key is on it, is at DRIFT_EXCLUDED_KEYS.
+          live_payload = comparable_payload(evt.metadata_)
+          incoming_payload = comparable_payload(metadata_blob)
           new_meta = dict(evt.metadata_ or {})
           meta_changed = False
           if live_payload != incoming_payload:

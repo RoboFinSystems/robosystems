@@ -144,6 +144,8 @@ def build_fiscal_calendar_response(
     sync_stale_days=gate.sync_stale_days if gate else None,
     stranded_obligation_count=gate.stranded_obligation_count if gate else 0,
     stranded_obligation_sample=stranded_obligation_sample,
+    reconciling_item_count=gate.reconciling_item_count if gate else 0,
+    reconciling_item_sample=list(gate.reconciling_item_sample) if gate else [],
     last_close_at=calendar.last_close_at,
     initialized_at=calendar.initialized_at,
     last_sync_at=last_sync_at,

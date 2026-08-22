@@ -129,9 +129,14 @@ class TestGetClosePlaybookContent:
     assert "since_date" in seq
     # Verify-the-sync half of step 1 (the outcome now persists).
     assert "last_sync_result" in seq
-    # Reconciling items reviewed with an explicit per-item disposition.
+    # Reconciling items reviewed with an explicit per-item disposition, and
+    # the operator is pointed at the operations that carry one out — naming
+    # the treatments without naming the verbs left the flag uncleared, which
+    # is what made the same items reappear every month.
     assert "is_reconciling_item=true" in seq
-    assert "RESTATE" in seq and "CATCH-UP" in seq
+    assert "RESTATE" in seq and "CATCH_UP" in seq and "ACKNOWLEDGE" in seq
+    assert "preview-reconciling-item" in seq
+    assert "resolve-reconciling-item" in seq
     # Post-close: the receipt is verified, not assumed, and graph reads
     # wait for the rebuild.
     assert "entries_published_to_qb" in seq

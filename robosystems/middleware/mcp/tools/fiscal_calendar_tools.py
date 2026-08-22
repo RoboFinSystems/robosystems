@@ -132,6 +132,9 @@ class GetFiscalCalendarTool:
   - `stranded_obligations`: matured obligations already classified but
     with no drafted closing entry — adjusting entries a close would
     silently omit (count + sample ride on the response)
+  - `reconciling_items`: posted events whose source payload changed
+    afterwards and that nobody has dispositioned — resolve each with
+    resolve-reconciling-item (count + sample ride on the response)
 - `last_sync_at`: most recent QB sync timestamp (null if no QB connection)
 - `periods`: list of all fiscal period rows with status
 
@@ -143,6 +146,8 @@ class GetFiscalCalendarTool:
 5. If blocked by `pending_obligations` or `stranded_obligations`, run
    promote-obligations (dispatch_handlers=true) — it reaches both — then
    re-check
+5b. If blocked by `reconciling_items`, work each with
+   preview-reconciling-item then resolve-reconciling-item, then re-check
 6. If `gap_periods > 1`, the user is behind — acknowledge and plan a catch-up
 
 **NOTES:** Read-only — safe to call repeatedly, no side effects.""",
@@ -223,6 +228,10 @@ class ClosePeriodTool:
   gate — close even though matured classified obligations have no drafted
   closing entry, knowingly omitting those adjusting entries. Prefer
   promote-obligations (dispatch_handlers=true) or voiding them instead.
+- allow_reconciling_items (optional): override the reconciling-item gate —
+  close even though posted events in the period are still flagged as
+  changed in the source system, leaving those differences undecided.
+  Prefer resolve-reconciling-item on each first.
 
 **RETURNS:**
 - period: the period that was closed
@@ -252,11 +261,15 @@ class ClosePeriodTool:
 - Cannot close over stranded obligations (matured, classified, but no
   drafted entry) unless allow_stranded_obligations=true — run
   promote-obligations (dispatch_handlers=true) to draft them first
+- Cannot close over unresolved reconciling items (posted events whose
+  source payload changed afterwards) unless allow_reconciling_items=true —
+  preview-reconciling-item then resolve-reconciling-item on each first
 - Cannot close if BS equation doesn't balance for the period
 
 **NOTES:**
 - Posted entries cannot be re-drafted — use reopen-period to undo
 - Manual entries (drafted via create-event-block event_type='journal_entry_recorded') are posted alongside schedule drafts
+- Which drafts write back to QuickBooks follows the event's source (schedule/manual publish; system posts locally), unless metadata.publish_to_source overrides it per entry. list-period-drafts previews the split before you close
 - After close, close_target auto-advances to the next period""",
       "inputSchema": {
         "type": "object",
@@ -280,6 +293,15 @@ class ClosePeriodTool:
               "Closes over matured classified obligations that have no "
               "drafted closing entry, knowingly omitting them; the "
               "override is recorded in the close audit note."
+            ),
+          },
+          "allow_reconciling_items": {
+            "type": "boolean",
+            "description": (
+              "Override the reconciling-item gate (default false). Closes "
+              "over posted events still flagged as changed in the source "
+              "system, leaving those differences undecided; the override "
+              "is recorded in the close audit note."
             ),
           },
           "note": {
@@ -307,6 +329,7 @@ class ClosePeriodTool:
     allow_stranded_obligations = bool(
       arguments.get("allow_stranded_obligations", False)
     )
+    allow_reconciling_items = bool(arguments.get("allow_reconciling_items", False))
     note = arguments.get("note")
 
     # Best-effort user identity from the graph client context; fall back to
@@ -330,6 +353,7 @@ class ClosePeriodTool:
           close_service=close_svc,
           actor_type="agent",
           allow_stranded_obligations=allow_stranded_obligations,
+          allow_reconciling_items=allow_reconciling_items,
         )
         # ops_close_period commits the session internally.
         fc_payload = result.fiscal_calendar.model_dump(mode="json")
@@ -392,6 +416,9 @@ class ClosePeriodTool:
           }
           for d in exc.gate.stranded_obligation_sample
         ]
+      if exc.gate.reconciling_item_count:
+        payload["reconciling_item_count"] = exc.gate.reconciling_item_count
+        payload["reconciling_item_sample"] = list(exc.gate.reconciling_item_sample)
       if exc.gate.sync_stale_days is not None:
         payload["sync_stale_days"] = exc.gate.sync_stale_days
       return payload
@@ -621,6 +648,10 @@ class BackfillPlanHistoryTool:
 - allow_stranded_obligations (optional): override the stranded-obligation
   gate on each reclose — only when a matured classified obligation with
   no drafted entry sits inside the backfill window.
+- allow_reconciling_items (optional): override the reconciling-item gate
+  on each reclose — only when an event inside the backfill window is
+  still flagged as changed upstream and you have decided not to resolve
+  it first.
 - restamp (optional, default false): also re-derive months that already
   have canonical sets — the healing pass after an engine improvement.
   Advance start_period between chunks (a restamp run is not
@@ -664,6 +695,14 @@ class BackfillPlanHistoryTool:
               "Override the sync-currency gate on each reclose (default "
               "false). Rarely needed — historical months predate the last "
               "sync in the normal case."
+            ),
+          },
+          "allow_reconciling_items": {
+            "type": "boolean",
+            "description": (
+              "Override the reconciling-item gate on each reclose "
+              "(default false). Only needed when an event inside the "
+              "backfill window is still flagged as changed upstream."
             ),
           },
           "allow_stranded_obligations": {
@@ -713,6 +752,7 @@ class BackfillPlanHistoryTool:
       allow_stranded_obligations=bool(
         arguments.get("allow_stranded_obligations", False)
       ),
+      allow_reconciling_items=bool(arguments.get("allow_reconciling_items", False)),
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
     )

@@ -271,6 +271,7 @@ class PeriodCloseService:
     last_sync_at: datetime | None,
     allow_stale_sync: bool = False,
     allow_stranded_obligations: bool = False,
+    allow_reconciling_items: bool = False,
     note: str | None = None,
   ) -> PeriodCloseResult:
     """Close `period` atomically. See class docstring for the full flow."""
@@ -283,6 +284,7 @@ class PeriodCloseService:
       last_sync_at=last_sync_at,
       allow_stale_sync=allow_stale_sync,
       allow_stranded_obligations=allow_stranded_obligations,
+      allow_reconciling_items=allow_reconciling_items,
     )
     if not gate.is_closeable:
       raise CloseGateFailed(gate)
@@ -381,6 +383,9 @@ class PeriodCloseService:
       allow_stale_sync=allow_stale_sync and has_sync_connection,
       stranded_overridden_count=(
         gate.stranded_obligation_count if allow_stranded_obligations else 0
+      ),
+      reconciling_overridden_count=(
+        gate.reconciling_item_count if allow_reconciling_items else 0
       ),
     )
 
@@ -800,6 +805,7 @@ class PeriodCloseService:
     *,
     allow_stale_sync: bool,
     stranded_overridden_count: int = 0,
+    reconciling_overridden_count: int = 0,
   ) -> str | None:
     """Annotate the audit note when a close gate was overridden.
 
@@ -814,6 +820,11 @@ class PeriodCloseService:
       suffixes.append(
         "[stranded-obligation gate overridden — "
         f"{stranded_overridden_count} undrafted obligation(s) omitted]"
+      )
+    if reconciling_overridden_count > 0:
+      suffixes.append(
+        "[reconciling-item gate overridden — "
+        f"{reconciling_overridden_count} unresolved item(s) left undecided]"
       )
     if not suffixes:
       return note

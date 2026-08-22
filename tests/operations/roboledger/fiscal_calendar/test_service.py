@@ -27,6 +27,29 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   InvalidCloseTargetError,
 )
 
+
+def set_reconciling_items(monkeypatch, rows) -> None:
+  """Point the gate's reconciling-item lookup at a fixed answer."""
+  monkeypatch.setattr(
+    "robosystems.operations.roboledger.commands.reconciling_items."
+    "find_unresolved_reconciling_items",
+    lambda session, *, as_of: list(rows),
+  )
+
+
+@pytest.fixture(autouse=True)
+def _no_reconciling_items(monkeypatch):
+  """Answer the reconciling-item lookup without pretending to run its SQL.
+
+  Gate 4c joins events to entries, which the in-memory stub below cannot
+  model. Teaching the stub to fake that join would produce tests that agree
+  with the stub rather than with Postgres, so the lookup is replaced at its
+  boundary here; the query itself is exercised against a real database in
+  `tests/operations/roboledger/commands/test_reconciling_items_db.py`.
+  """
+  set_reconciling_items(monkeypatch, [])
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # In-memory session stub
 # ────────────────────────────────────────────────────────────────────────────
@@ -576,6 +599,42 @@ class TestCloseableGate:
     )
     assert not result.is_closeable
     assert CloseableGateResult.SEQUENCE in result.blockers
+
+  def test_unresolved_reconciling_items_block_the_close(self, monkeypatch):
+    svc, session = self._init()
+    set_reconciling_items(monkeypatch, [("evt_1", "Expense_1721"), ("evt_2", None)])
+
+    result = svc.closeable_gate(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      today=date(2026, 2, 1),
+    )
+
+    assert not result.is_closeable
+    assert CloseableGateResult.RECONCILING_ITEMS in result.blockers
+    assert result.reconciling_item_count == 2
+    # The sample names the source identifier where there is one, so the
+    # operator can find the transaction without a second call.
+    assert result.reconciling_item_sample == ["Expense_1721", "evt_2"]
+
+  def test_reconciling_items_bypass_still_reports_what_was_skipped(self, monkeypatch):
+    svc, session = self._init()
+    set_reconciling_items(monkeypatch, [("evt_1", "Expense_1721")])
+
+    result = svc.closeable_gate(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      today=date(2026, 2, 1),
+      allow_reconciling_items=True,
+    )
+
+    assert result.is_closeable
+    assert CloseableGateResult.RECONCILING_ITEMS not in result.blockers
+    # Bypassing decides not to stop; it does not decide to forget. The count
+    # is what the close audit note records.
+    assert result.reconciling_item_count == 1
 
   def test_period_incomplete(self):
     svc, session = self._init()
