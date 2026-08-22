@@ -125,7 +125,7 @@ dev = [
     # are the dogfooding surface and should exercise the current client, and
     # uv.lock is what makes a given checkout reproducible. <2 is the SDK's
     # post-1.0 semver boundary.
-    "robosystems-client>=1.8.1,<2.0",
+    "robosystems-client>=1.11.0,<2.0",
 
     # Testing framework
     "pytest>=9.0.0,<10.0",
