@@ -75,8 +75,9 @@ A typed envelope with:
 - information_model (concept + member arrangement)
 - artifact (topic, mechanics — typed per block_type)
 - elements, connections, facts (bundled atoms)
-- rules, dimensions, fact_set, verification_results (empty when the block
-  has none)
+- rules, fact_set, verification_results (empty when the block has none)
+- dimensions — always empty; the dimension catalog is not wired up yet, so
+  an empty list here says nothing about the block
 
 **RELATED TOOLS:**
 - list-information-blocks — browse available blocks

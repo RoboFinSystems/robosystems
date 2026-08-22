@@ -51,6 +51,7 @@ class LiveFinancialStatementTool(BaseTool):
 - Only available on RoboLedger tenant entity graphs (not SEC shared repo)
 
 **PARAMETERS:**
+- `statement_type` (required) — one of the four below
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - equity_statement — Equity components and changes
@@ -181,10 +182,12 @@ class FinancialStatementAnalysisTool(BaseTool):
 - Tenant graph: `report_id` REQUIRED.
 
 **PARAMETERS:**
-- income_statement, balance_sheet, cash_flow_statement, equity_statement
-- annual — 10-K/20-F/40-F forms, duration facts
-- quarterly — 10-Q + annuals (international filers), duration facts
-- instant — point-in-time facts (balance sheet default)
+- `statement_type` (required) — one of income_statement, balance_sheet,
+  cash_flow_statement, equity_statement
+- `period_type` — annual (10-K/20-F/40-F, duration facts), quarterly (10-Q
+  plus annuals for international filers, duration facts), or instant
+  (point-in-time facts; the balance-sheet default)
+- `ticker` / `report_id` — which one is required depends on the graph; see NOTES
 
 **RETURNS:**
 - Deduplicated facts (qname, name, value, end_date) ordered by end_date DESC
