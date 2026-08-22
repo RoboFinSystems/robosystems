@@ -201,8 +201,8 @@ LBUG_NODE_TYPE=writer|shared_master|shared_replica
 CLUSTER_TIER=ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
 LBUG_DATABASE_PATH=/data/lbug-dbs
 
-# Capacity Settings
-LBUG_MAX_DATABASES_PER_NODE
+# Capacity Settings — per-node database count is not an env var; it comes
+# from the tier's `max_databases` in .github/configs/graph.yml
 LBUG_MAX_MEMORY_MB
 LBUG_MAX_MEMORY_PER_DB_MB  # 0 = auto-calculate
 

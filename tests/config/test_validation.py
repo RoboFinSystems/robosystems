@@ -29,7 +29,6 @@ class MockEnvConfig:
     self.GRAPH_API_URL = "http://localhost:8001"
     self.GRAPH_API_KEY = None
     self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
-    self.LBUG_MAX_DATABASES_PER_NODE = 100
     self.VALKEY_URL = "redis://localhost:6379"
     self.LOG_FILE_PATH = "stdout"
     self.DEBUG = False
