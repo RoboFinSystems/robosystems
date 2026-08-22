@@ -1,6 +1,7 @@
 """Schema manager tests."""
 
 import pytest
+from pydantic import ValidationError
 
 from robosystems.schemas.runtime.manager import (
   SchemaCompatibility,
@@ -241,3 +242,22 @@ class TestConvenienceFunctions:
   def test_create_accounting_schema(self):
     schema = create_accounting_schema()
     assert len(schema.nodes) > 0
+
+
+@pytest.mark.unit
+def test_the_advertised_extensions_are_the_ones_create_accepts():
+  """The listing and the validator must not drift apart.
+
+  /v1/graphs/extensions advertised `knowledge`, which EntityCreate rejects
+  with a 422 — a value offered by one half of the API and refused by the
+  other. `knowledge` is a real schema; it is just installed on a subgraph
+  rather than composed into an entity graph.
+  """
+  from robosystems.models.api.entity_graph import EntityCreate
+  from robosystems.schemas.runtime.manager import ENTITY_GRAPH_EXTENSIONS
+
+  for name in ENTITY_GRAPH_EXTENSIONS:
+    assert EntityCreate(name="probe", extensions=[name]).extensions == [name]
+
+  with pytest.raises(ValidationError):
+    EntityCreate(name="probe", extensions=["knowledge"])

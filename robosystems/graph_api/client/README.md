@@ -175,7 +175,6 @@ GRAPH_API_URL=http://localhost:8001      # dev / fallback endpoint
 GRAPH_API_KEY=                           # cluster API key
 GRAPH_RETRY_LOGIC_ENABLED=true
 GRAPH_CIRCUIT_BREAKERS_ENABLED=true
-GRAPH_HEALTH_CHECKS_ENABLED=true
 GRAPH_REDIS_CACHE_ENABLED=true           # route caching; name kept for compatibility
 SHARED_MASTER_READS_ENABLED=             # allow shared reads to fall back to the master
 ```

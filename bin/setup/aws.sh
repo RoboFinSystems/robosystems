@@ -216,6 +216,26 @@ function create_ssm_feature_flags() {
         # Seeded at its code default purely so it is discoverable in
         # `just ssm-list <env> features` — a kill switch you cannot find is not one.
         "GRAPH_USAGE_ALERTS_ENABLED=true"
+        # Identity and access controls. Seeded at their code defaults so an
+        # operator can find them — these are the switches you reach for during
+        # an incident, and one you cannot see in `just ssm-list` is not a
+        # switch. Changing a value here changes nothing until an environment
+        # is bootstrapped; the code default already governs today.
+        "PASSWORD_AUTH_ENABLED=true"
+        "PASSKEYS_ENABLED=false"
+        "MFA_ENFORCEMENT_ENABLED=false"
+        "SSO_OIDC_ENABLED=false"
+        "SCIM_ENABLED=false"
+        # Kill switch for the daily storage-reclaim sweep, which deletes data.
+        # Read per run rather than at import, so flipping it takes effect on
+        # the next run.
+        "STORAGE_RECLAIM_ENABLED=true"
+        "CONNECTION_EXTERNAL_ENABLED=true"
+        "SEMANTIC_MEMORY_ENABLED=false"
+        "MCP_GRAPHQL_ENABLED=true"
+        "OPERATOR_POST_ENABLED=true"
+        "EXTENSIONS_PROMOTION_AUTO_DISPATCH=false"
+        "INTUIT_REPORTS_TESTING_MIGRATION=true"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"
         "MCP_SEMANTIC_MEMORY_ENABLED=false"
