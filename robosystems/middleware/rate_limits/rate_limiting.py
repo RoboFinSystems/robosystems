@@ -537,9 +537,9 @@ def scim_ip_rate_limit_dependency(request: Request):
 
   The per-token bucket above keys off the *presented* bearer, so each newly
   invented bogus bearer would otherwise mint a fresh full-size bucket; this
-  IP-keyed backstop caps that churn before authentication. Sized above
-  RATE_LIMIT_SCIM so a legitimate IdP burst exhausts its per-token budget
-  first, never this one.
+  IP-keyed backstop caps that churn before authentication. Sized above the
+  per-token ``scim`` limit so a legitimate IdP burst exhausts its per-token
+  budget first, never this one.
   """
   limit = BURST_LIMITS["scim_ip"]  # 300/minute per IP
   return create_custom_rate_limit_dependency(
