@@ -142,11 +142,6 @@ class TestMultiTenantUtils:
     with pytest.raises(ValueError, match="contains invalid characters"):
       MultiTenantUtils.validate_database_creation("invalid.graph@id")
 
-  def test_check_database_limits(self):
-    """Test database limits checking (placeholder implementation)."""
-    # This should not raise an exception with the current placeholder implementation
-    MultiTenantUtils.check_database_limits()
-
   def test_log_database_operation_calls_correctly(self):
     """Test logging database operations calls the logger correctly."""
     # Test that the method executes without error - actual logging testing

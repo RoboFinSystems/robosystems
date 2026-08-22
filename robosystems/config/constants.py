@@ -101,12 +101,6 @@ JWT_REVOCATION_GRACE_SECONDS = (
 JWT_REVOCATION_KEY_PREFIX = "revoked_jwt:"
 JWT_DEVICE_FINGERPRINT_ENABLED = True  # Enable device fingerprinting for token binding
 
-# Rate Limiting Defaults
-JWT_REFRESH_RATE_LIMIT_DEFAULT = 20  # Requests per minute for token refresh
-AUTH_RATE_LIMIT_LOGIN_DEFAULT = 5  # Login attempts per 5 minutes
-AUTH_RATE_LIMIT_REGISTER_DEFAULT = 3  # Registration attempts per hour
-AUTH_RATE_LIMIT_WINDOW_LOGIN = 300  # 5 minutes for login rate limiting
-AUTH_RATE_LIMIT_WINDOW_REGISTER = 3600  # 1 hour for registration rate limiting
 
 # =============================================================================
 # GRAPH API CONFIGURATION
@@ -152,14 +146,6 @@ INGESTION_LOCK_TTL = 3600  # 1 hour - for graph materialization locks
 
 # S3 bucket prefix (fixed naming convention)
 AWS_S3_PREFIX = "robosystems"
-
-# =============================================================================
-# SSE RATE LIMITING
-# =============================================================================
-
-# Server-Sent Events connection limits
-RATE_LIMIT_SSE_CONNECTIONS = 10
-RATE_LIMIT_SSE_CONNECTIONS_WINDOW = 60  # seconds
 
 # =============================================================================
 # DATA PROCESSING CONFIGURATION

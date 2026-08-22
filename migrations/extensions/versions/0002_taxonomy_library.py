@@ -22,7 +22,7 @@ Schema changes (public schema):
 - CREATE TABLE public.element_traits (element ↔ trait many-to-many junction)
 - CREATE TABLE public.classifications (association structural patterns —
   3 categories: concept_arrangement, member_arrangement, named_disclosure)
-- DROP elements.classification + sub_classification (concocted columns;
+- DROP elements.classification + sub_classification (not XBRL-intrinsic;
   replaced by element_traits junction rows in the
   ``elementsOfFinancialStatements`` category)
 - ADD elements.substitution_group (XBRL intrinsic; previously missing)
@@ -474,7 +474,7 @@ def _restore_narrow_tenant_checks(conn, schema: str) -> None:
 
 
 def _drop_old_element_columns(conn, schema: str) -> None:
-  """Drop the concocted classification columns from a tenant's elements table."""
+  """Drop the non-XBRL classification columns from a tenant's elements table."""
   for column, constraint, index in (
     ("classification", "check_element_classification", "idx_elements_classification"),
     ("sub_classification", None, None),
@@ -893,7 +893,7 @@ def upgrade() -> None:
   conn = op.get_bind()
 
   # ──────────────────────────────────────────────────────────────────────
-  # 1. Drop concocted classification columns + their CHECK + index.
+  # 1. Drop the non-XBRL classification columns + their CHECK + index.
   # ──────────────────────────────────────────────────────────────────────
   # These columns live on the 0001 schema. Replaced by
   # element_traits junction rows in the

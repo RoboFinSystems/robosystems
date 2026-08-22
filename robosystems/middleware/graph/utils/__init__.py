@@ -82,15 +82,6 @@ class MultiTenantUtils:
   log_cluster_operation = staticmethod(log_cluster_operation)
   get_migration_status = staticmethod(get_migration_status)
 
-  @staticmethod
-  def check_database_limits() -> None:
-    """Check if the current number of databases exceeds the configured limit.
-
-    Currently implemented as a no-op. Database limits are enforced at the
-    instance level based on LBUG_MAX_DATABASES_PER_NODE.
-    """
-    pass
-
 
 __all__ = [
   "FULL_SUBGRAPH_PATTERN",
