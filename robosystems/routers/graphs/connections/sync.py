@@ -51,7 +51,7 @@ router = APIRouter()
 @router.post(
   "/{connection_id}/sync",
   summary="Sync Connection",
-  description="SEC: downloads latest EDGAR filings (5-10 min). QuickBooks: fetches transactions, balances, and chart of accounts. Async — returns an `OperationEnvelope` with the provider task id; completion is reflected in the connection's `last_sync` timestamp. Supports `Idempotency-Key`.",
+  description="QuickBooks: fetches transactions, balances, and chart of accounts; async, and completion is reflected in the connection's `last_sync` timestamp. SEC connections have nothing to pull — filings are refreshed nightly into the shared SEC repository — and return a message saying so. Returns an `OperationEnvelope`; supports `Idempotency-Key`.",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="syncConnection",

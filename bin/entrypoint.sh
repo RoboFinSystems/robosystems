@@ -180,14 +180,12 @@ configure_dagster() {
 case $DOCKER_PROFILE in
   "api")
     echo "Starting API service..."
-    # F6: --proxy-headers alone trusts X-Forwarded-For from ANY peer only when
-    # --forwarded-allow-ips permits it; uvicorn defaults that allow-list to
-    # 127.0.0.1, so behind the ALB every external client collapses to the ALB's
-    # IP and the per-IP / brute-force limiters degrade to one shared bucket.
-    # Set FORWARDED_ALLOW_IPS to the ALB/VPC CIDR (e.g. "10.0.0.0/16") so the
-    # real client IP is recovered. NEVER set it to "*" — that lets any caller
-    # spoof X-Forwarded-For and fully bypass brute-force protection. Default
-    # stays 127.0.0.1 (behavior-preserving) until the deployment sets the CIDR.
+    # FORWARDED_ALLOW_IPS must name the trusted proxy range, so uvicorn will
+    # read X-Forwarded-For from it and per-IP limits see the real client rather
+    # than the load balancer. The deployment sets it to the VPC CIDR; the
+    # 127.0.0.1 default here is for running without a proxy in front.
+    # It must never be "*" — the allow-list is what makes the header
+    # trustworthy, and a wildcard accepts it from anyone.
     exec uv run uvicorn main:app \
       --host 0.0.0.0 \
       --port 8000 \

@@ -54,9 +54,10 @@ class AdvancedAuthProtection:
 
   # Progressive delay configuration (seconds)
   PROGRESSIVE_DELAYS = {
-    0: 0,  # no failures: no delay. Explicit — the lookup floors to the
-    #       highest tier at or below the count, so a missing 0 charges a
-    #       fresh caller the 8th-failure delay.
+    0: 0,  # no failures: no delay. Every key must be present and
+    #       contiguous — the lookup is an exact-key get whose fallback is the
+    #       *highest* delay, so any gap charges that caller the 8th-failure
+    #       delay rather than the next tier down.
     1: 1,  # 1st failure: 1 second
     2: 2,  # 2nd failure: 2 seconds
     3: 5,  # 3rd failure: 5 seconds

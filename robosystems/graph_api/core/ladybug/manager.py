@@ -45,9 +45,10 @@ def counts_toward_capacity(db_name: str) -> bool:
   a node overfill, and a name counted but not exempt would be refused a slot
   it already effectively holds.
 
-  Not a primary: a subgraph (``{parent}_{name}``) or a shared repository
-  (``sec_historical``), both of which ride their parent's slot, and the
-  blue-green temporaries, which exist only for the length of a swap.
+  Not a primary: a subgraph (``{parent}_{name}``), which rides its parent's
+  slot, and the blue-green temporaries, which exist only for the length of a
+  swap. A shared repository *does* count — ``sec`` occupies a slot like any
+  other primary; only its subgraphs (``sec_historical``) are exempt.
   """
   return "_" not in db_name and not db_name.endswith(BLUE_GREEN_SUFFIXES)
 

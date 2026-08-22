@@ -52,10 +52,14 @@ class CypherTool(BaseTool):
     """Get the tool definition for Cypher queries."""
     description = """Execute read-only Cypher queries against the graph database.
 
-**OVERVIEW:**
-Query the graph using Cypher syntax. Use `get-graph-schema` first to discover available node types and relationships.
+**WHEN TO USE:**
+- To traverse the graph directly when no typed tool covers the question
+- Call `get-graph-schema` first to discover node types and relationships
 
-**QUERY BEST PRACTICES:**
+**RETURNS:** The rows the query RETURNs, as records. Read-only: the write
+verbs are rejected before execution, and query complexity is monitored.
+
+**NOTES:**
 - Always include LIMIT clause for large result sets
 - Use WHERE clauses to filter data effectively
 - Check for NULL values: WHERE n.property IS NOT NULL
@@ -63,12 +67,8 @@ Query the graph using Cypher syntax. Use `get-graph-schema` first to discover av
 - When joining multiple relationships from the same node, use comma-separated patterns
   in a SINGLE MATCH clause: `MATCH (n)-[:R1]->(a), (n)-[:R2]->(b)` (not separate MATCH clauses)
 
-**SECURITY:**
-- Only read operations allowed (MATCH, RETURN, WHERE, etc.)
-- No write operations (CREATE, SET, DELETE, etc.)
-- Query complexity is automatically monitored
 
-**NOTES:**
+**WORKFLOW:**
 ```cypher
 // Count nodes by type
 MATCH (n)
@@ -83,7 +83,8 @@ MATCH (a)-[r]->(b)
 RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS to_type
 ```
 
-**NOTES:** Use `get-graph-schema` to understand what's in the graph before writing complex queries."""
+**RELATED TOOLS:** `get-graph-schema` for what is in the graph, and
+`get-example-queries` for patterns that already work against it."""
 
     if self._has_ledger_spine():
       description += "\n\n" + LEDGER_STATUS_GUIDANCE

@@ -47,7 +47,7 @@ class SearchDocumentsTool(_SearchToolMixin):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "search-documents",
-      "description": """Search across documents using hybrid BM25 + KNN search. Covers SEC filing narratives, user-uploaded documents (policies, procedures, notes), and any other indexed content.
+      "description": """Search across documents. Keyword (BM25) by default; set `semantic=true` to add KNN. Covers SEC filing narratives, user-uploaded documents (policies, procedures, notes), and any other indexed content.
 
 **WHEN TO USE:**
 - To find accounting policies, close procedures, or reference documents
@@ -56,14 +56,15 @@ class SearchDocumentsTool(_SearchToolMixin):
 - For cross-company topic search on shared repositories (e.g., "which companies mention tariff risk?")
 
 **PARAMETERS:**
-- User-uploaded documents (policies, procedures, notes) — created via create-document
-- SEC filing text blocks and narrative sections
-- iXBRL disclosure sections with embedded XBRL facts
+- `query` (required) — the search text
+- `semantic` — adds KNN to the BM25 pass; defaults to false, so a plain call
+  is keyword-only
+- `entity`, `form_type`, `section`, `element`, `fiscal_year`, `size` — filters
 
-**HOW IT DIFFERS FROM other tools:**
-- read-graph-cypher: queries structured data (numbers, relationships)
-- list-documents: browses documents by metadata (no content search)
-- search-documents: finds content by meaning using hybrid search
+**RELATED TOOLS:**
+- read-graph-cypher — structured data (numbers, relationships), not prose
+- list-documents — browses by metadata; does not search content
+- get-document-section / get-document — retrieve what a hit points at
 
 **RETURNS:**
 - Ranked results with relevance scores and text snippets
@@ -71,12 +72,13 @@ class SearchDocumentsTool(_SearchToolMixin):
 - For user docs, use get-document to retrieve the complete document
 - iXBRL results include xbrl_elements for graph cross-reference
 
-**GRAPH CROSS-REFERENCE (iXBRL disclosures):**
-- iXBRL results contain xbrl_elements (e.g., us-gaap:Goodwill, us-gaap:Revenues)
-- Use resolve-element to look up details, then read-graph-cypher for structured values
-- Bridges unstructured narrative context ↔ structured financial facts
-
 **NOTES:**
+- Searches user-uploaded documents (created via create-document), SEC filing
+  text blocks and narrative sections, and iXBRL disclosure sections
+- iXBRL results carry xbrl_elements (e.g. us-gaap:Goodwill). Look one up with
+  resolve-element, then read-graph-cypher for its structured values — this is
+  the bridge from narrative context to financial facts. Note resolve-element
+  is only published on graphs with semantic enrichment
 - Natural language queries work well ("depreciation policy", "month end close procedures")
 - Use entity filter to focus on one company's filings
 - Use section filter (item_1a, item_7) to target specific filing sections""",

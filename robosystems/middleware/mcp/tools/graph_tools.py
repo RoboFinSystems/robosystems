@@ -321,12 +321,15 @@ class DeleteSubgraphTool:
         "- To permanently remove a subgraph that is no longer needed\n"
         "- Requires admin role on the parent, and cannot target the parent "
         "graph itself\n\n"
-        "**RETURNS:** Confirmation of the deletion, and the backup id when "
-        "`backup_first` is set.\n\n"
+        "**RETURNS:** Confirmation of the deletion, echoing back the "
+        "`backup_first` flag. No backup is taken — see NOTES.\n\n"
         "**PARAMETERS:**\n"
         "- subgraph_id: Full id like `{parent_id}_{name}`\n"
         "- force: Delete even if the subgraph contains data (default false)\n"
-        "- backup_first: Create a backup before deletion (default true)"
+        "- backup_first: Accepted but NOT implemented; it takes no backup\n\n"
+        "**NOTES:** This is irreversible. `backup_first` does not protect the "
+        "data and never has — to keep a copy, run `create-backup` on the "
+        "parent graph first and confirm it succeeded."
       ),
       "inputSchema": {
         "type": "object",

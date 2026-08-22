@@ -54,6 +54,47 @@ REQUIRED_SECTIONS = ("WHEN TO USE", "RETURNS")
 _SINGLE_LINE_EXEMPT: frozenset[str] = frozenset()
 
 
+def _string_env(tree: ast.Module) -> dict[str, str]:
+  """Every name in a module bound to a resolvable string, at any depth.
+
+  Descriptions are not always written inline: one is assembled into a local
+  variable, another concatenates a shared block of guidance. Both are still
+  static text, and skipping them is how the two tools least like the others
+  stayed unexamined.
+  """
+  env: dict[str, str] = {}
+  for _ in range(3):  # a few passes, so a name defined from another resolves
+    for node in ast.walk(tree):
+      if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        continue
+      target = node.targets[0]
+      if not isinstance(target, ast.Name):
+        continue
+      value = _resolve(node.value, env)
+      if value is not None:
+        env[target.id] = value
+  return env
+
+
+def _resolve(node: ast.AST, env: dict[str, str]) -> str | None:
+  """A string literal, a name bound to one, or a concatenation of those."""
+  if isinstance(node, ast.Constant) and isinstance(node.value, str):
+    return node.value
+  if isinstance(node, ast.Name):
+    return env.get(node.id)
+  if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+    left, right = _resolve(node.left, env), _resolve(node.right, env)
+    return None if left is None or right is None else left + right
+  if isinstance(node, ast.JoinedStr):  # an f-string: keep the static parts
+    parts = [
+      v.value
+      for v in node.values
+      if isinstance(v, ast.Constant) and isinstance(v.value, str)
+    ]
+    return "".join(parts) if parts else None
+  return None
+
+
 def _tool_descriptions() -> dict[str, tuple[str, str]]:
   """Every ``{"name": ..., "description": ...}`` literal under ``tools/``.
 
@@ -61,8 +102,17 @@ def _tool_descriptions() -> dict[str, tuple[str, str]]:
   client to construct, and the shape of the string does not depend on it.
   """
   found: dict[str, tuple[str, str]] = {}
-  for path in sorted(TOOLS_DIR.glob("*.py")):
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+  trees = {
+    path: ast.parse(path.read_text(encoding="utf-8"))
+    for path in sorted(TOOLS_DIR.rglob("*.py"))
+  }
+  # One symbol table for the package: shared blocks of guidance live in
+  # constants.py and are concatenated into descriptions elsewhere.
+  env: dict[str, str] = {}
+  for tree in trees.values():
+    env.update(_string_env(tree))
+
+  for path, tree in trees.items():
     for node in ast.walk(tree):
       if not isinstance(node, ast.Dict):
         continue
@@ -81,11 +131,8 @@ def _tool_descriptions() -> dict[str, tuple[str, str]]:
         continue
       if not (isinstance(name_node, ast.Constant) and isinstance(name_node.value, str)):
         continue
-      try:
-        description = ast.literal_eval(desc_node)
-      except ValueError:
-        continue  # an f-string or a computed value; not a static contract
-      if isinstance(description, str):
+      description = _resolve(desc_node, env)
+      if description is not None:
         found[name_node.value] = (description, path.name)
   return found
 
@@ -106,9 +153,14 @@ DESCRIPTIONS = _tool_descriptions()
 @pytest.mark.unit
 def test_the_registry_is_discoverable():
   """A parse failure here would make every test below vacuously pass."""
-  assert len(DESCRIPTIONS) >= 40, (
-    f"only found {len(DESCRIPTIONS)} tool descriptions — the parser probably "
-    "stopped matching the definition shape"
+  # Pinned, not a floor. A floor with slack in it is how a tool drops out of
+  # coverage unnoticed: two did, by writing their description as a variable
+  # and a concatenation rather than a literal, and both were violating the
+  # contract at the time. Raise this deliberately when a tool is added.
+  assert len(DESCRIPTIONS) == 53, (
+    f"found {len(DESCRIPTIONS)} tool descriptions, expected 53. If a tool was "
+    "added or removed, update this number; if not, the parser has stopped "
+    "matching a definition shape and those tools are now unguarded."
   )
 
 

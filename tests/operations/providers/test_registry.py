@@ -131,6 +131,25 @@ class TestProviderRegistryInit:
     # returns immediately and the dispatcher, not a run, releases the lock.
     assert registry._providers["external"]["starts_async_run"] is False
 
+  def test_only_quickbooks_hands_the_sync_lock_to_a_run(self):
+    """Which providers release the lock themselves is one token away from a
+    data race, and nothing else asserts it.
+
+    quickbooks releases the per-connection lock from `qb_load` when its
+    Dagster run ends. Flipping this to False would have the dispatcher release
+    the lock while that run is still writing — the concurrent-UPSERT the lock
+    exists to prevent — and every other test would stay green.
+    """
+    env_mock = _make_mock_env(
+      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
+    )
+    with _registry_context(env_mock) as (registry, _):
+      assert registry.starts_async_run("quickbooks") is True
+      assert registry.starts_async_run("sec") is False
+      assert registry.starts_async_run("external") is False
+      # An unregistered name must not claim to start a run.
+      assert registry.starts_async_run("nonesuch") is False
+
   def test_registry_does_not_register_external_when_disabled(self):
     """External provider is absent when CONNECTION_EXTERNAL_ENABLED=False."""
     env_mock = _make_mock_env(external_enabled=False)

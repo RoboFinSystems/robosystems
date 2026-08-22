@@ -53,11 +53,10 @@ class ExampleQueriesTool(BaseTool):
 **RETURNS:**
 List of example queries with explanations, tailored to the actual schema present in this graph.
 
-**BENEFITS:**
-- See real working queries for this specific graph
-- Learn property names and relationships
-- Understand query patterns that work
-- Copy and modify examples for your needs
+**NOTES:**
+- The examples are real working queries for this specific graph, so they
+  carry its actual property names and relationships
+- Copy and modify them rather than writing a traversal from scratch
 
 """
       + QUERY_PATTERN_GUIDANCE

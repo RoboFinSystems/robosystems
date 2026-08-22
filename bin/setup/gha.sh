@@ -413,7 +413,7 @@ function setup_full_config() {
     gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
     gh variable set OPENSEARCH_VERSION_PROD --body "2.19"
     # Scaling / HA — minimal single-node install. AZ count rides the workflow default;
-    # set the switches (count/zone) to roll out Multi-AZ later (see specs/opensearch-scaling-ha).
+    # set the switches (count/zone) to roll out Multi-AZ later.
     gh variable set OPENSEARCH_INSTANCE_COUNT_PROD --body "1"
     gh variable set OPENSEARCH_ZONE_AWARENESS_PROD --body "false"
     if $setup_staging; then
