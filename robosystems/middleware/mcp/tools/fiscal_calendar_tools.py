@@ -363,24 +363,39 @@ The receipt:
         "message": "User context required to close a period.",
       }
 
-    dispatch = await enqueue_task(
-      task_type="period_close",
-      graph_id=graph_id,
-      user_id=str(user_id),
-      params={
+    try:
+      dispatch = await enqueue_task(
+        task_type="period_close",
+        graph_id=graph_id,
+        user_id=str(user_id),
+        params={
+          "period": period,
+          "actor_id": str(user_id),
+          "actor_type": "agent",
+          "allow_stale_sync": bool(arguments.get("allow_stale_sync", False)),
+          "allow_stranded_obligations": bool(
+            arguments.get("allow_stranded_obligations", False)
+          ),
+          "allow_reconciling_items": bool(
+            arguments.get("allow_reconciling_items", False)
+          ),
+          "note": arguments.get("note"),
+        },
+      )
+    except Exception as exc:
+      # Nothing was queued, which makes this the one failure here that is
+      # safe to retry — and worth saying so, because every other message
+      # this tool returns says the opposite.
+      logger.warning("close-period could not dispatch: %s", exc, exc_info=True)
+      return {
+        "error": "dispatch_failed",
         "period": period,
-        "actor_id": str(user_id),
-        "actor_type": "agent",
-        "allow_stale_sync": bool(arguments.get("allow_stale_sync", False)),
-        "allow_stranded_obligations": bool(
-          arguments.get("allow_stranded_obligations", False)
+        "message": (
+          "The close could not be handed to the worker, so it has NOT "
+          "started and nothing was written. Retry; if it keeps failing, "
+          "the task queue is unavailable."
         ),
-        "allow_reconciling_items": bool(
-          arguments.get("allow_reconciling_items", False)
-        ),
-        "note": arguments.get("note"),
-      },
-    )
+      }
     operation_id = dispatch["operation_id"]
 
     storage = get_event_storage()
@@ -392,7 +407,19 @@ The receipt:
     started_at = loop.time()
     status = None
     while loop.time() < deadline:
-      metadata = await storage.get_operation_metadata(operation_id)
+      try:
+        metadata = await storage.get_operation_metadata(operation_id)
+      except Exception as exc:
+        # The close is already running. Losing sight of it is a reporting
+        # problem, not a reason to suggest doing it again — fall through to
+        # the handback, which sends the operator to the period itself.
+        logger.warning(
+          "close-period lost track of operation %s: %s",
+          operation_id,
+          exc,
+          exc_info=True,
+        )
+        break
       status = metadata.status if metadata else None
       if metadata and status == OperationStatus.COMPLETED:
         # The task already shaped this — return it as it stands so the

@@ -338,6 +338,45 @@ class TestClosePeriodToolHandback:
     assert "get-period-close-status" in result["message"]
 
   @pytest.mark.asyncio
+  async def test_a_dispatch_that_never_happened_is_the_one_safe_retry(self):
+    """Every other message this tool returns says not to re-run the close.
+    This one has to say the opposite, because nothing was queued and nothing
+    was written — and getting that backwards either strands the period or
+    invites a second close."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    enqueue = AsyncMock(side_effect=ConnectionError("queue unavailable"))
+
+    with (
+      patch.object(ClosePeriodTool, "_gate_check", return_value=None),
+      patch("robosystems.worker.client.enqueue_task", enqueue),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["error"] == "dispatch_failed"
+    assert "has NOT" in result["message"]
+    assert "Retry" in result["message"]
+    # No operation id, because there is no operation to look up.
+    assert "operation_id" not in result
+
+  @pytest.mark.asyncio
+  async def test_losing_sight_of_a_running_close_does_not_invite_a_retry(self):
+    """By the time polling fails the close is already running. A reporting
+    failure must not be reported as a reason to do it again."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+
+    class _Broken:
+      async def get_operation_metadata(self, operation_id):
+        raise ConnectionError("event storage unavailable")
+
+    with _patch_dispatch(_Broken()):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["status"] == "in_progress"
+    assert result["operation_id"] == "op_close_1"
+    assert "error" not in result
+    assert "get-period-close-status" in result["message"]
+
+  @pytest.mark.asyncio
   async def test_a_cancelled_operation_says_so(self):
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
     storage = _Storage((OperationStatus.CANCELLED, None))

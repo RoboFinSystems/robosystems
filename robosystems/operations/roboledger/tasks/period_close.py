@@ -85,7 +85,11 @@ class PeriodCloseTask(BaseTask):
 
     period = self.params["period"]
     graph_id = self.graph_id
-    assert graph_id is not None  # every close is graph-scoped
+    if graph_id is None:
+      # BaseTask allows a graph-less task; a close is never one. Raising
+      # rather than asserting because `-O` strips asserts, and the failure
+      # this guards would otherwise be a confusing None in a session call.
+      raise ValueError("period_close requires a graph_id")
 
     service = FiscalCalendarService()
     with platform_session() as platform_db, extensions_session(graph_id) as session:
