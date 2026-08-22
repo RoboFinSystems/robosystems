@@ -1,6 +1,6 @@
 """The oracle — classify a cross-tenant response as PASS / LEAK / … .
 
-The load-bearing idea (spec §4): a status code alone cannot tell a leak from
+The load-bearing idea: a status code alone cannot tell a leak from
 a correctly-scoped empty result, and it passes the known real leak shape (a
 200 carrying another tenant's `org_name`). So the verdict is computed by
 comparing the attacker's response against what the *owner* legitimately sees
