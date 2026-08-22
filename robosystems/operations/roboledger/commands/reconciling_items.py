@@ -294,15 +294,29 @@ def _event_entries(session: Session, event_id: str) -> list[Entry]:
 
 
 def _restate_blockers(
-  session: Session, event: Event, entries: list[Entry]
+  session: Session, event: Event, entries: list[Entry], accepted: dict
 ) -> list[str]:
   """Everything that would make regenerating these entries unsafe.
 
   Each is a case where deleting the current rows would either fail against
-  a foreign key or quietly take something else with it.
+  a foreign key, quietly take something else with it, or leave the event
+  disagreeing with the rows beneath it.
   """
   blockers: list[str] = []
   entry_ids = [str(e.id) for e in entries]
+
+  # A terminal event whose accepted payload drafts its entries would end up
+  # `fulfilled` over draft rows: the handler only ever upgrades status to
+  # fulfilled, never back down, and downgrading a terminal state silently
+  # would be the worse answer. Unreachable through QuickBooks — the loader
+  # derives this status from the source, and QuickBooks always posts — but
+  # reachable for a source that does not auto-commit, so refuse rather than
+  # produce the mismatch.
+  if str(event.status) == "fulfilled" and accepted.get("status") == "draft":
+    blockers.append(
+      "the accepted payload would draft this event's entries while the event "
+      "is 'fulfilled' — resolve it as catch_up, or correct the payload's status"
+    )
 
   closed = _closed_period_names(session, [e.posting_date for e in entries])
   if closed:
@@ -429,6 +443,22 @@ def plan_reconciling_item(
   Read-only. The netting is per account and debit-positive, so the ``delta``
   column is exactly the entry a catch-up would post.
   """
+  plan, _stamp = _plan_with_stamp(session, event_id, graph_id=graph_id)
+  return plan
+
+
+def _plan_with_stamp(
+  session: Session, event_id: str, *, graph_id: str
+) -> tuple[ReconcilingItemPlan, str | None]:
+  """The plan, plus the raw ``drift_detected_at`` string it was built from.
+
+  The resolver compares that string against the row it later locks, to catch
+  a re-flag in between. It has to be the stored value rather than the plan's
+  parsed one: ``datetime.fromisoformat`` accepts both ``Z`` and ``+00:00``
+  and re-serializes either as ``+00:00``, so a round-tripped comparison
+  would report a re-flag that never happened — and an unparseable stamp
+  would do it permanently, leaving the item impossible to resolve at all.
+  """
   event = _load_event(session, event_id)
   accepted = _require_flagged(event)
   metadata = dict(event.metadata_ or {})
@@ -497,7 +527,7 @@ def plan_reconciling_item(
 
   posting_dates = sorted({e.posting_date for e in entries if e.posting_date})
   closed_periods = _closed_period_names(session, posting_dates)
-  blockers = _restate_blockers(session, event, entries)
+  blockers = _restate_blockers(session, event, entries, accepted)
 
   drift_detected_at = metadata.get("drift_detected_at")
   if isinstance(drift_detected_at, str):
@@ -506,7 +536,8 @@ def plan_reconciling_item(
     except ValueError:
       drift_detected_at = None
 
-  return ReconcilingItemPlan(
+  raw_stamp = metadata.get("drift_detected_at")
+  plan = ReconcilingItemPlan(
     event_id=str(event.id),
     external_id=event.external_id,
     source=str(event.source),
@@ -526,6 +557,7 @@ def plan_reconciling_item(
     restate_blockers=blockers,
     unmapped_element_external_ids=unmapped,
   )
+  return plan, raw_stamp if isinstance(raw_stamp, str) else None
 
 
 def preview_reconciling_item(
@@ -585,7 +617,7 @@ def resolve_reconciling_item(
   of that fence across its own row locks, and acquiring in the other order
   deadlocks against it.
   """
-  plan = plan_reconciling_item(session, body.event_id, graph_id=graph_id)
+  plan, planned_stamp = _plan_with_stamp(session, body.event_id, graph_id=graph_id)
   disposition: ReconcilingItemDisposition = body.disposition or plan.default_disposition
 
   catch_up_date: date | None = None
@@ -622,9 +654,7 @@ def resolve_reconciling_item(
   # The plan was built before the lock. If the sync flagged a *newer*
   # payload in between, the operator would be accepting something they
   # never saw — make them look again rather than resolve the wrong thing.
-  if live.get("drift_detected_at") != (
-    plan.drift_detected_at.isoformat() if plan.drift_detected_at else None
-  ):
+  if live.get("drift_detected_at") != planned_stamp:
     raise RowLockedError(
       f"Event {body.event_id} was re-flagged with a newer payload while this "
       f"resolution was being prepared. Preview it again."
@@ -662,10 +692,15 @@ def resolve_reconciling_item(
   regenerated: ReconcilingItemRegenerated | None = None
 
   if disposition == "restate":
-    blockers = _restate_blockers(session, event, entries)
+    blockers = _restate_blockers(session, event, entries, accepted)
     if blockers:
       raise RestateBlockedError(str(event.id), blockers)
     _delete_event_gl_rows(session, str(event.id), entry_ids)
+    # Written before dispatch because the handler regenerates the entries
+    # from `event.metadata_`, and written again below once the rebuilt ids
+    # exist — they cannot go on the trail before the rows they name. Both
+    # calls build their history from the pre-mutation `live`, so the second
+    # replaces the first rather than appending a second record.
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
     fire_handler_on_commit(session, event, created_by)
     session.flush()

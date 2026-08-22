@@ -37,6 +37,7 @@ from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.commands import create_event_block_in_session
 from robosystems.operations.extensions.loader import comparable_payload
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.reconciling_items import (
   NotAReconcilingItemError,
@@ -546,6 +547,114 @@ def test_restate_refuses_when_another_event_shares_the_transaction(session):
       graph_id=GRAPH_ID,
     )
   assert "share this event's transaction" in str(excinfo.value)
+
+
+def test_restate_refuses_to_draft_entries_under_a_fulfilled_event(session):
+  """A terminal event over draft rows is a state neither side can fix.
+
+  The handler only ever upgrades status to `fulfilled`, so regenerating
+  draft entries beneath an already-fulfilled event would leave the two
+  permanently disagreeing. Unreachable through QuickBooks — its payloads
+  always say posted — but reachable for a source that does not auto-commit.
+  """
+  _elements, event, _accepted = _setup(session)
+  assert event.status == "fulfilled"
+  drafting_payload = _incoming_payload(expense_account=NEW_EXPENSE)
+  drafting_payload["status"] = "draft"
+  event.metadata_ = {**dict(event.metadata_), "drift_payload": drafting_payload}
+  session.flush()
+
+  plan = plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+  assert any("fulfilled" in blocker for blocker in plan.restate_blockers)
+
+  with pytest.raises(RestateBlockedError, match="fulfilled"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(event_id=str(event.id), disposition="restate"),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+
+  # The escape hatch the error names actually works.
+  result = resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id), disposition="catch_up", posting_date=OPEN_END
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  assert result.catch_up is not None
+
+
+def test_a_reflag_between_preview_and_resolve_is_refused(session):
+  """Resolving would otherwise accept a payload the operator never saw."""
+  _elements, event, _accepted = _setup(session)
+
+  # A sync lands a newer payload after the plan was read but before the
+  # resolve takes its lock.
+  newer = _incoming_payload(expense_account=CASH)
+  event.metadata_ = {
+    **dict(event.metadata_),
+    "drift_payload": newer,
+    "drift_detected_at": datetime(2026, 8, 21, 4, 0).isoformat(),
+  }
+  session.flush()
+
+  # `resolve` re-plans internally, so simulate the race by pinning the stamp
+  # the plan was built from to the older value.
+  from robosystems.operations.roboledger.commands import reconciling_items as module
+
+  real_plan = module._plan_with_stamp
+
+  def _stale_plan(*args, **kwargs):
+    plan, _stamp = real_plan(*args, **kwargs)
+    return plan, datetime(2026, 8, 20, 3, 32).isoformat()
+
+  module._plan_with_stamp = _stale_plan
+  try:
+    with pytest.raises(RowLockedError, match="re-flagged"):
+      resolve_reconciling_item(
+        session,
+        ResolveReconcilingItemRequest(
+          event_id=str(event.id), disposition="acknowledge", note="x"
+        ),
+        "user_test",
+        graph_id=GRAPH_ID,
+      )
+  finally:
+    module._plan_with_stamp = real_plan
+
+  assert event.payload_drift is True
+
+
+def test_a_z_suffixed_stamp_does_not_read_as_a_reflag(session):
+  """The guard compares the stored string, not a round-trip of it.
+
+  `fromisoformat` accepts `Z` and re-serializes it as `+00:00`, so a guard
+  that compared parsed-then-formatted values would refuse a `Z`-stamped
+  item forever while reporting a race that never happened.
+  """
+  _elements, event, accepted = _setup(session)
+  event.metadata_ = {
+    **dict(event.metadata_),
+    "drift_detected_at": "2026-08-20T03:32:04.690073Z",
+  }
+  session.flush()
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(event.id), disposition="acknowledge", note="handled"
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  session.refresh(event)
+
+  assert event.payload_drift is False
+  assert comparable_payload(event.metadata_) == comparable_payload(accepted)
 
 
 def test_an_unflagged_event_is_refused(session):
