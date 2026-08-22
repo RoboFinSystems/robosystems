@@ -790,3 +790,22 @@ class TestEmitEventToOperation:
 
       event_arg = mock_mgr.broadcast_event.call_args[0][1]
       assert event_arg.sequence_number == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sse_enabled_is_a_real_kill_switch():
+  """SSE_ENABLED was resolved from SSM, assigned, and never read.
+
+  A kill switch that reads as live and does nothing is worse than no switch:
+  the operator who flips it during an incident believes they have acted.
+  """
+  manager = SSEConnectionManager()
+  manager.sse_enabled = False
+  with pytest.raises(HTTPException) as exc:
+    await manager.add_connection("op1", "conn1", "usr1")
+  assert exc.value.status_code == 503
+
+  manager.sse_enabled = True
+  queue = await manager.add_connection("op1", "conn1", "usr1")
+  assert queue is not None

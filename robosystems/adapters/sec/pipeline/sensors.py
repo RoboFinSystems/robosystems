@@ -214,9 +214,11 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 # ============================================================================
 # SEC Incremental Pipeline (Automated Chain)
 # ============================================================================
-# When SEC_INCREMENTAL_PIPELINE_ENABLED=true, this enables a fully automated
-# pipeline that runs every 3 hours:
+# A fully automated chain, off until you start it:
 #   download → process → stage → materialize → S3 sync
+# The schedule below is declared STOPPED and the sensors that chain it are
+# too, so enabling the pipeline means starting them in the Dagster UI. There
+# is no environment variable for it.
 #
 # Each step is chained via run_status_sensor, only proceeding on success.
 # Keep disabled during backfills; enable for production incremental updates.
@@ -255,7 +257,7 @@ def sec_incremental_download_schedule(context):
 
   Chain: download → process → stage → materialize → S3 sync
 
-  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  Declared STOPPED — start it in the Dagster UI to enable.
   """
   from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
 
