@@ -5,9 +5,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from robosystems.operations.providers.quickbooks_provider import (
+  sync_quickbooks_connection,
+)
+from robosystems.operations.providers.types import SyncOutcome
+
 
 def _make_mock_env(
-  sec_enabled=True,
   quickbooks_enabled=True,
   external_enabled=False,
 ):
@@ -18,7 +22,6 @@ def _make_mock_env(
   tests opt in.
   """
   mock_env = Mock()
-  mock_env.CONNECTION_SEC_ENABLED = sec_enabled
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   # QuickBooks provider needs these
@@ -66,50 +69,31 @@ def _build_registry(env_mock):
 class TestProviderRegistryInit:
   """Tests for ProviderRegistry initialization."""
 
-  def test_registry_registers_sec_when_enabled(self):
-    """Test that SEC provider is registered when CONNECTION_SEC_ENABLED=True."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
-    registry = _build_registry(env_mock)
-
-    assert "sec" in registry._providers
-
-  def test_registry_does_not_register_sec_when_disabled(self):
-    """Test that SEC provider is absent when CONNECTION_SEC_ENABLED=False."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
-    registry = _build_registry(env_mock)
-
-    assert "sec" not in registry._providers
-
   def test_registry_registers_quickbooks_when_enabled(self):
     """Test that QuickBooks provider is registered when CONNECTION_QUICKBOOKS_ENABLED=True."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
     registry = _build_registry(env_mock)
 
     assert "quickbooks" in registry._providers
 
   def test_registry_does_not_register_quickbooks_when_disabled(self):
     """Test that QB provider is absent when CONNECTION_QUICKBOOKS_ENABLED=False."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False)
     registry = _build_registry(env_mock)
 
     assert "quickbooks" not in registry._providers
 
   def test_registry_all_providers_registered_when_all_enabled(self):
     """Test all providers are present when all flags are True."""
-    env_mock = _make_mock_env(
-      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
-    )
+    env_mock = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
     registry = _build_registry(env_mock)
 
-    assert "sec" in registry._providers
     assert "quickbooks" in registry._providers
     assert "external" in registry._providers
 
   def test_registry_empty_when_all_disabled(self):
     """Test no providers registered when all flags are False."""
-    env_mock = _make_mock_env(
-      sec_enabled=False, quickbooks_enabled=False, external_enabled=False
-    )
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=False)
     registry = _build_registry(env_mock)
 
     assert len(registry._providers) == 0
@@ -125,30 +109,31 @@ class TestProviderRegistryInit:
       "sync",
       "cleanup",
       "config_class",
-      "starts_async_run",
     }
-    # External writes through the public API on its own schedule, so its sync
-    # returns immediately and the dispatcher, not a run, releases the lock.
-    assert registry._providers["external"]["starts_async_run"] is False
 
-  def test_only_quickbooks_hands_the_sync_lock_to_a_run(self):
+  @pytest.mark.asyncio
+  async def test_only_quickbooks_hands_the_sync_lock_to_a_run(self):
     """Which providers release the lock themselves is one token away from a
     data race, and nothing else asserts it.
 
     quickbooks releases the per-connection lock from `qb_load` when its
-    Dagster run ends. Flipping this to False would have the dispatcher release
-    the lock while that run is still writing — the concurrent-UPSERT the lock
-    exists to prevent — and every other test would stay green.
+    Dagster run ends, and says so by returning `dispatched`. An external
+    connection has nothing to pull, so the dispatcher must release the lock
+    itself; if external ever claimed `dispatched`, the lock would sit until
+    its TTL and 409 every later sync on that connection.
     """
-    env_mock = _make_mock_env(
-      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
+    from robosystems.operations.providers.external_provider import (
+      sync_external_connection,
     )
+
+    env_mock = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
     with _registry_context(env_mock) as (registry, _):
-      assert registry.starts_async_run("quickbooks") is True
-      assert registry.starts_async_run("sec") is False
-      assert registry.starts_async_run("external") is False
-      # An unregistered name must not claim to start a run.
-      assert registry.starts_async_run("nonesuch") is False
+      assert registry._providers["quickbooks"]["sync"] is sync_quickbooks_connection
+      assert registry._providers["external"]["sync"] is sync_external_connection
+
+    external_outcome = await sync_external_connection({}, None, "kg_test")
+    assert external_outcome.dispatched is False
+    assert external_outcome.task_id is None
 
   def test_registry_does_not_register_external_when_disabled(self):
     """External provider is absent when CONNECTION_EXTERNAL_ENABLED=False."""
@@ -169,12 +154,12 @@ class TestProviderRegistryInit:
 class TestGetProvider:
   """Tests for ProviderRegistry.get_provider()."""
 
-  def test_get_provider_sec_returns_dict_with_expected_keys(self):
-    """Test that get_provider('sec') returns dict with create/sync/cleanup/config_class."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+  def test_get_provider_external_returns_dict_with_expected_keys(self):
+    """Test that get_provider('external') returns create/sync/cleanup/config_class."""
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      provider = registry.get_provider("sec")
+      provider = registry.get_provider("external")
 
     assert "create" in provider
     assert "sync" in provider
@@ -183,7 +168,7 @@ class TestGetProvider:
 
   def test_get_provider_quickbooks_returns_dict_with_expected_keys(self):
     """Test that get_provider('quickbooks') returns dict with create/sync/cleanup/config_class."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       provider = registry.get_provider("quickbooks")
@@ -195,27 +180,19 @@ class TestGetProvider:
 
   def test_get_provider_case_insensitive(self):
     """Test that get_provider normalizes the provider type to lowercase."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      provider_upper = registry.get_provider("SEC")
-      provider_lower = registry.get_provider("sec")
-      provider_mixed = registry.get_provider("Sec")
+      provider_upper = registry.get_provider("EXTERNAL")
+      provider_lower = registry.get_provider("external")
+      provider_mixed = registry.get_provider("External")
 
     assert provider_upper is provider_lower
     assert provider_lower is provider_mixed
 
-  def test_get_provider_disabled_sec_raises_value_error(self):
-    """Test ValueError is raised with helpful message when SEC is disabled."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
-
-    with _registry_context(env_mock) as (registry, _):
-      with pytest.raises(ValueError, match="SEC provider is not enabled"):
-        registry.get_provider("sec")
-
   def test_get_provider_disabled_quickbooks_raises_value_error(self):
     """Test ValueError is raised with helpful message when QuickBooks is disabled."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False)
 
     with _registry_context(env_mock) as (registry, _):
       with pytest.raises(ValueError, match="QuickBooks provider is not enabled"):
@@ -223,7 +200,7 @@ class TestGetProvider:
 
   def test_get_provider_unknown_raises_value_error(self):
     """Test ValueError with 'Unknown provider type' for completely unknown providers."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       with pytest.raises(ValueError, match="Unknown provider type"):
@@ -231,7 +208,7 @@ class TestGetProvider:
 
   def test_get_provider_unknown_raises_value_error_with_provider_name(self):
     """Test that the unknown provider name is included in the error message."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       with pytest.raises(ValueError, match="twitter"):
@@ -243,21 +220,21 @@ class TestCreateConnection:
   """Tests for ProviderRegistry.create_connection()."""
 
   @pytest.mark.asyncio
-  async def test_create_connection_delegates_to_sec_provider(self):
-    """Test that create_connection calls the SEC create function."""
+  async def test_create_connection_delegates_to_external_provider(self):
+    """Test that create_connection calls the external create function."""
     from sqlalchemy.orm import Session
 
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      mock_create = AsyncMock(return_value="conn_sec_123")
-      registry._providers["sec"]["create"] = mock_create
+      mock_create = AsyncMock(return_value="conn_ext_123")
+      registry._providers["external"]["create"] = mock_create
 
       mock_db = Mock(spec=Session)
       mock_config = Mock()
 
       result = await registry.create_connection(
-        provider_type="sec",
+        provider_type="external",
         entity_id="entity_1",
         config=mock_config,
         user_id="user_1",
@@ -265,7 +242,7 @@ class TestCreateConnection:
         db=mock_db,
       )
 
-    assert result == "conn_sec_123"
+    assert result == "conn_ext_123"
     mock_create.assert_awaited_once_with(
       "entity_1", mock_config, "user_1", "kg_test", mock_db
     )
@@ -275,7 +252,7 @@ class TestCreateConnection:
     """Test that create_connection calls the QB create function."""
     from sqlalchemy.orm import Session
 
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       mock_create = AsyncMock(return_value="conn_qb_456")
@@ -301,14 +278,14 @@ class TestCreateConnection:
     """Test that create_connection raises ValueError for a disabled provider."""
     from sqlalchemy.orm import Session
 
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False)
 
     with _registry_context(env_mock) as (registry, _):
       mock_db = Mock(spec=Session)
 
-      with pytest.raises(ValueError, match="SEC provider is not enabled"):
+      with pytest.raises(ValueError, match="External provider is not enabled"):
         await registry.create_connection(
-          provider_type="sec",
+          provider_type="external",
           entity_id="entity_1",
           config=None,
           user_id="user_1",
@@ -322,33 +299,35 @@ class TestSyncConnection:
   """Tests for ProviderRegistry.sync_connection()."""
 
   @pytest.mark.asyncio
-  async def test_sync_connection_delegates_to_sec_provider(self):
-    """Test that sync_connection calls the SEC sync function."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+  async def test_sync_connection_delegates_to_external_provider(self):
+    """Test that sync_connection calls the external sync function."""
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      mock_sync = AsyncMock(return_value="run_123")
-      registry._providers["sec"]["sync"] = mock_sync
+      outcome = SyncOutcome(status="unsupported", message="nothing to pull")
+      mock_sync = AsyncMock(return_value=outcome)
+      registry._providers["external"]["sync"] = mock_sync
 
       connection = {"connection_id": "conn_1", "entity_id": "entity_1"}
 
       result = await registry.sync_connection(
-        provider_type="sec",
+        provider_type="external",
         connection=connection,
         sync_options=None,
         graph_id="kg_test",
       )
 
-    assert result == "run_123"
+    assert result is outcome
     mock_sync.assert_awaited_once_with(connection, None, "kg_test")
 
   @pytest.mark.asyncio
   async def test_sync_connection_delegates_to_quickbooks_provider(self):
     """Test that sync_connection calls the QB sync function."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      mock_sync = AsyncMock(return_value="run_qb_789")
+      qb_outcome = SyncOutcome(status="dispatched", task_id="run_qb_789")
+      mock_sync = AsyncMock(return_value=qb_outcome)
       registry._providers["quickbooks"]["sync"] = mock_sync
 
       connection = {
@@ -365,22 +344,25 @@ class TestSyncConnection:
         graph_id="kg_test",
       )
 
-    assert result == "run_qb_789"
+    assert result is qb_outcome
+    assert result.task_id == "run_qb_789"
     mock_sync.assert_awaited_once_with(connection, sync_options, "kg_test")
 
   @pytest.mark.asyncio
   async def test_sync_connection_passes_sync_options(self):
     """Test that sync_options are forwarded to the provider sync function."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
-      mock_sync = AsyncMock(return_value="run_opts_test")
-      registry._providers["sec"]["sync"] = mock_sync
+      mock_sync = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="run_opts_test")
+      )
+      registry._providers["external"]["sync"] = mock_sync
 
       sync_opts = {"lookback_days": 90, "full_rebuild": False}
 
       await registry.sync_connection(
-        provider_type="sec",
+        provider_type="external",
         connection={"connection_id": "c1", "entity_id": "e1"},
         sync_options=sync_opts,
         graph_id="kg_test",
@@ -392,7 +374,7 @@ class TestSyncConnection:
   @pytest.mark.asyncio
   async def test_sync_connection_raises_for_unknown_provider(self):
     """Test sync_connection raises ValueError for an unknown provider."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       with pytest.raises(ValueError, match="Unknown provider type"):
@@ -409,18 +391,18 @@ class TestCleanupConnection:
   """Tests for ProviderRegistry.cleanup_connection()."""
 
   @pytest.mark.asyncio
-  async def test_cleanup_connection_delegates_to_sec_provider(self):
-    """Test that cleanup_connection calls the SEC cleanup function."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+  async def test_cleanup_connection_delegates_to_external_provider(self):
+    """Test that cleanup_connection calls the external cleanup function."""
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       mock_cleanup = AsyncMock(return_value=None)
-      registry._providers["sec"]["cleanup"] = mock_cleanup
+      registry._providers["external"]["cleanup"] = mock_cleanup
 
       connection = {"connection_id": "conn_c1", "entity_id": "entity_c1"}
 
       await registry.cleanup_connection(
-        provider_type="sec",
+        provider_type="external",
         connection=connection,
         graph_id="kg_test",
       )
@@ -430,7 +412,7 @@ class TestCleanupConnection:
   @pytest.mark.asyncio
   async def test_cleanup_connection_delegates_to_quickbooks_provider(self):
     """Test that cleanup_connection calls the QB cleanup function."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
 
     with _registry_context(env_mock) as (registry, _):
       mock_cleanup = AsyncMock(return_value=None)
@@ -449,12 +431,12 @@ class TestCleanupConnection:
   @pytest.mark.asyncio
   async def test_cleanup_connection_raises_for_disabled_provider(self):
     """Test cleanup_connection raises ValueError for disabled provider."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False)
 
     with _registry_context(env_mock) as (registry, _):
-      with pytest.raises(ValueError, match="SEC provider is not enabled"):
+      with pytest.raises(ValueError, match="External provider is not enabled"):
         await registry.cleanup_connection(
-          provider_type="sec",
+          provider_type="external",
           connection={},
           graph_id="kg_test",
         )
@@ -506,7 +488,7 @@ class TestProviderRegistryMetrics:
 
   def test_metrics_failure_on_get_provider_does_not_raise(self):
     """Test that metrics recording failure during get_provider doesn't propagate."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     call_count = {"n": 0}
     original_metrics = Mock()
@@ -530,7 +512,7 @@ class TestProviderRegistryMetrics:
 
       registry = ProviderRegistry()
       # get_provider will try to record metrics; if it fails, it should not raise
-      provider = registry.get_provider("sec")
+      provider = registry.get_provider("external")
 
     assert provider is not None
 
@@ -539,20 +521,20 @@ class TestProviderRegistryMetrics:
 class TestProviderConfigClasses:
   """Tests that providers are associated with the correct config classes."""
 
-  def test_sec_provider_uses_sec_connection_config(self):
-    """Test that SEC provider's config_class is SECConnectionConfig."""
-    from robosystems.models.api.graphs.connections import SECConnectionConfig
+  def test_external_provider_uses_external_connection_config(self):
+    """Test that external provider's config_class is ExternalConnectionConfig."""
+    from robosystems.models.api.graphs.connections import ExternalConnectionConfig
 
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    env_mock = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
     registry = _build_registry(env_mock)
 
-    assert registry._providers["sec"]["config_class"] is SECConnectionConfig
+    assert registry._providers["external"]["config_class"] is ExternalConnectionConfig
 
   def test_quickbooks_provider_uses_quickbooks_connection_config(self):
     """Test that QB provider's config_class is QuickBooksConnectionConfig."""
     from robosystems.models.api.graphs.connections import QuickBooksConnectionConfig
 
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    env_mock = _make_mock_env(quickbooks_enabled=True)
     registry = _build_registry(env_mock)
 
     assert (

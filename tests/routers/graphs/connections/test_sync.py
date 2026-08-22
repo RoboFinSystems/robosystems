@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.operations.providers.types import SyncOutcome
 from robosystems.routers.graphs.connections.sync import sync_connection
 
 SYNC_MODULE = "robosystems.routers.graphs.connections.sync"
@@ -166,7 +167,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_qb_001")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_qb_001")
+      )
 
       result = await sync_connection(
         graph_id=GRAPH_ID,
@@ -186,12 +189,17 @@ class TestSyncConnection:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_sync_connection_success_sec(self):
-    """Happy path: SEC sync returns OperationEnvelope with task_id in result."""
+  async def test_sync_connection_no_op_provider_completes_without_task_id(self):
+    """A provider with nothing to pull must not be reported as pending.
+
+    External connections are push-based. Wrapping that as `pending` with a
+    prose message in `task_id` hands the caller an operation id that no run
+    backs and a poll that never terminates.
+    """
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_sync_request()
-    connection_dict = _make_connection_dict(provider="sec")
+    connection_dict = _make_connection_dict(provider="external")
     components = _make_robustness_components()
 
     with (
@@ -209,7 +217,11 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_sec_001")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(
+          status="unsupported", message="nothing to sync; it is push-based"
+        )
+      )
 
       result = await sync_connection(
         graph_id=GRAPH_ID,
@@ -222,8 +234,10 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
-    assert result.result["task_id"] == "task_sec_001"
-    assert "SEC" in result.result["message"]
+    assert result.status == "completed"
+    assert result.result["task_id"] is None
+    assert result.result["message"] == "nothing to sync; it is push-based"
+    assert result.result["connection_id"] == CONNECTION_ID
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -458,7 +472,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      sync_mock = AsyncMock(return_value="task_123")
+      sync_mock = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_123")
+      )
       mock_registry.sync_connection = sync_mock
 
       await sync_connection(
@@ -513,7 +529,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      sync_mock = AsyncMock(return_value="task_456")
+      sync_mock = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_456")
+      )
       mock_registry.sync_connection = sync_mock
 
       await sync_connection(
@@ -565,7 +583,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_001")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_001")
+      )
 
       await sync_connection(
         graph_id=GRAPH_ID,
@@ -651,7 +671,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_success")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_success")
+      )
 
       await sync_connection(
         graph_id=GRAPH_ID,
@@ -691,7 +713,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_quickbooks")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_quickbooks")
+      )
 
       result = await sync_connection(
         graph_id=GRAPH_ID,
@@ -732,7 +756,9 @@ class TestSyncConnection:
       patch(f"{REGISTRY_MODULE}.provider_registry") as mock_registry,
     ):
       mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.sync_connection = AsyncMock(return_value="task_001")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="task_001")
+      )
 
       await sync_connection(
         graph_id=GRAPH_ID,

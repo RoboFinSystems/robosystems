@@ -303,7 +303,8 @@ class TestSyncQuickbooksConnection:
         graph_id="kg_test",
       )
 
-    assert result == "run_abc123"
+    assert result.dispatched is True
+    assert result.task_id == "run_abc123"
     call_kwargs = mock_submit.call_args
     assert call_kwargs.kwargs["job_name"] == "qb_sync"
     run_config = call_kwargs.kwargs["run_config"]

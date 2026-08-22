@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
-ProviderType = Literal["sec", "quickbooks", "external"]
+ProviderType = Literal["quickbooks", "external"]
 
 # Source names an external connection can never claim: platform-emitted
 # values, platform adapter providers (current and reserved), and the
@@ -32,28 +32,8 @@ class ConnectionBase(BaseModel):
   entity_id: str | None = Field(
     None,
     min_length=1,
-    description="Entity identifier. Required for QuickBooks, optional for SEC "
-    "(SEC creates the entity from filing data).",
+    description="Entity identifier. Required for QuickBooks.",
   )
-
-
-class SECConnectionConfig(BaseModel):
-  """SEC-specific connection configuration."""
-
-  cik: str = Field(
-    ..., min_length=1, max_length=10, description="SEC Central Index Key"
-  )
-
-  @field_validator("cik")
-  @classmethod
-  def validate_cik(cls, v: str) -> str:
-    """Validate and normalize CIK format. Auto-pads with leading zeros to 10 digits."""
-    clean_cik = "".join(filter(str.isdigit, v))
-    if not clean_cik:
-      raise ValueError("CIK must contain digits")
-    if len(clean_cik) > 10:
-      raise ValueError("CIK cannot be longer than 10 digits")
-    return clean_cik.zfill(10)
 
 
 class QuickBooksConnectionConfig(BaseModel):
@@ -104,7 +84,6 @@ class ExternalConnectionConfig(BaseModel):
 class CreateConnectionRequest(ConnectionBase):
   """Request to create a new connection."""
 
-  sec_config: SECConnectionConfig | None = None
   quickbooks_config: QuickBooksConnectionConfig | None = None
   external_config: ExternalConnectionConfig | None = None
 
@@ -119,18 +98,13 @@ class CreateConnectionRequest(ConnectionBase):
       raise ValueError("entity_id is required for QuickBooks connections")
     return v
 
-  @field_validator("sec_config", "quickbooks_config", "external_config")
+  @field_validator("quickbooks_config", "external_config")
   @classmethod
   def validate_provider_config(
     cls,
-    v: SECConnectionConfig
-    | QuickBooksConnectionConfig
-    | ExternalConnectionConfig
-    | None,
+    v: QuickBooksConnectionConfig | ExternalConnectionConfig | None,
     info: ValidationInfo,
-  ) -> (
-    SECConnectionConfig | QuickBooksConnectionConfig | ExternalConnectionConfig | None
-  ):
+  ) -> QuickBooksConnectionConfig | ExternalConnectionConfig | None:
     """Ensure only the matching provider config is provided."""
     provider = info.data.get("provider")
     field_name = info.field_name
@@ -138,7 +112,6 @@ class CreateConnectionRequest(ConnectionBase):
       return v  # Should not happen in practice
 
     field_to_provider = {
-      "sec_config": "sec",
       "quickbooks_config": "quickbooks",
       "external_config": "external",
     }

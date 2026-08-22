@@ -11,10 +11,9 @@ from collections.abc import AsyncGenerator
 from datetime import UTC
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.config import env
 from robosystems.config.defaults import SSEDefaults
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
@@ -44,7 +43,6 @@ class SSEConnectionManager:
     # Runtime-tunable via SSM.
     self.max_connections_per_user = TuningConfig.get_sse_max_connections_per_user()
     self.queue_size = TuningConfig.get_sse_queue_size()
-    self.sse_enabled = env.SSE_ENABLED  # Feature flag, not tunable
 
   async def add_connection(
     self, operation_id: str, connection_id: str, user_id: str
@@ -55,16 +53,6 @@ class SSEConnectionManager:
     `max_connections_per_user`.
     """
     async with self._lock:
-      if not self.sse_enabled:
-        # The kill switch. Refusing the connection here rather than at the
-        # route keeps every SSE surface behind one check, and a client that
-        # cannot stream falls back to polling the operation's status.
-        logger.warning("SSE connection refused: disabled via SSE_ENABLED")
-        raise HTTPException(
-          status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-          detail="Server-sent events are currently disabled.",
-        )
-
       if user_id in self.user_connections:
         user_connection_count = len(self.user_connections[user_id])
         if user_connection_count >= self.max_connections_per_user:

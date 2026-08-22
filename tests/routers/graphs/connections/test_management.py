@@ -66,7 +66,6 @@ def _make_create_request(
     CreateConnectionRequest,
     ExternalConnectionConfig,
     QuickBooksConnectionConfig,
-    SECConnectionConfig,
   )
 
   if provider == "quickbooks":
@@ -74,12 +73,6 @@ def _make_create_request(
       provider="quickbooks",
       entity_id=entity_id,
       quickbooks_config=QuickBooksConnectionConfig(),
-    )
-  elif provider == "sec":
-    return CreateConnectionRequest(
-      provider="sec",
-      entity_id=entity_id,
-      sec_config=SECConnectionConfig(cik="0001234567"),
     )
   elif provider == "external":
     return CreateConnectionRequest(
@@ -167,44 +160,6 @@ class TestCreateConnection:
     assert result.status == "connected"
     mock_registry.get_provider.assert_called_once_with("quickbooks")
     mock_registry.create_connection.assert_called_once()
-
-  @pytest.mark.unit
-  @pytest.mark.asyncio
-  async def test_create_connection_success_sec(self):
-    """Happy path: creates an SEC connection."""
-    mock_user = _make_mock_user()
-    mock_db = MagicMock()
-    request = _make_create_request(provider="sec")
-    connection_dict = _make_connection_dict(provider="sec")
-    components = _make_robustness_components()
-
-    with (
-      patch(
-        f"{MANAGEMENT_MODULE}.create_robustness_components",
-        return_value=components,
-      ),
-      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
-      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
-      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
-      patch(
-        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
-        new_callable=AsyncMock,
-        return_value=connection_dict,
-      ),
-    ):
-      mock_registry.get_provider = MagicMock(return_value=MagicMock())
-      mock_registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
-
-      result = await create_connection(
-        graph_id=GRAPH_ID,
-        request=request,
-        current_user=mock_user,
-        db=mock_db,
-        _rate_limit=None,
-      )
-
-    assert result.connection_id == CONNECTION_ID
-    assert result.provider == "sec"
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -565,7 +520,7 @@ class TestListConnections:
     mock_db = MagicMock()
     connections = [
       _make_connection_dict(connection_id="conn_1", provider="quickbooks"),
-      _make_connection_dict(connection_id="conn_2", provider="sec"),
+      _make_connection_dict(connection_id="conn_2", provider="external"),
     ]
 
     with patch(
@@ -1106,7 +1061,7 @@ class TestDeleteConnection:
     mock_user = _make_mock_user()
     mock_db = MagicMock()
 
-    connection_dict = _make_connection_dict(provider="sec")
+    connection_dict = _make_connection_dict(provider="external")
 
     with (
       patch(
@@ -1133,7 +1088,7 @@ class TestDeleteConnection:
       )
 
     mock_registry.cleanup_connection.assert_awaited_once_with(
-      "sec", connection_dict, GRAPH_ID
+      "external", connection_dict, GRAPH_ID
     )
 
   @pytest.mark.unit
@@ -1346,13 +1301,13 @@ class TestExternalConnectionConfigValidation:
     from robosystems.models.api.graphs.connections import (
       CreateConnectionRequest,
       ExternalConnectionConfig,
-      SECConnectionConfig,
+      QuickBooksConnectionConfig,
     )
 
     with pytest.raises(ValidationError, match="should not be provided"):
       CreateConnectionRequest(
-        provider="sec",
+        provider="quickbooks",
         entity_id=GRAPH_ID,
-        sec_config=SECConnectionConfig(cik="0001234567"),
+        quickbooks_config=QuickBooksConnectionConfig(),
         external_config=ExternalConnectionConfig(source_name="salesforce"),
       )

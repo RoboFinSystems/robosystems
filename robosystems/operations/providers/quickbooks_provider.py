@@ -10,6 +10,7 @@ from ...logger import logger
 from ...models.api.graphs.connections import QuickBooksConnectionConfig
 from ...operations.connection_service import ConnectionService
 from .oauth_handler import OAuthHandler
+from .types import SyncOutcome
 
 
 class QuickBooksOAuthProvider:
@@ -161,7 +162,7 @@ async def create_quickbooks_connection(
 
 async def sync_quickbooks_connection(
   connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
-) -> str:
+) -> SyncOutcome:
   """Submit the `qb_sync` Dagster job; returns its run id.
 
   `sync_options` accepts `full_rebuild`, `lookback_days` (default 60),
@@ -220,7 +221,7 @@ async def sync_quickbooks_connection(
     f"connection={connection_id}, run_id={run_id}, "
     f"full_rebuild={full_rebuild}, since_date={since_date or '<lookback>'}"
   )
-  return run_id
+  return SyncOutcome(status="dispatched", task_id=run_id)
 
 
 async def cleanup_quickbooks_connection(

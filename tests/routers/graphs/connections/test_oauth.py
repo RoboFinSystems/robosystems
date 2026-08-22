@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.operations.providers.types import SyncOutcome
 from robosystems.routers.graphs.connections.oauth import init_oauth, oauth_callback
 
 OAUTH_MODULE = "robosystems.routers.graphs.connections.oauth"
@@ -346,7 +347,9 @@ class TestOAuthCallback:
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
     mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(return_value="task_123")
+    mock_provider_registry.sync_connection = AsyncMock(
+      return_value=SyncOutcome(status="dispatched", task_id="task_123")
+    )
 
     with (
       patch(
@@ -440,7 +443,9 @@ class TestOAuthCallback:
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
     mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(return_value="task_revived")
+    mock_provider_registry.sync_connection = AsyncMock(
+      return_value=SyncOutcome(status="dispatched", task_id="task_revived")
+    )
 
     with (
       patch(
@@ -905,7 +910,9 @@ class TestOAuthCallback:
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
     mock_provider_registry = MagicMock()
-    sync_mock = AsyncMock(return_value="task_sync_999")
+    sync_mock = AsyncMock(
+      return_value=SyncOutcome(status="dispatched", task_id="task_sync_999")
+    )
     mock_provider_registry.sync_connection = sync_mock
 
     with (
@@ -984,7 +991,9 @@ class TestOAuthCallback:
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
     mock_provider_registry = MagicMock()
-    sync_mock = AsyncMock(return_value="task_sync_resync")
+    sync_mock = AsyncMock(
+      return_value=SyncOutcome(status="dispatched", task_id="task_sync_resync")
+    )
     mock_provider_registry.sync_connection = sync_mock
 
     with (
@@ -1078,7 +1087,9 @@ class TestOAuthCallback:
     mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
 
     mock_provider_registry = MagicMock()
-    mock_provider_registry.sync_connection = AsyncMock(return_value="task_abc")
+    mock_provider_registry.sync_connection = AsyncMock(
+      return_value=SyncOutcome(status="dispatched", task_id="task_abc")
+    )
 
     with (
       patch(

@@ -69,7 +69,6 @@ jobs:
       # Feature Flags (test configuration)
       USER_REGISTRATION_ENABLED: "true"
       RATE_LIMIT_ENABLED: "false"
-      SSE_ENABLED: "true"
       OTEL_ENABLED: "false"
       LOAD_SHEDDING_ENABLED: "true"
       MCP_AUTO_LIMIT_ENABLED: "true"

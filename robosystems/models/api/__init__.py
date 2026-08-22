@@ -113,7 +113,6 @@ from .graphs import (
   OperatorResponse,
   ProviderType,
   QuickBooksConnectionConfig,
-  SECConnectionConfig,
   SyncConnectionRequest,
   TierCapacity,
 )
@@ -247,7 +246,6 @@ __all__ = [
   "RepositorySubscriptions",
   "ResetPasswordRequest",
   "ResetPasswordValidateResponse",
-  "SECConnectionConfig",
   "SSOCompleteRequest",
   "SSOExchangeRequest",
   "SSOExchangeResponse",

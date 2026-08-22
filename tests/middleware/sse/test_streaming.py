@@ -46,9 +46,7 @@ class TestSSEConnectionManagerLifecycle:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = SSEConnectionManager()
     return mgr
 
@@ -135,9 +133,7 @@ class TestSSEConnectionManagerLimits:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = SSEConnectionManager()
     return mgr
 
@@ -179,9 +175,7 @@ class TestSSEConnectionManagerBroadcast:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = SSEConnectionManager()
     return mgr
 
@@ -233,9 +227,7 @@ class TestSSEConnectionManagerBroadcast:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=1,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       small_mgr = SSEConnectionManager()
 
     queue = await small_mgr.add_connection("op1", "conn1", "user1")
@@ -273,9 +265,7 @@ class TestSSEConnectionManagerCounts:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = SSEConnectionManager()
     return mgr
 
@@ -323,9 +313,7 @@ class TestSSEConnectionManagerErrorHandling:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = SSEConnectionManager()
     return mgr
 
@@ -370,9 +358,7 @@ class TestGetConnectionManager:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr = get_connection_manager()
     assert isinstance(mgr, SSEConnectionManager)
 
@@ -387,9 +373,7 @@ class TestGetConnectionManager:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mgr1 = get_connection_manager()
       mgr2 = get_connection_manager()
     assert mgr1 is mgr2
@@ -433,9 +417,7 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = None
       mock_storage_fn.return_value = mock_storage
@@ -463,9 +445,7 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = self._make_metadata(
         user_id="other_user"
@@ -497,12 +477,10 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
       patch(
         "robosystems.middleware.sse.streaming.asyncio.sleep", new_callable=AsyncMock
       ),
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = metadata
       mock_storage.get_events.return_value = []
@@ -553,12 +531,10 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
       patch(
         "robosystems.middleware.sse.streaming.asyncio.sleep", new_callable=AsyncMock
       ),
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = metadata
       # First call for replay, second call for completed replay
@@ -608,12 +584,10 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
       patch(
         "robosystems.middleware.sse.streaming.asyncio.sleep", new_callable=AsyncMock
       ),
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = metadata
       mock_storage.get_events.return_value = []
@@ -653,12 +627,10 @@ class TestCreateSSEStreamStarlette:
         "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
         return_value=100,
       ),
-      patch("robosystems.middleware.sse.streaming.env") as mock_env,
       patch(
         "robosystems.middleware.sse.streaming.asyncio.sleep", new_callable=AsyncMock
       ),
     ):
-      mock_env.SSE_ENABLED = True
       mock_storage = AsyncMock()
       mock_storage.get_operation_metadata.return_value = metadata
       mock_storage.get_events.return_value = []
@@ -790,22 +762,3 @@ class TestEmitEventToOperation:
 
       event_arg = mock_mgr.broadcast_event.call_args[0][1]
       assert event_arg.sequence_number == 0
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_sse_enabled_is_a_real_kill_switch():
-  """SSE_ENABLED was resolved from SSM, assigned, and never read.
-
-  A kill switch that reads as live and does nothing is worse than no switch:
-  the operator who flips it during an incident believes they have acted.
-  """
-  manager = SSEConnectionManager()
-  manager.sse_enabled = False
-  with pytest.raises(HTTPException) as exc:
-    await manager.add_connection("op1", "conn1", "usr1")
-  assert exc.value.status_code == 503
-
-  manager.sse_enabled = True
-  queue = await manager.add_connection("op1", "conn1", "usr1")
-  assert queue is not None

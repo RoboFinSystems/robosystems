@@ -20,6 +20,7 @@ from robosystems.middleware.operations import (
   get_idempotency_cache,
   idempotent_dispatch,
   log_operation_audit,
+  wrap_completed,
   wrap_pending,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
@@ -51,7 +52,7 @@ router = APIRouter()
 @router.post(
   "/{connection_id}/sync",
   summary="Sync Connection",
-  description="QuickBooks: fetches transactions, balances, and chart of accounts; async, and completion is reflected in the connection's `last_sync` timestamp. SEC connections have nothing to pull — filings are refreshed nightly into the shared SEC repository — and return a message saying so. Returns an `OperationEnvelope`; supports `Idempotency-Key`.",
+  description="QuickBooks: fetches transactions, balances, and chart of accounts; the envelope is `pending` with the run's `task_id`, and completion is reflected in the connection's `last_sync` timestamp. External connections are push-based and have nothing to pull; the envelope is `completed` with a null `task_id` and a message saying so — there is nothing to poll. Returns an `OperationEnvelope`; supports `Idempotency-Key`.",
   response_model=OperationEnvelope,
   status_code=status.HTTP_202_ACCEPTED,
   operation_id="syncConnection",
@@ -160,6 +161,7 @@ async def sync_connection(
 
       provider = dispatch["provider"]
       task_id = dispatch["task_id"]
+      dispatched = dispatch["dispatched"]
 
       # Record successful operation
       record_operation_success(
@@ -176,16 +178,30 @@ async def sync_connection(
       )
 
       operation_id = generate_operation_id()
-      envelope = wrap_pending(
-        op_name,
-        operation_id=operation_id,
-        partial_result={
-          "message": f"{provider.upper()} sync started",
-          "connection_id": connection_id,
-          "task_id": task_id,
-        },
-        created_by=user_id,
-      )
+      if dispatched:
+        envelope = wrap_pending(
+          op_name,
+          operation_id=operation_id,
+          partial_result={
+            "message": f"{provider.upper()} sync started",
+            "connection_id": connection_id,
+            "task_id": task_id,
+          },
+          created_by=user_id,
+        )
+      else:
+        # Nothing was started, so there is nothing to poll. Reporting this as
+        # pending would invite the client to wait on a run that does not exist.
+        envelope = wrap_completed(
+          op_name,
+          result={
+            "message": dispatch["message"],
+            "connection_id": connection_id,
+            "task_id": None,
+          },
+          operation_id=operation_id,
+          created_by=user_id,
+        )
 
       # The task id here is the provider's Dagster run, not an SSE operation, so
       # the pending envelope has no terminal-status hook to evict it; the
@@ -198,7 +214,7 @@ async def sync_connection(
         user_id=user_id,
         graph_id=graph_id,
         duration_ms=0.0,
-        status="pending",
+        status=envelope.status,
         idempotency_key=idempotency_key,
         event="graph.operation",
       )

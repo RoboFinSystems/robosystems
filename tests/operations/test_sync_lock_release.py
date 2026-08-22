@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from robosystems.operations.providers.types import SyncOutcome
+
 MODULE = "robosystems.operations.connection_service"
 # dispatch_connection_sync imports these inside the function, so they are
 # patched at their source rather than as attributes of the module under test.
@@ -37,7 +39,7 @@ def _lock():
     yield release
 
 
-async def _dispatch(provider: str, sync_result: str):
+async def _dispatch(provider: str, sync_result: SyncOutcome):
   from robosystems.operations import connection_service
 
   connection = {
@@ -60,7 +62,6 @@ async def _dispatch(provider: str, sync_result: str):
     patch(f"{REGISTRY}.provider_registry") as registry,
   ):
     registry.get_provider.return_value = {}
-    registry.starts_async_run.side_effect = lambda p: p == "quickbooks"
     registry.sync_connection.side_effect = _sync
     return await connection_service.dispatch_connection_sync(
       connection_id="conn123", graph_id="kg1", user_id="usr1"
@@ -70,8 +71,10 @@ async def _dispatch(provider: str, sync_result: str):
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_a_synchronous_provider_releases_the_lock(_lock):
-  """SEC and external return a status string; nothing else will free the lock."""
-  await _dispatch("sec", "nothing to sync")
+  """A provider that dispatches nothing leaves no run to free the lock."""
+  await _dispatch(
+    "external", SyncOutcome(status="unsupported", message="nothing to sync")
+  )
   assert _lock.called, (
     "a provider that returns synchronously must release the sync lock, or the "
     "next sync on this connection 409s for the lock's full TTL"
@@ -83,5 +86,5 @@ async def test_a_synchronous_provider_releases_the_lock(_lock):
 async def test_an_async_provider_keeps_the_lock_for_its_run(_lock):
   """QuickBooks hands the lock to qb_load; releasing here would let a second
   sync race the run this one just started."""
-  await _dispatch("quickbooks", "run-xyz")
+  await _dispatch("quickbooks", SyncOutcome(status="dispatched", task_id="run-xyz"))
   assert not _lock.called

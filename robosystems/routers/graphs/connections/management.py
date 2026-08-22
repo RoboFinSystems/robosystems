@@ -47,7 +47,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="SEC: provide entity CIK, no auth needed. QuickBooks: returns an OAuth URL — complete the flow to activate. External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name.",
+  description="QuickBooks: returns an OAuth URL — complete the flow to activate. External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -115,9 +115,7 @@ async def create_connection(
 
     # Get the appropriate config based on provider
     config = None
-    if request.provider == "sec":
-      config = request.sec_config
-    elif request.provider == "quickbooks":
+    if request.provider == "quickbooks":
       config = request.quickbooks_config
     elif request.provider == "external":
       config = request.external_config
