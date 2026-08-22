@@ -10,6 +10,7 @@ import pytest
 
 from robosystems.graph_api.core.ladybug.manager import (
   LadybugDatabaseManager,
+  counts_toward_capacity,
   validate_database_path,
 )
 from robosystems.graph_api.models.database import (
@@ -940,3 +941,25 @@ class TestLadybugDatabaseManagerIntegration:
             shutil.rmtree(path, ignore_errors=True)
           except Exception:
             pass  # Ignore cleanup errors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  "db_name,counts",
+  [
+    ("kg1a2b3c4d5e6f7a8b9c", True),  # an ordinary customer graph
+    ("sec", True),  # a shared repository is a primary and holds a slot
+    ("sec_historical", False),  # ...but its subgraphs are not
+    ("kg1a2b3c4d5e6f7a8b9c_dev", False),  # a subgraph rides its parent's slot
+    ("kg1a2b3c4d5e6f7a8b9c-wip", False),  # blue-green, exists only for a swap
+    ("kg1a2b3c4d5e6f7a8b9c-prev", False),
+  ],
+)
+def test_counts_toward_capacity(db_name, counts):
+  """The predicate behind both halves of capacity accounting, pinned by name.
+
+  ``sec`` is the case worth stating: a shared repository is a primary and does
+  occupy a slot. Reading it as exempt would let a node overfill, and that is
+  the direction that costs an outage rather than a spurious 507.
+  """
+  assert counts_toward_capacity(db_name) is counts

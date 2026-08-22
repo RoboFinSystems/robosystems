@@ -165,10 +165,9 @@ class TestCloseHappyPath:
     fcs.record_reclose.assert_not_called()
 
   def test_entries_posted_counts_both_post_paths(self):
-    """The QB pre-publish step promotes each published draft before the
-     bulk transition runs, so the receipt must sum both paths — counting
-     only the bulk pass reported entries_posted=0 while posting everything
-    ."""
+    """The QB pre-publish step promotes each published draft before the bulk
+    transition runs, so the receipt must sum both paths — counting only the
+    bulk pass reports entries_posted=0 while posting everything."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
     svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     # All 36 drafts were published (and promoted) by the pre-publish
