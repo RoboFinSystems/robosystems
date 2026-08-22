@@ -20,6 +20,7 @@ from robosystems.logger import (
   log_auth_event,
   security_logger,
 )
+from robosystems.security.audit_logger import SecurityAuditLogger
 from robosystems.security.request_context import bind_request_id, reset_request_id
 
 logger = api_logger
@@ -301,6 +302,22 @@ class SecurityLoggingMiddleware(BaseHTTPMiddleware):
           "method": request.method,
           "path": request.url.path,
         },
+      )
+
+    # Record every authenticated admin-surface action. `admin_key_id` is set on
+    # request.state by AdminAuthMiddleware once the key verifies, so its absence
+    # means authentication never succeeded — those are already recorded (and
+    # alarmed) by log_admin_auth_failure, and must not be double-logged here.
+    admin_key_id = getattr(request.state, "admin_key_id", None)
+    if admin_key_id and request.url.path.startswith("/admin/v1/"):
+      SecurityAuditLogger.log_admin_action(
+        admin_key_id=str(admin_key_id),
+        method=request.method,
+        endpoint=request.url.path,
+        status_code=response.status_code,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        query=redact_sensitive_query_params(str(request.url.query)) or None,
       )
 
     # Log authorization failures (403 responses) using structured logging
