@@ -24,6 +24,16 @@ class SchemaType(Enum):
   KNOWLEDGE = "knowledge"
 
 
+# Extensions an *entity graph* can be created with. `knowledge` is a schema
+# but not one of these: it is installed on a subgraph via `subgraph_type=
+# "knowledge"`, never composed into an entity graph. Both the create
+# validator and the /extensions listing read this, so the set a caller is
+# offered and the set the API accepts cannot drift apart.
+ENTITY_GRAPH_EXTENSIONS: frozenset[str] = frozenset(
+  {SchemaType.ROBOLEDGER.value, SchemaType.ROBOINVESTOR.value}
+)
+
+
 @dataclass
 class SchemaConfiguration:
   """Schema configuration with base + extensions."""

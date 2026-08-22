@@ -514,10 +514,21 @@ async def get_available_extensions(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
   try:
-    from robosystems.schemas.runtime.manager import SchemaManager
+    from robosystems.schemas.runtime.manager import (
+      ENTITY_GRAPH_EXTENSIONS,
+      SchemaManager,
+    )
 
     manager = SchemaManager()
-    extensions_info = manager.list_available_extensions()
+    # Only what an entity graph can actually be created with. `knowledge` is a
+    # loadable schema, but it is installed on a subgraph rather than composed
+    # into an entity graph, so listing it here offered callers a value the
+    # create path rejects with a 422.
+    extensions_info = [
+      info
+      for info in manager.list_available_extensions()
+      if info["name"] in ENTITY_GRAPH_EXTENSIONS
+    ]
     logger.info(f"Got {len(extensions_info)} extensions from schema manager")
 
     # Convert to response format

@@ -52,11 +52,9 @@ class EntityCreate(BaseModel):
     if v is None:
       return v
 
-    # List of available extensions
-    available_extensions = {
-      "roboledger",
-      "roboinvestor",
-    }
+    from robosystems.schemas.runtime.manager import ENTITY_GRAPH_EXTENSIONS
+
+    available_extensions = ENTITY_GRAPH_EXTENSIONS
 
     # Check for unknown extensions
     unknown_extensions = set(v) - available_extensions
