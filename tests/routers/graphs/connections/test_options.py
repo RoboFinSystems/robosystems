@@ -25,16 +25,11 @@ def _make_mock_user(user_id: str = USER_ID):
 
 
 def _make_mock_env(
-  sec_enabled: bool = True,
   quickbooks_enabled: bool = True,
-  external_enabled: bool = False,
+  external_enabled: bool = True,
 ):
-  """Create a mock env object with connection feature flags.
-
-  ``external_enabled`` defaults False so the pre-external assertions
-  about provider counts stay literal; external-specific tests opt in."""
+  """Create a mock env object with connection feature flags."""
   mock_env = MagicMock()
-  mock_env.CONNECTION_SEC_ENABLED = sec_enabled
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   return mock_env
@@ -53,7 +48,7 @@ class TestGetConnectionOptions:
   async def test_all_providers_enabled_returns_two_providers(self):
     """All providers enabled → two providers in response."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -64,7 +59,7 @@ class TestGetConnectionOptions:
 
     assert result.total_providers == 2
     provider_names = [p.provider for p in result.providers]
-    assert "sec" in provider_names
+    assert "external" in provider_names
     assert "quickbooks" in provider_names
 
   @pytest.mark.unit
@@ -72,9 +67,7 @@ class TestGetConnectionOptions:
   async def test_all_providers_disabled_returns_empty_list(self):
     """All providers disabled → empty providers list."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(
-      sec_enabled=False, quickbooks_enabled=False, external_enabled=False
-    )
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=False)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -88,10 +81,10 @@ class TestGetConnectionOptions:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_only_sec_enabled(self):
-    """Only SEC enabled → single SEC provider in response."""
+  async def test_only_external_enabled(self):
+    """Only external enabled → single external provider in response."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -101,14 +94,14 @@ class TestGetConnectionOptions:
       )
 
     assert result.total_providers == 1
-    assert result.providers[0].provider == "sec"
+    assert result.providers[0].provider == "external"
 
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_only_quickbooks_enabled(self):
     """Only QuickBooks enabled → single QB provider in response."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=False)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -125,7 +118,7 @@ class TestGetConnectionOptions:
   async def test_total_providers_matches_providers_list_length(self):
     """total_providers field always matches the length of the providers list."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -138,10 +131,10 @@ class TestGetConnectionOptions:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_provider_ordering_is_sec_then_qb(self):
-    """Providers appear in canonical order: SEC, QuickBooks."""
+  async def test_provider_ordering_is_qb_then_external(self):
+    """Providers appear in canonical order: QuickBooks, external."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -151,7 +144,7 @@ class TestGetConnectionOptions:
       )
 
     provider_names = [p.provider for p in result.providers]
-    assert provider_names == ["sec", "quickbooks"]
+    assert provider_names == ["quickbooks", "external"]
 
   # ---------------------------------------------------------------------------
   # Verify provider metadata for each enabled provider
@@ -159,10 +152,10 @@ class TestGetConnectionOptions:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_sec_provider_metadata(self):
-    """SEC provider includes correct display name and auth_type."""
+  async def test_external_provider_metadata(self):
+    """External provider includes correct display name and auth_type."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -171,19 +164,18 @@ class TestGetConnectionOptions:
         _rate_limit=None,
       )
 
-    sec = result.providers[0]
-    assert sec.provider == "sec"
-    assert sec.display_name == "SEC EDGAR"
-    assert sec.auth_type == "none"
-    assert "cik" in sec.required_config
-    assert sec.documentation_url is not None
+    external = result.providers[0]
+    assert external.provider == "external"
+    assert external.display_name == "External Integration"
+    assert external.auth_type == "none"
+    assert "source_name" in external.required_config
 
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_quickbooks_provider_metadata(self):
     """QuickBooks provider includes OAuth auth_type and correct features."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=False)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -202,10 +194,10 @@ class TestGetConnectionOptions:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_sec_provider_has_xbrl_features(self):
-    """SEC provider advertises XBRL parsing as a feature."""
+  async def test_external_provider_advertises_event_push(self):
+    """External provider advertises event push as a feature."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -214,15 +206,15 @@ class TestGetConnectionOptions:
         _rate_limit=None,
       )
 
-    sec = result.providers[0]
-    assert "xbrl_parsing" in sec.features
+    external = result.providers[0]
+    assert "event_push" in external.features
 
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_quickbooks_has_entity_id_in_required_config(self):
     """QuickBooks provider requires entity_id configuration."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=False, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=False)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -241,7 +233,7 @@ class TestGetConnectionOptions:
     from robosystems.models.api.graphs.connections import ConnectionOptionsResponse
 
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=False)
+    mock_env = _make_mock_env(quickbooks_enabled=False, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -259,7 +251,7 @@ class TestGetConnectionOptions:
     from robosystems.models.api.graphs.connections import ConnectionProviderInfo
 
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -276,7 +268,7 @@ class TestGetConnectionOptions:
   async def test_all_providers_have_setup_instructions(self):
     """Every enabled provider includes setup_instructions."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -294,7 +286,7 @@ class TestGetConnectionOptions:
   async def test_all_providers_have_data_types(self):
     """Every enabled provider includes a non-empty data_types list."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -311,7 +303,7 @@ class TestGetConnectionOptions:
   async def test_all_providers_have_sync_frequency(self):
     """Every enabled provider includes sync_frequency."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -328,9 +320,7 @@ class TestGetConnectionOptions:
   async def test_external_provider_listed_when_enabled(self):
     """External provider appears with source_name as required config."""
     mock_user = _make_mock_user()
-    mock_env = _make_mock_env(
-      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
-    )
+    mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=True)
 
     with patch(f"{OPTIONS_MODULE}.env", mock_env):
       result = await get_connection_options(
@@ -339,7 +329,7 @@ class TestGetConnectionOptions:
         _rate_limit=None,
       )
 
-    assert result.total_providers == 3
+    assert result.total_providers == 2
     external = next(p for p in result.providers if p.provider == "external")
     assert external.auth_type == "none"
     assert external.required_config == ["source_name"]

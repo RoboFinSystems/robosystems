@@ -638,14 +638,19 @@ async def dispatch_connection_sync(
   sync_options: dict[str, object] | None = None,
   dispatch_timeout: float | None = None,
 ) -> dict[str, Any]:
-  """Validate, lock, and dispatch a connection sync (async via Dagster).
+  """Validate, lock, and dispatch a connection sync.
 
   The shared kernel behind `POST .../connections/{id}/sync` and the
   `sync-connection` MCP tool: graph- and user-scoped connection lookup,
   provider validation, the per-connection sync lock, and provider
-  dispatch. Completion is observed via `Connection.last_sync` (the load
-  asset updates it), surfaced through `get-fiscal-calendar` and the
-  connections read surface.
+  dispatch.
+
+  `dispatched` in the returned dict says whether a run actually started.
+  When true, `task_id` is that run and completion is observed via
+  `Connection.last_sync` (the load asset updates it), surfaced through
+  `get-fiscal-calendar` and the connections read surface. When false the
+  provider had nothing to pull, `task_id` is None, `message` says why, and
+  there is nothing to poll for.
 
   Raises:
       ConnectionNotFoundError, ProviderUnavailableError,
@@ -731,7 +736,7 @@ async def dispatch_connection_sync(
     effective_options["sync_lock_id"] = sync_lock_id
 
   try:
-    task_id = await asyncio.wait_for(
+    outcome = await asyncio.wait_for(
       provider_registry.sync_connection(
         provider, connection, effective_options or None, graph_id
       ),
@@ -746,18 +751,30 @@ async def dispatch_connection_sync(
       _release_sync_lock(connection_id, sync_lock_id)
     raise
 
-  # A provider that returns synchronously has already done whatever it does —
+  # A provider that did not dispatch a run has already done whatever it does —
   # there is no run coming that will release the lock, so holding it until the
   # TTL would 409 every later attempt on this connection for 30 minutes.
-  if sync_lock_id and not provider_registry.starts_async_run(provider):
+  if sync_lock_id and not outcome.dispatched:
     _release_sync_lock(connection_id, sync_lock_id)
 
-  logger.info(f"Sync initiated for connection {connection_id}: task_id={task_id}")
+  if outcome.dispatched:
+    logger.info(
+      f"Sync dispatched for connection {connection_id}: task_id={outcome.task_id}"
+    )
+  else:
+    logger.info(
+      f"Sync is a no-op for connection {connection_id} "
+      f"(provider={provider}): {outcome.message}"
+    )
 
   return {
     "connection_id": connection_id,
     "provider": provider,
-    "task_id": task_id,
+    "dispatched": outcome.dispatched,
+    # Only a dispatched run has something to poll; a provider with nothing to
+    # pull must not be handed back an id that resolves to no work.
+    "task_id": outcome.task_id,
+    "message": outcome.message,
     "full_rebuild": bool(full_rebuild),
     "since_date": since_date.isoformat() if since_date else None,
     "last_sync_before_dispatch": connection.get("last_sync"),

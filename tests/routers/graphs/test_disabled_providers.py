@@ -12,16 +12,16 @@ from tests.conftest import VALID_TEST_GRAPH_ID
 class TestDisabledProviderHandling:
   """Test that disabled providers return proper client errors."""
 
-  def test_create_connection_disabled_sec_provider(
+  def test_create_connection_disabled_external_provider(
     self, client: TestClient, auth_headers
   ):
-    """Test creating a connection for disabled SEC provider returns 403."""
+    """Test creating a connection for disabled external provider returns 403."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      # Configure mock env with SEC disabled
-      mock_env.CONNECTION_SEC_ENABLED = False
+      # Configure mock env with external disabled
+      mock_env.CONNECTION_EXTERNAL_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
 
-      # Re-initialize the provider registry with SEC disabled
+      # Re-initialize the provider registry with external disabled
       import robosystems.routers.graphs.connections.management as management
       from robosystems.operations.providers.registry import ProviderRegistry
       from robosystems.routers.graphs.connections import utils
@@ -31,9 +31,9 @@ class TestDisabledProviderHandling:
       management.provider_registry = new_registry
 
       request_data = {
-        "provider": "sec",
+        "provider": "external",
         "entity_id": "entity_123",
-        "sec_config": {"cik": "0000320193"},
+        "external_config": {"source_name": "salesforce"},
       }
 
       response = client.post(
@@ -56,7 +56,7 @@ class TestDisabledProviderHandling:
     ) as mock_get:
       mock_get.return_value = {
         "connection_id": "conn_123",
-        "provider": "SEC",
+        "provider": "EXTERNAL",
         "entity_id": "entity_123",
         "status": "active",
         "created_at": "2024-01-01T00:00:00",
@@ -64,19 +64,21 @@ class TestDisabledProviderHandling:
       }
 
       with patch("robosystems.operations.providers.registry.env") as mock_env:
-        # Configure mock env with SEC disabled
-        mock_env.CONNECTION_SEC_ENABLED = False
+        # Configure mock env with external disabled
+        mock_env.CONNECTION_EXTERNAL_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
 
-        # Re-initialize the provider registry
-        import robosystems.routers.graphs.connections.sync as sync_module
         from robosystems.operations.providers.registry import ProviderRegistry
-        from robosystems.routers.graphs.connections import utils
 
         new_registry = ProviderRegistry()
-        utils.provider_registry = new_registry
-        sync_module.provider_registry = new_registry
 
+      # `dispatch_connection_sync` imports the module-level singleton at call
+      # time, so that is the reference the patch has to replace — rebinding
+      # the routers' names leaves the dispatcher on the real registry.
+      with patch(
+        "robosystems.operations.providers.registry.provider_registry",
+        new_registry,
+      ):
         request_data = {"sync_options": {}}
 
         response = client.post(
@@ -115,7 +117,7 @@ class TestDisabledProviderHandling:
 
         with patch("robosystems.operations.providers.registry.env") as mock_env:
           # Configure mock env with QuickBooks disabled
-          mock_env.CONNECTION_SEC_ENABLED = True
+          mock_env.CONNECTION_EXTERNAL_ENABLED = False
           mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
 
           # Re-initialize the provider registry

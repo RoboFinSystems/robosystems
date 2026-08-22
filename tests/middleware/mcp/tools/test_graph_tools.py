@@ -785,10 +785,23 @@ class TestSetWritePolicyExecute:
 _DISPATCH_RESULT = {
   "connection_id": "conn_1",
   "provider": "quickbooks",
+  "dispatched": True,
   "task_id": "run_123",
+  "message": None,
   "full_rebuild": False,
   "since_date": None,
   "last_sync_before_dispatch": "2026-07-31T00:00:00+00:00",
+}
+
+_NO_OP_DISPATCH_RESULT = {
+  "connection_id": "conn_1",
+  "provider": "external",
+  "dispatched": False,
+  "task_id": None,
+  "message": "External connections are push-based; there is nothing to sync.",
+  "full_rebuild": False,
+  "since_date": None,
+  "last_sync_before_dispatch": None,
 }
 
 
@@ -860,6 +873,23 @@ class TestSyncConnectionExecute:
     assert kwargs["since_date"].isoformat() == "2026-07-01"
 
   @pytest.mark.asyncio
+  async def test_no_op_provider_is_not_reported_as_accepted(self) -> None:
+    """A provider that dispatched nothing must not tell the operator to poll.
+
+    `accepted` plus the polling instruction would send the agent into a wait
+    on a run that was never started.
+    """
+    with patch(
+      f"{CONN_MODULE}.dispatch_connection_sync",
+      new=AsyncMock(return_value=_NO_OP_DISPATCH_RESULT),
+    ):
+      result = await SyncConnectionTool(_client()).execute({"connection_id": "conn_1"})
+
+    assert result["status"] == "no_op"
+    assert result["task_id"] is None
+    assert "nothing to poll for" in result["message"]
+
+  @pytest.mark.asyncio
   async def test_ambiguous_resolution_lists_candidates(self) -> None:
     from robosystems.operations.connection_service import (
       AmbiguousSyncConnectionError,
@@ -867,7 +897,7 @@ class TestSyncConnectionExecute:
 
     candidates = [
       {"connection_id": "conn_1", "provider": "quickbooks", "status": "connected"},
-      {"connection_id": "conn_2", "provider": "sec", "status": "connected"},
+      {"connection_id": "conn_2", "provider": "external", "status": "connected"},
     ]
     with patch(
       f"{CONN_MODULE}.resolve_sync_connection",

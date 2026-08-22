@@ -17,7 +17,6 @@ from .connections import (
   LinkTokenRequest,
   ProviderType,
   QuickBooksConnectionConfig,
-  SECConnectionConfig,
   SyncConnectionRequest,
 )
 from .core import (
@@ -199,7 +198,6 @@ __all__ = [
   "QueryLimits",
   "QuickBooksConnectionConfig",
   "RateLimits",
-  "SECConnectionConfig",
   "SchemaExportRequest",
   "SchemaExportResponse",
   "SchemaInfoResponse",

@@ -196,7 +196,6 @@ function create_ssm_feature_flags() {
         "CONNECTIONS_ENABLED=false"
 
         "CONNECTION_QUICKBOOKS_ENABLED=false"
-        "CONNECTION_SEC_ENABLED=false"
         "SEC_PIPELINE_ENABLED=false"
         "DIRECT_GRAPH_MATERIALIZATION_ENABLED=true"
         "EMAIL_VERIFICATION_ENABLED=false"
@@ -249,7 +248,6 @@ function create_ssm_feature_flags() {
         "SHARED_MASTER_READS_ENABLED=true"
         "SHARED_MASTER_PARKING_ENABLED=true"
         "SEMANTIC_SEARCH_ENABLED=false"
-        "SSE_ENABLED=true"
         "SUBGRAPH_CREATION_ENABLED=true"
         "TAXONOMY_AUTHORING_ENABLED=false"
         "USER_REGISTRATION_ENABLED=${user_reg}"

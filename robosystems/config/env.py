@@ -481,10 +481,6 @@ class EnvConfig:
     "BILLING_ENABLED",
     get_parameter_value("BILLING_ENABLED", "false").lower() == "true",
   )
-  SSE_ENABLED = get_bool_env(
-    "SSE_ENABLED",
-    get_parameter_value("SSE_ENABLED", "true").lower() == "true",
-  )
   RATE_LIMIT_ENABLED = get_bool_env(
     "RATE_LIMIT_ENABLED",
     get_parameter_value("RATE_LIMIT_ENABLED", "false").lower() == "true",
@@ -698,15 +694,6 @@ class EnvConfig:
     get_parameter_value("CONNECTIONS_ENABLED", "true").lower() == "true",
   )
   # Individual provider flags (require CONNECTIONS_ENABLED=true)
-  # Defaults off: the SEC connection is a filing-driven entity-creation path
-  # that predates the shared SEC repository, and it is disabled in every
-  # deployed environment. Keeping the default on meant local dev registered a
-  # provider prod does not, and a fresh deployment would have shipped it live.
-  # The provider itself is intact — flip the flag to bring it back.
-  CONNECTION_SEC_ENABLED = get_bool_env(
-    "CONNECTION_SEC_ENABLED",
-    get_parameter_value("CONNECTION_SEC_ENABLED", "false").lower() == "true",
-  )
   CONNECTION_QUICKBOOKS_ENABLED = get_bool_env(
     "CONNECTION_QUICKBOOKS_ENABLED",
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",

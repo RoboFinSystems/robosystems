@@ -22,7 +22,7 @@ router = APIRouter()
   "/options",
   response_model=ConnectionOptionsResponse,
   summary="List Connection Options",
-  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). SEC requires no auth; QuickBooks requires OAuth 2.0.",
+  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). QuickBooks requires OAuth 2.0; external connections require no auth.",
   operation_id="getConnectionOptions",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -34,30 +34,6 @@ async def get_connection_options(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionOptionsResponse:
   providers = []
-
-  # SEC EDGAR provider
-  if env.CONNECTION_SEC_ENABLED:
-    providers.append(
-      ConnectionProviderInfo(
-        provider="sec",
-        display_name="SEC EDGAR",
-        description="Connect to SEC EDGAR database for public entity financial filings",
-        auth_type="none",
-        auth_flow="No authentication required - public data source",
-        required_config=["cik"],
-        optional_config=["entity_name"],
-        features=[
-          "xbrl_parsing",
-          "10k_10q_import",
-          "real_time_filings",
-          "historical_data",
-        ],
-        sync_frequency="Daily for new filings",
-        data_types=["10-K", "10-Q", "8-K", "DEF 14A", "20-F", "XBRL Financial Data"],
-        setup_instructions="Enter the entity's 10-digit CIK (Central Index Key) number. The CIK can be found on SEC.gov.",
-        documentation_url="https://www.sec.gov/edgar/searchedgar/entitysearch",
-      )
-    )
 
   # QuickBooks provider
   if env.CONNECTION_QUICKBOOKS_ENABLED:

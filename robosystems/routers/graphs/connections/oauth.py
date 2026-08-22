@@ -299,9 +299,11 @@ async def oauth_callback(
           is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
           sync_options = {"full_rebuild": True} if is_first_sync else None
 
-          task_id = await provider_registry.sync_connection(
+          outcome = await provider_registry.sync_connection(
             "quickbooks", connection, sync_options, graph_id
           )
+          # `auto_sync_task_id` is the run id, not the outcome object.
+          task_id = outcome.task_id
           logger.info(
             "Auto-sync initiated for QuickBooks connection: task_id=%s "
             "(first_sync=%s, full_rebuild=%s)",

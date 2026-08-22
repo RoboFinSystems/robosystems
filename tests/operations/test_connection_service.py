@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.operations.connection_service import SYSTEM_USER_ID, ConnectionService
+from robosystems.operations.providers.types import SyncOutcome
 
 MODULE = "robosystems.operations.connection_service"
 
@@ -1418,7 +1419,9 @@ class TestDispatchConnectionSync:
       valkey_patch,
     ):
       mock_registry.get_provider.return_value = MagicMock()
-      mock_registry.sync_connection = AsyncMock(return_value="run_777")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="run_777")
+      )
 
       result = await dispatch_connection_sync(
         graph_id="kg_test",
@@ -1456,7 +1459,9 @@ class TestDispatchConnectionSync:
       ),
     ):
       mock_registry.get_provider.return_value = MagicMock()
-      mock_registry.sync_connection = AsyncMock(return_value="run_888")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="run_888")
+      )
 
       result = await dispatch_connection_sync(
         graph_id="kg_test", connection_id="conn_1", user_id="usr_123"
@@ -1488,7 +1493,9 @@ class TestDispatchConnectionSync:
       valkey_patch,
     ):
       mock_registry.get_provider.return_value = MagicMock()
-      mock_registry.sync_connection = AsyncMock(return_value="run_999")
+      mock_registry.sync_connection = AsyncMock(
+        return_value=SyncOutcome(status="dispatched", task_id="run_999")
+      )
 
       result = await dispatch_connection_sync(
         graph_id="kg_test", connection_id="conn_1", user_id="usr_123"

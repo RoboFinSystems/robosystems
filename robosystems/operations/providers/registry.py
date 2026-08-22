@@ -14,7 +14,6 @@ from ...middleware.otel.metrics import get_endpoint_metrics
 from ...models.api.graphs.connections import (
   ExternalConnectionConfig,
   QuickBooksConnectionConfig,
-  SECConnectionConfig,
 )
 from .external_provider import (
   cleanup_external_connection,
@@ -26,11 +25,7 @@ from .quickbooks_provider import (
   create_quickbooks_connection,
   sync_quickbooks_connection,
 )
-from .sec_provider import (
-  cleanup_sec_connection,
-  create_sec_connection,
-  sync_sec_connection,
-)
+from .types import SyncOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +44,8 @@ class ConnectionProvider(Protocol):
     connection: dict[str, Any],
     sync_options: dict[str, Any] | None,
     graph_id: str,
-  ) -> str:
-    """Pull from the source; returns a run id or a human-readable status."""
+  ) -> SyncOutcome:
+    """Pull from the source; the outcome says whether a run was started."""
     ...
 
   async def cleanup_connection(self, connection: dict[str, Any], graph_id: str) -> None:
@@ -66,23 +61,12 @@ class ProviderRegistry:
 
     self._record_feature_flag_status()
 
-    if env.CONNECTION_SEC_ENABLED:
-      self._providers["sec"] = {
-        "create": create_sec_connection,
-        "sync": sync_sec_connection,
-        "cleanup": cleanup_sec_connection,
-        "config_class": SECConnectionConfig,
-        "starts_async_run": False,
-      }
-
     if env.CONNECTION_QUICKBOOKS_ENABLED:
       self._providers["quickbooks"] = {
         "create": create_quickbooks_connection,
         "sync": sync_quickbooks_connection,
         "cleanup": cleanup_quickbooks_connection,
         "config_class": QuickBooksConnectionConfig,
-        # `qb_load` releases the per-connection sync lock when the run ends.
-        "starts_async_run": True,
       }
 
     # "external" is source-namespace registration only — see external_provider.py
@@ -92,7 +76,6 @@ class ProviderRegistry:
         "sync": sync_external_connection,
         "cleanup": cleanup_external_connection,
         "config_class": ExternalConnectionConfig,
-        "starts_async_run": False,
       }
 
   def _record_feature_flag_status(self):
@@ -101,7 +84,6 @@ class ProviderRegistry:
     try:
       metrics = get_endpoint_metrics()
       for provider, enabled in [
-        ("sec", env.CONNECTION_SEC_ENABLED),
         ("quickbooks", env.CONNECTION_QUICKBOOKS_ENABLED),
         ("external", env.CONNECTION_EXTERNAL_ENABLED),
       ]:
@@ -125,17 +107,6 @@ class ProviderRegistry:
     """Whether a provider is registered (feature-flag enabled)."""
     return provider_type.lower() in self._providers
 
-  def starts_async_run(self, provider_type: str) -> bool:
-    """Whether this provider's ``sync`` hands off to a run that outlives it.
-
-    The per-connection sync lock is released by whoever finishes the work. A
-    provider that starts a Dagster run releases it there; one that returns
-    synchronously has already finished, so the caller must release it or the
-    lock sits until its TTL and 409s every later attempt.
-    """
-    provider = self._providers.get(provider_type.lower())
-    return bool(provider and provider.get("starts_async_run"))
-
   def get_provider(self, provider_type: str) -> dict[str, Any]:
     """Look up a provider's handler dict.
 
@@ -148,12 +119,7 @@ class ProviderRegistry:
 
     provider = self._providers.get(provider_lower)
     if not provider:
-      if provider_lower == "sec" and not env.CONNECTION_SEC_ENABLED:
-        self._record_disabled_provider_request(provider_lower)
-        raise ValueError(
-          "SEC provider is not enabled. Please contact support to enable this connection type."
-        )
-      elif provider_lower == "quickbooks" and not env.CONNECTION_QUICKBOOKS_ENABLED:
+      if provider_lower == "quickbooks" and not env.CONNECTION_QUICKBOOKS_ENABLED:
         self._record_disabled_provider_request(provider_lower)
         raise ValueError(
           "QuickBooks provider is not enabled. Please contact support to enable this connection type."
@@ -215,7 +181,7 @@ class ProviderRegistry:
     connection: dict[str, Any],
     sync_options: dict[str, Any] | None,
     graph_id: str,
-  ) -> str:
+  ) -> SyncOutcome:
     provider = self.get_provider(provider_type)
     sync_func = provider["sync"]
     return await sync_func(connection, sync_options, graph_id)

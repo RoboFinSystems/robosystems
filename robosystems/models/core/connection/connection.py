@@ -118,7 +118,7 @@ class Connection(Model):
   )
   graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False)
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
-  provider = Column(String, nullable=False)  # quickbooks, sec, external
+  provider = Column(String, nullable=False)  # quickbooks, external
   status = Column(String, default=ConnectionStatus.PENDING_OAUTH, nullable=False)
 
   # Provider-specific metadata

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.graphs.connections import (
-  SECConnectionConfig,
+  ExternalConnectionConfig,
 )
 from robosystems.models.core import User
 from robosystems.operations.providers.registry import ProviderRegistry
@@ -43,7 +43,6 @@ class TestConnectionFeatureFlags:
       # Mock the environment configuration
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
         # Configure mock env
-        mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -61,8 +60,8 @@ class TestConnectionFeatureFlags:
       # Clean up the override
       app.dependency_overrides.clear()
 
-  def test_options_endpoint_sec_only_enabled(self, client: TestClient, mock_user):
-    """Test connection options endpoint with only SEC enabled."""
+  def test_options_endpoint_external_only_enabled(self, client: TestClient, mock_user):
+    """Test connection options endpoint with only external enabled."""
     from main import app
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
@@ -71,9 +70,8 @@ class TestConnectionFeatureFlags:
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
         # Configure mock env
-        mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-        mock_env.CONNECTION_EXTERNAL_ENABLED = False
+        mock_env.CONNECTION_EXTERNAL_ENABLED = True
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -84,8 +82,8 @@ class TestConnectionFeatureFlags:
           data = response.json()
           assert data["total_providers"] == 1
           assert len(data["providers"]) == 1
-          assert data["providers"][0]["provider"] == "sec"
-          assert data["providers"][0]["display_name"] == "SEC EDGAR"
+          assert data["providers"][0]["provider"] == "external"
+          assert data["providers"][0]["display_name"] == "External Integration"
     finally:
       app.dependency_overrides.clear()
 
@@ -101,7 +99,6 @@ class TestConnectionFeatureFlags:
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
         # Configure mock env
-        mock_env.CONNECTION_SEC_ENABLED = False
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -129,9 +126,8 @@ class TestConnectionFeatureFlags:
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
         # Configure mock env
-        mock_env.CONNECTION_SEC_ENABLED = True
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_EXTERNAL_ENABLED = False
+        mock_env.CONNECTION_EXTERNAL_ENABLED = True
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -145,7 +141,7 @@ class TestConnectionFeatureFlags:
 
           # Check all providers are present
           provider_names = [p["provider"] for p in data["providers"]]
-          assert "sec" in provider_names
+          assert "external" in provider_names
           assert "quickbooks" in provider_names
     finally:
       app.dependency_overrides.clear()
@@ -159,10 +155,9 @@ class TestConnectionFeatureFlags:
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
-        # Configure mock env - SEC and QuickBooks enabled
-        mock_env.CONNECTION_SEC_ENABLED = True
+        # Configure mock env - QuickBooks and external enabled
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
-        mock_env.CONNECTION_EXTERNAL_ENABLED = False
+        mock_env.CONNECTION_EXTERNAL_ENABLED = True
 
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
@@ -175,7 +170,7 @@ class TestConnectionFeatureFlags:
           assert len(data["providers"]) == 2
 
           provider_names = [p["provider"] for p in data["providers"]]
-          assert "sec" in provider_names
+          assert "external" in provider_names
           assert "quickbooks" in provider_names
     finally:
       app.dependency_overrides.clear()
@@ -187,53 +182,48 @@ class TestProviderRegistry:
   def test_registry_with_all_disabled(self):
     """Test provider registry initialization with all providers disabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
       assert len(registry._providers) == 0
 
-  def test_registry_with_sec_enabled(self):
-    """Test provider registry with SEC enabled."""
+  def test_registry_with_external_enabled(self):
+    """Test provider registry with external enabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
-      mock_env.CONNECTION_EXTERNAL_ENABLED = False
+      mock_env.CONNECTION_EXTERNAL_ENABLED = True
 
       registry = ProviderRegistry()
-      assert "sec" in registry._providers
+      assert "external" in registry._providers
       assert "quickbooks" not in registry._providers
 
   def test_registry_with_quickbooks_enabled(self):
     """Test provider registry with QuickBooks enabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
-      assert "sec" not in registry._providers
+      assert "external" not in registry._providers
       assert "quickbooks" in registry._providers
 
-  def test_registry_get_provider_disabled_sec(self):
-    """Test getting SEC provider when disabled."""
+  def test_registry_get_provider_disabled_external(self):
+    """Test getting external provider when disabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
       registry = ProviderRegistry()
 
       with pytest.raises(ValueError) as exc_info:
-        registry.get_provider("sec")
+        registry.get_provider("external")
 
-      assert "SEC provider is not enabled" in str(exc_info.value)
+      assert "External provider is not enabled" in str(exc_info.value)
 
   def test_registry_get_provider_disabled_quickbooks(self):
     """Test getting QuickBooks provider when disabled."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -247,7 +237,6 @@ class TestProviderRegistry:
   def test_registry_get_unknown_provider(self):
     """Test getting unknown provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -262,7 +251,6 @@ class TestProviderRegistry:
   async def test_create_connection_disabled_provider(self):
     """Test creating a connection with a disabled provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -271,21 +259,20 @@ class TestProviderRegistry:
 
       with pytest.raises(ValueError) as exc_info:
         await registry.create_connection(
-          provider_type="sec",
+          provider_type="external",
           entity_id="test-entity",
-          config=SECConnectionConfig(cik="0000012345", entity_name="Test Company"),
+          config=ExternalConnectionConfig(source_name="salesforce"),
           user_id="test-user",
           graph_id="kg1a2b3c4d5e6f7a8b",
           db=mock_db,
         )
 
-      assert "SEC provider is not enabled" in str(exc_info.value)
+      assert "External provider is not enabled" in str(exc_info.value)
 
   @pytest.mark.asyncio
   async def test_sync_connection_disabled_provider(self):
     """Test syncing a connection with a disabled provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -312,7 +299,6 @@ class TestProviderRegistry:
   async def test_cleanup_connection_disabled_provider(self):
     """Test cleaning up a connection with an unknown provider."""
     with patch("robosystems.operations.providers.registry.env") as mock_env:
-      mock_env.CONNECTION_SEC_ENABLED = False
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
       mock_env.CONNECTION_EXTERNAL_ENABLED = False
 
@@ -345,7 +331,7 @@ class TestEnvironmentConfiguration:
     # Test the helper function with no env var set
     with patch.dict("os.environ", {}, clear=True):
       # By default, all should be disabled (False)
-      assert not get_bool_env("CONNECTION_SEC_ENABLED", False)
+      assert not get_bool_env("CONNECTION_EXTERNAL_ENABLED", False)
       assert not get_bool_env("CONNECTION_QUICKBOOKS_ENABLED", False)
 
   def test_feature_flags_from_env(self):
@@ -367,20 +353,20 @@ class TestEnvironmentConfiguration:
     ]
 
     for value, expected in test_cases:
-      with patch.dict("os.environ", {"CONNECTION_SEC_ENABLED": value}, clear=True):
-        assert get_bool_env("CONNECTION_SEC_ENABLED", False) == expected
+      with patch.dict("os.environ", {"CONNECTION_EXTERNAL_ENABLED": value}, clear=True):
+        assert get_bool_env("CONNECTION_EXTERNAL_ENABLED", False) == expected
 
   def test_multiple_feature_flags(self):
     """Test setting multiple feature flags at once."""
     from robosystems.config.env import get_bool_env
 
     env_vars = {
-      "CONNECTION_SEC_ENABLED": "true",
+      "CONNECTION_EXTERNAL_ENABLED": "true",
       "CONNECTION_QUICKBOOKS_ENABLED": "false",
     }
 
     with patch.dict("os.environ", env_vars, clear=True):
-      assert get_bool_env("CONNECTION_SEC_ENABLED", False) is True
+      assert get_bool_env("CONNECTION_EXTERNAL_ENABLED", False) is True
       assert not get_bool_env("CONNECTION_QUICKBOOKS_ENABLED", False)
 
 

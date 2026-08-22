@@ -920,9 +920,12 @@ class SyncConnectionTool:
         "incremental refresh is the common case.\n"
         "- since_date: Bounded incremental window (YYYY-MM-DD); ignored "
         "when full_rebuild=true.\n\n"
-        "**RETURNS:** A `task_id` once dispatched; the sync runs in the "
-        "background.\n\n"
-        "**NOTES:** Poll `get-fiscal-calendar` until "
+        "**RETURNS:** `status: accepted` with a `task_id` once dispatched; "
+        "the sync runs in the background. A push-based connection has "
+        "nothing to pull and returns `status: no_op` with a null `task_id` "
+        "— that is a normal answer, not a failure, and there is nothing to "
+        "poll for.\n\n"
+        "**NOTES:** After a dispatch, poll `get-fiscal-calendar` until "
         "`last_sync_at` advances past the dispatch time (and any "
         "`sync_stale` blocker clears) before proceeding with a close. A "
         "`sync_in_progress` error means a sync is already running — wait "
@@ -1018,6 +1021,19 @@ class SyncConnectionTool:
     except Exception as exc:
       logger.error("sync-connection failed for %s: %s", graph_id, exc, exc_info=True)
       return {"error": "command_failed", "message": str(exc)}
+
+    if not result.get("dispatched"):
+      # No run was started, so telling the operator to poll would send it
+      # into a wait that never resolves.
+      return {
+        "status": "no_op",
+        **result,
+        "message": (
+          f"{result.get('message')} Nothing was dispatched and there is "
+          "nothing to poll for — this connection's data does not arrive by "
+          "a platform-run sync."
+        ),
+      }
 
     return {
       "status": "accepted",

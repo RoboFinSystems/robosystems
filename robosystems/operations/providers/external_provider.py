@@ -17,6 +17,7 @@ from ...logger import logger
 from ...models.api.graphs.connections import ExternalConnectionConfig
 from ...models.core.connection.connection import Connection
 from ...operations.connection_service import ConnectionService
+from .types import SyncOutcome
 
 
 async def create_external_connection(
@@ -71,11 +72,14 @@ async def sync_external_connection(
   connection: dict[str, Any],
   sync_options: dict[str, Any] | None,
   graph_id: str,
-) -> str:
+) -> SyncOutcome:
   """External connections are push-based — nothing for the platform to pull."""
-  return (
-    "External connections are push-based: the integration writes through "
-    "the public API on its own schedule; there is nothing to sync."
+  return SyncOutcome(
+    status="unsupported",
+    message=(
+      "External connections are push-based: the integration writes through "
+      "the public API on its own schedule; there is nothing to sync."
+    ),
   )
 
 
