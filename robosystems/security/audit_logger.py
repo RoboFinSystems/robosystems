@@ -68,6 +68,13 @@ class SecurityEventType(Enum):
   GRAPH_MEMBER_ADDED = "graph_member_added"
   GRAPH_MEMBER_ROLE_CHANGED = "graph_member_role_changed"
   GRAPH_MEMBER_REMOVED = "graph_member_removed"
+  # Every authenticated request to the admin surface (SOC 2 CC6.1: privileged
+  # access is restricted AND what it did is recorded). Evidence, not alerts:
+  # no metric, like the membership and SCIM lifecycle events — the admin
+  # surface is unreachable from the internet, so volume here is not a signal.
+  # ``user_id`` is the admin credential that acted, which is what correlates
+  # this line to the CloudTrail ``GetSecretValue`` that fetched it.
+  ADMIN_ACTION = "admin_action"
   # Passkey MFA lifecycle (operational; only MFA_FAILED alarms — a spike is
   # the second-factor brute-force / phishing-relay signal)
   PASSKEY_ENROLLED = "passkey_enrolled"
@@ -282,6 +289,43 @@ class SecurityAuditLogger:
       endpoint=endpoint,
       details={"admin": True, "failure_reason": reason},
       risk_level="high",
+    )
+
+  @staticmethod
+  def log_admin_action(
+    admin_key_id: str,
+    method: str,
+    endpoint: str,
+    status_code: int,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    query: str | None = None,
+  ):
+    """Record one authenticated action on the admin surface.
+
+    Emitted for every request that got past admin authentication, whatever it
+    returned — a 403 or a 500 on the admin surface is as much a part of the
+    trail as a 200. Authentication *failures* are not routed here; they go to
+    :meth:`log_admin_auth_failure`, which alarms.
+
+    ``endpoint`` is the literal path, identifiers included: which subscription
+    or user was acted on is the point of the record, not incidental detail.
+    """
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.ADMIN_ACTION,
+      user_id=admin_key_id,
+      ip_address=ip_address,
+      user_agent=user_agent,
+      endpoint=endpoint,
+      details={
+        "admin": True,
+        "admin_key_id": admin_key_id,
+        "method": method,
+        "status_code": status_code,
+        "success": 200 <= status_code < 400,
+        **({"query": query} if query else {}),
+      },
+      risk_level="low" if method in ("GET", "HEAD", "OPTIONS") else "medium",
     )
 
   @staticmethod
