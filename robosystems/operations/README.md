@@ -46,6 +46,8 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `connection_service.py`, `document_service.py` | Connection and document lifecycle |
 | `oidc.py` | OIDC login kernel: connection config, flow state, ID-token validation, link-only user resolution |
 | `user_provisioning.py` | Account-creation kernel shared by registration and IdP-driven (SCIM) provisioning |
+| `passkeys.py` | WebAuthn kernel: registration and assertion challenges, credential storage, recovery codes |
+| `locking.py` | Distributed lock primitives for operations that must not run concurrently |
 
 Cross-domain block envelopes sit at the top level; domain kernels hold reads, commands, and services; cross-cutting infrastructure is top level too.
 
