@@ -201,6 +201,18 @@ One rule: **every isolation primitive keys on `graph_id`, never on an organizati
 
 Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a dedicated single-tenant deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy).
 
+### Identity & Access
+
+Credentials are `X-API-Key` for programmatic access and short-lived JWTs for the browser apps, both resolving to the same user and both revocable — deactivating a user bumps their session version *and* revokes their API keys, so there is no credential family that survives an offboarding.
+
+How a person authenticates is a deployment decision rather than a build-time one, published at `GET /v1/auth/providers` so a single frontend build renders whichever posture the backend is configured for:
+
+- **Passwords** — bcrypt cost 14, score-based strength policy, and a session-invalidating password change.
+- **Passkeys (WebAuthn)** — both a second factor after password login and a passwordless first factor, with optional enforcement for org owners and admins. Enrollment requires a fresh re-authentication proof and refuses API keys; challenge tokens are purpose-scoped and rejected as session bearers. The relying-party identity derives from the deployment's own domain, so each deployment is its own credential zone.
+- **Enterprise SSO (OIDC) + SCIM 2.0** — an identity-provider login paired with user provisioning, so the customer's IdP is the authoritative roster. Resolution is **link-only**: SCIM creates accounts, OIDC only resolves already-provisioned ones, and there is no just-in-time path where a valid token mints a local user. The SCIM bearer is its own credential class, accepted only at `/scim/v2` and never anywhere else. Off by default, not enabled on the managed platform, and — because the whole thing ships under Apache-2.0 — available to any fork without a license gate.
+
+Details: [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/wiki/Enterprise-SSO-and-SCIM) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [`SECURITY.md`](/SECURITY.md)
+
 ### Components
 
 **Application Layer:**
@@ -330,7 +342,7 @@ pip install robosystems-client
 
 **Operations Layer:**
 
-- [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [Querying the Analytical Graph](https://github.com/RoboFinSystems/robosystems/wiki/Querying-the-Analytical-Graph) · [Graph Operations](https://github.com/RoboFinSystems/robosystems/wiki/Graph-Operations) · [AI Operators & MCP](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) · [Shared Repositories](https://github.com/RoboFinSystems/robosystems/wiki/Shared-Repositories) · [Credits & Billing](https://github.com/RoboFinSystems/robosystems/wiki/Credits-and-Billing) · [Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)
+- [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/wiki/Enterprise-SSO-and-SCIM) · [Querying the Analytical Graph](https://github.com/RoboFinSystems/robosystems/wiki/Querying-the-Analytical-Graph) · [Graph Operations](https://github.com/RoboFinSystems/robosystems/wiki/Graph-Operations) · [AI Operators & MCP](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) · [Shared Repositories](https://github.com/RoboFinSystems/robosystems/wiki/Shared-Repositories) · [Credits & Billing](https://github.com/RoboFinSystems/robosystems/wiki/Credits-and-Billing) · [Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)
 
 **Extensions Layer:**
 

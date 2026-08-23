@@ -266,7 +266,7 @@ robosystems/
 │   ├── operators/                # AI Operator operations (Claude/MCP executors — distinct from REA Agent counterparty model)
 │   └── providers/                # Provider registry and implementations
 ├── middleware/                   # Cross-cutting concerns
-│   ├── auth/                     # Authentication (JWT, API keys, SSO)
+│   ├── auth/                     # Authentication (JWT, API keys, cross-app SSO, passkeys/MFA, enterprise OIDC + SCIM)
 │   ├── billing/                  # Credit consumption tracking
 │   ├── graph/                    # Graph routing and multi-tenancy
 │   ├── rate_limits/              # Burst protection
