@@ -13,6 +13,8 @@ RoboSystems has two doors into the same building. Both resolve to the same `User
 
 For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing.
 
+Those two are the *credentials*. How a person proves who they are to get a JWT in the first place is a separate, configurable question: password, passkey, or an enterprise identity provider. A deployment publishes its own answer at `GET /v1/auth/providers` — see [Login Methods](#login-methods) below.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -26,14 +28,17 @@ For everything in this guide — `curl`, MCP, SDK smoke tests — use the API ke
 - [Graph Membership](#graph-membership)
 - [The JWT / Bearer Boundary](#the-jwt--bearer-boundary)
 - [Accounts, Passwords, and Registration](#accounts-passwords-and-registration)
-- [Single Sign-On (SSO)](#single-sign-on-sso)
+- [Login Methods](#login-methods)
+- [Passkeys and MFA](#passkeys-and-mfa)
+- [Enterprise SSO (OIDC)](#enterprise-sso-oidc)
+- [The Internal Cross-App SSO Bridge](#the-internal-cross-app-sso-bridge)
 - [Troubleshooting](#troubleshooting)
 - [Related Documentation](#related-documentation)
 - [Support](#support)
 
 ## Overview
 
-Authentication in RoboSystems is credential-in-header, validated by a FastAPI dependency before any handler runs. Anonymous access is limited to the health probe (`GET /v1/status`), the public offering (`GET /v1/offering`), and the pre-login auth flow — registration, login, password reset, email verification, invitation preview, the password policy, and the CAPTCHA config. Everything else requires a valid credential. A request carries either an `X-API-Key` header (programmatic) or an `Authorization: Bearer` header (frontend session); both resolve to the same authenticated `User`.
+Authentication in RoboSystems is credential-in-header, validated by a FastAPI dependency before any handler runs. Anonymous access is limited to the health probe (`GET /v1/status`), the public offering (`GET /v1/offering`), and the pre-login auth flow — registration, login, password reset, email verification, invitation preview, the password policy, the auth-provider posture, and the CAPTCHA config. Everything else requires a valid credential. A request carries either an `X-API-Key` header (programmatic) or an `Authorization: Bearer` header (frontend session); both resolve to the same authenticated `User`.
 
 Access is layered. A valid credential authenticates *you*; access to a specific `graph_id` is checked separately by the graph-scoped dependency. That distinction drives the most important status-code rule on the platform: **401 means "no/invalid credential," 403 means "valid user, no access to that graph."** Keep them straight and most auth debugging resolves itself.
 
@@ -368,17 +373,105 @@ The practical consequence: **rotating a password is not a way to cut off program
 
 `PUT /v1/user` updates the authenticated user's own profile — `name` and `email`. It is the write counterpart to the `GET /v1/user` whoami call used in the [worked examples](#authenticated-rest-get-whoami) above.
 
-## Single Sign-On (SSO)
+## Login Methods
 
-RoboSystems supports SSO so a user authenticated in one frontend app (for example robosystems-app) can hand off to a sibling app (roboledger-app, roboinvestor-app) without re-entering credentials. It is a three-step token handoff:
+Everything above concerns *credentials in a header*. This section covers the other half — how a human proves identity to obtain a session in the first place. It is deployment-configurable, and a deployment publishes its own posture:
+
+```bash
+curl http://localhost:8000/v1/auth/providers
+```
+
+```json
+{
+  "password_auth": true,
+  "oidc": { "enabled": false, "provider_label": null },
+  "registration": true,
+  "passkeys": false
+}
+```
+
+That endpoint is public and carries no secrets. It exists so a frontend renders the login page from runtime configuration rather than hardcoding a set of methods — the same frontend build serves a password-primary deployment, a passkey deployment, and an SSO-only deployment. It is a **rendering hint, never a security boundary**: the backend flags are the enforcement, and a client that ignores this endpoint gains nothing.
+
+| Method | Flag | Notes |
+| --- | --- | --- |
+| Password | `PASSWORD_AUTH_ENABLED` | Bcrypt at cost 14, score-based strength policy |
+| Passkey (WebAuthn) | `PASSKEYS_ENABLED` | Second factor *and* passwordless first factor |
+| MFA enforcement | `MFA_ENFORCEMENT_ENABLED` | Requires org owners and admins to enroll a passkey |
+| Enterprise SSO (OIDC) | `SSO_OIDC_ENABLED` | Off on the managed platform; for dedicated and self-hosted deployments |
+
+Disabling password auth is only permitted when passkeys or OIDC are enabled — boot validation refuses a configuration in which nobody could log in.
+
+## Passkeys and MFA
+
+Passkeys are WebAuthn credentials, and they serve two distinct roles behind one flag.
+
+**As a second factor**, after a password login succeeds:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/auth/mfa/options` | Get the assertion challenge for a pending login |
+| `POST /v1/auth/mfa/verify` | Complete the challenge and receive the session |
+| `GET /v1/auth/mfa/status` | Whether this user has a factor enrolled |
+| `POST /v1/auth/mfa/recovery-codes/regenerate` | Issue a fresh set of recovery codes |
+
+**As a passwordless first factor**, replacing the password entirely:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/auth/passkeys/login/options` | Begin a passwordless login |
+| `POST /v1/auth/passkeys/login/verify` | Complete it and receive the session |
+
+**Enrollment and management** live behind an authenticated session:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/auth/passkeys/register/options` · `/verify` | Enroll a credential |
+| `GET /v1/auth/passkeys` | List enrolled credentials |
+| `DELETE /v1/auth/passkeys/{id}` | Remove one |
+| `POST /v1/auth/passkeys/reauth/options` | The fresh re-authentication proof enrollment requires |
+
+Things worth knowing before you wire a frontend against this:
+
+- **Enrollment needs more than a session.** It requires a fresh re-authentication proof on top of the session, and **API keys are refused** for it — programmatic credentials cannot enroll a second factor.
+- **MFA challenge tokens are not session tokens.** They're short-lived (5 minutes), scoped to a single purpose (`login` versus `enroll`), and explicitly refused if presented as a session bearer.
+- **Recovery codes**: ten, single-use, stored hashed, regenerable. They are shown once.
+- **Stored credentials hold no secrets** — the public key, a signature counter, transports, and backup flags. There is nothing in the record to steal and replay.
+- **The relying-party identity is per-deployment**, derived from the deployment's root domain (overridable with `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`). Each deployment is its own credential zone; a passkey enrolled on one does not exist on another.
+- **Enforcement keys on the password door.** When `MFA_ENFORCEMENT_ENABLED` is on, org owners and admins must enroll a passkey before a password login yields a session. Enrolled users are always challenged once passkeys are on, whether or not enforcement is.
+
+## Enterprise SSO (OIDC)
+
+A real identity-provider sign-in — Okta and other OIDC providers — paired with SCIM 2.0 provisioning, so the customer's IdP is the authoritative roster and unassigning a user ends their access.
+
+This is **off by default and not enabled on the managed platform**. It exists for deployments serving a single organization: a dedicated deployment or a self-hosted fork.
+
+```
+GET /v1/auth/oidc/login     → 302 to the identity provider
+GET /v1/auth/oidc/callback  → validates the ID token, resolves the user,
+                              hands off to the session bridge
+```
+
+The design rule that surprises people: **login never creates an account.** SCIM provisions users; OIDC only resolves already-provisioned ones. An authenticated IdP subject with no SCIM-provisioned local user is refused, by design.
+
+Both endpoints are redirect-based and deliberately absent from the OpenAPI spec — they are browser surface, not SDK surface, and you do not exercise them with `curl`.
+
+**Full setup, IdP configuration, and the control story: [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).**
+
+## The Internal Cross-App SSO Bridge
+
+> **"SSO" means two different things in this platform.** The section above is identity-provider federation. This one is an internal handoff between the platform's own frontends. They are unrelated mechanisms that happen to share a word — and they meet at exactly one point, which is that the OIDC callback finishes by handing the browser to the bridge's completion path, so there is a single place where a session token is issued.
+
+The bridge lets a user authenticated in one frontend app (say robosystems-app) move to a sibling app (roboledger-app, roboinvestor-app) without re-entering credentials. It is a three-step token handoff:
 
 | Step | Endpoint | What it does |
 | --- | --- | --- |
-| 1. Generate | `POST /v1/auth/sso-token` | The originating app (authenticated) mints a short-lived SSO token |
+| 1. Generate | `POST /v1/auth/sso-token` | The originating app (authenticated) mints a short-lived, single-use token |
 | 2. Exchange | `POST /v1/auth/sso-exchange` | The target app exchanges that token for a session |
 | 3. Complete | `POST /v1/auth/sso-complete` | The session is finalized in the target app |
 
-SSO is a frontend-to-frontend concern built on the Bearer/session layer. You do not invoke it from `curl` when testing the backend — like the JWT path, it sits on the frontend door. It is documented here so the full authentication picture is complete; for programmatic access, stay on the `X-API-Key` path.
+The handoff token is not a session token: it is single-use, expires in five minutes, and is refused if presented as a bearer. The session version is captured at exchange and re-checked at completion, so a password change between the two steps kills the handoff rather than completing it.
+
+This is a frontend-to-frontend concern built on the Bearer/session layer. You do not invoke it from `curl` when testing the backend — like the JWT path, it sits on the frontend door. It is documented here so the full authentication picture is complete; for programmatic access, stay on the `X-API-Key` path.
 
 ## Troubleshooting
 
@@ -434,6 +527,8 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 **Wiki Guides:**
 
 - **[Quick Start](Quick-Start)** - Start the local stack and run `just demo-user` to get your first API key
+- **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)** - Identity-provider federation and SCIM 2.0 provisioning for dedicated and self-hosted deployments
+- **[Security & Compliance](Security-and-Compliance)** - The platform's built-in controls and the optional compliance stacks
 - **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The per-graph access model and 401-vs-403 semantics
 - **[Graph Operations](Graph-Operations)** - Where authenticated requests go: operation envelopes and `X-API-Key` in practice
 - **[Credits and Billing](Credits-and-Billing)** - What the organization carries: credit pools, account limits, and the role-gated billing endpoints

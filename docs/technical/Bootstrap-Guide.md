@@ -181,6 +181,21 @@ robosystems/{env}                      # Single JSON secret per environment
   └── TURNSTILE_SITE_KEY
 ```
 
+**Enterprise SSO keys are deliberately not seeded.** A deployment that enables OIDC login and SCIM provisioning adds these to the same secret by hand:
+
+```
+robosystems/{env}
+  ├── SSO_OIDC_ISSUER                  # The IdP's issuer URL
+  ├── SSO_OIDC_CLIENT_ID
+  ├── SSO_OIDC_CLIENT_SECRET
+  ├── SSO_OIDC_PROVIDER_LABEL          # Login button text; defaults to "SSO"
+  ├── SSO_OIDC_BINDING_CLAIM           # ID-token claim matched to SCIM externalId (default "sub")
+  ├── SSO_DEFAULT_ROLE                 # Org role provisioned users join at — "member" or "admin"
+  └── ENTERPRISE_ORG_ID                # The single org this deployment's SSO/SCIM surface serves
+```
+
+They are absent rather than placeheld on purpose: boot validation refuses to start with `SSO_OIDC_ENABLED=true` and an unconfigured connection, and a placeholder string would satisfy that check with garbage instead of failing loudly. The full enablement sequence is in [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).
+
 **Managing secrets:**
 ```bash
 # View current values
@@ -206,6 +221,11 @@ Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs 
     SEMANTIC_SEARCH_ENABLED
     MCP_SUBGRAPH_OPS_ENABLED
     TAXONOMY_AUTHORING_ENABLED
+    PASSWORD_AUTH_ENABLED       # Identity: password login
+    PASSKEYS_ENABLED            # Identity: WebAuthn passkeys (MFA + passwordless)
+    MFA_ENFORCEMENT_ENABLED     # Identity: require a passkey for org owners/admins
+    SSO_OIDC_ENABLED            # Identity: enterprise OIDC login
+    SCIM_ENABLED                # Identity: SCIM 2.0 provisioning
     ROBOLEDGER_ENABLED          # RoboLedger extensions surface (ops + GraphQL)
     ROBOINVESTOR_ENABLED        # RoboInvestor extensions surface
     EXTENSIONS_GRAPHQL_ENABLED  # GraphQL reads endpoint kill switch

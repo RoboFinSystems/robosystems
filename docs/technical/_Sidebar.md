@@ -15,6 +15,7 @@
 
 ### Operations Layer
 - [Authentication & API Keys](Authentication-and-API-Keys)
+- [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)
 - [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)
 - [Shared Repositories](Shared-Repositories)
 - [Graph Operations](Graph-Operations)

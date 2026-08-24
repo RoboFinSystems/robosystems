@@ -32,6 +32,7 @@ Hands-on walkthroughs — run one command, explore the result.
 The core platform API and graph management.
 
 - **[Authentication & API Keys](Authentication-and-API-Keys)** - The X-API-Key header for technical access, and the JWT boundary
+- **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)** - OIDC login and SCIM 2.0 provisioning for dedicated and self-hosted deployments
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The graph_id model, tiers, and subgraphs
 - **[Shared Repositories](Shared-Repositories)** - Platform-managed public datasets (SEC) you subscribe to and query
 - **[Graph Operations](Graph-Operations)** - The CQRS operation surface: backups, subgraphs, materialize

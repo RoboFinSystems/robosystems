@@ -26,7 +26,8 @@ RoboSystems runs on AWS, so security splits three ways — and knowing which lay
 
 These are always on in any deployment — you inherit them by running the platform:
 
-- **Authentication** — JWT (30-min TTL, JTI revocation, fails closed) and API keys (`rfs` prefix, `rfsc` for graph-scoped keys, bcrypt cost-12 at rest, per-key expiry). See [Authentication & API Keys](Authentication-and-API-Keys).
+- **Authentication** — JWT (30-min TTL, JTI revocation, fails closed) and API keys (`rfs` prefix, `rfsc` for graph-scoped keys, bcrypt cost-12 at rest, per-key expiry). Login methods are deployment-configurable — password, WebAuthn passkeys (second factor *and* passwordless first factor, with optional enforcement for org owners and admins), or an enterprise identity provider — and a deployment publishes its own posture at `GET /v1/auth/providers`. See [Authentication & API Keys](Authentication-and-API-Keys).
+- **Identity lifecycle** — optional OIDC single sign-on and SCIM 2.0 provisioning bind account lifecycle to the customer's identity provider, so assignment and unassignment there are the joiner/leaver control. Deactivation is a genuine kill switch: it invalidates live sessions *and* revokes the user's API keys. Off by default and not enabled on the managed platform. See [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).
 - **Access control** — role-based, with a distinct vocabulary per scope: org (owner / admin / member) and graph (admin / member / viewer), where org owners and admins hold implicit graph admin over graphs their org owns. Shared repositories use subscription-based access instead of membership, and are **read-only for every subscriber** — writes against a shared repository or its subgraphs are refused unconditionally at the query surface.
 - **Tenant isolation** — every graph is a separate database; extensions OLTP uses schema-per-graph PostgreSQL isolation, with `search_path` re-stamped at the top of each session, schema names validated against a strict pattern before use, and the binding cleared before a connection returns to the pool. Enforced at the data layer, not just in app code. A CI structural test additionally guards the migration path, failing any extensions migration whose tenant-table DDL is not fanned out to every existing tenant schema.
 - **Encryption** — TLS 1.2+ in transit; AES-256 at rest (RDS, EBS, S3); Fernet field-encryption for OAuth/connection credentials.
@@ -92,6 +93,7 @@ The machine-readable contact record is served at [`/.well-known/security.txt`](h
 **Wiki Guides:**
 - **[Bootstrap Guide](Bootstrap-Guide)** — set up a fork, OIDC, and the deployment variables
 - **[Authentication & API Keys](Authentication-and-API-Keys)** — credentials and access
+- **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)** — identity-provider federation, SCIM provisioning, and the joiner/leaver control
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** — tenant isolation model
 - **[Architecture Overview](Architecture-Overview)** — infrastructure and deployment
 
