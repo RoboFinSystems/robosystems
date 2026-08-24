@@ -19,7 +19,9 @@ Prefer widening a model over replacing it.
 
 | Path | Contents |
 | ---- | -------- |
-| `auth.py` | Login, registration, JWT tokens, SSO flows |
+| `auth.py` | Login, registration, JWT tokens, the cross-app SSO bridge, auth-provider posture |
+| `passkeys.py` | WebAuthn passkey registration, passwordless login, and MFA challenge models |
+| `scim.py` | SCIM 2.0 resource, patch, list, and error-envelope models (RFC 7643/7644) |
 | `oauth.py` | OAuth provider integrations (QuickBooks, etc.) |
 | `common.py` | Error responses, pagination, health checks |
 | `user.py`, `orgs.py` | User profiles, API keys, usage analytics, organizations |

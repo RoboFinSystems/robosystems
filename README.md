@@ -201,6 +201,14 @@ One rule: **every isolation primitive keys on `graph_id`, never on an organizati
 
 Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a dedicated single-tenant deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy).
 
+### Identity & Access
+
+Programmatic access uses `X-API-Key`; the browser apps use short-lived JWTs. How a person *logs in* is a deployment decision — password, WebAuthn passkey, or an enterprise identity provider — published at `GET /v1/auth/providers`, so one frontend build renders whichever posture the backend is configured for.
+
+Enterprise SSO (OIDC) and SCIM 2.0 provisioning ship in the repository, off by default — available to any fork without a license gate. Provisioning is link-only: SCIM creates accounts and OIDC only resolves already-provisioned ones, so the identity provider owns the account lifecycle in both directions.
+
+Details: [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/wiki/Enterprise-SSO-and-SCIM) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [`SECURITY.md`](/SECURITY.md)
+
 ### Components
 
 **Application Layer:**
@@ -330,7 +338,7 @@ pip install robosystems-client
 
 **Operations Layer:**
 
-- [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [Querying the Analytical Graph](https://github.com/RoboFinSystems/robosystems/wiki/Querying-the-Analytical-Graph) · [Graph Operations](https://github.com/RoboFinSystems/robosystems/wiki/Graph-Operations) · [AI Operators & MCP](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) · [Shared Repositories](https://github.com/RoboFinSystems/robosystems/wiki/Shared-Repositories) · [Credits & Billing](https://github.com/RoboFinSystems/robosystems/wiki/Credits-and-Billing) · [Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)
+- [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/wiki/Enterprise-SSO-and-SCIM) · [Querying the Analytical Graph](https://github.com/RoboFinSystems/robosystems/wiki/Querying-the-Analytical-Graph) · [Graph Operations](https://github.com/RoboFinSystems/robosystems/wiki/Graph-Operations) · [AI Operators & MCP](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) · [Shared Repositories](https://github.com/RoboFinSystems/robosystems/wiki/Shared-Repositories) · [Credits & Billing](https://github.com/RoboFinSystems/robosystems/wiki/Credits-and-Billing) · [Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)
 
 **Extensions Layer:**
 

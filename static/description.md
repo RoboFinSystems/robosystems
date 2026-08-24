@@ -98,7 +98,8 @@ Built on the blocks:
 
 ### User & Access
 
-- **Authentication**: JWT tokens and API key management
+- **Authentication**: JWT sessions and API keys, plus WebAuthn passkeys as a second factor or a passwordless first factor. A deployment publishes which login methods it offers at `GET /v1/auth/providers`
+- **Enterprise identity** *(off by default; dedicated and self-hosted deployments)*: OIDC single sign-on and SCIM 2.0 user provisioning at `/scim/v2`, so an identity provider owns the account lifecycle. Login resolves SCIM-provisioned users only — there is no just-in-time account creation
 - **User Management**: Manage user account settings and profile
 - **Subscriptions**: Shared repository subscription access & AI credits
 - **Limits**: Rate limiting and usage tracking for shared repositories
