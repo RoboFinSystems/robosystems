@@ -16,6 +16,7 @@ from robosystems.config import env
 from robosystems.middleware.auth.jwt import (
   create_jwt_token,
   create_sso_token,
+  is_session_access_token,
   verify_jwt_claims,
 )
 
@@ -95,6 +96,13 @@ class TestJWTTokenType:
     result = verify_jwt_claims(token)
     assert result is not None
     assert result[0] == "usr_1"
+
+  def test_is_session_access_token_matches_the_bearer_gate(self):
+    assert is_session_access_token({"type": "access"}) is True
+    assert is_session_access_token({}) is True  # grandfathered
+    assert is_session_access_token({"sso": True}) is False
+    assert is_session_access_token({"type": "mfa"}) is False
+    assert is_session_access_token({"type": "access", "sso": True}) is False
 
   def test_non_access_type_is_rejected(self):
     from datetime import UTC, datetime, timedelta

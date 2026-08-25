@@ -19,6 +19,7 @@ from ...database import get_async_db_session
 from ...logger import logger
 from ...middleware.auth.jwt import (
   create_jwt_token,
+  is_session_access_token,
   revoke_jwt_token,
   verify_jwt_claims,
 )
@@ -169,6 +170,16 @@ async def refresh_session(
           audience=env.JWT_AUDIENCE,
           options={"verify_exp": False},  # Allow expired tokens for grace period
         )
+
+        # Purpose-scoped tokens (SSO handoff, MFA challenge) fail
+        # `verify_jwt_claims` on type even while unexpired, and on `exp`
+        # once they age out. The grace path must re-apply the same gate or
+        # an expired MFA/SSO token mints a session JWT.
+        if not is_session_access_token(payload) or not payload.get("jti"):
+          raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+          )
 
         # Check if token expired recently (within reduced grace period)
         exp = payload.get("exp")
