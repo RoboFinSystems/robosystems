@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CloseableGateResult,
 )
+from robosystems.operations.roboledger.reports.statement_sets import StatementStampError
 from robosystems.operations.roboledger.tasks.period_close import PeriodCloseTask
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -134,7 +135,9 @@ def _gate(*blockers, **detail) -> CloseGateFailed:
 
 class TestSuccess:
   def test_the_receipt_carries_the_close_and_names_the_operation(self):
-    result = _run(_task(), close_result=_close_response())
+    session = MagicMock()
+    result = _run(_task(), close_result=_close_response(), session=session)
+    session.rollback.assert_not_called()
 
     assert result["outcome"] == "closed"
     assert result["operation_id"] == "op_close_1"
@@ -195,14 +198,19 @@ class TestRefusals:
         WritebackFailed([{"event_id": "evt_1", "qb_error": {"code": "x"}}]),
         "write_back_failed",
       ),
+      (StatementStampError("pivot failed"), "statement_stamp_failed"),
     ],
   )
   def test_domain_outcomes_come_back_as_results(self, error, expected):
-    result = _run(_task(), close_error=error)
+    session = MagicMock()
+    result = _run(_task(), close_error=error, session=session)
 
     assert result["outcome"] == "rejected"
     assert result["error"] == expected
     assert result["operation_id"] == "op_close_1"
+    # Refusals are results, so extensions_session would commit on the way
+    # out. Rollback first or a stamp/gate failure leaves the period closed.
+    session.rollback.assert_called()
 
   def test_a_gate_rejection_keeps_the_blockers_the_operator_needs(self):
     result = _run(
