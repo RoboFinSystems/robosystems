@@ -232,6 +232,10 @@ class TestPasswordCheckModels:
     model = PasswordCheckRequest(password="test", email="user@example.com")
     assert model.email == "user@example.com"
 
+  def test_password_check_request_rejects_overlong_password(self):
+    with pytest.raises(ValidationError):
+      PasswordCheckRequest(password="x" * 129)
+
   def test_password_check_response(self):
     model = PasswordCheckResponse(
       is_valid=True,

@@ -152,6 +152,21 @@ def _get_user_session_version(user_id: str, session: Any = None) -> int | None:
     sess.close()
 
 
+def is_session_access_token(payload: dict[str, Any]) -> bool:
+  """Whether this JWT is a session bearer, not a purpose-scoped token.
+
+  Session tokens carry ``type: "access"``. Tokens with no ``type`` at all are
+  grandfathered (pre-type-claim sessions). SSO handoff tokens (``sso: true``)
+  and any other ``type`` (``mfa``, ``stream``, …) are not session bearers.
+  Shared by ``verify_jwt_claims`` and the ``/refresh`` grace path so a
+  purpose-scoped token cannot mint a session after it expires.
+  """
+  if payload.get("sso"):
+    return False
+  token_type = payload.get("type")
+  return token_type is None or token_type == "access"
+
+
 def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
@@ -186,8 +201,7 @@ def verify_jwt_claims(
     # through this function. Rejecting every non-`access` type also stops a
     # future purpose-scoped token (an SSE stream token, say) from being
     # replayed as a bearer. Tokens with no `type` claim at all are accepted.
-    token_type = payload.get("type")
-    if payload.get("sso") or (token_type is not None and token_type != "access"):
+    if not is_session_access_token(payload):
       logger.info("JWT token verification failed: non-access token presented as bearer")
       # A signature-valid but wrong-purpose token used as a bearer is a distinct
       # signal (possible replay of a leaked single-use SSO handoff) that the
@@ -199,7 +213,7 @@ def verify_jwt_claims(
         user_id=payload.get("user_id"),
         details={
           "reason": "non_access_token_as_bearer",
-          "token_type": "sso" if payload.get("sso") else token_type,
+          "token_type": "sso" if payload.get("sso") else payload.get("type"),
         },
         risk_level="high",
       )

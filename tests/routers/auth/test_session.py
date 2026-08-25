@@ -597,6 +597,81 @@ class TestRefreshSession:
     assert exc_info.value.detail == "Session refresh failed"
 
 
+class TestRefreshPurposeGate:
+  """Expired purpose-scoped tokens must not mint a session on /refresh.
+
+  `verify_jwt_claims` already refuses them as bearers. The grace path is a
+  second decoder and has to re-apply the same gate.
+  """
+
+  def _expired(self, **claims) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+
+    from robosystems.config import env
+
+    now = datetime.now(UTC)
+    payload = {
+      "user_id": "user_123",
+      "session_version": 0,
+      "iss": env.JWT_ISSUER,
+      "aud": env.JWT_AUDIENCE,
+      "exp": now - timedelta(minutes=1),
+      "iat": now - timedelta(minutes=6),
+    }
+    payload.update(claims)
+    return jwt.encode(payload, env.JWT_SECRET_KEY, algorithm="HS256")
+
+  def _request(self, token: str):
+    mock_request = Mock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": f"Bearer {token}",
+    }
+    return mock_request
+
+  async def _refresh(self, token: str):
+    mock_redis = Mock()
+    mock_redis.hgetall.return_value = {}
+    with patch(
+      "robosystems.middleware.auth.jwt.get_redis_client", return_value=mock_redis
+    ):
+      return await refresh_session(
+        fastapi_request=self._request(token),
+        session=Mock(),
+        _rate_limit=None,
+      )
+
+  async def test_expired_mfa_token_cannot_refresh(self):
+    token = self._expired(type="mfa", purpose="login", jti="jti-mfa")
+    with pytest.raises(HTTPException) as exc_info:
+      await self._refresh(token)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert exc_info.value.detail == "Invalid or expired token"
+
+  async def test_expired_sso_token_cannot_refresh(self):
+    token = self._expired(sso=True)
+    with pytest.raises(HTTPException) as exc_info:
+      await self._refresh(token)
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert exc_info.value.detail == "Invalid or expired token"
+
+  @patch("robosystems.routers.auth.session.User.get_by_id")
+  @patch("robosystems.routers.auth.session.revoke_jwt_token", return_value=True)
+  @patch(
+    "robosystems.routers.auth.session.create_jwt_token", return_value="new_jwt_token"
+  )
+  async def test_expired_access_token_within_grace_still_refreshes(
+    self, _create, _revoke, mock_get_by_id, mock_user
+  ):
+    mock_get_by_id.return_value = mock_user
+    token = self._expired(type="access", jti="jti-access")
+    result = await self._refresh(token)
+    assert result.token == "new_jwt_token"
+
+
 class TestCookieSettings:
   """Test cookie configuration in session refresh."""
 

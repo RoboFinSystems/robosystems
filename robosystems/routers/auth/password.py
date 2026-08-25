@@ -1,7 +1,8 @@
 """Password policy and validation endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import (
   PasswordCheckRequest,
   PasswordCheckResponse,
@@ -31,7 +32,10 @@ async def get_password_policy():
   operation_id="checkPasswordStrength",
   responses={**COMMON_ERROR_RESPONSES},
 )
-async def check_password_strength(request: PasswordCheckRequest):
+async def check_password_strength(
+  request: PasswordCheckRequest,
+  _rate_limit: None = Depends(auth_rate_limit_dependency),
+):
   result = PasswordSecurity.validate_password(request.password, request.email)
 
   return PasswordCheckResponse(

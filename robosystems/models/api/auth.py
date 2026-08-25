@@ -153,7 +153,12 @@ class AuthProvidersResponse(BaseModel):
 class PasswordCheckRequest(BaseModel):
   """Password strength check request model."""
 
-  password: str = Field(..., description="Password to check")
+  password: str = Field(
+    ...,
+    min_length=1,
+    max_length=128,
+    description="Password to check",
+  )
   email: str | None = Field(None, description="User email for personalization checks")
 
 

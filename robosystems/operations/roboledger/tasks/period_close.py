@@ -133,6 +133,16 @@ class PeriodCloseTask(BaseTask):
           )
           if receipt:
             payload["close_receipt"] = receipt
+        # Domain refusals are results, so this `with` exits cleanly and
+        # `extensions_session` would COMMIT. Stamp/gate failures raise
+        # after the period has been marked closed in the same transaction;
+        # without a rollback the operator is told the close rolled back
+        # while OLTP disagrees. `WritebackFailed` already committed its
+        # publish markers in a prior transaction — rollback only discards
+        # uncommitted work after that. `PeriodAlreadyClosedError` has
+        # nothing dirty; the receipt SELECT above is against committed
+        # rows and survives this.
+        session.rollback()
         logger.info(
           "period_close refused for %s %s: %s",
           graph_id,
