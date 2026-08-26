@@ -36,7 +36,8 @@ A JSON report lands at `.local/isolation-report.json` (override with
   - the `add-member` write, plus the destructive/sensitive **core ops**
     (`delete-graph`, `materialize`, `change-tier`, `create-backup`,
     `create-subgraph`, `update-graph-metadata`),
-  - MCP (`read-graph-cypher` + `write-graph-cypher` via `/mcp/call-tool`),
+  - MCP (`read-graph-cypher` + `write-graph-cypher` as JSON-RPC `tools/call`
+    over the `/mcp` transport),
   - GraphQL (`/extensions/{graph_id}/graphql`): `{ hello }` (access probe) and
     `{ entity { name } }` (data-leak probe),
   - the **extensions command surfaces** for both products — roboledger

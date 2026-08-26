@@ -53,17 +53,32 @@ CORE_OP_WRITES: list[str] = [
   "delete-graph",
 ]
 
-# MCP is always mounted (no domain flag). read-graph-cypher is a data probe;
-# write-graph-cypher is a cross-tenant write probe.
-MCP_PATH = "/v1/graphs/{graph_id}/mcp/call-tool"
-MCP_READ_BODY = {
-  "name": "read-graph-cypher",
-  "arguments": {"query": "MATCH (n) RETURN count(n) AS c", "parameters": {}},
-}
-MCP_WRITE_BODY = {
-  "name": "write-graph-cypher",
-  "arguments": {"query": "CREATE (n:IsoHarnessProbe {marker: 1}) RETURN n"},
-}
+# MCP is always mounted (no domain flag) as the JSON-RPC transport; the REST
+# call-tool endpoint was removed in v1.10.2. read-graph-cypher is a data
+# probe; write-graph-cypher is a cross-tenant write probe. Denials arrive as
+# HTTP 401/403 from the transport's auth dependency; a tool that runs but
+# fails answers HTTP 200 with `result.isError`, which the oracle reads as
+# acceptance — conservative in the right direction for a leak probe.
+MCP_PATH = "/v1/graphs/{graph_id}/mcp"
+
+
+def _mcp_call(name: str, arguments: dict) -> dict:
+  return {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {"name": name, "arguments": arguments},
+  }
+
+
+MCP_READ_BODY = _mcp_call(
+  "read-graph-cypher",
+  {"query": "MATCH (n) RETURN count(n) AS c", "parameters": {}},
+)
+MCP_WRITE_BODY = _mcp_call(
+  "write-graph-cypher",
+  {"query": "CREATE (n:IsoHarnessProbe {marker: 1}) RETURN n"},
+)
 
 # GraphQL is flag-gated (EXTENSIONS_GRAPHQL_ENABLED AND a domain flag). Two
 # probes: `hello` echoes the caller (access-control probe), while `entity` reads
