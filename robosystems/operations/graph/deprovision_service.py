@@ -8,7 +8,7 @@ and do not block the overall deprovisioning flow.
 """
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ class DeprovisionResult:
   registry_deallocated: bool = False
   records_cleaned: bool = False
   documents_deleted: int = 0
+  connections_revoked: int = 0
   connections_deleted: int = 0
   search_purged: bool = False
   report_bundles_deleted: int = 0
@@ -236,6 +237,12 @@ class GraphDeprovisionService:
     # enumerate what it still holds — so this must run first.
     self._purge_staged_uploads(graph_id, session, result)
 
+    # --- 5b. Revoke provider-side grants BEFORE the credentials they need ---
+    # Deleting our copy of a refresh token stops sync; it does not end the
+    # authorization at the provider. The provider cleanup reads the stored
+    # token to revoke it, so it has to run while the credential row exists.
+    await self._revoke_provider_grants(graph_id, session, result)
+
     # --- 6. Clean PostgreSQL records ---
     self._clean_pg_records(graph_id, session, result)
 
@@ -257,6 +264,7 @@ class GraphDeprovisionService:
         "subgraphs_deleted": result.subgraphs_deleted,
         "database_deleted": result.database_deleted,
         "documents_deleted": result.documents_deleted,
+        "connections_revoked": result.connections_revoked,
         "connections_deleted": result.connections_deleted,
         "search_purged": result.search_purged,
         "report_bundles_deleted": result.report_bundles_deleted,
@@ -381,47 +389,17 @@ class GraphDeprovisionService:
     already gone, leaving their records looking live. The savepoint contains
     the failure to this row alone.
     """
-    from ...models.core.graph.graph_backup import (
-      BackupInitiator,
-      BackupStatus,
-      BackupType,
-      GraphBackup,
-    )
-
-    now = datetime.now(UTC)
-    backup_metadata: dict = {
-      "backup_format": metadata.backup_format,
-      "compression_ratio": metadata.compression_ratio,
-    }
-    if metadata.memory:
-      backup_metadata["memory"] = metadata.memory
-    if metadata.payload_delta:
-      backup_metadata["payload_delta"] = metadata.payload_delta
+    from ...models.core.graph.graph_backup import BackupInitiator, GraphBackup
 
     with session.begin_nested():
       session.add(
-        GraphBackup(
+        GraphBackup.from_completed_export(
           graph_id=graph.graph_id,
           database_name=graph.graph_id,
-          backup_type=BackupType.FULL.value,
-          initiated_by=BackupInitiator.FINAL.value,
-          status=BackupStatus.COMPLETED.value,
+          metadata=metadata,
           s3_bucket=s3_bucket,
-          s3_key=metadata.s3_key or "",
-          s3_metadata_key=metadata.s3_metadata_key,
-          original_size_bytes=metadata.original_size,
-          compressed_size_bytes=metadata.compressed_size,
-          compression_ratio=metadata.compression_ratio,
-          node_count=metadata.node_count,
-          relationship_count=metadata.relationship_count,
-          database_version=metadata.database_version,
-          backup_duration_seconds=metadata.backup_duration_seconds,
-          checksum=metadata.checksum,
-          compression_enabled=True,
-          backup_metadata=backup_metadata,
-          started_at=metadata.timestamp,
-          completed_at=now,
-          expires_at=now + timedelta(days=retention_days),
+          retention_days=retention_days,
+          initiated_by=BackupInitiator.FINAL.value,
         )
       )
     result.backup_registered = True
@@ -692,6 +670,73 @@ class GraphDeprovisionService:
       error_msg = f"Staged upload purge failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  async def _revoke_provider_grants(
+    self, graph_id: str, session: Session, result: DeprovisionResult
+  ) -> None:
+    """Revoke each connection's provider-side grant before teardown deletes it.
+
+    The user-initiated disconnect revokes at the provider and then deletes
+    the local rows; teardown deleted the rows and never revoked, so a departed
+    customer's authorization stayed live at the provider until it expired on
+    its own. Same provider hook as the disconnect path, per connection.
+
+    Best-effort per connection: the provider cleanup logs its own failures
+    and does not raise, and a provider disabled by flag has nothing to call.
+    Anything that does raise is recorded and the teardown continues — the
+    credential row is deleted either way, and a stranded grant is an operator
+    follow-up, not a reason to leave the tenant's data in place.
+    """
+    try:
+      from ...models.core.connection.connection import Connection
+      from ...operations.providers.registry import provider_registry
+
+      rows = (
+        session.query(Connection.id, Connection.provider, Connection.entity_name)
+        .filter(Connection.graph_id == graph_id)
+        .all()
+      )
+    except Exception as e:
+      error_msg = f"Provider grant revocation could not list connections: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
+      return
+
+    for connection_id, provider, entity_name in rows:
+      provider_type = (provider or "").lower()
+      try:
+        await provider_registry.cleanup_connection(
+          provider_type,
+          {
+            "id": connection_id,
+            "connection_id": connection_id,
+            "provider": provider_type,
+            "entity_name": entity_name,
+            "graph_id": graph_id,
+          },
+          graph_id,
+        )
+        result.connections_revoked += 1
+        logger.info(
+          f"Revoked provider grant for connection {connection_id} ({provider_type}) "
+          f"during teardown of {graph_id}",
+          extra={"graph_id": graph_id, "connection_id": connection_id},
+        )
+      except ValueError:
+        # Provider disabled by feature flag in this deployment: no client to
+        # call. Mirrors the disconnect endpoint, which also skips cleanup here.
+        logger.warning(
+          f"Provider {provider_type} disabled; skipping grant revocation for "
+          f"connection {connection_id} during teardown of {graph_id}",
+          extra={"graph_id": graph_id, "connection_id": connection_id},
+        )
+      except Exception as e:
+        error_msg = (
+          f"Provider grant revocation failed for connection {connection_id} "
+          f"({provider_type}): {e}"
+        )
+        result.errors.append(error_msg)
+        logger.warning(error_msg, extra={"graph_id": graph_id})
 
   def _clean_pg_records(
     self, graph_id: str, session: Session, result: DeprovisionResult

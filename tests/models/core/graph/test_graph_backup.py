@@ -849,3 +849,83 @@ class TestDailyBackupQuotaCounting:
     self._make(db_session, "kg_quota_f")
 
     assert GraphBackup.count_user_initiated_today("kg_quota_f", db_session) == 1
+
+
+class TestFromCompletedExport:
+  """The one mapping from a manager export onto a COMPLETED row, shared by a
+  graph's final backup at teardown and a subgraph's pre-delete backup."""
+
+  def _metadata(self):
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    m = MagicMock()
+    m.s3_key = "graph-backups/kg_parent/dev.lbug.zip"
+    m.s3_metadata_key = "graph-backups/kg_parent/dev.lbug.zip.metadata.json"
+    m.original_size = 2048
+    m.compressed_size = 512
+    m.compression_ratio = 0.75
+    m.node_count = 12
+    m.relationship_count = 7
+    m.database_version = "1.0"
+    m.backup_duration_seconds = 1.5
+    m.checksum = "abc123"
+    m.backup_format = "full_dump"
+    m.timestamp = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    m.memory = None
+    m.payload_delta = {"node_count": 1}
+    return m
+
+  def test_maps_the_export_onto_a_completed_row(self):
+    from datetime import UTC, datetime, timedelta
+
+    from robosystems.models.core.graph.graph_backup import (
+      BackupInitiator,
+      BackupStatus,
+      BackupType,
+      GraphBackup,
+    )
+
+    now = datetime(2026, 8, 25, 13, 0, tzinfo=UTC)
+    row = GraphBackup.from_completed_export(
+      graph_id="kg_parent",
+      database_name="kg_parent",
+      metadata=self._metadata(),
+      s3_bucket="robosystems-test",
+      retention_days=90,
+      initiated_by=BackupInitiator.FINAL.value,
+      now=now,
+    )
+
+    assert row.status == BackupStatus.COMPLETED.value
+    assert row.backup_type == BackupType.FULL.value
+    assert row.initiated_by == BackupInitiator.FINAL.value
+    assert row.s3_bucket == "robosystems-test"
+    assert row.s3_key == "graph-backups/kg_parent/dev.lbug.zip"
+    assert row.original_size_bytes == 2048
+    assert row.compressed_size_bytes == 512
+    assert row.node_count == 12
+    assert row.checksum == "abc123"
+    assert row.completed_at == now
+    assert row.expires_at == now + timedelta(days=90)
+    assert row.backup_metadata["payload_delta"] == {"node_count": 1}
+    assert "database_name" not in row.backup_metadata
+
+  def test_records_the_database_name_when_registered_on_another_graph(self):
+    from robosystems.models.core.graph.graph_backup import (
+      BackupInitiator,
+      GraphBackup,
+    )
+
+    row = GraphBackup.from_completed_export(
+      graph_id="kg_parent",
+      database_name="kg_parent_dev",
+      metadata=self._metadata(),
+      s3_bucket="robosystems-test",
+      retention_days=7,
+      initiated_by=BackupInitiator.FINAL.value,
+    )
+
+    assert row.graph_id == "kg_parent"
+    assert row.database_name == "kg_parent_dev"
+    assert row.backup_metadata["database_name"] == "kg_parent_dev"

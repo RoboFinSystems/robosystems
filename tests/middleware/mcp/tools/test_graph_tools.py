@@ -355,6 +355,12 @@ class TestDeleteSubgraphExecute:
       ) as mock_svc_class,
     ):
       mock_svc = AsyncMock()
+      mock_svc.delete_subgraph_database.return_value = {
+        "status": "deleted",
+        "backup_created": True,
+        "backup_location": "graph-backups/kg_x/dev.lbug.zip",
+        "backup_id": "gbk_01",
+      }
       mock_svc_class.return_value = mock_svc
 
       result = await DeleteSubgraphTool(_client()).execute(
@@ -365,10 +371,51 @@ class TestDeleteSubgraphExecute:
       "deleted": True,
       "subgraph_id": f"{GRAPH_ID}_dev",
       "backup_created": True,
+      "backup_location": "graph-backups/kg_x/dev.lbug.zip",
+      "backup_id": "gbk_01",
     }
     mock_svc.delete_subgraph_database.assert_awaited_once()
+    assert mock_svc.delete_subgraph_database.call_args.kwargs["create_backup"] is True
     mock_db.delete.assert_called_once_with(subgraph)
     mock_db.commit.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_backup_created_reports_what_happened_not_what_was_asked(
+    self, mock_db: MagicMock
+  ) -> None:
+    """The result used to echo the `backup_first` flag while no backup was
+    taken. It now carries the service's own account of the backup."""
+    subgraph = MagicMock()
+    subgraph.is_subgraph = True
+    filter_chain = MagicMock()
+    filter_chain.first.side_effect = [subgraph]
+    mock_db.query.return_value.filter.return_value = filter_chain
+
+    with (
+      patch(
+        "robosystems.models.core.graph.graph_user.GraphUser.user_has_admin_access",
+        return_value=True,
+      ),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_svc_class,
+    ):
+      mock_svc = AsyncMock()
+      mock_svc.delete_subgraph_database.return_value = {
+        "status": "deleted",
+        "backup_created": False,
+        "backup_location": None,
+        "backup_id": None,
+      }
+      mock_svc_class.return_value = mock_svc
+
+      result = await DeleteSubgraphTool(_client()).execute(
+        {"subgraph_id": f"{GRAPH_ID}_dev", "force": True, "backup_first": True}
+      )
+
+    assert result["deleted"] is True
+    assert result["backup_created"] is False
+    assert result["backup_location"] is None
 
 
 # ══════════════════════════════════════════════════════════════════════════

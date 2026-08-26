@@ -1,7 +1,7 @@
 """Graph backup tracking model for PostgreSQL."""
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 
@@ -190,6 +190,67 @@ class GraphBackup(Model):
     session.commit()
     session.refresh(backup)
     return backup
+
+  @classmethod
+  def from_completed_export(
+    cls,
+    *,
+    graph_id: str,
+    database_name: str,
+    metadata: Any,
+    s3_bucket: str,
+    retention_days: int,
+    initiated_by: str,
+    now: datetime | None = None,
+  ) -> "GraphBackup":
+    """Build — but do not persist — a COMPLETED row from a BackupManager export.
+
+    The manager's metadata describes the archive; this maps it onto the row the
+    listing and download surfaces resolve through. The caller owns ``add`` and
+    the transaction: a graph's final backup at teardown is added under a
+    SAVEPOINT inside a batch that must not commit early, while a subgraph's
+    pre-delete backup commits at once. Neither can use ``create`` /
+    ``complete_backup``, which commit.
+
+    ``database_name`` is the LadybugDB database the archive holds. It differs
+    from ``graph_id`` when a subgraph's backup is registered on its parent —
+    the row the customer still has once the subgraph itself is gone.
+    """
+    now = now or datetime.now(UTC)
+    backup_metadata: dict[str, Any] = {
+      "backup_format": metadata.backup_format,
+      "compression_ratio": metadata.compression_ratio,
+    }
+    if metadata.memory:
+      backup_metadata["memory"] = metadata.memory
+    if metadata.payload_delta:
+      backup_metadata["payload_delta"] = metadata.payload_delta
+    if database_name != graph_id:
+      backup_metadata["database_name"] = database_name
+
+    return cls(
+      graph_id=graph_id,
+      database_name=database_name,
+      backup_type=BackupType.FULL.value,
+      initiated_by=initiated_by,
+      status=BackupStatus.COMPLETED.value,
+      s3_bucket=s3_bucket,
+      s3_key=metadata.s3_key or "",
+      s3_metadata_key=metadata.s3_metadata_key,
+      original_size_bytes=metadata.original_size,
+      compressed_size_bytes=metadata.compressed_size,
+      compression_ratio=metadata.compression_ratio,
+      node_count=metadata.node_count,
+      relationship_count=metadata.relationship_count,
+      database_version=metadata.database_version,
+      backup_duration_seconds=metadata.backup_duration_seconds,
+      checksum=metadata.checksum,
+      compression_enabled=True,
+      backup_metadata=backup_metadata,
+      started_at=metadata.timestamp,
+      completed_at=now,
+      expires_at=now + timedelta(days=retention_days),
+    )
 
   @classmethod
   def get_by_id(cls, backup_id: str, session: Session) -> Optional["GraphBackup"]:

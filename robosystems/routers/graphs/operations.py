@@ -298,7 +298,10 @@ async def delete_subgraph_op(
         "parent_graph_id": subgraph.parent_graph_id,
         "user_id": user.id,
         "forced": body.force,
-        "backup_created": body.backup_first,
+        # What happened, not what was asked: the service reports whether the
+        # pre-delete backup was actually taken.
+        "backup_created": bool(deletion_result.get("backup_created")),
+        "backup_id": deletion_result.get("backup_id"),
       },
       risk_level="medium",
     )
@@ -306,7 +309,9 @@ async def delete_subgraph_op(
     return {
       "graph_id": subgraph_id,
       "status": "deleted",
+      "backup_created": bool(deletion_result.get("backup_created")),
       "backup_location": backup_location,
+      "backup_id": deletion_result.get("backup_id"),
     }
 
   return await _dispatch(ctx, _runner, cache)

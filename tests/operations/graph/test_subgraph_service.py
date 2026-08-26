@@ -417,6 +417,160 @@ class TestSubgraphService:
         assert result["status"] == "deleted"
         mock_lbug_client.delete_database.assert_called_once()
 
+  def _backup_metadata(self):
+    metadata = Mock()
+    metadata.s3_key = "graph-backups/kg5f2e5e0da65d45d69645/analysis.lbug.zip"
+    metadata.s3_metadata_key = f"{metadata.s3_key}.metadata.json"
+    metadata.original_size = 2048
+    metadata.compressed_size = 512
+    metadata.compression_ratio = 0.75
+    metadata.node_count = 12
+    metadata.relationship_count = 7
+    metadata.database_version = "1.0"
+    metadata.backup_duration_seconds = 1.5
+    metadata.checksum = "abc123"
+    metadata.backup_format = "full_dump"
+    from datetime import UTC, datetime
+
+    metadata.timestamp = datetime(2026, 8, 25, tzinfo=UTC)
+    metadata.memory = None
+    metadata.payload_delta = None
+    return metadata
+
+  @pytest.mark.asyncio
+  async def test_delete_with_backup_takes_it_before_deleting_and_registers_on_parent(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    """`create_backup` used to be accepted and ignored. It now takes a full
+    backup first, registers it on the parent graph's backup list (the row the
+    customer still has after the subgraph is gone), and only then deletes."""
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 100}]
+
+    calls: list[str] = []
+    metadata = self._backup_metadata()
+
+    async def _backup(job):
+      calls.append(("backup", job.graph_id))
+      return metadata
+
+    async def _delete(name):
+      calls.append(("delete", name))
+
+    mock_lbug_client.delete_database = AsyncMock(side_effect=_delete)
+    manager = Mock()
+    manager.create_backup = AsyncMock(side_effect=_backup)
+    manager.s3_adapter.bucket_name = "robosystems-test"
+
+    parent = Mock()
+    parent.graph_tier = "ladybug-standard"
+    session = Mock()
+    session.query.return_value.filter.return_value.first.return_value = parent
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ),
+      patch("robosystems.graph_api.client.GraphClient", return_value=mock_lbug_client),
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager",
+        return_value=manager,
+      ),
+      patch("robosystems.database.SessionFactory", return_value=session),
+    ):
+      result = await service.delete_subgraph_database(
+        "kg5f2e5e0da65d45d69645_analysis", force=True, create_backup=True
+      )
+
+    assert calls == [
+      ("backup", "kg5f2e5e0da65d45d69645_analysis"),
+      ("delete", "kg5f2e5e0da65d45d69645_analysis"),
+    ]
+    assert result["status"] == "deleted"
+    assert result["backup_created"] is True
+    assert result["backup_location"] == metadata.s3_key
+
+    from robosystems.models.core.graph.graph_backup import BackupInitiator, GraphBackup
+
+    session.add.assert_called_once()
+    row = session.add.call_args.args[0]
+    assert isinstance(row, GraphBackup)
+    assert row.graph_id == "kg5f2e5e0da65d45d69645"
+    assert row.database_name == "kg5f2e5e0da65d45d69645_analysis"
+    assert row.initiated_by == BackupInitiator.FINAL.value
+    assert row.s3_key == metadata.s3_key
+    session.commit.assert_called_once()
+    session.close.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_delete_with_backup_fails_closed_when_the_backup_fails(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 100}]
+
+    manager = Mock()
+    manager.create_backup = AsyncMock(side_effect=RuntimeError("s3 is down"))
+    session = Mock()
+    session.query.return_value.filter.return_value.first.return_value = None
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ),
+      patch("robosystems.graph_api.client.GraphClient", return_value=mock_lbug_client),
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager",
+        return_value=manager,
+      ),
+      patch("robosystems.database.SessionFactory", return_value=session),
+    ):
+      with pytest.raises(GraphAllocationError, match="was not deleted"):
+        await service.delete_subgraph_database(
+          "kg5f2e5e0da65d45d69645_analysis", force=True, create_backup=True
+        )
+
+    mock_lbug_client.delete_database.assert_not_called()
+    session.add.assert_not_called()
+    session.close.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_delete_without_backup_reports_none_taken(
+    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
+  ):
+    mock_allocation_manager.find_database_location.return_value = mock_parent_location
+    mock_lbug_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
+    mock_lbug_client.execute.return_value = [{"node_count": 0}]
+
+    with (
+      patch(
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance",
+        return_value=mock_lbug_client,
+      ),
+      patch("robosystems.graph_api.client.GraphClient", return_value=mock_lbug_client),
+      patch(
+        "robosystems.operations.graph.engine.backup_manager.BackupManager"
+      ) as manager_cls,
+    ):
+      result = await service.delete_subgraph_database(
+        "kg5f2e5e0da65d45d69645_analysis", create_backup=False
+      )
+
+    assert result["status"] == "deleted"
+    assert result["backup_created"] is False
+    assert result["backup_location"] is None
+    manager_cls.assert_not_called()
+
   # NOTE: test_delete_subgraph_with_backup removed - create_backup capability
   # was removed from subgraph_service.py as part of S3 bucket restructure
 
