@@ -36,10 +36,6 @@ MAIN_API_TAGS = [
   },
   # ── Interact with the graph — query, search, AI ───────────────────────────
   {
-    "name": "MCP",
-    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
-  },
-  {
     "name": "Operator",
     "description": "🤖 AI Operators - AI agent orchestration and execution",
   },

@@ -62,7 +62,6 @@ from .graphs import (
 from .graphs.content_ops import router as graph_content_ops_router
 from .graphs.mcp import agnostic_router as mcp_agnostic_router
 from .graphs.mcp import remote_router as mcp_remote_router
-from .graphs.mcp import router as mcp_router
 from .graphs.operations import router as graph_operations_router
 from .graphs.operator import (
   router as operator_router,
@@ -86,9 +85,9 @@ if env.CONNECTIONS_ENABLED:
 router.include_router(
   operator_router
 )  # No prefix - handled in the operator module itself
-router.include_router(mcp_router, prefix="/mcp")
 # Streamable-HTTP MCP transport at the bare /mcp path (POST, JSON-RPC 2.0);
-# schema-excluded, so it never appears in the generated SDK clients.
+# schema-excluded, so it never appears in the generated SDK clients. It is
+# the graph's only MCP surface — the REST tool endpoints were removed.
 router.include_router(mcp_remote_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
 router.include_router(

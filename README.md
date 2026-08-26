@@ -215,7 +215,7 @@ Details: [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/w
 
 - FastAPI REST API with versioned endpoints
 - Extension GraphQL read API plus named REST command operations (CQRS)
-- MCP Server for AI-powered graph database access with schema-aware tools
+- MCP server for AI-powered graph database access — every graph speaks the MCP Streamable HTTP transport, with OAuth or API-key auth
 - AI Operator System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 

@@ -52,7 +52,7 @@ Reads are REST `GET`s; content writes share the same `/operations/{op_name}` env
 
 ### MCP & AI Operators
 
-- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, alongside the REST tool surface (`/mcp/tools`, `/mcp/call-tool`)
+- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, and the graph-agnostic `POST /v1/mcp` serves the same transport to OAuth clients
 - **AI Operators**: Autonomous Claude/MCP executors for financial analysis and report generation, with automatic credit tracking and SSE progress (sync, SSE, or background worker)
 
 ### Data Synchronization
