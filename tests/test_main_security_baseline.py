@@ -151,3 +151,16 @@ class TestSecurityTxt:
     """Control path: proves security.txt is a genuine route, not a catch-all."""
     response = client.get("/.well-known/does-not-exist.txt")
     assert response.status_code == 404
+
+
+class TestGlamaClaim:
+  def test_glama_json_served(self, client):
+    """Glama verifies connector ownership from this document on the MCP
+    endpoint's origin; the address is a role mailbox that matches the Glama
+    account, never a person."""
+    response = client.get("/.well-known/glama.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["$schema"] == "https://glama.ai/mcp/schemas/connector.json"
+    assert body["maintainers"] == [{"email": "admin@robosystems.ai"}]

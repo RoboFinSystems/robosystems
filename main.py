@@ -6,6 +6,7 @@ headers), exception handlers, the core `/v1` routers, the flag-gated
 that injects the shared operation error/idempotency contract.
 """
 
+import json
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -222,6 +223,17 @@ def create_app() -> FastAPI:
     @app.get("/.well-known/security.txt", include_in_schema=False)
     async def security_txt() -> PlainTextResponse:
       return PlainTextResponse(security_txt_content)
+
+  # Glama connector-ownership claim (mirrors security.txt): the MCP endpoint's
+  # origin publishes the maintainers' role address and Glama matches it
+  # against its accounts.
+  glama_file = Path("static") / "glama.json"
+  if glama_file.exists():
+    glama_content = json.loads(glama_file.read_text(encoding="utf-8"))
+
+    @app.get("/.well-known/glama.json", include_in_schema=False)
+    async def glama_json() -> JSONResponse:
+      return JSONResponse(glama_content)
 
   # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
