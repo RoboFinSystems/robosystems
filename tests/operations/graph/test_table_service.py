@@ -191,10 +191,13 @@ class TestTableServiceS3Pattern:
     return TableService(mock_session)
 
   def test_get_s3_pattern_for_table(self, table_service, monkeypatch):
-    monkeypatch.setenv("USER_DATA_BUCKET", "test-bucket")
     from robosystems.config import env
 
-    env.USER_DATA_BUCKET = "test-bucket"
+    # `env` reads the variable at import, so the attribute is what the code
+    # under test sees — and it must be restored, or every later test in the
+    # session (the S3 adapter's bucket probe, for one) runs against a bucket
+    # that does not exist.
+    monkeypatch.setattr(env, "USER_DATA_BUCKET", "test-bucket")
 
     pattern = table_service.get_s3_pattern_for_table(
       graph_id="kg123", table_name="Company", user_id="user456"

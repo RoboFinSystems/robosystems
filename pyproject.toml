@@ -110,25 +110,22 @@ dependencies = [
 dev = [
     # RoboSystems client for demo and testing.
     "robosystems-client>=1.11.0,<2.0",
-
     # Testing framework
     "pytest>=9.0.0,<10.0",
     "pytest-asyncio>=1.4.0,<2.0",
     "pytest-cov>=6.2.0",
     "pytest-env>=1.1.0,<2.0",
     "pytest-mock>=3.14.0,<4.0",
-
     # Code quality tools
     "ruff>=0.12.0,<1.0",
     "basedpyright>=1.22.0,<2.0",
-
     # AWS development tools
     "awscli-local>=0.22.0,<1.0",
     "cfn-lint>=1.50.1,<2.0",
     "moto[s3]>=5.2.2,<6.0",
-
     # Development utilities
-    "rich>=15.0.0,<16.0"
+    "rich>=15.0.0,<16.0",
+    "pytest-xdist>=3.6,<4.0",
 ]
 
 [build-system]

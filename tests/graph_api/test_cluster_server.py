@@ -575,7 +575,19 @@ class TestFastAPIEndpoints:
       "parameters": {"limit": 10},
     }
 
-    response = client.post("/databases/test_db/query", json=query_data)
+    # The endpoint consults the real admission controller, which reads host
+    # CPU and memory headroom — under a parallel test run those can cross the
+    # thresholds and 503 a request that has nothing to do with load. This
+    # test is about the query path, so admit unconditionally.
+    from robosystems.graph_api.core.admission_control import AdmissionDecision
+
+    admission = MagicMock()
+    admission.check_admission.return_value = (AdmissionDecision.ACCEPT, None)
+    with patch(
+      "robosystems.graph_api.routers.databases.query.get_admission_controller",
+      return_value=admission,
+    ):
+      response = client.post("/databases/test_db/query", json=query_data)
 
     assert response.status_code == 200
     data = response.json()

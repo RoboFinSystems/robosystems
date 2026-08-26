@@ -128,19 +128,23 @@ test-all:
     @just cf-lint-all
     @just lint-actions
 
-# Run tests (exclude slow tests)
+# Run tests (exclude slow tests). Parallel across cores: each xdist worker
+# gets its own platform test database (tests/xdist_workers.py); `loadfile`
+# keeps a file's tests on one worker so module-scoped tenant schemas in the
+# shared extensions DB never race themselves.
 test module="":
     uv run pytest \
         {{ if module != "" { "tests/" + module } else { "" } }} \
+        -n auto --dist loadfile \
         -m "not slow"
 
 # Run ALL tests including slow ones
 test-full:
-    uv run pytest
+    uv run pytest -n auto --dist loadfile
 
 # Run tests with coverage
 test-cov:
-    uv run pytest --cov=robosystems tests/
+    uv run pytest -n auto --dist loadfile --cov=robosystems tests/
 
 # Run the tenant-isolation harness against a deployment (default: local stack)
 test-isolation target="http://localhost:8000":
