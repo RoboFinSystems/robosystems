@@ -448,12 +448,15 @@ class GraphDeprovisionService:
   async def _delete_database(self, graph_id: str, result: DeprovisionResult) -> None:
     """Delete the parent graph database.
 
-    A 404 (the .lbug is already absent) counts as success. The invariant that
-    gates the rest of teardown is *the file is not on the instance*, not *we
-    were the one who removed it*: run #1 can delete the file and the Dagster
-    daemon can restart before the status flip, and then every retry would get
-    the same 404 and strand the graph forever. Delete is idempotent on the
-    outcome that matters.
+    The invariant that gates the rest of teardown is *the file is not on the
+    instance*, not *we were the one who removed it*: run #1 can delete the
+    file and the Dagster daemon can restart before the status flip, so every
+    retry must converge rather than strand the graph forever. The node now
+    treats a missing .lbug as "continue disposing" — WAL, Lance, DuckDB
+    staging and the blue-green temporaries — and reports `existed=False`,
+    so a retry finishes the side stores the first run did not reach. A 404
+    can still come from a node on an AMI that predates that; it is counted as
+    success for convergence, with the residue left to storage reclaim.
     """
     from ...graph_api.client.exceptions import GraphAPIError
 
@@ -462,16 +465,24 @@ class GraphDeprovisionService:
 
       graph_client = await get_graph_client(graph_id=graph_id, operation_type="write")
       try:
-        await graph_client.delete_database(graph_id)
+        outcome = await graph_client.delete_database(graph_id)
         result.database_deleted = True
-        logger.info(f"Deleted database for graph {graph_id}")
+        if isinstance(outcome, dict) and outcome.get("existed") is False:
+          logger.info(
+            f"Database for graph {graph_id} was already absent; the node "
+            f"disposed its side stores ({len(outcome.get('removed') or [])} paths)",
+            extra={"graph_id": graph_id, "removed": outcome.get("removed")},
+          )
+        else:
+          logger.info(f"Deleted database for graph {graph_id}")
       finally:
         await graph_client.close()
     except GraphAPIError as e:
       if getattr(e, "status_code", None) == 404:
         result.database_deleted = True
         logger.info(
-          f"Database for graph {graph_id} already absent; treating delete as "
+          f"Database for graph {graph_id} already absent on a node that does "
+          "not dispose side stores for a missing file; treating delete as "
           "complete so teardown can converge",
           extra={"graph_id": graph_id},
         )

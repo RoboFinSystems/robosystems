@@ -300,13 +300,22 @@ class TestLadybugDatabaseManagerDeleteDatabase:
   def teardown_method(self):
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  def test_delete_database_not_found(self):
-    """Should raise 404 if database doesn't exist."""
+  def test_delete_database_missing_file_still_disposes_and_reports_it(self):
+    """A missing .lbug is not a refusal: the file is the first thing a delete
+    removes, so a teardown that died between it and the side stores retries
+    into exactly this state. The side stores are still disposed and the
+    result says the file was not there."""
     manager = _make_manager(self.temp_dir)
 
-    with pytest.raises(HTTPException) as exc_info:
-      manager.delete_database("nonexistent")
-    assert exc_info.value.status_code == 404
+    with patch("robosystems.graph_api.core.duckdb.get_duckdb_pool") as mock_get_duck:
+      mock_duck_pool = MagicMock()
+      mock_get_duck.return_value = mock_duck_pool
+
+      result = manager.delete_database("nonexistent")
+
+    assert result["status"] == "success"
+    assert result["existed"] is False
+    mock_duck_pool.force_database_cleanup.assert_called_once_with("nonexistent")
 
   def test_delete_database_success(self):
     """Should delete database file and WAL."""

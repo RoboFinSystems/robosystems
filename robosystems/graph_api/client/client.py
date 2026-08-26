@@ -711,10 +711,13 @@ class GraphClient(BaseGraphClient):
     ``staging_only`` does the inverse, dropping staging and keeping the graph.
     The two are mutually exclusive.
 
-    Deleting a ``-wip``/``-prev`` name is guarded by the base graph's
-    materialization lock. A caller that already holds it (the materialize flow
-    cleaning up its own WIP) passes ``lock_token`` so the endpoint does not
-    re-acquire — without it, the delete 409s against the caller's own lock.
+    Every delete is guarded by the base graph's materialization lock — a
+    ``-wip``/``-prev`` name because it is a build artifact, a base name because
+    the node sweeps that graph's ``-wip``/``-prev`` alongside it. A caller that
+    already holds the lock (the materialize flow cleaning up its own WIP, or
+    deleting its own base on a rebuild) passes ``lock_token`` so the endpoint
+    does not re-acquire — without it, the delete 409s against the caller's own
+    lock; without the lock at all, it 409s while a build is in progress.
     """
     params = {}
     if preserve_duckdb:

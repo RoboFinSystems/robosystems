@@ -1543,7 +1543,9 @@ class ExtensionsMaterializer:
     Unlike the blue-green path there is no fallback copy: a failure part-way
     leaves the graph in whatever state it reached.
     """
-    await self._ensure_database(client, graph_id, rebuild)
+    await self._ensure_database(
+      client, graph_id, rebuild, lock_token=lock.token if lock else None
+    )
 
     connstr = build_postgres_connstr()
 
@@ -1652,6 +1654,7 @@ class ExtensionsMaterializer:
     graph_id: str,
     rebuild: bool,
     is_subgraph: bool = False,
+    lock_token: str | None = None,
   ) -> None:
     """Ensure the LadybugDB database exists with the graph schema.
 
@@ -1661,6 +1664,12 @@ class ExtensionsMaterializer:
     flag — see ``counts_toward_capacity`` in the node's database manager — so
     the transient can be built alongside the live primary on a dedicated
     single-database instance while the primary still holds the slot.
+
+    ``lock_token`` is the per-graph materialization lock this run already
+    holds. A rebuild deletes the base name, and the node guards every delete
+    with that lock (a base-name delete sweeps the graph's blue-green
+    temporaries), so the token has to travel or the delete 409s against our
+    own lock.
     """
     from robosystems.schemas.loader import get_contextual_schema_loader
 
@@ -1668,7 +1677,9 @@ class ExtensionsMaterializer:
 
     if rebuild and db_exists:
       logger.info(f"Rebuilding LadybugDB database for {graph_id}")
-      await client.delete_database(graph_id, preserve_duckdb=True)
+      await client.delete_database(
+        graph_id, preserve_duckdb=True, lock_token=lock_token
+      )
       db_exists = False
 
     if not db_exists:

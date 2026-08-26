@@ -341,29 +341,113 @@ class TestLadybugDatabaseManager:
 
     assert result["status"] == "success"
     assert result["graph_id"] == "test_db"
+    assert result["existed"] is True
     assert "successfully" in result["message"]
 
-    # Verify connection pool was called to close database connections
-    manager.connection_pool.close_database_connections.assert_called_once_with(
-      "test_db"
-    )
+    # The base's connections close first; the blue-green temporaries' after.
+    closed = manager.connection_pool.close_database_connections
+    assert closed.call_args_list[0].args == ("test_db",)
 
     # Verify directory was deleted
     assert not db_path.exists()
 
-  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
-  def test_delete_database_not_found(self, mock_init_pool):
-    """Test database deletion when database doesn't exist."""
-    from fastapi import HTTPException
+  def _side_stores(self):
+    """Patch the Lance and DuckDB cleanup the manager reaches for lazily."""
+    lance = MagicMock()
+    lance.delete.return_value = {"deleted": ["/lance/test_db"]}
+    duck = MagicMock()
+    return (
+      patch("robosystems.graph_api.core.lance.LanceManager", return_value=lance),
+      patch("robosystems.graph_api.core.duckdb.get_duckdb_pool", return_value=duck),
+      lance,
+      duck,
+    )
 
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_delete_database_missing_lbug_still_disposes_side_stores(
+    self, mock_init_pool
+  ):
+    """The .lbug is the first thing a delete removes, so a teardown that died
+    between it and the side stores comes back to exactly this state. The old
+    404-before-cleanup left the Lance directory, the DuckDB staging and the
+    blue-green temporaries on a volume the registry was about to hand to the
+    next tenant — and deprovision, treating the 404 as done, freed the slot."""
     mock_init_pool.return_value = MagicMock()
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
+    manager.connection_pool.close_database_connections = MagicMock()
 
-    with pytest.raises(HTTPException) as exc_info:
-      manager.delete_database("nonexistent_db")
+    leftovers = [
+      self.base_path / "test_db.lbug.wal",
+      self.base_path / "test_db-wip.lbug",
+      self.base_path / "test_db-prev.lbug",
+      self.base_path / "test_db-prev.lbug.wal",
+    ]
+    for path in leftovers:
+      path.touch()
 
-    assert exc_info.value.status_code == 404
-    assert "not found" in str(exc_info.value.detail)
+    lance_patch, duck_patch, lance, duck = self._side_stores()
+    with lance_patch, duck_patch:
+      result = manager.delete_database("test_db")
+
+    assert result["status"] == "success"
+    assert result["existed"] is False
+    assert "already absent" in result["message"]
+    for path in leftovers:
+      assert not path.exists(), path
+      assert str(path) in result["removed"]
+    lance.delete.assert_called_once_with("test_db")
+    duck.force_database_cleanup.assert_called_once_with("test_db")
+    assert "/lance/test_db" in result["removed"]
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_delete_database_sweeps_the_blue_green_temporaries_of_a_base(
+    self, mock_init_pool
+  ):
+    """A build mid-flight when the graph is torn down, or a swap that died
+    between its renames, leaves a -wip/-prev beside the base. They share the
+    base's staging and indexes rather than owning any, so once the base is
+    gone they are dead weight on the volume."""
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
+    manager.connection_pool.close_database_connections = MagicMock()
+
+    for name in ("test_db.lbug", "test_db-wip.lbug", "test_db-prev.lbug"):
+      (self.base_path / name).touch()
+    (self.base_path / "other_db.lbug").touch()
+
+    lance_patch, duck_patch, _, _ = self._side_stores()
+    with lance_patch, duck_patch:
+      result = manager.delete_database("test_db")
+
+    assert result["existed"] is True
+    assert not (self.base_path / "test_db.lbug").exists()
+    assert not (self.base_path / "test_db-wip.lbug").exists()
+    assert not (self.base_path / "test_db-prev.lbug").exists()
+    assert (self.base_path / "other_db.lbug").exists()
+    closed = [
+      call.args[0]
+      for call in manager.connection_pool.close_database_connections.call_args_list
+    ]
+    assert closed == ["test_db", "test_db-wip", "test_db-prev"]
+
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
+  def test_deleting_a_temporary_by_name_removes_only_itself(self, mock_init_pool):
+    """The materialize flow deletes its own WIP under the base's lock; that
+    must not reach across to the live base or a -prev mid-swap."""
+    mock_init_pool.return_value = MagicMock()
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
+    manager.connection_pool.close_database_connections = MagicMock()
+
+    for name in ("test_db.lbug", "test_db-wip.lbug", "test_db-prev.lbug"):
+      (self.base_path / name).touch()
+
+    lance_patch, duck_patch, _, _ = self._side_stores()
+    with lance_patch, duck_patch:
+      manager.delete_database("test_db-wip", preserve_duckdb=True)
+
+    assert not (self.base_path / "test_db-wip.lbug").exists()
+    assert (self.base_path / "test_db.lbug").exists()
+    assert (self.base_path / "test_db-prev.lbug").exists()
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_list_databases(self, mock_init_pool):
