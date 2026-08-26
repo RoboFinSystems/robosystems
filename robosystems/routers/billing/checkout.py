@@ -1,5 +1,7 @@
 """Billing checkout endpoints for payment collection."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -154,7 +156,15 @@ async def create_checkout_session(
       "base_price_cents", plan_config.get("price_cents", 0)
     )
 
-    # Clean up orphaned pending_payment subscriptions for this org
+    provider = get_payment_provider("stripe")
+
+    # Retire any earlier checkout for this resource type before opening a new
+    # one. Cancelling the local row alone is not enough: the hosted session it
+    # points at stays payable at the provider for up to 24 hours, and a payment
+    # against it would bind a live provider subscription to a row already
+    # marked canceled — money that never becomes a resource. Expire the session
+    # first; if it turns out to have been paid, that checkout won and this one
+    # must not open a second one.
     stale_pending = (
       db.query(BillingSubscription)
       .filter(
@@ -165,10 +175,29 @@ async def create_checkout_session(
       .all()
     )
     for stale_sub in stale_pending:
+      stale_session_id = stale_sub.provider_subscription_id
+      if stale_session_id and stale_session_id.startswith("cs_"):
+        outcome = provider.expire_checkout_session(stale_session_id)
+        if outcome == "complete":
+          raise HTTPException(
+            status_code=409,
+            detail=(
+              "A previous checkout for this resource has already been paid "
+              "and is being provisioned. Check your subscriptions before "
+              "starting another."
+            ),
+          )
+      now = datetime.now(UTC)
       stale_sub.status = "canceled"
+      stale_sub.canceled_at = now
+      stale_sub.ends_at = now
       logger.info(
-        f"Canceled orphaned pending_payment subscription {stale_sub.id}",
-        extra={"subscription_id": stale_sub.id, "org_id": org_id},
+        f"Canceled superseded pending_payment subscription {stale_sub.id}",
+        extra={
+          "subscription_id": stale_sub.id,
+          "org_id": org_id,
+          "checkout_session_id": stale_session_id,
+        },
       )
     if stale_pending:
       db.commit()
@@ -199,13 +228,11 @@ async def create_checkout_session(
 
     # Get or create Stripe customer ID
     if not customer.stripe_customer_id:
-      provider = get_payment_provider("stripe")
       stripe_customer_id = provider.create_customer(current_user.id, current_user.email)
       customer.stripe_customer_id = stripe_customer_id
       db.commit()
 
-    # Get payment provider and get/create Stripe price from billing config
-    provider = get_payment_provider("stripe")
+    # Get/create the Stripe price from billing config
     try:
       stripe_price_id = provider.get_or_create_price(
         plan_name=request.plan_name,

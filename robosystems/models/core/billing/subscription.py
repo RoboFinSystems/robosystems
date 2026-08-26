@@ -124,6 +124,23 @@ class BillingSubscription(Base):
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
     Index("idx_billing_sub_provider", "provider_subscription_id"),
     Index("idx_billing_sub_cancellation_type", "cancellation_type"),
+    # One live subscription per (resource, subscriber). Repository access is
+    # per user, so two concurrent subscribes must not both create a provider
+    # subscription; the router's pre-check is advisory, this is the guarantee
+    # (same shape as `uq_connections_graph_source_name`). Graph rows carry no
+    # user_id, and checkout rows carry no resource_id until provisioning binds
+    # one, so neither is constrained here.
+    Index(
+      "uq_billing_sub_live_user_resource",
+      "resource_type",
+      "resource_id",
+      "user_id",
+      unique=True,
+      postgresql_where=(
+        "status NOT IN ('canceled', 'failed') "
+        "AND resource_id IS NOT NULL AND user_id IS NOT NULL"
+      ),
+    ),
   )
 
   def __repr__(self) -> str:

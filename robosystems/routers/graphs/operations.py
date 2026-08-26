@@ -458,10 +458,14 @@ async def delete_graph_op(
             cancel_at_period_end=True,
           )
       except Exception as exc:
-        # Stripe side is best-effort; the local subscription state is the
-        # source of truth for the deprovision pipeline. Log to the standard
-        # logger (so it shows up in normal app logs / alerting) AND to the
-        # security audit trail so a reconciliation job can replay later.
+        # Provider first, and fail closed. A raise here means Stripe still
+        # holds a live subscription that will keep billing; cancelling locally
+        # anyway would end the customer's access while the charges continue —
+        # the inverse of what "delete" promised — and nothing replays the
+        # provider cancel later. Same contract as the repository cancel path
+        # (`ProviderCancellationError` → 502, local state untouched): the
+        # customer sees the failure and retries, instead of paying for a graph
+        # that no longer exists.
         logger.error(
           f"Failed to cancel Stripe subscription "
           f"{subscription.stripe_subscription_id} during delete-graph "
@@ -481,8 +485,17 @@ async def delete_graph_op(
             "subscription_id": subscription.id,
             "at_period_end": body.at_period_end,
             "error": str(exc),
+            "local_state": "unchanged",
           },
-          risk_level="low",
+          risk_level="medium",
+        )
+        raise HTTPException(
+          status_code=status.HTTP_502_BAD_GATEWAY,
+          detail=(
+            "The payment provider could not cancel this graph's subscription, "
+            "so nothing was changed. Retry in a moment; if it persists, contact "
+            "support before deleting the graph."
+          ),
         )
 
     subscription.cancel(db, immediate=immediate)

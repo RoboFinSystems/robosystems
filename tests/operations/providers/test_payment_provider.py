@@ -125,6 +125,54 @@ class TestStripeCheckoutSessions:
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
     assert call_args[1]["metadata"] == metadata
 
+  def _with_stripe_errors(self, stripe_provider):
+    import stripe as stripe_module
+
+    stripe_provider.stripe.error = stripe_module.error
+    return stripe_module.error.InvalidRequestError("already complete", "id")
+
+  def test_expire_checkout_session_returns_expired(self, stripe_provider):
+    expired = Mock()
+    expired.status = "expired"
+    stripe_provider.stripe.checkout.Session.expire.return_value = expired
+
+    assert stripe_provider.expire_checkout_session("cs_old") == "expired"
+    stripe_provider.stripe.checkout.Session.expire.assert_called_once_with("cs_old")
+
+  def test_expire_reports_complete_when_the_session_was_already_paid(
+    self, stripe_provider
+  ):
+    """Only an open session can be expired; a paid one is re-read and reported,
+    never treated as an error — the caller must keep the row behind it."""
+    err = self._with_stripe_errors(stripe_provider)
+    stripe_provider.stripe.checkout.Session.expire.side_effect = err
+    paid = Mock()
+    paid.status = "complete"
+    stripe_provider.stripe.checkout.Session.retrieve.return_value = paid
+
+    assert stripe_provider.expire_checkout_session("cs_paid") == "complete"
+
+  def test_expire_treats_an_already_expired_session_as_expired(self, stripe_provider):
+    err = self._with_stripe_errors(stripe_provider)
+    stripe_provider.stripe.checkout.Session.expire.side_effect = err
+    gone = Mock()
+    gone.status = "expired"
+    stripe_provider.stripe.checkout.Session.retrieve.return_value = gone
+
+    assert stripe_provider.expire_checkout_session("cs_gone") == "expired"
+
+  def test_expire_reraises_when_the_session_is_still_open(self, stripe_provider):
+    """A provider error on a session that is still open is not an outcome the
+    caller can act on — it propagates, and the caller fails closed."""
+    err = self._with_stripe_errors(stripe_provider)
+    stripe_provider.stripe.checkout.Session.expire.side_effect = err
+    still_open = Mock()
+    still_open.status = "open"
+    stripe_provider.stripe.checkout.Session.retrieve.return_value = still_open
+
+    with pytest.raises(type(err)):
+      stripe_provider.expire_checkout_session("cs_open")
+
   def test_checkout_session_stamps_metadata_on_the_subscription(self, stripe_provider):
     """Stripe does not copy session metadata onto the subscription it
     creates, and webhook resolution reads the subscription's metadata — so
@@ -197,6 +245,7 @@ class TestStripeSubscriptionOperations:
     """Test successful subscription creation."""
     mock_subscription = Mock()
     mock_subscription.id = "sub_test123"
+    mock_subscription.status = "active"
     stripe_provider.stripe.Subscription.create.return_value = mock_subscription
 
     mock_pm = Mock()
@@ -218,12 +267,14 @@ class TestStripeSubscriptionOperations:
       items=[{"price": "price_456"}],
       metadata={"plan": "standard"},
       default_payment_method="pm_test123",
+      payment_behavior="error_if_incomplete",
     )
 
   def test_create_subscription_with_metadata(self, stripe_provider):
     """Test that subscription metadata is passed through."""
     mock_subscription = Mock()
     mock_subscription.id = "sub_test456"
+    mock_subscription.status = "active"
     stripe_provider.stripe.Subscription.create.return_value = mock_subscription
 
     mock_pm = Mock()
@@ -240,6 +291,51 @@ class TestStripeSubscriptionOperations:
 
     call_args = stripe_provider.stripe.Subscription.create.call_args
     assert call_args[1]["metadata"] == metadata
+
+  def _customer_with_card(self, stripe_provider):
+    mock_pm = Mock()
+    mock_pm.id = "pm_card"
+    payment_methods = Mock()
+    payment_methods.data = [mock_pm]
+    stripe_provider.stripe.PaymentMethod.list.return_value = payment_methods
+    stripe_provider.stripe.Customer.retrieve.return_value = {
+      "invoice_settings": {"default_payment_method": None}
+    }
+
+  def test_create_subscription_refuses_an_incomplete_subscription(
+    self, stripe_provider
+  ):
+    """A subscription Stripe did not collect for is never handed back as
+    created — the callers activate on return, and an `incomplete` object
+    would activate locally against an unpaid first invoice."""
+    from robosystems.operations.providers.payment_provider import (
+      PaymentIncompleteError,
+    )
+
+    self._customer_with_card(stripe_provider)
+    incomplete = Mock()
+    incomplete.id = "sub_incomplete"
+    incomplete.status = "incomplete"
+    stripe_provider.stripe.Subscription.create.return_value = incomplete
+
+    with pytest.raises(PaymentIncompleteError):
+      stripe_provider.create_subscription("cus_123", "price_456", {})
+
+    # The stray provider object is cancelled so it cannot be paid later
+    # against a row the caller is about to mark failed.
+    stripe_provider.stripe.Subscription.cancel.assert_called_once_with("sub_incomplete")
+
+  def test_create_subscription_accepts_trialing(self, stripe_provider):
+    self._customer_with_card(stripe_provider)
+    trialing = Mock()
+    trialing.id = "sub_trial"
+    trialing.status = "trialing"
+    stripe_provider.stripe.Subscription.create.return_value = trialing
+
+    assert stripe_provider.create_subscription("cus_123", "price_456", {}) == (
+      "sub_trial"
+    )
+    stripe_provider.stripe.Subscription.cancel.assert_not_called()
 
   def test_cancel_subscription_success(self, stripe_provider):
     """Test successful subscription cancellation."""
