@@ -89,3 +89,43 @@ class TestResolveSharedRepositoryParent:
   def test_unknown_repo_raises(self):
     with pytest.raises(ValueError, match="Not a shared repository"):
       resolve_shared_repository_parent("nosuchrepo_sub")
+
+
+class TestPublishedPlanClaimsMatchEnforcedLimits:
+  """A plan's marketing bullets must not contradict the limits the same
+  manifest enforces.
+
+  The Starter plan advertised "Unlimited MCP tool access" while the manifest
+  set ``mcp_queries_per_hour: 100`` for it — copy a stranger reads on the
+  connector page and in ``GET /v1/offering``. Both are served from the
+  manifest, so the check lives against the manifest: any plan that carries a
+  per-window limit may not describe itself as unlimited.
+  """
+
+  def test_no_plan_with_rate_limits_claims_unlimited(self):
+    from robosystems.config.shared_repositories import (
+      get_all_manifests,
+      get_rate_limits,
+    )
+
+    offenders: list[str] = []
+    for repo_id, manifest in get_all_manifests().items():
+      for plan_key, plan in (manifest.plans or {}).items():
+        limits = get_rate_limits(repo_id, plan_key) or {}
+        if not any(v for k, v in limits.items() if "_per_" in k):
+          continue
+        for feature in plan.get("features", []):
+          if "unlimited" in feature.lower():
+            offenders.append(f"{repo_id}/{plan_key}: {feature!r}")
+
+    assert offenders == [], (
+      "A rate-limited plan advertises itself as unlimited; the enforced limit "
+      "and the published claim must agree — fix the copy, not the limit: "
+      + "; ".join(offenders)
+    )
+
+  def test_guard_sees_the_sec_plans(self):
+    from robosystems.config.shared_repositories import get_all_manifests
+
+    sec = get_all_manifests()["sec"]
+    assert set(sec.plans) >= {"starter", "advanced"}
