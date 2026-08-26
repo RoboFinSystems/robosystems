@@ -204,9 +204,9 @@ async def authorize_mcp_tool_call(
 ) -> str:
   """Run the shared MCP tool-call authorization gauntlet.
 
-  Used by both the REST endpoint (POST /mcp/call-tool) and the remote JSON-RPC
-  transport (POST /mcp) so the two surfaces cannot drift: fail-closed write
-  classification, StatementKernel statement policy for cypher read tools,
+  Used by the remote JSON-RPC transport (POST /mcp, both the per-graph and
+  the OAuth-only route) and the in-process operator path so the surfaces
+  cannot drift: fail-closed write classification, StatementKernel statement policy for cypher read tools,
   per-graph role validation, shared-repo subscription lookup, and dual-layer
   volume rate limiting.
 
