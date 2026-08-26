@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from robosystems.config import env
 from robosystems.database import get_db_session
@@ -166,7 +167,8 @@ async def authorize(
     resource=resource,
   )
   try:
-    location = begin_authorization(params, session)
+    # Client resolution may fetch a metadata document; keep it off the loop.
+    location = await run_in_threadpool(begin_authorization, params, session)
   except AuthorizeError as exc:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTHORIZATION_DENIED,
@@ -316,7 +318,7 @@ async def token(
   _require_enabled()
   try:
     form = await _read_form(request)
-    client = _authenticated_client(request, form, session)
+    client = await run_in_threadpool(_authenticated_client, request, form, session)
     grant_type = _form_field(form, "grant_type")
     if grant_type == "authorization_code":
       issued = exchange_authorization_code(
@@ -358,7 +360,7 @@ async def revoke(
   _require_enabled()
   try:
     form = await _read_form(request)
-    client = _authenticated_client(request, form, session)
+    client = await run_in_threadpool(_authenticated_client, request, form, session)
     revoke_presented_token(
       token=_form_field(form, "token"), client=client, session=session
     )

@@ -262,6 +262,69 @@ class OAuthClient(Model):
     )
     return client, client_secret
 
+  @classmethod
+  def upsert_cimd(
+    cls,
+    *,
+    client_id: str,
+    client_name: str,
+    redirect_uris: list[str],
+    session: Session,
+    is_trusted: bool,
+    client_uri: str | None = None,
+    logo_uri: str | None = None,
+    scope: str | None = None,
+  ) -> "OAuthClient":
+    """Mirror a validated Client ID Metadata Document into a row, updating
+    the mirror when the document changed. Never expires (the document is
+    the registration); ``is_active`` is left alone so an operator
+    deactivation sticks across document refreshes."""
+    client = cls.get_by_client_id(client_id, session)
+    if client is None:
+      client = cls(
+        client_id=client_id,
+        client_secret_hash=None,
+        client_name=client_name,
+        redirect_uris=list(redirect_uris),
+        registration_source=REGISTRATION_CIMD,
+        token_endpoint_auth_method=AUTH_METHOD_NONE,
+        client_uri=client_uri,
+        logo_uri=logo_uri,
+        scope=scope,
+        is_trusted=is_trusted,
+        expires_at=None,
+      )
+      session.add(client)
+      created = True
+    else:
+      created = False
+      client.client_name = client_name
+      client.redirect_uris = list(redirect_uris)
+      client.client_uri = client_uri
+      client.logo_uri = logo_uri
+      client.scope = scope
+      client.is_trusted = is_trusted
+      client.expires_at = None
+    try:
+      session.commit()
+      session.refresh(client)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+    if created:
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTH_SUCCESS,
+        details={
+          "action": "oauth_client_registered",
+          "oauth_client_id": client.id,
+          "registration_source": REGISTRATION_CIMD,
+          "client_name": client_name,
+          "trusted": is_trusted,
+        },
+        risk_level="low",
+      )
+    return client
+
   def mark_used(self, session: Session) -> None:
     """Stamp ``last_used_at`` and clear a dynamic registration's expiry —
     a client that completed a consent is no longer an unused registration."""

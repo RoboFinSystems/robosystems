@@ -222,11 +222,40 @@ def register_dynamic_client(
 def resolve_client(client_id: str | None, session: Session) -> OAuthClient:
   """The registered, usable client for a presented ``client_id``.
 
-  Raises ``invalid_client`` for unknown, deactivated, and expired-unused
-  registrations alike — the three are indistinguishable to the caller.
+  An HTTPS ``client_id`` is a Client ID Metadata Document: its document is
+  fetched (or served from cache), validated with the same rules as a
+  dynamic registration, and mirrored into an ``oauth_clients`` row so the
+  rest of the flow — redirect matching, grants, the consent page — sees
+  one client model. Raises ``invalid_client`` for unknown, deactivated, and
+  expired-unused registrations alike — indistinguishable to the caller.
   """
   if not client_id or not isinstance(client_id, str) or len(client_id) > 512:
     raise ClientError("invalid_client", "Unknown client")
+
+  from .cimd import get_client_metadata, is_cimd_client_id, trusted_cimd_host
+
+  if is_cimd_client_id(client_id):
+    existing = OAuthClient.get_by_client_id(client_id, session)
+    if existing is not None and not existing.is_active:
+      # Operator-deactivated: the document is not consulted again.
+      raise ClientError("invalid_client", "Unknown client")
+    document = dict(get_client_metadata(client_id))
+    # CIMD clients authenticate with PKCE alone (``none``); a document that
+    # names an auth method we do not speak (private_key_jwt) still gets the
+    # public-client treatment rather than a rejection.
+    document["token_endpoint_auth_method"] = AUTH_METHOD_NONE
+    metadata = validate_registration_metadata(document)
+    return OAuthClient.upsert_cimd(
+      client_id=client_id,
+      client_name=metadata.client_name,
+      redirect_uris=metadata.redirect_uris,
+      client_uri=metadata.client_uri,
+      logo_uri=metadata.logo_uri,
+      scope=metadata.scope,
+      is_trusted=trusted_cimd_host(client_id),
+      session=session,
+    )
+
   client = OAuthClient.get_by_client_id(client_id, session)
   if client is None or not client.is_usable:
     raise ClientError("invalid_client", "Unknown client")

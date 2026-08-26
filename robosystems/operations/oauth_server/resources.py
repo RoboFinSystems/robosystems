@@ -162,7 +162,7 @@ def authorization_server_metadata() -> dict:
     ],
     "code_challenge_methods_supported": ["S256"],
     "authorization_response_iss_parameter_supported": True,
-    "client_id_metadata_document_supported": False,
+    "client_id_metadata_document_supported": True,
     "service_documentation": f"{env.ROBOSYSTEMS_URL.rstrip('/')}/open-source",
   }
 
