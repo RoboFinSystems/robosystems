@@ -264,32 +264,39 @@ class LadybugDatabaseManager:
 
     ``preserve_duckdb`` keeps the staging database *and* the LanceDB indexes
     built from it, so LadybugDB can be rebuilt without re-running staging.
+
+    A missing ``.lbug`` is not a refusal. The graph file is the first thing
+    a delete removes, so a teardown that died between it and the side stores
+    comes back to exactly this state — and refusing it (a 404 before any
+    cleanup) left the Lance directory, the DuckDB staging and any blue-green
+    temporary on a volume the registry was about to hand to the next tenant.
+    Disposal continues from wherever the previous attempt stopped;
+    ``existed`` in the response says whether the graph file was there this
+    time, and ``removed`` lists what this call took off the disk.
+
+    Deleting a base name also removes its ``-wip``/``-prev`` temporaries: a
+    build that was mid-flight when the graph was torn down, or a swap that
+    died between its renames, is dead once the base is gone, and both share
+    the base's staging and indexes rather than owning any. A temporary
+    deleted by its own name — the materialize flow cleaning up its WIP under
+    its lock — removes only itself.
     """
     db_path = self.base_path / f"{graph_id}.lbug"
-
-    if not db_path.exists():
-      raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Database {graph_id} not found",
-      )
+    existed = db_path.exists()
+    removed: list[str] = []
 
     try:
-      logger.info(f"Deleting database: {graph_id} (preserve_duckdb={preserve_duckdb})")
+      logger.info(
+        f"Deleting database: {graph_id} "
+        f"(preserve_duckdb={preserve_duckdb}, existed={existed})"
+      )
 
-      self.connection_pool.close_database_connections(graph_id)
-
-      # The WAL goes first: left behind, it would be replayed against a
-      # database recreated under the same name.
-      wal_path = self.base_path / f"{graph_id}.lbug.wal"
-      if wal_path.exists():
-        wal_path.unlink()
-        logger.debug(f"Deleted WAL file for {graph_id}")
-
-      if db_path.is_file():
-        db_path.unlink()
-      elif db_path.is_dir():
-        # Older engine versions stored a database as a directory.
-        shutil.rmtree(db_path)
+      names = [graph_id]
+      if not graph_id.endswith(BLUE_GREEN_SUFFIXES):
+        names.extend(f"{graph_id}{suffix}" for suffix in BLUE_GREEN_SUFFIXES)
+      for name in names:
+        self.connection_pool.close_database_connections(name)
+        removed.extend(self._remove_graph_files(name))
 
       # LanceDB indexes are derived from DuckDB staging, so they follow the
       # same preserve decision.
@@ -300,6 +307,7 @@ class LadybugDatabaseManager:
           lance_mgr = LanceManager()
           lance_result = lance_mgr.delete(graph_id)
           if lance_result.get("deleted"):
+            removed.extend(str(path) for path in lance_result["deleted"])
             logger.info(f"Deleted lance indexes for {graph_id}")
         except Exception as lance_err:
           logger.warning(f"Could not delete lance indexes for {graph_id}: {lance_err}")
@@ -312,6 +320,7 @@ class LadybugDatabaseManager:
         try:
           duckdb_pool = get_duckdb_pool()
           duckdb_pool.force_database_cleanup(graph_id)
+          removed.append(f"duckdb:{graph_id}")
           logger.info(f"Deleted DuckDB staging database for {graph_id}")
         except Exception as duck_err:
           logger.warning(
@@ -320,12 +329,18 @@ class LadybugDatabaseManager:
       else:
         logger.info(f"Preserving DuckDB staging database for {graph_id}")
 
-      logger.info(f"Database {graph_id} deleted successfully")
+      if existed:
+        message = f"Database {graph_id} deleted successfully"
+      else:
+        message = f"Database {graph_id} was already absent; side stores disposed"
+      logger.info(message)
 
       return {
         "status": "success",
         "graph_id": graph_id,
-        "message": "Database deleted successfully",
+        "existed": existed,
+        "removed": removed,
+        "message": message,
       }
 
     except Exception as e:
@@ -334,6 +349,29 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Database deletion failed: {e!s}",
       )
+
+  def _remove_graph_files(self, name: str) -> list[str]:
+    """Remove ``{name}.lbug`` and its WAL, returning the paths taken."""
+    removed: list[str] = []
+
+    # The WAL goes first: left behind, it would be replayed against a
+    # database recreated under the same name.
+    wal_path = self.base_path / f"{name}.lbug.wal"
+    if wal_path.exists():
+      wal_path.unlink()
+      removed.append(str(wal_path))
+      logger.debug(f"Deleted WAL file for {name}")
+
+    db_path = self.base_path / f"{name}.lbug"
+    if db_path.is_file():
+      db_path.unlink()
+      removed.append(str(db_path))
+    elif db_path.is_dir():
+      # Older engine versions stored a database as a directory.
+      shutil.rmtree(db_path)
+      removed.append(str(db_path))
+
+    return removed
 
   def database_exists(self, graph_id: str) -> bool:
     """Check if a LadybugDB database file exists on disk."""

@@ -178,11 +178,12 @@ async def delete_database(
       lock = None
 
   try:
-    ladybug_service.db_manager.delete_database(
+    # The manager's result carries `existed` and `removed`: a delete of a
+    # graph whose .lbug was already gone still disposes its side stores and
+    # says so, rather than 404ing before any cleanup.
+    return ladybug_service.db_manager.delete_database(
       graph_id, preserve_duckdb=preserve_duckdb
     )
   finally:
     if lock is not None and lock.acquired:
       await lock.release()
-
-  return {"status": "success", "message": f"Database {graph_id} deleted successfully"}

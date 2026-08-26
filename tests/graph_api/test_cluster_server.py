@@ -698,7 +698,9 @@ class TestFastAPIEndpoints:
     self.mock_service.db_manager.delete_database.return_value = {
       "status": "success",
       "graph_id": "test_db",
-      "message": "Database deleted successfully",
+      "existed": True,
+      "removed": ["/data/test_db.lbug"],
+      "message": "Database test_db deleted successfully",
     }
 
     app = create_app()
@@ -710,6 +712,10 @@ class TestFastAPIEndpoints:
     data = response.json()
     assert data["status"] == "success"
     assert "test_db" in data["message"]
+    # The manager's result rides through: a caller can tell a delete that
+    # found the file from one that only disposed its side stores.
+    assert data["existed"] is True
+    assert data["removed"] == ["/data/test_db.lbug"]
 
   def test_database_health_endpoint(self):
     """Test database health check endpoint."""
