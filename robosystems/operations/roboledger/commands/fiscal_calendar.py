@@ -194,12 +194,17 @@ def close_period(
   actor_type: str = "user",
   allow_stranded_obligations: bool = False,
   allow_reconciling_items: bool = False,
+  fence_wait_ms: int | None = None,
 ) -> ClosePeriodResponse:
   """Close a fiscal period — the final commit action.
 
   `actor_type` defaults to `"user"` for REST callers; MCP tools pass
   `"agent"` so the audit log distinguishes Claude-driven closes from
   human-driven ones.
+
+  `fence_wait_ms` is how long to wait for the period fence. `None` is the
+  request wait (request handlers do not wait); the worker close passes its
+  own budget, because a background job waits.
 
   Raises `CloseGateFailed`, `PeriodNotFoundError`,
   `PeriodAlreadyClosedError`, `RowLockedError`,
@@ -218,6 +223,7 @@ def close_period(
       f"Period {period} is being closed or reopened by another process. "
       "Retry in a moment."
     ),
+    wait_ms=fence_wait_ms,
   ):
     result = close_service.close(
       session,

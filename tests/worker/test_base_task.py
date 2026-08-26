@@ -175,3 +175,119 @@ class TestReleaseLock:
     assert args[2] == "lock:graph_materialize:kg1"
     assert args[3] == "stale"
     redis_client.delete.assert_not_called()
+
+
+class TestRunBlocking:
+  """The consumer's budget cancels the coroutine and never the thread. What
+  happens in the gap decides whether a close that lands is reported as one
+  that failed."""
+
+  def _task(self, mock_manager, work):
+    class BlockingTask(BaseTask):
+      async def execute(self) -> dict[str, Any]:
+        return await self.run_blocking(work)
+
+    return BlockingTask(
+      task_id="op_01TEST",
+      graph_id="kg0123456789abcdef",
+      user_id="user_01TEST",
+      params={},
+      manager=mock_manager,
+    )
+
+  @pytest.mark.asyncio
+  async def test_a_thread_that_lands_inside_the_grace_is_the_result(self, mock_manager):
+    """The budget expires at 50ms; the thread needs 200ms; the grace is a
+    second. The outcome is the thread's, and `wait_for` returns it rather
+    than raising — the stdlib contract for a task that absorbs its cancel."""
+    import time
+
+    def work():
+      time.sleep(0.2)
+      return {"landed": True}
+
+    task = self._task(mock_manager, work)
+    with patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 1):
+      import asyncio
+
+      result = await asyncio.wait_for(task.execute(), timeout=0.05)
+
+    assert result == {"landed": True}
+    assert task.abandoned_work == []
+
+  @pytest.mark.asyncio
+  async def test_a_thread_that_fails_inside_the_grace_raises_its_own_error(
+    self, mock_manager
+  ):
+    """A fault after the budget is still that fault, not a timeout — the
+    consumer records its type, and a timeout would hide it."""
+    import asyncio
+    import time
+
+    def work():
+      time.sleep(0.1)
+      raise RuntimeError("stamp failed")
+
+    task = self._task(mock_manager, work)
+    with patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 1):
+      with pytest.raises(RuntimeError, match="stamp failed"):
+        await asyncio.wait_for(task.execute(), timeout=0.02)
+
+  @pytest.mark.asyncio
+  async def test_a_thread_that_outlives_the_grace_is_abandoned_and_the_timeout_stands(
+    self, mock_manager
+  ):
+    """Past budget + grace the worker must move on — a hung QuickBooks call
+    would otherwise wedge the only worker. The thread is tracked so the
+    consumer can say 'still running', and its late outcome is logged rather
+    than dropped as never retrieved."""
+    import asyncio
+    import threading
+
+    release = threading.Event()
+
+    def work():
+      release.wait(5)
+      return {"late": True}
+
+    task = self._task(mock_manager, work)
+    try:
+      with patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 0.05):
+        with pytest.raises(TimeoutError):
+          await asyncio.wait_for(task.execute(), timeout=0.05)
+      assert len(task.abandoned_work) == 1
+    finally:
+      release.set()
+
+    with patch("robosystems.worker.tasks.base.logger") as log:
+      await asyncio.wait(task._abandoned, timeout=2)
+      # Give the done-callback its turn on the loop.
+      await asyncio.sleep(0)
+    assert task.abandoned_work == []
+    assert log.warning.called
+    assert "abandoned blocking work finished" in log.warning.call_args.args[0]
+
+
+class TestBudget:
+  def test_register_task_stamps_the_type_the_budget_is_looked_up_by(self):
+    from robosystems.worker.tasks import TASK_REGISTRY, register_task
+
+    original = dict(TASK_REGISTRY)
+    try:
+
+      @register_task("test_budgeted")
+      class Budgeted(ConcreteTask):
+        pass
+
+      assert Budgeted.task_type == "test_budgeted"
+      task = Budgeted("op", None, "u", {}, MagicMock())
+      with patch("robosystems.worker.tasks.base.TASK_TIMEOUTS", {"test_budgeted": 7}):
+        assert task.budget_seconds == 7
+    finally:
+      TASK_REGISTRY.clear()
+      TASK_REGISTRY.update(original)
+
+  def test_an_unregistered_task_falls_back_to_the_default_budget(self, task):
+    assert task.task_type is None
+    with patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 42):
+      assert task.budget_seconds == 42

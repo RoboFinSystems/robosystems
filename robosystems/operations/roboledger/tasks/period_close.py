@@ -7,7 +7,10 @@ had to know not to retry a write that had already landed.
 
 Running it here decouples the work from the listener. The close itself is
 unchanged: same command, same exclusive period fence, same mid-flow commit
-of the publish markers. What changes is who waits.
+of the publish markers. What changes is who waits — and, because this is a
+background job, how long: the fence wait is the task's own budget rather
+than the request wait, so a duplicate dispatch queues behind the close it
+duplicates and comes back with that close's receipt instead of a refusal.
 
 **A refused close is a result, not a failure.** The consumer reduces any
 raised exception to a plain string, so a gate rejection that propagated
@@ -18,7 +21,6 @@ they need. Domain outcomes are therefore returned (shaped by
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from robosystems.logger import get_logger
@@ -52,8 +54,11 @@ class PeriodCloseTask(BaseTask):
     await self.report_progress(f"Closing {period}…", percent=5)
 
     # The close is synchronous and blocks on QuickBooks, so it cannot run on
-    # the event loop the consumer uses to emit progress.
-    result = await asyncio.to_thread(self._run_close)
+    # the event loop the consumer uses to emit progress — and the budget
+    # cannot cancel the thread it runs on, so `run_blocking` waits for the
+    # thread when the budget expires rather than reporting a close that is
+    # about to land as one that failed.
+    result = await self.run_blocking(self._run_close)
 
     outcome = result.get("outcome")
     await self.report_progress(
@@ -111,6 +116,12 @@ class PeriodCloseTask(BaseTask):
           allow_reconciling_items=bool(
             self.params.get("allow_reconciling_items", False)
           ),
+          # Background jobs wait. The request wait (3s) is sized so a
+          # request handler never pins a pooled connection behind a close;
+          # this *is* the close, and what holds the fence against it is
+          # most often another close of the same period — worth waiting
+          # out, since the answer is then "already closed" with a receipt.
+          fence_wait_ms=self.budget_seconds * 1000,
         )
       except CLOSE_DOMAIN_ERRORS as exc:
         payload = close_error_payload(exc, period=period)

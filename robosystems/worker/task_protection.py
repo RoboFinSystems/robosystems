@@ -26,9 +26,11 @@ logger = get_logger(__name__)
 METADATA_URI_ENV = "ECS_CONTAINER_METADATA_URI_V4"
 
 # Protection lease length. Must exceed the longest task timeout
-# (dagster_job_monitor = 3600s = 60 min) so protection never lapses mid-task.
-# If an unprotect call fails, the lease self-expires and the worker becomes
-# eligible for scale-in again — a safe fallback.
+# (dagster_job_monitor = 3600s = 60 min) so protection never lapses mid-task —
+# and twice the budget of any task that runs its work through
+# ``BaseTask.run_blocking``, whose thread-join grace is one more budget
+# (period_close: 2 x 600s). If an unprotect call fails, the lease self-expires
+# and the worker becomes eligible for scale-in again — a safe fallback.
 PROTECTION_EXPIRES_MINUTES = 90
 
 # Timeout for the one-shot metadata fetch.

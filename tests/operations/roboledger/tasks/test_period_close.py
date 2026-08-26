@@ -276,3 +276,22 @@ class TestFaults:
 
     with pytest.raises(OperationalError):
       _run(_task(), close_error=fault)
+
+
+class TestBackgroundWaits:
+  def test_the_worker_close_waits_its_whole_budget_for_the_fence(self):
+    """Background jobs wait. The 3s request wait exists so a request handler
+    never pins a connection behind a close; the worker close *is* the close,
+    and what holds the fence against it is most often another close of the
+    same period — after which this one reports 'already closed' with the
+    receipt instead of a refusal the operator is told to retry."""
+    from robosystems.worker.constants import TASK_TIMEOUTS
+
+    spy = MagicMock()
+    task = _task()
+    assert task.task_type == "period_close"
+    assert task.budget_seconds == TASK_TIMEOUTS["period_close"]
+
+    _run(task, close_result=_close_response(), close_spy=spy)
+
+    assert spy.call_args.kwargs["fence_wait_ms"] == TASK_TIMEOUTS["period_close"] * 1000

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
-from typing import Any
+from collections.abc import Callable
+from typing import Any, ClassVar
 
+from robosystems.logger import get_logger
 from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.middleware.sse.operation_manager import OperationManager
+from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
+
+logger = get_logger(__name__)
 
 
 class BaseTask(ABC):
@@ -14,8 +20,16 @@ class BaseTask(ABC):
 
   Subclasses must implement execute() and return a result dict.
   Use report_progress() for SSE updates and is_cancelled() to
-  check for user-initiated cancellation between steps.
+  check for user-initiated cancellation between steps. Sync work that
+  blocks — database and network calls — goes through ``run_blocking``,
+  which is what keeps the consumer's budget honest for a thread.
   """
+
+  # Stamped by ``@register_task``: the key the consumer sizes this task's
+  # budget by, so a handler can derive the waits it makes from that budget
+  # rather than from a constant that knows nothing about it. None on a
+  # subclass that was never registered.
+  task_type: ClassVar[str | None] = None
 
   def __init__(
     self,
@@ -30,11 +44,92 @@ class BaseTask(ABC):
     self.user_id = user_id
     self.params = params
     self.manager = manager
+    self._abandoned: list[asyncio.Future[Any]] = []
 
   @abstractmethod
   async def execute(self) -> dict[str, Any]:
     """Execute the task. Must return a result dict."""
     raise NotImplementedError
+
+  @property
+  def budget_seconds(self) -> int:
+    """The consumer's budget for this task type, from ``TASK_TIMEOUTS``."""
+    return TASK_TIMEOUTS.get(self.task_type or "", DEFAULT_TASK_TIMEOUT)
+
+  @property
+  def abandoned_work(self) -> list[asyncio.Future[Any]]:
+    """Blocking work still running after the budget and its grace expired."""
+    return [work for work in self._abandoned if not work.done()]
+
+  async def run_blocking(self, func: Callable[..., Any], *args: Any) -> Any:
+    """Run sync work — database and network calls — in a thread.
+
+    The consumer enforces the task budget with ``asyncio.wait_for``, which
+    cancels this coroutine and cannot cancel the thread. Left alone, that
+    reports the operation FAILED while the thread runs on and can still
+    commit: a close that landed, described to the operator as one that did
+    not. So the thread is shielded, and an expired budget becomes a bounded
+    wait for it — one more budget of grace. If the thread lands inside
+    that, its outcome is the task's outcome and the overrun is logged; only
+    past it is the work abandoned (tracked in ``abandoned_work``, so the
+    consumer can say so) and the timeout let through.
+
+    While this waits, the consumer's ``finally`` has not run: scale-in
+    protection stays on and the engines are not disposed, so a slow close is
+    not exposed to scale-in mid-publish and is not handed a second tenant's
+    task while its thread is still on the first.
+    """
+    work = asyncio.ensure_future(asyncio.to_thread(func, *args))
+    try:
+      return await asyncio.shield(work)
+    except asyncio.CancelledError:
+      if work.done() and not work.cancelled():
+        return work.result()
+      grace = self.budget_seconds
+      logger.warning(
+        f"Task {self.task_id} ({self.task_type}) ran out of budget with blocking "
+        f"work still running; waiting up to {grace}s more for it to finish"
+      )
+      try:
+        done, _ = await asyncio.wait({work}, timeout=grace)
+      except asyncio.CancelledError:
+        self._abandon(work)
+        raise
+      if work in done:
+        logger.warning(
+          f"Task {self.task_id} ({self.task_type}) finished its blocking work "
+          "past its budget; reporting that outcome rather than a timeout"
+        )
+        return work.result()
+      self._abandon(work)
+      raise
+
+  def _abandon(self, work: asyncio.Future[Any]) -> None:
+    self._abandoned.append(work)
+    work.add_done_callback(self._log_abandoned_outcome)
+    logger.error(
+      f"Task {self.task_id} ({self.task_type}) abandoned blocking work after its "
+      f"budget and {self.budget_seconds}s grace; the thread is still running "
+      "and may still commit"
+    )
+
+  def _log_abandoned_outcome(self, work: asyncio.Future[Any]) -> None:
+    # Nothing awaits an abandoned future, so its outcome would otherwise be
+    # dropped (or surface as "exception was never retrieved" on stderr).
+    if work.cancelled():
+      return
+    exc = work.exception()
+    if exc is None:
+      logger.warning(
+        f"Task {self.task_id} ({self.task_type}) abandoned blocking work "
+        "finished after the operation was already reported as timed out"
+      )
+    else:
+      logger.warning(
+        f"Task {self.task_id} ({self.task_type}) abandoned blocking work "
+        f"failed after the operation was reported as timed out: "
+        f"{type(exc).__name__}: {exc}"
+      )
 
   async def report_progress(
     self,

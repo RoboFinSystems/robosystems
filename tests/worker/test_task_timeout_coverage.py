@@ -164,28 +164,32 @@ def test_period_close_budget_covers_one_slow_publish_and_the_locks() -> None:
 
   Sizing here is decided by the failure mode rather than by how long a close
   usually takes. `asyncio.wait_for` cancels the coroutine but cannot cancel
-  the thread doing the QuickBooks publish, so an under-budget close is marked
-  FAILED while its thread runs on — and can still commit. Reporting a
-  landed close as a failure is far worse than waiting longer for a slow one.
+  the thread doing the QuickBooks publish. `BaseTask.run_blocking` waits one
+  more budget for that thread and reports what it produced, so an overrun
+  costs the operator a grace-length wait for the receipt rather than a
+  FAILED for a close that landed — but only inside that grace. Past it the
+  close is abandoned as still running, which is the outcome this budget
+  exists to keep rare.
 
-  Pinned against the constants that actually bound the run: one QuickBooks
-  call's retry ladder, the per-statement ceiling, and the period fence's
-  lock wait. Raising any of them without raising the budget fails here.
+  Pinned against the constants that bound the run on the request policy: one
+  QuickBooks call's retry ladder and the per-statement ceiling. The period
+  fence is not in the sum — on the worker its wait *is* this budget
+  (`PeriodCloseTask` passes `budget_seconds` as `fence_wait_ms`), so it
+  cannot drift from it. Raising either constant without raising the budget
+  fails here.
   """
   from robosystems.config.defaults import DatabaseDefaults
-  from robosystems.operations.locking import _LOCK_TIMEOUT_MS
 
   # One QuickBooks call that exhausts its retry ladder: 5 attempts with
   # exponential backoff capped at 60s. The floor below counts only the
   # backoff between attempts, not the calls themselves.
   qb_retry_backoff = 1 + 2 + 4 + 8
   statement_ceiling = DatabaseDefaults.EXTENSIONS_STATEMENT_TIMEOUT_MS / 1000
-  fence_wait = _LOCK_TIMEOUT_MS / 1000
 
-  internal_waits = qb_retry_backoff + statement_ceiling + fence_wait
+  internal_waits = qb_retry_backoff + statement_ceiling
   assert TASK_TIMEOUTS["period_close"] > internal_waits * 2, (
     f"period_close budget ({TASK_TIMEOUTS['period_close']}s) must clear its own "
     f"waits ({internal_waits}s) with wide headroom: a real month publishes one "
     "QuickBooks entry per draft, any of which can hit that retry ladder, and a "
-    "cancelled close keeps running in its thread."
+    "close past its budget is reported late at best."
   )
