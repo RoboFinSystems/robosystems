@@ -171,9 +171,12 @@ class GraphMCPTools:
 
     # Layer 1: GraphQL escape-hatch tools (gated by EXTENSIONS_GRAPHQL_ENABLED)
     # MCP_GRAPHQL_ENABLED is a runtime kill switch checked at dispatch time.
+    # Excluded on shared repos: the typed surface is the extensions OLTP
+    # schema, which a shared repository like 'sec' does not have —
+    # introspection answers, but every real query errors.
     self.graphql_schema_tool: GraphqlSchemaTool | None = None
     self.graphql_query_tool: GraphqlQueryTool | None = None
-    if env.EXTENSIONS_GRAPHQL_ENABLED:
+    if env.EXTENSIONS_GRAPHQL_ENABLED and not self._is_shared_repository():
       self.graphql_schema_tool = GraphqlSchemaTool(graph_client)
       self.graphql_query_tool = GraphqlQueryTool(
         graph_client, schema_extensions=self.schema_extensions

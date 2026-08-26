@@ -37,8 +37,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
     '- Map a concept like "revenue" to its XBRL element qname → '
     "`resolve-element`.\n"
     "- Full-text search across filings → `search-documents`.\n"
-    "- Typed GraphQL reads → `query-graphql`; raw graph traversal → "
-    "`read-graph-cypher`.\n"
+    "- Raw graph traversal → `read-graph-cypher`.\n"
     "\n"
     "NOTES\n"
     # The `sec_historical` subgraph was advertised here until 2026-08-14 and is
