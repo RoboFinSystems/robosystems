@@ -622,6 +622,9 @@ def setup_database(test_db):
     GraphCredits,
     GraphCreditTransaction,
     GraphUser,
+    OAuthClient,
+    OAuthGrant,
+    OAuthToken,
     Org,
     OrgInvitation,
     OrgLimits,
@@ -647,6 +650,9 @@ def setup_database(test_db):
     # table makes the User delete fail, and the rollback below then keeps
     # *every* row of this test alive for the rest of the session.
     test_db.query(Document).delete()
+    test_db.query(OAuthToken).delete()  # references oauth_grants
+    test_db.query(OAuthGrant).delete()  # references users and oauth_clients
+    test_db.query(OAuthClient).delete()
     test_db.query(ConnectionCredentials).delete()
     test_db.query(Connection).delete()
     test_db.query(UserAPIKey).delete()
