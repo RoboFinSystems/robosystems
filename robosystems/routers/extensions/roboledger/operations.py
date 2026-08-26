@@ -2104,6 +2104,7 @@ async def close_period_op(
           service=_fiscal_svc,
           close_service=_close_svc,
           allow_stranded_obligations=body.allow_stranded_obligations,
+          allow_reconciling_items=body.allow_reconciling_items,
         )
     except CloseGateFailed as e:
       if e.no_calendar:

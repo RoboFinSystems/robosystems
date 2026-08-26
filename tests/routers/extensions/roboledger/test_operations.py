@@ -24,6 +24,11 @@ from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
+from robosystems.models.api.extensions.fiscal_calendar import (
+  ClosePeriodRequest,
+  ClosePeriodResponse,
+  FiscalCalendarResponse,
+)
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
   JournalEntryLineItemInput,
@@ -46,11 +51,13 @@ from robosystems.operations.roboledger.commands.entity import ParentEntityNotFou
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   BlockSourceGraphOperation,
+  ClosePeriodOperation,
   RegenerateReportOperation,
   RevokeReportShareOperation,
   ShareReportOperation,
   auto_map_elements_op,
   block_source_graph_op,
+  close_period_op,
   create_report_op,
   delete_journal_entry_op,
   file_report_op,
@@ -1766,3 +1773,77 @@ class TestCrossGraphStalenessCallbacks:
       )
 
     mark.assert_not_called()
+
+
+def _make_close_period_response() -> ClosePeriodResponse:
+  return ClosePeriodResponse(
+    fiscal_calendar=FiscalCalendarResponse(
+      graph_id=GRAPH_ID, fiscal_year_start_month=1, closed_through="2026-01"
+    ),
+    period="2026-01",
+    entries_posted=2,
+    target_auto_advanced=False,
+  )
+
+
+class TestClosePeriodOp:
+  """The hand-written REST closer must forward every close-time override the
+  shared ``ClosePeriodRequest`` declares.
+
+  ``allow_reconciling_items`` was declared on the model, forwarded by the MCP
+  tool and the worker task, and silently dropped here — a documented flag
+  that REST callers could send and the kernel never saw, while the
+  LLM-reachable surface honoured it. The check is structural: any ``allow_*``
+  override the request model gains must reach ``cmd_close_period`` by name.
+  """
+
+  @pytest.mark.asyncio
+  async def test_forwards_every_close_override_to_the_kernel(self) -> None:
+    body = ClosePeriodOperation(
+      period="2026-01",
+      note="closed after review",
+      allow_stale_sync=True,
+      allow_stranded_obligations=True,
+      allow_reconciling_items=True,
+    )
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_close_period",
+        return_value=_make_close_period_response(),
+      ) as cmd,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await close_period_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        platform_db=MagicMock(),
+      )
+
+    assert envelope.operation == "close-period"
+    assert envelope.status == "completed"
+
+    kwargs = cmd.call_args.kwargs
+    overrides = {
+      name for name in ClosePeriodRequest.model_fields if name.startswith("allow_")
+    }
+    assert overrides == {
+      "allow_stale_sync",
+      "allow_stranded_obligations",
+      "allow_reconciling_items",
+    }
+    dropped = overrides - set(kwargs)
+    assert not dropped, (
+      f"REST closer drops close overrides the model declares: {dropped}"
+    )
+    for name in overrides:
+      assert kwargs[name] is True, name
+    assert kwargs["note"] == "closed after review"
+    assert kwargs["actor_id"] == "usr_test123"
