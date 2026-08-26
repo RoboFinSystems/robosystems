@@ -15,6 +15,8 @@ just test-full              # everything, including tests marked slow
 
 `just test <module>` takes a path *relative to* `tests/`, so `just test adapters` and `just test middleware/billing` work; `just test tests/adapters` does not. To run an arbitrary path, file, or node id, call pytest directly.
 
+The recipes run the suite in parallel (`-n auto --dist loadfile`); see [Running in parallel](#running-in-parallel) for what that isolates and the two rules it imposes on tests.
+
 Always go through `uv`:
 
 ```bash
@@ -106,13 +108,34 @@ def test_with_user(test_user):
     assert test_user.api_key is not None
 ```
 
+## Running in parallel
+
+`just test`, `test-full`, `test-cov` and CI run `pytest -n auto --dist loadfile` (pytest-xdist): one worker per core, each file's tests kept on one worker. The full non-slow suite is ~2 minutes on a 14-core machine and ~6 on the 2-core CI runner, against 12+ serially.
+
+**What is isolated per worker, and what is not** (`tests/xdist_workers.py`, invoked from `tests/__init__.py`):
+
+- **The platform test database — per worker.** `test_db` drops and recreates `public`, and the autouse cleanup truncates every table after each test; two workers on one database would race on that. Each worker gets `robosystems_test_<gwN>`, created on demand, and both `TEST_DATABASE_URL` (the fixtures) and `DATABASE_URL` (the app engine) move to it. The rewrite runs from the test package's `__init__` because `robosystems.config.env` reads the URL at import and `robosystems.db.platform` binds its engine from it at import — a later hook would leave the app on the shared database while the fixtures truncate a private one. The uuid-named throwaway extensions schemas some tests build live in this database, so they follow it.
+- **The extensions database — shared.** Its tests use those throwaway schemas or a module-scoped tenant schema with a per-file name; `--dist loadfile` keeps a file on one worker, so a file never runs concurrently against itself. The taxonomy library it holds is read-only to tests.
+- **Valkey and LocalStack — shared.** Tests that touch them live must key by their own ids.
+
+Nothing here runs outside xdist: a plain `uv run pytest path/to/test.py` still uses `robosystems_test` directly.
+
+**Two rules the parallel order enforces.** Both were latent for months; a new file order surfaced them in a day.
+
+1. **Every table with a plain (non-CASCADE) foreign key into a truncated table must be in `setup_database`'s delete list, before the table it references.** One missing table makes the `users` (or `graph_credits`) delete fail, and the cleanup then rolls *everything* back — every row of that test stays alive for the rest of the worker's session, and the failure shows up later as a duplicate key in an unrelated file. The cleanup now warns with the offending constraint instead of hiding it; if you see `Test database cleanup failed`, add the table it names. To audit the list, walk `Base.metadata.sorted_tables` for FK constraints without `ondelete="CASCADE"` whose referred table is in the list and whose own table is not.
+2. **A `robosystems.config.env` attribute set in a test must be set with `monkeypatch.setattr(env, ...)`.** `env` reads its variables at import, so `monkeypatch.setenv` changes nothing the code sees, and a direct `env.X = ...` assignment leaks into every later test on the session — the S3 adapter's bucket probe failing in CI was one such leak.
+
+A third class: tests that consult a real resource whose answer depends on host load (the Graph API admission controller reads CPU and memory headroom) must mock it, or they fail only when the machine is busy — which under xdist is always.
+
+**Verifying a change to the harness.** Run the suite twice at `-n 2` — the runner's worker count, which is a different file order from `-n auto` on a big machine — and look for both failures and cleanup warnings. A test that passes alone and fails in the suite is order-dependent: reproduce it serially by naming the earlier file and the failing file in that order on the command line.
+
 ## Test environment
 
 Configuration comes from the `env` block in `pytest.ini`, so tests get a deterministic environment without touching `.env`.
 
 | Dependency | Where tests expect it                                          |
 | ---------- | -------------------------------------------------------------- |
-| PostgreSQL | `robosystems_test` on `localhost:5432`, auto-migrated by `test_db` |
+| PostgreSQL | `robosystems_test` on `localhost:5432` (`robosystems_test_<gwN>` per xdist worker), schema built by `test_db` |
 | Valkey     | `localhost:6379`                                               |
 | Graph API  | `localhost:8001`                                               |
 | LadybugDB  | `./data/lbug-dbs`                                              |
@@ -266,7 +289,7 @@ mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_sessio
 
 `test-ci.yml` runs the gate on every pull request and on pushes to `main`; the staging and production deploy workflows call the same reusable `test.yml` before deploying, but they are manual dispatches, not push triggers.
 
-The gate is close to `just test-all` but not identical. CI runs the test suite (`pytest -m "not slow"`), the dbt tests, `ruff check`, `basedpyright`, CloudFormation lint, workflow lint, and a Trivy dependency scan. It does **not** run a formatting step — `just test-all` calls `just format`, which rewrites files rather than checking them, so unformatted code passes CI and gets reformatted on your next local run. Run `just test-all` locally before opening a pull request; the full suite takes several minutes.
+The gate is close to `just test-all` but not identical. CI runs the test suite (`pytest -m "not slow"`), the dbt tests, `ruff check`, `basedpyright`, CloudFormation lint, workflow lint, and a Trivy dependency scan. It does **not** run a formatting step — `just test-all` calls `just format`, which rewrites files rather than checking them, so unformatted code passes CI and gets reformatted on your next local run. Run `just test-all` locally before opening a pull request; the suite runs in parallel and takes a few minutes. CI's `-n auto` on its 2-core runner brings the pytest step to ~6 minutes against a 15-minute step timeout.
 
 ## Reference
 
