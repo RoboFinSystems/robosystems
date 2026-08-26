@@ -1057,6 +1057,72 @@ class TestProviderGrantRevocationAtTeardown:
     assert self._credential_rows(db_session, connection_id) == 0
 
   @pytest.mark.asyncio
+  async def test_revokes_connections_scoped_to_a_subgraph_too(
+    self, service, db_session, test_graph, test_user
+  ):
+    """Connections can be created directly on a subgraph id. Full teardown
+    cleans each subgraph's PG records, so it must revoke there as well — the
+    same leak one level down."""
+    from robosystems.operations.providers.registry import provider_registry
+
+    subgraph = Graph(
+      graph_id=f"{test_graph.graph_id}_dev",
+      graph_name="Dev Subgraph",
+      graph_type="entity",
+      org_id=test_graph.org_id,
+      graph_tier=test_graph.graph_tier,
+      parent_graph_id=test_graph.graph_id,
+      is_subgraph=True,
+      subgraph_index=0,
+      subgraph_name="dev",
+      status=GraphStatus.ACTIVE.value,
+    )
+    db_session.add(subgraph)
+    db_session.commit()
+
+    parent_conn = self._seed_quickbooks_connection(db_session, test_graph, test_user)
+    sub_conn = self._seed_quickbooks_connection(db_session, subgraph, test_user)
+    seen: list[tuple[str, str, int]] = []
+
+    async def _cleanup(provider_type, connection, graph_id):
+      seen.append(
+        (
+          connection["id"],
+          graph_id,
+          self._credential_rows(db_session, connection["id"]),
+        )
+      )
+
+    infra = self._infra()
+    with (
+      infra[0] as mock_get_client,
+      infra[1] as mock_alloc_cls,
+      infra[2],
+      patch("robosystems.operations.graph.subgraph_service.LadybugAllocationManager"),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_sub_cls,
+      patch.object(provider_registry, "cleanup_connection", side_effect=_cleanup),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+      mock_sub_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert result.status == "success", result.errors
+    assert result.subgraphs_deleted == 1
+    assert result.connections_revoked == 2
+    assert result.connections_deleted == 2
+    by_connection = {cid: (gid, rows) for cid, gid, rows in seen}
+    assert by_connection[sub_conn] == (subgraph.graph_id, 1)
+    assert by_connection[parent_conn] == (test_graph.graph_id, 1)
+    assert self._credential_rows(db_session, sub_conn) == 0
+    assert self._credential_rows(db_session, parent_conn) == 0
+
+  @pytest.mark.asyncio
   async def test_a_failed_revoke_is_recorded_and_teardown_still_completes(
     self, service, db_session, test_graph, test_user
   ):

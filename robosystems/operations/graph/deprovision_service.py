@@ -427,9 +427,12 @@ class GraphDeprovisionService:
         result.errors.append(error_msg)
         logger.warning(error_msg)
 
-      # Purge staged uploads before the PG records that index them (see the
-      # parent path), then clean subgraph PG records.
+      # Same ordering as the parent path: purge staged uploads before the PG
+      # records that index them, revoke provider grants before the credentials
+      # they read (a connection may be scoped directly to a subgraph), then
+      # clean the subgraph's PG records.
       self._purge_staged_uploads(subgraph.graph_id, session, result)
+      await self._revoke_provider_grants(subgraph.graph_id, session, result)
       self._clean_pg_records(subgraph.graph_id, session, result)
       self._purge_search_index(subgraph.graph_id, result)
 
@@ -712,6 +715,9 @@ class GraphDeprovisionService:
             "connection_id": connection_id,
             "provider": provider_type,
             "entity_name": entity_name,
+            # The disconnect endpoint's payload carries entity_id = graph_id;
+            # the provider cleanup logs it.
+            "entity_id": graph_id,
             "graph_id": graph_id,
           },
           graph_id,
