@@ -297,10 +297,36 @@ class TestToolsList:
       body = _body(await dispatch_jsonrpc(request, "kg123", _make_user()))
 
     tools = {tool["name"]: tool for tool in body["result"]["tools"]}
-    assert tools["get-graph-schema"]["annotations"] == {"readOnlyHint": True}
-    # Cypher reads stay unhinted — the StatementKernel classifies them per
-    # statement, and they can carry writes on a tenant graph.
-    assert "annotations" not in tools["read-graph-cypher"]
+    # Every tool carries a title and explicit annotations (directory
+    # listings require both); reads are read-only + idempotent.
+    for tool in tools.values():
+      assert tool["title"]
+      assert tool["annotations"]["title"] == tool["title"]
+      assert tool["annotations"]["openWorldHint"] is False
+    assert tools["get-graph-schema"]["title"] == "Get graph schema"
+    assert tools["get-graph-schema"]["annotations"] == {
+      "title": "Get graph schema",
+      "openWorldHint": False,
+      "readOnlyHint": True,
+      "destructiveHint": False,
+      "idempotentHint": True,
+    }
+    # Cypher reads carry neither hint — the StatementKernel classifies them
+    # per statement, and they can carry writes on a tenant graph.
+    assert "readOnlyHint" not in tools["read-graph-cypher"]["annotations"]
+    assert "destructiveHint" not in tools["read-graph-cypher"]["annotations"]
+
+  def test_write_tools_are_hinted_destructive(self):
+    assert remote._tool_annotations("close-period", "Close period") == {
+      "title": "Close period",
+      "openWorldHint": False,
+      "readOnlyHint": False,
+      "destructiveHint": True,
+    }
+
+  def test_title_prefers_the_definition_then_humanizes(self):
+    assert remote._tool_title({"name": "x", "title": " Fact grid "}) == "Fact grid"
+    assert remote._tool_title({"name": "build-fact-grid"}) == "Build fact grid"
 
 
 @pytest.mark.asyncio
