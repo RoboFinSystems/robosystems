@@ -107,7 +107,7 @@ Built on the blocks:
 
 ## Connect via MCP
 
-Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header:
+Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header. Access follows the graph: your own graphs need graph membership, and the public `sec` repository needs an **active repository subscription** (Starter or Advanced — plans and their MCP rate limits are published at `GET /v1/offering`). An API key alone does not open `sec`; the server answers `403` until the subscription exists, and tool calls count against the plan's MCP limits:
 
 ```
 https://api.robosystems.ai/v1/graphs/{graph_id}/mcp

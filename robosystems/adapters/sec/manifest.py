@@ -90,7 +90,7 @@ SEC_MANIFEST = SharedRepositoryManifest(
       "access_level": "READ",
       "description": "Full SEC data access for individuals",
       "features": [
-        "Unlimited MCP tool access",
+        "MCP access from Claude, Cursor, or any MCP client",
         "API access",
         "Standard rate limits",
         "1 backup download per month",
