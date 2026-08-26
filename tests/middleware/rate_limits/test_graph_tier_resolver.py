@@ -24,7 +24,7 @@ class TestExtractGraphId:
     "path,expected",
     [
       ("/v1/graphs/kg1abc/query/cypher", "kg1abc"),
-      ("/v1/graphs/kg1abc/mcp/call-tool", "kg1abc"),
+      ("/v1/graphs/kg1abc/mcp", "kg1abc"),
       ("/extensions/kg1abc/graphql", "kg1abc"),
       ("/extensions/roboledger/kg1abc/operations/close-period", "kg1abc"),
       ("/extensions/roboinvestor/kg1abc/operations/create-security", "kg1abc"),

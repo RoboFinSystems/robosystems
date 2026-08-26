@@ -901,9 +901,7 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
       continue
 
     block = client.get_information_block(graph_id, structure.id)
-    rollups = [
-      r for r in (block.rules if block else []) if r.rule_pattern == "RollUp"
-    ]
+    rollups = [r for r in (block.rules if block else []) if r.rule_pattern == "RollUp"]
     # `rule_variables` is typed `list[RuleVariableLite] | Unset`, and `Unset`
     # defines neither `__iter__` nor `__len__` — iterating or measuring it
     # raises TypeError rather than reading as empty. Its `__bool__` is False,
@@ -1689,40 +1687,46 @@ def run_forecast_scenario(
 
 
 def seed_memories(graph_id: str, memories: list[dict]) -> int:
-  """Seed the graph's semantic memory through the MCP tool surface.
+  """Seed the graph's semantic memory through the ``remember`` operation.
 
-  Memory writes are deliberately MCP-only (``remember``; REST is
-  read/governance — list/get/recall), so seeding goes through
-  ``POST /v1/graphs/{g}/mcp/call-tool`` — still the public HTTP API, and
-  it exercises the same tool an AI Operator uses during the close.
+  ``POST /v1/graphs/{g}/operations/remember`` — the same content operation
+  the MCP ``remember`` tool delegates to, so seeded memories are
+  indistinguishable from ones an AI Operator stores during the close.
   Degrades gracefully when semantic memory is disabled on the deployment.
   """
-  import httpx
+  from robosystems_client.api.content_operations.remember import (
+    sync_detailed as api_remember,
+  )
+  from robosystems_client.client import AuthenticatedClient
+  from robosystems_client.models import RememberOp
 
-  api_key = _client_config()["token"]
+  client = AuthenticatedClient(
+    base_url=BASE_URL,
+    token=_client_config()["token"],
+    prefix="",
+    auth_header_name="X-API-Key",
+  )
   seeded = 0
   for memory in memories:
-    resp = httpx.post(
-      f"{BASE_URL}/v1/graphs/{graph_id}/mcp/call-tool",
-      json={
-        "name": "remember",
-        "arguments": {
-          "text": memory["text"],
-          "memory_type": memory.get("memory_type", "fact"),
-          "tags": memory.get("tags", []),
-        },
-      },
-      headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-      timeout=60.0,
+    response = api_remember(
+      graph_id=graph_id,
+      client=client,
+      body=RememberOp(
+        text=memory["text"],
+        source="demo",
+        memory_type=memory.get("memory_type", "fact"),
+        tags=memory.get("tags", []),
+      ),
     )
-    if resp.status_code >= 400:
-      print(f"  WARNING: remember -> HTTP {resp.status_code}: {resp.text[:160]}")
-      continue
-    body = resp.json() or {}
-    payload = body.get("result") or body
-    if isinstance(payload, dict) and payload.get("error"):
-      print(f"  (skipped) {payload.get('message', payload['error'])}")
+    if response.status_code in (403, 404, 503):
+      # Memory disabled on the deployment, or not offered on this graph.
+      detail = response.content.decode("utf-8", "replace")[:160]
+      print(f"  (skipped) remember -> HTTP {response.status_code}: {detail}")
       return seeded
+    if response.status_code >= 400:
+      detail = response.content.decode("utf-8", "replace")[:160]
+      print(f"  WARNING: remember -> HTTP {response.status_code}: {detail}")
+      continue
     seeded += 1
   return seeded
 
@@ -1899,9 +1903,7 @@ def create_schedules(
 
   # Find or create schedule taxonomy
   existing_taxonomies = client.list_taxonomies(graph_id, taxonomy_type="schedule")
-  schedule_tax = next(
-    (t for t in existing_taxonomies if t.name == taxonomy_name), None
-  )
+  schedule_tax = next((t for t in existing_taxonomies if t.name == taxonomy_name), None)
   if schedule_tax:
     taxonomy_id = schedule_tax.id
     # Clean up prior-run schedules for idempotency
@@ -2184,7 +2186,9 @@ def generate_annual_report(
   # for loop/CI runs whose local files nobody will ever open, the same
   # bundles export on demand from the report UI.
   if skip_artifacts:
-    print("  Artifacts:    skipped (--no-artifacts) — export bundles from the report UI")
+    print(
+      "  Artifacts:    skipped (--no-artifacts) — export bundles from the report UI"
+    )
   else:
     _download_bundles(client, graph_id, report_id, output_dir, scenario)
 

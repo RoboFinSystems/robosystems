@@ -196,24 +196,43 @@ def test_viewer_cannot_use_classifier_verbs(
 
 
 def _mcp_tool_result(response) -> dict:
-  """Decode the tool's own JSON result out of an MCP call-tool response."""
+  """Decode the tool's own JSON out of an MCP ``tools/call`` JSON-RPC response.
+
+  Tool failures (including the authorization gauntlet's refusals) arrive as
+  HTTP 200 with ``result.isError`` and the detail as the first text content.
+  """
   if response.status_code // 100 != 2:
     return {"_http_status": response.status_code}
   try:
     body = response.json()
+    if body.get("error"):
+      return {"_rpc_error": body["error"]}
     result = body.get("result", body)
-    text = result.get("text") if isinstance(result, dict) else None
+    content = result.get("content") if isinstance(result, dict) else None
+    text = next(
+      (item.get("text") for item in content or [] if item.get("type") == "text"),
+      None,
+    )
     return json.loads(text) if isinstance(text, str) else {"_raw": result}
   except (ValueError, AttributeError):
     return {"_raw": response.text[:200]}
 
 
+def _mcp_call(name: str, arguments: dict) -> dict:
+  return {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {"name": name, "arguments": arguments},
+  }
+
+
 def test_member_cannot_create_subgraph_via_mcp(tenants, client: Client) -> None:
   member = _role(tenants, "member")
   r = client.post(
-    f"/v1/graphs/{tenants.graph_a}/mcp/call-tool",
+    f"/v1/graphs/{tenants.graph_a}/mcp",
     principal=member,
-    json={"name": "create-subgraph", "arguments": {"name": "isomcp"}},
+    json=_mcp_call("create-subgraph", {"name": "isomcp"}),
   )
   if r.status_code in (401, 403):
     return  # denied at the transport — fine
@@ -228,9 +247,9 @@ def test_member_cannot_create_subgraph_via_mcp(tenants, client: Client) -> None:
 def test_member_cannot_create_backup_via_mcp(tenants, client: Client) -> None:
   member = _role(tenants, "member")
   r = client.post(
-    f"/v1/graphs/{tenants.graph_a}/mcp/call-tool",
+    f"/v1/graphs/{tenants.graph_a}/mcp",
     principal=member,
-    json={"name": "create-backup", "arguments": {}},
+    json=_mcp_call("create-backup", {}),
   )
   if r.status_code in (401, 403):
     return
