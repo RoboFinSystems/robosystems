@@ -158,13 +158,20 @@ async def create_checkout_session(
 
     provider = get_payment_provider("stripe")
 
-    # Retire any earlier checkout for this resource type before opening a new
+    # Retire any earlier checkout for this same resource before opening a new
     # one. Cancelling the local row alone is not enough: the hosted session it
     # points at stays payable at the provider for up to 24 hours, and a payment
     # against it would bind a live provider subscription to a row already
     # marked canceled — money that never becomes a resource. Expire the session
     # first; if it turns out to have been paid, that checkout won and this one
     # must not open a second one.
+    already_paid = HTTPException(
+      status_code=409,
+      detail=(
+        "A previous checkout for this resource has already been paid and is "
+        "being provisioned. Check your subscriptions before starting another."
+      ),
+    )
     stale_pending = (
       db.query(BillingSubscription)
       .filter(
@@ -175,18 +182,28 @@ async def create_checkout_session(
       .all()
     )
     for stale_sub in stale_pending:
+      # Same resource only. Repository checkouts are per repository: an
+      # in-flight checkout for a different repository under the same org is
+      # not superseded by this one, and must not be expired — or, if it was
+      # already paid, mistaken for this resource's payment.
+      if request.resource_type == "repository":
+        stale_config = (stale_sub.subscription_metadata or {}).get(
+          "resource_config"
+        ) or {}
+        stale_repo = stale_config.get("repository_name")
+        if stale_repo and stale_repo != repo_name:
+          continue
+
       stale_session_id = stale_sub.provider_subscription_id
-      if stale_session_id and stale_session_id.startswith("cs_"):
+      if stale_session_id and not stale_session_id.startswith("cs_"):
+        # `checkout.session.completed` has already replaced the session id
+        # with the provider's subscription id: the row is paid and waiting
+        # for the provisioning claim. It is not a stale checkout.
+        raise already_paid
+      if stale_session_id:
         outcome = provider.expire_checkout_session(stale_session_id)
         if outcome == "complete":
-          raise HTTPException(
-            status_code=409,
-            detail=(
-              "A previous checkout for this resource has already been paid "
-              "and is being provisioned. Check your subscriptions before "
-              "starting another."
-            ),
-          )
+          raise already_paid
       now = datetime.now(UTC)
       stale_sub.status = "canceled"
       stale_sub.canceled_at = now
