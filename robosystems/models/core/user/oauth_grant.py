@@ -109,6 +109,22 @@ class OAuthGrant(Model):
       .all()
     )
 
+  @classmethod
+  def revoke_all_for_client(
+    cls, oauth_client_id: str, session: Session, *, reason: str
+  ) -> tuple[int, int]:
+    """Revoke every live grant for a client and the tokens minted from
+    them. Returns ``(grants_revoked, tokens_revoked)``."""
+    grants = (
+      session.query(cls)
+      .filter(cls.oauth_client_id == oauth_client_id, cls.revoked_at.is_(None))
+      .all()
+    )
+    tokens = 0
+    for grant in grants:
+      tokens += grant.revoke(session, reason=reason)
+    return len(grants), tokens
+
   def touch(self, session: Session) -> None:
     self.last_used_at = datetime.now(UTC)
     try:

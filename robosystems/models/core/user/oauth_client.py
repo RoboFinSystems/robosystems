@@ -336,7 +336,12 @@ class OAuthClient(Model):
       session.rollback()
       raise
 
-  def deactivate(self, session: Session) -> None:
+  def deactivate(self, session: Session) -> tuple[int, int]:
+    """Deactivate the client: no new consents, and every live grant and
+    token it holds is revoked now — not at the next validation-cache miss.
+    Returns ``(grants_revoked, tokens_revoked)``."""
+    from .oauth_grant import OAuthGrant
+
     self.is_active = False
     self.updated_at = datetime.now(UTC)
     try:
@@ -344,8 +349,17 @@ class OAuthClient(Model):
     except SQLAlchemyError:
       session.rollback()
       raise
+    grants, tokens = OAuthGrant.revoke_all_for_client(
+      str(self.id), session, reason="client_deactivated"
+    )
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.ADMIN_ACTION,
-      details={"action": "oauth_client_deactivated", "oauth_client_id": self.id},
+      details={
+        "action": "oauth_client_deactivated",
+        "oauth_client_id": self.id,
+        "grants_revoked": grants,
+        "tokens_revoked": tokens,
+      },
       risk_level="low",
     )
+    return grants, tokens

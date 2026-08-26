@@ -14,7 +14,6 @@ surface for OAuth clients, not part of the SDK-facing API.
 
 import base64
 import binascii
-import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -427,6 +426,3 @@ async def register(
     body["client_secret"] = secret
     body["client_secret_expires_at"] = 0
   return JSONResponse(body, status_code=201, headers=_NO_STORE)
-
-
-_ = re  # GRAPH_OR_SUBGRAPH_ID_PATTERN is applied by FastAPI's Path validator

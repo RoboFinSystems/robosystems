@@ -96,7 +96,7 @@ def list_clients(client, source, include_inactive, limit):
 @click.argument("oauth_client_id")
 @click.pass_obj
 def deactivate_client(client, oauth_client_id):
-  """Deactivate a client (no new consents; tokens stop at next cache miss)."""
+  """Deactivate a client (no new consents; its grants and tokens are revoked now)."""
   result = client._make_request(
     "POST", f"/admin/v1/oauth/clients/{oauth_client_id}/deactivate"
   )

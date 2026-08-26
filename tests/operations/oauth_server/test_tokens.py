@@ -431,6 +431,21 @@ class TestValidateAccessToken:
     with patch("robosystems.database.SessionFactory", return_value=test_db):
       assert validate_oauth_access_token(issued.access_token) is None
 
+  def test_client_deactivation_revokes_its_tokens(
+    self, test_db, issued, client_row, grant
+  ):
+    grants, tokens = client_row.deactivate(test_db)
+    assert (grants, tokens) == (1, 2)
+    assert OAuthGrant.get_by_id(grant.id, test_db).is_revoked
+    assert OAuthToken.get_by_plaintext(
+      issued.access_token, TOKEN_TYPE_ACCESS, test_db
+    ).revoked_at
+    assert OAuthToken.get_by_plaintext(
+      issued.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    ).revoked_at
+    with patch("robosystems.database.SessionFactory", return_value=test_db):
+      assert validate_oauth_access_token(issued.access_token) is None
+
   def test_user_deactivation_revokes_tokens(self, test_db, issued, test_user):
     from robosystems.models.core import User
 

@@ -106,8 +106,8 @@ async def list_oauth_clients(
 async def deactivate_oauth_client(
   request: Request, oauth_client_id: str
 ) -> OAuthClientDeactivateResponse:
-  """Deactivate a client: no new consents, and its access tokens stop
-  validating at the next cache miss (the validator checks the client)."""
+  """Deactivate a client: no new consents, and every grant and token it
+  holds is revoked immediately."""
   session = next(get_db_session())
   try:
     client = OAuthClient.get_by_id(oauth_client_id, session)
@@ -116,12 +116,14 @@ async def deactivate_oauth_client(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"OAuth client {oauth_client_id} not found",
       )
-    client.deactivate(session)
+    grants, tokens = client.deactivate(session)
     logger.info(
       "Admin deactivated OAuth client",
       extra={
         "admin_key_id": request.state.admin_key_id,
         "oauth_client_id": oauth_client_id,
+        "grants_revoked": grants,
+        "tokens_revoked": tokens,
       },
     )
     return OAuthClientDeactivateResponse(
