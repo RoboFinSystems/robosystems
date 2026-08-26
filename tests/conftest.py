@@ -611,6 +611,7 @@ def setup_database(test_db):
     Graph,
     GraphBackup,
     GraphCredits,
+    GraphCreditTransaction,
     GraphUser,
     Org,
     OrgInvitation,
@@ -643,6 +644,7 @@ def setup_database(test_db):
     test_db.query(UserRepositoryCreditTransaction).delete()
     test_db.query(UserRepositoryCredits).delete()
     test_db.query(UserRepository).delete()
+    test_db.query(GraphCreditTransaction).delete()  # references graph_credits
     test_db.query(GraphCredits).delete()
     test_db.query(GraphUser).delete()
     test_db.query(GraphBackup).delete()
