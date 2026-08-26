@@ -1,18 +1,26 @@
 # AI Operators & MCP
 
-RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude Desktop, a custom orchestrator) can call directly.
+RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a Claude-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude, Claude Code, Cursor, a custom orchestrator) can call directly.
 
 ---
 
 ## Connecting from MCP Clients
 
-Every graph is an MCP server. The recommended way to connect is the **remote MCP endpoint** — MCP's Streamable HTTP transport served directly by the API. One URL plus one header replaces the old install-Node-and-edit-config recipe:
+Every graph is an MCP server, served over MCP's Streamable HTTP transport directly by the API. There are two ways in:
 
-> **URL shape:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — use `sec` for the public SEC repository, your graph id for a tenant graph. A subgraph id (`kg…_dev`) is just another URL.
+> **OAuth (recommended):** `https://api.robosystems.ai/v1/mcp` — one URL for everyone. The client discovers the authorization server, you sign in to RoboSystems, and the consent screen asks **which graph** to connect: your own graphs, their subgraphs, and the shared repositories you subscribe to. One authorization is one graph; to work on another graph, reconnect and pick it.
+>
+> **API key:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — the graph is in the URL (`sec` for the public SEC repository, your graph id for a tenant graph; a subgraph id such as `kg…_dev` is just another URL). The key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide or **graph-scoped** — valid only for one graph and its subgraphs.
 
-Your API key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide (one key works for every graph; the URL picks the graph) or **graph-scoped** — valid only for one graph and its subgraphs, which is what a generated connector URL embeds.
+The OAuth path is what the [Claude Connectors Directory](https://claude.com/docs/connectors) listing uses, and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
 
-**Claude Code** — one command:
+**Claude Code** — one command; `/mcp` then opens the browser for consent:
+
+```bash
+claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
+```
+
+With an API key instead (no consent step; the URL fixes the graph):
 
 ```bash
 claude mcp add --transport http robosystems-sec \
@@ -20,7 +28,13 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-**Cursor / VS Code** (`mcp.json`):
+**Claude (claude.ai / Desktop)** — install from the Connectors Directory, or Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. For clients that cannot do OAuth, the **MCP page** in the app (`/connect`) still generates a per-graph **connector URL** that carries a graph-scoped, revocable API key as a query parameter — accepted only on the per-graph MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
+
+**Cursor / VS Code** (`mcp.json`) — the OAuth URL (the editor runs the consent flow), or the per-graph URL with the header:
+
+```json
+"robosystems": { "url": "https://api.robosystems.ai/v1/mcp" }
+```
 
 ```json
 "robosystems-sec": {
@@ -29,9 +43,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — generate a **connector URL** from the **MCP page** in the app (`/connect`) and paste it into Settings → Connectors → Add custom connector. The dialog has no header field, so the URL carries its own graph-scoped, revocable API key as a query parameter — accepted only on the MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
-
-The transport speaks JSON-RPC 2.0 and negotiates MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. JSON-RPC batching is rejected unconditionally. The transport streams long-running tool calls over SSE with progress notifications, and runs the identical authorization chain as the REST entry points below. Against a local stack the same shape works at `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
+Both routes speak JSON-RPC 2.0 and negotiate MCP revision **2025-06-18** — the only revision offered, because it is exactly the one this dispatch implements. Clients on other revisions negotiate to it at `initialize`. The transport is stateless (no session id), rejects JSON-RPC batching unconditionally, streams long-running tool calls over SSE with progress notifications when the client accepts `text/event-stream`, and runs the identical authorization chain as the rest of the API. Against a local stack the same shapes work at `http://localhost:8000/v1/mcp` (with `MCP_OAUTH_ENABLED=true`) and `http://localhost:8000/v1/graphs/{graph_id}/mcp`.
 
 ---
 
@@ -39,30 +51,34 @@ The transport speaks JSON-RPC 2.0 and negotiates MCP revision **2025-06-18** —
 
 MCP is the shared tool layer. Every entry path — the in-product Operator endpoint, external MCP clients, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
-Three HTTP entry points expose the surface on every graph:
+Two transport routes expose the surface:
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/v1/graphs/{graph_id}/mcp` | MCP Streamable HTTP transport — any MCP client connects here directly ([see above](#connecting-from-mcp-clients)) |
-| `GET` | `/v1/graphs/{graph_id}/mcp/tools` | REST: list the MCP tools available on this graph |
-| `POST` | `/v1/graphs/{graph_id}/mcp/call-tool` | REST: execute one MCP tool |
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/v1/mcp` | OAuth bearer | Graph chosen at consent ([see above](#connecting-from-mcp-clients)) |
+| `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key` (or a graph-scoped `?token=`) | Graph fixed by the URL |
 
-A `call-tool` request body is a `MCPToolCall`: a tool `name` plus an `arguments` object.
+Both take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
 
 ```json
 {
-  "name": "read-graph-cypher",
-  "arguments": { "query": "MATCH (n) RETURN count(n)", "parameters": {} }
+  "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+  "params": {
+    "name": "read-graph-cypher",
+    "arguments": { "query": "MATCH (n) RETURN count(n)", "parameters": {} }
+  }
 }
 ```
 
+The former REST pair (`GET …/mcp/tools`, `POST …/mcp/call-tool`) was removed in v1.10.2; the transport is the only MCP surface.
+
 **Database reads are free.** Cypher, GraphQL, schema, and search tool calls consume no credits — only AI (LLM) token usage does. You can drive the entire MCP surface programmatically without billing impact; credits enter the picture only when an Operator calls Claude.
 
-**Tool availability is per-deployment and per-graph.** The catalog is gated by feature flags and by each graph's `schema_extensions`. A ledger-only deployment exposes no investor fields; a read-only shared-repository graph hides write and live-OLTP tools. Always call `/mcp/tools` (or a schema-discovery tool) first rather than assuming a tool exists.
+**Tool availability is per-deployment and per-graph.** The catalog is gated by feature flags and by each graph's `schema_extensions`. A ledger-only deployment exposes no investor fields; a read-only shared-repository graph hides write and live-OLTP tools. Always call `tools/list` (or a schema-discovery tool) first rather than assuming a tool exists.
 
 ### Tool Catalog
 
-The following tool names are the exact strings accepted by `call-tool`. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; the tools that manage memory, documents, and the graph workspace sit alongside them rather than inside one.
+The following tool names are the exact `name` strings for `tools/call`. Every tool also carries a `title` and MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) in `tools/list`; the Cypher tools carry no read/destructive hint because the statement itself is classified server-side. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; the tools that manage memory, documents, and the graph workspace sit alongside them rather than inside one.
 
 **Retrieval — the three planes:**
 
@@ -109,9 +125,9 @@ The following tool names are the exact strings accepted by `call-tool`. The [thr
 
 `change-tier` is deliberately absent: it is a multi-minute destructive volume migration with billing consequences, so it stays on REST for humans. Restore is absent because it has no customer-facing surface at all — see [Graph Operations](Graph-Operations).
 
-In addition, **write tools are auto-generated** from the operation specs of each enabled extension (mapping, schedule, and event writes, for example). These are derived from the same `OperationSpec`s that back the REST command surface, so the MCP write tools and the `/extensions/*/operations/*` endpoints stay in lockstep. The exact set depends on which extensions are enabled; enumerate it for a given graph by calling `/mcp/tools`.
+In addition, **write tools are auto-generated** from the operation specs of each enabled extension (mapping, schedule, and event writes, for example). These are derived from the same `OperationSpec`s that back the REST command surface, so the MCP write tools and the `/extensions/*/operations/*` endpoints stay in lockstep. The exact set depends on which extensions are enabled; enumerate it for a given graph with `tools/list`.
 
-For the full request/response schema of every tool, see the live OpenAPI spec at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) (or `http://localhost:8000/docs` locally).
+Each tool's input schema comes back with `tools/list`. The MCP surface is deliberately absent from the OpenAPI spec — and therefore from the generated SDKs: the REST API at [api.robosystems.ai/docs](https://api.robosystems.ai/docs) is the human-and-SDK surface, the transport is the MCP-client surface.
 
 ---
 
@@ -215,7 +231,7 @@ The Operator endpoint runs a Claude-driven executor against a graph. It is mount
 | `extended` | ≤ 12 | 300 s |
 | `streaming` | ≤ 8 | 120 s |
 
-**Strategies.** A `?mode=sync|async|stream|auto` query parameter overrides the transport strategy on an operator `POST`. With `auto`, the endpoint chooses sync, Server-Sent Events, or async based on the tool type, client capabilities, and current load. On `call-tool`, a `?format=json|sse|ndjson` parameter plays the same role.
+**Strategies.** A `?mode=sync|async|stream|auto` query parameter overrides the transport strategy on an operator `POST`. With `auto`, the endpoint chooses sync, Server-Sent Events, or async based on the tool type, client capabilities, and current load.
 
 The Operator `POST` path can be disabled by deployment via `OPERATOR_POST_ENABLED=false` (returns 403). The GraphQL MCP tools have a separate kill switch, `MCP_GRAPHQL_ENABLED`.
 
@@ -248,7 +264,7 @@ For the operator framework patterns, see the [Operations README](https://github.
 
 ## Worked Examples
 
-All examples target the local stack at `http://localhost:8000` and read the API key from `.local/config.json` (written by `just demo-user`). Use the `X-API-Key` header. Set `GRAPH_ID` to your graph (for example a roboledger graph `kg1a2b3c4d5e`).
+All examples target the local stack at `http://localhost:8000` and read the API key from `.local/config.json` (written by `just demo-user`). Use the `X-API-Key` header on the per-graph route. Set `GRAPH_ID` to your graph (for example a roboledger graph `kg1a2b3c4d5e`). Without an `Accept: text/event-stream` header the transport answers plain JSON, which is what you want from curl.
 
 ### List the Tools Available on a Graph
 
@@ -257,8 +273,10 @@ This shows exactly which planes a given deployment and graph expose. Always star
 ```bash
 GRAPH_ID=<your graph id>
 
-curl -s "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/tools" \
-  -H "X-API-Key: $(jq -r .api_key .local/config.json)"
+curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
+  -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
+  -H "Content-Type: application/json" \
+  -d '{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }'
 ```
 
 ### Analytical Plane — Cypher over LadybugDB
@@ -266,14 +284,17 @@ curl -s "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/tools" \
 No credits are consumed. Run `get-graph-schema` first in real use to learn the node and relationship types.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/call-tool" \
+curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "read-graph-cypher",
-    "arguments": {
-      "query": "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) RETURN el.qname, f.value LIMIT 10",
-      "parameters": {}
+    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+    "params": {
+      "name": "read-graph-cypher",
+      "arguments": {
+        "query": "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) RETURN el.qname, f.value LIMIT 10",
+        "parameters": {}
+      }
     }
   }'
 ```
@@ -283,12 +304,15 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/call-tool" \
 The `graph_id` comes from the URL, never the query body.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/call-tool" \
+curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "query-graphql",
-    "arguments": { "query": "{ fiscalCalendar { closedThrough closeTarget } }" }
+    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+    "params": {
+      "name": "query-graphql",
+      "arguments": { "query": "{ fiscalCalendar { closedThrough closeTarget } }" }
+    }
   }'
 ```
 
@@ -297,12 +321,15 @@ curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/call-tool" \
 `semantic: true` opts into KNN vector ranking on top of keyword search.
 
 ```bash
-curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp/call-tool" \
+curl -s -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/mcp" \
   -H "X-API-Key: $(jq -r .api_key .local/config.json)" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "search-documents",
-    "arguments": { "query": "month end close procedures", "semantic": true, "size": 5 }
+    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+    "params": {
+      "name": "search-documents",
+      "arguments": { "query": "month end close procedures", "semantic": true, "size": 5 }
+    }
   }'
 ```
 
@@ -329,7 +356,7 @@ For direct, API-bypassing graph access during development, `just lbug-query GRAP
 | Write Cypher is a different tool | `write-graph-cypher` works on **subgraphs only** (memory), never the parent graph or shared repos; gated by `MCP_SUBGRAPH_OPS_ENABLED` |
 | `query-graphql` is read-only | Mutations and subscriptions are rejected; depth/field/alias complexity is gated |
 | Discover schema first | `get-graph-schema` returns the **Cypher** schema; `get-graphql-schema` returns the **GraphQL SDL** — distinct tools, easy to confuse |
-| Tool catalog varies | Gated by feature flags and per-graph `schema_extensions`; call `/mcp/tools` before assuming a tool exists |
+| Tool catalog varies | Gated by feature flags and per-graph `schema_extensions`; call `tools/list` before assuming a tool exists |
 | `live-` vs `analysis` | `live-financial-statement` = OLTP, tenant graphs, current books; `financial-statement-analysis` = LadybugDB, historical/cross-period |
 | Operator POST kill switch | `OPERATOR_POST_ENABLED=false` returns 403 |
 | GraphQL MCP kill switch | `MCP_GRAPHQL_ENABLED=false` removes `query-graphql` / `get-graphql-schema` |
@@ -353,7 +380,7 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Operator framework and business-logic kernel
-- **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - API key and access control
+- **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - API keys, OAuth 2.1 for MCP clients, and access control
 - **[API Documentation](https://api.robosystems.ai/docs)** - Full endpoint and tool reference with machine-readable OpenAPI spec
 
 ---
