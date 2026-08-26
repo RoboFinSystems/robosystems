@@ -235,6 +235,17 @@ def create_app() -> FastAPI:
     async def glama_json() -> JSONResponse:
       return JSONResponse(glama_content)
 
+  # ChatGPT app-directory domain verification (same pattern): the portal
+  # issues a token per submission and checks for exactly that token, as
+  # plain text, at the MCP origin's well-known URL.
+  openai_challenge_file = Path("static") / "openai-apps-challenge"
+  if openai_challenge_file.exists():
+    openai_challenge_token = openai_challenge_file.read_text(encoding="utf-8").strip()
+
+    @app.get("/.well-known/openai-apps-challenge", include_in_schema=False)
+    async def openai_apps_challenge() -> PlainTextResponse:
+      return PlainTextResponse(openai_challenge_token)
+
   # Custom dark-themed Swagger + ReDoc (served inline from docs_template).
   @app.get("/", response_class=HTMLResponse, include_in_schema=False)
   async def custom_docs():
