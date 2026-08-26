@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "ai.robosystems/robosystems",
   "title": "RoboSystems",
-  "description": "Financial knowledge graphs: SEC XBRL filings, ledgers, reports and forecasts over MCP.",
-  "version": "1.10.1",
+  "description": "Accounting knowledge graphs: SEC XBRL filings, QuickBooks ledgers, reports and forecasts over MCP.",
+  "version": "1.10.2",
   "websiteUrl": "https://robosystems.ai",
   "repository": {
     "url": "https://github.com/RoboFinSystems/robosystems",
