@@ -28,7 +28,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-**Claude (claude.ai / Desktop)** — install from the Connectors Directory, or Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. For clients that cannot do OAuth, the **MCP page** in the app (`/connect`) still generates a per-graph **connector URL** that carries a graph-scoped, revocable API key as a query parameter — accepted only on the per-graph MCP endpoint, and only for keys scoped to that URL's graph. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
+**Claude (claude.ai / Desktop)** — install from the Connectors Directory, or Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) in proxy mode via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries).
 
 **Cursor / VS Code** (`mcp.json`) — the OAuth URL (the editor runs the consent flow), or the per-graph URL with the header:
 
@@ -56,7 +56,7 @@ Two transport routes expose the surface:
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/v1/mcp` | OAuth bearer | Graph chosen at consent ([see above](#connecting-from-mcp-clients)) |
-| `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key` (or a graph-scoped `?token=`) | Graph fixed by the URL |
+| `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key`, or an OAuth bearer bound to this URL | Graph fixed by the URL |
 
 Both take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
 
