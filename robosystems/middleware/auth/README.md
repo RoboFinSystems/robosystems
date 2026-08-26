@@ -59,6 +59,33 @@ answer in the SCIM error envelope (`{"schemas": [...], "detail": ..., "status":
 "401"}`), not FastAPI's `{"detail": ...}`, and never distinguish unknown from
 revoked from expired.
 
+**OAuth 2.1 access tokens (`Authorization: Bearer rfso…`) are for MCP
+clients.** Behind `MCP_OAUTH_ENABLED`, the platform is its own authorization
+server (`routers/oauth`, kernel in `operations/oauth_server`): RFC 8414 /
+RFC 9728 discovery under `/.well-known`, the authorization-code flow with PKCE
+S256 whose consent screen is the login home's `/oauth/consent` page, a token
+endpoint with rotating refresh tokens (a replayed refresh token revokes its
+whole family), RFC 7009 revocation, and RFC 7591 dynamic registration
+(hardened: redirect-URI rules, per-IP caps, unused registrations expire).
+Tokens are opaque, generated at full entropy, and stored as SHA-256 digests
+(`oauth_tokens`) — the `UserToken` precedent; the digest doubles as the
+validation-cache key so `OAuthToken.revoke` clears the entry. The `rfso`
+prefix is what `dependencies.py:_oauth_bearer_token` keys on to tell the
+token from the app JWT before either is parsed.
+
+Every token is bound to **one grant** (`oauth_grants`: user x client x one
+graph x one canonical resource URL). `oauth.py:validate_oauth_access_token`
+resolves the token to an `OAuthPrincipal`; the MCP dependency then checks the
+**audience** — the grant's resource must equal the route's canonical URL, so a
+token for `/v1/mcp` is refused at `/v1/graphs/{g}/mcp` and vice versa — and
+runs the same live graph-access check every carriage runs. Invalid, expired
+and revoked tokens answer **401 `invalid_token`** (clients refresh); a valid
+token whose user lost access answers **403 `insufficient_scope`**. Password
+change, deactivation and any other `session_version` bump revoke the user's
+OAuth tokens outright (`User._revoke_oauth_tokens`), since like API keys they
+carry no session version. OAuth tokens are accepted on the two MCP routes only
+— `get_current_user` and the graph-scoped REST dependencies never resolve them.
+
 ### Key scoping
 
 A key minted with a `graph_id` (`user_api_keys.graph_id`, prefix `rfsc`) is
@@ -79,6 +106,15 @@ by the OTel span redaction in `middleware/otel/setup.py`.
 | -------------------------------------- | --------------------------------------- | -------------------------------- | ----------------------------------------- |
 | `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse`                  | **JWT only** (30-min TTL)        | browser `EventSource` cannot set headers  |
 | `POST /v1/graphs/{graph_id}/mcp`       | `get_current_user_with_graph_or_url_token` | **graph-scoped API key only** | MCP connector clients cannot set headers  |
+
+The graph-agnostic `POST /v1/mcp` (`get_oauth_mcp_principal`) is the
+counterpoint: it accepts **only** an OAuth bearer — no header key, no
+`?token=`, no JWT — because its tenant scope lives in the credential's grant
+and no other credential type carries one. Every other carriage there answers
+401 with the discovery challenge, not 403. A missing credential on either MCP
+route answers 401 with `WWW-Authenticate: Bearer resource_metadata="…"` naming
+the route's protected-resource document; that header is how an OAuth client
+finds the authorization server.
 
 The asymmetry is deliberate: the SSE door carries a short-lived session token,
 so no extra restriction is needed; the MCP door carries a durable key, so only

@@ -157,12 +157,21 @@ def client(test_db):
   app.dependency_overrides[passkey_management_rate_limit_dependency] = lambda: None
 
   from robosystems.middleware.rate_limits import (
+    oauth_authorize_rate_limit_dependency,
+    oauth_consent_rate_limit_dependency,
+    oauth_register_rate_limit_dependency,
+    oauth_token_rate_limit_dependency,
     oidc_rate_limit_dependency,
     scim_rate_limit_dependency,
   )
 
   app.dependency_overrides[oidc_rate_limit_dependency] = lambda: None
   app.dependency_overrides[scim_rate_limit_dependency] = lambda: None
+  # The OAuth token/registration buckets fail closed without a limiter.
+  app.dependency_overrides[oauth_authorize_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[oauth_consent_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[oauth_token_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[oauth_register_rate_limit_dependency] = lambda: None
 
   # Override the get_db_session dependency to use test database
   from robosystems.database import get_async_db_session, get_db_session

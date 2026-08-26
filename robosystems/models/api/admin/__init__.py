@@ -27,6 +27,13 @@ from .graphs import (
   OrphanTenantSchemasResponse,
 )
 from .invoice import InvoiceLineItemResponse, InvoiceResponse
+from .oauth import (
+  OAuthClientCreateRequest,
+  OAuthClientCreateResponse,
+  OAuthClientDeactivateResponse,
+  OAuthClientListResponse,
+  OAuthClientSummary,
+)
 from .orgs import OrgGraphInfo, OrgResponse, OrgUpdateRequest, OrgUserInfo
 from .scim import (
   ScimBootstrapRequest,
@@ -69,6 +76,11 @@ __all__ = [
   "GraphStorageResponse",
   "InvoiceLineItemResponse",
   "InvoiceResponse",
+  "OAuthClientCreateRequest",
+  "OAuthClientCreateResponse",
+  "OAuthClientDeactivateResponse",
+  "OAuthClientListResponse",
+  "OAuthClientSummary",
   "OrgGraphInfo",
   "OrgResponse",
   "OrgUpdateRequest",

@@ -50,6 +50,9 @@ from .org import (
   OrgUser,
 )
 from .user import (
+  OAuthClient,
+  OAuthGrant,
+  OAuthToken,
   RepositoryType,
   ScimToken,
   User,
@@ -94,6 +97,9 @@ __all__ = [
   "GraphUser",
   "InvitationStatus",
   "InvoiceStatus",
+  "OAuthClient",
+  "OAuthGrant",
+  "OAuthToken",
   "Org",
   "OrgInvitation",
   "OrgLimits",

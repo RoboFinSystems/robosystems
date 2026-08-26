@@ -13,6 +13,7 @@ Mounted under `/v1/graphs/{graph_id}/mcp`:
 from fastapi import APIRouter
 
 from .execute import router as execute_router
+from .remote import agnostic_router
 from .remote import router as remote_router
 from .tools import router as tools_router
 
@@ -30,4 +31,4 @@ router.include_router(execute_router)
 # so it is exported separately and mounted with the "/mcp" prefix alongside this
 # router in robosystems/routers/__init__.py. Schema-excluded so the JSON-RPC
 # envelope never reaches the generated SDKs.
-__all__ = ["remote_router", "router"]
+__all__ = ["agnostic_router", "remote_router", "router"]

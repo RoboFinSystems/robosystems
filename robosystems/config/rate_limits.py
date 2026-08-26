@@ -474,6 +474,13 @@ BURST_LIMITS: dict[str, int] = {
   "logout": 300,
   "sso": 100,
   "oidc": 120,  # 2 per flow
+  # MCP OAuth 2.1 authorization server. Anonymous callers get limit//10:
+  # the token and registration endpoints are unauthenticated by nature, so
+  # their effective per-IP rates are 30/min and 5/min.
+  "oauth_authorize": 120,  # browser GET; anonymous → 12/min per IP
+  "oauth_consent": 120,  # JWT-authenticated consent read + decision
+  "oauth_token": 300,  # code exchange + refresh; anonymous → 30/min per IP
+  "oauth_register": 50,  # RFC 7591; anonymous → 5/min per IP, plus a daily cap
   "mfa": 120,  # 2 per handshake
   "passkey_management": 60,
   # SCIM provisioning, which bursts during a directory's initial sync.

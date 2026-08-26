@@ -124,6 +124,11 @@ from .oauth import (
   OAuthProvider,
   OAuthTokens,
 )
+from .oauth_server import (
+  ConsentDecisionRequest,
+  ConsentDecisionResponse,
+  PendingAuthorizationResponse,
+)
 from .user import (
   AccountInfo,
   APIKeyInfo,
@@ -165,6 +170,8 @@ __all__ = [
   "ConnectionOptionsResponse",
   "ConnectionProviderInfo",
   "ConnectionResponse",
+  "ConsentDecisionRequest",
+  "ConsentDecisionResponse",
   "CreateAPIKeyRequest",
   "CreateAPIKeyResponse",
   "CreateConnectionRequest",
@@ -235,6 +242,7 @@ __all__ = [
   "PasswordCheckRequest",
   "PasswordCheckResponse",
   "PasswordPolicyResponse",
+  "PendingAuthorizationResponse",
   # Connection models
   "ProviderType",
   "QuickBooksConnectionConfig",

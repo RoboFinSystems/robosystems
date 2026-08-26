@@ -101,6 +101,17 @@ JWT_REVOCATION_GRACE_SECONDS = (
 JWT_REVOCATION_KEY_PREFIX = "revoked_jwt:"
 JWT_DEVICE_FINGERPRINT_ENABLED = True  # Enable device fingerprinting for token binding
 
+# MCP OAuth 2.1 authorization server (routers/oauth, operations/oauth_server).
+# Access tokens are short-lived and refreshed proactively by clients (Claude
+# refreshes within 5 minutes of expiry); refresh tokens rotate on every use,
+# each rotation minting a fresh lifetime, so an idle connector lapses after
+# OAUTH_REFRESH_TOKEN_TTL_DAYS without use.
+OAUTH_ACCESS_TOKEN_TTL_SECONDS = 3600
+OAUTH_REFRESH_TOKEN_TTL_DAYS = 90
+OAUTH_AUTHORIZATION_CODE_TTL_SECONDS = 120  # single-use; clients exchange at once
+OAUTH_PENDING_AUTHORIZATION_TTL_SECONDS = 600  # login + consent must finish in 10 min
+OAUTH_DCR_UNUSED_REGISTRATION_TTL_HOURS = 24  # dynamic registrations that never consent
+
 
 # =============================================================================
 # GRAPH API CONFIGURATION

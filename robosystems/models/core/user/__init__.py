@@ -1,5 +1,8 @@
 """User models."""
 
+from .oauth_client import OAuthClient
+from .oauth_grant import OAuthGrant
+from .oauth_token import OAuthToken
 from .scim_token import ScimToken
 from .user import User
 from .user_api_key import UserAPIKey
@@ -21,6 +24,9 @@ from .user_repository_credits import (
 from .user_token import UserToken
 
 __all__ = [
+  "OAuthClient",
+  "OAuthGrant",
+  "OAuthToken",
   "RepositoryType",
   "ScimToken",
   "User",

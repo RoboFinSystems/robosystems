@@ -20,7 +20,12 @@ Transport rules:
 - Stateless: no ``Mcp-Session-Id``, no GET-side SSE channel, no resumability.
   A subgraph is addressed as another connector URL, never via in-session
   switching.
-- Header auth (``X-API-Key`` or JWT); OAuth is a separate, later surface.
+- Three credential carriages on the per-graph route: ``X-API-Key``, the
+  graph-scoped ``?token=``, and an OAuth ``Authorization: Bearer`` bound to
+  this exact URL. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
+  is OAuth-only: the consent grant names the graph, and the transport
+  dispatches on that resolved ``graph_id`` exactly as the per-graph route
+  dispatches on the URL's.
 - Excluded from the OpenAPI schema so the JSON-RPC envelope never lands in
   the generated SDK clients.
 """
@@ -40,7 +45,9 @@ from sse_starlette.sse import EventSourceResponse
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user_with_graph_or_url_token,
+  get_oauth_mcp_principal,
 )
+from robosystems.middleware.auth.oauth import OAuthPrincipal
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.query_telemetry import (
   api_key_prefix_from_request,
@@ -75,6 +82,8 @@ from .strategies import MCPExecutionStrategy, MCPStrategySelector
 from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 
 router = APIRouter()
+# The graph-agnostic transport, mounted at /v1/mcp (see routers/__init__.py).
+agnostic_router = APIRouter()
 
 # Protocol revisions this transport can negotiate. The server answers with the
 # client's requested revision when supported, else its own latest. Exactly the
@@ -1049,3 +1058,19 @@ async def mcp_remote_transport(
 ) -> Response:
   """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""
   return await dispatch_jsonrpc(request, graph_id, current_user)
+
+
+@agnostic_router.post("", include_in_schema=False, response_model=None)
+@endpoint_metrics_decorator("/v1/mcp", business_event_type="mcp_remote_request")
+async def mcp_agnostic_transport(
+  request: Request,
+  _transport: None = Depends(_transport_gate),
+  principal: OAuthPrincipal = Depends(get_oauth_mcp_principal),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> Response:
+  """Streamable-HTTP MCP endpoint (JSON-RPC 2.0), OAuth-only.
+
+  The grant's graph is the resolved ``graph_id``: same dispatch, same
+  per-call access checks, same isolation keys as the per-graph route.
+  """
+  return await dispatch_jsonrpc(request, principal.graph_id, principal.user)

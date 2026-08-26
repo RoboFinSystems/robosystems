@@ -60,6 +60,7 @@ from .graphs import (
   subscriptions_router as graph_subscriptions_router,
 )
 from .graphs.content_ops import router as graph_content_ops_router
+from .graphs.mcp import agnostic_router as mcp_agnostic_router
 from .graphs.mcp import remote_router as mcp_remote_router
 from .graphs.mcp import router as mcp_router
 from .graphs.operations import router as graph_operations_router
@@ -158,6 +159,13 @@ offering_router_v1.include_router(offering_router)  # Already has /offering pref
 operations_router_v1 = APIRouter(prefix="/v1", tags=["Operations"])
 operations_router_v1.include_router(operations_router)
 
+# Graph-agnostic MCP transport: POST /v1/mcp, OAuth-only — the consent
+# grant names the graph. Schema-excluded like the per-graph transport.
+# (Same empty-path rule as the per-graph transport: the bare path must be
+# supplied by the include prefix, not the router's own.)
+mcp_agnostic_router_v1 = APIRouter(prefix="/v1")
+mcp_agnostic_router_v1.include_router(mcp_agnostic_router, prefix="/mcp")
+
 # Auth routes that don't require a graph_id
 auth_router_v1 = APIRouter(prefix="/v1/auth", tags=["Auth"])
 auth_router_v1.include_router(auth_router)
@@ -195,6 +203,7 @@ __all__ = [
   "billing_router_v1",
   "graph_router",
   "graph_schema_router_v1",
+  "mcp_agnostic_router_v1",
   "offering_router_v1",
   "operations_router_v1",
   "orgs_router_v1",
