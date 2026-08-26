@@ -6,11 +6,15 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from fastapi import HTTPException
 
-from robosystems.models.api.billing.subscription import CancelSubscriptionRequest
+from robosystems.models.api.billing.subscription import (
+  CancelSubscriptionRequest,
+  CreateRepositorySubscriptionRequest,
+)
 from robosystems.models.core.billing import BillingSubscription
 from robosystems.routers.graphs.subscriptions import (
   _get_plan_display_name,
   cancel_repository_subscription,
+  create_repository_subscription,
   is_shared_repository,
   subscription_to_response,
 )
@@ -563,6 +567,62 @@ class TestChangeRepositoryPlan:
 
     assert exc.value.status_code == 500
     sub.update_plan.assert_not_called()
+
+
+class TestCreateRepositorySubscriptionUniqueness:
+  """The 409 pre-check is advisory; the partial unique index on live
+  (resource, subscriber) rows is the guarantee, and it fires at the INSERT —
+  before any provider call — when two subscribes race past the check."""
+
+  @pytest.mark.asyncio
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.BillingSubscription.create_subscription")
+  @patch(f"{MODULE}.BillingCustomer.get_or_create")
+  @patch(f"{MODULE}.BillingConfig.get_repository_plan")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user", return_value=None)
+  @patch(f"{MODULE}._resolve_subscription_target", return_value=("user_123", "org_1"))
+  @patch(f"{MODULE}.resolve_shared_repository_parent", return_value="sec")
+  @patch(f"{MODULE}.is_shared_repository", return_value=True)
+  async def test_racing_insert_is_a_409_not_a_500(
+    self,
+    _is_shared,
+    _resolve_parent,
+    _resolve_target,
+    _get_existing,
+    mock_get_plan,
+    mock_get_customer,
+    mock_create_sub,
+    mock_audit,
+  ):
+    from sqlalchemy.exc import IntegrityError
+
+    mock_get_plan.return_value = {"name": "starter", "price_cents": 2900}
+    customer = Mock()
+    customer.can_provision_resources.return_value = (True, "")
+    mock_get_customer.return_value = customer
+    mock_create_sub.side_effect = IntegrityError(
+      "INSERT INTO billing_subscriptions",
+      {},
+      Exception("uq_billing_sub_live_user_resource"),
+    )
+
+    user = MagicMock()
+    user.id = "user_123"
+    db = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+      await create_repository_subscription(
+        graph_id="sec",
+        request=CreateRepositorySubscriptionRequest(plan_name="starter"),
+        current_user=user,
+        db=db,
+        _rate_limit=None,
+      )
+
+    assert exc.value.status_code == 409
+    assert "already have an active subscription" in exc.value.detail
+    db.rollback.assert_called_once()
+    mock_audit.log_event.assert_not_called()
 
 
 class TestCancelStripeFailureHandling:

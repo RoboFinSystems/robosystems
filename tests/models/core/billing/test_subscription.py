@@ -931,3 +931,59 @@ class TestPerSubscriberLookups:
     )
 
     assert [s.id for s in found] == [live.id]
+
+
+class TestLiveSubscriptionUniqueness:
+  """`uq_billing_sub_live_user_resource`: one live subscription per
+  (resource, subscriber), enforced by the database rather than by the
+  router's check-then-insert."""
+
+  def _repo_sub(self, db_session, test_org, test_user):
+    return BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="repository",
+      resource_id="sec",
+      plan_name="starter",
+      base_price_cents=2900,
+      session=db_session,
+      user_id=test_user.id,
+    )
+
+  def test_second_live_subscription_for_the_same_subscriber_is_refused(
+    self, db_session: Session, test_user, test_org
+  ):
+    from sqlalchemy.exc import IntegrityError
+
+    first = self._repo_sub(db_session, test_org, test_user)
+    first.activate(db_session)
+
+    with pytest.raises(IntegrityError):
+      self._repo_sub(db_session, test_org, test_user)
+    db_session.rollback()
+
+    # Once the first is terminal the same subscriber may subscribe again —
+    # canceled and failed rows are history, not a block on retry.
+    first = db_session.get(BillingSubscription, first.id)
+    assert first is not None
+    first.cancel(db_session, immediate=True)
+    second = self._repo_sub(db_session, test_org, test_user)
+    assert second.id != first.id
+
+  def test_checkout_rows_without_a_resource_do_not_collide(
+    self, db_session: Session, test_user, test_org
+  ):
+    """A checkout row carries no resource_id until provisioning binds one, so
+    it is outside the index — a pending checkout never blocks a live grant."""
+    live = self._repo_sub(db_session, test_org, test_user)
+    live.activate(db_session)
+
+    pending = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="repository",
+      resource_id=None,
+      plan_name="starter",
+      base_price_cents=2900,
+      session=db_session,
+      user_id=test_user.id,
+    )
+    assert pending.resource_id is None

@@ -17,6 +17,18 @@ from ...logger import get_logger
 logger = get_logger(__name__)
 
 
+class PaymentIncompleteError(ValueError):
+  """The provider created no live subscription — its first invoice was not paid.
+
+  Raised instead of returning a subscription whose status is ``incomplete`` (a
+  declined card, or a card that needs authentication the off-session path
+  cannot perform), so a caller that activates on return can never activate
+  locally against a subscription the provider never collected for. A
+  ``ValueError`` so the callers that already translate provider failures into
+  a failed row keep doing so.
+  """
+
+
 class PaymentProvider(ABC):
   """Abstract payment provider interface."""
 
@@ -30,6 +42,17 @@ class PaymentProvider(ABC):
     self, customer_id: str, price_id: str, metadata: dict[str, Any]
   ) -> dict[str, Any]:
     """Start a hosted checkout. Returns ``{checkout_url, session_id}``."""
+    pass
+
+  @abstractmethod
+  def expire_checkout_session(self, session_id: str) -> str:
+    """Retire a hosted checkout so its URL can no longer be paid.
+
+    Returns the session's resulting status: ``"expired"`` when this call (or an
+    earlier one) retired it, ``"complete"`` when the customer had already paid
+    it — in which case nothing was changed, and the caller must not discard the
+    subscription row that session was opened for.
+    """
     pass
 
   @abstractmethod
@@ -151,6 +174,28 @@ class StripePaymentProvider(PaymentProvider):
 
     return {"checkout_url": session.url, "session_id": session.id}
 
+  def expire_checkout_session(self, session_id: str) -> str:
+    """Expire an open Checkout Session; report ``complete`` if it was already paid."""
+    try:
+      session = self.stripe.checkout.Session.expire(session_id)
+      logger.info(
+        f"Expired Stripe checkout session {session_id}",
+        extra={"session_id": session_id},
+      )
+      return session.status
+    except self.stripe.error.InvalidRequestError:
+      # Only an `open` session can be expired. Re-read rather than parse the
+      # error text: a completed session must be left alone — the customer
+      # paid it — and an already-expired one is the outcome we wanted.
+      session = self.stripe.checkout.Session.retrieve(session_id)
+      if session.status in ("complete", "expired"):
+        logger.info(
+          f"Stripe checkout session {session_id} is already {session.status}",
+          extra={"session_id": session_id, "status": session.status},
+        )
+        return session.status
+      raise
+
   def create_subscription(
     self,
     customer_id: str,
@@ -172,12 +217,35 @@ class StripePaymentProvider(PaymentProvider):
         extra={"customer_id": customer_id, "payment_method_id": payment_method_id},
       )
 
+    # Fail at the provider rather than create an `incomplete` subscription:
+    # with a card already on file there is no customer in front of a browser
+    # to complete authentication, and an `incomplete` object would be
+    # returned to callers that activate on return.
     subscription = self.stripe.Subscription.create(
       customer=customer_id,
       items=[{"price": price_id}],
       default_payment_method=payment_method_id,
       metadata=metadata,
+      payment_behavior="error_if_incomplete",
     )
+
+    if subscription.status not in ("active", "trialing"):
+      # `error_if_incomplete` should already have raised; this is the backstop
+      # that keeps local state from activating against a subscription Stripe
+      # never collected for. Cancel it so it cannot be paid later against a
+      # row the caller is about to mark failed.
+      try:
+        self.stripe.Subscription.cancel(subscription.id)
+      except Exception as cancel_error:
+        logger.warning(
+          f"Could not cancel incomplete Stripe subscription {subscription.id}: "
+          f"{cancel_error}",
+          extra={"subscription_id": subscription.id},
+        )
+      raise PaymentIncompleteError(
+        f"Stripe subscription {subscription.id} was created with status "
+        f"'{subscription.status}', not active; the first invoice was not paid"
+      )
 
     logger.info(
       f"Created Stripe subscription {subscription.id}",

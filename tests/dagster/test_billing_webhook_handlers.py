@@ -245,6 +245,62 @@ class TestHandleCheckoutCompleted:
       mock_subscription, mock_db_session, mock_context
     )
 
+  async def test_paid_checkout_reclaims_a_retired_row(
+    self, mock_db_session, mock_context, mock_subscription, mock_customer
+  ):
+    """A hosted session paid after its row was retired locally reopens the
+    row for provisioning. Money moved, so it must become a resource — not a
+    live Stripe subscription bound to a `canceled` row that the claim refuses
+    and the org listing hides."""
+    mock_subscription.status = "canceled"
+    mock_subscription.resource_id = None
+    mock_subscription.ends_at = datetime(2026, 8, 1, tzinfo=UTC)
+    mock_subscription.canceled_at = datetime(2026, 8, 1, tzinfo=UTC)
+    mock_subscription.subscription_metadata = {"resource_config": {"tier": "standard"}}
+    session_data = make_checkout_session(
+      session_id="cs_paid_late", subscription_id="sub_stripe_late"
+    )
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_CUST),
+      patch(PATCH_BILLING_AUDIT) as MockAudit,
+      patch(PATCH_TRIGGER, new_callable=AsyncMock) as mock_trigger,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_customer
+      )
+
+      from robosystems.dagster.jobs.billing import _handle_checkout_completed
+
+      await _handle_checkout_completed(session_data, mock_db_session, mock_context)
+
+    assert mock_subscription.status == "pending_payment"
+    assert mock_subscription.ends_at is None
+    assert mock_subscription.canceled_at is None
+    assert (
+      mock_subscription.subscription_metadata["reclaimed_from_status"] == "canceled"
+    )
+    assert (
+      mock_subscription.subscription_metadata["reclaimed_checkout_session_id"]
+      == "cs_paid_late"
+    )
+    # The original config survives the reclaim — provisioning reads it.
+    assert mock_subscription.subscription_metadata["resource_config"] == {
+      "tier": "standard"
+    }
+    assert mock_subscription.stripe_subscription_id == "sub_stripe_late"
+    resumed = [
+      c
+      for c in MockAudit.log_event.call_args_list
+      if c.kwargs["event_type"].value == "subscription_resumed"
+    ]
+    assert len(resumed) == 1
+    mock_trigger.assert_awaited_once_with(
+      mock_subscription, mock_db_session, mock_context
+    )
+
   async def test_sets_stripe_customer_id_when_missing(
     self, mock_db_session, mock_context, mock_subscription, mock_customer
   ):
@@ -911,16 +967,18 @@ class TestHandlePaymentFailed:
     MockAudit.log_event.assert_called_once()
     assert MockAudit.log_event.call_args.kwargs["event_type"].value == "payment_failed"
 
-  async def test_non_pending_subscription_not_changed(
+  async def test_active_subscription_moves_to_past_due(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Leaves status alone when already active — but still audits the failure.
+    """A failed renewal against a live subscription is the dunning case.
 
-    A failed payment against a live subscription is the dunning case: the
-    status deliberately does not move, and the audit row is the only record
-    that it happened.
+    Stripe moves the subscription to `past_due` on its side at the first
+    failed attempt; mirroring it here means a missed or unmarked
+    `customer.subscription.updated` cannot leave the row reading `active`
+    while the provider is dunning it. `updated` still owns the way back.
     """
     mock_subscription.status = "active"
+    mock_subscription.subscription_metadata = {}
     invoice_data = make_invoice_data()
 
     with (
@@ -933,15 +991,36 @@ class TestHandlePaymentFailed:
 
       await _handle_payment_failed(invoice_data, mock_db_session, mock_context)
 
-    assert mock_subscription.status == "active"
-    # No status transition to persist — the only write is the audit row, which
-    # log_event commits itself.
-    mock_db_session.commit.assert_not_called()
+    assert mock_subscription.status == "past_due"
+    assert mock_subscription.subscription_metadata.get("error") == "Payment failed"
+    mock_db_session.commit.assert_called_once()
+    mock_subscription._invalidate_access_cache.assert_called_once()
     MockAudit.log_event.assert_called_once()
     assert (
       MockAudit.log_event.call_args.kwargs["event_data"]["subscription_status"]
-      == "active"
+      == "past_due"
     )
+
+  async def test_terminal_subscription_not_changed(
+    self, mock_db_session, mock_context, mock_subscription
+  ):
+    """A failure against a row that is already terminal only audits."""
+    mock_subscription.status = "canceled"
+    invoice_data = make_invoice_data()
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(f"{_BILLING}.BillingAuditLog") as MockAudit,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+
+      from robosystems.dagster.jobs.billing import _handle_payment_failed
+
+      await _handle_payment_failed(invoice_data, mock_db_session, mock_context)
+
+    assert mock_subscription.status == "canceled"
+    mock_db_session.commit.assert_not_called()
+    MockAudit.log_event.assert_called_once()
 
   async def test_no_subscription_id_raises_not_found(
     self, mock_db_session, mock_context

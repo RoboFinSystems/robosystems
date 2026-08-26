@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
@@ -291,16 +292,31 @@ async def create_repository_subscription(
     # plan key from config, not the request's raw string — everything keyed on
     # the plan (rate limits, credits, price lookups) expects the canonical form.
     plan_name = plan_config["name"]
-    subscription = BillingSubscription.create_subscription(
-      org_id=org_id,
-      resource_type="repository",
-      resource_id=parent_repo_id,
-      plan_name=plan_name,
-      base_price_cents=plan_config["price_cents"],
-      session=db,
-      billing_interval="monthly",
-      user_id=target_user_id,
-    )
+    try:
+      subscription = BillingSubscription.create_subscription(
+        org_id=org_id,
+        resource_type="repository",
+        resource_id=parent_repo_id,
+        plan_name=plan_name,
+        base_price_cents=plan_config["price_cents"],
+        session=db,
+        billing_interval="monthly",
+        user_id=target_user_id,
+      )
+    except IntegrityError:
+      # The advisory pre-check above raced a concurrent subscribe for the same
+      # subscriber; the partial unique index on live (resource, user) rows is
+      # the guarantee, and it fires here — before any provider call, so there
+      # is no stray provider subscription to compensate for.
+      db.rollback()
+      raise HTTPException(
+        status_code=409,
+        detail=(
+          f"That user already has an active subscription to the {graph_id} repository"
+          if subscribing_for_other
+          else f"You already have an active subscription to the {graph_id} repository"
+        ),
+      )
 
     BillingAuditLog.log_event(
       session=db,

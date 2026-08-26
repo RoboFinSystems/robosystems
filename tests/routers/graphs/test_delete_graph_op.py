@@ -438,3 +438,49 @@ class TestDeleteGraphRunner:
     )
     provider.cancel_subscription.assert_not_called()
     sub.cancel.assert_called_once_with(db, immediate=False)
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_stripe_cancel_failure_leaves_local_state_unchanged(
+    self,
+    mock_get_sub: MagicMock,
+    mock_log_event: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """Provider first, fail closed. A Stripe cancel that raises means the
+    customer would keep paying for a graph that no longer exists if the local
+    cancel proceeded — so nothing local moves, and the caller sees a 502 to
+    retry. Same contract as the repository cancel path."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    mock_get_sub.return_value = sub
+
+    provider = MagicMock()
+    provider.cancel_subscription.side_effect = Exception("stripe is down")
+    mock_get_provider.return_value = provider
+
+    body = DeleteGraphOp(confirm="kg_x")
+    with self._patch_org_owner("OWNER"):
+      with pytest.raises(HTTPException) as exc:
+        await delete_graph_op(
+          body=body,
+          graph_id="kg_x",
+          user=_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+          db=db,
+        )
+
+    assert exc.value.status_code == 502
+    sub.cancel.assert_not_called()
+    mock_log_event.assert_not_called()

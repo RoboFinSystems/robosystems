@@ -85,6 +85,50 @@ async def _handle_checkout_completed(
     return
 
   if payment_status == "paid":
+    from robosystems.models.core.billing import BillingAuditLog, BillingEventType
+    from robosystems.models.core.billing.subscription import (
+      TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    if (
+      subscription.status in TERMINAL_SUBSCRIPTION_STATUSES
+      and not subscription.resource_id
+    ):
+      # The row was retired locally (the customer retried checkout) but its
+      # hosted session was paid before it could be expired at the provider.
+      # Money moved, so deliver: reopen the row so the provisioning claim can
+      # take it, rather than binding a live provider subscription to a
+      # terminal row that the claim refuses and the org listing hides.
+      previous_status = subscription.status
+      subscription.status = "pending_payment"
+      subscription.ends_at = None
+      subscription.canceled_at = None
+      subscription.subscription_metadata = {
+        **(subscription.subscription_metadata or {}),
+        "reclaimed_from_status": previous_status,
+        "reclaimed_checkout_session_id": session_id,
+      }
+      db_session.commit()
+      BillingAuditLog.log_event(
+        session=db_session,
+        event_type=BillingEventType.SUBSCRIPTION_RESUMED,
+        description=(
+          f"Reopened {previous_status} subscription {subscription.id}: its "
+          f"checkout session {session_id} was paid after the row was retired"
+        ),
+        subscription_id=subscription.id,
+        org_id=subscription.org_id,
+        event_data={
+          "checkout_session_id": session_id,
+          "previous_status": previous_status,
+          "stripe_subscription_id": stripe_subscription_id,
+        },
+      )
+      context.log.warning(
+        f"Checkout session {session_id} paid against {previous_status} "
+        f"subscription {subscription.id}; reopened for provisioning"
+      )
+
     customer.has_payment_method = True
 
     if not customer.stripe_customer_id:
@@ -471,13 +515,24 @@ async def _handle_payment_succeeded(
 async def _handle_payment_failed(
   invoice_data: dict, db_session: Any, context: OpExecutionContext
 ) -> None:
-  """Handle invoice.payment_failed event."""
+  """Handle invoice.payment_failed event.
+
+  A first invoice that fails leaves the subscription ``unpaid`` (it never
+  activated). A renewal that fails against a live subscription moves it to
+  ``past_due`` here as well as through ``customer.subscription.updated`` —
+  Stripe makes the same transition on its side at the first failed attempt,
+  and a missed or unmarked ``updated`` event must not leave a subscription
+  reading ``active`` while the provider is dunning it. ``updated`` stays the
+  authority for the way back: it restores ``active`` once the retry succeeds.
+  """
   from robosystems.models.core.billing import BillingAuditLog, BillingEventType
 
   subscription = _resolve_subscription(invoice_data, db_session, context)
 
-  if subscription.status == "pending_payment":
-    subscription.status = "unpaid"
+  if subscription.status in ("pending_payment", "active"):
+    subscription.status = (
+      "unpaid" if subscription.status == "pending_payment" else "past_due"
+    )
 
     error_message = "Payment failed"
     metadata = dict(subscription.subscription_metadata or {})

@@ -469,6 +469,227 @@ class TestCreateCheckoutSession:
     mock_get_provider.assert_not_called()
 
 
+class TestCheckoutRetryRetiresThePreviousSession:
+  """A retried checkout must expire the earlier hosted session before it
+  retires the local row. Cancelling the row alone left a payable Stripe URL
+  behind for 24 hours; paying it bound a live subscription to a `canceled`
+  row that provisioning refuses and the org listing hides."""
+
+  @pytest.fixture
+  def mock_user(self):
+    user = Mock(spec=User)
+    user.id = "user_123"
+    user.email = "test@example.com"
+    return user
+
+  @pytest.fixture
+  def checkout_request(self):
+    return CreateCheckoutRequest(
+      resource_type="graph",
+      plan_name="standard",
+      resource_config={"tier": "standard"},
+    )
+
+  @pytest.fixture(autouse=True)
+  def _gates_open(self):
+    with (
+      patch("robosystems.models.core.OrgLimits.get_or_create_for_org") as limits,
+      patch(
+        "robosystems.routers.billing.checkout._tier_capacity_status",
+        new=AsyncMock(return_value="ready"),
+      ),
+    ):
+      limits.return_value.can_create_graph.return_value = (True, "")
+      yield
+
+  def _stale_pending(self, session_id="cs_old"):
+    stale = Mock(spec=BillingSubscription)
+    stale.id = "sub_old"
+    stale.status = "pending_payment"
+    stale.provider_subscription_id = session_id
+    return stale
+
+  def _wire(
+    self, mock_get_user_orgs, mock_get_customer, mock_get_plan, mock_create_sub
+  ):
+    from robosystems.models.core import OrgRole
+
+    org_user = Mock()
+    org_user.org_id = "org_123"
+    org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [org_user]
+
+    customer = Mock(spec=BillingCustomer)
+    customer.invoice_billing_enabled = False
+    customer.has_payment_method = False
+    customer.stripe_customer_id = "cus_123"
+    mock_get_customer.return_value = customer
+
+    mock_get_plan.return_value = {"base_price_cents": 2999}
+
+    new_sub = Mock(spec=BillingSubscription)
+    new_sub.id = "sub_new"
+    new_sub.subscription_metadata = {}
+    mock_create_sub.return_value = new_sub
+    return new_sub
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_retry_expires_the_previous_session_then_cancels_the_row(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    checkout_request,
+  ):
+    self._wire(mock_get_user_orgs, mock_get_customer, mock_get_plan, mock_create_sub)
+    stale = self._stale_pending("cs_old")
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [stale]
+
+    provider = Mock()
+    provider.expire_checkout_session.return_value = "expired"
+    provider.get_or_create_price.return_value = "price_789"
+    provider.create_checkout_session.return_value = {
+      "checkout_url": "https://checkout.stripe.com/new",
+      "session_id": "cs_new",
+    }
+    mock_get_provider.return_value = provider
+
+    result = await create_checkout_session(checkout_request, mock_user, db, None)
+
+    provider.expire_checkout_session.assert_called_once_with("cs_old")
+    assert stale.status == "canceled"
+    assert stale.ends_at is not None
+    assert result.session_id == "cs_new"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_retry_is_refused_when_the_previous_session_was_already_paid(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    checkout_request,
+  ):
+    """The earlier checkout won: its row stays, no second session opens."""
+    self._wire(mock_get_user_orgs, mock_get_customer, mock_get_plan, mock_create_sub)
+    stale = self._stale_pending("cs_paid")
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [stale]
+
+    provider = Mock()
+    provider.expire_checkout_session.return_value = "complete"
+    mock_get_provider.return_value = provider
+
+    with pytest.raises(HTTPException) as exc:
+      await create_checkout_session(checkout_request, mock_user, db, None)
+
+    assert exc.value.status_code == 409
+    assert stale.status == "pending_payment"
+    mock_create_sub.assert_not_called()
+    provider.create_checkout_session.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_retry_is_refused_when_the_previous_row_already_holds_a_subscription(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    checkout_request,
+  ):
+    """Between `checkout.session.completed` and the provisioning claim the row
+    is still `pending_payment` but carries the provider's `sub_` id — it is
+    paid, not stale. It must not be expired or canceled."""
+    self._wire(mock_get_user_orgs, mock_get_customer, mock_get_plan, mock_create_sub)
+    stale = self._stale_pending("sub_live_abc")
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [stale]
+
+    provider = Mock()
+    mock_get_provider.return_value = provider
+
+    with pytest.raises(HTTPException) as exc:
+      await create_checkout_session(checkout_request, mock_user, db, None)
+
+    assert exc.value.status_code == 409
+    assert stale.status == "pending_payment"
+    provider.expire_checkout_session.assert_not_called()
+    mock_create_sub.assert_not_called()
+    provider.create_checkout_session.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_repository_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  async def test_repository_retry_leaves_another_repositorys_checkout_alone(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+  ):
+    """Repository checkouts are per repository: starting one for `sec` must
+    not expire — or mistake for its own payment — an in-flight checkout for a
+    different repository under the same org."""
+    self._wire(mock_get_user_orgs, mock_get_customer, mock_get_plan, mock_create_sub)
+    mock_get_plan.return_value = {"price_cents": 2900}
+
+    other = self._stale_pending("cs_other_repo")
+    other.subscription_metadata = {"resource_config": {"repository_name": "industry"}}
+    same = self._stale_pending("cs_sec_old")
+    same.subscription_metadata = {"resource_config": {"repository_name": "sec"}}
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [other, same]
+
+    provider = Mock()
+    provider.expire_checkout_session.return_value = "expired"
+    provider.get_or_create_price.return_value = "price_789"
+    provider.create_checkout_session.return_value = {
+      "checkout_url": "https://checkout.stripe.com/new",
+      "session_id": "cs_new",
+    }
+    mock_get_provider.return_value = provider
+
+    request = CreateCheckoutRequest(
+      resource_type="repository",
+      plan_name="starter",
+      resource_config={"repository_name": "sec"},
+    )
+    result = await create_checkout_session(request, mock_user, db, None)
+
+    provider.expire_checkout_session.assert_called_once_with("cs_sec_old")
+    assert same.status == "canceled"
+    assert other.status == "pending_payment"
+    assert result.session_id == "cs_new"
+
+
 class TestTierCapacityStatus:
   """The checkout gate's capacity probe fails closed and treats a scalable-but-
   empty tier as at capacity, since nothing on the create path scales."""
