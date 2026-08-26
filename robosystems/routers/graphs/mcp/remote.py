@@ -322,15 +322,15 @@ def _tool_annotations(name: str, title: str) -> dict[str, Any]:
   authorization classification) are read-only and idempotent; everything
   else is a write and is hinted destructive — conservatively, since the
   authorization gauntlet treats every non-read tool as a mutation. The
-  Cypher tools carry neither hint: they are classified per statement by the
-  StatementKernel and can run a write on a tenant graph, so a read-only
-  hint would promise what the tool does not enforce. All tools act on this
-  graph alone (closed world).
+  Cypher read tools are hinted read-only too: ``assert_read_only_cypher``
+  refuses write, bulk, admin and schema-DDL statements on every path that
+  executes on their behalf, so the hint promises exactly what the tool
+  enforces (``write-graph-cypher`` stays destructive). Directory scans —
+  ChatGPT's in particular — reject a tool that carries no hints. All tools
+  act on this graph alone (closed world).
   """
   annotations: dict[str, Any] = {"title": title, "openWorldHint": False}
-  if name in _CYPHER_READ_TOOLS:
-    return annotations
-  if name in READ_ONLY_MCP_TOOLS:
+  if name in READ_ONLY_MCP_TOOLS or name in _CYPHER_READ_TOOLS:
     annotations.update(
       {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
     )
