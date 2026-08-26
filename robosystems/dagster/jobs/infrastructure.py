@@ -359,7 +359,8 @@ def cleanup_stale_volume_entries(context: OpExecutionContext) -> dict[str, Any]:
   Removes or updates:
   - Volumes stuck in 'attaching' state to non-existent instances
   - Volumes with missing instance references
-  - Old unattached volumes (older than 30 days)
+  - Empty volumes unattached for more than 30 days (rows carrying databases
+    are never dropped)
   """
   from robosystems.operations.graph.infrastructure import InstanceMonitor
 
