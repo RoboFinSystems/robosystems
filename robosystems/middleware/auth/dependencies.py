@@ -26,6 +26,11 @@ from .cache import api_key_cache
 from .jwt import (
   verify_jwt_claims as verify_jwt_claims_from_auth,
 )
+from .oauth import (
+  OAuthPrincipal,
+  is_oauth_access_token,
+  validate_oauth_access_token,
+)
 from .utils import (
   validate_api_key,
   validate_api_key_with_graph,
@@ -566,6 +571,154 @@ get_current_user_with_deprovisioned_graph = graph_access_dependency(
 )
 
 
+def _oauth_bearer_token(request: Request) -> str | None:
+  """The opaque OAuth access token in ``Authorization: Bearer``, or None.
+
+  Distinguished from the app's JWT by its ``rfso`` prefix before any
+  parsing — a JWT never starts with it, and an OAuth token is never a JWT.
+  """
+  authorization = request.headers.get("authorization")
+  if not authorization or not authorization.startswith("Bearer "):
+    return None
+  candidate = authorization[7:].strip()
+  return candidate if is_oauth_access_token(candidate) else None
+
+
+def _mcp_challenge_headers(
+  graph_id: str | None, *, error: str | None = None, description: str | None = None
+) -> dict[str, str]:
+  """``WWW-Authenticate`` for an MCP route naming its resource metadata —
+  how an OAuth client discovers the authorization server. Only emitted
+  while the OAuth surface is on; off, the challenge is the plain header
+  the API-key carriages have always sent."""
+  from robosystems.config import env
+
+  if not env.MCP_OAUTH_ENABLED:
+    return {"WWW-Authenticate": "Bearer, ApiKey"}
+
+  from robosystems.operations.oauth_server.resources import (
+    agnostic_target,
+    bearer_challenge,
+    graph_target,
+  )
+
+  target = graph_target(graph_id) if graph_id else agnostic_target()
+  return {
+    "WWW-Authenticate": bearer_challenge(
+      target, error=error, error_description=description
+    )
+  }
+
+
+def _oauth_principal_graph_access(
+  request: Request, principal: OAuthPrincipal, graph_id: str
+) -> None:
+  """Live access check for an OAuth principal on ``graph_id`` — the same
+  evidence the JWT branch gathers (per-user graph-access cache, capped at
+  ten minutes, so a revoked membership stops the token quickly). Raises
+  403 ``insufficient_scope`` on denial: the token is valid, the user is
+  not (or no longer) a member.
+  """
+  client_ip = request.client.host if request.client else None
+  endpoint = str(request.url.path)
+  user_id = principal.user_id
+
+  has_access = api_key_cache.get_cached_jwt_graph_access(user_id, graph_id)
+  if has_access is None:
+    from robosystems.config.shared_repositories import (
+      is_shared_repository_or_subgraph,
+    )
+
+    from ..graph.utils import MultiTenantUtils
+
+    if is_shared_repository_or_subgraph(graph_id):
+      has_access = MultiTenantUtils.validate_repository_access(
+        graph_id, user_id, "read"
+      )
+    else:
+      has_access = _db_check_graph_access(user_id, graph_id)
+    api_key_cache.cache_jwt_graph_access(user_id, graph_id, bool(has_access))
+
+  if not has_access:
+    SecurityAuditLogger.log_authorization_denied(
+      user_id=user_id,
+      resource=f"graph_database:{graph_id}",
+      action="access",
+      ip_address=client_ip,
+      endpoint=endpoint,
+    )
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Access denied to graph",
+      headers=_mcp_challenge_headers(
+        graph_id, error="insufficient_scope", description="Access denied to graph"
+      ),
+    )
+
+
+def _resolve_oauth_principal(
+  request: Request, token: str, graph_id: str | None
+) -> OAuthPrincipal:
+  """Validate an OAuth bearer for an MCP route and bind it to the route.
+
+  ``graph_id`` is the URL's graph on the per-graph route, ``None`` on the
+  graph-agnostic route. The token's audience (the grant's canonical
+  resource) must be exactly this route's resource; the grant's graph must
+  be the URL's graph where the URL names one. Invalid, expired and revoked
+  tokens answer 401 ``invalid_token`` so clients refresh.
+  """
+  from robosystems.operations.oauth_server.resources import (
+    agnostic_target,
+    graph_target,
+  )
+
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  endpoint = str(request.url.path)
+
+  principal = validate_oauth_access_token(token)
+  expected = graph_target(graph_id) if graph_id else agnostic_target()
+  audience_ok = principal is not None and principal.resource == expected.resource
+  graph_ok = principal is not None and (
+    graph_id is None or principal.graph_id == graph_id
+  )
+
+  if principal is None or not audience_ok or not graph_ok:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTH_TOKEN_INVALID,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint=endpoint,
+      details={
+        "token_type": "oauth",
+        "reason": "invalid"
+        if principal is None
+        else ("audience_mismatch" if not audience_ok else "graph_mismatch"),
+      },
+      risk_level="high" if principal is None else "medium",
+    )
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Invalid or expired token",
+      headers=_mcp_challenge_headers(
+        graph_id, error="invalid_token", description="Invalid or expired token"
+      ),
+    )
+
+  resolved_graph = graph_id or principal.graph_id
+  _oauth_principal_graph_access(request, principal, resolved_graph)
+
+  publish_principal(request, principal.user_id, "oauth", api_key=token)
+  SecurityAuditLogger.log_auth_success(
+    user_id=principal.user_id,
+    ip_address=client_ip,
+    user_agent=user_agent,
+    auth_method="oauth",
+  )
+  _publish_graph_authorization(request, resolved_graph)
+  return principal
+
+
 async def get_current_user_with_graph_or_url_token(
   request: Request,
   graph_id: str,
@@ -576,28 +729,44 @@ async def get_current_user_with_graph_or_url_token(
     "clients that cannot send custom headers",
   ),
 ) -> User:
-  """Graph authentication that also accepts a graph-scoped API key via the
-  ``token`` query parameter.
+  """Graph authentication for the per-graph MCP route: all three carriages.
 
-  Built for the MCP Streamable HTTP endpoint: claude.ai / Claude Desktop
-  custom connectors cannot send custom headers, so the connector URL carries a
-  graph-scoped key instead. Header and JWT authentication take precedence and
-  behave exactly like ``get_current_user_with_graph``; the query parameter is
-  consulted only when neither is present, and it honors only keys whose scope
-  covers the URL's graph — an account-wide key in a URL is rejected outright,
-  so the account credential can never be the one that travels in a URL.
+  ``Authorization: Bearer <opaque OAuth token>`` (when the OAuth surface is
+  on) resolves through the grant bound to this exact route — the URL fixes
+  the graph, and the token's audience must name it. Otherwise header and
+  JWT authentication behave exactly like ``get_current_user_with_graph``,
+  and the ``token`` query parameter is consulted only when neither is
+  present: it honors only keys whose scope covers the URL's graph — an
+  account-wide key in a URL is rejected outright, so the account credential
+  can never be the one that travels in a URL.
+
+  A missing credential answers 401 with a ``WWW-Authenticate`` challenge
+  that names the route's protected-resource metadata; that header is what
+  lets an OAuth client find the authorization server.
 
   ``token`` is in the sensitive-query-params redaction list
   (``middleware/logging.py``), so it never appears in logged URLs.
   """
+  from robosystems.config import env
+
+  oauth_token = _oauth_bearer_token(request)
+  if oauth_token is not None and env.MCP_OAUTH_ENABLED:
+    return _resolve_oauth_principal(request, oauth_token, graph_id).user
+
   authorization = request.headers.get("authorization")
   has_header_auth = bool(api_key) or bool(
     authorization and authorization.startswith("Bearer ")
   )
 
   if has_header_auth or not token:
-    # Normal path — including the no-credentials 401.
-    return await get_current_user_with_graph(request, graph_id, api_key)
+    # Normal path — including the no-credentials 401, which carries the
+    # discovery challenge so an OAuth-capable client can proceed.
+    try:
+      return await get_current_user_with_graph(request, graph_id, api_key)
+    except HTTPException as exc:
+      if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+        exc.headers = _mcp_challenge_headers(graph_id)
+      raise
 
   client_ip = request.client.host if request.client else None
   user_agent = request.headers.get("user-agent")
@@ -633,6 +802,56 @@ async def get_current_user_with_graph_or_url_token(
     detail="Invalid API key or access denied to graph",
     headers={"WWW-Authenticate": "ApiKey"},
   )
+
+
+async def get_oauth_mcp_principal(
+  request: Request,
+  api_key: str = Security(API_KEY_HEADER),
+  token: str | None = Query(None, include_in_schema=False),
+) -> OAuthPrincipal:
+  """The graph-agnostic MCP route's only credential: an OAuth bearer.
+
+  No header key, no URL token, no JWT — the route's contract is that the
+  credential carries the grant, and only an OAuth token has one. Every
+  other carriage answers 401 with the discovery challenge (not 403: there
+  is no valid non-OAuth credential here, so the client should start the
+  flow). The returned principal names the grant's graph, which the
+  transport uses as the resolved ``graph_id`` for every isolation key.
+  """
+  from robosystems.config import env
+
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  endpoint = str(request.url.path)
+
+  if not env.MCP_OAUTH_ENABLED:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+  oauth_token = _oauth_bearer_token(request)
+  if oauth_token is None:
+    if api_key or token:
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint=endpoint,
+        details={"action": "non_oauth_credential_on_agnostic_mcp"},
+        risk_level="low",
+      )
+    else:
+      SecurityAuditLogger.log_auth_failure(
+        reason="No authentication provided",
+        ip_address=client_ip,
+        user_agent=user_agent,
+        endpoint=endpoint,
+      )
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="OAuth bearer token required",
+      headers=_mcp_challenge_headers(None),
+    )
+
+  return _resolve_oauth_principal(request, oauth_token, None)
 
 
 def require_graph_write_role(user_id: str, graph_id: str) -> None:

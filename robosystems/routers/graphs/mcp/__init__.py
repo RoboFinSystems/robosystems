@@ -1,33 +1,18 @@
-"""MCP (Model Context Protocol) endpoints for a graph.
+"""MCP (Model Context Protocol) for a graph — the Streamable HTTP transport.
 
-Mounted under `/v1/graphs/{graph_id}/mcp`:
+- `remote.py` serves the JSON-RPC transport at `POST /v1/graphs/{graph_id}/mcp`
+  (``remote_router``) and the graph-agnostic, OAuth-only `POST /v1/mcp`
+  (``agnostic_router``), both schema-excluded so the envelope never reaches
+  the generated SDKs.
+- `execute.py` holds the authorization gauntlet and execution helpers the
+  transport runs every call through; `strategies.py`, `streaming.py` and
+  `handlers.py` are its collaborators.
 
-- `tools.py` lists the tools available on the graph.
-- `execute.py` runs a tool, picking an execution strategy from the tool
-  type and system load and negotiating the response format (JSON, SSE, or
-  NDJSON) with the client.
-- `remote.py` serves the Streamable-HTTP JSON-RPC transport for MCP clients
-  that connect by URL.
+The REST tool endpoints (`GET /mcp/tools`, `POST /mcp/call-tool`) were removed
+in the same release that added OAuth: every MCP client speaks the transport.
 """
 
-from fastapi import APIRouter
-
-from .execute import router as execute_router
+from .remote import agnostic_router
 from .remote import router as remote_router
-from .tools import router as tools_router
 
-# Create main MCP router
-router = APIRouter(
-  tags=["MCP"],
-)
-
-# Mount sub-routers
-router.include_router(tools_router)
-router.include_router(execute_router)
-
-# The Streamable-HTTP JSON-RPC transport lives at POST /v1/graphs/{graph_id}/mcp
-# (the bare /mcp path). FastAPI rejects an empty path on a prefix-less include,
-# so it is exported separately and mounted with the "/mcp" prefix alongside this
-# router in robosystems/routers/__init__.py. Schema-excluded so the JSON-RPC
-# envelope never reaches the generated SDKs.
-__all__ = ["remote_router", "router"]
+__all__ = ["agnostic_router", "remote_router"]

@@ -555,6 +555,15 @@ class EnvConfig:
     "PASSKEYS_ENABLED",
     get_parameter_value("PASSKEYS_ENABLED", "false").lower() == "true",
   )
+  # MCP OAuth 2.1: the authorization server under /v1/oauth + /.well-known,
+  # the OAuth Bearer carriage on /v1/graphs/{g}/mcp, and the graph-agnostic
+  # OAuth-only /v1/mcp route. Off = those routes answer 404 and the MCP 401
+  # challenge carries no resource_metadata (clients treat the server as
+  # header-auth only). SSM: features/MCP_OAUTH_ENABLED.
+  MCP_OAUTH_ENABLED = get_bool_env(
+    "MCP_OAUTH_ENABLED",
+    get_parameter_value("MCP_OAUTH_ENABLED", "false").lower() == "true",
+  )
   # Hard MFA gate for org owner/admin password logins: without a passkey the
   # login returns mfa_enrollment_required instead of a session. Flipped after
   # an adoption window; requires PASSKEYS_ENABLED (boot-validated).

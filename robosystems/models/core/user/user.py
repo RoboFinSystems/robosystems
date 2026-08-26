@@ -215,6 +215,7 @@ class User(Model):
       session.refresh(self)
       cache_invalidated = self._invalidate_auth_cache()
       keys_revoked, keys_found, key_caches_invalidated = self._revoke_api_keys(session)
+      self._revoke_oauth_tokens(session, reason="user_deactivated")
       return DeactivationResult(
         keys_found=keys_found,
         keys_revoked=keys_revoked,
@@ -238,7 +239,12 @@ class User(Model):
       raise
 
   def invalidate_sessions(self, session: Session) -> None:
-    """Bump session_version, invalidating all existing JWTs for this user."""
+    """Bump session_version, invalidating all existing JWTs for this user.
+
+    OAuth tokens carry no ``session_version`` (like API keys), so the same
+    act revokes them directly — a password change or kill switch reaches
+    every MCP connector the user consented to.
+    """
     self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)
     try:
@@ -248,6 +254,20 @@ class User(Model):
     except SQLAlchemyError:
       session.rollback()
       raise
+    self._revoke_oauth_tokens(session, reason="sessions_invalidated")
+
+  def _revoke_oauth_tokens(self, session: Session, *, reason: str) -> int:
+    """Revoke every OAuth token minted for this user. Best-effort like
+    ``_revoke_api_keys``: a failure is logged, never aborts the caller —
+    the ``user.is_active`` / grant checks in the token validator are the
+    backstop, and re-running the invalidation retries the sweep."""
+    from .oauth_token import OAuthToken
+
+    try:
+      return OAuthToken.revoke_all_for_user(str(self.id), session, reason=reason)
+    except Exception as e:
+      logger.error(f"Failed to revoke OAuth tokens for user {self.id}: {e}")
+      return 0
 
   def _revoke_api_keys(self, session: Session) -> tuple[int, int, bool]:
     """Deactivate this user's API keys and clear their validation caches.

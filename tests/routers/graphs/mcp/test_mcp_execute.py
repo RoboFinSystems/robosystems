@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import HTTPException
 
+from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.routers.graphs.mcp.execute import (
   READ_ONLY_MCP_TOOLS,
   _get_mcp_cache,
@@ -212,272 +213,50 @@ class TestExecuteToolDirectly:
 
 
 @pytest.mark.unit
-class TestCallMcpToolValidation:
-  """Test validation logic within call_mcp_tool endpoint."""
+class TestAuthorizeMcpToolCallPolicy:
+  """The StatementKernel policy answers the gauntlet gives before any DB or
+  tool work — pinned here because the transport is now the only caller."""
 
   @pytest.mark.asyncio
   async def test_bulk_operation_rejected(self):
-    """Test that bulk operations (COPY, LOAD) are rejected with 400."""
-    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
+    from robosystems.routers.graphs.mcp.execute import authorize_mcp_tool_call
 
-    mock_request = Mock()
-    mock_request.headers = {}
-    user = _make_mock_user()
-
-    tool_call = Mock()
-    tool_call.name = "read-graph-cypher"
-    tool_call.arguments = {"query": "COPY companies FROM 'data.csv'"}
-
-    with (
-      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
-      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await call_mcp_tool(
-          full_request=mock_request,
-          graph_id="kg01234567890abcdef",
-          tool_call=tool_call,
-          format=None,
-          test_mode=False,
-          current_user=user,
-          _rate_limit=None,
-        )
-      assert exc_info.value.status_code == 400
-      assert "Bulk operations" in exc_info.value.detail
+    tool_call = MCPToolCall(
+      name="read-graph-cypher", arguments={"query": "COPY companies FROM 'data.csv'"}
+    )
+    with pytest.raises(HTTPException) as exc_info:
+      await authorize_mcp_tool_call("kg01234567890abcdef", tool_call, _make_mock_user())
+    assert exc_info.value.status_code == 400
+    assert "Bulk operations" in exc_info.value.detail
 
   @pytest.mark.asyncio
   async def test_admin_operation_rejected(self):
-    """Test that admin operations are rejected with 403."""
-    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
+    from robosystems.routers.graphs.mcp.execute import authorize_mcp_tool_call
 
-    mock_request = Mock()
-    mock_request.headers = {}
-    user = _make_mock_user()
-
-    tool_call = Mock()
-    tool_call.name = "read-graph-cypher"
-    tool_call.arguments = {"query": "EXPORT DATABASE TO 'backup.db'"}
-
-    with (
-      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
-      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await call_mcp_tool(
-          full_request=mock_request,
-          graph_id="kg01234567890abcdef",
-          tool_call=tool_call,
-          format=None,
-          test_mode=False,
-          current_user=user,
-          _rate_limit=None,
-        )
-      assert exc_info.value.status_code == 403
-      assert "admin" in exc_info.value.detail.lower()
+    tool_call = MCPToolCall(
+      name="read-graph-cypher", arguments={"query": "EXPORT DATABASE TO 'backup.db'"}
+    )
+    with pytest.raises(HTTPException) as exc_info:
+      await authorize_mcp_tool_call("kg01234567890abcdef", tool_call, _make_mock_user())
+    assert exc_info.value.status_code == 403
+    assert "admin" in exc_info.value.detail.lower()
 
   @pytest.mark.asyncio
   async def test_write_on_shared_repo_rejected(self):
-    """A write via read-graph-cypher on a shared repo is rejected with 403.
+    from robosystems.routers.graphs.mcp.execute import authorize_mcp_tool_call
 
-    Routed through the shared StatementKernel now — 'sec' is not a subgraph, so
-    the main-graph write block fires; the security outcome (writes rejected) is
-    what this pins.
-    """
-    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
-
-    mock_request = Mock()
-    mock_request.headers = {}
-    user = _make_mock_user()
-
-    tool_call = Mock()
-    tool_call.name = "read-graph-cypher"
-    tool_call.arguments = {"query": "CREATE (n:Entity {name: 'test'})"}
-
-    with (
-      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
-      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await call_mcp_tool(
-          full_request=mock_request,
-          graph_id="sec",
-          tool_call=tool_call,
-          format=None,
-          test_mode=False,
-          current_user=user,
-          _rate_limit=None,
-        )
-      assert exc_info.value.status_code == 403
-      assert "not allowed" in exc_info.value.detail.lower()
-
-  @pytest.mark.asyncio
-  async def test_queue_simple_returns_202_with_operation_id(self):
-    """The QUEUE_SIMPLE branch answers 202 with the queued operation's id.
-
-    Regression: this branch read ``sse_response.operation_id`` while
-    ``create_operation_response`` returns a plain ``dict``, so the caller got an
-    AttributeError-driven 500 *after* ``submit_query`` had already enqueued the
-    work. The strategy-selection test above proves we reach this branch; only
-    this one proves the branch answers.
-
-    Reached by a non-MCP, non-SSE client (plain SDK/curl) calling a cypher read
-    tool while the queue is deep — see ``_select_high_load_strategy``.
-    """
-    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
-
-    mock_request = Mock()
-    mock_request.headers = {
-      "user-agent": "python-httpx/0.27",
-      "accept": "application/json",
-    }
-    user = _make_mock_user()
-    tool_call = _make_mock_tool_call(
-      "read-graph-cypher", {"query": "MATCH (n) RETURN n"}
+    tool_call = MCPToolCall(
+      name="read-graph-cypher", arguments={"query": "CREATE (n:Entity {name: 'test'})"}
     )
-
-    queue = Mock()
-    # Over the high-load thresholds (queue_size > 10 or running_queries > 5).
-    queue.get_stats = Mock(return_value={"queue_size": 20, "running_queries": 10})
-    queue.submit_query = AsyncMock(return_value="queue-abc")
-
-    operation_response = {
-      "operation_id": "op-xyz",
-      "status": "pending",
-      "_links": {"stream": "/v1/operations/op-xyz/stream"},
-    }
-
-    with (
-      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
-      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-      patch("robosystems.routers.graphs.mcp.execute.log_shared_query_start"),
-      patch("robosystems.routers.graphs.mcp.execute.record_shared_query_outcome"),
-      patch(
-        "robosystems.routers.graphs.mcp.execute.get_query_queue", return_value=queue
-      ),
-      patch(
-        "robosystems.routers.graphs.mcp.execute.get_graph_repository", new=AsyncMock()
-      ),
-      patch("robosystems.models.core.GraphUser.user_has_access", return_value=True),
-      patch("robosystems.middleware.billing.enforcement.require_graph_access"),
-      patch("robosystems.routers.graphs.mcp.execute.MCPHandler") as handler_cls,
-      patch(
-        "robosystems.routers.graphs.mcp.execute.create_operation_response",
-        new=AsyncMock(return_value=operation_response),
-      ),
-    ):
-      handler_cls.return_value.close = AsyncMock()
-
-      response = await call_mcp_tool(
-        full_request=mock_request,
-        graph_id="kg01234567890abcdef",
-        tool_call=tool_call,
-        format=None,
-        test_mode=False,
-        current_user=user,
-        _rate_limit=None,
-      )
-
-    assert response.status_code == 202
-    body = json.loads(response.body)
-    assert body["queued"] is True
-    assert body["operation_id"] == "op-xyz"
-    assert body["monitor_url"] == "/v1/operations/op-xyz/stream"
-    queue.submit_query.assert_awaited_once()
-
-  @pytest.mark.asyncio
-  async def test_queue_path_refuses_write_statement_before_submission(self):
-    """`read-graph-cypher` stays a read tool on the queue strategies.
-
-    The queue executes the raw statement without constructing `CypherTool`,
-    so a write-role caller who lands on a queue strategy would otherwise get
-    a write through a read tool. The read-only guard runs before
-    `submit_query`; a violation is a 403, not an enqueued write.
-
-    On a subgraph deliberately: the statement kernel's write policy already
-    refuses direct writes on *main* graphs, so a main-graph id would pass
-    this test without the guard. Subgraphs accept direct writes from a
-    write-role caller — that is where the read tool leaked.
-    """
-    from robosystems.routers.graphs.mcp.execute import call_mcp_tool
-
-    mock_request = Mock()
-    mock_request.headers = {
-      "user-agent": "python-httpx/0.27",
-      "accept": "application/json",
-    }
-    user = _make_mock_user()
-    tool_call = _make_mock_tool_call(
-      "read-graph-cypher", {"query": "MATCH (n) DETACH DELETE n"}
-    )
-
-    queue = Mock()
-    queue.get_stats = Mock(return_value={"queue_size": 20, "running_queries": 10})
-    queue.submit_query = AsyncMock(return_value="queue-abc")
-
-    with (
-      patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
-      patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-      patch("robosystems.routers.graphs.mcp.execute.log_shared_query_start"),
-      patch("robosystems.routers.graphs.mcp.execute.record_shared_query_outcome"),
-      patch(
-        "robosystems.routers.graphs.mcp.execute.get_query_queue", return_value=queue
-      ),
-      patch(
-        "robosystems.routers.graphs.mcp.execute.get_graph_repository", new=AsyncMock()
-      ),
-      # A write-role caller: the statement kernel classifies the DELETE as a
-      # write and the role check passes — the read-only guard is what refuses.
-      patch(
-        "robosystems.models.core.GraphUser.user_has_write_access", return_value=True
-      ),
-      patch("robosystems.middleware.billing.enforcement.require_graph_access"),
-      patch("robosystems.routers.graphs.mcp.execute.MCPHandler") as handler_cls,
-    ):
-      handler_cls.return_value.close = AsyncMock()
-
-      with pytest.raises(HTTPException) as exc:
-        await call_mcp_tool(
-          full_request=mock_request,
-          graph_id="kg01234567890abcdef_dev",
-          tool_call=tool_call,
-          format=None,
-          test_mode=False,
-          current_user=user,
-          _rate_limit=None,
-        )
-
-    assert exc.value.status_code == 403
-    assert "Only read-only queries are allowed" in str(exc.value.detail)
-    queue.submit_query.assert_not_awaited()
-
-  def test_non_cypher_tool_not_in_cypher_tool_list(self):
-    """Test that non-cypher tools are not in the cypher validation tool list.
-
-    The call_mcp_tool endpoint only validates write/admin/bulk operations
-    for tools in the cypher tool list. This verifies that non-cypher tools
-    would skip that validation branch.
-    """
-    cypher_tools = [
-      "read-graph-cypher",
-      "read-neo4j-cypher",
-      "read-ladybug-cypher",
-    ]
-
-    assert "get-graph-schema" not in cypher_tools
-    assert "get-graph-info" not in cypher_tools
+    with pytest.raises(HTTPException) as exc_info:
+      await authorize_mcp_tool_call("sec", tool_call, _make_mock_user())
+    assert exc_info.value.status_code == 403
+    assert "not allowed" in exc_info.value.detail.lower()
 
 
 @pytest.mark.unit
 class TestCallMcpToolStrategySelection:
-  """Test strategy selection and format override in call_mcp_tool."""
-
-  def test_format_override_sse(self):
-    """Test that format='sse' selects SSE_PROGRESS strategy."""
-    from robosystems.routers.graphs.mcp.strategies import MCPExecutionStrategy
-
-    # The format override happens inline in call_mcp_tool, but we can test
-    # the strategy enum mapping
-    assert MCPExecutionStrategy.SSE_PROGRESS.value == "sse_progress"
+  """Strategy enum and timeout invariants the transport relies on."""
 
   def test_format_override_ndjson(self):
     """Test that format='ndjson' maps to STREAM_AGGREGATED."""
@@ -682,6 +461,85 @@ class TestMCPToolAnalyzer:
 
 
 @pytest.mark.unit
+class TestExecuteToolToJson:
+  """The cacheable strategies resolve through the Valkey MCP cache; a hit
+  never executes, a miss executes and stores, and failures are never cached."""
+
+  @pytest.mark.asyncio
+  async def test_cached_strategy_hit_does_not_execute(self):
+    from robosystems.routers.graphs.mcp.execute import execute_tool_to_json
+    from robosystems.routers.graphs.mcp.strategies import MCPExecutionStrategy
+
+    handler = Mock()
+    tool_call = MCPToolCall(name="get-graph-info", arguments={})
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.execute._get_mcp_cache",
+        AsyncMock(return_value={"cached": True}),
+      ),
+      patch("robosystems.routers.graphs.mcp.execute._set_mcp_cache", AsyncMock()),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.execute_tool_directly", AsyncMock()
+      ) as execute,
+    ):
+      result = await execute_tool_to_json(
+        handler, "kg1", tool_call, MCPExecutionStrategy.INFO_CACHED, 30
+      )
+    assert result == {"cached": True}
+    execute.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_cached_strategy_miss_executes_and_stores(self):
+    from robosystems.routers.graphs.mcp.execute import execute_tool_to_json
+    from robosystems.routers.graphs.mcp.strategies import MCPExecutionStrategy
+
+    handler = Mock()
+    tool_call = MCPToolCall(name="get-graph-schema", arguments={})
+    store = AsyncMock()
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.execute._get_mcp_cache",
+        AsyncMock(return_value=None),
+      ),
+      patch("robosystems.routers.graphs.mcp.execute._set_mcp_cache", store),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.execute_tool_directly",
+        AsyncMock(return_value={"schema": []}),
+      ),
+    ):
+      result = await execute_tool_to_json(
+        handler, "kg1", tool_call, MCPExecutionStrategy.SCHEMA_CACHED, 30
+      )
+    assert result == {"schema": []}
+    store.assert_awaited_once()
+    assert store.await_args.args[:2] == ("kg1", "get-graph-schema")
+
+  @pytest.mark.asyncio
+  async def test_failed_execution_is_not_cached(self):
+    from robosystems.routers.graphs.mcp.execute import execute_tool_to_json
+    from robosystems.routers.graphs.mcp.handlers import tool_error_result
+    from robosystems.routers.graphs.mcp.strategies import MCPExecutionStrategy
+
+    handler = Mock()
+    tool_call = MCPToolCall(name="get-graph-info", arguments={})
+    store = AsyncMock()
+    with (
+      patch(
+        "robosystems.routers.graphs.mcp.execute._get_mcp_cache",
+        AsyncMock(return_value=None),
+      ),
+      patch("robosystems.routers.graphs.mcp.execute._set_mcp_cache", store),
+      patch(
+        "robosystems.routers.graphs.mcp.execute.execute_tool_directly",
+        AsyncMock(return_value=tool_error_result("backend down", "backend")),
+      ),
+    ):
+      await execute_tool_to_json(
+        handler, "kg1", tool_call, MCPExecutionStrategy.INFO_CACHED, 30
+      )
+    store.assert_not_awaited()
+
+
 class TestMcpCacheKey:
   """Test the _mcp_cache_key helper."""
 
@@ -869,25 +727,3 @@ class TestCachedStrategies:
       graph_id="sec_historical",
     )
     assert schema_strategy == MCPExecutionStrategy.SCHEMA_CACHED
-
-
-@pytest.mark.unit
-class TestToolsRouterOperationType:
-  """tools.py carries its own _get_mcp_operation_type; it must agree with
-  execute.py and the MCP factory that shared subgraphs are reads — it
-  returned "write" for sec_historical while both of those said "read"."""
-
-  def test_shared_repo_and_subgraph_return_read(self):
-    from robosystems.routers.graphs.mcp.tools import (
-      _get_mcp_operation_type as tools_op_type,
-    )
-
-    assert tools_op_type("sec") == "read"
-    assert tools_op_type("sec_historical") == "read"
-
-  def test_user_graph_returns_write(self):
-    from robosystems.routers.graphs.mcp.tools import (
-      _get_mcp_operation_type as tools_op_type,
-    )
-
-    assert tools_op_type("kg0123456789abcdef") == "write"

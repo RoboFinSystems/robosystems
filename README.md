@@ -215,7 +215,7 @@ Details: [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/w
 
 - FastAPI REST API with versioned endpoints
 - Extension GraphQL read API plus named REST command operations (CQRS)
-- MCP Server for AI-powered graph database access with schema-aware tools
+- MCP server for AI-powered graph database access — every graph speaks the MCP Streamable HTTP transport, with OAuth or API-key auth
 - AI Operator System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 
@@ -283,7 +283,13 @@ RoboSystems provides comprehensive client libraries for building applications:
 
 Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header, or rides inside a generated connector URL for clients that cannot send headers.
 
-**Claude Code** — one command:
+**OAuth — sign in and pick a graph.** The graph-agnostic endpoint `https://api.robosystems.ai/v1/mcp` accepts OAuth only: an OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint, you sign in and choose the graph the connection covers, and the client holds a revocable token bound to that graph — no key to paste. Per-graph URLs accept OAuth too, alongside the key header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
+
+```bash
+claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
+```
+
+**Claude Code with an API key** — one command:
 
 ```bash
 claude mcp add --transport http robosystems-sec \

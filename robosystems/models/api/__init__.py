@@ -102,12 +102,7 @@ from .graphs import (
   GraphTierLimits,
   GraphUsageResponse,
   LinkTokenRequest,
-  MCPQueryRequest,
-  MCPQueryResponse,
-  MCPSchemaResponse,
   MCPToolCall,
-  MCPToolResult,
-  MCPToolsResponse,
   OperatorMessage,
   OperatorRequest,
   OperatorResponse,
@@ -123,6 +118,11 @@ from .oauth import (
   OAuthInitResponse,
   OAuthProvider,
   OAuthTokens,
+)
+from .oauth_server import (
+  ConsentDecisionRequest,
+  ConsentDecisionResponse,
+  PendingAuthorizationResponse,
 )
 from .user import (
   AccountInfo,
@@ -165,6 +165,8 @@ __all__ = [
   "ConnectionOptionsResponse",
   "ConnectionProviderInfo",
   "ConnectionResponse",
+  "ConsentDecisionRequest",
+  "ConsentDecisionResponse",
   "CreateAPIKeyRequest",
   "CreateAPIKeyResponse",
   "CreateConnectionRequest",
@@ -212,13 +214,8 @@ __all__ = [
   "LinkTokenRequest",
   # Auth models
   "LoginRequest",
-  "MCPQueryRequest",
-  "MCPQueryResponse",
-  "MCPSchemaResponse",
   # MCP models
   "MCPToolCall",
-  "MCPToolResult",
-  "MCPToolsResponse",
   "OAuthCallbackRequest",
   "OAuthConnectionUpdate",
   "OAuthInitRequest",
@@ -235,6 +232,7 @@ __all__ = [
   "PasswordCheckRequest",
   "PasswordCheckResponse",
   "PasswordPolicyResponse",
+  "PendingAuthorizationResponse",
   # Connection models
   "ProviderType",
   "QuickBooksConnectionConfig",

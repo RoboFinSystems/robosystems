@@ -44,6 +44,7 @@ from robosystems.routers import (
   billing_router_v1,
   graph_router,
   graph_schema_router_v1,
+  mcp_agnostic_router_v1,
   offering_router_v1,
   operations_router_v1,
   orgs_router_v1,
@@ -66,6 +67,9 @@ from robosystems.routers.admin import (
   invoice_router as admin_invoice_router,
 )
 from robosystems.routers.admin import (
+  oauth_router as admin_oauth_router,
+)
+from robosystems.routers.admin import (
   orgs_router as admin_orgs_router,
 )
 from robosystems.routers.admin import (
@@ -80,6 +84,7 @@ from robosystems.routers.admin import (
 from robosystems.routers.admin import (
   webhooks_router as admin_webhooks_router,
 )
+from robosystems.routers.oauth import router as oauth_router
 from robosystems.utils.docs_template import (
   generate_robosystems_docs,
   generate_robosystems_redoc,
@@ -532,6 +537,11 @@ def create_app() -> FastAPI:
   app.include_router(offering_router_v1)
   app.include_router(operations_router_v1)
   app.include_router(billing_router_v1)
+  # Graph-agnostic MCP transport (OAuth-only) and the OAuth 2.1 authorization
+  # server + discovery documents. Both are runtime-gated on MCP_OAUTH_ENABLED
+  # (404 when off) rather than import-gated, so the posture is testable.
+  app.include_router(mcp_agnostic_router_v1)
+  app.include_router(oauth_router)
 
   # SCIM 2.0 provisioning — flag-gated (the managed platform never mounts it).
   if env.SCIM_ENABLED:
@@ -624,6 +634,7 @@ def create_app() -> FastAPI:
   app.include_router(admin_users_router, include_in_schema=False)
   app.include_router(admin_orgs_router, include_in_schema=False)
   app.include_router(admin_scim_router, include_in_schema=False)
+  app.include_router(admin_oauth_router, include_in_schema=False)
 
   def custom_openapi():
     """Generate the OpenAPI schema, then layer on this API's own conventions.

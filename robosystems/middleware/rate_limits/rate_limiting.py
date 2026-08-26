@@ -468,6 +468,40 @@ def oidc_rate_limit_dependency(request: Request):
   return create_custom_rate_limit_dependency(limit, 60, "oidc")(request)
 
 
+def oauth_authorize_rate_limit_dependency(request: Request):
+  """The OAuth authorization endpoint: a browser GET, IP-keyed (anonymous
+  callers get limit//10, ~12/min per IP — several consent flows plus
+  retries)."""
+  limit = BURST_LIMITS["oauth_authorize"]
+  return create_custom_rate_limit_dependency(limit, 60, "oauth_authorize")(request)
+
+
+def oauth_consent_rate_limit_dependency(request: Request):
+  """The consent read + decision endpoints (JWT session)."""
+  limit = BURST_LIMITS["oauth_consent"]
+  return create_custom_rate_limit_dependency(limit, 60, "oauth_consent")(request)
+
+
+def oauth_token_rate_limit_dependency(request: Request):
+  """The token + revocation endpoints. Unauthenticated by nature (the
+  client proves itself in the body), so effectively per-IP at limit//10.
+  Fails closed: a token mint must not proceed unmetered."""
+  limit = BURST_LIMITS["oauth_token"]
+  return create_custom_rate_limit_dependency(
+    limit, 60, "oauth_token", fail_closed=True
+  )(request)
+
+
+def oauth_register_rate_limit_dependency(request: Request):
+  """RFC 7591 dynamic registration — the platform's only unauthenticated
+  write. Per-IP at limit//10 here, plus the daily cap in
+  ``operations.oauth_server.clients``. Fails closed."""
+  limit = BURST_LIMITS["oauth_register"]
+  return create_custom_rate_limit_dependency(
+    limit, 60, "oauth_register", fail_closed=True
+  )(request)
+
+
 def mfa_rate_limit_dependency(request: Request):
   """Rate limiting for the passkey login/MFA challenge surface.
 

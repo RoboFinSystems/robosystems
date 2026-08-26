@@ -33,6 +33,9 @@ from robosystems.models.core.graph.graph_user import GraphUser  # noqa: F401
 from robosystems.models.core.org.org import Org  # noqa: F401
 from robosystems.models.core.org.org_limits import OrgLimits  # noqa: F401
 from robosystems.models.core.org.org_user import OrgUser  # noqa: F401
+from robosystems.models.core.user.oauth_client import OAuthClient  # noqa: F401
+from robosystems.models.core.user.oauth_grant import OAuthGrant  # noqa: F401
+from robosystems.models.core.user.oauth_token import OAuthToken  # noqa: F401
 from robosystems.models.core.user.scim_token import ScimToken  # noqa: F401
 from robosystems.models.core.user.user import User  # noqa: F401
 from robosystems.models.core.user.user_api_key import UserAPIKey  # noqa: F401

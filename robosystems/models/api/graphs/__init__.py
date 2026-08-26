@@ -39,12 +39,7 @@ from .limits import (
   StorageLimits,
 )
 from .mcp import (
-  MCPQueryRequest,
-  MCPQueryResponse,
-  MCPSchemaResponse,
   MCPToolCall,
-  MCPToolResult,
-  MCPToolsResponse,
 )
 from .members import (
   AddGraphMemberRequest,
@@ -179,12 +174,7 @@ __all__ = [
   "LinkTokenRequest",
   "ListSubgraphsResponse",
   "ListTableFilesResponse",
-  "MCPQueryRequest",
-  "MCPQueryResponse",
-  "MCPSchemaResponse",
   "MCPToolCall",
-  "MCPToolResult",
-  "MCPToolsResponse",
   "OperatorHealthResponse",
   "OperatorHealthStatus",
   "OperatorListResponse",

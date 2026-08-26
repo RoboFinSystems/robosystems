@@ -37,6 +37,7 @@ from rich.console import Console
 from ..logger import get_logger
 from .commands.billing import credits, invoices, subscriptions
 from .commands.graphs import graphs
+from .commands.oauth import oauth
 from .commands.ops import cache, instances, migrations
 from .commands.scim import scim
 from .commands.search import search
@@ -349,6 +350,7 @@ cli.add_command(migrations)
 cli.add_command(cache)
 cli.add_command(instances)
 cli.add_command(scim)
+cli.add_command(oauth)
 cli.add_command(search)
 cli.add_command(worker)
 

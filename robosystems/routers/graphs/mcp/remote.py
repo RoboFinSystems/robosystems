@@ -20,7 +20,12 @@ Transport rules:
 - Stateless: no ``Mcp-Session-Id``, no GET-side SSE channel, no resumability.
   A subgraph is addressed as another connector URL, never via in-session
   switching.
-- Header auth (``X-API-Key`` or JWT); OAuth is a separate, later surface.
+- Three credential carriages on the per-graph route: ``X-API-Key``, the
+  graph-scoped ``?token=``, and an OAuth ``Authorization: Bearer`` bound to
+  this exact URL. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
+  is OAuth-only: the consent grant names the graph, and the transport
+  dispatches on that resolved ``graph_id`` exactly as the per-graph route
+  dispatches on the URL's.
 - Excluded from the OpenAPI schema so the JSON-RPC envelope never lands in
   the generated SDK clients.
 """
@@ -40,7 +45,9 @@ from sse_starlette.sse import EventSourceResponse
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user_with_graph_or_url_token,
+  get_oauth_mcp_principal,
 )
+from robosystems.middleware.auth.oauth import OAuthPrincipal
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.query_telemetry import (
   api_key_prefix_from_request,
@@ -75,6 +82,8 @@ from .strategies import MCPExecutionStrategy, MCPStrategySelector
 from .streaming import aggregate_streamed_results, stream_mcp_tool_execution
 
 router = APIRouter()
+# The graph-agnostic transport, mounted at /v1/mcp (see routers/__init__.py).
+agnostic_router = APIRouter()
 
 # Protocol revisions this transport can negotiate. The server answers with the
 # client's requested revision when supported, else its own latest. Exactly the
@@ -282,18 +291,52 @@ async def _handle_tools_list(graph_id: str, current_user: User) -> dict[str, Any
 
   mcp_tools: list[dict[str, Any]] = []
   for tool in tools:
+    title = _tool_title(tool)
     entry: dict[str, Any] = {
       "name": tool["name"],
+      "title": title,
       "description": tool.get("description", ""),
       "inputSchema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+      "annotations": _tool_annotations(tool["name"], title),
     }
-    # Cypher read tools are deliberately unhinted: they are classified per
-    # statement by the StatementKernel and can carry writes on tenant graphs.
-    if tool["name"] in READ_ONLY_MCP_TOOLS:
-      entry["annotations"] = {"readOnlyHint": True}
     mcp_tools.append(entry)
 
   return {"tools": mcp_tools}
+
+
+def _tool_title(tool: dict[str, Any]) -> str:
+  """A human title for a tool: the definition's own when it has one, else
+  its name with the hyphens read as spaces (``close-period`` → ``Close
+  period``). Directory listings require one on every tool."""
+  explicit = tool.get("title")
+  if isinstance(explicit, str) and explicit.strip():
+    return explicit.strip()
+  words = str(tool["name"]).replace("-", " ").replace("_", " ").strip()
+  return words[:1].upper() + words[1:]
+
+
+def _tool_annotations(name: str, title: str) -> dict[str, Any]:
+  """MCP tool annotations, explicit on every tool.
+
+  Reads (the ``READ_ONLY_MCP_TOOLS`` allowlist, which is also the
+  authorization classification) are read-only and idempotent; everything
+  else is a write and is hinted destructive — conservatively, since the
+  authorization gauntlet treats every non-read tool as a mutation. The
+  Cypher tools carry neither hint: they are classified per statement by the
+  StatementKernel and can run a write on a tenant graph, so a read-only
+  hint would promise what the tool does not enforce. All tools act on this
+  graph alone (closed world).
+  """
+  annotations: dict[str, Any] = {"title": title, "openWorldHint": False}
+  if name in _CYPHER_READ_TOOLS:
+    return annotations
+  if name in READ_ONLY_MCP_TOOLS:
+    annotations.update(
+      {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
+    )
+  else:
+    annotations.update({"readOnlyHint": False, "destructiveHint": True})
+  return annotations
 
 
 # Strategies whose work is long or chunked enough to earn the SSE response
@@ -1049,3 +1092,19 @@ async def mcp_remote_transport(
 ) -> Response:
   """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""
   return await dispatch_jsonrpc(request, graph_id, current_user)
+
+
+@agnostic_router.post("", include_in_schema=False, response_model=None)
+@endpoint_metrics_decorator("/v1/mcp", business_event_type="mcp_remote_request")
+async def mcp_agnostic_transport(
+  request: Request,
+  _transport: None = Depends(_transport_gate),
+  principal: OAuthPrincipal = Depends(get_oauth_mcp_principal),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> Response:
+  """Streamable-HTTP MCP endpoint (JSON-RPC 2.0), OAuth-only.
+
+  The grant's graph is the resolved ``graph_id``: same dispatch, same
+  per-call access checks, same isolation keys as the per-graph route.
+  """
+  return await dispatch_jsonrpc(request, principal.graph_id, principal.user)

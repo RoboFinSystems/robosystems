@@ -52,7 +52,7 @@ Reads are REST `GET`s; content writes share the same `/operations/{op_name}` env
 
 ### MCP & AI Operators
 
-- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, alongside the REST tool surface (`/mcp/tools`, `/mcp/call-tool`)
+- **MCP**: Model Context Protocol — schema-aware graph tools and queries for AI agents. Every graph serves the MCP Streamable HTTP transport at `POST /v1/graphs/{graph_id}/mcp`, and the graph-agnostic `POST /v1/mcp` serves the same transport to OAuth clients
 - **AI Operators**: Autonomous Claude/MCP executors for financial analysis and report generation, with automatic credit tracking and SSE progress (sync, SSE, or background worker)
 
 ### Data Synchronization
@@ -121,7 +121,15 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-For claude.ai and Claude Desktop — whose custom connectors cannot send an API-key header — generate a connector URL from the MCP page in the app (`/connect`): the URL carries its own graph-scoped, revocable API key, so it pastes straight into Settings → Connectors → Add custom connector. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
+**OAuth — sign in and pick a graph.** The graph-agnostic endpoint accepts OAuth only, and needs no key at all:
+
+```
+https://api.robosystems.ai/v1/mcp
+```
+
+An OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint (`/.well-known/oauth-protected-resource/v1/mcp`), sends you to sign in, and the consent screen is where you choose the graph the connection covers — your own graphs or a subscribed repository such as `sec`. The client then holds a revocable token bound to that graph; revoke it at any time and the connection stops. Per-graph URLs accept OAuth too, alongside the `X-API-Key` header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
+
+For claude.ai and Claude Desktop custom connectors that cannot send an API-key header, the alternative is a connector URL from the MCP page in the app (`/connect`): the URL carries its own graph-scoped, revocable API key, so it pastes straight into Settings → Connectors → Add custom connector. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
 
 ## Clients
 
