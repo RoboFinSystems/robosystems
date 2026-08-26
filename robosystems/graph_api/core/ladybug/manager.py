@@ -351,7 +351,12 @@ class LadybugDatabaseManager:
       )
 
   def _remove_graph_files(self, name: str) -> list[str]:
-    """Remove ``{name}.lbug`` and its WAL, returning the paths taken."""
+    """Remove ``{name}.lbug`` and its WAL, returning the paths taken.
+
+    Called once for the graph itself and, on a base-name delete, once per
+    blue-green temporary (``-wip``, ``-prev``) — the sweep in
+    ``delete_database`` decides the names; this only removes files.
+    """
     removed: list[str] = []
 
     # The WAL goes first: left behind, it would be replayed against a

@@ -138,16 +138,20 @@ async def delete_database(
   if ladybug_service.node_type == NodeType.SHARED_MASTER:
     logger.warning(f"Attempting to delete shared database: {graph_id}")
 
-  # A `-wip`/`-prev` name is a blue-green build artifact, and its base may be
-  # mid-materialization right now — deleting the WIP under an active build
-  # destroys the copy the build is writing into. Hold the base's
-  # materialization lock across the delete, same protocol as `swap_database`:
-  # acquiring (not just checking) closes the window where a build starts
-  # between the check and the unlink. The materialize flow deletes its own
-  # WIP (leftover cleanup, failure cleanup) while already holding this lock —
-  # it passes its token through so those deletes don't 409 against itself.
+  # Every delete here can touch a blue-green artifact: a `-wip`/`-prev` name
+  # is one, and a base-name delete sweeps its own `-wip`/`-prev` alongside.
+  # The base may be mid-materialization right now, and deleting the WIP under
+  # an active build destroys the copy the build is writing into. So hold the
+  # base's materialization lock across the delete, same protocol as
+  # `swap_database`: acquiring (not just checking) closes the window where a
+  # build starts between the check and the unlink, and a caller that cannot
+  # get it — a rebuild or a teardown racing an extensions build — is refused
+  # and retries, rather than pulling the WIP out from under the build. The
+  # materialize flow deletes its own WIP (leftover and failure cleanup) and
+  # its own base (a rebuild) while already holding this lock; it passes its
+  # token through so those deletes don't 409 against itself.
   lock = None
-  if graph_id.endswith(("-wip", "-prev")) and not x_materialization_lock_token:
+  if not x_materialization_lock_token:
     try:
       from robosystems.config.valkey_registry import (
         ValkeyDatabase,
@@ -164,7 +168,7 @@ async def delete_database(
           status_code=http_status.HTTP_409_CONFLICT,
           detail=(
             f"A materialization is in progress for {graph_id}'s base database; "
-            "the build artifact cannot be deleted while it may be written to."
+            "it cannot be deleted while a build may be writing alongside it."
           ),
         )
     except HTTPException:

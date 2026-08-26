@@ -1093,3 +1093,61 @@ class TestScenarioExclusion:
         assert "scenario_id IS NULL" in sql, (
           f"{name} reads facts/fact_sets without a scenario filter"
         )
+
+
+class TestRebuildDeleteCarriesTheLock:
+  """The node guards every delete with the base's materialization lock, and
+  a rebuild deletes the base name. The run already holds that lock, so its
+  token has to ride the delete or the rebuild 409s against itself."""
+
+  @pytest.mark.asyncio
+  async def test_direct_rebuild_passes_its_token_to_the_base_delete(self):
+    from robosystems.operations.extensions.materialize import (
+      ExtensionsMaterializer,
+    )
+
+    materializer = ExtensionsMaterializer()
+    client = AsyncMock()
+    client.database_exists.return_value = True
+    lock = _held_lock("tok-rebuild")
+
+    with patch.object(
+      materializer, "_get_graph_extensions", new=AsyncMock(return_value=[])
+    ):
+      await materializer._ensure_database(
+        client, GRAPH_ID, rebuild=True, lock_token=lock.token
+      )
+
+    client.delete_database.assert_awaited_once_with(
+      GRAPH_ID, preserve_duckdb=True, lock_token="tok-rebuild"
+    )
+    client.create_database.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_the_direct_path_hands_its_lock_to_ensure_database(self):
+    from robosystems.operations.extensions.materialize import (
+      ExtensionsMaterializer,
+    )
+
+    materializer = ExtensionsMaterializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    client = AsyncMock()
+    lock = _held_lock("tok-direct")
+
+    with (
+      patch.object(materializer, "_ensure_database", new=AsyncMock()) as ensure,
+      patch.object(
+        materializer, "_get_graph_extensions", new=AsyncMock(return_value=[])
+      ),
+      patch.object(materializer, "_stage_tables", new=AsyncMock()),
+      patch.object(materializer, "_materialize_tables", new=AsyncMock()),
+      patch(
+        "robosystems.operations.extensions.materialize.build_postgres_connstr",
+        return_value=CONNSTR,
+      ),
+    ):
+      await materializer._materialize_direct(
+        client, GRAPH_ID, ENTITY_ID, True, result, lock
+      )
+
+    ensure.assert_awaited_once_with(client, GRAPH_ID, True, lock_token="tok-direct")

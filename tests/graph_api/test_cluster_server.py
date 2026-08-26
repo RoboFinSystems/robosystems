@@ -2,7 +2,7 @@
 
 import shutil
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -716,6 +716,98 @@ class TestFastAPIEndpoints:
     # found the file from one that only disposed its side stores.
     assert data["existed"] is True
     assert data["removed"] == ["/data/test_db.lbug"]
+
+  def _lock_patches(self, acquired: bool):
+    """Patch the lazy imports the delete endpoint reaches for its lock."""
+    lock = MagicMock()
+    lock.acquire = AsyncMock(return_value=acquired)
+    lock.acquired = acquired
+    lock.release = AsyncMock(return_value=True)
+    lock_cls = MagicMock(return_value=lock)
+    return (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=MagicMock(),
+      ),
+      lock_cls,
+      lock,
+    )
+
+  def test_delete_of_a_base_name_holds_the_base_materialization_lock(self):
+    """A base-name delete sweeps the graph's -wip/-prev alongside it, and a
+    blue-green build may be writing into that WIP right now. The delete takes
+    the base's lock — the same one the build holds — so the two serialize
+    instead of the delete pulling the WIP out from under the build."""
+    self.mock_service.read_only = False
+    self.mock_service.node_type = NodeType.WRITER
+    self.mock_service.db_manager.delete_database.return_value = {
+      "status": "success",
+      "graph_id": "test_db",
+      "existed": True,
+      "removed": [],
+      "message": "Database test_db deleted successfully",
+    }
+    lock_patch, redis_patch, lock_cls, lock = self._lock_patches(acquired=True)
+
+    app = create_app()
+    client = TestClient(app)
+    with lock_patch, redis_patch:
+      response = client.delete("/databases/test_db")
+
+    assert response.status_code == 200
+    assert lock_cls.call_args.args[1] == "test_db"
+    lock.acquire.assert_awaited_once()
+    lock.release.assert_awaited_once()
+    self.mock_service.db_manager.delete_database.assert_called_once()
+
+  def test_delete_refuses_while_a_materialization_holds_the_lock(self):
+    """Before the sweep existed, a base-name delete never crossed into
+    -wip/-prev and so never needed the lock; now it does, and a rebuild or a
+    teardown that races an extensions build gets a 409 to retry on rather
+    than a silently destroyed build."""
+    self.mock_service.read_only = False
+    self.mock_service.node_type = NodeType.WRITER
+    lock_patch, redis_patch, _, _ = self._lock_patches(acquired=False)
+
+    app = create_app()
+    client = TestClient(app)
+    with lock_patch, redis_patch:
+      response = client.delete("/databases/test_db")
+
+    assert response.status_code == 409
+    assert "materialization is in progress" in response.json()["detail"]
+    self.mock_service.db_manager.delete_database.assert_not_called()
+
+  def test_delete_with_the_holders_token_does_not_reacquire(self):
+    """The materialize flow deletes its own base on a rebuild while holding
+    the lock; its token passes through so the delete does not 409 against
+    the caller's own lock."""
+    self.mock_service.read_only = False
+    self.mock_service.node_type = NodeType.WRITER
+    self.mock_service.db_manager.delete_database.return_value = {
+      "status": "success",
+      "graph_id": "test_db",
+      "existed": True,
+      "removed": [],
+      "message": "Database test_db deleted successfully",
+    }
+    lock_patch, redis_patch, lock_cls, _ = self._lock_patches(acquired=True)
+
+    app = create_app()
+    client = TestClient(app)
+    with lock_patch, redis_patch:
+      response = client.delete(
+        "/databases/test_db",
+        headers={"X-Materialization-Lock-Token": "tok-held"},
+      )
+
+    assert response.status_code == 200
+    lock_cls.assert_not_called()
+    self.mock_service.db_manager.delete_database.assert_called_once()
 
   def test_database_health_endpoint(self):
     """Test database health check endpoint."""

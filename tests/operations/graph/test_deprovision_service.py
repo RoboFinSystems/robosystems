@@ -611,6 +611,48 @@ class TestDeprovisionService:
       assert test_graph.status == GraphStatus.DEPROVISIONED.value
 
   @pytest.mark.asyncio
+  async def test_deprovision_records_a_node_disposing_side_stores_for_a_gone_file(
+    self, service, db_session, test_graph
+  ):
+    """A node on the current AMI answers a missing .lbug with 200 and
+    `existed=False` after disposing the side stores itself. That is the
+    converged case too — and the log must say the side stores were handled,
+    since that is the difference from the 404 a pre-upgrade node returns."""
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ) as mock_get_client,
+      patch(
+        "robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"
+      ) as mock_alloc_cls,
+      patch("robosystems.operations.graph.deprovision_service.logger") as log,
+    ):
+      mock_client = AsyncMock()
+      mock_client.delete_database.return_value = {
+        "status": "success",
+        "graph_id": test_graph.graph_id,
+        "existed": False,
+        "removed": ["/data/x.lbug.wal", "/lance/x", "duckdb:x"],
+        "message": "already absent; side stores disposed",
+      }
+      mock_get_client.return_value = mock_client
+      mock_alloc_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+      assert result.database_deleted is True
+      db_session.refresh(test_graph)
+      assert test_graph.status == GraphStatus.DEPROVISIONED.value
+      messages = [call.args[0] for call in log.info.call_args_list]
+      assert any(
+        "already absent" in m and "disposed its side stores (3 paths)" in m
+        for m in messages
+      ), messages
+
+  @pytest.mark.asyncio
   async def test_deprovision_still_strands_on_a_non_404_graph_api_error(
     self, service, db_session, test_graph
   ):
