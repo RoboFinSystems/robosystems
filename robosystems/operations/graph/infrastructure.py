@@ -558,8 +558,10 @@ class InstanceMonitor:
     """Correct or drop volume-registry rows that no longer reflect reality.
 
     A volume stuck ``attaching`` to a dead instance is marked ``failed`` and
-    unattached; an unattached volume older than ``STALE_VOLUME_DAYS`` is
-    dropped from the registry. Neither path deletes the EBS volume itself.
+    unattached; a volume that carries no databases and has been unattached
+    for more than ``STALE_VOLUME_DAYS`` is dropped from the registry. Rows
+    that still list databases are never dropped. Neither path deletes the
+    EBS volume itself.
     """
     logger.info("Starting volume registry cleanup")
 
@@ -611,17 +613,34 @@ class InstanceMonitor:
               f"non-existent instance {instance_id}"
             )
 
-        if instance_id == "unattached" and status == "available" and created_at:
-          try:
-            created_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            age_days = (datetime.now(UTC) - created_time).days
-            if age_days > STALE_VOLUME_DAYS:
-              should_remove = True
-              logger.info(
-                f"Removing old unattached volume {volume_id}: {age_days} days old"
-              )
-          except Exception:
-            pass
+        if instance_id == "unattached" and status == "available":
+          # A row that still lists databases is the only link between those
+          # graphs and their data; dropping it makes the next launch mint an
+          # empty replacement volume. Mirror the orphan sweep in the volume
+          # manager, which refuses to delete a volume that carries databases.
+          if item.get("databases"):
+            continue
+
+          # Age from the last detach, not the creation date: a volume that
+          # parks nightly is "unattached" for most of every day and would
+          # otherwise be dropped by the first sweep it sleeps through after
+          # turning STALE_VOLUME_DAYS old. Rows that have never been through
+          # a detach fall back to last_attached, then created_at.
+          age_anchor = (
+            item.get("last_detached") or item.get("last_attached") or created_at
+          )
+          if age_anchor:
+            try:
+              anchor_time = datetime.fromisoformat(age_anchor.replace("Z", "+00:00"))
+              age_days = (datetime.now(UTC) - anchor_time).days
+              if age_days > STALE_VOLUME_DAYS:
+                should_remove = True
+                logger.info(
+                  f"Removing old unattached volume {volume_id}: "
+                  f"unattached for {age_days} days"
+                )
+            except Exception:
+              pass
 
         if should_update and new_status:
           try:

@@ -205,7 +205,14 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
     # attaching — two concurrent master launches must not both attach the same
     # volume and burn the VolumeInUse retry loop.
     reclaim_stale_claims(az, tier)
-    for existing_volume in find_volumes_with_database("sec", az, tier):
+    candidates = find_volumes_with_database("sec", az, tier)
+    if not candidates:
+      # The registry row is the only thing this path consults, but the EBS
+      # volume's tags carry the same facts durably. When the row is gone and
+      # the volume is not, re-register it — minting an empty replacement while
+      # the real one sits available in the same AZ is the worse failure.
+      candidates = recover_unregistered_shared_volumes("sec", az, tier)
+    for existing_volume in candidates:
       volume_id = existing_volume["volume_id"]
       if not claim_volume(volume_id, instance_id):
         continue
@@ -294,6 +301,8 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
 
   # No existing volume found, create new one
   logger.info("No existing volume found, creating new volume")
+  if node_type == "shared_master":
+    report_shared_master_volume_created(instance_id, az, tier)
   return create_and_attach_volume(instance_id, tier, az, databases, node_type)
 
 
@@ -319,6 +328,96 @@ def find_volumes_with_database(database: str, az: str, tier: str) -> list[dict]:
   return sorted(
     response.get("Items", []),
     key=lambda item: (item.get("created_at") or "", item.get("volume_id") or ""),
+  )
+
+
+def recover_unregistered_shared_volumes(
+  database: str, az: str, tier: str
+) -> list[dict]:
+  """Re-register EC2 volumes tagged for ``database`` that the registry has lost.
+
+  A registry sweep dropped the parked SEC master's row on 2026-08-23 (it aged
+  the row from the volume's creation date), and the next launch minted an
+  empty 200 GB replacement while the 300 GB original sat ``available`` in the
+  same AZ. The volume's tags are the durable record: rebuild the row from
+  them so the launch claims the real volume. Returns the rebuilt rows, oldest
+  first, in the shape ``find_volumes_with_database`` returns.
+  """
+  response = ec2.describe_volumes(
+    Filters=[
+      {"Name": "availability-zone", "Values": [az]},
+      {"Name": "status", "Values": ["available"]},
+      {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+      {"Name": "tag:ManagedBy", "Values": ["GraphVolumeManager"]},
+      {"Name": "tag:Tier", "Values": [tier]},
+      {"Name": "tag:DatabaseId", "Values": [database]},
+    ]
+  )
+
+  recovered = []
+  for volume in sorted(response.get("Volumes", []), key=lambda v: v["CreateTime"]):
+    volume_id = volume["VolumeId"]
+    if table.get_item(Key={"volume_id": volume_id}).get("Item"):
+      continue
+    tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
+    item = {
+      "volume_id": volume_id,
+      "instance_id": "unattached",
+      "availability_zone": az,
+      "tier": tier,
+      "status": "available",
+      "databases": [database],
+      "node_type": tags.get("NodeType", "shared_master"),
+      "created_at": volume["CreateTime"].isoformat(),
+      "size": volume["Size"],
+      "iops": volume.get("Iops", DEFAULT_IOPS),
+      "throughput": volume.get("Throughput", DEFAULT_THROUGHPUT),
+      "recovered_at": datetime.now(UTC).isoformat(),
+    }
+    table.put_item(Item=item)
+    recovered.append(item)
+    logger.warning(
+      f"Volume {volume_id} is tagged for {database} but had no registry row; "
+      "re-registered it from its EC2 tags instead of minting a replacement"
+    )
+
+  if recovered:
+    send_alert(
+      f"Re-registered {len(recovered)} unregistered {database} volume(s)",
+      f"Volumes {[v['volume_id'] for v in recovered]} in {az} ({tier}) are "
+      f"tagged for {database} but were missing from {TABLE_NAME}. They were "
+      "re-registered from EC2 tags and offered to the launching instance. "
+      "Find out what dropped the rows.",
+    )
+  return recovered
+
+
+def report_shared_master_volume_created(instance_id: str, az: str, tier: str) -> None:
+  """Page when a shared master mints a data volume.
+
+  That is a once-per-lifetime event for a shared repository; every later
+  occurrence means neither the registry nor the EC2 tags surfaced the real
+  volume, and the master is about to boot empty — which fails the nightly
+  chain and, unnoticed, leaves the original volume with no row to protect it.
+  """
+  logger.warning(
+    f"Creating a NEW shared-master data volume for {instance_id} in {az} "
+    f"({tier}): no registered or tagged shared volume was available"
+  )
+  try:
+    cloudwatch.put_metric_data(
+      Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
+      MetricData=[
+        {"MetricName": "SharedMasterVolumeCreated", "Value": 1, "Unit": "Count"}
+      ],
+    )
+  except Exception as e:
+    logger.error(f"Failed to publish SharedMasterVolumeCreated metric: {e}")
+  send_alert(
+    "New shared-master data volume created",
+    f"Instance {instance_id} ({tier}, {az}) found no shared data volume to "
+    "claim and is creating an empty one. If a shared volume exists, its "
+    "registry row was lost — see the incident-triage runbook.",
   )
 
 
@@ -1451,6 +1550,10 @@ def sync_registry_with_ec2(event: dict[str, Any]) -> dict[str, Any]:
       # Extract info from tags
       tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
       databases = json.loads(tags.get("Databases", "[]"))
+      if not databases and tags.get("DatabaseId") not in (None, "", "unassigned"):
+        # Volumes carry their primary database as DatabaseId (see
+        # create_and_attach_volume); the Databases list is a snapshot tag.
+        databases = [tags["DatabaseId"]]
       tier = tags.get("Tier", "ladybug-standard")
       node_type = tags.get("NodeType", "writer")
 

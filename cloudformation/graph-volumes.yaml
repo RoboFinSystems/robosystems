@@ -477,6 +477,25 @@ Resources:
       AlarmActions:
         - !Ref VolumeAlertTopic
 
+  # A shared master minting a data volume is a once-per-lifetime event; any
+  # repeat means neither the registry nor the EC2 tags surfaced the real volume
+  # and the master booted empty.
+  SharedMasterVolumeCreatedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-shared-master-volume-created"
+      AlarmDescription: A shared master created a new data volume instead of claiming the existing one
+      MetricName: SharedMasterVolumeCreated
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
   # Failed Attachments Alarm
   FailedAttachmentsAlarm:
     Type: AWS::CloudWatch::Alarm

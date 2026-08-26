@@ -1055,6 +1055,120 @@ def test_shared_master_launch_still_attaches_when_reconcile_is_deferred(gvm):
   assert _volume_perf(volume_id) == (3000, 125)
 
 
+def _create_tagged_shared_volume(database: str = "sec", size: int = 300) -> str:
+  """An EBS volume carrying the tags create_and_attach_volume stamps, with no
+  registry row — the state the registry sweep left the SEC master's volume in."""
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  resp = ec2.create_volume(
+    AvailabilityZone="us-east-1c",
+    Size=size,
+    VolumeType="gp3",
+    Iops=12000,
+    Throughput=500,
+    Encrypted=True,
+    TagSpecifications=[
+      {
+        "ResourceType": "volume",
+        "Tags": [
+          {"Key": "Environment", "Value": "test"},
+          {"Key": "ManagedBy", "Value": "GraphVolumeManager"},
+          {"Key": "Tier", "Value": "ladybug-shared"},
+          {"Key": "NodeType", "Value": "shared_master"},
+          {"Key": "DatabaseId", "Value": database},
+        ],
+      }
+    ],
+  )
+  return resp["VolumeId"]
+
+
+def test_shared_master_recovers_tagged_volume_missing_from_registry(gvm):
+  """The registry lost the SEC volume's row but the volume, tagged for sec,
+  still exists in the AZ: launch must re-register and claim it rather than
+  mint an empty replacement (2026-08-23/25)."""
+  instance_id = _create_test_instance()
+  volume_id = _create_tagged_shared_volume()
+
+  with patch.object(gvm, "send_alert") as alert:
+    result = gvm.handle_instance_launch(
+      {
+        "instance_id": instance_id,
+        "node_type": "shared_master",
+        "tier": "ladybug-shared",
+      }
+    )
+
+  assert result["statusCode"] == 200
+  assert result["volume_id"] == volume_id
+  item = _registry_item(volume_id)
+  assert item["status"] == "attached"
+  assert item["instance_id"] == instance_id
+  assert "sec" in item["databases"]
+  assert item["node_type"] == "shared_master"
+  assert int(item["size"]) == 300
+  alert.assert_called_once()
+  assert "Re-registered" in alert.call_args.args[0]
+
+
+def test_shared_master_prefers_registered_volume_over_tag_recovery(gvm):
+  """Tag recovery only runs when the registry has nothing to offer."""
+  instance_id = _create_test_instance()
+  registered = _create_test_volume()
+  _seed_sec_volume(registered)
+  stray = _create_tagged_shared_volume()
+
+  result = gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  assert result["volume_id"] == registered
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  assert "Item" not in ddb.Table("test-volume-registry").get_item(
+    Key={"volume_id": stray}
+  )
+
+
+def test_new_shared_master_volume_pages(gvm):
+  """Minting a shared-master volume publishes the metric the alarm watches
+  and sends an alert; a writer minting its first volume is routine."""
+  instance_id = _create_test_instance()
+
+  with (
+    patch.object(gvm, "send_alert") as alert,
+    patch.object(gvm.cloudwatch, "put_metric_data") as metric,
+  ):
+    result = gvm.handle_instance_launch(
+      {
+        "instance_id": instance_id,
+        "node_type": "shared_master",
+        "tier": "ladybug-shared",
+      }
+    )
+
+  assert result["statusCode"] == 200
+  metric.assert_called_once()
+  assert metric.call_args.kwargs["MetricData"][0]["MetricName"] == (
+    "SharedMasterVolumeCreated"
+  )
+  alert.assert_called_once()
+
+  writer_id = _create_test_instance()
+  with (
+    patch.object(gvm, "send_alert") as alert,
+    patch.object(gvm.cloudwatch, "put_metric_data") as metric,
+  ):
+    gvm.handle_instance_launch(
+      {
+        "instance_id": writer_id,
+        "node_type": "writer",
+        "tier": "ladybug-standard",
+        "databases": ["kg_new"],
+      }
+    )
+  metric.assert_not_called()
+  alert.assert_not_called()
+
+
 def test_new_shared_volume_is_created_to_spec(gvm):
   instance_id = _create_test_instance()
 

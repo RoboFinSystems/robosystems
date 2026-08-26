@@ -632,6 +632,75 @@ class TestCleanupStaleVolumes:
     volume_table.delete_item.assert_called_once_with(Key={"volume_id": "vol-old"})
 
   @pytest.mark.unit
+  def test_keeps_old_volume_that_detached_recently(self, monitor):
+    """Age is measured from the last detach, not the creation date.
+
+    A nightly-parked shared master is unattached for most of every day; the
+    pre-fix sweep dropped its row the first time it slept through a sweep
+    after the volume turned 30 days old, and the next wake minted an empty
+    replacement volume.
+    """
+    volume_table = _make_dynamo_table(
+      items=[
+        {
+          "volume_id": "vol-parked",
+          "status": "available",
+          "instance_id": "unattached",
+          "created_at": (datetime.now(UTC) - timedelta(days=45)).isoformat(),
+          "last_attached": (datetime.now(UTC) - timedelta(days=3)).isoformat(),
+          "last_detached": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+
+    def table_router(name):
+      if name == "test-volume":
+        return volume_table
+      if name == "test-instance":
+        return instance_table
+      return _make_dynamo_table()
+
+    monitor._dynamodb.Table.side_effect = table_router
+
+    result = monitor.cleanup_stale_volumes()
+
+    assert result.removed_count == 0
+    volume_table.delete_item.assert_not_called()
+
+  @pytest.mark.unit
+  def test_never_removes_row_that_carries_databases(self, monitor):
+    """A row listing databases is the only link between those graphs and
+    their data, however long the volume has sat unattached."""
+    volume_table = _make_dynamo_table(
+      items=[
+        {
+          "volume_id": "vol-sec",
+          "status": "available",
+          "instance_id": "unattached",
+          "databases": ["sec"],
+          "created_at": (datetime.now(UTC) - timedelta(days=90)).isoformat(),
+          "last_detached": (datetime.now(UTC) - timedelta(days=60)).isoformat(),
+        },
+      ]
+    )
+    instance_table = _make_dynamo_table(items=[])
+
+    def table_router(name):
+      if name == "test-volume":
+        return volume_table
+      if name == "test-instance":
+        return instance_table
+      return _make_dynamo_table()
+
+    monitor._dynamodb.Table.side_effect = table_router
+
+    result = monitor.cleanup_stale_volumes()
+
+    assert result.removed_count == 0
+    volume_table.delete_item.assert_not_called()
+
+  @pytest.mark.unit
   def test_exception_sets_error_message(self, monitor):
     """Top-level exception is captured in error_message."""
     monitor._dynamodb.Table.side_effect = Exception("volume scan failed")
