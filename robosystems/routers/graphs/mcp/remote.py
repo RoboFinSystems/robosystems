@@ -20,9 +20,9 @@ Transport rules:
 - Stateless: no ``Mcp-Session-Id``, no GET-side SSE channel, no resumability.
   A subgraph is addressed as another connector URL, never via in-session
   switching.
-- Three credential carriages on the per-graph route: ``X-API-Key``, the
-  graph-scoped ``?token=``, and an OAuth ``Authorization: Bearer`` bound to
-  this exact URL. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
+- Two credential carriages on the per-graph route: ``X-API-Key`` and an
+  OAuth ``Authorization: Bearer`` bound to this exact URL — nothing in the
+  query string. The graph-agnostic ``POST /v1/mcp`` (``agnostic_router``)
   is OAuth-only: the consent grant names the graph, and the transport
   dispatches on that resolved ``graph_id`` exactly as the per-graph route
   dispatches on the URL's.
@@ -44,7 +44,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import (
-  get_current_user_with_graph_or_url_token,
+  get_current_user_with_graph_or_oauth,
   get_oauth_mcp_principal,
 )
 from robosystems.middleware.auth.oauth import OAuthPrincipal
@@ -1087,7 +1087,7 @@ async def mcp_remote_transport(
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   _transport: None = Depends(_transport_gate),
-  current_user: User = Depends(get_current_user_with_graph_or_url_token),
+  current_user: User = Depends(get_current_user_with_graph_or_oauth),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Response:
   """Streamable-HTTP MCP endpoint (JSON-RPC 2.0)."""

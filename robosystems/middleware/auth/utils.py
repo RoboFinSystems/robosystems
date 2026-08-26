@@ -202,17 +202,13 @@ def validate_api_key_with_graph(
   api_key: str,
   graph_id: str,
   db_session: Session | None = None,
-  require_scoped: bool = False,
   *,
   allow_deprovisioned: bool = False,
 ) -> User | None:
   """Validate an API key against a graph and return its user.
 
   Graph-scoped keys (``graph_id`` set on the row) are honored only for their
-  own graph and its subgraphs, regardless of how the key is carried. With
-  ``require_scoped=True`` (the MCP URL-token path), account-wide keys are
-  additionally rejected — the account credential must never be the one that
-  travels in a URL.
+  own graph and its subgraphs, regardless of how the key is carried.
 
   Returns None for an invalid key or an unauthorized graph, without
   distinguishing the two.
@@ -261,11 +257,6 @@ def validate_api_key_with_graph(
       if not _key_scope_allows(key_graph_id, graph_id):
         logger.debug(
           f"API key rejected: scoped to another graph: {api_key_hash[:8]}... -> {graph_id}"
-        )
-        return None
-      if require_scoped and not key_graph_id:
-        logger.debug(
-          f"API key rejected: account-wide key where a graph-scoped key is required: {api_key_hash[:8]}..."
         )
         return None
 
@@ -330,15 +321,6 @@ def validate_api_key_with_graph(
         _safe_cache_call("cache_graph_access", api_key_hash, graph_id, has_access=False)
       except Exception as e:
         logger.error(f"Failed to cache scoped-key mismatch result: {e}")
-      return None
-
-    # require_scoped rejects account-wide keys WITHOUT caching a negative
-    # access decision — the same key remains valid for this graph via headers,
-    # and the graph-access cache is shared across carriage paths.
-    if require_scoped and not key_record.graph_id:
-      logger.debug(
-        f"API key rejected: account-wide key where a graph-scoped key is required: {api_key_hash[:8]}..."
-      )
       return None
 
     from ..graph.utils import MultiTenantUtils
