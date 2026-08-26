@@ -311,10 +311,16 @@ class TestToolsList:
       "destructiveHint": False,
       "idempotentHint": True,
     }
-    # Cypher reads carry neither hint — the StatementKernel classifies them
-    # per statement, and they can carry writes on a tenant graph.
-    assert "readOnlyHint" not in tools["read-graph-cypher"]["annotations"]
-    assert "destructiveHint" not in tools["read-graph-cypher"]["annotations"]
+    # Cypher reads are hinted read-only: assert_read_only_cypher refuses
+    # every non-read statement on every execution path, so the hint
+    # promises what the tool enforces (directory scans reject unhinted tools).
+    assert tools["read-graph-cypher"]["annotations"] == {
+      "title": "Read graph cypher",
+      "openWorldHint": False,
+      "readOnlyHint": True,
+      "destructiveHint": False,
+      "idempotentHint": True,
+    }
 
   def test_write_tools_are_hinted_destructive(self):
     assert remote._tool_annotations("close-period", "Close period") == {

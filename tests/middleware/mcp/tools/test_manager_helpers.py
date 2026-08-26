@@ -108,6 +108,46 @@ class TestGetToolDefinitionHelpers:
     assert "financial-statement-analysis" in names
     assert "live-financial-statement" not in names
 
+  def test_graphql_tools_absent_on_shared_repo(self, mock_client):
+    """The GraphQL escape hatch reads the extensions OLTP schema, which a
+    shared repo like SEC does not have: introspection answers but every real
+    query errors. Neither tool is advertised there."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.EXTENSIONS_GRAPHQL_ENABLED = True
+      mock_env.MCP_GRAPHQL_ENABLED = True
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
+      names = {d["name"] for d in tools.get_tool_definitions_as_dict()}
+
+    assert tools.graphql_schema_tool is None
+    assert tools.graphql_query_tool is None
+    assert not names & {"get-graphql-schema", "query-graphql"}
+
+  def test_graphql_tools_present_on_tenant_graph(self, mock_client):
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.EXTENSIONS_GRAPHQL_ENABLED = True
+      mock_env.MCP_GRAPHQL_ENABLED = True
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
+      names = {d["name"] for d in tools.get_tool_definitions_as_dict()}
+
+    assert tools.graphql_schema_tool is not None
+    assert tools.graphql_query_tool is not None
+    assert {"get-graphql-schema", "query-graphql"} <= names
+
   def test_live_statement_tool_absent_on_read_only(self, mock_client):
     """Read-only graphs must NOT get the OLTP live-statement tool."""
     with (
