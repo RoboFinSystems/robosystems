@@ -238,8 +238,11 @@ jobs:
       - name: Run tests
         timeout-minutes: 15
         run: |
-          # Run tests (exclude slow tests)
-          uv run pytest -v --tb=short -m "not slow"
+          # Run tests (exclude slow tests), one xdist worker per runner core.
+          # Each worker gets its own platform test database, created on demand
+          # (tests/xdist_workers.py); the extensions DB stays shared, which
+          # `--dist loadfile` makes safe. Same flags as `just test`.
+          uv run pytest -n auto --dist loadfile --tb=short -m "not slow"
 
       - name: Run dbt tests
         timeout-minutes: 1

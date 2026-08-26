@@ -1,4 +1,5 @@
 import os
+import warnings
 from datetime import UTC
 from unittest.mock import Mock, patch
 
@@ -612,12 +613,15 @@ def setup_database(test_db):
     GraphCredits,
     GraphUser,
     Org,
+    OrgInvitation,
     OrgLimits,
     OrgUser,
     ScimToken,
     User,
     UserAPIKey,
     UserIdentity,
+    UserMfaRecoveryCode,
+    UserPasskey,
     UserRepository,
     UserRepositoryCredits,
     UserRepositoryCreditTransaction,
@@ -628,7 +632,10 @@ def setup_database(test_db):
     # Delete in reverse dependency order to avoid foreign key constraints.
     # UserRepository → Graph FK is ondelete=RESTRICT, so user_repository*
     # rows must be cleared before graphs. Billing tables reference orgs,
-    # so they must be cleared before orgs.
+    # so they must be cleared before orgs. Every table with a plain (NO
+    # ACTION) FK to users/orgs must appear here before User/Org: one missed
+    # table makes the User delete fail, and the rollback below then keeps
+    # *every* row of this test alive for the rest of the session.
     test_db.query(Document).delete()
     test_db.query(ConnectionCredentials).delete()
     test_db.query(Connection).delete()
@@ -646,14 +653,27 @@ def setup_database(test_db):
     test_db.query(BillingSubscription).delete()
     test_db.query(BillingCustomer).delete()
     test_db.query(OrgLimits).delete()
+    test_db.query(OrgInvitation).delete()  # references orgs and users
     test_db.query(OrgUser).delete()  # Delete org memberships before users/orgs
     test_db.query(UserIdentity).delete()  # references users
+    test_db.query(UserPasskey).delete()  # references users
+    test_db.query(UserMfaRecoveryCode).delete()  # references users
     test_db.query(ScimToken).delete()  # references orgs
     test_db.query(User).delete()
     test_db.query(Org).delete()
     test_db.commit()
-  except Exception:
+  except Exception as exc:
     test_db.rollback()
+    # Never silent: a failed cleanup leaks this test's rows into every test
+    # that follows on this session, and the failures it causes show up in
+    # unrelated files as duplicate keys — which is how a missing table in the
+    # list above went unnoticed until files ran in a new order.
+    warnings.warn(
+      f"Test database cleanup failed and was rolled back: {exc!r}. Rows from "
+      f"this test leak into later tests — add the offending table to "
+      f"setup_database's delete list.",
+      stacklevel=1,
+    )
 
 
 # SEC XBRL Testing Fixtures
