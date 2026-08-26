@@ -964,6 +964,232 @@ class TestDeprovisionService:
       assert isinstance(test_graph.deleted_at, datetime)
 
 
+class TestProviderGrantRevocationAtTeardown:
+  """Teardown deletes our copy of a connection's credentials; it must also end
+  the grant at the provider, the way the disconnect endpoint does — and it must
+  do so while the credential row still exists, because that is what the
+  provider cleanup reads."""
+
+  def _seed_quickbooks_connection(self, db_session, test_graph, test_user):
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
+
+    connection = Connection.create(
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      provider="quickbooks",
+      session=db_session,
+      realm_id="realm-departed",
+    )
+    db_session.add(
+      ConnectionCredentials(
+        connection_id=connection.id,
+        provider="quickbooks",
+        user_id=test_user.id,
+        encrypted_credentials="ciphertext-standing-in-for-a-refresh-token",
+      )
+    )
+    db_session.commit()
+    return connection.id
+
+  def _credential_rows(self, db_session, connection_id) -> int:
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
+
+    return (
+      db_session.query(ConnectionCredentials)
+      .filter(ConnectionCredentials.connection_id == connection_id)
+      .count()
+    )
+
+  def _infra(self):
+    return (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ),
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+      patch("robosystems.middleware.auth.cache.api_key_cache"),
+    )
+
+  @pytest.mark.asyncio
+  async def test_revokes_at_the_provider_while_the_credential_still_exists(
+    self, service, db_session, test_graph, test_user
+  ):
+    from robosystems.operations.providers.registry import provider_registry
+
+    connection_id = self._seed_quickbooks_connection(db_session, test_graph, test_user)
+    seen: list[tuple[str, dict, int]] = []
+
+    async def _cleanup(provider_type, connection, graph_id):
+      # The provider cleanup loads the stored token to revoke it — so the
+      # credential row must still be there when this is called.
+      seen.append(
+        (provider_type, connection, self._credential_rows(db_session, connection_id))
+      )
+
+    infra = self._infra()
+    with (
+      infra[0] as mock_get_client,
+      infra[1] as mock_alloc_cls,
+      infra[2],
+      patch.object(provider_registry, "cleanup_connection", side_effect=_cleanup),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert result.status == "success", result.errors
+    assert result.connections_revoked == 1
+    assert result.connections_deleted == 1
+    assert len(seen) == 1
+    provider_type, payload, rows_at_call = seen[0]
+    assert provider_type == "quickbooks"
+    assert payload["id"] == connection_id
+    assert payload["connection_id"] == connection_id
+    assert rows_at_call == 1, "revoke ran after the credential row was deleted"
+    assert self._credential_rows(db_session, connection_id) == 0
+
+  @pytest.mark.asyncio
+  async def test_revokes_connections_scoped_to_a_subgraph_too(
+    self, service, db_session, test_graph, test_user
+  ):
+    """Connections can be created directly on a subgraph id. Full teardown
+    cleans each subgraph's PG records, so it must revoke there as well — the
+    same leak one level down."""
+    from robosystems.operations.providers.registry import provider_registry
+
+    subgraph = Graph(
+      graph_id=f"{test_graph.graph_id}_dev",
+      graph_name="Dev Subgraph",
+      graph_type="entity",
+      org_id=test_graph.org_id,
+      graph_tier=test_graph.graph_tier,
+      parent_graph_id=test_graph.graph_id,
+      is_subgraph=True,
+      subgraph_index=0,
+      subgraph_name="dev",
+      status=GraphStatus.ACTIVE.value,
+    )
+    db_session.add(subgraph)
+    db_session.commit()
+
+    parent_conn = self._seed_quickbooks_connection(db_session, test_graph, test_user)
+    sub_conn = self._seed_quickbooks_connection(db_session, subgraph, test_user)
+    seen: list[tuple[str, str, int]] = []
+
+    async def _cleanup(provider_type, connection, graph_id):
+      seen.append(
+        (
+          connection["id"],
+          graph_id,
+          self._credential_rows(db_session, connection["id"]),
+        )
+      )
+
+    infra = self._infra()
+    with (
+      infra[0] as mock_get_client,
+      infra[1] as mock_alloc_cls,
+      infra[2],
+      patch("robosystems.operations.graph.subgraph_service.LadybugAllocationManager"),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_sub_cls,
+      patch.object(provider_registry, "cleanup_connection", side_effect=_cleanup),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+      mock_sub_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert result.status == "success", result.errors
+    assert result.subgraphs_deleted == 1
+    assert result.connections_revoked == 2
+    assert result.connections_deleted == 2
+    by_connection = {cid: (gid, rows) for cid, gid, rows in seen}
+    assert by_connection[sub_conn] == (subgraph.graph_id, 1)
+    assert by_connection[parent_conn] == (test_graph.graph_id, 1)
+    assert self._credential_rows(db_session, sub_conn) == 0
+    assert self._credential_rows(db_session, parent_conn) == 0
+
+  @pytest.mark.asyncio
+  async def test_a_failed_revoke_is_recorded_and_teardown_still_completes(
+    self, service, db_session, test_graph, test_user
+  ):
+    from robosystems.operations.providers.registry import provider_registry
+
+    connection_id = self._seed_quickbooks_connection(db_session, test_graph, test_user)
+
+    infra = self._infra()
+    with (
+      infra[0] as mock_get_client,
+      infra[1] as mock_alloc_cls,
+      infra[2],
+      patch.object(
+        provider_registry,
+        "cleanup_connection",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("intuit unreachable"),
+      ),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    # A stranded grant is an operator follow-up, not a reason to keep the
+    # tenant's data — so the teardown finishes and reports partial.
+    assert result.status == "partial"
+    assert any(connection_id in e and "revocation failed" in e for e in result.errors)
+    assert result.connections_revoked == 0
+    assert result.connections_deleted == 1
+    assert self._credential_rows(db_session, connection_id) == 0
+
+  @pytest.mark.asyncio
+  async def test_a_provider_disabled_by_flag_is_skipped_not_failed(
+    self, service, db_session, test_graph, test_user
+  ):
+    from robosystems.operations.providers.registry import provider_registry
+
+    connection_id = self._seed_quickbooks_connection(db_session, test_graph, test_user)
+
+    infra = self._infra()
+    with (
+      infra[0] as mock_get_client,
+      infra[1] as mock_alloc_cls,
+      infra[2],
+      patch.object(
+        provider_registry,
+        "cleanup_connection",
+        new_callable=AsyncMock,
+        side_effect=ValueError("Provider quickbooks is not enabled"),
+      ),
+    ):
+      mock_get_client.return_value = AsyncMock()
+      mock_alloc_cls.return_value = AsyncMock()
+
+      result = await service.deprovision_graph(
+        test_graph.graph_id, db_session, create_backup=False
+      )
+
+    assert result.status == "success", result.errors
+    assert result.connections_revoked == 0
+    assert result.connections_deleted == 1
+    assert self._credential_rows(db_session, connection_id) == 0
+
+
 class TestReportBundlePurge:
   """Published report artifacts must not outlive the tenant.
 

@@ -321,15 +321,18 @@ class DeleteSubgraphTool:
         "- To permanently remove a subgraph that is no longer needed\n"
         "- Requires admin role on the parent, and cannot target the parent "
         "graph itself\n\n"
-        "**RETURNS:** Confirmation of the deletion, echoing back the "
-        "`backup_first` flag. No backup is taken — see NOTES.\n\n"
+        "**RETURNS:** Confirmation of the deletion with `backup_created`, and "
+        "when a backup was taken its `backup_location` and `backup_id`.\n\n"
         "**PARAMETERS:**\n"
         "- subgraph_id: Full id like `{parent_id}_{name}`\n"
         "- force: Delete even if the subgraph contains data (default false)\n"
-        "- backup_first: Accepted but NOT implemented; it takes no backup\n\n"
-        "**NOTES:** This is irreversible. `backup_first` does not protect the "
-        "data and never has — to keep a copy, run `create-backup` on the "
-        "parent graph first and confirm it succeeded."
+        "- backup_first: Take a full backup of the subgraph first (default "
+        "true). It is registered on the parent graph's backup list, so it "
+        "stays listable and downloadable after the subgraph is gone. If the "
+        "backup fails, nothing is deleted.\n\n"
+        "**NOTES:** The deletion itself is irreversible; only a backup taken "
+        "here (or earlier via `create-backup` on the subgraph id) preserves "
+        "the data."
       ),
       "inputSchema": {
         "type": "object",
@@ -400,7 +403,7 @@ class DeleteSubgraphTool:
 
       service = SubgraphService()
       try:
-        await service.delete_subgraph_database(
+        deletion_result = await service.delete_subgraph_database(
           subgraph_id=subgraph_id,
           force=force,
           create_backup=backup_first,
@@ -421,7 +424,10 @@ class DeleteSubgraphTool:
       return {
         "deleted": True,
         "subgraph_id": subgraph_id,
-        "backup_created": backup_first,
+        # What happened, not what was asked.
+        "backup_created": bool(deletion_result.get("backup_created")),
+        "backup_location": deletion_result.get("backup_location"),
+        "backup_id": deletion_result.get("backup_id"),
       }
     finally:
       close()

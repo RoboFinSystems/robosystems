@@ -21,7 +21,12 @@ class DeleteSubgraphOp(BaseModel):
   )
   backup_first: bool = Field(
     default=True,
-    description="Create a backup before deleting",
+    description=(
+      "Take a full backup of the subgraph before deleting it. The backup is "
+      "registered on the parent graph's backup list, where it can be listed and "
+      "downloaded after the subgraph is gone. If the backup fails the subgraph "
+      "is not deleted."
+    ),
   )
 
 

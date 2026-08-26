@@ -432,11 +432,13 @@ class SubgraphService:
   ) -> dict[str, Any]:
     """Delete a subgraph's database. Destructive and not recoverable here.
 
-    Refuses a database that holds any nodes unless ``force`` is set.
-    ``create_backup`` is accepted but not yet implemented — take a backup
-    through the backup operations before forcing.
+    Refuses a database that holds any nodes unless ``force`` is set. With
+    ``create_backup`` a full backup of the subgraph is taken first and
+    registered on the parent graph's backup list; if that backup fails the
+    subgraph is not deleted.
 
-    Returns ``{status: "deleted"|"not_found", ...}``.
+    Returns ``{status: "deleted"|"not_found", backup_created, backup_location,
+    backup_id, ...}``.
     """
     subgraph_info = parse_subgraph_id(subgraph_id)
     if not subgraph_info:
@@ -487,6 +489,9 @@ class SubgraphService:
           "graph_id": subgraph_id,
           "message": "Subgraph database does not exist",
           "search_purged": search_purged,
+          "backup_created": False,
+          "backup_location": None,
+          "backup_id": None,
         }
 
       if is_local:
@@ -501,6 +506,16 @@ class SubgraphService:
             f"Subgraph {subgraph_id} contains data. "
             "Use force=True to delete anyway, or create a backup first."
           )
+
+      backup: dict[str, Any] = {
+        "backup_created": False,
+        "backup_location": None,
+        "backup_id": None,
+      }
+      if create_backup:
+        backup = await self._backup_before_delete(
+          subgraph_id, parent_graph_id, database_name
+        )
 
       logger.info(f"Deleting database {database_name} from instance {instance_id}")
       await client.delete_database(database_name)
@@ -517,11 +532,93 @@ class SubgraphService:
         "instance_id": instance_id,
         "deleted_at": datetime.now(UTC).isoformat(),
         "search_purged": search_purged,
+        **backup,
       }
 
+    except GraphAllocationError:
+      # Already a domain refusal with its own message (data without force, a
+      # failed pre-delete backup) — re-wrapping would only prefix it.
+      raise
     except Exception as e:
       logger.error(f"Failed to delete subgraph database {subgraph_id}: {e}")
       raise GraphAllocationError(f"Failed to delete subgraph: {e!s}")
+
+  async def _backup_before_delete(
+    self, subgraph_id: str, parent_graph_id: str, database_name: str
+  ) -> dict[str, Any]:
+    """Take a full backup of the subgraph and register it on the parent.
+
+    The subgraph's own row is hard-deleted right after this, so a backup row
+    keyed on the subgraph id would be unreachable through the listing and
+    download surfaces. Registering it under the parent — with the archive's
+    ``database_name`` recorded — keeps it on the backup list the customer
+    still has. Retention follows the parent tier's hosting window, the same
+    rule a graph's final backup uses at teardown.
+
+    Raises ``GraphAllocationError`` if the backup or its registration fails,
+    so the delete never proceeds on a promise it cannot keep.
+    """
+    from ...config.deprovisioning import get_deprovisioning_config
+    from ...database import SessionFactory
+    from ...models.core.graph import Graph
+    from ...models.core.graph.graph_backup import BackupInitiator, GraphBackup
+    from .engine.backup_manager import BackupFormat, BackupJob, BackupManager
+
+    # Independent session (see platform_session docs).
+    session = SessionFactory()
+    try:
+      parent = session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
+      tier = (
+        str(parent.graph_tier)
+        if parent is not None and parent.graph_tier
+        else "ladybug-standard"
+      )
+      retention_days = get_deprovisioning_config().get_backup_hosting_days(tier)
+
+      manager = BackupManager()
+      try:
+        metadata = await manager.create_backup(
+          BackupJob(
+            graph_id=subgraph_id,
+            backup_format=BackupFormat.FULL_DUMP,
+            retention_days=retention_days,
+            compression=True,
+          )
+        )
+      except Exception as e:
+        raise GraphAllocationError(
+          f"Backup of subgraph {subgraph_id} failed, so it was not deleted: {e!s}"
+        ) from e
+
+      try:
+        row = GraphBackup.from_completed_export(
+          graph_id=parent_graph_id,
+          database_name=database_name,
+          metadata=metadata,
+          s3_bucket=manager.s3_adapter.bucket_name,
+          retention_days=retention_days,
+          initiated_by=BackupInitiator.FINAL.value,
+        )
+        session.add(row)
+        session.commit()
+      except Exception as e:
+        session.rollback()
+        raise GraphAllocationError(
+          f"Backup of subgraph {subgraph_id} landed at {metadata.s3_key} but could "
+          f"not be registered, so it was not deleted: {e!s}"
+        ) from e
+
+      logger.info(
+        f"Backed up subgraph {subgraph_id} to {metadata.s3_key} before deletion "
+        f"(registered on parent {parent_graph_id} as backup {row.id})"
+      )
+      return {
+        "backup_created": True,
+        "backup_location": metadata.s3_key,
+        "backup_id": row.id,
+      }
+    finally:
+      session.close()
 
   async def _purge_subgraph_search_index(self, subgraph_id: str) -> bool:
     """Drop a subgraph's documents from the shared OpenSearch index.
