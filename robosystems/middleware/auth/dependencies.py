@@ -719,33 +719,27 @@ def _resolve_oauth_principal(
   return principal
 
 
-async def get_current_user_with_graph_or_url_token(
+async def get_current_user_with_graph_or_oauth(
   request: Request,
   graph_id: str,
   api_key: str = Security(API_KEY_HEADER),
-  token: str | None = Query(
-    None,
-    description="Graph-scoped API key carried in the URL, for MCP connector "
-    "clients that cannot send custom headers",
-  ),
 ) -> User:
-  """Graph authentication for the per-graph MCP route: all three carriages.
+  """Graph authentication for the per-graph MCP route: bearer or header.
 
   ``Authorization: Bearer <opaque OAuth token>`` (when the OAuth surface is
   on) resolves through the grant bound to this exact route — the URL fixes
   the graph, and the token's audience must name it. Otherwise header and
-  JWT authentication behave exactly like ``get_current_user_with_graph``,
-  and the ``token`` query parameter is consulted only when neither is
-  present: it honors only keys whose scope covers the URL's graph — an
-  account-wide key in a URL is rejected outright, so the account credential
-  can never be the one that travels in a URL.
+  JWT authentication behave exactly like ``get_current_user_with_graph``.
+
+  Nothing is read from the query string. The ``?token=`` door that once
+  carried a graph-scoped key for connector clients that could not send
+  headers was retired when OAuth covered those clients; a URL that still
+  carries one is treated as unauthenticated and gets the discovery
+  challenge, which is exactly what moves such a client onto OAuth.
 
   A missing credential answers 401 with a ``WWW-Authenticate`` challenge
   that names the route's protected-resource metadata; that header is what
   lets an OAuth client find the authorization server.
-
-  ``token`` is in the sensitive-query-params redaction list
-  (``middleware/logging.py``), so it never appears in logged URLs.
   """
   from robosystems.config import env
 
@@ -753,55 +747,12 @@ async def get_current_user_with_graph_or_url_token(
   if oauth_token is not None and env.MCP_OAUTH_ENABLED:
     return _resolve_oauth_principal(request, oauth_token, graph_id).user
 
-  authorization = request.headers.get("authorization")
-  has_header_auth = bool(api_key) or bool(
-    authorization and authorization.startswith("Bearer ")
-  )
-
-  if has_header_auth or not token:
-    # Normal path — including the no-credentials 401, which carries the
-    # discovery challenge so an OAuth-capable client can proceed.
-    try:
-      return await get_current_user_with_graph(request, graph_id, api_key)
-    except HTTPException as exc:
-      if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-        exc.headers = _mcp_challenge_headers(graph_id)
-      raise
-
-  client_ip = request.client.host if request.client else None
-  user_agent = request.headers.get("user-agent")
-  endpoint = str(request.url.path)
-
-  user = validate_api_key_with_graph(token, graph_id, require_scoped=True)
-  if user:
-    _stash_api_key_identity(request, token, user, auth_method="api_key_url")
-    SecurityAuditLogger.log_auth_success(
-      user_id=str(user.id),
-      ip_address=client_ip,
-      user_agent=user_agent,
-      auth_method="api_key_url",
-    )
-    return user
-
-  SecurityAuditLogger.log_security_event(
-    event_type=SecurityEventType.API_KEY_INVALID,
-    ip_address=client_ip,
-    user_agent=user_agent,
-    endpoint=endpoint,
-    details={
-      "api_key_prefix": token[:8] if token else "",
-      "graph_id": graph_id,
-      "carriage": "url_token",
-    },
-    risk_level="high",
-  )
-  # Same deliberate conflation as the header path: the two cases are
-  # indistinguishable to the caller.
-  raise HTTPException(
-    status_code=status.HTTP_403_FORBIDDEN,
-    detail="Invalid API key or access denied to graph",
-    headers={"WWW-Authenticate": "ApiKey"},
-  )
+  try:
+    return await get_current_user_with_graph(request, graph_id, api_key)
+  except HTTPException as exc:
+    if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+      exc.headers = _mcp_challenge_headers(graph_id)
+    raise
 
 
 async def get_oauth_mcp_principal(

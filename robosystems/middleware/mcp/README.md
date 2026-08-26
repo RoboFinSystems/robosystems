@@ -300,4 +300,4 @@ the relevant SSM flag, in that order. Pool exhaustion is usually a missing
 - [`../../schemas/README.md`](../../schemas/README.md) — `schema_extensions` conventions
 - [`../../graph_api/README.md`](../../graph_api/README.md) — the Graph API this client calls
 - [`../graph/README.md`](../graph/README.md) — graph routing
-- [`../auth/README.md`](../auth/README.md) — the MCP `?token=` door and key scoping
+- [`../auth/README.md`](../auth/README.md) — the MCP credential carriages and key scoping

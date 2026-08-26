@@ -509,9 +509,7 @@ class TestGraphScopedKeys:
     with patch(
       "robosystems.middleware.auth.utils.GraphUser.user_has_access", return_value=True
     ):
-      result = validate_api_key_with_graph(
-        "rfsc" + "a" * 64, "kg123", require_scoped=True
-      )
+      result = validate_api_key_with_graph("rfsc" + "a" * 64, "kg123")
 
     assert result is not None
     assert result.id == "user123"
@@ -531,47 +529,6 @@ class TestGraphScopedKeys:
     mock_cache.cache_graph_access.assert_called_once()
     assert mock_cache.cache_graph_access.call_args[1]["has_access"] is False
 
-  @patch("robosystems.database.SessionFactory")
-  @patch("robosystems.middleware.auth.utils.api_key_cache")
-  @patch("robosystems.middleware.auth.utils.UserAPIKey")
-  def test_require_scoped_rejects_account_wide_key_without_cache_poison(
-    self, mock_api_key_class, mock_cache, mock_session_factory
-  ):
-    """require_scoped rejects account-wide keys but must not cache a negative
-    access decision — the same key stays valid for this graph via headers."""
-    mock_cache.get_cached_api_key_validation.return_value = None
-    mock_cache.get_cached_graph_access.return_value = None
-    self._db_setup(mock_api_key_class, mock_session_factory, None)
-
-    result = validate_api_key_with_graph("rfs" + "a" * 64, "kg123", require_scoped=True)
-
-    assert result is None
-    mock_cache.cache_graph_access.assert_not_called()
-
-  @patch("robosystems.middleware.auth.utils.api_key_cache")
-  @patch("robosystems.middleware.auth.utils.UserAPIKey")
-  def test_require_scoped_rejects_account_wide_key_cache_hit(
-    self, mock_api_key_class, mock_cache
-  ):
-    """require_scoped rejection also holds on the cache-hit path."""
-    mock_cache.get_cached_api_key_validation.return_value = {
-      "is_active": True,
-      "user_data": {
-        "id": "user123",
-        "name": "Test User",
-        "email": "test@example.com",
-        "email_verified": True,
-        "is_active": True,
-        "key_graph_id": None,
-      },
-    }
-    mock_cache.get_cached_graph_access.return_value = True
-
-    result = validate_api_key_with_graph("rfs" + "a" * 64, "kg123", require_scoped=True)
-
-    assert result is None
-    mock_api_key_class.get_by_key.assert_not_called()
-
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
   def test_scoped_key_subgraph_allowed_cache_hit(self, mock_api_key_class, mock_cache):
@@ -589,9 +546,7 @@ class TestGraphScopedKeys:
     }
     mock_cache.get_cached_graph_access.return_value = True
 
-    result = validate_api_key_with_graph(
-      "rfsc" + "a" * 64, "kg123_dev", require_scoped=True
-    )
+    result = validate_api_key_with_graph("rfsc" + "a" * 64, "kg123_dev")
 
     assert result is not None
     assert result.id == "user123"

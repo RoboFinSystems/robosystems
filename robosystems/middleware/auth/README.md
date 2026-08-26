@@ -95,34 +95,38 @@ refuses scoped keys. A NULL `graph_id` means account-wide. The authoritative
 check is always the row's `graph_id`; the `rfsc` prefix is legibility for
 humans and incident response only.
 
-### Credentials in query parameters — the two deliberate doors
+### Credentials in query parameters — the one deliberate door
 
-Header carriage is the rule. Exactly two routes accept a credential via a
-`?token=` query parameter, both because their client cannot send custom
-headers. Both are covered by the redaction list in `middleware/logging.py` and
-by the OTel span redaction in `middleware/otel/setup.py`.
+Header carriage is the rule. Exactly one route accepts a credential via a
+`?token=` query parameter, because its client cannot send custom headers. It is
+covered by the redaction list in `middleware/logging.py` and by the OTel span
+redaction in `middleware/otel/setup.py`.
 
-| Route                                  | Dependency                              | Accepts                          | Why                                       |
-| -------------------------------------- | --------------------------------------- | -------------------------------- | ----------------------------------------- |
-| `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse`                  | **JWT only** (30-min TTL)        | browser `EventSource` cannot set headers  |
-| `POST /v1/graphs/{graph_id}/mcp`       | `get_current_user_with_graph_or_url_token` | **graph-scoped API key only** | MCP connector clients cannot set headers  |
+| Route                                  | Dependency             | Accepts                   | Why                                      |
+| -------------------------------------- | ---------------------- | ------------------------- | ---------------------------------------- |
+| `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse` | **JWT only** (30-min TTL) | browser `EventSource` cannot set headers |
 
-The graph-agnostic `POST /v1/mcp` (`get_oauth_mcp_principal`) is the
-counterpoint: it accepts **only** an OAuth bearer — no header key, no
-`?token=`, no JWT — because its tenant scope lives in the credential's grant
-and no other credential type carries one. Every other carriage there answers
-401 with the discovery challenge, not 403. A missing credential on either MCP
-route answers 401 with `WWW-Authenticate: Bearer resource_metadata="…"` naming
-the route's protected-resource document; that header is how an OAuth client
-finds the authorization server.
+There used to be a second door: `POST /v1/graphs/{graph_id}/mcp` honored a
+graph-scoped API key in `?token=`, for MCP connector clients that could not set
+headers. It was the bridge to OAuth and was retired once OAuth covered those
+clients — a durable key in a URL lands in client config, org-shared connector
+settings, and third-party logs, none of which a header reaches. The per-graph
+MCP route (`get_current_user_with_graph_or_oauth`) now reads nothing from the
+query string: an OAuth bearer bound to that exact route, or the header
+carriages exactly as `get_current_user_with_graph`. A URL that still carries a
+`?token=` is unauthenticated and gets the discovery challenge, which is what
+moves that client onto OAuth. The graph-agnostic `POST /v1/mcp`
+(`get_oauth_mcp_principal`) accepts **only** an OAuth bearer — no header key,
+no JWT — because its tenant scope lives in the credential's grant and no other
+credential type carries one; every other carriage there answers 401 with the
+discovery challenge, not 403. A missing credential on either MCP route answers
+401 with `WWW-Authenticate: Bearer resource_metadata="…"` naming the route's
+protected-resource document; that header is how an OAuth client finds the
+authorization server.
 
-The asymmetry is deliberate: the SSE door carries a short-lived session token,
-so no extra restriction is needed; the MCP door carries a durable key, so only
-graph-scoped keys are honored and account-wide keys are hard-rejected — the
-account credential must never be the one that travels in a URL. Header and JWT
-auth take precedence on both; the query parameter is consulted only when
-neither is present. Do not add a third door without matching this table, the
-redaction lists, and a scope story.
+The SSE door is tolerable because it carries a short-lived session token. Do
+not add another door without matching this table, the redaction lists, and a
+scope story.
 
 ### SSO — one word, two mechanisms
 
@@ -237,7 +241,7 @@ deliberately JWT-only for surfaces that manage sign-in credentials themselves.
 | `get_optional_user`                             | `User \| None` | Never raises for missing credentials.                             |
 | `get_optional_jwt_user`                         | `User \| None` | JWT sessions only — API keys read as anonymous. Passkey enrollment. |
 | `get_current_user_with_graph`                   | `User`  | Reads `graph_id` from the path and validates access.                    |
-| `get_current_user_with_graph_or_url_token`      | `User`  | As above, plus the `?token=` door. MCP only.                            |
+| `get_current_user_with_graph_or_oauth`          | `User`  | As above, plus an OAuth bearer bound to the route. MCP only.            |
 | `get_current_user_sse`                          | `User`  | As `get_current_user`, plus the `?token=` JWT door.                     |
 | `get_current_user_with_repository_access`       | `User`  | Shared repositories (SEC, etc.); resolves subgraphs to the parent.      |
 | `get_repository_user_dependency(repo, op_type)` | factory | Builds the above bound to a specific repository and operation type.     |

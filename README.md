@@ -281,7 +281,7 @@ RoboSystems provides comprehensive client libraries for building applications:
 
 ### MCP (Model Context Protocol)
 
-Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); your API key goes in the `X-API-Key` header, or rides inside a generated connector URL for clients that cannot send headers.
+Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); sign in with OAuth, or put your API key in the `X-API-Key` header — never in the URL.
 
 **OAuth — sign in and pick a graph.** The graph-agnostic endpoint `https://api.robosystems.ai/v1/mcp` accepts OAuth only: an OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint, you sign in and choose the graph the connection covers, and the client holds a revocable token bound to that graph — no key to paste. Per-graph URLs accept OAuth too, alongside the key header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
 
@@ -306,7 +306,7 @@ claude mcp add --transport http robosystems-sec \
 }
 ```
 
-**Claude (claude.ai / Desktop)** — generate a connector URL from the **MCP page** in the app (`/connect`) and paste it into Settings → Connectors → Add custom connector. The URL carries its own graph-scoped API key (Claude's connectors can't send custom headers), valid only for that graph and revocable anytime from Settings → API Keys.
+**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp` (or a per-graph URL): Claude detects OAuth and you pick the graph at sign-in. The **MCP page** in the app (`/connect`) has every snippet filled in for the selected graph, and mints graph-scoped keys for header-only clients.
 
 - **Documentation**: [Wiki guide](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
 

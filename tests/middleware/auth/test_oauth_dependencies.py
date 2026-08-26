@@ -83,9 +83,7 @@ class TestPerGraphRoute:
       patch.object(deps, "publish_principal") as publish,
       patch.object(deps, "SecurityAuditLogger"),
     ):
-      user = await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      user = await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert user.id == "user-1"
     publish.assert_called_once()
     assert publish.call_args.args[2] == "oauth"
@@ -102,9 +100,7 @@ class TestPerGraphRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 401
     challenge = exc.value.headers["WWW-Authenticate"]
     assert 'error="invalid_token"' in challenge
@@ -123,9 +119,7 @@ class TestPerGraphRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 401
 
   async def test_invalid_token_is_401(self):
@@ -135,9 +129,7 @@ class TestPerGraphRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 401
     assert 'error="invalid_token"' in exc.value.headers["WWW-Authenticate"]
 
@@ -153,9 +145,7 @@ class TestPerGraphRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 403
     assert 'error="insufficient_scope"' in exc.value.headers["WWW-Authenticate"]
 
@@ -165,9 +155,7 @@ class TestPerGraphRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 401
     challenge = exc.value.headers["WWW-Authenticate"]
     assert challenge.startswith("Bearer resource_metadata=")
@@ -181,8 +169,8 @@ class TestPerGraphRoute:
     with patch.object(
       deps, "get_current_user_with_graph", return_value=user
     ) as header_path:
-      resolved = await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key="rfsabc", token=None
+      resolved = await deps.get_current_user_with_graph_or_oauth(
+        request, KG, api_key="rfsabc"
       )
     assert resolved.id == "user-2"
     header_path.assert_awaited_once()
@@ -199,9 +187,7 @@ class TestPerGraphRouteFlagOff:
       patch.object(deps, "extract_device_fingerprint", return_value=None),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_current_user_with_graph_or_url_token(
-        request, KG, api_key=None, token=None
-      )
+      await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     validate.assert_not_called()
     assert exc.value.status_code == 401
     assert exc.value.headers["WWW-Authenticate"] == "Bearer, ApiKey"
@@ -220,7 +206,7 @@ class TestAgnosticRoute:
       patch.object(deps, "publish_principal"),
       patch.object(deps, "SecurityAuditLogger"),
     ):
-      resolved = await deps.get_oauth_mcp_principal(request, api_key=None, token=None)
+      resolved = await deps.get_oauth_mcp_principal(request, api_key=None)
     assert resolved.graph_id == KG
     assert request.state.auth_graph_id == KG
 
@@ -231,7 +217,7 @@ class TestAgnosticRoute:
       patch.object(deps, "SecurityAuditLogger"),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_oauth_mcp_principal(request, api_key=None, token=None)
+      await deps.get_oauth_mcp_principal(request, api_key=None)
     assert exc.value.status_code == 401
 
   @pytest.mark.parametrize(
@@ -266,5 +252,5 @@ class TestAgnosticRoute:
       patch.object(env, "MCP_OAUTH_ENABLED", False),
       pytest.raises(HTTPException) as exc,
     ):
-      await deps.get_oauth_mcp_principal(request, api_key=None, token=None)
+      await deps.get_oauth_mcp_principal(request, api_key=None)
     assert exc.value.status_code == 404
