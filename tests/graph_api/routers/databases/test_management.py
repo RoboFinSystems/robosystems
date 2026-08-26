@@ -15,6 +15,39 @@ from robosystems.graph_api.models.database import (
 from robosystems.middleware.graph.types import NodeType
 
 
+def _deleted(graph_id: str) -> dict:
+  """The shape the manager returns for a delete that found the file."""
+  return {
+    "status": "success",
+    "graph_id": graph_id,
+    "existed": True,
+    "removed": [f"/data/{graph_id}.lbug"],
+    "message": f"Database {graph_id} deleted successfully",
+  }
+
+
+def _lock_patches(acquired: bool):
+  """Every delete takes the base's materialization lock; stub it as held or not."""
+  from contextlib import ExitStack
+  from unittest.mock import AsyncMock
+
+  lock = MagicMock()
+  lock.acquire = AsyncMock(return_value=acquired)
+  lock.release = AsyncMock()
+  lock.acquired = acquired
+  stack = ExitStack()
+  stack.enter_context(
+    patch(
+      "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+      MagicMock(return_value=lock),
+    )
+  )
+  stack.enter_context(
+    patch("robosystems.config.valkey_registry.create_async_redis_client")
+  )
+  return stack
+
+
 class TestDatabaseManagementRouter:
   """Test cases for database management endpoints."""
 
@@ -231,20 +264,24 @@ class TestDatabaseManagementRouter:
     assert "not found" in data["detail"].lower()
 
   def test_delete_database_success(self, client):
-    """Test successful database deletion."""
+    """The manager's result rides through: a caller can tell a delete that
+    found the file from one that only disposed its side stores."""
     # Configure the mock service that was already injected
     from robosystems.graph_api.core.ladybug import get_ladybug_service
 
     mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.WRITER
-    mock_service.db_manager.delete_database.return_value = None
-    response = client.delete("/databases/kg1a2b3c4d5")
+    mock_service.db_manager.delete_database.return_value = _deleted("kg1a2b3c4d5")
+    with _lock_patches(acquired=True):
+      response = client.delete("/databases/kg1a2b3c4d5")
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["status"] == "success"
     assert "kg1a2b3c4d5" in data["message"]
+    assert data["existed"] is True
+    assert data["removed"] == ["/data/kg1a2b3c4d5.lbug"]
     mock_service.db_manager.delete_database.assert_called_once_with(
       "kg1a2b3c4d5", preserve_duckdb=False
     )
@@ -270,10 +307,11 @@ class TestDatabaseManagementRouter:
     mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.SHARED_MASTER
-    mock_service.db_manager.delete_database.return_value = None
-    with patch(
-      "robosystems.graph_api.routers.databases.management.logger"
-    ) as mock_logger:
+    mock_service.db_manager.delete_database.return_value = _deleted("sec")
+    with (
+      patch("robosystems.graph_api.routers.databases.management.logger") as mock_logger,
+      _lock_patches(acquired=True),
+    ):
       response = client.delete("/databases/sec")
 
       assert response.status_code == status.HTTP_200_OK
@@ -372,12 +410,15 @@ class TestDatabaseManagementRouter:
 
 
 class TestTransientDeleteLockGuard:
-  """Deleting a `-wip`/`-prev` artifact must not race an in-flight build.
+  """No delete may race an in-flight build.
 
-  The route acquires the base's materialization lock (the same lock the
-  build holds for its whole run) before unlinking, and honours the
+  A `-wip`/`-prev` artifact is what the build writes into, and a base-name
+  delete sweeps that graph's `-wip`/`-prev` alongside it — so the route
+  acquires the base's materialization lock (the same lock the build holds
+  for its whole run) before unlinking, whatever the name, and honours the
   X-Materialization-Lock-Token passthrough so the materialize flow's own
-  cleanup deletes don't 409 against the lock it already holds.
+  deletes (its WIP cleanup, its base on a rebuild) don't 409 against the
+  lock it already holds.
   """
 
   @pytest.fixture
@@ -388,7 +429,7 @@ class TestTransientDeleteLockGuard:
     mock_service = MagicMock()
     mock_service.read_only = False
     mock_service.node_type = NodeType.WRITER
-    mock_service.db_manager.delete_database.return_value = None
+    mock_service.db_manager.delete_database.return_value = _deleted("kg1a2b3c4d5")
     app.dependency_overrides[get_ladybug_service] = lambda: mock_service
     return TestClient(app)
 
@@ -461,13 +502,38 @@ class TestTransientDeleteLockGuard:
     lock_cls.assert_not_called()
     self._service(client).db_manager.delete_database.assert_called_once()
 
-  def test_regular_delete_never_touches_the_lock(self, client):
+  def test_base_name_delete_refused_while_build_holds_lock(self, client):
+    """A base-name delete sweeps the graph's -wip/-prev, so it takes the same
+    lock the build holds: a rebuild or a teardown racing an extensions build
+    gets a 409 to retry on, not a silently destroyed build."""
     lock_cls = self._lock_mock(acquire_result=False)
-    with patch(
-      "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
-      lock_cls,
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
+    ):
+      response = client.delete("/databases/kg1a2b3c4d5")
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert lock_cls.call_args.args[1] == "kg1a2b3c4d5"
+    self._service(client).db_manager.delete_database.assert_not_called()
+
+  def test_base_name_delete_holds_and_releases_the_lock(self, client):
+    lock_cls = self._lock_mock(acquire_result=True)
+    with (
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        lock_cls,
+      ),
+      patch("robosystems.config.valkey_registry.create_async_redis_client"),
     ):
       response = client.delete("/databases/kg1a2b3c4d5")
 
     assert response.status_code == status.HTTP_200_OK
-    lock_cls.assert_not_called()
+    self._service(client).db_manager.delete_database.assert_called_once_with(
+      "kg1a2b3c4d5", preserve_duckdb=False
+    )
+    lock_cls.return_value.acquire.assert_awaited_once()
+    lock_cls.return_value.release.assert_awaited_once()
