@@ -50,11 +50,14 @@ TASK_TIMEOUTS: dict[str, int] = {
   # The close publishes one QuickBooks entry per in-period draft, and the
   # Intuit SDK sets no per-request timeout — a single call that hits the
   # retry ladder backs off ~31s on its own. A 34-entry month runs ~30s;
-  # a heavier one, or one slow call, runs much longer. The failure mode
-  # decides the size: an under-budget close is cancelled mid-flight while
-  # its thread keeps running and can still commit, so the operation reports
-  # FAILED for a close that landed. Matching the operator's 600s leaves room
-  # for that rather than inviting it.
+  # a heavier one, or one slow call, runs much longer. The budget cannot
+  # cancel the thread the close runs on; ``BaseTask.run_blocking`` waits one
+  # more budget for it to land and reports what it produced, and only past
+  # that grace is the close abandoned as still running. So this number is
+  # doing three jobs — the budget, the grace, and (as ``fence_wait_ms``) how
+  # long a worker close waits behind another close of the same period — and
+  # matching the operator's 600s keeps the ordinary overrun inside the
+  # first of them.
   "period_close": 600,  # 10 minutes
 }
 DEFAULT_TASK_TIMEOUT = 120  # 2 minutes

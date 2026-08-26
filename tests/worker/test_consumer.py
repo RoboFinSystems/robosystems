@@ -247,3 +247,93 @@ async def test_timeout_marks_failed(
 
   # Cleanup still called
   mock_cleanup.assert_called_once()
+
+
+class ThreadBackedTask(BaseTask):
+  """A task whose work runs where the budget cannot cancel it."""
+
+  release: Any = None
+
+  async def execute(self) -> dict[str, Any]:
+    return await self.run_blocking(self._work)
+
+  def _work(self) -> dict[str, Any]:
+    import time
+
+    if self.release is not None:
+      self.release.wait(5)
+    else:
+      time.sleep(0.2)
+    return {"landed": True}
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_thread_that_lands_past_its_budget_is_completed_not_failed(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """The failure mode named in TASK_TIMEOUTS: a close whose thread keeps
+  running after the budget cancels the coroutine, and then commits. The
+  operation must report what the thread produced, not FAILED — and cleanup
+  must run only once the thread has joined."""
+  mock_tracer.return_value = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
+  TASK_REGISTRY["test_thread"] = ThreadBackedTask
+
+  with (
+    patch("robosystems.worker.consumer.TASK_TIMEOUTS", {}),
+    patch("robosystems.worker.consumer.DEFAULT_TASK_TIMEOUT", 0.05),
+    patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 1),
+  ):
+    await _call_process_task(_make_task_data("test_thread"), mock_queue, mock_manager)
+
+  mock_manager.complete_operation.assert_called_once()
+  assert mock_manager.complete_operation.call_args[1]["result"] == {"landed": True}
+  mock_manager.fail_operation.assert_not_called()
+  mock_cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_a_thread_abandoned_past_its_grace_is_reported_as_still_running(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """'Timed out' alone reads as 'did not happen' and invites a retry of a
+  write that may be about to land. The stored failure has to say the work is
+  still in flight."""
+  import asyncio
+  import threading
+
+  mock_tracer.return_value = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
+
+  release = threading.Event()
+
+  class StuckTask(ThreadBackedTask):
+    pass
+
+  StuckTask.release = release
+  TASK_REGISTRY["test_stuck"] = StuckTask
+
+  try:
+    with (
+      patch("robosystems.worker.consumer.TASK_TIMEOUTS", {}),
+      patch("robosystems.worker.consumer.DEFAULT_TASK_TIMEOUT", 0.05),
+      patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 0.05),
+    ):
+      await _call_process_task(_make_task_data("test_stuck"), mock_queue, mock_manager)
+  finally:
+    release.set()
+
+  mock_manager.fail_operation.assert_called_once()
+  call_args = mock_manager.fail_operation.call_args
+  assert "may still complete" in call_args[1]["error"]
+  assert call_args[1]["error_details"]["still_running"] is True
+  mock_manager.complete_operation.assert_not_called()
+  mock_cleanup.assert_called_once()
+  # Let the released thread finish before the loop closes.
+  await asyncio.sleep(0.1)

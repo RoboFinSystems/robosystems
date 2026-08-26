@@ -34,6 +34,10 @@ def register_task(task_type: str):
         f"{TASK_REGISTRY[task_type].__name__} -> {cls.__name__}"
       )
     TASK_REGISTRY[task_type] = cls
+    # The handler's own key into TASK_TIMEOUTS: a task sizes the waits it
+    # makes (a fence wait, a thread-join grace) from its budget, and the
+    # budget is looked up by this string.
+    cls.task_type = task_type
     return cls
 
   return decorator

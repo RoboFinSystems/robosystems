@@ -36,6 +36,7 @@ from robosystems.worker.task_protection import (
   TaskProtectionManager,
 )
 from robosystems.worker.tasks import get_task_handler
+from robosystems.worker.tasks.base import BaseTask
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +183,17 @@ async def _process_task(
     # Only long tasks need scale-in protection; short ones drain within the
     # SIGTERM grace, so protecting them would just churn the ECS API.
     protect_task = timeout >= PROTECT_MIN_TIMEOUT_SECONDS
+    handler: BaseTask | None = None
     try:
       if protect_task:
         await protection.protect()
       await manager.emit_progress(task_id, "Starting...", progress_percent=0)
 
       handler = handler_cls(task_id, graph_id, user_id, params, manager)
+      # The budget cancels the coroutine. A handler running sync work in a
+      # thread (`BaseTask.run_blocking`) absorbs that cancel for one more
+      # budget so the thread can land and report its real outcome; the
+      # TimeoutError below reaches us only once that grace is also spent.
       result = await asyncio.wait_for(handler.execute(), timeout=timeout)
       duration_ms = (time.time() - start_time) * 1000
 
@@ -205,21 +211,37 @@ async def _process_task(
 
     except TimeoutError:
       duration_ms = (time.time() - start_time) * 1000
+      # A thread the budget could not cancel is still running: the stored
+      # error must say so, because "timed out" alone reads as "did not
+      # happen" and invites a retry of a write that may be about to land.
+      still_running = bool(handler is not None and handler.abandoned_work)
       logger.error(
-        f"Task timed out: {task_type} ({task_id}) after {timeout}s",
+        f"Task timed out: {task_type} ({task_id}) after {duration_ms / 1000:.0f}s "
+        f"(budget {timeout}s)"
+        + (
+          "; blocking work is still running and may still commit"
+          if still_running
+          else ""
+        ),
         extra={
           "task_id": task_id,
           "task_type": task_type,
           "graph_id": graph_id,
           "timeout_seconds": timeout,
           "duration_ms": duration_ms,
+          "still_running": still_running,
         },
       )
       await _fail_quietly(
         manager,
         task_id,
-        error=f"Task timed out after {timeout}s",
-        error_details={"error_type": "TimeoutError", "timeout_seconds": timeout},
+        error=f"Task timed out after {timeout}s"
+        + ("; work already in flight may still complete" if still_running else ""),
+        error_details={
+          "error_type": "TimeoutError",
+          "timeout_seconds": timeout,
+          "still_running": still_running,
+        },
       )
 
     except Exception as e:
@@ -244,8 +266,13 @@ async def _process_task(
 
     finally:
       # Clear scale-in protection — worker is idle again and safe to terminate.
+      # A thread abandoned past its grace loses this: that is the accepted
+      # residue of bounding the join, and it is logged above as such.
       if protect_task:
         await protection.unprotect()
       # Remove from inflight — task completed (successfully or not)
       await queue.lrem(inflight_key, 1, task_json)
+      # Disposal closes checked-in connections only; one an abandoned thread
+      # still holds stays open to it and is discarded on checkin rather than
+      # handed to the next tenant's pool.
       cleanup_connections()

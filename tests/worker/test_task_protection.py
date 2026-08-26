@@ -123,3 +123,11 @@ def test_protection_lease_outlives_longest_task():
   """The protection lease must exceed the longest task timeout."""
   longest = max([*TASK_TIMEOUTS.values(), DEFAULT_TASK_TIMEOUT])
   assert longest < PROTECTION_EXPIRES_MINUTES * 60
+
+
+def test_protection_lease_outlives_a_thread_backed_task_and_its_grace():
+  """A task that runs its work through ``BaseTask.run_blocking`` can hold the
+  worker for its budget plus one more budget of thread-join grace. The lease
+  must cover both, or the close it exists to protect is exposed to scale-in
+  precisely when it is running long."""
+  assert 2 * TASK_TIMEOUTS["period_close"] < PROTECTION_EXPIRES_MINUTES * 60

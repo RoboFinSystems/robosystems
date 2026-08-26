@@ -191,7 +191,9 @@ def acquire_shared_period_fence(
 
 
 @contextmanager
-def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
+def exclusive_period_fence(
+  graph_id: str, period: str, *, detail: str, wait_ms: int | None = None
+):
   """Hold a session-scoped exclusive fence on ``(graph_id, period)``.
 
   Uses a dedicated connection, not the caller's ``Session``. The close
@@ -199,6 +201,14 @@ def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
   would return the session's connection to the pool and drop any lock
   taken on it. A session-scoped advisory lock on a connection we hold
   ourselves survives that commit.
+
+  ``wait_ms`` bounds the wait for whoever holds the fence. The default is
+  the request wait, per the module rule: a request handler that sat out a
+  whole close would pin a pooled connection for it. A background closer —
+  the worker close — passes its own budget instead. What it is most likely
+  waiting on is another close of the same period, and waiting turns a
+  duplicate dispatch into "already closed, here is the receipt" rather
+  than a refusal the operator is told to retry.
 
   Unlock (or invalidate the connection, so the pool discards it) before
   returning the connection — a pooled connection still holding this
@@ -208,10 +218,11 @@ def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
 
   ident = period_fence_ident(graph_id, period)
   params = {"classid": _PERIOD_FENCE_CLASS, "ident": ident}
+  wait = _LOCK_TIMEOUT_MS if wait_ms is None else wait_ms
   conn = get_extensions_engine().connect()
   acquired = False
   try:
-    conn.execute(text(f"SET lock_timeout = '{_LOCK_TIMEOUT_MS}ms'"))
+    conn.execute(text(f"SET lock_timeout = '{wait}ms'"))
     try:
       conn.execute(
         text("SELECT pg_advisory_lock(:classid, hashtext(:ident))"),
@@ -221,7 +232,7 @@ def exclusive_period_fence(graph_id: str, period: str, *, detail: str):
     except OperationalError as exc:
       # The failed statement aborted the transaction; roll it back and clear
       # the session-level timeout before the connection goes back to the
-      # pool, or the next borrower inherits a 3s lock_timeout it never set.
+      # pool, or the next borrower inherits a lock_timeout it never set.
       try:
         conn.rollback()
         conn.execute(text("RESET lock_timeout"))

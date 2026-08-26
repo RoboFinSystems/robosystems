@@ -81,7 +81,7 @@ def _stub_period_lock(session, fp):
 
 
 class TestClosePeriodResponseMapping:
-  def _run(self, result: PeriodCloseResult):
+  def _run(self, result: PeriodCloseResult, **overrides):
     close_service = MagicMock()
     close_service.close.return_value = result
     with (
@@ -98,6 +98,7 @@ class TestClosePeriodResponseMapping:
         note=None,
         service=MagicMock(),
         close_service=close_service,
+        **overrides,
       )
 
   def test_stamp_fields_ride_the_response(self):
@@ -151,6 +152,22 @@ class TestClosePeriodResponseMapping:
     self._run(_close_result())
     _noop_exclusive_period_fence.assert_called_once()
     assert _noop_exclusive_period_fence.call_args.args[:2] == (GRAPH_ID, "2026-01")
+
+  def test_a_request_close_takes_the_request_fence_wait(
+    self, _noop_exclusive_period_fence
+  ):
+    """REST and the synchronous MCP paths pass nothing, and get the fence's
+    own default — the bounded request wait."""
+    self._run(_close_result())
+    assert _noop_exclusive_period_fence.call_args.kwargs["wait_ms"] is None
+
+  def test_a_background_close_passes_its_wait_through_to_the_fence(
+    self, _noop_exclusive_period_fence
+  ):
+    """The worker close is a background job and waits its budget; the
+    command has to hand that to the fence rather than swallow it."""
+    self._run(_close_result(), fence_wait_ms=600_000)
+    assert _noop_exclusive_period_fence.call_args.kwargs["wait_ms"] == 600_000
 
 
 class TestReopenRetractsCanonicalSets:
