@@ -154,13 +154,11 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   create-deployment:
-    needs: [runner, test, stack-config]
+    needs: [runner]
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     # Every deploy-* job fans in through this one, so the production
-    # environment's protection rules (required reviewer, deployment branches)
-    # gate the whole run here, once. The image build sits behind it too:
-    # nothing reaches ECR or Docker Hub for a run that was never approved.
-    # Tests and the stack config run before the pause.
+    # environment's protection rules gate the whole run here, once. It runs
+    # first so approval is immediate; tests run during the wait, build after.
     environment: production
     outputs:
       deployment_id: ${{ steps.deployment.outputs.deployment_id }}
@@ -181,7 +179,7 @@ jobs:
           description: "Production Deployment In Progress"
 
   deploy-vpc:
-    needs: [runner, create-deployment, stack-config]
+    needs: [runner, create-deployment, stack-config, test]
     uses: ./.github/workflows/deploy-vpc.yml
     with:
       # Stack & Repository Configuration
@@ -211,7 +209,7 @@ jobs:
     secrets: inherit
 
   deploy-s3:
-    needs: [runner, create-deployment, stack-config]
+    needs: [runner, create-deployment, stack-config, test]
     uses: ./.github/workflows/deploy-s3.yml
     with:
       # Stack & Repository Configuration
@@ -368,7 +366,7 @@ jobs:
   deploy-grafana:
     # Observability disabled by default - set OBSERVABILITY_ENABLED_PROD=true to enable
     if: vars.OBSERVABILITY_ENABLED_PROD == 'true'
-    needs: [runner, create-deployment, stack-config]
+    needs: [runner, create-deployment, stack-config, test]
     uses: ./.github/workflows/deploy-grafana.yml
     with:
       # Stack & Repository Configuration
@@ -726,6 +724,7 @@ jobs:
     needs:
       [
         runner,
+        test,
         build,
         stack-config,
         create-deployment,
@@ -745,6 +744,7 @@ jobs:
     if: |
       always() &&
       needs.runner.result == 'success' &&
+      needs.test.result == 'success' &&
       needs.build.result == 'success' &&
       needs.stack-config.result == 'success' &&
       needs.create-deployment.result == 'success' &&
@@ -866,6 +866,8 @@ jobs:
     needs:
       [
         runner,
+        test,
+        build,
         create-deployment,
         deploy-vpc,
         deploy-graph,
@@ -874,6 +876,7 @@ jobs:
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
+        deploy-opensearch,
         deploy-bastion,
         deploy-api,
         deploy-dagster,
