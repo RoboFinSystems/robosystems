@@ -104,7 +104,10 @@ class CypherOperator(Operator):
   async def run(self, ctx: OperatorContext) -> OperatorResult:
     limits = OperatorConfig.get_mode_limits(ctx.mode.value)
     max_results = self._get_max_results(ctx.mode)
-    # One iteration per allowed tool call, plus a final answer turn.
+    # `max_tools + 1` tool-calling turns. The ceiling has been this since the
+    # loop's first version (every mode's budget was tuned against it); the
+    # natural final answer is not a tool turn and costs nothing, and a turn
+    # whose tool calls all fail is uncharged — see run_tool_loop.
     max_iterations = int(limits.get("max_tools", 5)) + 1
     max_tokens = int(limits.get("max_output_tokens", 4000))
     output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
