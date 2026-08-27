@@ -12,7 +12,7 @@ RoboSystems has three doors into the same building. All resolve to the same `Use
 | **JWT / Bearer** | The browser frontends (robosystems-app, roboledger-app, roboinvestor-app) | `Authorization: Bearer …` | `POST /v1/auth/login` issues a token | Short-lived, auto-refreshed by the frontend session layer |
 | **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` |
 
-For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth needs a browser and a deployment with `MCP_OAUTH_ENABLED` on, so it is not the local-stack path.
+For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth is the hosted, browser-driven path rather than the local-stack one.
 
 Those three are the *credentials*. How a person proves who they are to get a JWT in the first place is a separate, configurable question: password, passkey, or an enterprise identity provider. A deployment publishes its own answer at `GET /v1/auth/providers` — see [Login Methods](#login-methods) below.
 
