@@ -5,7 +5,15 @@ the MCP spec and RFC 8252 require: an ``http`` loopback redirect
 (``localhost`` / ``127.0.0.1`` / ``[::1]``) matches regardless of port,
 because a native client (Claude Code, an IDE) binds an ephemeral port per
 run. Everything else — including ``http`` to any non-loopback host — is
-refused at registration.
+refused at registration, and a registered URI is checked again at use.
+
+A redirect URI is also required to be canonical enough that every parser
+reads the same authority from it: RFC 3986 ASCII only, no userinfo, a
+numeric port. Python's ``urlsplit`` treats a backslash as an ordinary host
+character and takes the host from after an ``@``; the WHATWG parser a
+browser runs ends the authority at the backslash. Without this rule the
+host we validate and show on the consent page is not the host the browser
+delivers the authorization code to.
 """
 
 import ipaddress
@@ -31,6 +39,13 @@ DCR_PER_IP_DAILY_CAP = 50
 DCR_PER_IP_WINDOW = timedelta(hours=24)
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+# RFC 3986 unreserved + reserved + percent. Anything outside — a backslash,
+# whitespace, control characters, non-ASCII — makes parsers disagree.
+_URI_ALLOWED_CHARS = frozenset(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  "-._~:/?#[]@!$&'()*+,;=%"
+)
 
 
 class ClientError(Exception):
@@ -98,16 +113,22 @@ def validate_redirect_uri(uri: object) -> str | None:
   """
   if not isinstance(uri, str) or not uri or len(uri) > DCR_MAX_URI_LENGTH:
     return "redirect_uris entries must be non-empty strings"
-  if any(ch.isspace() for ch in uri):
-    return "redirect_uris entries must not contain whitespace"
+  if any(ch not in _URI_ALLOWED_CHARS for ch in uri):
+    return "redirect_uris entries must be ASCII URIs without whitespace or backslashes"
   parts = urlsplit(uri)
   if parts.fragment:
     return "redirect_uris entries must not contain a fragment"
+  if "@" in parts.netloc:
+    return "redirect_uris entries must not contain userinfo"
+  try:
+    _ = parts.port
+  except ValueError:
+    return "redirect_uris entries must have a numeric port"
   scheme = parts.scheme.lower()
   if not scheme:
     return "redirect_uris entries must be absolute URIs"
   if scheme == "https":
-    return None if parts.netloc else "https redirect_uris require a host"
+    return None if parts.hostname else "https redirect_uris require a host"
   if scheme == "http":
     if _is_loopback_host(parts.hostname or ""):
       return None
@@ -300,8 +321,12 @@ def authenticate_client(client: OAuthClient, presented_secret: str | None) -> No
 def pick_redirect_uri(client: OAuthClient, presented: str | None) -> str:
   """Resolve the redirect for an authorization request: the presented one
   when it matches a registration, else the sole registered one when the
-  client omitted it, else ``invalid_request``."""
-  registered: list[str] = list(client.redirect_uris or [])
+  client omitted it, else ``invalid_request``.
+
+  Registered URIs are re-validated here, so a row written under an earlier,
+  looser rule is refused at use and not only at registration."""
+  stored: list[str] = list(client.redirect_uris or [])
+  registered = [uri for uri in stored if validate_redirect_uri(uri) is None]
   if presented:
     if not isinstance(presented, str) or len(presented) > DCR_MAX_URI_LENGTH:
       raise ClientError("invalid_request", "redirect_uri is not registered")
