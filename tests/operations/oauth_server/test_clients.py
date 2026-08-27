@@ -303,6 +303,23 @@ class TestRegisterAndResolve:
       == "http://localhost:9999/callback"
     )
 
+  def test_pick_redirect_uri_validates_the_presented_value(self, test_db):
+    # A canonical loopback registration must not be matchable by a presented
+    # value whose parsed host is loopback but whose browser destination is
+    # not: the loopback match compares hosts, and the presented string is
+    # what the browser is sent to.
+    client, _ = register_dynamic_client(
+      VSCODE_BODY, registration_ip=None, session=test_db
+    )
+    with pytest.raises(ClientError) as exc:
+      pick_redirect_uri(client, "http://attacker.example\\@127.0.0.1/")
+    assert exc.value.error == "invalid_request"
+    with pytest.raises(ClientError):
+      pick_redirect_uri(client, "http://user@127.0.0.1:51000/")
+    assert (
+      pick_redirect_uri(client, "http://127.0.0.1:51000/") == "http://127.0.0.1:51000/"
+    )
+
   def test_deactivated_client_is_unusable(self, test_db):
     client, _ = register_dynamic_client(
       CURSOR_BODY, registration_ip=None, session=test_db

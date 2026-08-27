@@ -323,12 +323,15 @@ def pick_redirect_uri(client: OAuthClient, presented: str | None) -> str:
   when it matches a registration, else the sole registered one when the
   client omitted it, else ``invalid_request``.
 
-  Registered URIs are re-validated here, so a row written under an earlier,
-  looser rule is refused at use and not only at registration."""
+  Both sides are held to the canonical form: registered URIs are
+  re-validated here, so a row written under an earlier, looser rule is
+  refused at use, and the presented value is validated before any match —
+  the loopback match compares parsed hosts, and it is the presented string,
+  not the registered one, that the browser is eventually sent to."""
   stored: list[str] = list(client.redirect_uris or [])
   registered = [uri for uri in stored if validate_redirect_uri(uri) is None]
   if presented:
-    if not isinstance(presented, str) or len(presented) > DCR_MAX_URI_LENGTH:
+    if validate_redirect_uri(presented) is not None:
       raise ClientError("invalid_request", "redirect_uri is not registered")
     for uri in registered:
       if redirect_uri_matches(uri, presented):
