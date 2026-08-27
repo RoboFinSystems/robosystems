@@ -37,6 +37,22 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 - Usage tracking via `last_used_at` timestamp
 - Validation results are cached in Valkey (encrypted and signed; see Application-Level Encryption); deactivating or deleting a key invalidates its cache entry
 
+### OAuth 2.1 Authorization Server (MCP)
+
+**Implementation:** `robosystems/routers/oauth/server.py`, `robosystems/operations/oauth_server/`, `robosystems/middleware/auth/oauth.py`, `robosystems/models/core/user/oauth_client.py`, `oauth_grant.py`, `oauth_token.py`
+
+- Runtime-gated by `MCP_OAUTH_ENABLED` (SSM `features/MCP_OAUTH_ENABLED`); the endpoints and discovery documents return 404 when it is off
+- Discovery per RFC 8414 and RFC 9728: `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` (root and per MCP route); an unauthenticated MCP request receives a 401 with `WWW-Authenticate: Bearer resource_metadata="…"` naming the route's metadata document
+- Authorization code with PKCE only: `code_challenge_method` must be `S256`, `response_types` may only be `code`, grant types are `authorization_code` and `refresh_token`
+- Resource indicators (RFC 8707): `resource` must be one of this server's MCP URLs and every token is bound to it; authorization responses carry `iss` (RFC 9207)
+- Pending authorizations and authorization codes live in Valkey under SHA-256 keys and are redeemed with `GETDEL`, so each is atomically single-use; codes expire after 120 seconds and login plus consent must finish within 10 minutes
+- Consent requires a browser session (JWT); API keys are refused. One grant is one graph: the user chooses the graph on the consent screen, and every token minted from that grant reaches only that graph, intersected with the user's existing role
+- Tokens are opaque (`rfso` access, `rfsr` refresh) and stored as SHA-256 digests with an 8-character identification prefix; access tokens expire after 1 hour, refresh tokens after 90 days and rotate on use — a rotated refresh token presented again is treated as replay and revokes its entire token family
+- Revocation: RFC 7009 at `/v1/oauth/revoke`; revoking a grant revokes its tokens; account deactivation and session-version bumps revoke all of a user's OAuth tokens. Validation results are cached in the same encrypted, signed Valkey store as API keys, keyed by token digest, and revocation clears the entry
+- Client registration: RFC 7591 dynamic registration at `/v1/oauth/register` — redirect URIs limited to HTTPS, loopback HTTP, or native custom schemes, at most 10 per client, a per-IP cap of 50 registrations per day, and registrations that never consent expire after 24 hours; Client ID Metadata Documents are fetched over HTTPS from public addresses only, without following redirects, capped at 64 KB and 5 seconds, and must declare the `client_id` they were fetched from; pre-registered clients are managed at `/admin/v1/oauth/clients`, with `rfsos`-prefixed secrets stored as SHA-256 digests
+- Dedicated rate-limit categories (`oauth_authorize`, `oauth_consent`, `oauth_token`, `oauth_register`); anonymous callers get one tenth of each limit per IP
+- Structured audit records for authorization start and rejection, consent denial, PKCE failure, code/client mismatch, refresh-token replay, and registration rejection
+
 ### Authentication Protection
 
 **Implementation:** `robosystems/security/auth_protection.py`
@@ -197,6 +213,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
 - Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Tier`, `X-RateLimit-Category`; a 429 additionally carries `X-RateLimit-Reset` and `Retry-After`
 - Sensitive auth endpoints: login (5/5min) and register (3/hour), keyed by client IP; JWT refresh (20/min), keyed by the caller's identity while its token still parses and by client IP once it does not
 - Auth endpoints fail closed: if the limiter backend is unavailable, login and registration are denied rather than left unprotected
+- MCP OAuth endpoints carry their own categories (`oauth_authorize` 120/min, `oauth_consent` 120/min, `oauth_token` 300/min, `oauth_register` 50/min); anonymous callers get one tenth of each limit per IP, and dynamic registration is additionally capped at 50 per IP per day
 
 ### Admission Control
 
@@ -273,6 +290,7 @@ Live compliance posture and audit artifacts are published in the [RoboSystems Tr
   - Security: injection attempt, rate limit exceeded, suspicious activity
   - Operations: data import, timeout, financial transaction
   - Identity lifecycle: OIDC login denied, SCIM provisioning, org and graph membership changes, passkey enrollment, MFA challenges
+  - MCP OAuth: authorization rejected, consent denied, PKCE failure, refresh-token replay, client registration rejected
 - Risk level classification: LOW, MEDIUM, HIGH, CRITICAL
 - Controlled by `SECURITY_AUDIT_ENABLED` environment variable
 - Centralized collection via CloudWatch; emits custom security metrics off the request path (see CloudWatch Integration)
@@ -442,7 +460,7 @@ Production environment enforces at startup:
 
 - AWS shared responsibility model (AWS manages physical/infrastructure security)
 - All third-party APIs use encrypted connections
-- OAuth 2.0 for QuickBooks integration
+- OAuth 2.0 for the QuickBooks integration (RoboSystems as the client); MCP clients authenticate to RoboSystems with OAuth 2.1 (see Authentication and Access Control)
 - Read-only access for SEC EDGAR data
 
 
