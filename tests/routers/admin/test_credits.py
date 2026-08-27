@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -74,17 +73,11 @@ def _make_graph_credit_pool(
   return pool
 
 
-class _FakePlan(str, Enum):
-  """Fake enum so .value works like the router expects."""
-
-  STARTER = "starter"
-
-
 def _make_repo_credit_pool(
   user_repository_id="ur_abc123",
   user_id="usr_456",
   repository_type="sec",
-  repository_plan=_FakePlan.STARTER,
+  repository_plan="starter",
   current_balance=Decimal("500.0"),
   monthly_allocation=Decimal("1000.0"),
   credits_consumed_this_month=Decimal("200.0"),

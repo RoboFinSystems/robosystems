@@ -669,6 +669,108 @@ class TestSharedRepositorySubgraphBilling:
     assert mock_check.call_args.kwargs["repository_name"] == "sec"
 
 
+@pytest.mark.unit
+class TestSharedRepositoryPlanIsAPlainString:
+  """`UserRepository.repository_plan` is a plain `String` column, but the
+  shared-repository read paths kept reading `.repository_plan.value` from the
+  enum era. Nothing called them until the operator credit pre-flight made
+  `check_credit_balance` their first caller — after which every operator run
+  on `sec` was refused with `'str' object has no attribute 'value'`, fail-closed
+  and rendered to the user as "Insufficient credits".
+
+  The fixtures carry a real `str`, never a MagicMock attribute: a MagicMock
+  answers `.value` happily, which is exactly how the admin router tests hid
+  this. `access_level` stays a real enum, so its `.value` is legitimate.
+  """
+
+  @pytest.fixture
+  def credit_service(self):
+    with patch("robosystems.middleware.billing.cache.credit_cache"):
+      return CreditService(MagicMock())
+
+  @staticmethod
+  def _pool(is_active: bool = True, balance: str = "500"):
+    user_repo = MagicMock()
+    user_repo.is_active = is_active
+    user_repo.repository_type = "sec"
+    user_repo.repository_plan = "starter"  # plain str, as the column is
+    pool = MagicMock()
+    pool.user_repository = user_repo
+    pool.current_balance = Decimal(balance)
+    return pool
+
+  def test_operator_preflight_on_sec_is_funded(self, credit_service):
+    with patch(
+      "robosystems.operations.graph.credit_service.UserRepositoryCredits"
+    ) as mock_urc:
+      mock_urc.get_user_repository_credits.return_value = self._pool()
+      result = credit_service.check_credit_balance(
+        "sec", Decimal("14"), user_id="user123", operation_type="agent_call"
+      )
+
+    assert result["has_sufficient_credits"] is True
+    assert result["available_credits"] == 500.0
+    assert "error" not in result
+
+  def test_access_check_reports_the_plan_string(self, credit_service):
+    with patch(
+      "robosystems.operations.graph.credit_service.UserRepositoryCredits"
+    ) as mock_urc:
+      mock_urc.get_user_repository_credits.return_value = self._pool()
+      funded = credit_service.check_shared_repository_access(
+        user_id="user123",
+        repository_name="sec",
+        operation_type="agent_call",
+        required_credits=Decimal("14"),
+      )
+      mock_urc.get_user_repository_credits.return_value = self._pool(is_active=False)
+      inactive = credit_service.check_shared_repository_access(
+        user_id="user123",
+        repository_name="sec",
+        operation_type="agent_call",
+        required_credits=Decimal("14"),
+      )
+
+    assert funded["has_access"] is True
+    assert funded["addon_tier"] == "starter"
+    assert inactive["has_access"] is False
+    assert inactive["addon_tier"] == "starter"
+
+  def test_zero_cost_operation_is_included(self, credit_service):
+    with (
+      patch(
+        "robosystems.operations.graph.credit_service.UserRepositoryCredits"
+      ) as mock_urc,
+      patch(
+        "robosystems.operations.graph.credit_service._get_credit_costs",
+        return_value={"query": Decimal("0.0")},
+      ),
+    ):
+      mock_urc.get_user_repository_credits.return_value = self._pool()
+      result = credit_service.check_shared_repository_access(
+        user_id="user123", repository_name="sec", operation_type="query"
+      )
+
+    assert result["operation_included"] is True
+    assert result["addon_tier"] == "starter"
+
+  def test_repository_summary_reports_the_plan_string(self, credit_service):
+    from robosystems.models.core.user.user_repository import RepositoryAccessLevel
+
+    record = MagicMock()
+    record.id = "ur_1"
+    record.repository_type = "sec"
+    record.repository_plan = "starter"
+    record.access_level = RepositoryAccessLevel.READ
+    record.user_credits.get_summary.return_value = {"balance": 1.0}
+    with patch("robosystems.operations.graph.credit_service.UserRepository") as mock_ur:
+      mock_ur.get_user_repositories.return_value = [record]
+      summary = credit_service.get_shared_repository_summary("user123")
+
+    assert summary["sec"]["subscription_tier"] == "starter"
+    assert summary["sec"]["access_level"] == "read"
+
+
 class TestCreditConsumptionWritesUsageLedger:
   """Consuming credits records a `graph_usage` row, not just a credit ledger
   transaction.
