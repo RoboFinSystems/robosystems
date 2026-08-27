@@ -127,7 +127,7 @@ claude mcp add --transport http robosystems-sec \
 https://api.robosystems.ai/v1/mcp
 ```
 
-An OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint (`/.well-known/oauth-protected-resource/v1/mcp`), sends you to sign in, and the consent screen is where you choose the graph the connection covers — your own graphs or a subscribed repository such as `sec`. The client then holds a revocable token bound to that graph; revoke it at any time and the connection stops. Per-graph URLs accept OAuth too, alongside the `X-API-Key` header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
+An OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint (`/.well-known/oauth-protected-resource/v1/mcp`), sends you to sign in, and the consent screen is where you choose the graph the connection covers — your own graphs or a subscribed repository such as `sec`. The client then holds a revocable token bound to that graph; revoke it at any time and the connection stops. Per-graph URLs accept OAuth too, alongside the `X-API-Key` header.
 
 Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the MCP page in the app (`/connect`) mints keys scoped to one graph for exactly that. Credentials never travel in the URL. Clients without HTTP transport support can use the [stdio bridge](https://www.npmjs.com/package/@robosystems/mcp) in proxy mode.
 
@@ -149,8 +149,10 @@ TypeScript client for Node.js and browser applications - [@robosystems/client](h
 
 ## Authentication
 
-All API endpoints require authentication using API keys. Include your API key in the request headers:
+The REST, GraphQL and per-graph MCP endpoints authenticate with an API key in the request headers:
 
 ```
 X-API-Key: rfs*
 ```
+
+The graph-agnostic MCP endpoint (`/v1/mcp`) accepts OAuth 2.1 bearer tokens only — see **Connect via MCP** above. Browser sessions use JWTs issued by `POST /v1/auth/login`.
