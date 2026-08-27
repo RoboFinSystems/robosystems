@@ -507,6 +507,107 @@ class TestAIClientCreateMessage:
     assert "tool_choice" not in request_body
 
   @pytest.mark.unit
+  async def test_cache_token_counts_are_parsed_from_usage(self):
+    """Bedrock reports cache reads/writes in usage; with caching in play
+    `input_tokens` is the uncached remainder, so all three must be carried."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "cached"}],
+      "usage": {
+        "input_tokens": 337,
+        "output_tokens": 50,
+        "cache_read_input_tokens": 3905,
+        "cache_creation_input_tokens": 12,
+      },
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
+    assert result.input_tokens == 337
+    assert result.cache_read_input_tokens == 3905
+    assert result.cache_creation_input_tokens == 12
+
+  @pytest.mark.unit
+  async def test_cache_token_counts_default_to_zero_when_absent(self):
+    """Older recorded responses (and non-caching models) carry no cache
+    fields — they must read as zero, not KeyError."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
+    assert result.cache_read_input_tokens == 0
+    assert result.cache_creation_input_tokens == 0
+
+  @pytest.mark.unit
+  async def test_claude_4_family_sends_temperature_without_thinking(self):
+    """The 4.x family accepts temperature and does not run adaptive thinking,
+    so no thinking override is sent."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-sonnet-4-6",
+      temperature=0.3,
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["temperature"] == 0.3
+    assert "thinking" not in request_body
+
+  @pytest.mark.unit
+  async def test_sonnet_5_family_omits_temperature_and_disables_thinking(self):
+    """Claude 5-family models 400 on `temperature` and run adaptive thinking
+    unless explicitly disabled — thinking tokens would bill as output and eat
+    max_tokens."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-sonnet-5",
+      temperature=0.3,
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert "temperature" not in request_body
+    assert request_body["thinking"] == {"type": "disabled"}
+
+  @pytest.mark.unit
   async def test_create_message_formats_messages_correctly(self):
     """Test that messages are formatted into the correct dict structure."""
     client, mock_bedrock = _make_ai_client()

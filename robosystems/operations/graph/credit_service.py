@@ -996,6 +996,8 @@ class CreditService:
     operation_description: str,
     metadata: dict[str, Any] | None = None,
     user_id: str | None = None,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
   ) -> dict[str, Any]:
     """Bill an AI call from its measured token counts.
 
@@ -1004,11 +1006,16 @@ class CreditService:
     (``AIBillingConfig.apply_minimum_charge``) applies, so a tiny call still
     costs the minimum. An unrecognised model falls back to Sonnet pricing
     rather than billing zero.
+
+    ``input_tokens`` is the uncached input as Bedrock reports it; cache reads
+    and writes are billed at their own rates. All four counts land in the
+    transaction metadata so the CUR reconciliation stays reproducible.
     """
     from ...config import AIBillingConfig
 
     model_pricing_map = {
       # Bedrock model IDs as they come back from AIClient
+      "us.anthropic.claude-sonnet-5": "anthropic_claude_5_sonnet",
       "us.anthropic.claude-sonnet-4-6": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-5-20250929-v1:0": "anthropic_claude_4_sonnet",
       "us.anthropic.claude-sonnet-4-20250514-v1:0": "anthropic_claude_4_sonnet",
@@ -1022,21 +1029,32 @@ class CreditService:
 
     if not pricing:
       logger.warning(f"No pricing found for model {model}, using Sonnet pricing")
-      pricing = {"input": Decimal("3"), "output": Decimal("15")}
+      pricing = AIBillingConfig.TOKEN_PRICING["anthropic_claude_4_sonnet"]
 
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]
-    raw_cost = input_cost + output_cost
+    cache_read_cost = (Decimal(cache_read_input_tokens) / 1000) * pricing["cache_read"]
+    cache_write_cost = (Decimal(cache_creation_input_tokens) / 1000) * pricing[
+      "cache_write"
+    ]
+    raw_cost = input_cost + output_cost + cache_read_cost + cache_write_cost
 
     total_cost = AIBillingConfig.apply_minimum_charge(raw_cost)
 
     token_metadata = {
       "input_tokens": input_tokens,
       "output_tokens": output_tokens,
-      "total_tokens": input_tokens + output_tokens,
+      "cache_read_input_tokens": cache_read_input_tokens,
+      "cache_creation_input_tokens": cache_creation_input_tokens,
+      "total_tokens": input_tokens
+      + output_tokens
+      + cache_read_input_tokens
+      + cache_creation_input_tokens,
       "model": model,
       "input_cost": str(input_cost),
       "output_cost": str(output_cost),
+      "cache_read_cost": str(cache_read_cost),
+      "cache_write_cost": str(cache_write_cost),
       "raw_cost": str(raw_cost),
       "total_cost": str(total_cost),
       "minimum_charge_applied": total_cost > raw_cost,

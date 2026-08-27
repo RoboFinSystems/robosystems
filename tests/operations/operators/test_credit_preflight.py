@@ -198,6 +198,8 @@ class TestUnbilledCallsStopTheLoop:
     response = MagicMock()
     response.input_tokens = 100
     response.output_tokens = 50
+    response.cache_read_input_tokens = 0
+    response.cache_creation_input_tokens = 0
     response.model = "claude-sonnet"
     return response
 
@@ -258,6 +260,35 @@ class TestUnbilledCallsStopTheLoop:
     # Refused before spending, not after.
     assert ai.create_message.await_count == 1
 
+  @pytest.mark.asyncio
+  async def test_cache_tokens_are_accumulated_and_forwarded(self) -> None:
+    """With caching on, `input_tokens` is only the uncached remainder — the
+    cache counts must reach both the run totals and the consumer, or 90%+ of
+    the input goes unbilled."""
+    response = MagicMock()
+    response.input_tokens = 337
+    response.output_tokens = 50
+    response.cache_read_input_tokens = 3905
+    response.cache_creation_input_tokens = 12
+    response.model = "claude-sonnet"
+
+    consumer = MagicMock()
+    consumer.consume = AsyncMock(return_value=1.5)
+    tracked, _ = self._tracked(consumer, response)
+
+    await tracked.create_message(messages=[])
+    await tracked.create_message(messages=[])
+
+    assert tracked.total_tokens == {
+      "input": 674,
+      "output": 100,
+      "cache_read": 7810,
+      "cache_write": 24,
+    }
+    kwargs = consumer.consume.await_args.kwargs
+    assert kwargs["cache_read_input_tokens"] == 3905
+    assert kwargs["cache_creation_input_tokens"] == 12
+
 
 class TestConsumersSignalFailureByRaising:
   @pytest.mark.asyncio
@@ -308,3 +339,29 @@ class TestConsumersSignalFailureByRaising:
       )
 
     assert credits == 12.5
+
+  @pytest.mark.asyncio
+  async def test_session_consumer_forwards_cache_counts_to_the_meter(self) -> None:
+    from robosystems.operations.operators.credit_consumer import SessionCreditConsumer
+
+    service = MagicMock()
+    service.consume_ai_tokens.return_value = {"success": True, "credits_consumed": 2.0}
+
+    with patch(
+      "robosystems.operations.graph.credit_service.CreditService",
+      return_value=service,
+    ):
+      await SessionCreditConsumer(MagicMock()).consume(
+        graph_id=GRAPH_ID,
+        user_id=USER_ID,
+        input_tokens=337,
+        output_tokens=50,
+        model="claude-sonnet",
+        operation_description="test",
+        cache_read_input_tokens=3905,
+        cache_creation_input_tokens=12,
+      )
+
+    kwargs = service.consume_ai_tokens.call_args.kwargs
+    assert kwargs["cache_read_input_tokens"] == 3905
+    assert kwargs["cache_creation_input_tokens"] == 12

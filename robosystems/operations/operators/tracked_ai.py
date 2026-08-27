@@ -48,8 +48,15 @@ class TrackedAIClient:
     self._user_id = user_id
     self._credit_consumer = credit_consumer
 
-    # Accumulated totals across all calls in this context
-    self.total_tokens: dict[str, int] = {"input": 0, "output": 0}
+    # Accumulated totals across all calls in this context. "input" is the
+    # uncached input only — cache reads/writes are tracked (and billed)
+    # separately, mirroring how Bedrock reports and prices them.
+    self.total_tokens: dict[str, int] = {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0,
+    }
     self.total_credits: float = 0.0
     self.call_count: int = 0
     self._unbilled_call: str | None = None
@@ -95,6 +102,8 @@ class TrackedAIClient:
 
     self.total_tokens["input"] += response.input_tokens
     self.total_tokens["output"] += response.output_tokens
+    self.total_tokens["cache_read"] += response.cache_read_input_tokens
+    self.total_tokens["cache_write"] += response.cache_creation_input_tokens
     self.call_count += 1
 
     # No consumer means no billing at all — tests, and contexts with no
@@ -108,6 +117,8 @@ class TrackedAIClient:
           output_tokens=response.output_tokens,
           model=response.model,
           operation_description=operation_description,
+          cache_read_input_tokens=response.cache_read_input_tokens,
+          cache_creation_input_tokens=response.cache_creation_input_tokens,
         )
         self.total_credits += credits
       except Exception as e:
@@ -123,7 +134,9 @@ class TrackedAIClient:
     """
     detail = (
       f"graph={self._graph_id} user={self._user_id} "
-      f"tokens=({response.input_tokens}/{response.output_tokens}): {reason}"
+      f"tokens=({response.input_tokens}/{response.output_tokens}"
+      f"+cache {response.cache_read_input_tokens}r/"
+      f"{response.cache_creation_input_tokens}w): {reason}"
     )
     self._unbilled_call = detail
     logger.error(f"AI call completed but could not be billed — {detail}")

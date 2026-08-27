@@ -5,6 +5,8 @@ Exercises: routers/graphs/credits.py → operations/graph/credit_service.py → 
 
 from decimal import Decimal
 
+import pytest
+
 from robosystems.operations.graph.credit_service import (
   CreditService,
   get_operation_cost,
@@ -173,3 +175,46 @@ class TestCreditServiceFlow:
     )
     assert result["success"] is True
     assert result["credits_consumed"] > 0
+
+  def test_consume_ai_tokens_prices_all_four_token_classes(
+    self, test_db, test_graph_with_credits
+  ):
+    """Uncached input, output, cache reads, and cache writes each bill at
+    their own rate (3.3 / 16.5 / 0.33 / 4.125 per 1K for Sonnet 4.x)."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+
+    service = CreditService(test_db)
+    result = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=1000,
+      output_tokens=1000,
+      model="us.anthropic.claude-sonnet-4-6",
+      operation_description="Cache pricing test",
+      user_id=str(credits.user_id),
+      cache_read_input_tokens=10000,
+      cache_creation_input_tokens=1000,
+    )
+    assert result["success"] is True
+    # 3.3 + 16.5 + 10 * 0.33 + 4.125
+    assert float(result["credits_consumed"]) == pytest.approx(27.225)
+
+  def test_consume_ai_tokens_sonnet_5_uses_its_own_rate(
+    self, test_db, test_graph_with_credits
+  ):
+    """The Sonnet 5 model id maps to its own pricing entry (2.2/11 per 1K),
+    not the Sonnet 4 rates."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+
+    service = CreditService(test_db)
+    result = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=1000,
+      output_tokens=1000,
+      model="us.anthropic.claude-sonnet-5",
+      operation_description="Sonnet 5 pricing test",
+      user_id=str(credits.user_id),
+    )
+    assert result["success"] is True
+    assert float(result["credits_consumed"]) == pytest.approx(13.2)

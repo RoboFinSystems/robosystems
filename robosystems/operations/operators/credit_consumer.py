@@ -34,6 +34,8 @@ class CreditConsumer(Protocol):
     output_tokens: int,
     model: str,
     operation_description: str,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
   ) -> float:
     """Consume credits for an AI call. Returns credits consumed.
 
@@ -60,6 +62,8 @@ class SessionCreditConsumer:
     output_tokens: int,
     model: str,
     operation_description: str,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
   ) -> float:
     from robosystems.operations.graph.credit_service import CreditService
 
@@ -71,6 +75,8 @@ class SessionCreditConsumer:
       model=model,
       operation_description=operation_description,
       user_id=user_id,
+      cache_read_input_tokens=cache_read_input_tokens,
+      cache_creation_input_tokens=cache_creation_input_tokens,
     )
 
     if result.get("success"):
@@ -95,6 +101,8 @@ class FactoryCreditConsumer:
     output_tokens: int,
     model: str,
     operation_description: str,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
   ) -> float:
     from robosystems.db.platform import SessionFactory
     from robosystems.operations.graph.credit_service import CreditService
@@ -109,6 +117,8 @@ class FactoryCreditConsumer:
         model=model,
         operation_description=operation_description,
         user_id=user_id,
+        cache_read_input_tokens=cache_read_input_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
       )
 
       if result.get("success"):
@@ -134,5 +144,7 @@ class NoOpCreditConsumer:
     output_tokens: int,
     model: str,
     operation_description: str,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
   ) -> float:
     return 0.0

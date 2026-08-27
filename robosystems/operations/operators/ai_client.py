@@ -11,7 +11,12 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from robosystems.config import BedrockModel, OperatorConfig, env
+from robosystems.config import (
+  BedrockModel,
+  OperatorConfig,
+  env,
+  model_accepts_sampling_params,
+)
 from robosystems.logger import logger
 
 
@@ -28,9 +33,14 @@ class AIMessage:
 class AIResponse:
   content: str
   model: str
+  # With prompt caching in play, `input_tokens` is the UNCACHED input only;
+  # the true input is input + cache_read + cache_creation. All three must
+  # reach the meter or cached tokens go unbilled.
   input_tokens: int
   output_tokens: int
   stop_reason: str | None = None
+  cache_read_input_tokens: int = 0
+  cache_creation_input_tokens: int = 0
   # Full response content blocks (text + tool_use). Populated for tool-use
   # loops; `content` above is the concatenated text for simple callers.
   content_blocks: list[dict[str, Any]] = field(default_factory=list)
@@ -161,9 +171,17 @@ class AIClient:
     request_body: dict[str, Any] = {
       "anthropic_version": "bedrock-2023-05-31",
       "max_tokens": max_tokens,
-      "temperature": temperature,
       "messages": message_dicts,
     }
+
+    if model_accepts_sampling_params(model):
+      request_body["temperature"] = temperature
+    else:
+      # Claude 5-family models 400 on `temperature` and run adaptive thinking
+      # by default; thinking tokens would bill as output and eat max_tokens,
+      # so it is explicitly disabled until adopted deliberately. (Bedrock also
+      # requires thinking disabled whenever tool_choice forces a tool.)
+      request_body["thinking"] = {"type": "disabled"}
 
     if system:
       request_body["system"] = system
@@ -190,12 +208,17 @@ class AIClient:
       b.get("text", "") for b in blocks if isinstance(b, dict) and "text" in b
     )
 
+    usage = response_body["usage"]
     return AIResponse(
       content=text,
       model=model,
-      input_tokens=response_body["usage"]["input_tokens"],
-      output_tokens=response_body["usage"]["output_tokens"],
+      input_tokens=usage["input_tokens"],
+      output_tokens=usage["output_tokens"],
       stop_reason=response_body.get("stop_reason"),
+      # Bedrock returns these on every response (zeros while no cache_control
+      # is sent); .get keeps old recorded fixtures working.
+      cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+      cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
       content_blocks=blocks,
     )
 
