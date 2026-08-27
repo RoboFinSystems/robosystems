@@ -753,8 +753,7 @@ Resources:
               # access/instance roles the frontend stacks actually create
               # (robosystems-app-*, roboledger-*, roboinvestor-*), so a
               # compromised frontend workflow cannot attach policies to, or pass,
-              # backend/deploy/SSO roles. Reads stay broad; PassRole is
-              # additionally constrained by iam:PassedToService. Role-name
+              # backend/deploy/SSO roles. Reads stay broad. Role-name
               # prefixing alone does not stop creating a NEW privileged role
               # within the prefix — that is what FrontendRoleBoundary is for.
               # Once every app template sets PermissionsBoundary on its roles,
@@ -798,11 +797,11 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
-                Condition:
-                  StringEquals:
-                    "iam:PassedToService":
-                      - build.apprunner.amazonaws.com
-                      - tasks.apprunner.amazonaws.com
+                # No iam:PassedToService condition: App Runner does not populate
+                # that key, so any value denies the pass (a staging deploy under
+                # the conditioned statement failed at the service update). The
+                # role-name patterns above are the bound; the roles' own trust
+                # policies already limit them to the App Runner principals.
               # Setting the boundary is allowed only to this one policy, so the
               # frontend role can install the ceiling but never swap it for a
               # looser one. Removing it (DeleteRolePermissionsBoundary) is not
