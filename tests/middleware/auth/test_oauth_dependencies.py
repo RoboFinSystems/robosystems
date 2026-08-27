@@ -122,6 +122,23 @@ class TestPerGraphRoute:
       await deps.get_current_user_with_graph_or_oauth(request, KG, api_key=None)
     assert exc.value.status_code == 401
 
+  async def test_parent_grant_does_not_reach_a_subgraph_url(self):
+    """A grant is bound to one route. Unlike a graph-scoped key it does not
+    extend to the parent's subgraphs — which is why the subgraph tools'
+    credential copy branches on the carriage."""
+    subgraph = f"{KG}_dev"
+    request = _request(
+      {"authorization": f"Bearer {TOKEN}"}, path=f"/v1/graphs/{subgraph}/mcp"
+    )
+    with (
+      patch.object(deps, "validate_oauth_access_token", return_value=_principal()),
+      patch.object(deps, "SecurityAuditLogger"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_current_user_with_graph_or_oauth(request, subgraph, api_key=None)
+    assert exc.value.status_code == 401
+    assert 'error="invalid_token"' in exc.value.headers["WWW-Authenticate"]
+
   async def test_invalid_token_is_401(self):
     request = _request({"authorization": f"Bearer {TOKEN}"})
     with (

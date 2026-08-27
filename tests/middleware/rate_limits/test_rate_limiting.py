@@ -620,3 +620,29 @@ class TestScimBucketsFailClosed:
 
     scim_ip_rate_limit_dependency(request)
     assert mock_cache.check_rate_limit.call_args.kwargs["fail_closed"] is True
+
+
+class TestOAuthBucketsFailClosed:
+  """The OAuth endpoints that trigger an outbound fetch or mint a credential
+  must refuse, not run unmetered, when the limiter's store is down. The
+  consent endpoints sit behind a JWT session and stay fail-open like the
+  rest of the authenticated API."""
+
+  @pytest.mark.parametrize(
+    "dependency, bucket, closed",
+    [
+      ("oauth_authorize_rate_limit_dependency", "oauth_authorize", True),
+      ("oauth_token_rate_limit_dependency", "oauth_token", True),
+      ("oauth_register_rate_limit_dependency", "oauth_register", True),
+      ("oauth_consent_rate_limit_dependency", "oauth_consent", False),
+    ],
+  )
+  def test_bucket_posture(self, dependency, bucket, closed):
+    from robosystems.middleware.rate_limits import rate_limiting
+
+    with patch.object(rate_limiting, "create_custom_rate_limit_dependency") as factory:
+      factory.return_value = lambda request: None
+      getattr(rate_limiting, dependency)(MagicMock())
+
+    assert factory.call_args.args[2] == bucket
+    assert bool(factory.call_args.kwargs.get("fail_closed")) is closed

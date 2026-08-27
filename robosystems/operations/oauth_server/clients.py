@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.core.user.oauth_client import (
   AUTH_METHOD_NONE,
   SUPPORTED_AUTH_METHODS,
@@ -219,7 +220,9 @@ def register_dynamic_client(
   )
 
 
-def resolve_client(client_id: str | None, session: Session) -> OAuthClient:
+def resolve_client(
+  client_id: str | None, session: Session, *, allow_stale_mirror: bool = False
+) -> OAuthClient:
   """The registered, usable client for a presented ``client_id``.
 
   An HTTPS ``client_id`` is a Client ID Metadata Document: its document is
@@ -228,6 +231,14 @@ def resolve_client(client_id: str | None, session: Session) -> OAuthClient:
   rest of the flow — redirect matching, grants, the consent page — sees
   one client model. Raises ``invalid_client`` for unknown, deactivated, and
   expired-unused registrations alike — indistinguishable to the caller.
+
+  ``allow_stale_mirror`` is for the token and revocation endpoints, where
+  the client's identity only has to match the grant being refreshed: when
+  the document cannot be fetched or no longer validates, the mirrored row
+  (the last document that did) stands in, so an outage at the metadata
+  host does not take every refresh down with it. The authorization
+  endpoint never takes the fallback — a redirect URI must come from a
+  live document.
   """
   if not client_id or not isinstance(client_id, str) or len(client_id) > 512:
     raise ClientError("invalid_client", "Unknown client")
@@ -239,12 +250,21 @@ def resolve_client(client_id: str | None, session: Session) -> OAuthClient:
     if existing is not None and not existing.is_active:
       # Operator-deactivated: the document is not consulted again.
       raise ClientError("invalid_client", "Unknown client")
-    document = dict(get_client_metadata(client_id))
-    # CIMD clients authenticate with PKCE alone (``none``); a document that
-    # names an auth method we do not speak (private_key_jwt) still gets the
-    # public-client treatment rather than a rejection.
-    document["token_endpoint_auth_method"] = AUTH_METHOD_NONE
-    metadata = validate_registration_metadata(document)
+    try:
+      document = dict(get_client_metadata(client_id))
+      # CIMD clients authenticate with PKCE alone (``none``); a document that
+      # names an auth method we do not speak (private_key_jwt) still gets the
+      # public-client treatment rather than a rejection.
+      document["token_endpoint_auth_method"] = AUTH_METHOD_NONE
+      metadata = validate_registration_metadata(document)
+    except ClientError as exc:
+      if allow_stale_mirror and existing is not None and existing.is_usable:
+        logger.warning(
+          "CIMD document unavailable; serving the mirrored registration",
+          extra={"oauth_client_id": existing.id, "error": exc.error},
+        )
+        return existing
+      raise
     return OAuthClient.upsert_cimd(
       client_id=client_id,
       client_name=metadata.client_name,

@@ -16,7 +16,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -288,11 +288,18 @@ class OAuthToken(Model):
 
   @classmethod
   def cleanup_expired(cls, session: Session, *, older_than_days: int = 30) -> int:
-    """Delete tokens expired more than ``older_than_days`` ago. Recently
-    expired rows are kept so a late refresh replay is still detectable."""
+    """Delete tokens that expired, or were revoked, more than
+    ``older_than_days`` ago. Recently dead rows are kept so a late refresh
+    replay is still detectable — rotation revokes the previous access token
+    and a replay revokes a whole family, so revoked rows accrue as fast as
+    expired ones."""
     cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
     try:
-      count = session.query(cls).filter(cls.expires_at < cutoff).delete()
+      count = (
+        session.query(cls)
+        .filter(or_(cls.expires_at < cutoff, cls.revoked_at < cutoff))
+        .delete(synchronize_session=False)
+      )
       session.commit()
     except SQLAlchemyError:
       session.rollback()

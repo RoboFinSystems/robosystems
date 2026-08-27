@@ -20,7 +20,7 @@ from sqlalchemy import and_, or_
 
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
-from robosystems.models.core import UserAPIKey
+from robosystems.models.core import OAuthClient, OAuthToken, UserAPIKey
 
 # ============================================================================
 # Environment-based Schedule Status
@@ -104,10 +104,44 @@ def cleanup_stale_api_keys(context: OpExecutionContext, db: DatabaseResource) ->
     }
 
 
+@op
+def cleanup_stale_oauth_artifacts(
+  context: OpExecutionContext, db: DatabaseResource
+) -> dict:
+  """Drop OAuth rows that can no longer authenticate anything.
+
+  Tokens: expired or revoked longer ago than the retention window. Refresh
+  rotation mints two rows an hour per always-on connector, so the table
+  grows by ~50 dead rows a day per connector; the recently dead are kept
+  so a late refresh replay is still detectable. Clients: dynamic
+  registrations that never reached a consent — a client that consented had
+  its expiry cleared, so nothing holding a grant is touched. Neither kind
+  can hold a live validation-cache entry (access tokens outlive their cache
+  entry by days before they qualify), so no cache scan is needed.
+  """
+  with db.get_session() as session:
+    tokens_deleted = OAuthToken.cleanup_expired(
+      session, older_than_days=REVOKED_KEY_RETENTION_DAYS
+    )
+    clients_deleted = OAuthClient.cleanup_expired_registrations(session)
+
+    context.log.info(
+      f"OAuth cleanup: {tokens_deleted} tokens, "
+      f"{clients_deleted} unused registrations deleted"
+    )
+
+    return {
+      "tokens_deleted": tokens_deleted,
+      "clients_deleted": clients_deleted,
+      "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
 @job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def hourly_auth_cleanup_job():
   """Hourly auth cleanup job."""
   cleanup_stale_api_keys()
+  cleanup_stale_oauth_artifacts()
 
 
 # ============================================================================

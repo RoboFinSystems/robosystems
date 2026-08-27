@@ -12,6 +12,9 @@ from robosystems.models.core import (
   BillingAuditLog,
   BillingSubscription,
   Graph,
+  OAuthClient,
+  OAuthGrant,
+  OAuthToken,
   Org,
   OrgRole,
   OrgType,
@@ -143,6 +146,38 @@ class TestDeletionExecution:
     assert plan.orgs_to_delete == [org_id]
     assert User.get_by_email(email, test_db) is None
     assert Org.get_by_id(org_id, test_db) is None
+
+  def test_oauth_consents_go_with_the_account(self, test_db, test_user):
+    """A grant is a FK into users with no cascade: the sweep must take the
+    tokens and grants first, or the account row cannot be deleted at all."""
+    user = _create_user(test_db, test_user.password_hash)
+    _personal_org(test_db, user)
+    client, _ = OAuthClient.register_preregistered(
+      client_name="Claude",
+      redirect_uris=["https://claude.ai/api/mcp/auth_callback"],
+      confidential=False,
+      session=test_db,
+    )
+    grant = OAuthGrant.create(
+      user_id=str(user.id),
+      oauth_client_id=str(client.id),
+      graph_id="kg19fb490f76871d22e835",
+      resource="https://api.test.example/v1/mcp",
+      scope="mcp",
+      session=test_db,
+    )
+    OAuthToken.mint_pair(grant_id=str(grant.id), user_id=str(user.id), session=test_db)
+    # Captured before the rows go: a deleted instance cannot refresh its id.
+    user_id, grant_id, client_id = str(user.id), str(grant.id), str(client.id)
+
+    plan = execute_user_deletion(user_id, test_db, actor="admin:test")
+
+    assert plan.removals["oauth_grants"] == 1
+    assert User.get_by_id(user_id, test_db) is None
+    assert OAuthGrant.get_by_id(grant_id, test_db) is None
+    assert test_db.query(OAuthToken).filter_by(user_id=user_id).count() == 0
+    # The client is not the user's — it outlives every grant it held.
+    assert OAuthClient.get_by_id(client_id, test_db) is not None
 
   def test_invited_member_leaves_the_org_standing(self, test_db, test_user):
     """Deleting a member of a shared org removes them, not the organization."""

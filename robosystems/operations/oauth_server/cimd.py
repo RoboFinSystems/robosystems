@@ -141,7 +141,7 @@ def fetch_client_metadata(
             "invalid_client", "client metadata document is not available"
           )
         declared = response.headers.get("content-length")
-        if declared and int(declared) > CIMD_MAX_BYTES:
+        if declared and declared.isdigit() and int(declared) > CIMD_MAX_BYTES:
           raise ClientError("invalid_client", "client metadata document is too large")
         body = bytearray()
         for chunk in response.iter_bytes():

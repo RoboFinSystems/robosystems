@@ -331,6 +331,12 @@ class RateLimitConfig:
     if path.startswith("/v1/"):
       path = path[4:]
 
+    # The graph-agnostic MCP transport (POST /v1/mcp): the OAuth grant, not
+    # the path, names the graph, so the route is categorized by its suffix
+    # alone — it must land in the MCP bucket like its per-graph sibling.
+    if path == "mcp":
+      return EndpointCategory.GRAPH_MCP
+
     # Non-graph scoped endpoints - check these first
     if path.startswith("auth/"):
       return EndpointCategory.AUTH

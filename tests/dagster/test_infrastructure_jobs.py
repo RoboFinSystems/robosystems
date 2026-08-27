@@ -14,9 +14,11 @@ from dagster import build_op_context
 from robosystems.dagster.jobs.infrastructure import (
   REVOKED_KEY_RETENTION_DAYS,
   cleanup_stale_api_keys,
+  cleanup_stale_oauth_artifacts,
   hourly_auth_cleanup_job,
   weekly_health_check_job,
 )
+from robosystems.models.core import OAuthClient, OAuthGrant, OAuthToken
 from robosystems.models.core.user.user_api_key import UserAPIKey
 
 
@@ -44,7 +46,7 @@ class TestJobGraphs:
     job_def = hourly_auth_cleanup_job
 
     assert job_def.name == "hourly_auth_cleanup_job"
-    assert len(job_def.all_node_defs) == 1  # Single op
+    assert len(job_def.all_node_defs) == 2  # API keys + OAuth artifacts
 
   @pytest.mark.unit
   def test_weekly_health_check_job_graph(self):
@@ -178,3 +180,72 @@ class TestJobExecution:
       job_def = hourly_auth_cleanup_job
       assert job_def is not None
       assert job_def.name == "hourly_auth_cleanup_job"
+
+
+class TestStaleOAuthCleanup:
+  """Dead tokens and never-consented registrations go; live rows and the
+  recently dead stay, so a late refresh replay is still detectable."""
+
+  @pytest.mark.unit
+  def test_sweeps_dead_tokens_and_unused_registrations(self, test_db, test_user):
+    now = datetime.now(UTC)
+    retention = timedelta(days=REVOKED_KEY_RETENTION_DAYS + 1)
+    client, _ = OAuthClient.register_preregistered(
+      client_name="Claude",
+      redirect_uris=["https://claude.ai/api/mcp/auth_callback"],
+      confidential=False,
+      session=test_db,
+    )
+    grant = OAuthGrant.create(
+      user_id=str(test_user.id),
+      oauth_client_id=str(client.id),
+      graph_id="kg19fb490f76871d22e835",
+      resource="https://api.test.example/v1/mcp",
+      scope="mcp",
+      session=test_db,
+    )
+
+    def pair():
+      access, _, refresh, _, _ = OAuthToken.mint_pair(
+        grant_id=str(grant.id), user_id=str(test_user.id), session=test_db
+      )
+      return access, refresh
+
+    live_access, live_refresh = pair()
+    long_expired, recently_revoked = pair()
+    long_expired.expires_at = now - retention
+    recently_revoked.revoked_at = now - timedelta(days=1)
+    long_revoked, its_refresh = pair()
+    long_revoked.revoked_at = now - retention
+
+    stale_registration, _ = OAuthClient.register_dynamic(
+      client_name="stale",
+      redirect_uris=["http://localhost/callback"],
+      token_endpoint_auth_method="none",
+      session=test_db,
+    )
+    stale_registration.expires_at = now - timedelta(hours=1)
+    fresh_registration, _ = OAuthClient.register_dynamic(
+      client_name="fresh",
+      redirect_uris=["http://localhost/callback"],
+      token_endpoint_auth_method="none",
+      session=test_db,
+    )
+    test_db.commit()
+    # Captured before the sweep: a deleted instance cannot refresh its id.
+    kept = {live_access.id, live_refresh.id, recently_revoked.id, its_refresh.id}
+    grant_id, client_id = str(grant.id), str(client.id)
+    stale_id, fresh_id = str(stale_registration.id), str(fresh_registration.id)
+
+    result = cleanup_stale_oauth_artifacts(build_op_context(), _db(test_db))
+
+    assert result["tokens_deleted"] == 2
+    assert result["clients_deleted"] == 1
+    remaining = {
+      row.id for row in test_db.query(OAuthToken).filter_by(grant_id=grant_id)
+    }
+    assert remaining == kept
+    assert OAuthClient.get_by_id(stale_id, test_db) is None
+    assert OAuthClient.get_by_id(fresh_id, test_db) is not None
+    # A registration that consented has no expiry and is never eligible.
+    assert OAuthClient.get_by_id(client_id, test_db) is not None
