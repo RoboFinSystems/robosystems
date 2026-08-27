@@ -304,6 +304,37 @@ class APIKeysResponse(BaseModel):
   api_keys: list[APIKeyInfo] = Field(..., description="List of user's API keys")
 
 
+class OAuthGrantInfo(BaseModel):
+  """A connected app: one OAuth consent for one client on one graph."""
+
+  id: str = Field(..., description="Grant ID")
+  client_name: str = Field(..., description="The connected client's display name")
+  client_uri: str | None = Field(None, description="The client's homepage, if declared")
+  client_is_trusted: bool = Field(
+    ...,
+    description="Whether the client is on the trusted list (pre-registered, or a "
+    "known metadata-document host). Untrusted clients registered themselves.",
+  )
+  graph_id: str = Field(..., description="The one graph this consent reaches")
+  graph_name: str | None = Field(
+    None, description="The graph's display name, when the graph still exists"
+  )
+  resource: str = Field(
+    ..., description="The MCP URL the grant's tokens are bound to (their audience)"
+  )
+  scope: str = Field(..., description="Granted scopes, space-separated")
+  created_at: str = Field(..., description="When the user consented")
+  last_used_at: str | None = Field(None, description="Last token use, if any")
+
+
+class OAuthGrantsResponse(BaseModel):
+  """Response model for listing connected apps."""
+
+  grants: list[OAuthGrantInfo] = Field(
+    ..., description="Active OAuth grants, newest first"
+  )
+
+
 class UpdateAPIKeyRequest(BaseModel):
   """Request model for updating an API key."""
 
