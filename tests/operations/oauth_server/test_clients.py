@@ -132,6 +132,44 @@ class TestValidateRegistrationMetadata:
       validate_registration_metadata({"redirect_uris": ["http://evil.example/cb"]})
     assert exc.value.error == "invalid_redirect_uri"
 
+  @pytest.mark.parametrize(
+    "uri",
+    [
+      # urlsplit takes the host after the "@" (localhost / claude.ai); a
+      # browser ends the authority at the backslash and delivers the code
+      # to attacker.example.
+      "http://attacker.example\\@localhost/cb",
+      "https://attacker.example\\@claude.ai/cb",
+      "http://user@localhost/cb",
+      "https://@attacker.example/cb",
+      "http://localhost:abc/cb",
+      "http://127.0.0.1/cb\\x",
+      "http://localhost/cb\x01",
+      "http://localhost/cb x",
+      "https://\u0441laude.ai/cb",
+    ],
+  )
+  def test_ambiguous_redirect_uri_is_refused(self, uri):
+    assert validate_redirect_uri(uri) is not None
+    with pytest.raises(ClientError) as exc:
+      validate_registration_metadata({"redirect_uris": [uri]})
+    assert exc.value.error == "invalid_redirect_uri"
+
+  @pytest.mark.parametrize(
+    "uri",
+    [
+      "http://localhost/callback",
+      "http://127.0.0.1/callback",
+      "http://[::1]:8080/cb",
+      "https://claude.ai/api/mcp/auth_callback",
+      "https://mcp.docker.com/oauth/callback",
+      "cursor://anysphere.cursor-mcp/oauth/callback",
+      "https://a.example/cb?x=1&y=%20",
+    ],
+  )
+  def test_canonical_redirect_uri_is_accepted(self, uri):
+    assert validate_redirect_uri(uri) is None
+
   def test_unknown_auth_method(self):
     body = {**CURSOR_BODY, "token_endpoint_auth_method": "private_key_jwt"}
     with pytest.raises(ClientError) as exc:
@@ -247,6 +285,40 @@ class TestRegisterAndResolve:
       session=test_db,
     )
     assert pick_redirect_uri(single, None) == "https://one.example/cb"
+
+  def test_pick_redirect_uri_revalidates_registered_uris(self, test_db):
+    client, _ = register_dynamic_client(
+      CURSOR_BODY, registration_ip=None, session=test_db
+    )
+    # A row written under an earlier, looser rule: refused at use, not
+    # only at registration.
+    spoofed = "http://attacker.example\\@localhost/cb"
+    client.redirect_uris = [*client.redirect_uris, spoofed]
+    test_db.commit()
+    with pytest.raises(ClientError) as exc:
+      pick_redirect_uri(client, spoofed)
+    assert exc.value.error == "invalid_request"
+    assert (
+      pick_redirect_uri(client, "http://localhost:9999/callback")
+      == "http://localhost:9999/callback"
+    )
+
+  def test_pick_redirect_uri_validates_the_presented_value(self, test_db):
+    # A canonical loopback registration must not be matchable by a presented
+    # value whose parsed host is loopback but whose browser destination is
+    # not: the loopback match compares hosts, and the presented string is
+    # what the browser is sent to.
+    client, _ = register_dynamic_client(
+      VSCODE_BODY, registration_ip=None, session=test_db
+    )
+    with pytest.raises(ClientError) as exc:
+      pick_redirect_uri(client, "http://attacker.example\\@127.0.0.1/")
+    assert exc.value.error == "invalid_request"
+    with pytest.raises(ClientError):
+      pick_redirect_uri(client, "http://user@127.0.0.1:51000/")
+    assert (
+      pick_redirect_uri(client, "http://127.0.0.1:51000/") == "http://127.0.0.1:51000/"
+    )
 
   def test_deactivated_client_is_unusable(self, test_db):
     client, _ = register_dynamic_client(
