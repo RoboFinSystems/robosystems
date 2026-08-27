@@ -139,7 +139,7 @@ jobs:
     secrets: inherit
 
   build:
-    needs: [runner]
+    needs: [runner, create-deployment]
     uses: ./.github/workflows/build.yml
     with:
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
@@ -154,11 +154,13 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   create-deployment:
-    needs: [runner, test, build, stack-config]
+    needs: [runner, test, stack-config]
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     # Every deploy-* job fans in through this one, so the production
     # environment's protection rules (required reviewer, deployment branches)
-    # gate the whole run here, once.
+    # gate the whole run here, once. The image build sits behind it too:
+    # nothing reaches ECR or Docker Hub for a run that was never approved.
+    # Tests and the stack config run before the pause.
     environment: production
     outputs:
       deployment_id: ${{ steps.deployment.outputs.deployment_id }}
