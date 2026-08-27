@@ -164,3 +164,17 @@ class TestGlamaClaim:
     body = response.json()
     assert body["$schema"] == "https://glama.ai/mcp/schemas/connector.json"
     assert body["maintainers"] == [{"email": "admin@robosystems.ai"}]
+
+
+class TestOpenAIAppsChallenge:
+  def test_challenge_token_served_as_plain_text(self, client):
+    """The ChatGPT app-directory portal verifies the MCP origin by fetching
+    exactly its issued token, as plain text, from this well-known URL."""
+    from pathlib import Path
+
+    expected = Path("static/openai-apps-challenge").read_text(encoding="utf-8").strip()
+    assert expected and "\n" not in expected
+    response = client.get("/.well-known/openai-apps-challenge")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.text == expected
