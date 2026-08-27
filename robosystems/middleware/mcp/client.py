@@ -358,7 +358,8 @@ class GraphMCPClient:
       tables_query = "CALL SHOW_TABLES() RETURN id, name, type, comment"
       tables_result = await self.execute_query(tables_query)
 
-      schema_info = []
+      nodes: list[dict[str, Any]] = []
+      relationships: list[dict[str, Any]] = []
 
       for table in tables_result:
         table_name = table.get("name", "")
@@ -372,18 +373,17 @@ class GraphMCPClient:
           # Prefer the curated property map for well-known nodes (nice
           # ordering); for everything else introspect the real columns from
           # the catalog so the schema isn't reported as a misleading guess.
-          sample_properties = self._get_common_properties(table_name)
-          if sample_properties is None:
-            sample_properties = await self._introspect_node_properties(table_name)
+          properties = self._get_common_properties(table_name)
+          if properties is None:
+            properties = await self._introspect_node_properties(table_name)
 
-          schema_info.append(
+          nodes.append(
             {
               "label": table_name,
               "type": "node",
               "comment": table_comment,
               "description": self._get_node_description(table_name),
-              "sample_properties": sample_properties,
-              "common_properties": sample_properties,
+              "properties": properties,
             }
           )
 
@@ -391,7 +391,7 @@ class GraphMCPClient:
           # Infer relationship details without querying table structure
           from_node, to_node = self._infer_relationship_nodes(table_name)
 
-          schema_info.append(
+          relationships.append(
             {
               "label": table_name,
               "type": "relationship",
@@ -401,6 +401,14 @@ class GraphMCPClient:
               "description": self._get_relationship_description(table_name),
             }
           )
+
+      # Nodes first, then relationships, each alphabetical: the model reads
+      # the labels before the edges that join them, and the payload is
+      # byte-stable across calls (a prerequisite for prompt caching) rather
+      # than following catalog insertion order.
+      nodes.sort(key=lambda entry: entry["label"])
+      relationships.sort(key=lambda entry: entry["label"])
+      schema_info = nodes + relationships
 
       logger.info(f"Retrieved schema for {len(schema_info)} tables")
       return schema_info
@@ -443,7 +451,9 @@ class GraphMCPClient:
         "calendar_period_key",
       ],
       "Element": ["name", "qname", "balance", "item_type", "is_numeric", "is_abstract"],
-      "Transaction": ["date", "amount", "description", "type", "transaction_id"],
+      # The ledger spine (Transaction / Entry / LineItem / Event) is deliberately
+      # absent: those tables carry the live-row filter (`is_live`, `status`)
+      # a curated list would omit, so they are introspected from the catalog.
       "Account": ["name", "number", "type", "balance", "parent_account_id"],
       "User": ["id", "name", "email", "is_active", "created_at"],
       "Connection": ["provider", "status", "last_sync", "realm_id", "connection_id"],
@@ -542,8 +552,27 @@ class GraphMCPClient:
     return descriptions.get(rel_name, f"{rel_name} relationship in the graph")
 
   def _infer_relationship_nodes(self, rel_name: str) -> tuple[str, str]:
-    """Infer source and target nodes from relationship name (base + roboledger only)."""
-    # Complete relationship mappings for base + roboledger extension
+    """Resolve a relationship's source and target node labels.
+
+    The declared schema (base + every extension) is authoritative for the
+    platform's own relationships — several don't follow the naming patterns
+    below (``ENTRY_FROM_SCHEDULE`` targets ``Structure``; the ``EVENT_*``
+    verbs are neither HAS nor OWNS nor RELATES_TO). Name-pattern inference
+    remains the fallback for custom graphs that add their own tables.
+    """
+    try:
+      from robosystems.schemas.loader import get_schema_loader
+
+      declared = get_schema_loader().get_relationship_schema(rel_name)
+    except (
+      Exception
+    ) as e:  # pragma: no cover - never let a loader fault break schema retrieval
+      logger.warning(f"Declared-schema lookup failed for {rel_name}: {e}")
+      declared = None
+    if declared is not None:
+      return (declared.from_node, declared.to_node)
+
+    # Legacy hand map, kept for graphs whose extensions were not discoverable.
     known_relationships = {
       # Base relationships
       "ELEMENT_HAS_LABEL": ("Element", "Label"),

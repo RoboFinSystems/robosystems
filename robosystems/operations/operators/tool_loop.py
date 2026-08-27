@@ -25,10 +25,32 @@ if TYPE_CHECKING:
 # for the caller/frontend, which paginates.
 _MAX_TOOL_RESULT_CHARS = 12000
 
+# Orientation tools are the exception: a truncated schema or example set is
+# worse than none, because the model then plans queries against
+# relationships it never saw. A tenant schema with the ledger spine runs
+# 20-30k chars, so these get a cap well above the largest real payload and
+# only a pathological graph truncates.
+_ORIENTATION_TOOL_RESULT_CHARS = 48000
+_TOOL_RESULT_CHAR_CAPS: dict[str, int] = {
+  "get-graph-schema": _ORIENTATION_TOOL_RESULT_CHARS,
+  "get-example-queries": _ORIENTATION_TOOL_RESULT_CHARS,
+}
+
+# A turn whose tool calls ALL fail is not charged against the tool budget, up
+# to this many times per run. Error feedback is the point of the loop, and
+# charging a budgeted turn for a syntax error starves quick mode of the one
+# retry it needs to recover.
+DEFAULT_MAX_ERROR_RETRIES = 2
+
 _ANSWER_NOW = (
   "You've reached the step limit. Answer the original question now using the "
   "results gathered so far. Do not request any more tools."
 )
+
+# The nudge keeps the tool definitions (the transcript carries tool_use
+# blocks, which the API requires tools for) but forbids further calls, so
+# the final turn is guaranteed to be text rather than a dropped tool_use.
+_NO_MORE_TOOLS: dict[str, Any] = {"type": "none"}
 
 
 @dataclass
@@ -39,15 +61,17 @@ class ToolLoopResult:
   rows: list[dict[str, Any]] | None = None  # last read-graph-cypher result set
   cypher: str | None = None  # the query that produced ``rows``
   tools_called: list[str] = field(default_factory=list)
-  iterations: int = 0
+  iterations: int = 0  # model calls made, including the nudge if any
   hit_cap: bool = False  # stopped at max_iterations rather than by the model
+  error_retries: int = 0  # uncharged turns granted for all-error tool results
 
 
-def _serialize_tool_result(result: Any) -> str:
-  """JSON-encode a tool result for feedback, capped in size."""
+def _serialize_tool_result(result: Any, tool_name: str | None = None) -> str:
+  """JSON-encode a tool result for feedback, capped in size per tool."""
+  cap = _TOOL_RESULT_CHAR_CAPS.get(tool_name or "", _MAX_TOOL_RESULT_CHARS)
   text = json.dumps(result, default=str)
-  if len(text) > _MAX_TOOL_RESULT_CHARS:
-    text = text[:_MAX_TOOL_RESULT_CHARS] + f"\n… [truncated; {len(text)} chars total]"
+  if len(text) > cap:
+    text = text[:cap] + f"\n… [truncated; {len(text)} chars total]"
   return text
 
 
@@ -75,15 +99,19 @@ async def run_tool_loop(
   temperature: float = 0.3,
   operator_type: str | None = None,
   operation_description: str = "Tool-use loop",
+  max_error_retries: int = DEFAULT_MAX_ERROR_RETRIES,
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
   The model gets the read-only tools named by ``tool_names``, intersected with
   what the graph actually exposes, and iterates: call tools → observe results
   (errors included) → answer in natural language. ``max_iterations`` caps the
-  round-trips that may call tools; on hitting the cap one further turn nudges
-  the model to answer from what it has, so the loop always costs at most
-  ``max_iterations + 1`` model calls.
+  round-trips that may call tools. A round-trip whose tool calls all failed is
+  not charged against that cap, up to ``max_error_retries`` times, so a bad
+  query costs the model a correction rather than a step. On hitting the cap
+  one further turn nudges the model to answer from what it has with tool use
+  disabled, so the loop always costs at most
+  ``max_iterations + max_error_retries + 1`` model calls.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -102,12 +130,15 @@ async def run_tool_loop(
   last_rows: list[dict[str, Any]] | None = None
   last_cypher: str | None = None
 
+  tool_turns = 0  # round-trips charged against max_iterations
+  error_retries = 0  # uncharged round-trips granted so far
+  model_calls = 0
   step = 60 // max(max_iterations, 1)
 
-  for iteration in range(max_iterations):
+  while tool_turns < max_iterations:
     await ctx.progress.report(
-      "Thinking..." if iteration == 0 else f"Working (step {iteration + 1})...",
-      percent=min(20 + iteration * step, 85),
+      "Thinking..." if model_calls == 0 else f"Working (step {model_calls + 1})...",
+      percent=min(20 + tool_turns * step, 85),
     )
 
     response = await ctx.ai.create_message(
@@ -119,6 +150,7 @@ async def run_tool_loop(
       operation_description=operation_description,
       tools=tools,
     )
+    model_calls += 1
 
     # No tool call means the model is answering — done.
     if response.stop_reason != "tool_use":
@@ -127,13 +159,15 @@ async def run_tool_loop(
         rows=last_rows,
         cypher=last_cypher,
         tools_called=tools_called,
-        iterations=iteration + 1,
+        iterations=model_calls,
+        error_retries=error_retries,
       )
 
     # Replay the assistant turn (text + tool_use blocks) verbatim.
     messages.append(AIMessage(role="assistant", content=response.content_blocks))
 
     tool_results: list[dict[str, Any]] = []
+    turn_succeeded = False
     for block in response.content_blocks:
       if block.get("type") != "tool_use":
         continue
@@ -178,20 +212,29 @@ async def run_tool_loop(
         result = {"error": str(e)}
         is_error = True
 
+      if not is_error:
+        turn_succeeded = True
       tool_results.append(
         {
           "type": "tool_result",
           "tool_use_id": tool_use_id,
-          "content": _serialize_tool_result(result),
+          "content": _serialize_tool_result(result, name),
           "is_error": is_error,
         }
       )
 
     messages.append(AIMessage(role="user", content=tool_results))
 
+    if turn_succeeded or error_retries >= max_error_retries:
+      tool_turns += 1
+    else:
+      error_retries += 1
+
   # Iteration cap reached. Nudge for a final answer, appending the nudge to
   # the trailing user turn (avoids a second consecutive user message). Keep
-  # `tools` defined so the tool_use/tool_result transcript stays valid.
+  # `tools` defined so the tool_use/tool_result transcript stays valid, but
+  # disable tool choice so the answer can't come back as a tool_use block
+  # that nobody would execute.
   final_messages = list(messages)
   last = final_messages[-1]
   if last.role == "user" and isinstance(last.content, list):
@@ -210,6 +253,7 @@ async def run_tool_loop(
     operator_type=operator_type,
     operation_description=operation_description,
     tools=tools,
+    tool_choice=_NO_MORE_TOOLS if tools else None,
   )
   return ToolLoopResult(
     text=final.content
@@ -217,6 +261,7 @@ async def run_tool_loop(
     rows=last_rows,
     cypher=last_cypher,
     tools_called=tools_called,
-    iterations=max_iterations,
+    iterations=model_calls + 1,
     hit_cap=True,
+    error_retries=error_retries,
   )

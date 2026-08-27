@@ -458,6 +458,55 @@ class TestAIClientCreateMessage:
     assert "tools" not in request_body
 
   @pytest.mark.unit
+  async def test_create_message_sends_tool_choice_alongside_tools(self):
+    """tool_choice rides in the request body with the tools it constrains —
+    the tool loop's final nudge uses {"type": "none"} to keep the transcript
+    valid while forbidding another tool_use turn."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "final"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    tools = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
+    await client.create_message(
+      messages=[AIMessage(role="user", content="answer now")],
+      tools=tools,
+      tool_choice={"type": "none"},
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["tools"] == tools
+    assert request_body["tool_choice"] == {"type": "none"}
+
+  @pytest.mark.unit
+  async def test_tool_choice_without_tools_is_dropped(self):
+    """tool_choice is meaningless (and rejected by the API) without tools."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      tool_choice={"type": "none"},
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert "tool_choice" not in request_body
+
+  @pytest.mark.unit
   async def test_create_message_formats_messages_correctly(self):
     """Test that messages are formatted into the correct dict structure."""
     client, mock_bedrock = _make_ai_client()

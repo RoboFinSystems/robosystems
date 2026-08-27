@@ -24,7 +24,11 @@ from robosystems.operations.operators.base import (
 )
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.operator_registry import register_operator
-from robosystems.operations.operators.tool_loop import ToolLoopResult, run_tool_loop
+from robosystems.operations.operators.tool_loop import (
+  DEFAULT_MAX_ERROR_RETRIES,
+  ToolLoopResult,
+  run_tool_loop,
+)
 
 
 @register_operator("cypher")
@@ -117,7 +121,7 @@ class CypherOperator(Operator):
     has_document_search = "search-documents" in available_tools
 
     system = self._build_system_prompt(
-      max_results, output_mode, is_shared, has_document_search
+      max_results, output_mode, is_shared, has_document_search, max_iterations
     )
 
     result = await run_tool_loop(
@@ -155,6 +159,7 @@ class CypherOperator(Operator):
     output_mode: str,
     is_shared: bool,
     has_document_search: bool = False,
+    tool_turns: int = 6,
   ) -> str:
     if is_shared:
       # Shared repository (e.g. SEC): thousands of filers, so the selective
@@ -188,8 +193,10 @@ WORKFLOW:
 1. For any question that needs the fact graph, call `get-graph-schema` first to discover node labels, relationships, and properties — never guess the schema. (Purely qualitative/narrative questions may skip straight to document search — see below.)
 2. If `get-example-queries` is available, use it for working query patterns tuned to this graph.
 3. Write a read-only Cypher query and run it with `read-graph-cypher`.
-4. If a query errors or returns nothing useful, read the error, fix the query, and try again. You have a limited number of steps, so be efficient — don't repeat a failing query unchanged.
+4. If a query errors or returns nothing useful, read the error, fix the query, and try again — don't repeat a failing query unchanged.
 5. When you have the answer, respond in natural language.
+
+STEP BUDGET: you have {tool_turns} tool-calling turns before you must answer from what you have. A turn whose tool calls all fail is not charged (up to {DEFAULT_MAX_ERROR_RETRIES} times), so a corrected retry is free — but plan to reach `read-graph-cypher` within the first three turns.
 
 CYPHER RULES:
 - Read-only only: MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT. Never CREATE, SET, DELETE, MERGE, or DROP.

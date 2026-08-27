@@ -359,6 +359,13 @@ class TestSchemaInference:
     # the catalog instead of emitting a misleading generic guess.
     assert client._get_common_properties("UnknownNode") is None
 
+  def test_ledger_spine_is_introspected_not_curated(self):
+    """Transaction/Entry/LineItem carry the live-row columns (is_live,
+    status) a curated hint list omitted, so they must come from the catalog."""
+    client = _create_client()
+    for label in ("Transaction", "Entry", "LineItem", "Event"):
+      assert client._get_common_properties(label) is None
+
   @pytest.mark.asyncio
   async def test_introspect_node_properties_uses_catalog(self):
     client = _create_client()
@@ -430,6 +437,38 @@ class TestSchemaInference:
     from_node, to_node = client._infer_relationship_nodes("SOME_UNKNOWN_TYPE")
     assert from_node == "Unknown"
     assert to_node == "Unknown"
+
+  def test_infer_relationship_nodes_prefers_the_declared_schema(self):
+    """Platform relationships resolve from the declared schema, including the
+    ones no naming heuristic could guess: ENTRY_FROM_SCHEDULE targets a
+    Structure, and the Event verbs are neither HAS nor OWNS nor RELATES_TO."""
+    client = _create_client()
+    assert client._infer_relationship_nodes("ENTRY_FROM_SCHEDULE") == (
+      "Entry",
+      "Structure",
+    )
+    assert client._infer_relationship_nodes("EVENT_TRIGGERS_TRANSACTION") == (
+      "Event",
+      "Transaction",
+    )
+    assert client._infer_relationship_nodes("EVENT_INVOLVES_AGENT") == (
+      "Event",
+      "Agent",
+    )
+    assert client._infer_relationship_nodes("ENTITY_HAS_EVENT") == ("Entity", "Event")
+
+  def test_infer_relationship_nodes_survives_a_loader_fault(self):
+    """A declared-schema lookup failure degrades to the name heuristics
+    rather than breaking schema retrieval."""
+    client = _create_client()
+    with patch(
+      "robosystems.schemas.loader.get_schema_loader",
+      side_effect=RuntimeError("extensions not importable"),
+    ):
+      assert client._infer_relationship_nodes("COMPANY_HAS_PRODUCT") == (
+        "Company",
+        "Product",
+      )
 
 
 @pytest.mark.unit

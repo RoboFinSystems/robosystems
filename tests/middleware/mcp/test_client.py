@@ -146,11 +146,12 @@ class TestGraphMCPClient:
     """Test schema retrieval (no counts for performance)."""
     # Mock responses - schema no longer fetches counts
     query_responses = [
-      # SHOW_TABLES response only
+      # SHOW_TABLES response only — deliberately NOT nodes-first or
+      # alphabetical, to check get_schema imposes its own order.
       [
-        {"name": "Entity", "type": "NODE"},
-        {"name": "Report", "type": "NODE"},
         {"name": "HAS_REPORT", "type": "REL"},
+        {"name": "Report", "type": "NODE"},
+        {"name": "Entity", "type": "NODE"},
       ],
     ]
 
@@ -166,6 +167,9 @@ class TestGraphMCPClient:
       schema = await client.get_schema()
 
       assert len(schema) == 3
+      # Nodes first, then relationships, each alphabetical — byte-stable
+      # output regardless of catalog insertion order.
+      assert [s["label"] for s in schema] == ["Entity", "Report", "HAS_REPORT"]
       # Check node tables
       entity_schema = next(s for s in schema if s["label"] == "Entity")
       assert entity_schema["type"] == "node"
@@ -628,7 +632,7 @@ class TestGraphMCPConfigurableSchema:
       custom1 = next(s for s in schema if s["label"] == "CustomTable1")
       assert custom1["type"] == "node"
       assert "count" not in custom1
-      assert custom1["sample_properties"] == ["identifier", "label"]
+      assert custom1["properties"] == ["identifier", "label"]
 
       custom2 = next(s for s in schema if s["label"] == "CustomTable2")
       assert custom2["type"] == "node"

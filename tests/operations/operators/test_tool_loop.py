@@ -230,13 +230,19 @@ async def test_hits_iteration_cap_then_forces_a_final_answer():
   )
 
   assert result.hit_cap is True
-  assert result.iterations == 2
+  # `iterations` counts model calls: 2 loop turns + the forced-final turn.
+  assert result.iterations == 3
+  assert result.error_retries == 0
   assert result.text == "Best-effort answer from what I gathered."
-  # 2 loop iterations + 1 forced-final turn.
   assert ai.create_message.await_count == 3
 
   final_kwargs = ai.create_message.call_args_list[2].kwargs
   assert final_kwargs["tools"]  # transcript stays valid
+  # ...but the nudge forbids further tool use, so the answer can't come back
+  # as a tool_use block the loop would have to drop.
+  assert final_kwargs["tool_choice"] == {"type": "none"}
+  # Loop turns carry no tool_choice — the model decides.
+  assert ai.create_message.call_args_list[0].kwargs.get("tool_choice") is None
   # The answer-now nudge is appended to the trailing user turn (no second
   # consecutive user message).
   last_user = final_kwargs["messages"][-1]
@@ -286,3 +292,168 @@ async def test_unadvertised_tool_is_refused_without_dispatch():
   assert len(blocks) == 1
   assert blocks[0]["is_error"] is True
   assert "not available" in blocks[0]["content"]
+
+
+async def test_all_error_turn_is_not_charged_against_the_tool_budget():
+  """A turn whose tool calls all fail costs the model a correction, not a
+  step: with a budget of TWO turns, error → fixed query → answer must complete
+  normally. Charging the error would spend both turns before the answer and
+  force the nudge (hit_cap) instead."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH bad syntax"),
+      _tool_use("t2", "read-graph-cypher", query="MATCH (e:Entity) RETURN e LIMIT 1"),
+      _final("Fixed and answered."),
+    ]
+  )
+  rows = [{"e": 1}]
+  tools = _tools_mock(call_results=[ValueError("Invalid Cypher near 'bad'"), rows])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=2,
+    max_tokens=100,
+  )
+
+  assert result.hit_cap is False
+  assert result.text == "Fixed and answered."
+  assert result.rows == rows
+  assert result.error_retries == 1
+  assert result.iterations == 3
+  # No nudge was needed, so no call carried a tool_choice.
+  assert all(
+    c.kwargs.get("tool_choice") is None for c in ai.create_message.call_args_list
+  )
+
+
+async def test_error_retry_budget_is_bounded():
+  """Uncharged retries are capped by max_error_retries; past that an
+  all-error turn is charged like any other, so a model that never fixes its
+  query still hits the cap and gets nudged."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH bad"),
+      _tool_use("t2", "read-graph-cypher", query="MATCH still bad"),
+      _final("I couldn't get a working query."),
+    ]
+  )
+  tools = _tools_mock(call_results=[ValueError("bad"), ValueError("still bad")])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=1,
+    max_tokens=100,
+    max_error_retries=1,
+  )
+
+  # 1 free retry + 1 charged turn + the nudge = 3 model calls.
+  assert ai.create_message.await_count == 3
+  assert result.hit_cap is True
+  assert result.error_retries == 1
+  assert result.rows is None
+  assert ai.create_message.call_args_list[2].kwargs["tool_choice"] == {"type": "none"}
+
+
+async def test_mixed_turn_with_one_success_is_charged():
+  """A turn is only free when EVERY tool call in it failed — one success
+  means the model got usable information and the turn counts."""
+  ai = MagicMock()
+  mixed = AIResponse(
+    content="",
+    model="m",
+    input_tokens=10,
+    output_tokens=5,
+    stop_reason="tool_use",
+    content_blocks=[
+      {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "read-graph-cypher",
+        "input": {"query": "bad"},
+      },
+      {
+        "type": "tool_use",
+        "id": "t2",
+        "name": "read-graph-cypher",
+        "input": {"query": "ok"},
+      },
+    ],
+  )
+  ai.create_message = AsyncMock(side_effect=[mixed, _final("answer")])
+  tools = _tools_mock(call_results=[ValueError("bad"), [{"n": 1}]])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=1,
+    max_tokens=100,
+  )
+
+  # Charged: the single budgeted turn is spent, so the next call is the
+  # tool-disabled nudge. Had the turn been free, the loop would have made a
+  # normal second call with no tool_choice and finished without hit_cap.
+  assert result.error_retries == 0
+  assert result.hit_cap is True
+  assert result.text == "answer"
+  assert ai.create_message.await_count == 2
+  assert ai.create_message.call_args_list[1].kwargs["tool_choice"] == {"type": "none"}
+
+
+def _two_tools_mock(call_results: list) -> MagicMock:
+  tools = MagicMock()
+  tools.get_tool_schemas = AsyncMock(
+    return_value=[
+      {"name": "get-graph-schema", "description": "schema", "input_schema": {}},
+      {"name": "read-graph-cypher", "description": "cypher", "input_schema": {}},
+    ]
+  )
+  tools.call_tool = AsyncMock(side_effect=call_results)
+  return tools
+
+
+async def test_orientation_tool_results_escape_the_default_cap():
+  """A 20k-char schema is fed back whole (a truncated schema hides the
+  relationships the model needs), while a 20k-char query result is still
+  capped at the default — the console paginates rows, the model doesn't
+  need them all."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "get-graph-schema"),
+      _tool_use("t2", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 500"),
+      _final("done"),
+    ]
+  )
+  big_schema = [{"label": f"Node{i}", "properties": ["x" * 40] * 4} for i in range(100)]
+  big_rows = [{"n": "y" * 100} for _ in range(200)]
+  tools = _two_tools_mock(call_results=[big_schema, big_rows])
+  ctx = _ctx(ai, tools)
+
+  await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["get-graph-schema", "read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=100,
+  )
+
+  schema_block = _tool_result_blocks(
+    ai.create_message.call_args_list[1].kwargs["messages"]
+  )[0]
+  assert "truncated" not in schema_block["content"]
+  assert len(schema_block["content"]) > 12000
+
+  rows_blocks = _tool_result_blocks(
+    ai.create_message.call_args_list[2].kwargs["messages"]
+  )
+  assert "truncated" in rows_blocks[-1]["content"]
