@@ -83,8 +83,13 @@ and revoked tokens answer **401 `invalid_token`** (clients refresh); a valid
 token whose user lost access answers **403 `insufficient_scope`**. Password
 change, deactivation and any other `session_version` bump revoke the user's
 OAuth tokens outright (`User._revoke_oauth_tokens`), since like API keys they
-carry no session version. OAuth tokens are accepted on the two MCP routes only
-— `get_current_user` and the graph-scoped REST dependencies never resolve them.
+carry no session version. A user revokes one connection at a time through the
+connected-apps endpoints (`GET`/`DELETE /v1/user/oauth/grants`,
+`operations/oauth_server/grants.py`) — the grant and every token minted from
+it go together, and their cache entries are cleared, so the client fails at
+its next call rather than its next cache miss. OAuth tokens are accepted on the
+two MCP routes only — `get_current_user` and the graph-scoped REST dependencies
+never resolve them.
 
 ### Key scoping
 

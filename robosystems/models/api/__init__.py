@@ -131,6 +131,8 @@ from .user import (
   CreateAPIKeyRequest,
   CreateAPIKeyResponse,
   GraphInfo,
+  OAuthGrantInfo,
+  OAuthGrantsResponse,
   UpdateAPIKeyRequest,
   UpdatePasswordRequest,
   UpdateUserRequest,
@@ -218,6 +220,8 @@ __all__ = [
   "MCPToolCall",
   "OAuthCallbackRequest",
   "OAuthConnectionUpdate",
+  "OAuthGrantInfo",
+  "OAuthGrantsResponse",
   "OAuthInitRequest",
   "OAuthInitResponse",
   # OAuth models
