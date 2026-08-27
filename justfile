@@ -325,6 +325,15 @@ tunnel environment service="all":
 bootstrap profile="robosystems-sso" region="us-east-1":
     @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
 
+# Re-apply the GitHub OIDC stack only (the deploy roles) — after editing
+# cloudformation/bootstrap-oidc.yaml. Previews the change set and asks before
+# applying; a stack that already matches the template is reported, not touched.
+# Refreshes AWS_ROLE_ARN / AWS_ACCOUNT_ID / AWS_REGION if they drifted. No ECR,
+# SES, secrets or other variables are touched.
+# Usage: just bootstrap-oidc [profile] [region]
+bootstrap-oidc profile="robosystems-sso" region="us-east-1":
+    @bin/setup/bootstrap.sh --oidc "{{profile}}" "{{region}}"
+
 # AWS setup (Secrets Manager + SSM Parameter Store)
 setup-aws:
     @bin/setup/aws.sh
