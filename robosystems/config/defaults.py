@@ -73,6 +73,7 @@ class CacheDefaults:
   # Authentication cache TTLs
   JWT_TTL = 1800  # 30 minutes for JWT validation cache
   API_KEY_TTL = SHORT  # 5 minutes for API key validation
+  EMAIL_TOKEN_REF_TTL = 900  # 15 minutes for a queued email's parked token
 
   # Graph/Schema cache TTLs
   SCHEMA_TTL = SHORT  # 5 minutes for schema/config cache

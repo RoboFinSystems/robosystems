@@ -216,6 +216,17 @@ class TestREAStaging:
     assert "address" not in tables["Agent"]
     assert "metadata" not in tables["Agent"]
 
+  def test_agent_tax_id_masked_to_last_four(self):
+    """The graph never carries more than the last four of a counterparty
+    tax ID, whatever wrote the OLTP row — QuickBooks delivers it masked,
+    a native write may not. Entity.tax_id is the filer's public EIN and
+    stays verbatim."""
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert "'***' || right(tax_id, 4)" in tables["Agent"]
+    assert "AS tax_id" in tables["Agent"]
+    assert "right(tax_id, 4)" not in tables["Entity"]
+    assert "tax_id," in tables["Entity"]
+
   def test_event_table_sources_from_events_with_event_action(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert "Event" in tables

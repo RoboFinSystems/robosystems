@@ -518,7 +518,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       agent_type,
       name,
       legal_name,
-      tax_id,
+      -- Counterparty tax IDs reach the graph as last-4 only (Entity.tax_id
+      -- is the filer's public EIN and stays verbatim).
+      CASE WHEN coalesce(tax_id, '') = '' THEN NULL
+           ELSE '***' || right(tax_id, 4) END AS tax_id,
       registration_number,
       duns,
       lei,
