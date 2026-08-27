@@ -120,18 +120,21 @@ Resources:
                 Condition:
                   StringEquals:
                     "ec2:ResourceTag/Component": "Bastion"
+              # Scoped to this environment's own secrets: the VPC is shared, so
+              # a bastion must not be a path to the other environment's
+              # database or cache credentials.
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey*"
               - Effect: Allow
                 Action:
                   - secretsmanager:DescribeSecret
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey*"
               # OpenSearch access for admin CLI (search queries, index stats).
               # ESHttpPost is required for _search and _count API calls.
               - Effect: Allow

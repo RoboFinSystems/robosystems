@@ -195,7 +195,7 @@ Parameters are documented in each template — read the `Parameters:` block for 
 
 **Exports** (all carry an `{Env}` segment):
 - `{StackName}-{Env}-ValkeyEndpoint`, `-ValkeyPort`, `-ValkeyConfigEndpoint`
-- `{StackName}-{Env}-ValkeyUrl`, `-ValkeyUrlWithAuth`
+- `{StackName}-{Env}-ValkeyUrl` (no credentials — clients build the authenticated URL from the secret)
 - `{StackName}-{Env}-ValkeyClientSecurityGroupId` - attach this to clients
 - `{StackName}-{Env}-ValkeyAuthSecretArn`, `-ValkeyAuthSecretName`
 - plus engine/encryption/replication-group metadata exports

@@ -278,6 +278,7 @@ jobs:
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      vpc_cidr: ${{ needs.deploy-vpc.outputs.vpc_cidr }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Database Version Configuration
       postgres_version: ${{ vars.DATABASE_POSTGRES_VERSION_STAGING || '16.11' }}
@@ -664,6 +665,7 @@ jobs:
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_STAGING || '20' }}
       # Worker Configuration
       worker_stack_name: ${{ needs.stack-config.outputs.worker_stack }}
+      graph_volumes_stack_name: ${{ needs.stack-config.outputs.graph_volumes_stack }}
       worker_enabled: ${{ vars.WORKER_ENABLED_STAGING || 'false' }}
       worker_cpu: ${{ vars.WORKER_CPU_STAGING || '512' }}
       worker_memory: ${{ vars.WORKER_MEMORY_STAGING || '1024' }}

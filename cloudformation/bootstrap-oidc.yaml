@@ -518,6 +518,60 @@ Resources:
   # =============================================================================
   # FRONTEND ROLE - Limited permissions for frontend app deployments
   # =============================================================================
+  # Ceiling for the IAM roles the frontend stacks create — the App Runner
+  # access and instance roles. The app templates set PermissionsBoundary on
+  # those roles to this policy (ARN exported below); the frontend deploy role
+  # may then create roles and attach policies only inside it, so a compromised
+  # frontend workflow cannot mint a privileged role within the name prefix it
+  # owns. The document is the union of what those roles legitimately hold:
+  # pull the app image, read the app's own secret, publish contact-form mail.
+  FrontendRoleBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ManagedPolicyName: !Sub ${ServiceTag}FrontendRoleBoundary
+      Description: Permissions ceiling for the App Runner roles created by the frontend stacks
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ECRLogin
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: PullAppImages
+            Effect: Allow
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+              - ecr:DescribeImages
+            Resource:
+              - !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/robosystems-app*
+              - !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/roboledger-app*
+              - !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/roboinvestor-app*
+          # The apps read the environment's base secret (robosystems/<env>);
+          # the "<env>-" suffix form matches that secret's ARN and none of the
+          # component secrets under robosystems/<env>/....
+          - Sid: ReadAppSecret
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource:
+              - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems/prod-*
+              - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems/staging-*
+          # Each app names its topic <app>-<env>-contact-form.
+          - Sid: ContactFormNotifications
+            Effect: Allow
+            Action:
+              - sns:Publish
+            Resource:
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-app-*
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:roboledger-app-*
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:roboinvestor-app-*
+
   GitHubActionsFrontendRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -563,13 +617,25 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # CloudFormation - for deploying frontend stacks
-              - Sid: CloudFormation
+              # CloudFormation - mutations are pinned to the frontend stacks
+              # (RoboSystemsApp*, RoboLedgerApp*, RoboInvestorApp*,
+              # RoboSystemsHolonViewer*, each with its S3 sibling). Reads stay
+              # account-wide: the deploy workflows describe their own stacks
+              # by name and the calls carry no resource ARN.
+              - Sid: CloudFormationWrite
                 Effect: Allow
                 Action:
                   - cloudformation:CreateStack
                   - cloudformation:UpdateStack
                   - cloudformation:DeleteStack
+                Resource:
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsApp*/*
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboLedgerApp*/*
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboInvestorApp*/*
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/RoboSystemsHolonViewer*/*
+              - Sid: CloudFormationRead
+                Effect: Allow
+                Action:
                   - cloudformation:DescribeStacks
                   - cloudformation:DescribeStackEvents
                   - cloudformation:DescribeStackResources
@@ -602,45 +668,6 @@ Resources:
                   - ecr:GetAuthorizationToken
                 Resource: "*"
 
-              # ECS - for container deployments (including cluster management)
-              - Sid: ECS
-                Effect: Allow
-                Action:
-                  - ecs:CreateCluster
-                  - ecs:DeleteCluster
-                  - ecs:DescribeClusters
-                  - ecs:ListClusters
-                  - ecs:UpdateClusterSettings
-                  - ecs:CreateService
-                  - ecs:UpdateService
-                  - ecs:DeleteService
-                  - ecs:DescribeServices
-                  - ecs:DescribeTasks
-                  - ecs:DescribeTaskDefinition
-                  - ecs:RegisterTaskDefinition
-                  - ecs:DeregisterTaskDefinition
-                  - ecs:ListServices
-                  - ecs:ListTasks
-                  - ecs:ListTaskDefinitions
-                  - ecs:TagResource
-                  - ecs:UntagResource
-                  - ecs:ListTagsForResource
-                Resource: "*"
-
-              # ELB - for load balancers
-              - Sid: ELB
-                Effect: Allow
-                Action:
-                  - elasticloadbalancing:*
-                Resource: "*"
-
-              # Auto Scaling - for ECS auto scaling
-              - Sid: AutoScaling
-                Effect: Allow
-                Action:
-                  - application-autoscaling:*
-                Resource: "*"
-
               # S3 - scoped to frontend app buckets
               - Sid: S3
                 Effect: Allow
@@ -662,31 +689,16 @@ Resources:
                   - s3:GetBucketLocation
                 Resource: "*"
 
-              # Secrets Manager - read-only for app secrets
-              - Sid: SecretsManager
+              # Secrets Manager - the deploy workflows resolve the app secret's
+              # ARN by name and hand it to the stack; its value is read at
+              # runtime by the App Runner instance role, never by the deploy
+              # identity. Metadata only, no GetSecretValue.
+              - Sid: SecretsManagerDescribe
                 Effect: Allow
                 Action:
-                  - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource:
                   - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems/*
-
-              # CloudWatch Logs
-              - Sid: CloudWatchLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:DeleteLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                  - logs:TagLogGroup
-                  - logs:UntagLogGroup
-                  - logs:PutRetentionPolicy
-                  - logs:DeleteRetentionPolicy
-                  - logs:ListTagsLogGroup
-                Resource: "*"
 
               # Route53 - for DNS
               - Sid: Route53
@@ -742,11 +754,13 @@ Resources:
               # (robosystems-app-*, roboledger-*, roboinvestor-*), so a
               # compromised frontend workflow cannot attach policies to, or pass,
               # backend/deploy/SSO roles. Reads stay broad; PassRole is
-              # additionally constrained by iam:PassedToService. NOTE: role-name
-              # prefixing alone does not stop creating a NEW admin role within the
-              # prefix — full closure requires a permissions boundary on
-              # iam:CreateRole (tracked for a follow-up; needs the app templates
-              # to set PermissionsBoundary on the roles they create).
+              # additionally constrained by iam:PassedToService. Role-name
+              # prefixing alone does not stop creating a NEW privileged role
+              # within the prefix — that is what FrontendRoleBoundary is for.
+              # Once every app template sets PermissionsBoundary on its roles,
+              # add the iam:PermissionsBoundary condition to this statement so
+              # CreateRole/AttachRolePolicy/PutRolePolicy only succeed inside
+              # the boundary.
               - Sid: IAMRoleManagement
                 Effect: Allow
                 Action:
@@ -789,55 +803,35 @@ Resources:
                     "iam:PassedToService":
                       - build.apprunner.amazonaws.com
                       - tasks.apprunner.amazonaws.com
-                      - ecs-tasks.amazonaws.com
+              # Setting the boundary is allowed only to this one policy, so the
+              # frontend role can install the ceiling but never swap it for a
+              # looser one. Removing it (DeleteRolePermissionsBoundary) is not
+              # granted at all.
+              - Sid: IAMRoleBoundary
+                Effect: Allow
+                Action:
+                  - iam:PutRolePermissionsBoundary
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                Condition:
+                  StringEquals:
+                    "iam:PermissionsBoundary": !Ref FrontendRoleBoundary
               - Sid: IAMServiceLinkedRole
                 Effect: Allow
                 Action:
                   - iam:CreateServiceLinkedRole
-                Resource: "*"
-
-              # EC2 - read-only for VPC/subnet info
-              - Sid: EC2ReadOnly
-                Effect: Allow
-                Action:
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeSecurityGroups
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DescribeManagedPrefixLists
-                Resource: "*"
-
-              # EC2 Security Groups - create/manage for ECS tasks
-              - Sid: EC2SecurityGroups
-                Effect: Allow
-                Action:
-                  - ec2:CreateSecurityGroup
-                  - ec2:DeleteSecurityGroup
-                  - ec2:AuthorizeSecurityGroupIngress
-                  - ec2:AuthorizeSecurityGroupEgress
-                  - ec2:RevokeSecurityGroupIngress
-                  - ec2:RevokeSecurityGroupEgress
-                  - ec2:CreateTags
-                  - ec2:DeleteTags
-                Resource: "*"
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/apprunner.amazonaws.com/*
+                Condition:
+                  StringEquals:
+                    "iam:AWSServiceName": apprunner.amazonaws.com
 
               # STS - for identity
               - Sid: STS
                 Effect: Allow
                 Action:
                   - sts:GetCallerIdentity
-                Resource: "*"
-
-              # CloudWatch - for alarms
-              - Sid: CloudWatch
-                Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricAlarm
-                  - cloudwatch:DeleteAlarms
-                  - cloudwatch:DescribeAlarms
-                  - cloudwatch:TagResource
-                  - cloudwatch:UntagResource
-                  - cloudwatch:ListTagsForResource
                 Resource: "*"
 
               # App Runner - for serverless container deployments
@@ -857,36 +851,6 @@ Resources:
                   - apprunner:TagResource
                   - apprunner:UntagResource
                   - apprunner:ListTagsForResource
-                Resource: "*"
-
-              # Lambda - for CloudFront edge functions
-              - Sid: Lambda
-                Effect: Allow
-                Action:
-                  - lambda:CreateFunction
-                  - lambda:DeleteFunction
-                  - lambda:GetFunction
-                  - lambda:GetFunctionConfiguration
-                  - lambda:UpdateFunctionCode
-                  - lambda:UpdateFunctionConfiguration
-                  - lambda:PublishVersion
-                  - lambda:CreateAlias
-                  - lambda:UpdateAlias
-                  - lambda:DeleteAlias
-                  - lambda:AddPermission
-                  - lambda:RemovePermission
-                  - lambda:InvokeFunction
-                  - lambda:TagResource
-                  - lambda:UntagResource
-                  - lambda:ListTags
-                  - lambda:EnableReplication
-                Resource:
-                  - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:*-WwwRedirect*
-                  - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:*-www-redirect*
-              - Sid: LambdaGlobal
-                Effect: Allow
-                Action:
-                  - lambda:ListFunctions
                 Resource: "*"
       Tags:
         - Key: Name
@@ -1071,6 +1035,12 @@ Outputs:
     Value: !Ref GitHubActionsFrontendRole
     Export:
       Name: !Sub ${AWS::StackName}-GitHubActionsFrontendRoleName
+
+  FrontendRoleBoundaryArn:
+    Description: Permissions boundary the frontend stacks set on the App Runner roles they create
+    Value: !Ref FrontendRoleBoundary
+    Export:
+      Name: !Sub ${AWS::StackName}-FrontendRoleBoundaryArn
 
   WorkflowExample:
     Description: Example workflow configuration for GitHub Actions

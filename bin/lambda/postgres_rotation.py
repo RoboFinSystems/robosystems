@@ -38,42 +38,40 @@ rds_client = boto3.client("rds")
 def get_database_connection_info(secret_arn: str, environment: str) -> dict[str, Any]:
   """Resolve host, port, and database name for the RDS instance this secret guards.
 
-  The environment is read out of the secret name rather than taken from the
-  caller, and matched against RDS instance identifiers.
+  The instance is addressed by its exact identifier (DB_INSTANCE_IDENTIFIER,
+  set by the stack that owns both the secret and the instance) — never by
+  searching the account for a name that merely contains the environment. The
+  environment segment of the secret name must agree with the function's own
+  ENVIRONMENT, so a secret from another environment handed to this function
+  is refused rather than rotated against the wrong database.
   """
-  # Parse the secret name from ARN to determine the database
   # Format: arn:aws:secretsmanager:region:account:secret:robosystems/env/postgres-xxxxx
   secret_name = secret_arn.split(":")[-1].rsplit("-", 1)[0]
   env_from_secret = secret_name.split("/")[1]
+  if env_from_secret != environment:
+    raise ValueError(
+      f"Secret environment {env_from_secret!r} does not match this function's "
+      f"environment {environment!r}"
+    )
 
-  # Find the database instance
-  db_info = {
-    "host": None,
-    "port": None,
-    "database": "robosystems",  # Default database name
-    "instance_id": None,
-  }
+  instance_id = os.environ.get("DB_INSTANCE_IDENTIFIER")
+  if not instance_id:
+    raise ValueError("DB_INSTANCE_IDENTIFIER is not set")
 
-  # Find the RDS instance. Use a paginator so accounts with >100 RDS instances
-  # aren't silently truncated to the first page of describe_db_instances.
   try:
-    paginator = rds_client.get_paginator("describe_db_instances")
-    for page in paginator.paginate():
-      for instance in page["DBInstances"]:
-        if env_from_secret in instance["DBInstanceIdentifier"]:
-          db_info["host"] = instance["Endpoint"]["Address"]
-          db_info["port"] = instance["Endpoint"]["Port"]
-          db_info["instance_id"] = instance["DBInstanceIdentifier"]
-          db_info["engine"] = "postgres"
-          db_info["database"] = instance.get("DBName", "robosystems")
-          logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
-          return db_info
-  except Exception as e:
-    logger.warning(f"Error checking RDS instances: {e!s}")
+    response = rds_client.describe_db_instances(DBInstanceIdentifier=instance_id)
+  except rds_client.exceptions.DBInstanceNotFoundFault:
+    raise ValueError(f"RDS instance {instance_id} not found") from None
 
-  raise ValueError(
-    f"Could not find database instance for environment: {env_from_secret}"
-  )
+  instance = response["DBInstances"][0]
+  logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
+  return {
+    "host": instance["Endpoint"]["Address"],
+    "port": instance["Endpoint"]["Port"],
+    "database": instance.get("DBName", "robosystems"),
+    "instance_id": instance["DBInstanceIdentifier"],
+    "engine": "postgres",
+  }
 
 
 def create_new_password() -> str:

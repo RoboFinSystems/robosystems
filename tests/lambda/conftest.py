@@ -104,3 +104,24 @@ def gvmon(aws):
 def gcr(aws):
   """graph_container_refresh module under mock_aws."""
   yield _import_lambda("graph_container_refresh")
+
+
+@pytest.fixture
+def pgrot(aws_env, monkeypatch):
+  """postgres_rotation module under mock_aws, with two RDS instances: the one
+  the function is bound to, and a decoy whose identifier also contains the
+  environment name (what a substring search would have matched first)."""
+  monkeypatch.setenv("ENVIRONMENT", "prod")
+  monkeypatch.setenv("DB_INSTANCE_IDENTIFIER", "robosystems-prod")
+  with mock_aws():
+    rds = boto3.client("rds", region_name="us-east-1")
+    for identifier in ("robosystems-prod-restore", "robosystems-prod"):
+      rds.create_db_instance(
+        DBInstanceIdentifier=identifier,
+        DBInstanceClass="db.t4g.micro",
+        Engine="postgres",
+        MasterUsername="postgres",
+        MasterUserPassword="irrelevant",
+        DBName="robosystems",
+      )
+    yield _import_lambda("postgres_rotation")

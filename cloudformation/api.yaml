@@ -1449,6 +1449,7 @@ Resources:
       FunctionName: !Ref ApiKeyRotationLambda
       Action: lambda:InvokeFunction
       Principal: secretsmanager.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
 
   # Rotation schedule — cadence managed by secrets-rotation.yml workflow;
   # high AutomaticallyAfterDays prevents SM from auto-triggering outside the workflow.
