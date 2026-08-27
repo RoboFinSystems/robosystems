@@ -121,16 +121,20 @@ class AIClient:
     model: str | None = None,
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: dict[str, Any] | None = None,
   ) -> AIResponse:
     """Send one Bedrock request.
 
     `tools` takes Anthropic tool definitions (name/description/input_schema);
     with them the model may stop with reason "tool_use" and return tool_use
-    blocks in `AIResponse.content_blocks`.
+    blocks in `AIResponse.content_blocks`. `tool_choice` is the Anthropic
+    tool_choice object (e.g. ``{"type": "none"}`` to keep the tool definitions
+    — required while the transcript carries tool_use blocks — but forbid
+    further calls). Only meaningful alongside `tools`.
     """
     model_id = self._get_model_id(model, operator_type)
     return await self._bedrock_create_message(
-      messages, system, max_tokens, temperature, model_id, tools
+      messages, system, max_tokens, temperature, model_id, tools, tool_choice
     )
 
   def _invoke_model_sync(
@@ -150,6 +154,7 @@ class AIClient:
     temperature: float,
     model: str,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: dict[str, Any] | None = None,
   ) -> AIResponse:
     message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
 
@@ -164,6 +169,8 @@ class AIClient:
       request_body["system"] = system
     if tools:
       request_body["tools"] = tools
+      if tool_choice:
+        request_body["tool_choice"] = tool_choice
 
     # botocore is synchronous and a model call can take minutes; run it on a
     # worker thread so the event loop — shared by every tenant on this task —
