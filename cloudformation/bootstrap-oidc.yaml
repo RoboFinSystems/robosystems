@@ -562,11 +562,15 @@ Resources:
             Resource:
               - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems/prod-*
               - !Sub arn:aws:secretsmanager:*:${AWS::AccountId}:secret:robosystems/staging-*
+          # Each app names its topic <app>-<env>-contact-form.
           - Sid: ContactFormNotifications
             Effect: Allow
             Action:
               - sns:Publish
-            Resource: !Sub arn:aws:sns:*:${AWS::AccountId}:*
+            Resource:
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:robosystems-app-*
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:roboledger-app-*
+              - !Sub arn:aws:sns:*:${AWS::AccountId}:roboinvestor-app-*
 
   GitHubActionsFrontendRole:
     Type: AWS::IAM::Role
