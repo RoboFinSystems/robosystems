@@ -149,8 +149,10 @@ TypeScript client for Node.js and browser applications - [@robosystems/client](h
 
 ## Authentication
 
-All API endpoints require authentication using API keys. Include your API key in the request headers:
+The REST, GraphQL and per-graph MCP endpoints authenticate with an API key in the request headers:
 
 ```
 X-API-Key: rfs*
 ```
+
+The graph-agnostic MCP endpoint (`/v1/mcp`) accepts OAuth 2.1 bearer tokens only — see **Connect via MCP** above. Browser sessions use JWTs issued by `POST /v1/auth/login`.
