@@ -108,6 +108,10 @@ on:
         required: false
         type: string
         default: ""
+      graph_volumes_stack_name:
+        description: "CloudFormation stack name of the graph-volumes stack whose volume-manager Lambda the worker invokes"
+        required: true
+        type: string
       worker_enabled:
         description: "Enable background worker deployment (true/false)"
         required: false
@@ -444,6 +448,7 @@ jobs:
                 ParameterKey=DagsterClusterArn,ParameterValue=${{ steps.dagster-outputs.outputs.cluster_arn }} \
                 ParameterKey=DagsterClusterName,ParameterValue=$CLUSTER_NAME \
                 ParameterKey=DagsterSecurityGroupId,ParameterValue=${{ steps.dagster-outputs.outputs.sg_id }} \
+                ParameterKey=GraphVolumesStackName,ParameterValue=${{ inputs.graph_volumes_stack_name }} \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=WorkerCpu,ParameterValue=${{ inputs.worker_cpu }} \

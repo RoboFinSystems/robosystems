@@ -484,6 +484,7 @@ Resources:
       FunctionName: !Ref SecretRotationLambda
       Action: lambda:InvokeFunction
       Principal: secretsmanager.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
 
   # ===== Monitoring Infrastructure =====
   # SNS Topic for Infrastructure Alerts

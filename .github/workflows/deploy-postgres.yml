@@ -29,6 +29,10 @@ on:
         description: "VPC ID for RDS instance"
         required: true
         type: string
+      vpc_cidr:
+        description: "VPC CIDR block admitted to the database port (from the VPC stack)"
+        required: true
+        type: string
       subnet_ids:
         description: "Comma-separated subnet IDs for RDS (minimum 2 for multi-AZ)"
         required: true
@@ -182,6 +186,7 @@ jobs:
                 ParameterKey=EnablePerformanceInsights,ParameterValue=${{ inputs.performance_insights_enabled }} \
                 ParameterKey=PerformanceInsightsRetentionPeriod,ParameterValue=${{ inputs.performance_insights_retention_days }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=VpcCidr,ParameterValue=${{ inputs.vpc_cidr }} \
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \

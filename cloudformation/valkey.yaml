@@ -409,6 +409,7 @@ Resources:
       FunctionName: !GetAtt ValkeySecretRotationLambda.Arn
       Action: lambda:InvokeFunction
       Principal: secretsmanager.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
 
   # Rotation Schedule - links Lambda to secret and enables on-demand rotation
   # Actual rotation timing is managed via GitHub Actions (secrets-rotation.yml)
@@ -586,16 +587,6 @@ Outputs:
       - !Sub "redis://${ValkeyReplicationGroup.PrimaryEndPoint.Address}:${ValkeyReplicationGroup.PrimaryEndPoint.Port}"
     Export:
       Name: !Sub "${AWS::StackName}-${Environment}-ValkeyUrl"
-
-  ValkeyUrlWithAuth:
-    Description: Full Redis URL for Valkey ElastiCache with authentication
-    Value: !Sub
-      - "rediss://default:${AuthToken}@${Address}:${Port}"
-      - AuthToken: !Sub "{{resolve:secretsmanager:${ValkeyAuthSecret}:SecretString:VALKEY_AUTH_TOKEN}}"
-        Address: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Address
-        Port: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Port
-    Export:
-      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyUrlWithAuth"
 
   ValkeyConfigurationEndpoint:
     Condition: IsMultiNode

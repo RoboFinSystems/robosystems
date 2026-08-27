@@ -109,6 +109,9 @@ on:
       vpc_id:
         description: "VPC ID"
         value: ${{ jobs.deploy.outputs.vpc_id }}
+      vpc_cidr:
+        description: "VPC CIDR block"
+        value: ${{ jobs.deploy.outputs.vpc_cidr }}
       private_subnet_ids:
         description: "Private Subnet IDs"
         value: ${{ jobs.deploy.outputs.private_subnet_ids }}
@@ -125,6 +128,7 @@ jobs:
       contents: read
     outputs:
       vpc_id: ${{ steps.stack-outputs.outputs.vpc_id }}
+      vpc_cidr: ${{ steps.stack-outputs.outputs.vpc_cidr }}
       private_subnet_ids: ${{ steps.stack-outputs.outputs.private_subnet_ids }}
       public_subnet_ids: ${{ steps.stack-outputs.outputs.public_subnet_ids }}
 
@@ -234,6 +238,20 @@ jobs:
             echo "VPC configured successfully"
           else
             echo "Error: Could not retrieve VPC ID"
+            exit 1
+          fi
+
+          # Get VPC CIDR (the postgres stack admits it to the database port)
+          VPC_CIDR=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcCidr'].OutputValue" \
+            --output text)
+
+          if [ -n "$VPC_CIDR" ] && [ "$VPC_CIDR" != "None" ]; then
+            echo "vpc_cidr=$VPC_CIDR" >> $GITHUB_OUTPUT
+            echo "VPC CIDR: $VPC_CIDR"
+          else
+            echo "Error: Could not retrieve VPC CIDR"
             exit 1
           fi
 
