@@ -889,7 +889,7 @@ class CreditService:
         summaries[repo_type] = {
           "access_id": access_record.id,
           "repository_type": access_record.repository_type,
-          "subscription_tier": access_record.repository_plan.value,
+          "subscription_tier": access_record.repository_plan,
           "access_level": access_record.access_level.value,
           "credits": access_record.user_credits.get_summary(),
         }
@@ -923,7 +923,7 @@ class CreditService:
         "has_access": False,
         "error": "Subscription is not active",
         "addon_type": shared_credits.user_repository.repository_type,
-        "addon_tier": shared_credits.user_repository.repository_plan.value,
+        "addon_tier": shared_credits.user_repository.repository_plan,
       }
 
     if required_credits is None:
@@ -936,7 +936,7 @@ class CreditService:
           "required_credits": 0.0,
           "available_credits": float(shared_credits.current_balance),
           "addon_type": shared_credits.user_repository.repository_type,
-          "addon_tier": shared_credits.user_repository.repository_plan.value,
+          "addon_tier": shared_credits.user_repository.repository_plan,
           "operation_included": True,
         }
 
@@ -948,7 +948,7 @@ class CreditService:
       "required_credits": float(required_credits),
       "available_credits": float(shared_credits.current_balance),
       "addon_type": shared_credits.user_repository.repository_type,
-      "addon_tier": shared_credits.user_repository.repository_plan.value,
+      "addon_tier": shared_credits.user_repository.repository_plan,
     }
 
   def set_storage_override(
