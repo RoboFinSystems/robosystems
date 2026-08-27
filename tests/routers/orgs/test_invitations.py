@@ -86,7 +86,10 @@ class TestCreateInvitation:
     assert email_config["to_email"] == "invitee@example.com"
     assert email_config["org_name"] == org.name
     assert email_config["inviter_name"] == test_user.name
-    assert email_config["token"]
+    # The raw invitation token is parked in Valkey; run config carries a
+    # reference only.
+    assert email_config["token_ref"]
+    assert "token" not in email_config
 
   async def test_member_cannot_invite(self, async_client, test_db, test_user):
     org = _make_org(test_db, test_user.id, OrgRole.MEMBER)

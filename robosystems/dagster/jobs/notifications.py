@@ -1,5 +1,8 @@
 """Dagster jobs for notification operations (email, SMS, push)."""
 
+import secrets
+from typing import Any
+
 from dagster import (
   Backoff,
   Config,
@@ -9,6 +12,7 @@ from dagster import (
   op,
 )
 
+from robosystems.config.defaults import CacheDefaults
 from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,7 +26,12 @@ class SendEmailConfig(Config):
   )
   to_email: str
   user_name: str
-  token: str | None = None  # For verification/reset/invitation emails
+  # Opaque reference to the raw verification/reset/invitation token, which
+  # is parked in Valkey for CacheDefaults.EMAIL_TOKEN_REF_TTL. The raw token
+  # never enters run config: Dagster persists run config indefinitely in run
+  # storage and renders it in its UI, while the platform DB deliberately
+  # holds only the token's hash.
+  token_ref: str | None = None
   app: str = "roboledger"
   operation_id: str | None = None  # For SSE tracking
   org_name: str | None = None  # For org_invitation emails
@@ -58,6 +67,32 @@ class EmailResult:
     }
 
 
+_EMAIL_TOKEN_KEY_PREFIX = "email_token:"
+
+
+def _token_store() -> Any:
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+
+  return create_redis_client(ValkeyDatabase.AUTH)
+
+
+def _stash_email_token(token: str) -> str:
+  """Park a raw email token in Valkey; return the reference to carry in run config."""
+  ref = secrets.token_urlsafe(32)
+  _token_store().setex(
+    f"{_EMAIL_TOKEN_KEY_PREFIX}{ref}", CacheDefaults.EMAIL_TOKEN_REF_TTL, token
+  )
+  return ref
+
+
+def _fetch_email_token(ref: str) -> str | None:
+  return _token_store().get(f"{_EMAIL_TOKEN_KEY_PREFIX}{ref}") or None
+
+
+def _discard_email_token(ref: str) -> None:
+  _token_store().delete(f"{_EMAIL_TOKEN_KEY_PREFIX}{ref}")
+
+
 @op(
   retry_policy=RetryPolicy(
     max_retries=3,
@@ -70,7 +105,9 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
   """Send an email via SES.
 
   Token requirements by email_type:
-  - email_verification, password_reset, org_invitation: token required
+  - email_verification, password_reset, org_invitation: token_ref required,
+    and it must still resolve (the parked token expires after
+    CacheDefaults.EMAIL_TOKEN_REF_TTL and is discarded once sent)
   - org_invitation: org_name also required
   - welcome: no token
 
@@ -85,27 +122,37 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     f"Sending {config.email_type} email to {config.to_email} for app {config.app}"
   )
 
+  token: str | None = None
+  if config.token_ref:
+    token = _fetch_email_token(config.token_ref)
+    if not token:
+      # Expired or already sent. The caller must issue a fresh token; a
+      # re-execution from the Dagster UI must not be able to resend one.
+      raise ValueError(
+        f"Token reference for {config.email_type} has expired or was already used"
+      )
+
   loop = asyncio.new_event_loop()
   try:
     if config.email_type == "email_verification":
-      if not config.token:
+      if not token:
         raise ValueError("Token required for email_verification")
       success = loop.run_until_complete(
         ses_service.send_verification_email(
           user_email=config.to_email,
           user_name=config.user_name,
-          token=config.token,
+          token=token,
           app=config.app,
         )
       )
     elif config.email_type == "password_reset":
-      if not config.token:
+      if not token:
         raise ValueError("Token required for password_reset")
       success = loop.run_until_complete(
         ses_service.send_password_reset_email(
           user_email=config.to_email,
           user_name=config.user_name,
-          token=config.token,
+          token=token,
           app=config.app,
         )
       )
@@ -118,7 +165,7 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
         )
       )
     elif config.email_type == "org_invitation":
-      if not config.token:
+      if not token:
         raise ValueError("Token required for org_invitation")
       if not config.org_name:
         raise ValueError("org_name required for org_invitation")
@@ -127,7 +174,7 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
           user_email=config.to_email,
           inviter_name=config.inviter_name or "A teammate",
           org_name=config.org_name,
-          token=config.token,
+          token=token,
           app=config.app,
         )
       )
@@ -171,6 +218,14 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
     # Raise to trigger retry
     raise RuntimeError(f"Failed to send {config.email_type} email to {config.to_email}")
 
+  if config.token_ref:
+    # Best-effort: the TTL is the backstop, and raising here would retry
+    # the op and send the email twice.
+    try:
+      _discard_email_token(config.token_ref)
+    except Exception as e:
+      context.log.warning(f"Could not discard token reference after send: {e}")
+
   if config.operation_id:
     _emit_email_result_to_sse(context, config.operation_id, result.to_dict())
 
@@ -204,15 +259,15 @@ def send_email_job():
   """Send an email via SES, with 3 retries at exponential backoff.
 
   Usage:
-    from robosystems.middleware.sse import run_and_monitor_dagster_job, build_notification_job_config
+    from robosystems.middleware.sse import run_and_monitor_dagster_job, build_email_job_config
 
-    # Queue email send with SSE monitoring
+    # Queue email send with SSE monitoring. The raw token is parked in
+    # Valkey by build_email_job_config; run config carries a reference.
     background_tasks.add_task(
       run_and_monitor_dagster_job,
       job_name="send_email_job",
       operation_id=operation_id,
-      run_config=build_notification_job_config(
-        "send_email_job",
+      run_config=build_email_job_config(
         email_type="email_verification",
         to_email="user@example.com",
         user_name="John",
@@ -242,7 +297,9 @@ def build_email_job_config(
 
   Args:
     email_type: email_verification, password_reset, welcome, or org_invitation
-    token: Verification/reset/invitation token (required for all but welcome)
+    token: Raw verification/reset/invitation token (required for all but
+      welcome). Parked in Valkey for CacheDefaults.EMAIL_TOKEN_REF_TTL; the
+      run config carries only an opaque reference to it.
     app: App identifier (roboledger, roboinvestor, robosystems)
     operation_id: SSE operation ID for progress tracking
     org_name: Organization name (required for org_invitation)
@@ -257,7 +314,7 @@ def build_email_job_config(
   }
 
   if token:
-    config["token"] = token
+    config["token_ref"] = _stash_email_token(token)
 
   if operation_id:
     config["operation_id"] = operation_id
