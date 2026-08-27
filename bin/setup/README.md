@@ -75,7 +75,8 @@ The complete bootstrap process for a fresh deployment:
 │    - Repository name is always "robosystems" (fleet-uniform, even on        │
 │      a renamed fork — the deploy role's ECR scope assumes it)               │
 │    - Image scanning on push, AES256 encryption                              │
-│    - Prompts for a lifecycle policy: robust (default) / basic / skip        │
+│    - First run: prompts for a lifecycle policy (robust / basic / skip);    │
+│      later runs: silent when the live policy matches the bundled file      │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -131,9 +132,10 @@ The complete bootstrap process for a fresh deployment:
 just bootstrap                           # Default: robosystems-sso profile, us-east-1
 just bootstrap my-fork-sso               # Custom SSO profile
 just bootstrap my-fork-sso eu-west-1     # Custom profile and region
+just bootstrap-oidc                      # Re-apply the deploy roles only (see below)
 
 # Direct execution
-./bin/setup/bootstrap.sh [profile] [region]
+./bin/setup/bootstrap.sh [--oidc] [--with-app-config] [profile] [region]
 ```
 
 **Arguments**:
@@ -141,6 +143,22 @@ just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 |----------|---------|-------------|
 | `profile` | `robosystems-sso` | AWS SSO profile name |
 | `region` | `us-east-1` | AWS region |
+| `--oidc` | off | Only the OIDC stack and the three identity variables; nothing else is touched |
+| `--with-app-config` | off | On a re-run, also offer the Secrets Manager / GitHub-variables setup |
+
+**Re-running**: the script is built to be re-run against a live account without
+risk. The OIDC stack is applied through a **change set** — you see the resource
+changes and confirm, and a stack that already matches the template is reported
+rather than updated; on an existing stack the trusted org/repo come from the
+stack's own parameters, not a prompt. The ECR lifecycle step is silent when the
+live policy matches `ecr-lifecycle-policy.json` (reconcile deliberately with
+`just bootstrap-ecr-lifecycle` if it differs). The application-config step —
+Secrets Manager and GitHub variables — runs on the **first** bootstrap only;
+afterwards it needs `--with-app-config`, and the GitHub-variables part asks for a
+typed `yes`, because `gha.sh` re-asserts every repository variable and would
+reset a live account's sizing and toggles to defaults. After editing
+`cloudformation/bootstrap-oidc.yaml`, `just bootstrap-oidc` is the whole
+procedure.
 
 **Prerequisites**:
 

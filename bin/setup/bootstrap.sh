@@ -13,13 +13,25 @@
 #
 # WHAT THIS DOES:
 #   1. Configures AWS CLI SSO profile (if not exists)
-#   2. Deploys GitHub OIDC CloudFormation stack
+#   2. Deploys the GitHub OIDC CloudFormation stack (the deploy roles)
 #   3. Sets GitHub variables (role ARN, etc.)
-#   4. Creates AWS Secrets Manager secrets
+#   4. First run only: ECR repository, SES identity, application secrets
+#
+# MODES:
+#   full (default)  Everything above. On a re-run the application-config
+#                   step (Secrets Manager, GitHub variables) is skipped unless
+#                   --with-app-config is given — those are the two steps that
+#                   can rewrite a live account, so they never run by accident.
+#   --oidc          Only the OIDC stack + the three identity variables. Use this
+#                   after editing cloudformation/bootstrap-oidc.yaml. The stack
+#                   update is previewed as a change set: you see exactly which
+#                   resources change before anything is applied, and a stack
+#                   that already matches the template is reported, not touched.
 #
 # USAGE:
-#   just bootstrap [profile] [region]
-#   or: bin/setup/bootstrap.sh [profile] [region]
+#   just bootstrap [profile] [region]          # full
+#   just bootstrap-oidc [profile] [region]     # --oidc
+#   bin/setup/bootstrap.sh [--oidc] [--with-app-config] [profile] [region]
 #
 # ARGUMENTS:
 #   profile: AWS SSO profile name (default: robosystems-sso)
@@ -29,6 +41,7 @@
 #   just bootstrap                           # Use defaults
 #   just bootstrap my-fork-sso               # Custom profile
 #   just bootstrap my-fork-sso eu-west-1     # Custom profile and region
+#   just bootstrap-oidc                      # Re-apply the deploy roles only
 #
 # =============================================================================
 
@@ -42,10 +55,47 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Parse arguments - these take priority over environment variables
-SSO_PROFILE="${1:-${AWS_PROFILE:-robosystems-sso}}"
-AWS_REGION="${2:-${AWS_REGION:-us-east-1}}"
+usage() {
+    echo "Usage: bin/setup/bootstrap.sh [--oidc] [--with-app-config] [profile] [region]"
+    echo ""
+    echo "  --oidc             Only deploy/update the GitHub OIDC stack and refresh the"
+    echo "                     identity variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)."
+    echo "  --with-app-config  On a re-run, also offer the Secrets Manager / GitHub"
+    echo "                     variables setup (skipped by default after the first run)."
+    echo "  profile            AWS SSO profile name (default: robosystems-sso)"
+    echo "  region             AWS region (default: us-east-1)"
+}
+
+# Parse arguments - flags first, then positional profile/region. Positionals
+# take priority over environment variables.
+BOOTSTRAP_MODE="full"
+WITH_APP_CONFIG=false
+_pos_profile=""
+_pos_region=""
+for arg in "$@"; do
+    case "$arg" in
+        --oidc|--oidc-only) BOOTSTRAP_MODE="oidc" ;;
+        --with-app-config)  WITH_APP_CONFIG=true ;;
+        -h|--help)          usage; exit 0 ;;
+        --*)                echo "Unknown option: $arg" >&2; usage >&2; exit 1 ;;
+        *)
+            if [ -z "$_pos_profile" ]; then
+                _pos_profile="$arg"
+            elif [ -z "$_pos_region" ]; then
+                _pos_region="$arg"
+            else
+                echo "Unexpected argument: $arg" >&2; usage >&2; exit 1
+            fi
+            ;;
+    esac
+done
+SSO_PROFILE="${_pos_profile:-${AWS_PROFILE:-robosystems-sso}}"
+AWS_REGION="${_pos_region:-${AWS_REGION:-us-east-1}}"
 OIDC_STACK_NAME="RoboSystemsGitHubOIDC"
+
+# Set when this run creates the OIDC stack, i.e. this is the first bootstrap
+# of the account. Gates the application-config step in full mode.
+OIDC_STACK_CREATED=false
 
 # Export immediately so all AWS CLI calls in this script use the correct profile
 # This ensures bootstrap works even if .envrc isn't activated yet
@@ -323,7 +373,8 @@ deploy_github_oidc() {
         exit 1
     fi
 
-    local repo_info=$(gh repo view --json owner,name 2>/dev/null || echo "")
+    local repo_info
+    repo_info=$(gh repo view --json owner,name 2>/dev/null || echo "")
     if [ -z "$repo_info" ]; then
         print_warning "Not in a GitHub repository"
         read -p "Enter GitHub organization/username: " GITHUB_ORG
@@ -334,9 +385,40 @@ deploy_github_oidc() {
         print_info "Detected repository: ${GITHUB_ORG}/${GITHUB_REPO}"
     fi
 
-    echo ""
-    read -p "GitHub Organization [${GITHUB_ORG}]: " input_org
-    GITHUB_ORG=${input_org:-$GITHUB_ORG}
+    # Check if stack exists
+    local stack_status=""
+    stack_status=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].StackStatus' \
+        --output text 2>/dev/null) || true
+
+    if [ -n "$stack_status" ]; then
+        # An existing stack keeps its trust identity: the org/repo come from
+        # its parameters, not from a prompt, so a re-run can never re-point
+        # the deploy roles at a different repository by a stray keystroke.
+        local stack_org stack_repo
+        stack_org=$(aws cloudformation describe-stacks \
+            --stack-name "${OIDC_STACK_NAME}" \
+            --profile "${SSO_PROFILE}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].Parameters[?ParameterKey==`GitHubOrg`].ParameterValue' \
+            --output text 2>/dev/null) || stack_org=""
+        stack_repo=$(aws cloudformation describe-stacks \
+            --stack-name "${OIDC_STACK_NAME}" \
+            --profile "${SSO_PROFILE}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].Parameters[?ParameterKey==`GitHubRepoName`].ParameterValue' \
+            --output text 2>/dev/null) || stack_repo=""
+        [ -n "$stack_org" ] && [ "$stack_org" != "None" ] && GITHUB_ORG="$stack_org"
+        [ -n "$stack_repo" ] && [ "$stack_repo" != "None" ] && GITHUB_REPO="$stack_repo"
+        print_info "Stack trusts: ${GITHUB_ORG}/${GITHUB_REPO} (from the existing stack's parameters)"
+    else
+        echo ""
+        read -p "GitHub Organization [${GITHUB_ORG}]: " input_org
+        GITHUB_ORG=${input_org:-$GITHUB_ORG}
+    fi
 
     echo ""
     print_info "Backend role will allow:"
@@ -351,80 +433,10 @@ deploy_github_oidc() {
     echo ""
     print_step "Deploying CloudFormation stack: ${OIDC_STACK_NAME}"
 
-    # Check if stack exists
-    local stack_status=""
-    stack_status=$(aws cloudformation describe-stacks \
-        --stack-name "${OIDC_STACK_NAME}" \
-        --profile "${SSO_PROFILE}" \
-        --region "${AWS_REGION}" \
-        --query 'Stacks[0].StackStatus' \
-        --output text 2>/dev/null) || true
-
-    local cf_action="create-stack"
-    if [ -n "$stack_status" ]; then
-        print_warning "Stack already exists (status: ${stack_status})"
-        read -p "Update existing stack? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            cf_action="update-stack"
-        else
-            print_info "Skipping stack deployment"
-            # Get existing role ARN
-            GITHUB_ACTIONS_ROLE_ARN=$(aws cloudformation describe-stacks \
-                --stack-name "${OIDC_STACK_NAME}" \
-                --profile "${SSO_PROFILE}" \
-                --region "${AWS_REGION}" \
-                --query 'Stacks[0].Outputs[?OutputKey==`GitHubActionsRoleArn`].OutputValue' \
-                --output text)
-            return 0
-        fi
-    fi
-
-    # Deploy/update stack
-    local cf_output=""
-    if [ "$cf_action" = "create-stack" ]; then
-        aws cloudformation create-stack \
-            --stack-name "${OIDC_STACK_NAME}" \
-            --template-body file://cloudformation/bootstrap-oidc.yaml \
-            --parameters \
-                ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
-                ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --profile "${SSO_PROFILE}" \
-            --region "${AWS_REGION}" \
-            --tags Key=Service,Value=RoboSystems Key=Component,Value=GitHubOIDC
-
-        print_step "Waiting for stack creation..."
-        aws cloudformation wait stack-create-complete \
-            --stack-name "${OIDC_STACK_NAME}" \
-            --profile "${SSO_PROFILE}" \
-            --region "${AWS_REGION}"
+    if [ -z "$stack_status" ]; then
+        deploy_oidc_create
     else
-        aws cloudformation update-stack \
-            --stack-name "${OIDC_STACK_NAME}" \
-            --template-body file://cloudformation/bootstrap-oidc.yaml \
-            --parameters \
-                ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
-                ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --profile "${SSO_PROFILE}" \
-            --region "${AWS_REGION}" 2>&1 || {
-                if [[ $? -eq 255 ]] && aws cloudformation describe-stacks \
-                    --stack-name "${OIDC_STACK_NAME}" \
-                    --profile "${SSO_PROFILE}" \
-                    --region "${AWS_REGION}" &>/dev/null; then
-                    print_info "No updates needed"
-                else
-                    print_error "Stack update failed"
-                    exit 1
-                fi
-            }
-
-        print_step "Waiting for stack update..."
-        aws cloudformation wait stack-update-complete \
-            --stack-name "${OIDC_STACK_NAME}" \
-            --profile "${SSO_PROFILE}" \
-            --region "${AWS_REGION}" 2>/dev/null || true
+        deploy_oidc_update "$stack_status"
     fi
 
     # Get outputs
@@ -435,13 +447,170 @@ deploy_github_oidc() {
         --query 'Stacks[0].Outputs[?OutputKey==`GitHubActionsRoleArn`].OutputValue' \
         --output text)
 
-    print_success "GitHub OIDC stack deployed"
     print_info "Role ARN: ${GITHUB_ACTIONS_ROLE_ARN}"
+}
+
+deploy_oidc_create() {
+    aws cloudformation create-stack \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --parameters \
+            ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
+            ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --tags Key=Service,Value=RoboSystems Key=Component,Value=GitHubOIDC
+
+    print_step "Waiting for stack creation..."
+    aws cloudformation wait stack-create-complete \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}"
+
+    OIDC_STACK_CREATED=true
+    print_success "GitHub OIDC stack created"
+}
+
+# Update path. The template is applied through a change set so the operator
+# sees which resources would change before anything is touched, and a stack
+# that already matches the template is reported as such — the prompt only
+# appears when there is something to apply. That closes the gap where a
+# hardening edit sat in the template for weeks, unapplied, because nothing
+# said the live stack was behind.
+deploy_oidc_update() {
+    local stack_status="$1"
+
+    # Where the template and the live stack each stand.
+    local template_commit template_date branch dirty="" stack_updated
+    template_commit=$(git log -1 --format='%h' -- cloudformation/bootstrap-oidc.yaml 2>/dev/null || echo "?")
+    template_date=$(git log -1 --format='%ad' --date=short -- cloudformation/bootstrap-oidc.yaml 2>/dev/null || echo "?")
+    branch=$(git branch --show-current 2>/dev/null || echo "?")
+    if ! git diff --quiet -- cloudformation/bootstrap-oidc.yaml 2>/dev/null; then
+        dirty=" + uncommitted edits"
+    fi
+    stack_updated=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].[LastUpdatedTime, CreationTime] | [?@ != `null`] | [0]' \
+        --output text 2>/dev/null) || stack_updated="?"
+
+    echo ""
+    print_info "Stack:    ${stack_status}, last applied ${stack_updated}"
+    print_info "Template: cloudformation/bootstrap-oidc.yaml @ ${template_commit} (${template_date}) on '${branch}'${dirty}"
+    if [ "$branch" != "main" ]; then
+        print_warning "Not on main — whatever is in this checkout is what gets applied"
+    fi
+
+    case "$stack_status" in
+        *_IN_PROGRESS)
+            print_error "Stack is busy (${stack_status}) — wait for the current operation to finish"
+            exit 1
+            ;;
+        UPDATE_ROLLBACK_FAILED|ROLLBACK_COMPLETE|*_FAILED)
+            print_error "Stack is ${stack_status} and cannot be updated from here — inspect it in the console first"
+            exit 1
+            ;;
+    esac
+
+    local change_set
+    change_set="bootstrap-$(date +%Y%m%d%H%M%S)"
+    print_step "Computing what would change (change set ${change_set})..."
+    aws cloudformation create-change-set \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --change-set-name "${change_set}" \
+        --change-set-type UPDATE \
+        --template-body file://cloudformation/bootstrap-oidc.yaml \
+        --parameters \
+            ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
+            ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --tags Key=Service,Value=RoboSystems Key=Component,Value=GitHubOIDC >/dev/null
+
+    if ! aws cloudformation wait change-set-create-complete \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --change-set-name "${change_set}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" 2>/dev/null; then
+        local reason
+        reason=$(aws cloudformation describe-change-set \
+            --stack-name "${OIDC_STACK_NAME}" \
+            --change-set-name "${change_set}" \
+            --profile "${SSO_PROFILE}" \
+            --region "${AWS_REGION}" \
+            --query 'StatusReason' --output text 2>/dev/null) || reason=""
+        aws cloudformation delete-change-set \
+            --stack-name "${OIDC_STACK_NAME}" \
+            --change-set-name "${change_set}" \
+            --profile "${SSO_PROFILE}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1 || true
+        if echo "$reason" | grep -qi "didn't contain changes\|No updates are to be performed"; then
+            print_success "Stack already matches the template — nothing to apply"
+            return 0
+        fi
+        print_error "Could not compute the change set: ${reason:-unknown reason}"
+        exit 1
+    fi
+
+    echo ""
+    echo "Changes the template would make to ${OIDC_STACK_NAME}:"
+    aws cloudformation describe-change-set \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --change-set-name "${change_set}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Changes[].ResourceChange.[Action, LogicalResourceId, ResourceType, Replacement]' \
+        --output text | while IFS=$'\t' read -r action logical rtype replacement; do
+            local note=""
+            if [ "$replacement" = "True" ]; then note="  (REPLACEMENT)"; fi
+            echo "  ${action}  ${logical}  [${rtype}]${note}"
+        done
+    echo ""
+
+    read -p "Apply these changes to ${OIDC_STACK_NAME}? (y/N): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        aws cloudformation delete-change-set \
+            --stack-name "${OIDC_STACK_NAME}" \
+            --change-set-name "${change_set}" \
+            --profile "${SSO_PROFILE}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1 || true
+        print_info "Left the stack unchanged"
+        return 0
+    fi
+
+    aws cloudformation execute-change-set \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --change-set-name "${change_set}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" >/dev/null
+
+    print_step "Waiting for stack update..."
+    aws cloudformation wait stack-update-complete \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}"
+
+    print_success "GitHub OIDC stack updated"
 }
 
 # =============================================================================
 # GITHUB CONFIGURATION
 # =============================================================================
+
+set_variable_if_changed() {
+    local name="$1" value="$2" current
+    current=$(gh variable get "$name" 2>/dev/null || echo "")
+    if [ "$current" = "$value" ]; then
+        print_success "${name} already set"
+    else
+        gh variable set "$name" --body "$value"
+        print_success "Set ${name}"
+    fi
+}
 
 configure_github() {
     print_header "Configuring GitHub Repository"
@@ -452,17 +621,14 @@ configure_github() {
         --query 'Account' \
         --output text)
 
-    print_step "Setting GitHub variables for OIDC..."
+    print_step "Checking GitHub identity variables..."
 
-    # Set the role ARN as a variable (not a secret - it's not sensitive)
-    gh variable set AWS_ROLE_ARN --body "${GITHUB_ACTIONS_ROLE_ARN}"
-    print_success "Set AWS_ROLE_ARN"
-
-    gh variable set AWS_ACCOUNT_ID --body "${AWS_ACCOUNT_ID}"
-    print_success "Set AWS_ACCOUNT_ID"
-
-    gh variable set AWS_REGION --body "${AWS_REGION}"
-    print_success "Set AWS_REGION"
+    # These three are derived, not configured (the ARN is not sensitive), so
+    # they are safe to re-assert — but only write when the value differs, so a
+    # re-run against a correct account is read-only here.
+    set_variable_if_changed AWS_ROLE_ARN "${GITHUB_ACTIONS_ROLE_ARN}"
+    set_variable_if_changed AWS_ACCOUNT_ID "${AWS_ACCOUNT_ID}"
+    set_variable_if_changed AWS_REGION "${AWS_REGION}"
 
     echo ""
     print_step "Note: No AWS secrets needed with OIDC!"
@@ -610,10 +776,26 @@ setup_ecr_repository() {
 
     # Choose the lifecycle policy. Honors a non-interactive override:
     #   ECR_LIFECYCLE_POLICY=robust|basic|skip
-    # Robust/basic are (re)applied so re-running bootstrap reconciles them after
-    # edits to ecr-lifecycle-policy.json; skip leaves the existing policy alone.
+    # Without an override, a repository that already carries a lifecycle policy
+    # is never prompted about: when it matches the bundled operational policy
+    # there is nothing to do, and when it differs the reconcile is a deliberate
+    # act (just bootstrap-ecr-lifecycle), not a keystroke in a setup flow.
     local policy_choice="${ECR_LIFECYCLE_POLICY:-}"
     if [ -z "$policy_choice" ]; then
+        local live_policy
+        live_policy=$(aws ecr get-lifecycle-policy \
+            --repository-name "${ecr_repo_name}" \
+            --region "${AWS_REGION}" \
+            --query 'lifecyclePolicyText' --output text 2>/dev/null) || live_policy=""
+        if [ -n "$live_policy" ] && [ "$live_policy" != "None" ]; then
+            if [ -f "$policy_file" ] && [ "$(echo "$live_policy" | jq -S -c .)" = "$(jq -S -c . "$policy_file")" ]; then
+                print_success "Lifecycle policy matches ${policy_file##*/} — nothing to do"
+            else
+                print_warning "Live lifecycle policy differs from ${policy_file##*/} — leaving it unchanged"
+                print_info "Reconcile deliberately with: just bootstrap-ecr-lifecycle"
+            fi
+            return 0
+        fi
         echo ""
         echo "Which ECR image lifecycle policy do you want to apply?"
         echo "  1) Robust - full operational policy, count-based dev-image retention (recommended)"
@@ -873,6 +1055,20 @@ prompt_environment_choice() {
 setup_secrets_and_variables() {
     print_header "Application Configuration"
 
+    # Only a first bootstrap (this run created the OIDC stack) walks into the
+    # secrets/variables setup. On a re-run these are the steps that can rewrite
+    # a live account — gha.sh re-asserts every repository variable — so they
+    # run only when asked for by flag, never by an Enter or a stray 'y'.
+    if [ "$OIDC_STACK_CREATED" != true ] && [ "$WITH_APP_CONFIG" != true ]; then
+        print_info "Skipped on a re-run. Nothing here is touched unless you ask for it:"
+        echo ""
+        echo "   just setup-aws        # secrets + SSM parameters (never overwrites an existing secret)"
+        echo "   just setup-gha        # GitHub variables — RE-ASSERTS all ~185 repo variables;"
+        echo "                         # review the defaults before running against a live account"
+        echo "   bin/setup/bootstrap.sh --with-app-config   # include them in this flow"
+        return 0
+    fi
+
     echo "The following optional setup steps are available:"
     echo ""
     echo "  AWS Secrets Manager - Application secrets & feature flags"
@@ -908,9 +1104,11 @@ setup_secrets_and_variables() {
         print_info "API access mode: $API_ACCESS_MODE"
     fi
 
-    read -p "Setup GitHub Variables? (y/N): " -n 1 -r
     echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    print_warning "GitHub Variables (re)writes ~185 repository variables. On a live account"
+    print_warning "that resets instance sizes, capacities and feature toggles to the defaults."
+    read -p "Type 'yes' to run the GitHub Variables setup, anything else to skip: " -r
+    if [ "$REPLY" = "yes" ]; then
         run_gha=true
     fi
 
@@ -1009,6 +1207,15 @@ check_github_secrets() {
 # =============================================================================
 
 show_summary() {
+    if [ "$BOOTSTRAP_MODE" = "oidc" ]; then
+        print_header "OIDC Stack Complete"
+        echo -e "${CYAN}AWS Account:${NC} ${AWS_ACCOUNT_ID}   ${CYAN}Region:${NC} ${AWS_REGION}"
+        echo -e "${CYAN}GitHub OIDC Role:${NC} ${GITHUB_ACTIONS_ROLE_ARN}"
+        echo ""
+        echo "Nothing else was touched (no ECR, SES, secrets or variable changes)."
+        return 0
+    fi
+
     print_header "Bootstrap Complete!"
 
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
@@ -1085,6 +1292,13 @@ main() {
     echo -e "${CYAN}Configuration:${NC}"
     echo "  AWS Profile: ${SSO_PROFILE}"
     echo "  AWS Region:  ${AWS_REGION}"
+    if [ "$BOOTSTRAP_MODE" = "oidc" ]; then
+        echo "  Mode:        oidc — deploy roles + identity variables only"
+    elif [ "$WITH_APP_CONFIG" = true ]; then
+        echo "  Mode:        full, including application config (secrets / variables)"
+    else
+        echo "  Mode:        full (application config only on a first run)"
+    fi
     echo ""
     echo "Prerequisites:"
     echo "  ✓ AWS IAM Identity Center enabled"
@@ -1120,8 +1334,11 @@ main() {
         exit 0
     fi
 
-    # Setup direnv for AWS profile
-    setup_direnv
+    # The OIDC-only path touches no local files: the profile is already
+    # exported above, and .envrc belongs to the full first-run flow.
+    if [ "$BOOTSTRAP_MODE" != "oidc" ]; then
+        setup_direnv
+    fi
 
     # Check/configure SSO
     if ! check_sso_configured; then
@@ -1141,6 +1358,11 @@ main() {
 
     # Configure GitHub
     configure_github
+
+    if [ "$BOOTSTRAP_MODE" = "oidc" ]; then
+        show_summary
+        return 0
+    fi
 
     # Configure essential variables (alert email, S3 namespace)
     configure_essential_variables
