@@ -14,15 +14,16 @@ connector cannot widen anyone's access.
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Optional
+from typing import Optional, cast
 
 from sqlalchemy import Boolean, Column, DateTime, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from robosystems.config.constants import OAUTH_DCR_UNUSED_REGISTRATION_TTL_HOURS
 from robosystems.database import Model
+from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -308,6 +309,22 @@ class OAuthClient(Model):
     try:
       session.commit()
       session.refresh(client)
+    except IntegrityError:
+      # Two first contacts with the same document raced on the unique
+      # client_id; the loser re-reads the winner's row and updates it.
+      session.rollback()
+      if not created or cls.get_by_client_id(client_id, session) is None:
+        raise
+      return cls.upsert_cimd(
+        client_id=client_id,
+        client_name=client_name,
+        redirect_uris=redirect_uris,
+        session=session,
+        is_trusted=is_trusted,
+        client_uri=client_uri,
+        logo_uri=logo_uri,
+        scope=scope,
+      )
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -324,6 +341,33 @@ class OAuthClient(Model):
         risk_level="low",
       )
     return client
+
+  @classmethod
+  def cleanup_expired_registrations(cls, session: Session) -> int:
+    """Delete dynamic registrations that expired without a consent. The
+    first consent clears ``expires_at`` (``mark_used``), so no row that
+    holds a grant is ever eligible."""
+    now = datetime.now(UTC)
+    # The attribute reads as Optional to the type checker because mark_used
+    # assigns None to it; the class-level column itself never is.
+    expires_at = cast(Column[datetime | None], cls.expires_at)
+    try:
+      count = (
+        session.query(cls)
+        .filter(
+          cls.registration_source == REGISTRATION_DCR,
+          expires_at.isnot(None),
+          expires_at < now,
+        )
+        .delete(synchronize_session=False)
+      )
+      session.commit()
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+    if count:
+      logger.info(f"Cleaned up {count} expired OAuth client registrations")
+    return count
 
   def mark_used(self, session: Session) -> None:
     """Stamp ``last_used_at`` and clear a dynamic registration's expiry —

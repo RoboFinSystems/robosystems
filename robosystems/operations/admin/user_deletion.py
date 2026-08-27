@@ -29,6 +29,8 @@ from robosystems.models.core import (
   GraphCredits,
   GraphStatus,
   GraphUser,
+  OAuthGrant,
+  OAuthToken,
   Org,
   OrgInvitation,
   OrgLimits,
@@ -41,6 +43,7 @@ from robosystems.models.core import (
   UserToken,
 )
 from robosystems.models.core.billing.subscription import TERMINAL_SUBSCRIPTION_STATUSES
+from robosystems.models.core.user.oauth_token import TOKEN_TYPE_ACCESS
 from robosystems.models.core.user.user_repository import RepositoryAccessLevel
 from robosystems.models.core.user.user_repository_credits import (
   UserRepositoryCreditTransaction,
@@ -222,6 +225,7 @@ def plan_user_deletion(user_id: str, session: Session) -> UserDeletionPlan:
   removals = {
     "api_keys": session.query(UserAPIKey).filter_by(user_id=user_id).count(),
     "tokens": session.query(UserToken).filter_by(user_id=user_id).count(),
+    "oauth_grants": session.query(OAuthGrant).filter_by(user_id=user_id).count(),
     "graph_grants": session.query(GraphUser).filter_by(user_id=user_id).count(),
     "connections": session.query(Connection).filter_by(user_id=user_id).count(),
     "documents": session.query(Document).filter_by(user_id=user_id).count(),
@@ -310,6 +314,14 @@ def execute_user_deletion(
     .all()
     if row.key_fingerprint
   ]
+  # OAuth access tokens are cached under their digest in the same store;
+  # refresh tokens are never cached. Same capture-then-purge discipline.
+  oauth_token_digests = [
+    row.token_hash
+    for row in session.query(OAuthToken.token_hash)
+    .filter_by(user_id=user_id, token_type=TOKEN_TYPE_ACCESS)
+    .all()
+  ]
 
   # Audit and billing history survive the account — the actor is de-referenced,
   # never deleted, because retention is itself a compliance requirement.
@@ -366,6 +378,10 @@ def execute_user_deletion(
   session.query(Document).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(Connection).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(GraphUser).filter_by(user_id=user_id).delete(synchronize_session=False)
+  # OAuth consents: tokens hang off grants, grants off the user — deepest
+  # first, or the FK into users refuses the account row below.
+  session.query(OAuthToken).filter_by(user_id=user_id).delete(synchronize_session=False)
+  session.query(OAuthGrant).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(UserAPIKey).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(UserToken).filter_by(user_id=user_id).delete(synchronize_session=False)
   session.query(OrgUser).filter_by(user_id=user_id).delete(synchronize_session=False)
@@ -388,7 +404,7 @@ def execute_user_deletion(
     session.rollback()
     raise
 
-  _invalidate_auth_caches(user_id, api_key_fingerprints)
+  _invalidate_auth_caches(user_id, api_key_fingerprints + oauth_token_digests)
 
   logger.info(
     f"Deleted user {user_id} ({plan.email}) by {actor}",

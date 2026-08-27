@@ -166,9 +166,6 @@ def refresh_access_token(
   if grant is None or str(grant.oauth_client_id) != str(client.id):
     raise TokenError("invalid_grant", "Invalid refresh token")
 
-  if row.revoked_at is not None or row.is_expired:
-    raise TokenError("invalid_grant", "Refresh token expired or revoked")
-
   def _replay() -> TokenError:
     revoked = OAuthToken.revoke_family(
       str(row.family_id), session, reason="refresh_token_replay"
@@ -186,8 +183,17 @@ def refresh_access_token(
     )
     return TokenError("invalid_grant", "Refresh token has already been used")
 
+  # A consumed token presented again is replay whatever else is true of the
+  # row: an expired one may still have a live successor in its family, so
+  # this comes before the expiry check, not after it. Once the family is
+  # revoked there is nothing left to revoke, and the replay is not re-logged.
   if row.used_at is not None:
-    raise _replay()
+    if row.revoked_at is None:
+      raise _replay()
+    raise TokenError("invalid_grant", "Refresh token has already been used")
+
+  if row.revoked_at is not None or row.is_expired:
+    raise TokenError("invalid_grant", "Refresh token expired or revoked")
 
   if grant.is_revoked:
     raise TokenError("invalid_grant", "The grant has been revoked")

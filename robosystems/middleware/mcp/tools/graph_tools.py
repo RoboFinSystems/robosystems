@@ -117,6 +117,28 @@ def _verify_admin_on_graph(user, graph_id: str, session) -> dict[str, Any] | Non
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _subgraph_credential_hint(parent_graph_id: str) -> str:
+  """What credential reaches a subgraph's ``connector_url`` from this
+  connector. A graph-scoped key covers the parent's subgraphs; an OAuth
+  grant is bound to exactly one route, so the OAuth answer is "authorize
+  the new URL" — telling an OAuth connector to reuse its token would send
+  it into a 401-and-refresh loop at the subgraph."""
+  from robosystems.security.request_context import current_principal
+
+  principal = current_principal()
+  if principal is not None and principal.auth_method == "oauth":
+    return (
+      "This connector is authorized with OAuth, and an OAuth grant is bound "
+      "to exactly one URL — its token does not reach the subgraph. Add "
+      "connector_url as a new connector and authorize it; the consent screen "
+      "shows the subgraph locked in. No API key is involved."
+    )
+  return (
+    "Reuse this connector's API key — a key scoped to "
+    f"'{parent_graph_id}' covers its subgraphs. No new key needed."
+  )
+
+
 class CreateSubgraphTool:
   """Create an isolated subgraph (workspace) under the current parent graph."""
 
@@ -143,8 +165,12 @@ class CreateSubgraphTool:
         "`connector_url`. A subgraph is a separate MCP endpoint, not a mode of "
         "this one: this connector is anchored to its own graph by URL and "
         "cannot reach the new subgraph. To work in it, add an MCP connector "
-        "for `connector_url` — the API key this connector already uses covers "
-        "its own subgraphs, so reuse it as-is rather than generating a new one."
+        "for `connector_url`. Credential: a key-based connector reuses its "
+        "key as-is (a key scoped to the parent covers its subgraphs); an "
+        "OAuth connector authorizes the new URL when adding it, because an "
+        "OAuth grant is bound to exactly one URL — the consent screen shows "
+        "the subgraph locked in. The result's `credential` field says which "
+        "applies to this connector."
       ),
       "inputSchema": {
         "type": "object",
@@ -288,10 +314,7 @@ class CreateSubgraphTool:
         "subgraph_type": subgraph_type,
         "operation_id": result.get("operation_id"),
         "connector_url": f"{env.ROBOSYSTEMS_API_URL}/v1/graphs/{subgraph_id}/mcp",
-        "credential": (
-          "Reuse this connector's API key — a key scoped to "
-          f"'{parent_graph_id}' covers its subgraphs. No new key needed."
-        ),
+        "credential": _subgraph_credential_hint(parent_graph_id),
         "next_step": (
           "Add an MCP connector for connector_url. This connector is anchored "
           "to its own graph by URL and cannot switch to the new subgraph."
@@ -461,12 +484,15 @@ class ListSubgraphsTool:
         "connector is anchored to its own graph by URL and cannot be "
         "retargeted. To work in a subgraph, add its `connector_url` as its "
         "own MCP connector.\n\n"
-        "**Credential:** a key scoped to a parent graph also covers that "
-        "parent's subgraphs, so a connector on the parent can reuse its own "
-        "key on any subgraph listed here. Going the other way — from a "
-        "subgraph to its parent or a sibling — a subgraph-scoped key does "
-        "not reach, and a key for the target is generated from the app's MCP "
-        "page (/connect)."
+        "**Credential:** depends on how this connector authenticates — the "
+        "result's `credential` field says which. A key scoped to a parent "
+        "graph also covers that parent's subgraphs, so a key-based connector "
+        "on the parent reuses its own key on any subgraph listed here. An "
+        "OAuth grant is bound to exactly one URL, so an OAuth connector "
+        "authorizes the subgraph URL when adding it (consent shows it locked "
+        "in). Going the other way — from a subgraph to its parent or a "
+        "sibling — neither reaches: authorize the target URL, or generate a "
+        "key for it from the app's MCP page (/connect)."
       ),
       "inputSchema": {
         "type": "object",
@@ -521,6 +547,7 @@ class ListSubgraphsTool:
       return {
         "primary_graph_id": parent_id,
         "total_subgraphs": len(out) - 1,
+        "credential": _subgraph_credential_hint(parent_id),
         "subgraphs": out,
       }
     finally:

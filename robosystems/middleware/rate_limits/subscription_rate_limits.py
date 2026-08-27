@@ -28,6 +28,11 @@ def should_use_subscription_limits(path: str) -> bool:
   if path.startswith("/extensions/"):
     return True
 
+  # The graph-agnostic MCP transport carries no graph in its path; it is
+  # tenant-scoped through the OAuth grant and takes the MCP buckets.
+  if path == "/v1/mcp":
+    return True
+
   # Always use subscription limits for graph-scoped endpoints
   if path.startswith("/v1/") and len(path.split("/")) >= 4:
     # Check if it's a graph-scoped endpoint (has graph_id)

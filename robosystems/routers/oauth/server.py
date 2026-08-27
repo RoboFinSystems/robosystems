@@ -300,7 +300,7 @@ def _client_credentials(request: Request, form: Any) -> tuple[str | None, str | 
 def _authenticated_client(request: Request, form: Any, session: Session) -> OAuthClient:
   client_id, client_secret = _client_credentials(request, form)
   try:
-    client = resolve_client(client_id, session)
+    client = resolve_client(client_id, session, allow_stale_mirror=True)
     authenticate_client(client, client_secret)
   except ClientError as exc:
     raise TokenError(exc.error, exc.description, status_code=401) from exc

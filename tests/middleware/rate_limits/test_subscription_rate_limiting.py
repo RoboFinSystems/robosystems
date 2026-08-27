@@ -74,6 +74,8 @@ class TestSubscriptionRateLimits:
     # Graph-scoped endpoints should use subscription limits
     assert should_use_subscription_limits("/v1/graphs/kg1a2b3c/entity/")
     assert should_use_subscription_limits("/v1/graphs/kg1a2b3c/mcp/query")
+    # The graph-agnostic OAuth transport is tenant-scoped through its grant.
+    assert should_use_subscription_limits("/v1/mcp")
     assert should_use_subscription_limits("/v1/graphs/sec/entity/")
 
     # Non-graph endpoints that should use subscription limits
@@ -265,6 +267,34 @@ class TestSubscriptionAwareRateLimiting:
   @patch(
     "robosystems.middleware.rate_limits.rate_limiting.rate_limit_cache.check_rate_limit"
   )
+  def test_agnostic_mcp_route_draws_from_the_grant_graph_budget(
+    self, mock_check_rate_limit, mock_get_user, mock_request
+  ):
+    """POST /v1/mcp names no graph in its path. The OAuth dependency
+    publishes the grant's graph on request.state before the limiter runs,
+    and that graph's budget — not the caller's — is what a directory
+    connector must draw from."""
+    mock_get_user.return_value = "user_456"
+    mock_check_rate_limit.return_value = (True, 4)
+    mock_request.url.path = "/v1/mcp"
+    mock_request.method = "POST"
+    mock_request.state.auth_graph_id = "kg1a2b3c"
+
+    subscription_aware_rate_limit_dependency(mock_request)
+
+    limit, window = get_subscription_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_MCP
+    )
+    mock_check_rate_limit.assert_called_once_with(
+      "graph_sub:kg1a2b3c:graph_mcp", limit, window
+    )
+    assert mock_request.state.rate_limit_category == "graph_mcp"
+    assert mock_request.state.rate_limit_tier == "ladybug-standard"
+
+  @patch("robosystems.middleware.rate_limits.rate_limiting.get_user_from_request")
+  @patch(
+    "robosystems.middleware.rate_limits.rate_limiting.rate_limit_cache.check_rate_limit"
+  )
   @patch(
     "robosystems.middleware.rate_limits.rate_limiting.SecurityAuditLogger.log_rate_limit_exceeded"
   )
@@ -329,6 +359,8 @@ class TestSubscriptionAwareRateLimiting:
       get_endpoint_category("/v1/graphs/kg1a2b3c/mcp/benchmark")
       == EndpointCategory.GRAPH_MCP
     )
+    # The graph-agnostic route lands in the same bucket as its per-graph sibling.
+    assert get_endpoint_category("/v1/mcp", "POST") == EndpointCategory.GRAPH_MCP
 
     # Check MCP limits for different tiers
     limit, window = get_subscription_rate_limit("base", EndpointCategory.GRAPH_MCP)

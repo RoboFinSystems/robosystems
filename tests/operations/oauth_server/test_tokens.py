@@ -312,6 +312,39 @@ class TestRefresh:
       )
     assert exc.value.error == "invalid_grant"
 
+  def test_replay_of_an_expired_consumed_token_still_revokes_the_family(
+    self, test_db, issued, client_row
+  ):
+    """A consumed refresh token replayed after its own expiry is still a
+    replay — its successor may be live — so the family goes; the expiry
+    must not mask it."""
+    rotated = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    consumed = OAuthToken.get_by_plaintext(
+      issued.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    )
+    consumed.expires_at = datetime.now(UTC) - timedelta(days=1)
+    test_db.commit()
+
+    with pytest.raises(TokenError) as exc:
+      refresh_access_token(
+        refresh_token=issued.refresh_token,
+        client=client_row,
+        scope=None,
+        resource=None,
+        session=test_db,
+      )
+    assert exc.value.error == "invalid_grant"
+    successor = OAuthToken.get_by_plaintext(
+      rotated.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    )
+    assert successor.revoked_at is not None
+
 
 @pytest.mark.usefixtures("oauth_env", "fake_redis")
 class TestRevocation:

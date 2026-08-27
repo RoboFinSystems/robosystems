@@ -34,6 +34,7 @@ from robosystems.middleware.mcp.tools.graph_tools import (
   MaterializeTool,
   SetWritePolicyTool,
   SyncConnectionTool,
+  _subgraph_credential_hint,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.graph_tools"
@@ -455,6 +456,8 @@ class TestListSubgraphsExecute:
     names = [entry["subgraph_id"] for entry in result["subgraphs"]]
     assert GRAPH_ID in names  # primary row
     assert f"{GRAPH_ID}_dev" in names
+    # The carriage-specific credential answer rides on the result.
+    assert "credential" in result
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -979,3 +982,46 @@ class TestSyncConnectionExecute:
     assert result["error"] == "sync_in_progress"
     assert result["holder_id"] == "holder_abc"
     assert result["ttl_remaining_seconds"] == 1200
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Subgraph credential hint — carriage-aware
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestSubgraphCredentialHint:
+  """A graph-scoped key covers the parent's subgraphs; an OAuth grant is
+  bound to exactly one URL. The hint must say which applies to the calling
+  connector — "reuse your key" sends an OAuth connector into a 401-and-
+  refresh loop at the subgraph."""
+
+  @staticmethod
+  def _hint_as(auth_method: str | None) -> str:
+    from robosystems.security.request_context import (
+      RequestPrincipal,
+      bind_principal,
+      reset_principal,
+    )
+
+    principal = (
+      RequestPrincipal(user_id="u1", auth_method=auth_method) if auth_method else None
+    )
+    token = bind_principal(principal)
+    try:
+      return _subgraph_credential_hint(GRAPH_ID)
+    finally:
+      reset_principal(token)
+
+  def test_key_carriage_reuses_the_key(self) -> None:
+    hint = self._hint_as("api_key")
+    assert "Reuse this connector's API key" in hint
+    assert GRAPH_ID in hint
+
+  def test_oauth_carriage_authorizes_the_new_url(self) -> None:
+    hint = self._hint_as("oauth")
+    assert "bound to exactly one URL" in hint
+    assert "authorize it" in hint
+    assert "Reuse" not in hint
+
+  def test_no_principal_defaults_to_the_key_answer(self) -> None:
+    assert "Reuse this connector's API key" in self._hint_as(None)

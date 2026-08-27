@@ -471,9 +471,13 @@ def oidc_rate_limit_dependency(request: Request):
 def oauth_authorize_rate_limit_dependency(request: Request):
   """The OAuth authorization endpoint: a browser GET, IP-keyed (anonymous
   callers get limit//10, ~12/min per IP — several consent flows plus
-  retries)."""
+  retries). Fails closed: the endpoint cannot complete without Valkey
+  anyway, and the client-metadata fetch it triggers must never run
+  unmetered."""
   limit = BURST_LIMITS["oauth_authorize"]
-  return create_custom_rate_limit_dependency(limit, 60, "oauth_authorize")(request)
+  return create_custom_rate_limit_dependency(
+    limit, 60, "oauth_authorize", fail_closed=True
+  )(request)
 
 
 def oauth_consent_rate_limit_dependency(request: Request):
@@ -706,6 +710,13 @@ def subscription_aware_rate_limit_dependency(request: Request):
   #      has not run yet (router-level mounting) and no cached decision
   #      exists, the request stays on the caller's own budget.
   graph_id = extract_graph_id(request.url.path) if user_id else None
+  if graph_id is None and user_id:
+    # The graph-agnostic MCP route names no graph in its path; the OAuth
+    # dependency has already published the grant's graph on request.state,
+    # so a directory connector draws from that graph's budget too.
+    published = getattr(request.state, "auth_graph_id", None)
+    if isinstance(published, str):
+      graph_id = published
   if (
     graph_id
     and user_id

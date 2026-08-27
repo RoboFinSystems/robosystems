@@ -161,6 +161,21 @@ class TestFetch:
       )
     assert "too large" in exc.value.description
 
+  def test_bogus_content_length_is_ignored(self):
+    """A non-numeric Content-Length is a malformed peer, not a 500: the
+    streamed size cap still applies."""
+    body = json.dumps(VSCODE_DOC).encode()
+
+    def handler(request):
+      return httpx.Response(
+        200,
+        content=body,
+        headers={"content-length": "not-a-number", "content-type": "application/json"},
+      )
+
+    doc, _ = fetch_client_metadata(VSCODE_ID, transport=_transport(handler))
+    assert doc["client_id"] == VSCODE_ID
+
   def test_network_failure(self):
     def handler(request):
       raise httpx.ConnectError("boom")
@@ -282,6 +297,62 @@ class TestResolveClient:
     with self._serve(doc):
       with pytest.raises(ClientError):
         resolve_client(VSCODE_ID, test_db)
+
+  def test_token_path_serves_the_mirror_when_the_document_is_unreachable(
+    self, test_db, cimd_redis
+  ):
+    """The metadata host going down must not take every refresh with it.
+    The token and revocation endpoints only need the client's identity to
+    match the grant, so the last validated document — the mirror — stands
+    in; the authorization endpoint never takes that fallback, because a
+    redirect URI has to come from a live document."""
+    with self._serve(VSCODE_DOC):
+      mirror = resolve_client(VSCODE_ID, test_db)
+    # The cached document lapses; every resolve below has to fetch.
+    cimd_redis.store.clear()
+    unreachable = patch.object(
+      cimd,
+      "fetch_client_metadata",
+      side_effect=ClientError("invalid_client", "document is not available"),
+    )
+    with unreachable, pytest.raises(ClientError):
+      resolve_client(VSCODE_ID, test_db)
+    with unreachable:
+      served = resolve_client(VSCODE_ID, test_db, allow_stale_mirror=True)
+    assert served.id == mirror.id
+    # Never a deactivated mirror, and never a mirror that does not exist.
+    mirror.deactivate(test_db)
+    with unreachable, pytest.raises(ClientError):
+      resolve_client(VSCODE_ID, test_db, allow_stale_mirror=True)
+    with unreachable, pytest.raises(ClientError):
+      resolve_client(UNKNOWN_ID, test_db, allow_stale_mirror=True)
+
+  def test_first_contact_race_updates_the_winner(self, test_db, cimd_redis):
+    """Two concurrent first resolutions of one document: the loser's INSERT
+    hits the unique client_id and must fall through to an update of the
+    winner's row rather than surface as a 500."""
+    with self._serve(VSCODE_DOC):
+      winner = resolve_client(VSCODE_ID, test_db)
+
+    real_lookup = OAuthClient.get_by_client_id
+    calls = {"n": 0}
+
+    def racing_lookup(client_id, session):
+      # The loser read "no row" before the winner committed.
+      calls["n"] += 1
+      return None if calls["n"] == 1 else real_lookup(client_id, session)
+
+    with patch.object(OAuthClient, "get_by_client_id", side_effect=racing_lookup):
+      loser = OAuthClient.upsert_cimd(
+        client_id=VSCODE_ID,
+        client_name="VS Code (raced)",
+        redirect_uris=["https://vscode.dev/redirect"],
+        session=test_db,
+        is_trusted=True,
+      )
+    assert loser.id == winner.id
+    assert loser.client_name == "VS Code (raced)"
+    assert calls["n"] >= 2
 
   def test_deactivated_mirror_is_not_refetched(self, test_db):
     with self._serve(VSCODE_DOC):
