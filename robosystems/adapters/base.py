@@ -46,6 +46,13 @@ class SharedRepositoryManifest:
   # falls back to generating instructions from the graph's live tool surface.
   agent_instructions: str | None = None
 
+  # Query guidance appended to `read-graph-cypher`'s tool description for this
+  # repository: the data-model rules a raw Cypher query must honour to return
+  # a correct number (consolidation, period shape, deduplication). The tool
+  # description is the one place every MCP client reads — `agent_instructions`
+  # is the routing layer, and client-side skills reach only our own Claude.
+  cypher_query_guidance: str | None = None
+
   # Status
   status: str = "available"  # available, coming_soon
 
