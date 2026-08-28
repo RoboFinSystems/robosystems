@@ -1,9 +1,10 @@
 """Worker execution adapter — runs operators in worker context.
 
-Builds an OperatorContext from `DirectToolAccess` (in-process tool classes, no
-HTTP), `FactoryCreditConsumer` (a session per call), and
-`OperationManagerProgress` (SSE progress + cancellation). Reached through the
-`OperatorWorkerTask` bridge in `worker_task.py`.
+Builds an OperatorContext from `HttpToolAccess` (the full GraphMCPTools
+surface, gated by the operator's `read_only` flag), `FactoryCreditConsumer`
+(a session per call), and `OperationManagerProgress` (SSE progress +
+cancellation). Reached through the `OperatorWorkerTask` bridge in
+`worker_task.py`.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from robosystems.operations.operators.credit_consumer import FactoryCreditConsum
 from robosystems.operations.operators.credit_preflight import enforce_operator_credits
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
-from robosystems.operations.operators.tool_access import DirectToolAccess
+from robosystems.operations.operators.tool_access import HttpToolAccess
 from robosystems.operations.operators.tracked_ai import TrackedAIClient
 
 if TYPE_CHECKING:
@@ -74,7 +75,12 @@ async def run_operator_worker(
   finally:
     preflight_session.close()
 
-  tools = DirectToolAccess(graph_id, user_id=user_id)
+  # The full GraphMCPTools surface, gated by the operator's read_only flag —
+  # the same tool access the API path used. DirectToolAccess only reports
+  # tool classes registered by hand, so a model-driven loop on it sees no
+  # tools at all: on the first worker deploy the Cypher operator narrated
+  # "Tool: get-graph-schema" as text and stopped.
+  tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only, user_id=user_id)
   ai_client = get_ai_client()
   credit_consumer = FactoryCreditConsumer()
 
