@@ -94,7 +94,7 @@ RenderingLite
                 balance_type, item_type, depth, is_subtotal, text_value,
                 values[]  (one per period)
   periods[]     label, start, end, forecast
-  validation    passed, checks[], failures[], warnings[]
+  validation    passed, status, checks[], failures[], warnings[]
   unmapped_count
 ```
 
@@ -108,7 +108,7 @@ Rendering runs **synchronous footing checks** at the moment a statement is produ
 - `Net Income = Revenue − Expenses`
 - The cash-flow statement foots (operating + investing + financing reconciles to the change in cash)
 
-Guard-rail results surface in the `validation` block of a `RenderingLite` payload (`passed`, `checks`, `failures`, `warnings`).
+Guard-rail results surface in the `validation` block of a `RenderingLite` payload (`passed`, `status`, `checks`, `failures`, `warnings`) and, with the same shape, on saved-report statements and the live statement. Every check runs on every rendered column; on a comparative statement each failure and warning is prefixed with the column it was found in (`[Prior] Balance sheet does not balance …`). `status` is `passed`, `failed`, or `inconclusive` — the last means no rules exist for that block type (the statement of equity today), nothing was checked, and `passed` is `false` rather than vacuously `true`.
 
 **Do not conflate guard rails with rule-engine verification.** Guard rails are render-time footing checks — "does this statement balance right now." Rule-engine verification (`verificationResults` / `verificationSummary` on the envelope) is a separate, persisted audit-corpus outcome. Both can assert `Assets = L + E`, but they answer different questions and run at different times.
 
