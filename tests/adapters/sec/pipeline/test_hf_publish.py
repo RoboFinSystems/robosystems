@@ -282,7 +282,7 @@ class TestPublishToHuggingface:
       )
     hf_api.permanently_delete_lfs_files.assert_not_called()
 
-  def test_missing_file_after_upload_raises(
+  def test_missing_file_after_upload_raises_after_retries(
     self, prod_env, r2_client, r2_destination, hf_api
   ):
     hf_api.dataset_info.return_value = SimpleNamespace(siblings=[])
@@ -290,6 +290,21 @@ class TestPublishToHuggingface:
       publish_to_huggingface(
         build_asset_context(), graph_id="sec", repo_id=REPO, path_in_repo=PATH
       )
+    assert hf_api.dataset_info.call_count == hf_module.HF_VERIFY_ATTEMPTS
+    hf_api.permanently_delete_lfs_files.assert_not_called()
+
+  def test_lagging_listing_is_retried(
+    self, prod_env, r2_client, r2_destination, hf_api
+  ):
+    hf_api.dataset_info.side_effect = [
+      SimpleNamespace(siblings=[]),
+      SimpleNamespace(siblings=[_sibling()]),
+    ]
+    result = publish_to_huggingface(
+      build_asset_context(), graph_id="sec", repo_id=REPO, path_in_repo=PATH
+    )
+    assert hf_api.dataset_info.call_count == 2
+    assert result.metadata["sha256"] == SHA
 
   def test_enum_stage_values_are_normalised(
     self, prod_env, r2_client, r2_destination, hf_api

@@ -25,6 +25,8 @@ HF_JOB_IMAGE = "python:3.12"
 HF_JOB_POLL_SECONDS = 30
 HF_JOB_MAX_WAIT_SECONDS = 24 * 60 * 60
 HF_PRESIGN_TTL_SECONDS = 12 * 60 * 60
+HF_VERIFY_ATTEMPTS = 6
+HF_VERIFY_DELAY_SECONDS = 10
 HF_TERMINAL_STAGES = frozenset({"COMPLETED", "ERROR", "CANCELED", "DELETED"})
 
 # Runs inside the Hugging Face Job container: pull from R2 (free egress) onto
@@ -204,15 +206,22 @@ def _wait_for_job(
 
 
 def _published_file(api: HfApi, repo_id: str, path_in_repo: str) -> dict[str, Any]:
-  """Size and LFS sha256 of ``path_in_repo`` as the Hub now serves it."""
-  info = api.dataset_info(repo_id, files_metadata=True)
-  for sibling in info.siblings or []:
-    if sibling.rfilename == path_in_repo:
-      lfs = sibling.lfs
-      return {
-        "size": sibling.size,
-        "sha256": lfs["sha256"] if lfs else None,
-      }
+  """Size and LFS sha256 of ``path_in_repo`` as the Hub now serves it.
+
+  Retried briefly: the file listing can lag a just-completed commit, and a
+  false "not found" here would fail a multi-hour run over a metadata read.
+  """
+  for attempt in range(1, HF_VERIFY_ATTEMPTS + 1):
+    info = api.dataset_info(repo_id, files_metadata=True)
+    for sibling in info.siblings or []:
+      if sibling.rfilename == path_in_repo:
+        lfs = sibling.lfs
+        return {
+          "size": sibling.size,
+          "sha256": lfs["sha256"] if lfs else None,
+        }
+    if attempt < HF_VERIFY_ATTEMPTS:
+      time.sleep(HF_VERIFY_DELAY_SECONDS)
   raise RuntimeError(f"{path_in_repo} not found in {repo_id} after upload")
 
 

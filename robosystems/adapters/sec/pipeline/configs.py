@@ -291,8 +291,9 @@ class SECHFPublishConfig(Config):
   """Configuration for the manual Hugging Face dataset publish.
 
   The copy runs as a Hugging Face Job on the Hub's side (R2 -> Job -> Hub),
-  so the flavor is HF hardware, not ECS. cpu-basic has a 50 GB disk; move up
-  to cpu-xl if the compressed snapshot outgrows it.
+  so the flavor is HF hardware, not ECS. cpu-basic is enough: its hardware
+  table lists 50 GB of disk, but the job filesystem observed in practice was
+  ~1.7 TB, so a larger flavor buys download/upload speed, not room.
   """
 
   job_flavor: str = Field(
