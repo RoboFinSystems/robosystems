@@ -1,19 +1,23 @@
 """CypherOperator — natural-language querying of the graph.
 
-Drives a bounded tool-use loop (`run_tool_loop`): the model discovers the
-schema, writes read-only Cypher, sees query errors and retries, then answers in
-natural language. Seeing its own errors is the point — a single-shot pipeline
-that generates one query and formats whatever comes back fails on questions
-this handles. The last non-empty result set is returned as structured ``rows``
-so the console renders a real table instead of scraping the prose.
+Drives a bounded tool-use loop (`run_tool_loop`): the schema and example
+queries are fetched up front into the (cached) system prompt, the model
+writes read-only Cypher against them, sees query errors and retries, then
+answers in natural language. Seeing its own errors is the point — a
+single-shot pipeline that generates one query and formats whatever comes
+back fails on questions this handles. The last non-empty result set is
+returned as structured ``rows`` so the console renders a real table instead
+of scraping the prose.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from robosystems.config import OperatorConfig
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+from robosystems.logger import logger
 from robosystems.operations.operators.base import (
   ExecutionProfile,
   Operator,
@@ -30,6 +34,14 @@ from robosystems.operations.operators.tool_loop import (
   run_tool_loop,
 )
 
+# Orientation payloads are fetched up front and rendered into the system
+# prompt rather than left as tools for the model to call: schema and
+# examples are static per graph, so this removes two model calls per
+# question and puts both under the system cache breakpoint. The cap mirrors
+# the tool loop's orientation cap — only a pathological graph truncates.
+_ORIENTATION_TOOLS = ("get-graph-schema", "get-example-queries")
+_MAX_ORIENTATION_CHARS = 48000
+
 
 @register_operator("cypher")
 class CypherOperator(Operator):
@@ -38,7 +50,9 @@ class CypherOperator(Operator):
   # Read-only tool allowlist. The loop intersects this with the tools the
   # graph actually exposes (generic graphs get only schema + cypher; SEC and
   # roboledger graphs also get example queries, element resolution, GraphQL,
-  # and document search). Write tools are never included.
+  # and document search). Write tools are never included. The two orientation
+  # tools are normally prefetched into the system prompt and withheld from
+  # the loop; they stay listed for the fallback when that prefetch fails.
   READ_ONLY_TOOLS = [
     "get-graph-schema",
     "read-graph-cypher",
@@ -123,14 +137,24 @@ class CypherOperator(Operator):
     }
     has_document_search = "search-documents" in available_tools
 
+    orientation = await self._fetch_orientation(ctx, available_tools)
+    tool_names = self.READ_ONLY_TOOLS
+    if orientation is not None:
+      tool_names = [t for t in tool_names if t not in _ORIENTATION_TOOLS]
+
     system = self._build_system_prompt(
-      max_results, output_mode, is_shared, has_document_search, max_iterations
+      max_results,
+      output_mode,
+      is_shared,
+      has_document_search,
+      max_iterations,
+      orientation,
     )
 
     result = await run_tool_loop(
       ctx,
       system=system,
-      tool_names=self.READ_ONLY_TOOLS,
+      tool_names=tool_names,
       max_iterations=max_iterations,
       max_tokens=max_tokens,
       temperature=0.3,
@@ -156,6 +180,45 @@ class CypherOperator(Operator):
       confidence_score=self._calculate_confidence(result),
     )
 
+  async def _fetch_orientation(
+    self, ctx: OperatorContext, available_tools: set[str]
+  ) -> dict[str, str] | None:
+    """Fetch the schema (and examples, where the graph has them) up front.
+
+    Both payloads are deterministic per graph, so they belong in the cached
+    system prefix rather than in the transcript as tool results — the model
+    gets a complete schema instead of a truncated tool result, and skips the
+    orientation calls entirely. Returns None on any failure so the loop
+    falls back to tool-driven orientation.
+    """
+    if "get-graph-schema" not in available_tools:
+      return None
+    try:
+      schema = await ctx.tools.call_tool("get-graph-schema", {}, return_raw=True)
+      if isinstance(schema, dict) and "error" in schema:
+        return None
+      orientation = {"schema": self._serialize_orientation(schema)}
+      if "get-example-queries" in available_tools:
+        examples = await ctx.tools.call_tool("get-example-queries", {}, return_raw=True)
+        if not (isinstance(examples, dict) and "error" in examples):
+          orientation["examples"] = self._serialize_orientation(examples)
+      return orientation
+    except Exception as e:
+      logger.warning(
+        "Cypher operator orientation prefetch failed on %s; "
+        "falling back to tool-driven orientation: %s",
+        ctx.graph_id,
+        e,
+      )
+      return None
+
+  @staticmethod
+  def _serialize_orientation(payload: Any) -> str:
+    text = json.dumps(payload, default=str)
+    if len(text) > _MAX_ORIENTATION_CHARS:
+      text = text[:_MAX_ORIENTATION_CHARS] + "\n… [truncated]"
+    return text
+
   def _build_system_prompt(
     self,
     max_results: int,
@@ -163,6 +226,7 @@ class CypherOperator(Operator):
     is_shared: bool,
     has_document_search: bool = False,
     tool_turns: int = 6,
+    orientation: dict[str, str] | None = None,
   ) -> str:
     if is_shared:
       # Shared repository (e.g. SEC): thousands of filers, so the selective
@@ -190,16 +254,32 @@ class CypherOperator(Operator):
         "hypercube unless the question is about a published financial statement."
       )
 
-    prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
+    if orientation is not None:
+      workflow = f"""WORKFLOW:
+1. The GRAPH SCHEMA and (when present) EXAMPLE QUERIES sections at the end of this prompt are authoritative for this graph — plan directly from them and never guess labels or properties they don't show. (Purely qualitative/narrative questions may go straight to document search — see below.)
+2. Write a read-only Cypher query and run it with `read-graph-cypher` on your first turn — no orientation calls are needed.
+3. If a query errors or returns nothing useful, read the error, fix the query, and try again — don't repeat a failing query unchanged.
+4. When you have the answer, respond in natural language.
 
-WORKFLOW:
+STEP BUDGET: you have {tool_turns} tool-calling turns before you must answer from what you have. A turn whose tool calls all fail is not charged (up to {DEFAULT_MAX_ERROR_RETRIES} times), so a corrected retry is free — spend your turns on queries, not orientation."""
+    else:
+      workflow = f"""WORKFLOW:
 1. For any question that needs the fact graph, call `get-graph-schema` first to discover node labels, relationships, and properties — never guess the schema. (Purely qualitative/narrative questions may skip straight to document search — see below.)
 2. If `get-example-queries` is available, use it for working query patterns tuned to this graph.
 3. Write a read-only Cypher query and run it with `read-graph-cypher`.
 4. If a query errors or returns nothing useful, read the error, fix the query, and try again — don't repeat a failing query unchanged.
 5. When you have the answer, respond in natural language.
 
-STEP BUDGET: you have {tool_turns} tool-calling turns before you must answer from what you have. A turn whose tool calls all fail is not charged (up to {DEFAULT_MAX_ERROR_RETRIES} times), so a corrected retry is free — but plan to reach `read-graph-cypher` within the first three turns.
+STEP BUDGET: you have {tool_turns} tool-calling turns before you must answer from what you have. A turn whose tool calls all fail is not charged (up to {DEFAULT_MAX_ERROR_RETRIES} times), so a corrected retry is free — but plan to reach `read-graph-cypher` within the first three turns."""
+
+    # Stale once orientation is in the prompt and the tool isn't offered.
+    schema_skip_note = (
+      ", and you do NOT need `get-graph-schema` first" if orientation is None else ""
+    )
+
+    prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
+
+{workflow}
 
 CYPHER RULES:
 - Read-only only: MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT. Never CREATE, SET, DELETE, MERGE, or DROP.
@@ -214,20 +294,30 @@ LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
       if is_shared:
         # Shared repository (SEC): documents are filing sections, so the
         # vocabulary is filing-specific (risk factors, MD&A, item_1a/item_7).
-        prompt += """
+        prompt += f"""
 NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph):
-- Questions about risk factors, MD&A, business description, legal proceedings, competition, or other management commentary are answered from filing TEXT, not the XBRL facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over filing sections), and you do NOT need `get-graph-schema` first.
+- Questions about risk factors, MD&A, business description, legal proceedings, competition, or other management commentary are answered from filing TEXT, not the XBRL facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over filing sections){schema_skip_note}.
 - `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer. When the question names a section, narrow with the section filter (e.g. item_1a for risk factors, item_7 for MD&A).
 - A section may carry `xbrl_elements`; use `resolve-element` or `read-graph-cypher` to tie the narrative back to the reported numbers when the question needs both text and figures.
 """
       else:
         # Tenant graph (roboledger / custom): documents are the company's own
         # uploaded policies, procedures, and notes — not SEC filing sections.
-        prompt += """
+        prompt += f"""
 DOCUMENTS (qualitative written context — accounting policies, procedures, memos, notes — NOT in the Cypher fact graph):
-- Questions about this company's accounting policies, close procedures, memos, or other written context are answered from its uploaded DOCUMENTS, not the ledger facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over this graph's documents), and you do NOT need `get-graph-schema` first.
+- Questions about this company's accounting policies, close procedures, memos, or other written context are answered from its uploaded DOCUMENTS, not the ledger facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over this graph's documents){schema_skip_note}.
 - `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer.
 - When a question needs both the written policy and the reported figures, combine the two: search for the text, then query the ledger with `read-graph-cypher`.
+"""
+    if orientation is not None:
+      prompt += f"""
+GRAPH SCHEMA (authoritative — node types first, then relationships):
+{orientation["schema"]}
+"""
+      if "examples" in orientation:
+        prompt += f"""
+EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than writing traversals from scratch):
+{orientation["examples"]}
 """
     if output_mode == "answer":
       prompt += (

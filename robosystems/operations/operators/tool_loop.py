@@ -149,6 +149,10 @@ async def run_tool_loop(
       operator_type=operator_type,
       operation_description=operation_description,
       tools=tools,
+      # The transcript grows monotonically across iterations, so a breakpoint
+      # on the trailing turn means every call from the second onward reads the
+      # previous call's cache entry and extends it.
+      cache_conversation=True,
     )
     model_calls += 1
 
@@ -254,6 +258,7 @@ async def run_tool_loop(
     operation_description=operation_description,
     tools=tools,
     tool_choice=_NO_MORE_TOOLS if tools else None,
+    cache_conversation=True,
   )
   return ToolLoopResult(
     text=final.content

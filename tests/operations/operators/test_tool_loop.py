@@ -409,6 +409,34 @@ async def test_mixed_turn_with_one_success_is_charged():
   assert ai.create_message.call_args_list[1].kwargs["tool_choice"] == {"type": "none"}
 
 
+async def test_every_model_call_requests_conversation_caching():
+  """The transcript grows monotonically, so every call — loop turns and the
+  nudge alike — marks the trailing turn for caching; the next call reads the
+  entry the previous one wrote."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _final("nudged answer"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+
+  await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=1,
+    max_tokens=100,
+  )
+
+  assert ai.create_message.await_count == 2  # one loop turn + the nudge
+  assert all(
+    c.kwargs["cache_conversation"] is True for c in ai.create_message.call_args_list
+  )
+
+
 def _two_tools_mock(call_results: list) -> MagicMock:
   tools = MagicMock()
   tools.get_tool_schemas = AsyncMock(
