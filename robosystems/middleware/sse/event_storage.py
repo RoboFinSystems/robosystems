@@ -170,10 +170,12 @@ _STATUS_CHANGING_EVENTS = frozenset(
 def _apply_input_request(
   metadata: "OperationMetadata", event_type: EventType, data: dict[str, Any]
 ) -> None:
-  """Record the pause's request on the metadata, and clear it on resume."""
+  """Record the pause's request on the metadata, and clear it once the run
+  is going again — on the resume, and on a worker pickup (the two share a
+  rung, so a started event can follow a pause directly)."""
   if event_type == EventType.OPERATION_AWAITING_INPUT:
     metadata.input_request = data.get("input_request")
-  elif event_type == EventType.OPERATION_RESUMED:
+  elif event_type in (EventType.OPERATION_RESUMED, EventType.OPERATION_STARTED):
     metadata.input_request = None
 
 

@@ -133,3 +133,15 @@ async def test_run_operator_worker_tolerates_missing_history_and_context():
   assert ctx.extra["mapping_id"] == "map_1"
   assert ctx.mode.value == "standard"
   assert result["mode_used"] == "standard"
+
+
+@pytest.mark.asyncio
+async def test_worker_task_without_operator_type_fails_rather_than_completing():
+  """A returned error dict would be stored as a COMPLETED result; the consumer
+  only records FAILED on an exception."""
+  from robosystems.operations.operators.adapters.worker_task import OperatorWorkerTask
+
+  task = OperatorWorkerTask("op_1", GRAPH_ID, USER_ID, {"query": "?"}, AsyncMock())
+
+  with pytest.raises(ValueError, match="operator_type"):
+    await task.execute()

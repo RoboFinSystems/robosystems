@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,7 +28,14 @@ def _bypass_graph_lifecycle_gate():
 
 @pytest.fixture
 def queued_worker():
-  """The worker seam: gates pass and the enqueue returns a 202 envelope."""
+  """The worker seam: operator selection is fixed, gates pass, and the
+  enqueue returns a 202 envelope.
+
+  Selection is mocked rather than left to the registry: which operators are
+  registered in a given xdist worker depends on what that process imported
+  first, and an empty registry answers 404 — a test-order flake, not the
+  subgraph-id acceptance under test.
+  """
 
   def _envelope(task_type, graph_id, user_id, params):
     return {
@@ -39,7 +46,14 @@ def queued_worker():
       "_links": {},
     }
 
+  orchestrator = MagicMock()
+  orchestrator.get_operator_recommendations.return_value = [
+    {"operator_type": "cypher", "confidence": 0.9}
+  ]
+
   with (
+    patch(f"{EXECUTE}.OperatorOrchestrator", return_value=orchestrator),
+    patch(f"{EXECUTE}.get_operator", return_value=MagicMock()),
     patch(f"{EXECUTE}.enqueue_task", new=AsyncMock(side_effect=_envelope)) as enqueue,
     patch(f"{EXECUTE}.enforce_operator_write_role"),
     patch(f"{EXECUTE}.enforce_operator_graph_scope"),

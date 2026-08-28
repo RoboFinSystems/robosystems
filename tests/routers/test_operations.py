@@ -493,3 +493,40 @@ class TestAwaitingInput:
       )
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+class TestResumeOrdering:
+  """The requeue lands before the status flips, so a failed push leaves the
+  pause — and its resume link — in place for a retry."""
+
+  @pytest.mark.unit
+  async def test_failed_requeue_leaves_the_pause_untouched(self):
+    from robosystems.models.api.operations import OperationResumeRequest
+    from robosystems.routers.operations import resume_operation
+
+    metadata = _make_mock_metadata(status=OperationStatus.AWAITING_INPUT)
+    metadata.input_request = {
+      "prompt": "?",
+      "checkpoint": {},
+      "task": {"task_type": "operator", "user_id": "usr_test123", "params": {}},
+    }
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+    manager = AsyncMock()
+
+    with (
+      patch(f"{MODULE}.get_event_storage", return_value=mock_storage),
+      patch(f"{MODULE}.get_operation_manager", return_value=manager),
+      patch(
+        f"{MODULE}.requeue_task", AsyncMock(side_effect=RuntimeError("valkey down"))
+      ),
+      pytest.raises(RuntimeError),
+    ):
+      await resume_operation(
+        body=OperationResumeRequest(input={"approved": True}),
+        operation_id="op_123",
+        current_user=_make_mock_user(),
+      )
+
+    manager.resume_operation.assert_not_awaited()

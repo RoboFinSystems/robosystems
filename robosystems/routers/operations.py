@@ -501,12 +501,16 @@ async def resume_operation(
       detail="Operation cannot be resumed: its checkpoint was not recorded.",
     )
 
-  await get_operation_manager().resume_operation(operation_id, body.input)
+  # Queue first, status second: if the push fails the operation stays
+  # awaiting_input with its resume link intact and the caller can retry. The
+  # other order could strand it RUNNING, off the queue, with the recovery
+  # path erased.
   await requeue_task(
     operation_id,
     task,
     resume={"checkpoint": request.get("checkpoint") or {}, "input": body.input},
   )
+  await get_operation_manager().resume_operation(operation_id, body.input)
 
   logger.info(f"User {current_user.id} resumed operation {operation_id}")
 

@@ -154,8 +154,9 @@ class OperationManager:
   async def resume_operation(self, operation_id: str, user_input: dict[str, Any]):
     """Record the answer and move the operation back to RUNNING.
 
-    The caller re-enqueues the task payload afterwards; the status flips
-    first so a concurrent status read never shows an answered pause.
+    Called after the task payload is back on the queue: a failed push then
+    leaves the pause — and its resume link — in place for a retry, whereas
+    flipping the status first would strand an unqueued operation as RUNNING.
     """
     await self.event_storage.store_event(
       operation_id,

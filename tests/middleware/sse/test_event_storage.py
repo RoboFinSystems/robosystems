@@ -1198,3 +1198,24 @@ class TestAwaitingInputLifecycle:
     # Metadata written before the field existed still loads.
     legacy = {k: v for k, v in metadata.to_dict().items() if k != "input_request"}
     assert OperationMetadata(**legacy).input_request is None
+
+  def test_a_pickup_after_a_pause_also_clears_the_request(self):
+    """AWAITING_INPUT and RUNNING share a rung, so a started event can follow
+    a pause directly; the stale request must not linger on a running op."""
+    from robosystems.middleware.sse.event_storage import (
+      OperationMetadata,
+      _apply_input_request,
+    )
+
+    metadata = OperationMetadata(
+      operation_id="op_1",
+      operation_type="operator",
+      user_id="user_1",
+      graph_id="kg1",
+      status=OperationStatus.AWAITING_INPUT,
+      created_at="t0",
+      updated_at="t0",
+      input_request={"prompt": "?", "task": {}},
+    )
+    _apply_input_request(metadata, EventType.OPERATION_STARTED, {"message": "Starting"})
+    assert metadata.input_request is None

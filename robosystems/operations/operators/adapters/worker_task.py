@@ -25,7 +25,9 @@ class OperatorWorkerTask(BaseTask):
 
     operator_type = self.params.get("operator_type")
     if not operator_type:
-      return {"error": "Missing operator_type in task params"}
+      # Raise so the consumer records the operation FAILED; a returned dict
+      # would be stored as a COMPLETED result with no content.
+      raise ValueError("Missing operator_type in task params")
 
     operator = get_operator(operator_type)
 
