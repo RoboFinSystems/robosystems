@@ -148,7 +148,7 @@ on:
         type: string
         default: "false"
       aws_sns_alert_email:
-        description: "Email for worker alerts (e.g. DLQ depth); empty disables alarm notifications"
+        description: "Email for Dagster and worker alerts (run failures, DLQ depth, backup gaps, stalled-provisioning write-offs); empty disables alarm notifications"
         required: false
         type: string
         default: ""
@@ -347,6 +347,7 @@ jobs:
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \
                 ParameterKey=ApiSecurityGroupId,ParameterValue=${{ steps.resolve-api-sg.outputs.api_sg_id }} \
                 ParameterKey=ContainerInsightsEnabled,ParameterValue=${{ inputs.container_insights_enabled }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SharedRawBucketArn,ParameterValue=\"${{ inputs.shared_raw_bucket_arn }}\" \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \
