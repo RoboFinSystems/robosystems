@@ -23,6 +23,7 @@ from robosystems.middleware.sse.event_storage import OperationStatus, get_event_
 from robosystems.middleware.sse.streaming import create_sse_response_starlette
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.core import User
+from robosystems.worker.client import get_queue_position
 
 router = APIRouter()
 
@@ -247,7 +248,19 @@ async def get_operation_status(
 
     # Add status-specific messages
     if metadata.status == OperationStatus.PENDING:
-      response["message"] = "Operation is pending execution"
+      # Pending means waiting for a worker; say how far back in line it is
+      # so a client can tell "queued behind a long task" from "about to run".
+      position, depth = await get_queue_position(operation_id)
+      response["queue_position"] = position
+      response["queue_depth"] = depth
+      if position is None:
+        response["message"] = "Operation is pending execution"
+      elif position == 1:
+        response["message"] = "Operation is next in the worker queue"
+      else:
+        response["message"] = (
+          f"Operation is queued — {position - 1} ahead of it in the worker queue"
+        )
     elif metadata.status == OperationStatus.RUNNING:
       response["message"] = "Operation is currently executing"
     elif metadata.status == OperationStatus.COMPLETED:

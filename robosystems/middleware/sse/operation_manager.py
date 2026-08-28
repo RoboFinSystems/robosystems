@@ -54,6 +54,20 @@ class OperationManager:
     )
     return op_id
 
+  async def mark_running(self, operation_id: str, message: str = "Starting..."):
+    """Move a queued operation to RUNNING when a worker picks it up.
+
+    Queued work is registered PENDING by `create_operation_response` and,
+    until this event, nothing distinguished "waiting in the queue" from
+    "executing" — `/status` reported pending for the whole run. The started
+    event carries the first progress frame so streams see it as one.
+    """
+    await self.event_storage.store_event(
+      operation_id,
+      EventType.OPERATION_STARTED,
+      {"message": message, "progress_percent": 0},
+    )
+
   async def emit_progress(
     self,
     operation_id: str,

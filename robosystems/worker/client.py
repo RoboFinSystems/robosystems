@@ -99,3 +99,28 @@ async def enqueue_task(
     return response
   finally:
     await queue.aclose()
+
+
+async def get_queue_position(operation_id: str) -> tuple[int | None, int]:
+  """Where a queued operation sits: (1-based position, queue depth).
+
+  Position is None when the operation is not waiting in the queue — it has
+  been picked up, finished, or was never enqueued. The queue is short by
+  design (single digits), so a full LRANGE is cheaper than reconstructing
+  the exact payload an LPOS would need.
+  """
+  queue = create_async_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
+  try:
+    entries = await queue.lrange("worker:tasks", 0, -1)
+  finally:
+    await queue.aclose()
+
+  position: int | None = None
+  for index, raw in enumerate(entries):
+    try:
+      if json.loads(raw).get("task_id") == operation_id:
+        position = index + 1
+        break
+    except (json.JSONDecodeError, AttributeError):
+      continue
+  return position, len(entries)

@@ -187,7 +187,7 @@ async def _process_task(
     try:
       if protect_task:
         await protection.protect()
-      await manager.emit_progress(task_id, "Starting...", progress_percent=0)
+      await manager.mark_running(task_id)
 
       handler = handler_cls(task_id, graph_id, user_id, params, manager)
       # The budget cancels the coroutine. A handler running sync work in a

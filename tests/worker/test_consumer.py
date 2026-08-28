@@ -34,6 +34,7 @@ def _clean_registry():
 @pytest.fixture
 def mock_manager():
   manager = AsyncMock()
+  manager.mark_running = AsyncMock()
   manager.emit_progress = AsyncMock()
   manager.complete_operation = AsyncMock()
   manager.fail_operation = AsyncMock()
@@ -108,10 +109,8 @@ async def test_happy_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
   task_data = _make_task_data()
   await _call_process_task(task_data, mock_queue, mock_manager)
 
-  # Progress emitted at start
-  mock_manager.emit_progress.assert_called_once_with(
-    "op_01TEST", "Starting...", progress_percent=0
-  )
+  # The pickup moves the operation from PENDING (queued) to RUNNING
+  mock_manager.mark_running.assert_called_once_with("op_01TEST")
 
   # Operation completed with result
   mock_manager.complete_operation.assert_called_once()

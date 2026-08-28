@@ -32,6 +32,13 @@ QUEUE_KEY = "worker:tasks"
 # canary for retry failures under routine scale-in.
 DLQ_KEY = "worker:dlq"
 
+# Per-worker inflight lists (BLMOVE destination). Their combined length is
+# the number of tasks executing right now; queue depth alone counts only the
+# waiting ones, so with one worker busy on a ten-minute close, two questions
+# waiting behind it never crossed the scale-out threshold. `Backlog` (queued
+# + in flight) is the metric the scaling alarms read.
+INFLIGHT_KEY_PATTERN = "worker:inflight:*"
+
 # Join timeout when stopping the thread on shutdown.
 STOP_JOIN_TIMEOUT = 5
 
@@ -88,16 +95,25 @@ class QueueDepthPublisher:
       except Exception as e:
         logger.debug(f"Queue client close error on shutdown: {e}")
 
+  def _in_flight(self) -> int:
+    """Tasks currently executing: the sum over every worker's inflight list."""
+    total = 0
+    for key in self._queue.scan_iter(match=INFLIGHT_KEY_PATTERN, count=100):
+      total += self._queue.llen(key)
+    return total
+
   def _publish_once(self) -> None:
-    """Read queue + DLQ depth and publish them to CloudWatch (skipped in dev)."""
+    """Read queue, in-flight and DLQ depth and publish them (skipped in dev)."""
     from robosystems.config import env
 
     depth = self._queue.llen(QUEUE_KEY)
+    in_flight = self._in_flight()
     dlq_depth = self._queue.llen(DLQ_KEY)
+    backlog = depth + in_flight
 
     if env.ENVIRONMENT == "dev":
       logger.debug(
-        f"Queue depth: {depth}, DLQ depth: {dlq_depth} "
+        f"Queue depth: {depth}, in flight: {in_flight}, DLQ depth: {dlq_depth} "
         "(CloudWatch publish skipped in dev)"
       )
       return
@@ -107,10 +123,15 @@ class QueueDepthPublisher:
       Namespace=namespace,
       MetricData=[
         {"MetricName": "QueueDepth", "Value": depth, "Unit": "Count"},
+        {"MetricName": "InFlight", "Value": in_flight, "Unit": "Count"},
+        {"MetricName": "Backlog", "Value": backlog, "Unit": "Count"},
         {"MetricName": "DLQDepth", "Value": dlq_depth, "Unit": "Count"},
       ],
     )
-    logger.debug(f"Published queue depth {depth}, DLQ depth {dlq_depth} to {namespace}")
+    logger.debug(
+      f"Published queue depth {depth}, in flight {in_flight}, DLQ depth "
+      f"{dlq_depth} to {namespace}"
+    )
 
   def _get_cloudwatch_client(self) -> Any:
     if self._cloudwatch_client is None:

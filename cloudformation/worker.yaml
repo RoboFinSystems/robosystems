@@ -547,15 +547,15 @@ Resources:
         Cooldown: 60
         MetricAggregationType: Maximum
         StepAdjustments:
-          # QueueDepth > 2 and <= 5: add 1
+          # Backlog (queued + in flight) > 2 and <= 5: add 1
           - MetricIntervalLowerBound: 0
             MetricIntervalUpperBound: 3
             ScalingAdjustment: 1
-          # QueueDepth > 5 and <= 10: add 2
+          # Backlog > 5 and <= 10: add 2
           - MetricIntervalLowerBound: 3
             MetricIntervalUpperBound: 8
             ScalingAdjustment: 2
-          # QueueDepth > 10: add 3
+          # Backlog > 10: add 3
           - MetricIntervalLowerBound: 8
             ScalingAdjustment: 3
 
@@ -564,9 +564,14 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-worker-queue-depth-high-${Environment}
-      AlarmDescription: Worker queue depth exceeds threshold - scale out
+      # Backlog counts queued + executing tasks. QueueDepth alone counted only
+      # the waiting ones, so one worker busy on a long close with two tasks
+      # queued behind it never crossed the threshold (F10 in the operator
+      # console-hardening review). With Backlog, two waiting behind one busy
+      # reads 3 and scales out.
+      AlarmDescription: Worker backlog (queued + in flight) exceeds threshold - scale out
       Namespace: !Sub RoboSystems/Worker/${Environment}
-      MetricName: QueueDepth
+      MetricName: Backlog
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 1
@@ -591,7 +596,7 @@ Resources:
         Cooldown: 300
         MetricAggregationType: Maximum
         StepAdjustments:
-          # QueueDepth dropped to 0: remove 1
+          # Backlog dropped to 0 (nothing queued or running): remove 1
           - MetricIntervalUpperBound: 0
             ScalingAdjustment: -1
 
@@ -600,9 +605,9 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-worker-queue-depth-zero-${Environment}
-      AlarmDescription: Worker queue empty - scale in
+      AlarmDescription: Worker backlog empty - scale in
       Namespace: !Sub RoboSystems/Worker/${Environment}
-      MetricName: QueueDepth
+      MetricName: Backlog
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 5

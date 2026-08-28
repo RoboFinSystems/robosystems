@@ -165,14 +165,18 @@ class TestGetOperationStatus:
 
   @pytest.mark.unit
   async def test_pending_status_message(self):
-    """Pending operation includes the correct status message."""
+    """Pending operation not found in the queue keeps the generic message."""
     metadata = _make_mock_metadata(status=OperationStatus.PENDING)
     mock_storage = AsyncMock()
     mock_storage.get_operation_metadata.return_value = metadata
     mock_user = _make_mock_user()
 
     p_storage, p_metrics = _make_patches(mock_storage)
-    with p_storage, p_metrics:
+    with (
+      p_storage,
+      p_metrics,
+      patch(f"{MODULE}.get_queue_position", AsyncMock(return_value=(None, 0))),
+    ):
       result = await get_operation_status(
         operation_id="op_123",
         current_user=mock_user,
@@ -180,8 +184,76 @@ class TestGetOperationStatus:
 
     assert result["status"] == OperationStatus.PENDING
     assert result["message"] == "Operation is pending execution"
+    assert result["queue_position"] is None
+    assert result["queue_depth"] == 0
     # Pending operations also get a cancel link
     assert "cancel" in result["_links"]
+
+  @pytest.mark.unit
+  async def test_pending_status_reports_queue_position(self):
+    """A queued operation says how many tasks are ahead of it."""
+    metadata = _make_mock_metadata(status=OperationStatus.PENDING)
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+    mock_user = _make_mock_user()
+
+    p_storage, p_metrics = _make_patches(mock_storage)
+    with (
+      p_storage,
+      p_metrics,
+      patch(f"{MODULE}.get_queue_position", AsyncMock(return_value=(3, 4))) as pos,
+    ):
+      result = await get_operation_status(
+        operation_id="op_123",
+        current_user=mock_user,
+      )
+
+    pos.assert_awaited_once_with("op_123")
+    assert result["queue_position"] == 3
+    assert result["queue_depth"] == 4
+    assert result["message"] == (
+      "Operation is queued — 2 ahead of it in the worker queue"
+    )
+
+  @pytest.mark.unit
+  async def test_pending_status_next_in_queue(self):
+    metadata = _make_mock_metadata(status=OperationStatus.PENDING)
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+
+    p_storage, p_metrics = _make_patches(mock_storage)
+    with (
+      p_storage,
+      p_metrics,
+      patch(f"{MODULE}.get_queue_position", AsyncMock(return_value=(1, 1))),
+    ):
+      result = await get_operation_status(
+        operation_id="op_123",
+        current_user=_make_mock_user(),
+      )
+
+    assert result["message"] == "Operation is next in the worker queue"
+
+  @pytest.mark.unit
+  async def test_running_status_does_not_read_the_queue(self):
+    """Only PENDING consults the queue — a running task is not in it."""
+    metadata = _make_mock_metadata(status=OperationStatus.RUNNING)
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = metadata
+
+    p_storage, p_metrics = _make_patches(mock_storage)
+    with (
+      p_storage,
+      p_metrics,
+      patch(f"{MODULE}.get_queue_position", AsyncMock()) as pos,
+    ):
+      result = await get_operation_status(
+        operation_id="op_123",
+        current_user=_make_mock_user(),
+      )
+
+    pos.assert_not_awaited()
+    assert "queue_position" not in result
 
 
 @pytest.mark.asyncio
