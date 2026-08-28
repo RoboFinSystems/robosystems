@@ -227,6 +227,7 @@ class CypherOperator(Operator):
         "result_count": len(rows),
         "hit_step_limit": result.hit_cap,
         "hit_credit_ceiling": result.hit_credit_ceiling,
+        "cancelled": result.cancelled,
         "loop_iterations": result.iterations,
       },
       # De-dupe preserving order (a tool may be called several times).
@@ -431,6 +432,8 @@ EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than 
     return value if value > 0 else None
 
   def _calculate_confidence(self, result: ToolLoopResult) -> float:
+    if result.cancelled:
+      return 0.0
     if result.hit_cap or result.hit_credit_ceiling:
       return 0.5
     if result.rows:

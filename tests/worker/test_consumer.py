@@ -364,3 +364,24 @@ async def test_paused_task_is_neither_completed_nor_failed(
   # It still leaves the inflight list and the worker is cleaned up
   mock_queue.lrem.assert_called_once()
   mock_cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_task_cancelled_while_queued_is_skipped(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """A cancel that landed while the task waited: never executed, never
+  completed or failed, still removed from inflight."""
+  from robosystems.middleware.sse.event_storage import OperationStatus
+
+  mock_manager.get_operation_status = AsyncMock(return_value=OperationStatus.CANCELLED)
+
+  await _call_process_task(_make_task_data(), mock_queue, mock_manager)
+
+  mock_manager.mark_running.assert_not_called()
+  mock_manager.complete_operation.assert_not_called()
+  mock_manager.fail_operation.assert_not_called()
+  mock_queue.lrem.assert_called_once()
+  mock_cleanup.assert_not_called()

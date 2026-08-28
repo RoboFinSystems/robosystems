@@ -548,3 +548,57 @@ async def test_orientation_tool_results_escape_the_default_cap():
     ai.create_message.call_args_list[2].kwargs["messages"]
   )
   assert "truncated" in rows_blocks[-1]["content"]
+
+
+async def test_cancel_between_calls_stops_the_loop_without_a_wrap_up_call():
+  """A cancel lands on the operation store; the loop must consult it before
+  every call. Once seen, no further model call is made — not even the nudge.
+  On the worker this used to run to completion behind a 'cancelled' status."""
+  ai = MagicMock()
+  ai.total_credits = 0.0
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _final("should never be composed"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+  ctx.progress = MagicMock()
+  ctx.progress.report = AsyncMock()
+  ctx.progress.is_cancelled = AsyncMock(side_effect=[False, True])
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=100,
+  )
+
+  assert result.cancelled is True
+  assert result.hit_cap is False
+  assert result.hit_credit_ceiling is False
+  assert ai.create_message.await_count == 1
+  assert result.iterations == 1
+  assert result.tools_called == ["read-graph-cypher"]
+  assert result.rows == [{"n": 1}]
+
+
+async def test_a_run_cancelled_while_queued_spends_nothing():
+  ai = MagicMock()
+  ai.total_credits = 0.0
+  ai.create_message = AsyncMock(side_effect=[_final("never")])
+  tools = _tools_mock(call_results=[])
+  ctx = _ctx(ai, tools)
+  ctx.progress = MagicMock()
+  ctx.progress.report = AsyncMock()
+  ctx.progress.is_cancelled = AsyncMock(return_value=True)
+
+  result = await run_tool_loop(
+    ctx, system="s", tool_names=["read-graph-cypher"], max_iterations=5, max_tokens=100
+  )
+
+  assert result.cancelled is True
+  assert result.iterations == 0
+  ai.create_message.assert_not_awaited()
