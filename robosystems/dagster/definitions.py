@@ -111,6 +111,7 @@ from robosystems.dagster.sensors.invoice_billing import (
 from robosystems.dagster.sensors.materialization import (
   stale_graph_materialization_sensor,
 )
+from robosystems.dagster.sensors.run_failure import run_failure_metric_sensor
 from robosystems.dagster.sensors.usage_monitor import (
   graph_usage_monitor_sensor,
 )
@@ -282,6 +283,8 @@ all_sensors = [
   graph_usage_monitor_sensor,
   # Platform: Worker reliability
   worker_inflight_reaper_sensor,
+  # Platform: Run failure detection (every job, including the adapters')
+  run_failure_metric_sensor,
   # Extensions: period-boundary obligation promoter
   *_extensions_sensors,
   # Adapter: SEC pipeline

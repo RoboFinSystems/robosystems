@@ -93,6 +93,7 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 | `invoice_subscription_renewal_sensor` | Invoice-billed subscriptions whose period ended |
 | `graph_usage_monitor_sensor` | Storage usage against tier limits (email alerts at 80% and 100%) |
 | `worker_inflight_reaper_sensor` | Stale `worker:inflight:*` keys in Valkey DB 6 — runs in the always-on daemon, so no cold start |
+| `run_failure_metric_sensor` | Every failed run in any job — publishes a `RunFailure` CloudWatch metric that `robosystems-dagster-{env}-run-failure` pages on; without it a failed run is visible only in the UI |
 | `scheduled_obligation_promotion_sensor` | Matured `schedule_entry_due` events per entity graph |
 
 **Platform sensors default to `RUNNING`;** the obligation promoter is the exception and defaults to `STOPPED`. **Every SEC adapter sensor and its schedule default to `STOPPED`** — enable them in the Dagster UI when you're ready for automated processing.

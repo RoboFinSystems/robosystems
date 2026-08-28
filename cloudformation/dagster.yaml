@@ -14,7 +14,7 @@ Parameters:
   SNSAlertEmail:
     Type: String
     Default: ""
-    Description: Email for Dagster alerts (e.g. backup coverage gaps); empty disables alarm notifications
+    Description: Email for Dagster alerts (run failures, backup coverage gaps, stalled-provisioning write-offs); empty disables alarm notifications
 
   # Infrastructure & Networking
   VpcId:
@@ -538,14 +538,17 @@ Resources:
                   - logs:DescribeLogStreams
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/dagster:*"
-              # CloudWatch Metrics for instance monitoring and auto-scaling
+              # CloudWatch Metrics: instance monitoring and auto-scaling (Graph),
+              # run-failure detection (Dagster)
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: "*"
                 Condition:
                   StringEquals:
-                    "cloudwatch:namespace": !Sub "RoboSystems/Graph/${Environment}"
+                    "cloudwatch:namespace":
+                      - !Sub "RoboSystems/Graph/${Environment}"
+                      - !Sub "RoboSystems/Dagster/${Environment}"
               # SES for transactional emails (verification, password reset, welcome)
               - Effect: Allow
                 Action:
@@ -1090,6 +1093,28 @@ Resources:
       AlarmName: !Sub robosystems-dagster-${Environment}-stalled-provisioning-write-off
       AlarmDescription: A paid subscription was written off after provisioning stalled - the customer has no resource and needs an operator
       MetricName: StalledProvisioningWriteOff
+      Namespace: !Sub RoboSystems/Dagster/${Environment}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref DagsterAlertTopic
+      TreatMissingData: notBreaching
+
+  # Every customer-visible failure that is not "the API is down" runs through
+  # Dagster: QuickBooks sync, materialization, backups, invoicing, the SEC
+  # pipeline. run_failure_metric_sensor publishes one RunFailure point per
+  # failed run and this pages on any of them. A quiet day publishes nothing,
+  # so missing data is the healthy state.
+  DagsterRunFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmName: !Sub robosystems-dagster-${Environment}-run-failure
+      AlarmDescription: A Dagster run failed - triage it in the Dagster UI before the work it carried (sync, materialization, backup, invoicing, SEC) goes stale
+      MetricName: RunFailure
       Namespace: !Sub RoboSystems/Dagster/${Environment}
       Statistic: Sum
       Period: 300
