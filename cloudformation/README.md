@@ -491,6 +491,7 @@ Those three are the whole stack — per-rule CloudWatch metrics are emitted by t
 4. **SizeRestrictions** - block oversized payloads (413 response)
 5. **GeoBlocking** - optional: block non-US/CA traffic (403 response)
 6. **AWSManagedRulesCommonRuleSet** - optional: AWS managed rules
+7. **BlockSqliBody** - SQL injection in the request body, everywhere except the SQL query surface (`/query/sql`), which carries SQL by contract (403 response)
 
 **Exports**:
 - `{StackName}-WebACLId`, `-WebACLArn`
