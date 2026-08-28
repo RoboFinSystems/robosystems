@@ -71,6 +71,14 @@ def _make_graph_credits(allocation=8000):
 
 
 GRAPH_ID = "kg1a2b3c4d5e6f78"
+_CAPACITY = "robosystems.operations.graph.capacity.tier_capacity_status"
+
+
+@pytest.fixture(autouse=True)
+def target_tier_has_capacity():
+  """The refuse-the-sale gate passes unless a test says otherwise."""
+  with patch(_CAPACITY, new_callable=AsyncMock, return_value="ready") as gate:
+    yield gate
 
 
 @pytest.mark.asyncio
@@ -229,6 +237,46 @@ class TestChangeGraphTierCmd:
         await self._call(new_tier="ladybug-standard")
     assert exc.value.status_code == 400
     assert "Already on this tier" in exc.value.detail
+
+  async def test_target_tier_without_capacity_raises_409(
+    self, target_tier_has_capacity
+  ):
+    """The refuse-the-sale rule fires before billing or Stripe move."""
+    target_tier_has_capacity.return_value = "at_capacity"
+    membership = _make_membership()
+    subscription = _make_subscription()
+    graph = _make_graph()
+    db = MagicMock()
+    with (
+      patch(f"{_CORE}.OrgUser") as mock_org_user,
+      patch(f"{_CORE}.OrgRole") as mock_org_role,
+      patch(_GRAPH) as mock_graph_cls,
+      patch(f"{_TIER}.BillingSubscription") as mock_sub_cls,
+      patch(f"{_TIER}.BillingConfig") as mock_billing_cfg,
+      patch(_PAYMENT) as mock_provider_factory,
+      patch(_WORKER, new_callable=AsyncMock) as mock_enqueue,
+    ):
+      mock_org_user.get_user_orgs.return_value = [membership]
+      mock_org_role.OWNER = "OWNER"
+      membership.role = mock_org_role.OWNER
+      mock_graph_cls.get_by_id.return_value = graph
+      mock_sub_cls.get_by_resource.return_value = subscription
+      mock_billing_cfg.get_subscription_plan.return_value = {
+        "name": "ladybug-large",
+        "base_price_cents": 24900,
+      }
+      with pytest.raises(HTTPException) as exc:
+        await self._call(new_tier="ladybug-large", db=db)
+
+    assert exc.value.status_code == 409
+    assert "ladybug-large" in exc.value.detail
+    target_tier_has_capacity.assert_awaited_once_with("ladybug-large")
+    # Nothing moved: no commit, no Stripe, no worker task.
+    assert subscription.status == "active"
+    assert graph.graph_tier == "ladybug-standard"
+    db.commit.assert_not_called()
+    mock_provider_factory.assert_not_called()
+    mock_enqueue.assert_not_called()
 
   async def test_successful_upgrade_returns_operation_id(self):
     """Happy-path upgrade returns the operation_id string."""

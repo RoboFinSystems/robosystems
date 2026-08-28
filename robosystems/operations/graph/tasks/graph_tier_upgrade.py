@@ -5,7 +5,8 @@ sequence is a correctness constraint, not just a description:
 
 1. mark the graph ``migrating`` and retag the volume with the new tier
 2. snapshot the volume via the Volume Manager Lambda (the rollback point)
-3. drain connections on the old instance
+3. drain connections on the old instance — or refuse, if it cannot be
+   confirmed drained; the volume is never detached under possible writes
 4. detach the volume — it then sits ``available`` carrying the new tier tag,
    which is what makes the target tier's ASG claim it
 5. ensure the target ASG has capacity
@@ -36,9 +37,17 @@ logger = logging.getLogger(__name__)
 
 DRAIN_TIMEOUT_SECONDS = 120
 DRAIN_POLL_INTERVAL_SECONDS = 5
+# Consecutive failed attempts before an unreachable graph API is taken to mean
+# the container is stopped rather than the network blinked.
+DRAIN_UNREACHABLE_CONFIRMATIONS = 3
 REATTACH_TIMEOUT_SECONDS = 300
 REATTACH_POLL_INTERVAL_SECONDS = 10
 GRAPH_API_PORT = 8001
+
+
+class DrainRefusedError(RuntimeError):
+  """The old instance could not be confirmed drained, so the volume must
+  not be detached. Nothing has moved yet when this is raised."""
 
 
 def _get_dynamodb_resource():
@@ -312,23 +321,57 @@ class GraphTierUpgradeTask(BaseTask):
       raise
 
   async def _drain_instance(self, private_ip: str) -> None:
-    """Ask the old instance to close its connections before the detach.
+    """Confirm the old instance has stopped serving before the detach.
 
-    Bounded by ``DRAIN_TIMEOUT_SECONDS``; the migration proceeds either way, so
-    a slow drain delays rather than blocks the move.
+    Two outcomes count as drained: the instance reports zero active
+    connections, or its graph API is not listening at all, confirmed across
+    several attempts so a network blip does not pass for a stopped container
+    — the maintenance-window procedure stops the container before a tier
+    change precisely so nothing can be writing when the volume detaches, and
+    every write reaches the volume through that API. Everything else refuses:
+    no private IP to ask, a graph API that is up but has no drain endpoint, an
+    error response, or a drain that times out with connections still open.
+    Detaching under live writes is the one thing this step exists to prevent.
     """
     if not private_ip:
-      logger.warning("No private IP for drain, skipping")
-      return
+      raise DrainRefusedError(
+        "No private IP recorded for the source instance; cannot confirm it "
+        "is drained, so the volume stays attached"
+      )
 
     base_url = f"http://{private_ip}:{GRAPH_API_PORT}"
 
     async with httpx.AsyncClient(timeout=10) as client:
-      try:
-        await client.post(f"{base_url}/admin/drain")
-      except httpx.HTTPError as e:
-        logger.warning(f"Drain request failed (may be expected): {e}")
+      response = None
+      for attempt in range(1, DRAIN_UNREACHABLE_CONFIRMATIONS + 1):
+        try:
+          response = await client.post(f"{base_url}/admin/drain")
+          break
+        except httpx.HTTPError as e:
+          logger.warning(
+            f"Graph API on {private_ip} not reachable "
+            f"(attempt {attempt}/{DRAIN_UNREACHABLE_CONFIRMATIONS}): {e}"
+          )
+          if attempt < DRAIN_UNREACHABLE_CONFIRMATIONS:
+            await asyncio.sleep(DRAIN_POLL_INTERVAL_SECONDS)
+      if response is None:
+        logger.warning(
+          f"Graph API on {private_ip} stayed unreachable across "
+          f"{DRAIN_UNREACHABLE_CONFIRMATIONS} attempts; treating the instance "
+          "as drained — nothing can be writing through it"
+        )
         return
+
+      if response.status_code == 404:
+        raise DrainRefusedError(
+          f"Graph API on {private_ip} has no drain endpoint; stop the graph "
+          "container (maintenance window) and retry the tier change"
+        )
+      if response.status_code >= 400:
+        raise DrainRefusedError(
+          f"Drain request to {private_ip} failed with HTTP "
+          f"{response.status_code}; not detaching"
+        )
 
       # Poll for connections to reach 0
       elapsed = 0
@@ -346,7 +389,10 @@ class GraphTierUpgradeTask(BaseTask):
         await asyncio.sleep(DRAIN_POLL_INTERVAL_SECONDS)
         elapsed += DRAIN_POLL_INTERVAL_SECONDS
 
-    logger.warning("Drain timeout reached, proceeding with detach")
+    raise DrainRefusedError(
+      f"Drain of {private_ip} timed out after {DRAIN_TIMEOUT_SECONDS}s with "
+      "connections still open; not detaching"
+    )
 
   async def _ensure_asg_capacity(self, asg_client: Any, tier: str) -> None:
     """Ensure the target tier ASG has capacity for a new instance."""

@@ -37,6 +37,7 @@ async def change_graph_tier_cmd(
   from robosystems.models.core import OrgRole, OrgUser
   from robosystems.models.core.graph import Graph
   from robosystems.models.core.graph.graph_credits import GraphCredits
+  from robosystems.operations.graph.capacity import tier_capacity_status
   from robosystems.operations.graph.tier_validation import (
     validate_storage_capacity,
     validate_subgraph_count,
@@ -92,6 +93,20 @@ async def change_graph_tier_cmd(
   old_tier = graph.graph_tier
   if new_tier == old_tier:
     raise HTTPException(status_code=400, detail="Already on this tier")
+
+  # Refuse-the-sale rule, the same one checkout applies: the migration needs
+  # a healthy writer on the target tier with a free slot *now*. The worker
+  # can raise the ASG's desired capacity itself, but a cold boot does not fit
+  # its reattach window, and the high tiers are provisioned on request by
+  # policy — so refuse here, before Stripe has moved the customer's price.
+  if await tier_capacity_status(new_tier) != "ready":
+    raise HTTPException(
+      status_code=409,
+      detail=(
+        f"No capacity is currently available on the '{new_tier}' tier. "
+        "Request access from the tier picker or contact support."
+      ),
+    )
 
   new_price_cents = plan_config["base_price_cents"]
   old_price_cents = subscription.base_price_cents

@@ -9,6 +9,7 @@ progress reporting, and rollback behavior.
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 TASK_MODULE = "robosystems.operations.graph.tasks.graph_tier_upgrade"
@@ -588,9 +589,14 @@ class TestGraphTierUpgradeTask:
 class TestDrainInstance:
   """Tests for the _drain_instance helper method."""
 
-  async def test_drain_with_no_private_ip_skips(self):
+  async def test_drain_with_no_private_ip_refuses(self):
+    from robosystems.operations.graph.tasks.graph_tier_upgrade import (
+      DrainRefusedError,
+    )
+
     task = _make_task()
-    await task._drain_instance("")
+    with pytest.raises(DrainRefusedError, match="No private IP"):
+      await task._drain_instance("")
 
   async def test_drain_succeeds_when_connections_reach_zero(self):
     task = _make_task()
@@ -601,7 +607,7 @@ class TestDrainInstance:
 
     with patch("httpx.AsyncClient") as MockClient:
       client = AsyncMock()
-      client.post = AsyncMock()
+      client.post = AsyncMock(return_value=MagicMock(status_code=202))
       client.get = AsyncMock(return_value=mock_response)
       MockClient.return_value.__aenter__ = AsyncMock(return_value=client)
       MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -609,6 +615,92 @@ class TestDrainInstance:
       await task._drain_instance("10.0.1.5")
 
     client.post.assert_called_once()
+    client.get.assert_called()
+
+  async def test_drain_treats_unreachable_api_as_drained(self):
+    # The maintenance-window procedure stops the graph container first;
+    # nothing can write through an API that is not listening.
+    task = _make_task()
+
+    with patch("httpx.AsyncClient") as MockClient:
+      client = AsyncMock()
+      client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
+      client.get = AsyncMock()
+      MockClient.return_value.__aenter__ = AsyncMock(return_value=client)
+      MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+      await task._drain_instance("10.0.1.5")
+
+    # Unreachable is confirmed across several attempts, not taken on faith.
+    assert client.post.await_count == 3
+    client.get.assert_not_called()
+
+  async def test_drain_does_not_mistake_a_blip_for_a_stopped_container(self):
+    from robosystems.operations.graph.tasks.graph_tier_upgrade import (
+      DrainRefusedError,
+    )
+
+    task = _make_task()
+    post_response = MagicMock()
+    post_response.status_code = 404
+
+    with patch("httpx.AsyncClient") as MockClient:
+      client = AsyncMock()
+      # First attempt fails, second reaches an API with no drain endpoint.
+      client.post = AsyncMock(side_effect=[httpx.ConnectError("blip"), post_response])
+      client.get = AsyncMock()
+      MockClient.return_value.__aenter__ = AsyncMock(return_value=client)
+      MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+      with pytest.raises(DrainRefusedError, match="no drain endpoint"):
+        await task._drain_instance("10.0.1.5")
+
+    assert client.post.await_count == 2
+    client.get.assert_not_called()
+
+  async def test_drain_refuses_when_api_has_no_drain_endpoint(self):
+    from robosystems.operations.graph.tasks.graph_tier_upgrade import (
+      DrainRefusedError,
+    )
+
+    task = _make_task()
+    post_response = MagicMock()
+    post_response.status_code = 404
+
+    with patch("httpx.AsyncClient") as MockClient:
+      client = AsyncMock()
+      client.post = AsyncMock(return_value=post_response)
+      client.get = AsyncMock()
+      MockClient.return_value.__aenter__ = AsyncMock(return_value=client)
+      MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+      with pytest.raises(DrainRefusedError, match="no drain endpoint"):
+        await task._drain_instance("10.0.1.5")
+
+    client.get.assert_not_called()
+
+  async def test_drain_refuses_on_timeout_with_connections_open(self):
+    from robosystems.operations.graph.tasks.graph_tier_upgrade import (
+      DrainRefusedError,
+    )
+
+    task = _make_task()
+    post_response = MagicMock()
+    post_response.status_code = 202
+    poll_response = MagicMock()
+    poll_response.status_code = 200
+    poll_response.json.return_value = {"active_connections": 3}
+
+    with patch("httpx.AsyncClient") as MockClient:
+      client = AsyncMock()
+      client.post = AsyncMock(return_value=post_response)
+      client.get = AsyncMock(return_value=poll_response)
+      MockClient.return_value.__aenter__ = AsyncMock(return_value=client)
+      MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+      with pytest.raises(DrainRefusedError, match="still open"):
+        await task._drain_instance("10.0.1.5")
+
     client.get.assert_called()
 
 
