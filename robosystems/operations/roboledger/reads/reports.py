@@ -39,15 +39,16 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
+  FactRow,
+  _compute_prior_period,
+  generate_report_facts,
+  render_structure_view,
+)
+from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact as ReportFactData,
-)
-from robosystems.operations.roboledger.reports.fact_grid import (
-  _compute_prior_period,
-  generate_report_facts,
-  render_structure_view,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -875,7 +876,9 @@ def get_statement(
   if not grid.structure_id:
     raise StatementStructureNotFoundError(block_type)
 
-  validation = validate_report(block_type, grid.rows)
+  validation = validate_report(
+    block_type, grid.rows, period_labels=[p.label for p in grid.periods]
+  )
 
   # Drop XBRL is_abstract rows (presentation scaffolding — *Abstract,
   # *Table, *LineItems, *RollUp wrappers that aren't themselves reportable
@@ -899,6 +902,7 @@ def get_statement(
   validation_resp = (
     ValidationCheckResponse(
       passed=validation.passed,
+      status=validation.status,
       checks=validation.checks,
       failures=validation.failures,
       warnings=validation.warnings,
@@ -1031,6 +1035,7 @@ def get_live_financial_statement(
   - builds current+prior periods of matching duration
   - renders both columns, except on a cash flow statement, which renders
     the current period only (``rendered_period_indexes``)
+  - runs the guard rails over exactly the rendered columns (``validation``)
   - filters abstract scaffolding rows and all-zero rows
   - caps at ``limit`` rows (marking ``truncated=True`` when capped)
 
@@ -1052,6 +1057,15 @@ def get_live_financial_statement(
   )
   columns = rendered_period_indexes(statement_type, periods)
   rendered_periods = [periods[i] for i in columns]
+
+  # Validate what the reader sees: the full grid (subtotals foot against
+  # their children, so the all-zero rows filtered below still count), but
+  # only the rendered columns — the cash flow delta basis is not a statement.
+  validation = validate_report(
+    statement_type,
+    [_project_row(row, columns) for row in grid.rows],
+    period_labels=[p.label for p in rendered_periods],
+  )
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
@@ -1100,6 +1114,28 @@ def get_live_financial_statement(
     ],
     facts=facts,
     fact_count=len(facts),
+    validation=ValidationCheckResponse(
+      passed=validation.passed,
+      status=validation.status,
+      checks=validation.checks,
+      failures=validation.failures,
+      warnings=validation.warnings,
+    ),
     unmapped_count=unmapped_count,
     truncated=truncated,
+  )
+
+
+def _project_row(row: FactRow, columns: list[int]) -> FactRow:
+  """Copy ``row`` keeping only the values at ``columns``, in that order."""
+  return FactRow(
+    element_id=row.element_id,
+    element_qname=row.element_qname,
+    element_name=row.element_name,
+    classification=row.classification,
+    balance_type=row.balance_type,
+    values=[row.values[i] if i < len(row.values) else None for i in columns],
+    is_subtotal=row.is_subtotal,
+    is_abstract=row.is_abstract,
+    depth=row.depth,
   )

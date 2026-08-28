@@ -253,9 +253,29 @@ class FactRowResponse(BaseModel):
 
 
 class ValidationCheckResponse(BaseModel):
-  """Aggregate result of running reporting rules over a structure."""
+  """Aggregate result of running reporting rules over a structure.
 
-  passed: bool = Field(..., description="True iff every rule produced zero failures.")
+  Every rule runs once per rendered period column; on a multi-column
+  statement each failure and warning is prefixed with the column it was
+  found in (``[Prior] …``).
+  """
+
+  passed: bool = Field(
+    ...,
+    description=(
+      "True iff at least one rule ran and every rule produced zero failures "
+      "on every rendered column. False when nothing was checked "
+      "(`status == 'inconclusive'`)."
+    ),
+  )
+  status: str = Field(
+    ...,
+    description=(
+      "`passed` — every rule ran on every column with zero failures; "
+      "`failed` — at least one rule failed; `inconclusive` — no validation "
+      "rules exist for this block type, so nothing was checked."
+    ),
+  )
   checks: list[str] = Field(
     ...,
     description="Names of rules that were evaluated.",
@@ -604,6 +624,14 @@ class LiveFinancialStatementResponse(BaseModel):
   )
   facts: list[LiveStatementFactRow]
   fact_count: int
+  validation: ValidationCheckResponse | None = Field(
+    None,
+    description=(
+      "Guard-rail outcome for the rendered columns — accounting equation, "
+      "net-income equation, totals footing, operating-plug size. Null only "
+      "when no structure rendered."
+    ),
+  )
   unmapped_count: int = 0
   truncated: bool = False
 

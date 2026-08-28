@@ -94,6 +94,58 @@ class TestLiveFinancialStatementToolExecute:
     assert "tip" in result  # empty results trigger the tip
 
   @pytest.mark.unit
+  async def test_validation_rides_the_payload(self):
+    """The guard-rail outcome reaches the model verbatim — it is the only
+    signal that a returned number does not foot."""
+    tool = LiveFinancialStatementTool(_make_client("kg_123"))
+    from robosystems.models.api.extensions.reports import (
+      LiveFinancialStatementResponse,
+      LiveStatementFactRow,
+      PeriodSpec,
+      ValidationCheckResponse,
+    )
+
+    mock_response = LiveFinancialStatementResponse(
+      graph_id="kg_123",
+      statement_type="balance_sheet",
+      periods=[
+        PeriodSpec(start=date(2026, 7, 1), end=date(2026, 7, 31), label="Current")
+      ],
+      facts=[
+        LiveStatementFactRow(qname="rs-gaap:Assets", name="Assets", values=[100.0])
+      ],
+      fact_count=1,
+      validation=ValidationCheckResponse(
+        passed=False,
+        status="failed",
+        checks=["accounting_equation"],
+        failures=["Balance sheet does not balance: Assets (100.00) ≠ …"],
+        warnings=[],
+      ),
+    )
+
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 7, 1), date(2026, 7, 31)),
+      ),
+      patch(f"{MODULE}.get_live_financial_statement", return_value=mock_response),
+    ):
+      result = await tool.execute({"statement_type": "balance_sheet"})
+
+    assert result["validation"]["status"] == "failed"
+    assert result["validation"]["passed"] is False
+    assert result["validation"]["failures"] == [
+      "Balance sheet does not balance: Assets (100.00) ≠ …"
+    ]
+    assert "tip" not in result
+
+  @pytest.mark.unit
   async def test_default_limit_is_the_ceiling(self):
     """A real chart of accounts exceeds 50 non-zero rows routinely, and a
     cut statement's visible rows stop footing to its subtotals."""

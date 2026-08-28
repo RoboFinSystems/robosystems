@@ -937,6 +937,9 @@ class ValidationLite(BaseModel):
   model_config = ConfigDict(from_attributes=True)
 
   passed: bool = True
+  # ``passed`` | ``failed`` | ``inconclusive`` (no rules for the block type —
+  # nothing was checked, and ``passed`` is False rather than vacuously True).
+  status: str = "passed"
   checks: list[str] = Field(default_factory=list)
   failures: list[str] = Field(default_factory=list)
   warnings: list[str] = Field(default_factory=list)
