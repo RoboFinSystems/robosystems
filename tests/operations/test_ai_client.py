@@ -368,7 +368,15 @@ class TestAIClientCreateMessage:
 
     call_args = mock_bedrock.invoke_model.call_args
     request_body = json.loads(call_args[1]["body"])
-    assert request_body["system"] == "You are a financial analyst."
+    # `system` is a content-block list carrying the cache breakpoint that
+    # caches tools + system together.
+    assert request_body["system"] == [
+      {
+        "type": "text",
+        "text": "You are a financial analyst.",
+        "cache_control": {"type": "ephemeral"},
+      }
+    ]
     assert result.content == "Response with system context."
 
   @pytest.mark.unit
@@ -505,6 +513,189 @@ class TestAIClientCreateMessage:
     )
     request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
     assert "tool_choice" not in request_body
+
+  @pytest.mark.unit
+  async def test_cache_conversation_marks_the_trailing_turn(self):
+    """cache_conversation puts a cache breakpoint on the last block of the
+    trailing message — string content is wrapped into a text block — and the
+    caller's message objects are never mutated (a persisted marker on every
+    past turn would exceed the 4-breakpoint limit)."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    tool_result = {"type": "tool_result", "tool_use_id": "t1", "content": "[]"}
+    messages = [
+      AIMessage(role="user", content="question"),
+      AIMessage(role="assistant", content=[{"type": "tool_use", "id": "t1"}]),
+      AIMessage(role="user", content=[tool_result]),
+    ]
+
+    await client.create_message(messages=messages, cache_conversation=True)
+
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    sent = request_body["messages"]
+    # Only the trailing turn's last block carries the marker.
+    assert sent[-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in json.dumps(sent[:-1])
+    # The caller's block object was copied, not mutated.
+    assert "cache_control" not in tool_result
+
+  @pytest.mark.unit
+  async def test_cache_conversation_wraps_string_content(self):
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="just a question")],
+      cache_conversation=True,
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["messages"][-1]["content"] == [
+      {
+        "type": "text",
+        "text": "just a question",
+        "cache_control": {"type": "ephemeral"},
+      }
+    ]
+
+  @pytest.mark.unit
+  async def test_no_conversation_marker_by_default(self):
+    """Single-shot callers pay the cache-write premium with nothing ever
+    reading the entry — the trailing-turn marker is opt-in."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(messages=[AIMessage(role="user", content="hi")])
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["messages"] == [{"role": "user", "content": "hi"}]
+
+  @pytest.mark.unit
+  async def test_cache_token_counts_are_parsed_from_usage(self):
+    """Bedrock reports cache reads/writes in usage; with caching in play
+    `input_tokens` is the uncached remainder, so all three must be carried."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "cached"}],
+      "usage": {
+        "input_tokens": 337,
+        "output_tokens": 50,
+        "cache_read_input_tokens": 3905,
+        "cache_creation_input_tokens": 12,
+      },
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
+    assert result.input_tokens == 337
+    assert result.cache_read_input_tokens == 3905
+    assert result.cache_creation_input_tokens == 12
+
+  @pytest.mark.unit
+  async def test_cache_token_counts_default_to_zero_when_absent(self):
+    """Older recorded responses (and non-caching models) carry no cache
+    fields — they must read as zero, not KeyError."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="hi")]
+    )
+    assert result.cache_read_input_tokens == 0
+    assert result.cache_creation_input_tokens == 0
+
+  @pytest.mark.unit
+  async def test_claude_4_family_sends_temperature_without_thinking(self):
+    """The 4.x family accepts temperature and does not run adaptive thinking,
+    so no thinking override is sent."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-sonnet-4-6",
+      temperature=0.3,
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["temperature"] == 0.3
+    assert "thinking" not in request_body
+
+  @pytest.mark.unit
+  async def test_sonnet_5_family_omits_temperature_and_disables_thinking(self):
+    """Claude 5-family models 400 on `temperature` and run adaptive thinking
+    unless explicitly disabled — thinking tokens would bill as output and eat
+    max_tokens."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model="claude-sonnet-5",
+      temperature=0.3,
+    )
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert "temperature" not in request_body
+    assert request_body["thinking"] == {"type": "disabled"}
 
   @pytest.mark.unit
   async def test_create_message_formats_messages_correctly(self):

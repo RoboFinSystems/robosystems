@@ -130,7 +130,12 @@ class TestTrackedAIClient:
       operation_description="test",
     )
     assert response.content == "Test response"
-    assert tracked_ai.total_tokens == {"input": 100, "output": 50}
+    assert tracked_ai.total_tokens == {
+      "input": 100,
+      "output": 50,
+      "cache_read": 0,
+      "cache_write": 0,
+    }
     assert tracked_ai.call_count == 1
 
   @pytest.mark.asyncio
@@ -143,7 +148,12 @@ class TestTrackedAIClient:
       messages=[AIMessage(role="user", content="second")],
       operation_description="test2",
     )
-    assert tracked_ai.total_tokens == {"input": 200, "output": 100}
+    assert tracked_ai.total_tokens == {
+      "input": 200,
+      "output": 100,
+      "cache_read": 0,
+      "cache_write": 0,
+    }
     assert tracked_ai.call_count == 2
 
   @pytest.mark.asyncio
@@ -166,7 +176,12 @@ class TestTrackedAIClient:
     )
     assert response.content == "Test response"
     assert tracked.total_credits == 0.0
-    assert tracked.total_tokens == {"input": 100, "output": 50}
+    assert tracked.total_tokens == {
+      "input": 100,
+      "output": 50,
+      "cache_read": 0,
+      "cache_write": 0,
+    }
 
   @pytest.mark.asyncio
   async def test_with_real_credit_consumer(self, mock_ai_client):
@@ -192,6 +207,8 @@ class TestTrackedAIClient:
       output_tokens=50,
       model="us.anthropic.claude-sonnet-4-6",
       operation_description="my op",
+      cache_read_input_tokens=0,
+      cache_creation_input_tokens=0,
     )
     assert tracked.total_credits == 5.0
 
@@ -203,7 +220,12 @@ class TestTrackedAIClient:
     )
     summary = tracked_ai.credit_summary
     assert summary["call_count"] == 1
-    assert summary["total_tokens"] == {"input": 100, "output": 50}
+    assert summary["total_tokens"] == {
+      "input": 100,
+      "output": 50,
+      "cache_read": 0,
+      "cache_write": 0,
+    }
 
 
 # ── Operator.run() tests ────────────────────────────────────────────────────────

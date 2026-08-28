@@ -16,9 +16,23 @@ from robosystems.config.env import env
 class BedrockModel(Enum):
   """Available AWS Bedrock Claude models."""
 
+  SONNET_5 = "claude-sonnet-5"  # Not default — gated on the model-upgrade flip
   SONNET_4_6 = "claude-sonnet-4-6"
   SONNET_4_5 = "claude-sonnet-4-5-20250929"
   SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
+
+
+# Claude 5-family models reject `temperature`/`top_p`/`top_k` with a 400
+# (verified live: "temperature is deprecated for this model") and run
+# adaptive thinking unless it is explicitly disabled. Request shaping in
+# `ai_client` branches on this, keyed off the resolved Bedrock model id so
+# the next model swap is a data change here, not a code change there.
+_NO_SAMPLING_PARAMS_MODEL_SUBSTRINGS = ("claude-sonnet-5", "claude-opus-5")
+
+
+def model_accepts_sampling_params(model_id: str) -> bool:
+  """Whether a Bedrock model id accepts `temperature` (Claude 4.x family)."""
+  return not any(s in model_id for s in _NO_SAMPLING_PARAMS_MODEL_SUBSTRINGS)
 
 
 class OperatorExecutionMode(Enum):
@@ -65,6 +79,7 @@ class OperatorConfig:
   # AWS Bedrock Model Configuration
   # Using regional inference profiles (us.*) for on-demand access
   BEDROCK_MODELS = {
+    BedrockModel.SONNET_5: "us.anthropic.claude-sonnet-5",
     BedrockModel.SONNET_4_6: "us.anthropic.claude-sonnet-4-6",
     BedrockModel.SONNET_4_5: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     BedrockModel.SONNET_4: "us.anthropic.claude-sonnet-4-20250514-v1:0",

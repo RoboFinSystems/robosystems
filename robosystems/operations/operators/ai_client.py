@@ -11,7 +11,12 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from robosystems.config import BedrockModel, OperatorConfig, env
+from robosystems.config import (
+  BedrockModel,
+  OperatorConfig,
+  env,
+  model_accepts_sampling_params,
+)
 from robosystems.logger import logger
 
 
@@ -28,9 +33,14 @@ class AIMessage:
 class AIResponse:
   content: str
   model: str
+  # With prompt caching in play, `input_tokens` is the UNCACHED input only;
+  # the true input is input + cache_read + cache_creation. All three must
+  # reach the meter or cached tokens go unbilled.
   input_tokens: int
   output_tokens: int
   stop_reason: str | None = None
+  cache_read_input_tokens: int = 0
+  cache_creation_input_tokens: int = 0
   # Full response content blocks (text + tool_use). Populated for tool-use
   # loops; `content` above is the concatenated text for simple callers.
   content_blocks: list[dict[str, Any]] = field(default_factory=list)
@@ -122,6 +132,7 @@ class AIClient:
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: dict[str, Any] | None = None,
+    cache_conversation: bool = False,
   ) -> AIResponse:
     """Send one Bedrock request.
 
@@ -131,10 +142,22 @@ class AIClient:
     tool_choice object (e.g. ``{"type": "none"}`` to keep the tool definitions
     — required while the transcript carries tool_use blocks — but forbid
     further calls). Only meaningful alongside `tools`.
+
+    `cache_conversation` adds a cache breakpoint on the trailing user turn.
+    Only worth it for multi-call loops over a growing transcript, where the
+    next call re-reads everything up to that turn; a single-shot caller would
+    pay the 1.25x cache-write premium with nothing ever reading the entry.
     """
     model_id = self._get_model_id(model, operator_type)
     return await self._bedrock_create_message(
-      messages, system, max_tokens, temperature, model_id, tools, tool_choice
+      messages,
+      system,
+      max_tokens,
+      temperature,
+      model_id,
+      tools,
+      tool_choice,
+      cache_conversation,
     )
 
   def _invoke_model_sync(
@@ -155,18 +178,53 @@ class AIClient:
     model: str,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: dict[str, Any] | None = None,
+    cache_conversation: bool = False,
   ) -> AIResponse:
-    message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+    message_dicts: list[dict[str, Any]] = [
+      {"role": msg.role, "content": msg.content} for msg in messages
+    ]
+
+    if cache_conversation and message_dicts:
+      # Cache breakpoint on the trailing user turn. Markers are applied here
+      # at request build, never persisted into the caller's transcript — a
+      # marker left on every past turn would exceed the 4-breakpoint limit.
+      # The moved breakpoint still hits: the lookup resolves the longest
+      # previously cached prefix, so each call reads the entry the previous
+      # one wrote and extends it.
+      last = message_dicts[-1]
+      content = last["content"]
+      if isinstance(content, str):
+        content = [{"type": "text", "text": content}] if content else []
+      else:
+        content = list(content)
+      if content:
+        content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+        message_dicts[-1] = {"role": last["role"], "content": content}
 
     request_body: dict[str, Any] = {
       "anthropic_version": "bedrock-2023-05-31",
       "max_tokens": max_tokens,
-      "temperature": temperature,
       "messages": message_dicts,
     }
 
+    if model_accepts_sampling_params(model):
+      request_body["temperature"] = temperature
+    else:
+      # Claude 5-family models 400 on `temperature` and run adaptive thinking
+      # by default; thinking tokens would bill as output and eat max_tokens,
+      # so it is explicitly disabled until adopted deliberately. (Bedrock also
+      # requires thinking disabled whenever tool_choice forces a tool.)
+      request_body["thinking"] = {"type": "disabled"}
+
     if system:
-      request_body["system"] = system
+      # One cache breakpoint at the end of `system` caches the tool
+      # definitions and the system prompt together (the request renders
+      # tools -> system -> messages). Below Sonnet's 1,024-token minimum
+      # cacheable prefix the marker is accepted and silently caches nothing,
+      # which costs nothing extra.
+      request_body["system"] = [
+        {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+      ]
     if tools:
       request_body["tools"] = tools
       if tool_choice:
@@ -190,12 +248,17 @@ class AIClient:
       b.get("text", "") for b in blocks if isinstance(b, dict) and "text" in b
     )
 
+    usage = response_body["usage"]
     return AIResponse(
       content=text,
       model=model,
-      input_tokens=response_body["usage"]["input_tokens"],
-      output_tokens=response_body["usage"]["output_tokens"],
+      input_tokens=usage["input_tokens"],
+      output_tokens=usage["output_tokens"],
       stop_reason=response_body.get("stop_reason"),
+      # Bedrock returns these on every response (zeros while no cache_control
+      # is sent); .get keeps old recorded fixtures working.
+      cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+      cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
       content_blocks=blocks,
     )
 

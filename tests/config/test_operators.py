@@ -163,3 +163,30 @@ class TestGetAllConfig:
     profiles = config["execution_profiles"]
     for mode in OperatorExecutionMode:
       assert mode.value in profiles
+
+
+class TestModelFamilyRequestShaping:
+  """Sampling-param support is keyed off the resolved Bedrock model id so a
+  model swap is a data change in BEDROCK_MODELS, not a code change in
+  ai_client."""
+
+  def test_claude_4_family_accepts_sampling_params(self):
+    from robosystems.config.operators import model_accepts_sampling_params
+
+    assert model_accepts_sampling_params("us.anthropic.claude-sonnet-4-6")
+    assert model_accepts_sampling_params("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+
+  def test_claude_5_family_does_not(self):
+    from robosystems.config.operators import model_accepts_sampling_params
+
+    assert not model_accepts_sampling_params("us.anthropic.claude-sonnet-5")
+    assert not model_accepts_sampling_params("global.anthropic.claude-opus-5")
+
+  def test_sonnet_5_is_registered_but_not_default(self):
+    from robosystems.config.operators import BedrockModel, OperatorConfig
+
+    assert (
+      OperatorConfig.BEDROCK_MODELS[BedrockModel.SONNET_5]
+      == "us.anthropic.claude-sonnet-5"
+    )
+    assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_model == BedrockModel.SONNET_4_6
