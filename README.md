@@ -268,6 +268,8 @@ Details: [Enterprise SSO & SCIM](https://github.com/RoboFinSystems/robosystems/w
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
 
+The full corpus is also published monthly as one LadybugDB file on Hugging Face — [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (35 GiB download, 128 GiB on disk). `just sec-dump` pulls it into `data/lbug-dbs` for local Cypher, API, and MCP with no pipeline run; see the [SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline) wiki page.
+
 - **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
 - **Graph**: the base schema plus the `roboledger` extension — 20 node types and 41 relationship types modeling the full XBRL reporting hierarchy
 - **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures

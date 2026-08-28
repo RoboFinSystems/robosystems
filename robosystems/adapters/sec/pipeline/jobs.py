@@ -49,6 +49,7 @@ from .duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
+from .hf_publish import sec_lbug_hf_published
 from .materialize import (
   sec_graph_materialized,
   sec_historical_materialized,
@@ -421,6 +422,34 @@ sec_lbug_r2_publish_job = define_asset_job(
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 5c: Hugging Face Publish (public dataset, manual only)
+# ============================================================================
+# Copies the R2 snapshot to the public Hugging Face dataset via a Hub-side
+# Job, so the bytes never leave AWS a second time. No sensor or schedule
+# launches this; it is run by hand from the Dagster UI.
+
+sec_lbug_hf_publish_job = define_asset_job(
+  name="sec_lbug_hf_publish",
+  description="Copy the SEC R2 snapshot to the public Hugging Face dataset. Manual only.",
+  selection=AssetSelection.assets(sec_lbug_hf_published),
+  tags={
+    "pipeline": "sec",
+    "phase": "hf_publish",
+    # Light profile: presign + Hub API calls; the Job on HF moves the bytes
+    "ecs/cpu": "512",
+    "ecs/memory": "2048",
+    "ecs/ephemeral_storage": "21",
+    # On-demand: the run polls the Hub for hours and must not be interrupted
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

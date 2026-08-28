@@ -59,6 +59,11 @@ restart profile="robosystems":
 restart-container container="worker":
     docker compose -f compose.yaml restart robosystems-{{container}}
 
+# Restart graph-api if it is running (it holds replaced .lbug files open) and wait until it is healthy
+graph-api-restart:
+    @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || docker compose -f compose.yaml restart graph-api
+    @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || (curl -fs --retry 30 --retry-delay 2 --retry-all-errors -o /dev/null http://localhost:8001/health && echo "graph-api healthy")
+
 # Show running containers
 ps:
     docker compose -f compose.yaml ps
@@ -527,6 +532,18 @@ duckdb-query graph_id query format="table":
 #   just sec-process all=1                    # Process all pending files
 #   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
+#   just sec-dump                             # Pull the prebuilt public dump instead of running the pipeline
+
+# --- Dump (the prebuilt corpus, no pipeline) ---
+
+# Download the public SEC .lbug dump from Hugging Face into data/lbug-dbs (~35 GiB down, ~128 GiB on disk), then restart graph-api if running
+sec-dump *flags="":
+    @just sec-dump-no-restart {{flags}}
+    @just graph-api-restart
+
+# Same download without the graph-api restart (a running graph-api keeps serving the replaced file until restarted)
+sec-dump-no-restart *flags="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_dump {{flags}}
 
 # --- Full Pipeline (convenience) ---
 

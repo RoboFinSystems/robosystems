@@ -32,6 +32,7 @@ Pipeline stages (run independently via separate jobs):
    - sec_duckdb_s3_published - Publish raw .duckdb to S3
    - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
    - sec_lbug_r2_published - Publish raw .lbug to R2 for zero-egress subscriber downloads
+   - sec_lbug_hf_published - Copy the R2 snapshot to the public Hugging Face dataset (manual)
 
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
@@ -64,6 +65,7 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECDownloadConfig,
+  SECHFPublishConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
   SECMaterializeConfig,
@@ -76,6 +78,7 @@ from robosystems.adapters.sec.pipeline.duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
+from robosystems.adapters.sec.pipeline.hf_publish import sec_lbug_hf_published
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
   sec_download_job,
@@ -87,6 +90,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_historical_staged_materialize_job,
   sec_incremental_stage_job,
   sec_ixbrl_index_job,
+  sec_lbug_hf_publish_job,
   sec_lbug_r2_publish_job,
   sec_lbug_s3_publish_job,
   sec_materialize_job,
@@ -151,6 +155,7 @@ def get_dagster_components():
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
       sec_lbug_r2_published,
+      sec_lbug_hf_published,
       sec_knowledge_artifacts,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
@@ -169,6 +174,7 @@ def get_dagster_components():
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_lbug_r2_publish_job,
+      sec_lbug_hf_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
       sec_narratives_index_job,
@@ -199,6 +205,7 @@ __all__ = [
   "SEC_START_YEAR",
   "SECArtifactConfig",
   "SECDownloadConfig",
+  "SECHFPublishConfig",
   "SECHistoricalStageConfig",
   "SECIncrementalStageConfig",
   "SECMaterializeConfig",
@@ -228,6 +235,8 @@ __all__ = [
   "sec_ixbrl_disclosures_indexed",
   "sec_ixbrl_index_job",
   "sec_knowledge_artifacts",
+  "sec_lbug_hf_publish_job",
+  "sec_lbug_hf_published",
   "sec_lbug_r2_publish_job",
   "sec_lbug_r2_published",
   "sec_lbug_s3_publish_job",

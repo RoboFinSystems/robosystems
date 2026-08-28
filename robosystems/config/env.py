@@ -461,6 +461,12 @@ class EnvConfig:
     "R2_PUBLIC_URL", ""
   )  # Public bucket URL (no auth needed)
 
+  # Hugging Face (public SEC dataset publish — a manual Dagster job)
+  HF_TOKEN = get_secret_value("HF_TOKEN", "")  # write token; also runs HF Jobs
+  HF_SEC_DATASET_REPO = get_str_env(
+    "HF_SEC_DATASET_REPO", "robosystems/sec-xbrl-knowledge-graphs"
+  )
+
   # ==========================================================================
   # 2. FEATURE FLAGS
   # ==========================================================================
