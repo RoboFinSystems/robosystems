@@ -23,23 +23,11 @@ from ...operations.providers.payment_provider import get_payment_provider
 logger = get_logger(__name__)
 
 
-async def _tier_capacity_status(plan_name: str) -> str:
-  """``ready`` when a writer for the tier has a free slot; otherwise
-  ``at_capacity``. ``scalable`` (no slot, ASG below max) counts as
-  ``at_capacity`` because nothing on the create path raises desired capacity.
-  Any failure to determine capacity reads as ``at_capacity``.
-  """
-  try:
-    from ...middleware.graph.allocation_manager import LadybugAllocationManager
-    from ...middleware.graph.types import GraphTier
-
-    manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
-    status_value = await manager.check_tier_capacity(GraphTier(plan_name))
-  except Exception as e:
-    logger.warning(f"Could not determine capacity for tier {plan_name}: {e}")
-    return "at_capacity"
-  return "ready" if status_value == "ready" else "at_capacity"
-
+# The same refuse-the-sale rule guards change-tier; the helper lives in the
+# ops layer so both paths read one definition of "capacity".
+from ...operations.graph.capacity import (  # noqa: E402
+  tier_capacity_status as _tier_capacity_status,
+)
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
