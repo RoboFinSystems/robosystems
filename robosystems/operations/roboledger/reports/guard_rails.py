@@ -159,7 +159,7 @@ def _fail(result: ValidationResult, message: str) -> None:
 def _validate_income_statement(
   rows: list[FactRow], result: ValidationResult, column: _Column
 ) -> None:
-  _check_totals_foot(rows, result, column)
+  _check_totals_foot(rows, result, column, sign_by_balance=True)
 
   # Structural: Net Income must reconcile against EVERY income-statement
   # line by natural balance — credit-nature lines (operating AND
@@ -325,7 +325,7 @@ def _net_income_row(rows: list[FactRow]) -> FactRow | None:
 def _validate_balance_sheet(
   rows: list[FactRow], result: ValidationResult, column: _Column
 ) -> None:
-  _check_totals_foot(rows, result, column)
+  _check_totals_foot(rows, result, column, sign_by_balance=True)
 
   # Structural: Assets = Liabilities + Equity.
   #
@@ -389,7 +389,10 @@ def _validate_cash_flow(
   reconciliation against the balance sheet is a fact-bundle check
   (``fact_grid._check_cash_flow_tie_out``), not a per-statement one.
   """
-  _check_totals_foot(rows, result, column)
+  # Cash-flow rows are cash-effect signed by ``_derive_cash_flow_facts`` and
+  # ``_reconcile_operating_to_cash`` — a section foots as a plain sum by
+  # construction, whatever balance type each element declares.
+  _check_totals_foot(rows, result, column, sign_by_balance=False)
   _check_operating_plug(rows, result, column)
 
 
@@ -404,7 +407,11 @@ _VALIDATORS: dict[str, _Validator] = {
 
 
 def _check_totals_foot(
-  rows: list[FactRow], result: ValidationResult, column: _Column
+  rows: list[FactRow],
+  result: ValidationResult,
+  column: _Column,
+  *,
+  sign_by_balance: bool,
 ) -> None:
   """Verify that subtotal rows equal the sum of their children.
 
@@ -414,6 +421,17 @@ def _check_totals_foot(
   or lower depth. Scanning FORWARD instead would foot each subtotal against
   the next section's children (e.g. 'Revenues' against Cost of Revenue's
   leaves), producing spurious warnings while skipping the real check.
+
+  ``sign_by_balance`` applies the XBRL calculation-weight rule: a child
+  whose balance type differs from its parent's enters with weight -1
+  (interest expense under Nonoperating Income, a contra under Revenues,
+  accumulated depreciation under PP&E net). Income-statement and
+  balance-sheet rows are natural-signed per element, so that is exactly
+  how the calc DAG produced the subtotal — a plain sum counted a 3,755.70
+  interest expense with the wrong sign and reported a 7,511.40 "difference"
+  on a subtotal that was right. Cash-flow rows are cash-effect signed and
+  foot as a plain sum, so that validator passes ``False``. A row with no
+  usable balance type enters with weight +1 either way.
 
   Calc-target subtotals with no presentation children (Gross Profit,
   Operating Income) have no preceding deeper rows and fall out via the
@@ -438,7 +456,9 @@ def _check_totals_foot(
       if child.depth <= subtotal.depth:
         break
       if child.depth == subtotal.depth + 1:
-        child_sum += _value(child, column.index)
+        child_sum += _child_weight(child, subtotal, sign_by_balance) * _value(
+          child, column.index
+        )
 
     subtotal_val = _value(subtotal, column.index)
     diff = abs(subtotal_val - child_sum)
@@ -448,6 +468,18 @@ def _check_totals_foot(
         f"does not match sum of children ({child_sum:.2f}), "
         f"difference: {diff:.2f}"
       )
+
+
+def _child_weight(child: FactRow, subtotal: FactRow, sign_by_balance: bool) -> float:
+  """Calculation weight of ``child`` under ``subtotal``: -1 when their balance
+  types differ, +1 when they agree or either is unknown."""
+  if not sign_by_balance:
+    return 1.0
+  parent = subtotal.balance_type
+  kid = child.balance_type
+  if parent not in ("credit", "debit") or kid not in ("credit", "debit"):
+    return 1.0
+  return 1.0 if kid == parent else -1.0
 
 
 def _check_zero_subtotals(
