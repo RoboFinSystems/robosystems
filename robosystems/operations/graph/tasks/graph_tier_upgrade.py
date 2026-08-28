@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 DRAIN_TIMEOUT_SECONDS = 120
 DRAIN_POLL_INTERVAL_SECONDS = 5
+# Consecutive failed attempts before an unreachable graph API is taken to mean
+# the container is stopped rather than the network blinked.
+DRAIN_UNREACHABLE_CONFIRMATIONS = 3
 REATTACH_TIMEOUT_SECONDS = 300
 REATTACH_POLL_INTERVAL_SECONDS = 10
 GRAPH_API_PORT = 8001
@@ -321,27 +324,41 @@ class GraphTierUpgradeTask(BaseTask):
     """Confirm the old instance has stopped serving before the detach.
 
     Two outcomes count as drained: the instance reports zero active
-    connections, or its graph API is not listening at all — the
-    maintenance-window procedure stops the container before a tier change
-    precisely so nothing can be writing when the volume detaches, and every
-    write reaches the volume through that API. A graph API that is up but
-    has no drain endpoint is neither, and so is a drain that times out with
-    connections still open: raise, because detaching under live writes is the
-    one thing this step exists to prevent.
+    connections, or its graph API is not listening at all, confirmed across
+    several attempts so a network blip does not pass for a stopped container
+    — the maintenance-window procedure stops the container before a tier
+    change precisely so nothing can be writing when the volume detaches, and
+    every write reaches the volume through that API. Everything else refuses:
+    no private IP to ask, a graph API that is up but has no drain endpoint, an
+    error response, or a drain that times out with connections still open.
+    Detaching under live writes is the one thing this step exists to prevent.
     """
     if not private_ip:
-      logger.warning("No private IP for drain, skipping")
-      return
+      raise DrainRefusedError(
+        "No private IP recorded for the source instance; cannot confirm it "
+        "is drained, so the volume stays attached"
+      )
 
     base_url = f"http://{private_ip}:{GRAPH_API_PORT}"
 
     async with httpx.AsyncClient(timeout=10) as client:
-      try:
-        response = await client.post(f"{base_url}/admin/drain")
-      except httpx.HTTPError as e:
+      response = None
+      for attempt in range(1, DRAIN_UNREACHABLE_CONFIRMATIONS + 1):
+        try:
+          response = await client.post(f"{base_url}/admin/drain")
+          break
+        except httpx.HTTPError as e:
+          logger.warning(
+            f"Graph API on {private_ip} not reachable "
+            f"(attempt {attempt}/{DRAIN_UNREACHABLE_CONFIRMATIONS}): {e}"
+          )
+          if attempt < DRAIN_UNREACHABLE_CONFIRMATIONS:
+            await asyncio.sleep(DRAIN_POLL_INTERVAL_SECONDS)
+      if response is None:
         logger.warning(
-          f"Graph API on {private_ip} is not reachable ({e}); treating the "
-          "instance as drained — nothing can be writing through it"
+          f"Graph API on {private_ip} stayed unreachable across "
+          f"{DRAIN_UNREACHABLE_CONFIRMATIONS} attempts; treating the instance "
+          "as drained — nothing can be writing through it"
         )
         return
 
