@@ -123,7 +123,8 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: RateLimitPerIP
 
-        # Rule 3: Block common attack patterns (SQL injection, XSS)
+        # Rule 3: Block common attack patterns (SQL injection, XSS). Body SQLi
+        # lives in rule 3b so the SQL query surface can be exempted from it.
         - Name: BlockCommonAttacks
           Priority: 3
           Statement:
@@ -133,16 +134,6 @@ Resources:
                 - SqliMatchStatement:
                     FieldToMatch:
                       AllQueryArguments: {}
-                    TextTransformations:
-                      - Priority: 0
-                        Type: URL_DECODE
-                      - Priority: 1
-                        Type: HTML_ENTITY_DECODE
-                # SQL Injection - Request Body
-                - SqliMatchStatement:
-                    FieldToMatch:
-                      Body:
-                        OversizeHandling: CONTINUE
                     TextTransformations:
                       - Priority: 0
                         Type: URL_DECODE
@@ -194,6 +185,46 @@ Resources:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: BlockCommonAttacks
+
+        # Rule 3b: SQL injection in the request body, everywhere except the SQL
+        # query surface. /v1/graphs/{g}/query/sql carries user SQL by contract;
+        # its controls are the SELECT-only validator and the sandboxed
+        # read-only DuckDB connection, so a body SQLi signature there only
+        # rejects legitimate statements. Query arguments, the URI path and the
+        # body XSS match (rule 3) still apply to that path.
+        - Name: BlockSqliBody
+          Priority: 7
+          Statement:
+            AndStatement:
+              Statements:
+                - NotStatement:
+                    Statement:
+                      ByteMatchStatement:
+                        FieldToMatch:
+                          UriPath: {}
+                        PositionalConstraint: ENDS_WITH
+                        SearchString: /query/sql
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
+                - SqliMatchStatement:
+                    FieldToMatch:
+                      Body:
+                        OversizeHandling: CONTINUE
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: CommonAttackBlocked
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockSqliBody
 
         # Rule 4: Size restrictions (prevent large payload attacks)
         - Name: SizeRestrictions
