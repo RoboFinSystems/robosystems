@@ -92,9 +92,10 @@ class ViewResponse(BaseModel):
   summary: dict[str, ElementSummary] | None = Field(
     None,
     description=(
-      "Per-element aggregates, only when include_summary=true. Note that "
-      "`total` sums across every returned period, which is meaningful for "
-      "duration facts and not for instants. Overlapping duration windows "
+      "Per-element aggregates, only when include_summary=true. `total` and "
+      "`average` span every returned period, so they are present for "
+      "duration elements only — instants omit both (a balance summed across "
+      "periods is not a balance). Overlapping duration windows "
       "sharing a period_end (quarter + year-to-date) contribute only the "
       "narrowest window, so a quarter is never double-counted inside its "
       "own YTD figure."

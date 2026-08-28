@@ -40,7 +40,7 @@ class BuildFactGridTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "build-fact-grid",
-      "description": """Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add aggregated statistics (count, total, avg, min, max) by element.
+      "description": """Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add per-element statistics: count, min, max for every element, plus total and average for duration elements only — a balance summed or averaged across periods is not a balance, so instants (e.g. total_assets) omit both.
 
 **WHEN TO USE:**
 - When the user asks to compare specific financial metrics across periods or companies
@@ -127,7 +127,7 @@ For income statement items (revenue, net income), always specify period_type='an
           },
           "include_summary": {
             "type": "boolean",
-            "description": "Include summary statistics (count, total, avg, min, max) by element",
+            "description": "Include per-element statistics: count, min, max for every element; total and average for duration elements only (instants omit them — a balance summed across periods is not a balance).",
             "default": False,
           },
           "limit": {
