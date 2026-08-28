@@ -91,6 +91,14 @@ class TestOperatorRequest:
     with pytest.raises(ValidationError):
       OperatorRequest(message="")
 
+  def test_max_credits_bounds(self):
+    """The per-question credit ceiling must be a positive, sane number."""
+    assert OperatorRequest(message="ok").max_credits is None
+    assert OperatorRequest(message="ok", max_credits=250).max_credits == 250
+    for bad in (0, -1, 100_001):
+      with pytest.raises(ValidationError):
+        OperatorRequest(message="ok", max_credits=bad)
+
   def test_history_is_bounded_in_size_and_content(self):
     too_many = [
       OperatorMessage(role="user", content="q")

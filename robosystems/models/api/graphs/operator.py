@@ -87,6 +87,17 @@ class OperatorRequest(BaseModel):
   )
   enable_rag: bool = Field(True, description="Enable RAG context enrichment")
   stream: bool = Field(False, description="Enable streaming response")
+  max_credits: float | None = Field(
+    None,
+    gt=0,
+    le=100_000,
+    description=(
+      "Per-question credit ceiling. Once the run's consumed credits reach "
+      "this number, no further tool step starts and the operator answers "
+      "from what it has (the wrap-up itself may carry the total slightly "
+      "past the ceiling). Omit for the mode's default step-bounded behavior."
+    ),
+  )
 
   class Config:
     json_schema_extra = {

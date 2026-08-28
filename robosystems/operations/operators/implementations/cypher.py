@@ -49,10 +49,10 @@ class CypherOperator(Operator):
 
   # Read-only tool allowlist. The loop intersects this with the tools the
   # graph actually exposes (generic graphs get only schema + cypher; SEC and
-  # roboledger graphs also get example queries, element resolution, GraphQL,
-  # and document search). Write tools are never included. The two orientation
-  # tools are normally prefetched into the system prompt and withheld from
-  # the loop; they stay listed for the fallback when that prefetch fails.
+  # roboledger graphs also get the curated and OLTP reads below). Write tools
+  # are never included. The two orientation tools are normally prefetched
+  # into the system prompt and withheld from the loop; they stay listed for
+  # the fallback when that prefetch fails.
   READ_ONLY_TOOLS = [
     "get-graph-schema",
     "read-graph-cypher",
@@ -62,7 +62,56 @@ class CypherOperator(Operator):
     "resolve-element",
     "search-documents",
     "get-document-section",
+    # Curated financial reads — routed ahead of raw Cypher for statement,
+    # balance, and pivot questions (see CURATED TOOLS in the system prompt).
+    "live-financial-statement",
+    "financial-statement-analysis",
+    "build-fact-grid",
+    # Period workflow and freshness reads
+    "get-fiscal-calendar",
+    "get-period-close-status",
+    "list-period-drafts",
+    "get-graph-sync-status",
+    "get-close-playbook",
+    # Chart-of-accounts mapping reads
+    "list-mapping-structures",
+    "get-unmapped-elements",
+    "get-mapping-summary",
+    "suggest-mapping",
+    # Tenant entity/OLTP reads
+    "list-subgraphs",
+    "get-information-block",
+    "list-information-blocks",
+    "get-agent",
+    "list-agents",
+    "agent-activity",
+    "get-event-block",
+    "list-event-blocks",
+    "get-event-handler",
+    "list-event-handlers",
+    "get-document",
+    "list-documents",
+    "recall",
   ]
+
+  # The subset worth calling out in the system prompt as preferred over raw
+  # Cypher, with the one-line routing hint for each.
+  CURATED_TOOL_HINTS: dict[str, str] = {
+    "live-financial-statement": (
+      "current income statement / balance sheet / trial balance straight "
+      "from the live ledger — the right first call for expense, revenue, "
+      "and balance questions"
+    ),
+    "financial-statement-analysis": (
+      "financial statement analysis over the reported (materialized) facts"
+    ),
+    "build-fact-grid": (
+      "multidimensional pivots over the fact hypercube (by account, period, dimension)"
+    ),
+    "get-fiscal-calendar": "fiscal periods, close status, and the close target",
+    "get-period-close-status": "close readiness for a specific period",
+    "get-graph-sync-status": "source-connection data freshness",
+  }
 
   spec = OperatorSpec(
     name="Cypher Operator",
@@ -142,6 +191,8 @@ class CypherOperator(Operator):
     if orientation is not None:
       tool_names = [t for t in tool_names if t not in _ORIENTATION_TOOLS]
 
+    curated_tools = [t for t in self.CURATED_TOOL_HINTS if t in available_tools]
+
     system = self._build_system_prompt(
       max_results,
       output_mode,
@@ -149,6 +200,7 @@ class CypherOperator(Operator):
       has_document_search,
       max_iterations,
       orientation,
+      curated_tools,
     )
 
     result = await run_tool_loop(
@@ -160,6 +212,7 @@ class CypherOperator(Operator):
       temperature=0.3,
       operator_type="cypher",
       operation_description="Cypher query loop",
+      max_credits=self._get_max_credits(ctx),
     )
 
     await ctx.progress.report("Done", percent=100)
@@ -173,6 +226,7 @@ class CypherOperator(Operator):
         "rows": rows,
         "result_count": len(rows),
         "hit_step_limit": result.hit_cap,
+        "hit_credit_ceiling": result.hit_credit_ceiling,
         "loop_iterations": result.iterations,
       },
       # De-dupe preserving order (a tool may be called several times).
@@ -227,6 +281,7 @@ class CypherOperator(Operator):
     has_document_search: bool = False,
     tool_turns: int = 6,
     orientation: dict[str, str] | None = None,
+    curated_tools: list[str] | None = None,
   ) -> str:
     if is_shared:
       # Shared repository (e.g. SEC): thousands of filers, so the selective
@@ -255,9 +310,19 @@ class CypherOperator(Operator):
       )
 
     if orientation is not None:
+      first_move = (
+        "Call a curated tool where one fits (see CURATED TOOLS below); "
+        "otherwise write a read-only Cypher query and run it with "
+        "`read-graph-cypher`. Act on your first turn — no orientation calls "
+        "are needed."
+        if curated_tools
+        else "Write a read-only Cypher query and run it with "
+        "`read-graph-cypher` on your first turn — no orientation calls are "
+        "needed."
+      )
       workflow = f"""WORKFLOW:
 1. The GRAPH SCHEMA and (when present) EXAMPLE QUERIES sections at the end of this prompt are authoritative for this graph — plan directly from them and never guess labels or properties they don't show. (Purely qualitative/narrative questions may go straight to document search — see below.)
-2. Write a read-only Cypher query and run it with `read-graph-cypher` on your first turn — no orientation calls are needed.
+2. {first_move}
 3. If a query errors or returns nothing useful, read the error, fix the query, and try again — don't repeat a failing query unchanged.
 4. When you have the answer, respond in natural language.
 
@@ -289,6 +354,15 @@ CYPHER RULES:
 
 LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
 - The graph keeps cancelled/replaced rows for audit. When counting or summing ledger data, restrict to live rows using the materialized `is_live` boolean — it exists on every spine node (`Entry`, `LineItem`, `Event`, `Transaction`) and is the one rule to remember: `WHERE e.is_live`, `WHERE li.is_live`, `WHERE ev.is_live`, `WHERE t.is_live`. For balances/debit-credit sums, aggregate through live Entry/LineItem (`e.is_live`, ⇔ status = 'posted'), not by summing Transaction.amount. `is_live` keeps open obligations (pending/committed/fulfilled events); for a specific realized set, filter `status` explicitly.
+"""
+    if curated_tools:
+      hints = "\n".join(
+        f"- `{name}`: {self.CURATED_TOOL_HINTS[name]}" for name in curated_tools
+      )
+      prompt += f"""
+CURATED TOOLS (prefer these over raw Cypher when one answers the question — they encode the accounting semantics you would otherwise reconstruct by hand):
+{hints}
+Reach for `read-graph-cypher` when no curated tool fits, or to drill into specifics a curated result doesn't show.
 """
     if has_document_search:
       if is_shared:
@@ -340,8 +414,24 @@ EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than 
       OperatorMode.EXTENDED: 500,
     }.get(mode, 100)
 
+  @staticmethod
+  def _get_max_credits(ctx: OperatorContext) -> float | None:
+    """Caller-chosen per-question credit ceiling, from the request context.
+
+    Tenant-supplied, so anything non-numeric or non-positive is ignored
+    rather than trusted to shape the loop.
+    """
+    raw = ctx.extra.get("max_credits")
+    if raw is None:
+      return None
+    try:
+      value = float(raw)
+    except (TypeError, ValueError):
+      return None
+    return value if value > 0 else None
+
   def _calculate_confidence(self, result: ToolLoopResult) -> float:
-    if result.hit_cap:
+    if result.hit_cap or result.hit_credit_ceiling:
       return 0.5
     if result.rows:
       return 0.9

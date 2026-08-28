@@ -47,6 +47,12 @@ _ANSWER_NOW = (
   "results gathered so far. Do not request any more tools."
 )
 
+_ANSWER_NOW_CREDITS = (
+  "You've reached the credit limit set for this question. Answer the original "
+  "question now using the results gathered so far. Do not request any more "
+  "tools."
+)
+
 # The nudge keeps the tool definitions (the transcript carries tool_use
 # blocks, which the API requires tools for) but forbids further calls, so
 # the final turn is guaranteed to be text rather than a dropped tool_use.
@@ -63,6 +69,7 @@ class ToolLoopResult:
   tools_called: list[str] = field(default_factory=list)
   iterations: int = 0  # model calls made, including the nudge if any
   hit_cap: bool = False  # stopped at max_iterations rather than by the model
+  hit_credit_ceiling: bool = False  # stopped by the caller's max_credits
   error_retries: int = 0  # uncharged turns granted for all-error tool results
 
 
@@ -100,6 +107,7 @@ async def run_tool_loop(
   operator_type: str | None = None,
   operation_description: str = "Tool-use loop",
   max_error_retries: int = DEFAULT_MAX_ERROR_RETRIES,
+  max_credits: float | None = None,
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
@@ -112,6 +120,13 @@ async def run_tool_loop(
   one further turn nudges the model to answer from what it has with tool use
   disabled, so the loop always costs at most
   ``max_iterations + max_error_retries + 1`` model calls.
+
+  ``max_credits`` is a soft per-run ceiling checked between model calls
+  against the run's accumulated spend (`TrackedAIClient.total_credits`): once
+  reached, no further tool turn starts and the model is nudged to answer from
+  what it has — so the wrap-up turn itself can carry the total somewhat past
+  the ceiling, but a runaway run stops at a number the caller chose rather
+  than at the iteration cap.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -133,9 +148,20 @@ async def run_tool_loop(
   tool_turns = 0  # round-trips charged against max_iterations
   error_retries = 0  # uncharged round-trips granted so far
   model_calls = 0
+  hit_ceiling = False
   step = 60 // max(max_iterations, 1)
 
   while tool_turns < max_iterations:
+    # Between-calls credit check: the first call always runs (its cost is
+    # unknowable up front and the pre-flight already gated the run).
+    if (
+      max_credits is not None
+      and model_calls > 0
+      and getattr(ctx.ai, "total_credits", 0.0) >= max_credits
+    ):
+      hit_ceiling = True
+      break
+
     await ctx.progress.report(
       "Thinking..." if model_calls == 0 else f"Working (step {model_calls + 1})...",
       percent=min(20 + tool_turns * step, 85),
@@ -234,20 +260,26 @@ async def run_tool_loop(
     else:
       error_retries += 1
 
-  # Iteration cap reached. Nudge for a final answer, appending the nudge to
-  # the trailing user turn (avoids a second consecutive user message). Keep
-  # `tools` defined so the tool_use/tool_result transcript stays valid, but
-  # disable tool choice so the answer can't come back as a tool_use block
-  # that nobody would execute.
+  # Iteration cap or credit ceiling reached. Nudge for a final answer,
+  # appending the nudge to the trailing user turn (a second consecutive user
+  # message would be rejected). Keep `tools` defined so the tool_use/
+  # tool_result transcript stays valid, but disable tool choice so the answer
+  # can't come back as a tool_use block that nobody would execute.
+  answer_now = _ANSWER_NOW_CREDITS if hit_ceiling else _ANSWER_NOW
   final_messages = list(messages)
   last = final_messages[-1]
-  if last.role == "user" and isinstance(last.content, list):
-    final_messages[-1] = AIMessage(
-      role="user",
-      content=[*last.content, {"type": "text", "text": _ANSWER_NOW}],
-    )
+  if last.role == "user":
+    if isinstance(last.content, list):
+      final_messages[-1] = AIMessage(
+        role="user",
+        content=[*last.content, {"type": "text", "text": answer_now}],
+      )
+    else:
+      final_messages[-1] = AIMessage(
+        role="user", content=f"{last.content}\n\n{answer_now}"
+      )
   else:
-    final_messages.append(AIMessage(role="user", content=_ANSWER_NOW))
+    final_messages.append(AIMessage(role="user", content=answer_now))
 
   final = await ctx.ai.create_message(
     messages=final_messages,
@@ -267,6 +299,7 @@ async def run_tool_loop(
     cypher=last_cypher,
     tools_called=tools_called,
     iterations=model_calls + 1,
-    hit_cap=True,
+    hit_cap=not hit_ceiling,
+    hit_credit_ceiling=hit_ceiling,
     error_retries=error_retries,
   )
