@@ -12,9 +12,13 @@ Usage:
     just sec-dump                    # ~35 GiB download, ~128 GiB on disk afterwards
     just sec-dump --force            # replace an existing data/lbug-dbs/sec.lbug
     just sec-dump --keep-archive     # keep the .zst after decompression
+    just sec-dump --no-restart       # recipe-level: skip the graph-api restart afterwards
+
+The `just` recipe restarts the graph-api container after a successful run (it
+holds a replaced file open until restarted); this script never touches the
+stack, so run standalone it only warns.
 
 Then:
-    just restart                                       # if the stack is running
     just lbug-query sec "MATCH (e:Entity) RETURN count(e)"
 """
 
@@ -285,8 +289,9 @@ def main(argv: list[str] | None = None) -> int:
 
   if dest.exists() and graph_api_running():
     logger.warning(
-      f"The graph API container is running and may hold {dest.name} open; "
-      "run `just restart` after this finishes."
+      f"The graph API container is running and holds the current {dest.name} "
+      "open; it serves the old file until restarted (`just sec-dump` restarts it; "
+      "standalone, run `just restart`)."
     )
 
   logger.info(f"Decompressing {archive.name} -> {dest}")
@@ -298,9 +303,6 @@ def main(argv: list[str] | None = None) -> int:
 
   logger.info(f"Ready: {dest} ({written / GIB:.1f} GiB)")
   logger.info("Next:")
-  logger.info(
-    "  just restart                                       # if the stack is running"
-  )
   logger.info(f'  just lbug-query {graph_id} "MATCH (e:Entity) RETURN count(e)"')
   return 0
 
