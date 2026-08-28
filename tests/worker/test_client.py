@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.worker.client import enqueue_task, get_queue_position
+from robosystems.worker.client import enqueue_task, get_queue_position, requeue_task
 
 
 def _params_hash(params: dict | None = None) -> str:
@@ -320,3 +320,38 @@ async def test_get_queue_position_skips_malformed_entries():
     position, depth = await get_queue_position("op_B")
 
   assert (position, depth) == (3, 3)
+
+
+@pytest.mark.asyncio
+async def test_requeue_task_pushes_the_same_operation_with_the_answer():
+  mock_queue = AsyncMock()
+
+  with patch(
+    "robosystems.worker.client.create_async_redis_client", return_value=mock_queue
+  ):
+    await requeue_task(
+      "op_01PAUSED",
+      task={
+        "task_type": "operator",
+        "graph_id": "kg0123456789abcdef",
+        "user_id": "user_01TEST",
+        "params": {"operator_type": "cypher", "query": "close?"},
+      },
+      resume={"checkpoint": {"step": 2}, "input": {"approved": True}},
+    )
+
+  mock_queue.rpush.assert_awaited_once()
+  queue_name, payload = mock_queue.rpush.call_args[0]
+  assert queue_name == "worker:tasks"
+  data = json.loads(payload)
+  assert data["task_id"] == "op_01PAUSED"
+  assert data["task_type"] == "operator"
+  assert data["attempt"] == 1
+  assert data["params"]["operator_type"] == "cypher"
+  assert data["params"]["resume"] == {
+    "checkpoint": {"step": 2},
+    "input": {"approved": True},
+  }
+  # Explicit human action: never deduplicated
+  mock_queue.get.assert_not_called()
+  mock_queue.aclose.assert_awaited_once()

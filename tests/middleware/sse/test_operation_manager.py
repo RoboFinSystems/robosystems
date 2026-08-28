@@ -185,3 +185,43 @@ class TestGetOperationManager:
   def test_returns_instance(self):
     mgr = get_operation_manager()
     assert isinstance(mgr, OperationManager)
+
+
+class TestPauseAndResume:
+  @pytest.mark.asyncio
+  async def test_await_input_stores_the_request_with_the_queue_payload(self):
+    from robosystems.middleware.sse.event_storage import EventType
+    from robosystems.middleware.sse.operation_manager import OperationManager
+
+    storage = AsyncMock()
+    manager = OperationManager(event_storage=storage)
+    task = {"task_type": "operator", "graph_id": "kg1", "user_id": "u1", "params": {}}
+
+    await manager.await_input(
+      "op_1", prompt="Post it?", task=task, checkpoint={"step": 2}, details={"n": 3}
+    )
+
+    storage.store_event.assert_awaited_once()
+    op_id, event_type, data = storage.store_event.call_args[0]
+    assert (op_id, event_type) == ("op_1", EventType.OPERATION_AWAITING_INPUT)
+    assert data["message"] == "Post it?"
+    request = data["input_request"]
+    assert request["prompt"] == "Post it?"
+    assert request["checkpoint"] == {"step": 2}
+    assert request["details"] == {"n": 3}
+    assert request["task"] == task
+    assert request["requested_at"]
+
+  @pytest.mark.asyncio
+  async def test_resume_operation_stores_the_answer(self):
+    from robosystems.middleware.sse.event_storage import EventType
+    from robosystems.middleware.sse.operation_manager import OperationManager
+
+    storage = AsyncMock()
+    manager = OperationManager(event_storage=storage)
+
+    await manager.resume_operation("op_1", {"approved": True})
+
+    op_id, event_type, data = storage.store_event.call_args[0]
+    assert (op_id, event_type) == ("op_1", EventType.OPERATION_RESUMED)
+    assert data["input"] == {"approved": True}

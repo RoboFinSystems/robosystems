@@ -291,3 +291,57 @@ class TestBudget:
     assert task.task_type is None
     with patch("robosystems.worker.tasks.base.DEFAULT_TASK_TIMEOUT", 42):
       assert task.budget_seconds == 42
+
+
+@pytest.mark.asyncio
+async def test_pause_for_input_records_the_request_and_unwinds(task, mock_manager):
+  from robosystems.worker.tasks.base import TaskPaused
+
+  mock_manager.await_input = AsyncMock()
+  task.task_type = "operator"
+
+  with pytest.raises(TaskPaused) as exc_info:
+    await task.pause_for_input(
+      "Post the close?", checkpoint={"step": 3}, details={"period": "2026-07"}
+    )
+
+  assert exc_info.value.prompt == "Post the close?"
+  mock_manager.await_input.assert_awaited_once_with(
+    "op_01TEST",
+    prompt="Post the close?",
+    checkpoint={"step": 3},
+    details={"period": "2026-07"},
+    task={
+      "task_type": "operator",
+      "graph_id": "kg0123456789abcdef",
+      "user_id": "user_01TEST",
+      "params": {"key": "value"},
+    },
+  )
+
+
+@pytest.mark.asyncio
+async def test_pause_strips_a_previous_resume_from_the_recorded_params(mock_manager):
+  """A second pause must not carry the first answer back into the payload."""
+  mock_manager.await_input = AsyncMock()
+  task = ConcreteTask(
+    task_id="op_01TEST",
+    graph_id="kg0123456789abcdef",
+    user_id="user_01TEST",
+    params={"key": "value", "resume": {"checkpoint": {"step": 1}, "input": {}}},
+    manager=mock_manager,
+  )
+
+  assert task.resume == {"checkpoint": {"step": 1}, "input": {}}
+
+  from robosystems.worker.tasks.base import TaskPaused
+
+  with pytest.raises(TaskPaused):
+    await task.pause_for_input("Again?")
+
+  recorded = mock_manager.await_input.call_args.kwargs["task"]["params"]
+  assert recorded == {"key": "value"}
+
+
+def test_resume_is_none_on_a_first_run(task):
+  assert task.resume is None

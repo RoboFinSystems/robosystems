@@ -336,3 +336,31 @@ async def test_a_thread_abandoned_past_its_grace_is_reported_as_still_running(
   mock_cleanup.assert_called_once()
   # Let the released thread finish before the loop closes.
   await asyncio.sleep(0.1)
+
+
+class PausingTask(BaseTask):
+  async def execute(self) -> dict[str, Any]:
+    from robosystems.worker.tasks.base import TaskPaused
+
+    raise TaskPaused("Need a decision")
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_paused_task_is_neither_completed_nor_failed(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """A pause leaves the operation AWAITING_INPUT for the resume endpoint."""
+  mock_tracer.return_value = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
+  register_task("test_pausing")(PausingTask)
+
+  await _call_process_task(_make_task_data("test_pausing"), mock_queue, mock_manager)
+
+  mock_manager.complete_operation.assert_not_called()
+  mock_manager.fail_operation.assert_not_called()
+  # It still leaves the inflight list and the worker is cleaned up
+  mock_queue.lrem.assert_called_once()
+  mock_cleanup.assert_called_once()

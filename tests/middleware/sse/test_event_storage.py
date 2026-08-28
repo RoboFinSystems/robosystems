@@ -363,6 +363,7 @@ class TestSSEEventStorage:
             "updated_at": "2023-01-01T12:00:00Z",
             "error_message": None,
             "result_data": None,
+            "input_request": None,
           }
         ),
       )
@@ -1112,3 +1113,88 @@ class TestIntegrationScenarios:
 
       assert error_event.data["error"] == "Database connection failed"
       assert error_event.data["error_code"] == "DB_CONN_ERR"
+
+
+class TestAwaitingInputLifecycle:
+  """The pause state sits beside RUNNING and never outranks a terminal one."""
+
+  def test_events_map_to_statuses(self):
+    from robosystems.middleware.sse.event_storage import _next_status
+
+    assert (
+      _next_status(EventType.OPERATION_AWAITING_INPUT) == OperationStatus.AWAITING_INPUT
+    )
+    assert _next_status(EventType.OPERATION_RESUMED) == OperationStatus.RUNNING
+
+  def test_pause_and_resume_move_both_ways(self):
+    from robosystems.middleware.sse.event_storage import _transition_allowed
+
+    assert _transition_allowed(OperationStatus.RUNNING, OperationStatus.AWAITING_INPUT)
+    assert _transition_allowed(OperationStatus.AWAITING_INPUT, OperationStatus.RUNNING)
+    # A second pause after a resume is an ordinary forward move again.
+    assert _transition_allowed(
+      OperationStatus.AWAITING_INPUT, OperationStatus.AWAITING_INPUT
+    )
+
+  def test_pause_can_be_cancelled_or_finished_but_not_reopened(self):
+    from robosystems.middleware.sse.event_storage import _transition_allowed
+
+    assert _transition_allowed(
+      OperationStatus.AWAITING_INPUT, OperationStatus.CANCELLED
+    )
+    assert _transition_allowed(
+      OperationStatus.AWAITING_INPUT, OperationStatus.COMPLETED
+    )
+    assert not _transition_allowed(
+      OperationStatus.COMPLETED, OperationStatus.AWAITING_INPUT
+    )
+    assert not _transition_allowed(OperationStatus.CANCELLED, OperationStatus.RUNNING)
+
+  def test_pause_events_change_status_and_progress_does_not(self):
+    from robosystems.middleware.sse.event_storage import _STATUS_CHANGING_EVENTS
+
+    assert EventType.OPERATION_AWAITING_INPUT in _STATUS_CHANGING_EVENTS
+    assert EventType.OPERATION_RESUMED in _STATUS_CHANGING_EVENTS
+    assert EventType.OPERATION_PROGRESS not in _STATUS_CHANGING_EVENTS
+
+  def test_input_request_is_recorded_on_pause_and_cleared_on_resume(self):
+    from robosystems.middleware.sse.event_storage import (
+      OperationMetadata,
+      _apply_input_request,
+    )
+
+    metadata = OperationMetadata(
+      operation_id="op_1",
+      operation_type="operator",
+      user_id="user_1",
+      graph_id="kg1",
+      status=OperationStatus.RUNNING,
+      created_at="t0",
+      updated_at="t0",
+    )
+    request = {"prompt": "Close the period?", "task": {"task_type": "operator"}}
+    _apply_input_request(
+      metadata, EventType.OPERATION_AWAITING_INPUT, {"input_request": request}
+    )
+    assert metadata.input_request == request
+
+    _apply_input_request(metadata, EventType.OPERATION_RESUMED, {"input": {"ok": True}})
+    assert metadata.input_request is None
+
+  def test_metadata_roundtrips_input_request(self):
+    from robosystems.middleware.sse.event_storage import OperationMetadata
+
+    metadata = OperationMetadata(
+      operation_id="op_1",
+      operation_type="operator",
+      user_id="user_1",
+      graph_id=None,
+      status=OperationStatus.AWAITING_INPUT,
+      created_at="t0",
+      updated_at="t1",
+      input_request={"prompt": "?", "task": {}},
+    )
+    assert OperationMetadata(**metadata.to_dict()) == metadata
+    # Metadata written before the field existed still loads.
+    legacy = {k: v for k, v in metadata.to_dict().items() if k != "input_request"}
+    assert OperationMetadata(**legacy).input_request is None

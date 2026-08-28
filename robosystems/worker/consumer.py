@@ -36,7 +36,7 @@ from robosystems.worker.task_protection import (
   TaskProtectionManager,
 )
 from robosystems.worker.tasks import get_task_handler
-from robosystems.worker.tasks.base import BaseTask
+from robosystems.worker.tasks.base import BaseTask, TaskPaused
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +207,15 @@ async def _process_task(
           "graph_id": graph_id,
           "duration_ms": duration_ms,
         },
+      )
+
+    except TaskPaused as paused:
+      # Not an outcome: the task recorded its checkpoint and the operation is
+      # AWAITING_INPUT. It leaves the inflight list like any other task and
+      # comes back through the queue when the resume endpoint re-enqueues it.
+      logger.info(
+        f"Task paused for input: {task_type} ({task_id}): {paused.prompt}",
+        extra={"task_id": task_id, "task_type": task_type, "graph_id": graph_id},
       )
 
     except TimeoutError:

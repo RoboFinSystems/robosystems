@@ -20,10 +20,16 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.middleware.sse.event_storage import OperationStatus, get_event_storage
+from robosystems.middleware.sse.operation_manager import get_operation_manager
 from robosystems.middleware.sse.streaming import create_sse_response_starlette
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
+from robosystems.models.api.operations import OperationResumeRequest
 from robosystems.models.core import User
-from robosystems.worker.client import get_queue_position
+from robosystems.worker.client import get_queue_position, requeue_task
+
+OPERATION_ID_PATTERN = (
+  "^(op_[0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
 
 router = APIRouter()
 
@@ -241,8 +247,14 @@ async def get_operation_status(
       "stream": f"/v1/operations/{operation_id}/stream",
     }
 
-    if metadata.status in [OperationStatus.PENDING, OperationStatus.RUNNING]:
+    if metadata.status in [
+      OperationStatus.PENDING,
+      OperationStatus.RUNNING,
+      OperationStatus.AWAITING_INPUT,
+    ]:
       links["cancel"] = f"/v1/operations/{operation_id}"
+    if metadata.status == OperationStatus.AWAITING_INPUT:
+      links["resume"] = f"/v1/operations/{operation_id}/resume"
 
     response["_links"] = links
 
@@ -263,6 +275,16 @@ async def get_operation_status(
         )
     elif metadata.status == OperationStatus.RUNNING:
       response["message"] = "Operation is currently executing"
+    elif metadata.status == OperationStatus.AWAITING_INPUT:
+      # The prompt and its details are the caller's; the checkpoint and the
+      # queue payload behind them are the worker's and stay server-side.
+      request = metadata.input_request or {}
+      response["message"] = "Operation is paused and waiting for input"
+      response["input_request"] = {
+        "prompt": request.get("prompt"),
+        "details": request.get("details") or {},
+        "requested_at": request.get("requested_at"),
+      }
     elif metadata.status == OperationStatus.COMPLETED:
       response["message"] = "Operation completed successfully"
     elif metadata.status == OperationStatus.FAILED:
@@ -417,3 +439,84 @@ async def cancel_operation(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to cancel operation",
     )
+
+
+@router.post(
+  "/operations/{operation_id}/resume",
+  summary="Resume Operation",
+  description=(
+    "Answers an operation that paused at a checkpoint (status "
+    "`awaiting_input`) and puts it back on the worker queue with the answer. "
+    "The operation keeps its id, so the stream, status and cancel links stay "
+    "valid; reconnect to `/stream` to follow the resumed run. Consumes no "
+    "credits."
+  ),
+  operation_id="resumeOperation",
+  status_code=http_status.HTTP_202_ACCEPTED,
+  responses={
+    **RESOURCE_ERROR_RESPONSES,
+    409: {"description": "Operation is not waiting for input"},
+  },
+)
+@endpoint_metrics_decorator(
+  "/v1/operations/{operation_id}/resume",
+  business_event_type="operation_resumed",
+)
+async def resume_operation(
+  body: OperationResumeRequest,
+  operation_id: str = Path(
+    ..., description="Operation identifier", pattern=OPERATION_ID_PATTERN
+  ),
+  current_user: User = Depends(get_current_user),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> dict[str, Any]:
+  event_storage = get_event_storage()
+  metadata = await event_storage.get_operation_metadata(operation_id)
+
+  if not metadata:
+    raise HTTPException(
+      status_code=http_status.HTTP_404_NOT_FOUND,
+      detail="Operation not found. It may have expired or been cancelled.",
+    )
+
+  if metadata.user_id != current_user.id:
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail="Access denied to operation.",
+    )
+
+  if metadata.status != OperationStatus.AWAITING_INPUT:
+    raise HTTPException(
+      status_code=http_status.HTTP_409_CONFLICT,
+      detail=f"Operation is not waiting for input - current status is {metadata.status}",
+    )
+
+  request = metadata.input_request or {}
+  task = request.get("task")
+  if not task:
+    # A pause without its queue payload cannot be put back; only a store
+    # that lost the request mid-write produces this.
+    raise HTTPException(
+      status_code=http_status.HTTP_409_CONFLICT,
+      detail="Operation cannot be resumed: its checkpoint was not recorded.",
+    )
+
+  await get_operation_manager().resume_operation(operation_id, body.input)
+  await requeue_task(
+    operation_id,
+    task,
+    resume={"checkpoint": request.get("checkpoint") or {}, "input": body.input},
+  )
+
+  logger.info(f"User {current_user.id} resumed operation {operation_id}")
+
+  return {
+    "operation_id": operation_id,
+    "status": OperationStatus.RUNNING,
+    "message": "Operation resumed and queued for the worker",
+    "_links": {
+      "stream": f"/v1/operations/{operation_id}/stream",
+      "status": f"/v1/operations/{operation_id}/status",
+      "cancel": f"/v1/operations/{operation_id}",
+    },
+  }
