@@ -83,6 +83,15 @@ manifest (`agent_instructions`); tenant graphs get a generated one. It names
 tool *families* rather than restating schemas, because it occupies the agent's
 context for the whole session.
 
+The handler (`routers/graphs/mcp/handlers.py`) prepends a one-line graph scope
+to the core tools' authored descriptions and never replaces them. A shared
+repository's manifest can also carry `cypher_query_guidance`, appended to
+`read-graph-cypher`'s description: the data-model rules a raw query must honour
+to return a correct number (for SEC: consolidation, canonical concepts, period
+shape, deduplication). The tool description is the one place every MCP client
+reads — `instructions` is routing, and client-side skills reach only our own
+Claude.
+
 ### Layer 1 — core, always available
 
 | Tool | Description |

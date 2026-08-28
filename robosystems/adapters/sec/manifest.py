@@ -44,8 +44,37 @@ SEC_MANIFEST = SharedRepositoryManifest(
     # not served: the replica stack carries `sec` only, master reads are off,
     # and the master is parked at desired 0, so every read for it fails. Do not
     # restore this line until a read actually succeeds against that graph.
+    "- Raw Cypher on this graph has four rules that decide whether a number is "
+    "right: `Fact {has_dimensions: false}` for consolidated totals, "
+    "`Element.canonical_concept` over a single qname, a pinned `Period` shape "
+    "(`duration_type` for flows, `period_type: 'instant'` for balances), and "
+    "`RETURN DISTINCT` anchored on the Entity. `read-graph-cypher`'s "
+    "description spells them out.\n"
     "- This is shared public data: period close, chart-of-accounts mapping, and "
     "all write operations are unavailable here."
+  ),
+  cypher_query_guidance=(
+    "**SEC DATA RULES — a query that ignores these returns a plausible wrong "
+    "number:**\n"
+    "- Consolidated vs dimensional: `Fact {has_dimensions: false}` is the "
+    "consolidated total; `true` is a segment / geography / member breakdown. "
+    "Mixing them double-counts.\n"
+    "- Canonical concepts over qnames: filter `Element.canonical_concept` "
+    "('revenue', 'net_income', 'total_assets', ...) rather than one qname — "
+    "filers tag the same concept differently (us-gaap:Revenues vs "
+    "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax). "
+    "`resolve-element` maps a concept to its qnames.\n"
+    "- Period shape: income-statement and cash-flow facts are durations — pin "
+    "`Period {duration_type: 'annual'}` (or 'quarterly'); balance-sheet facts "
+    "are `Period {period_type: 'instant'}`. Quarterly, year-to-date and annual "
+    "figures share end dates, so an unpinned period mixes them.\n"
+    "- Anchor on the Entity (`{ticker: ...}` or CIK) or a Report first and reach "
+    "`Structure`, `Element` or `Period` last — ~53k filings share a "
+    "`Structure.canonical_type`, and leading with it scans them all. Always "
+    "`LIMIT`.\n"
+    "- `RETURN DISTINCT`: a fact is restated in later filings and sits in more "
+    "than one FactSet, so an un-deduplicated result repeats rows.\n"
+    "- `get-example-queries` carries these as working patterns; run it first."
   ),
   rate_limits={
     "starter": {

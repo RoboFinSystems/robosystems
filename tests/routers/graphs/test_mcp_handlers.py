@@ -56,6 +56,21 @@ async def mcp_handler(mock_repository):
     return handler
 
 
+def _core_definitions() -> list[dict]:
+  return [
+    {
+      "name": "read-graph-cypher",
+      "description": "AUTHORED CYPHER GUIDANCE",
+      "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+      "name": "get-graph-schema",
+      "description": "AUTHORED SCHEMA GUIDANCE",
+      "inputSchema": {"type": "object", "properties": {}},
+    },
+  ]
+
+
 class TestMCPHandler:
   """Test MCPHandler functionality."""
 
@@ -210,6 +225,67 @@ class TestMCPHandler:
       assert any(expected in name for name in tool_names), (
         f"Expected tool {expected} not found"
       )
+
+  @pytest.mark.asyncio
+  async def test_get_tools_keeps_the_authored_descriptions(self, mcp_handler):
+    """The scope line is prepended and the authored prompt survives.
+    Replacing it with the scope sentence is what handed clients a plausible
+    wrong query."""
+    mcp_handler.mcp_tools.get_tool_definitions_as_dict = Mock(
+      return_value=_core_definitions()
+    )
+
+    tools = {tool["name"]: tool for tool in await mcp_handler.get_tools()}
+
+    cypher = tools["read-graph-cypher"]["description"]
+    assert cypher.startswith("**GRAPH:** private graph `test_graph`")
+    assert "AUTHORED CYPHER GUIDANCE" in cypher
+    assert "has_dimensions" not in cypher
+    schema = tools["get-graph-schema"]["description"]
+    assert schema.startswith("**GRAPH:** private graph `test_graph`")
+    assert "AUTHORED SCHEMA GUIDANCE" in schema
+    info = tools["get-graph-info"]["description"]
+    assert "node labels" in info and "relationship types" in info
+
+  @pytest.mark.asyncio
+  async def test_get_tools_shared_repo_appends_the_manifest_query_guidance(
+    self, mcp_handler
+  ):
+    """On the SEC graph the consolidation rules ride on the tool description,
+    the one surface every MCP client reads."""
+    mcp_handler.graph_id = "sec"
+    mcp_handler.mcp_tools.get_tool_definitions_as_dict = Mock(
+      return_value=_core_definitions()
+    )
+
+    tools = {tool["name"]: tool for tool in await mcp_handler.get_tools()}
+
+    cypher = tools["read-graph-cypher"]["description"]
+    assert cypher.startswith("**GRAPH:** shared repository `sec`")
+    assert "AUTHORED CYPHER GUIDANCE" in cypher
+    for rule in (
+      "has_dimensions: false",
+      "canonical_concept",
+      "duration_type",
+      "period_type: 'instant'",
+      "RETURN DISTINCT",
+    ):
+      assert rule in cypher, rule
+    assert "has_dimensions" not in tools["get-graph-schema"]["description"]
+    assert "shared repository `sec`" in tools["get-graph-info"]["description"]
+
+  @pytest.mark.asyncio
+  async def test_get_tools_does_not_grow_descriptions_across_calls(self, mcp_handler):
+    """Prepending must not accumulate if the manager ever hands back the same
+    dicts, and the manager's own definitions stay untouched."""
+    definitions = _core_definitions()
+    mcp_handler.mcp_tools.get_tool_definitions_as_dict = Mock(return_value=definitions)
+
+    first = await mcp_handler.get_tools()
+    second = await mcp_handler.get_tools()
+
+    assert first == second
+    assert definitions[0]["description"] == "AUTHORED CYPHER GUIDANCE"
 
   @pytest.mark.asyncio
   async def test_execute_streaming_tool(self, mcp_handler, mock_repository):
