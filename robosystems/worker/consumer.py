@@ -23,6 +23,7 @@ import redis.exceptions
 
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.middleware.otel.setup import get_tracer
+from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.middleware.sse.operation_manager import (
   OperationManager,
   get_operation_manager,
@@ -164,6 +165,14 @@ async def _process_task(
   if handler_cls is None:
     logger.error(f"Unknown task type: {task_type}, task_id={task_id}")
     await manager.fail_operation(task_id, error=f"Unknown task type: {task_type}")
+    await queue.lrem(inflight_key, 1, task_json)
+    return
+
+  # Cancelled while it waited in the queue: the operation is already
+  # terminal, so running it would only spend credits on a result the
+  # status ladder will refuse to record.
+  if await manager.get_operation_status(task_id) == OperationStatus.CANCELLED:
+    logger.info(f"Skipping cancelled task: {task_type} ({task_id})")
     await queue.lrem(inflight_key, 1, task_json)
     return
 

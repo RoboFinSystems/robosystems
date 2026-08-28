@@ -70,6 +70,7 @@ class ToolLoopResult:
   iterations: int = 0  # model calls made, including the nudge if any
   hit_cap: bool = False  # stopped at max_iterations rather than by the model
   hit_credit_ceiling: bool = False  # stopped by the caller's max_credits
+  cancelled: bool = False  # the operation was cancelled; no answer was composed
   error_retries: int = 0  # uncharged turns granted for all-error tool results
 
 
@@ -152,6 +153,22 @@ async def run_tool_loop(
   step = 60 // max(max_iterations, 1)
 
   while tool_turns < max_iterations:
+    # A cancel lands on the operation store and nothing else in this loop
+    # would ever see it: on the worker the run kept calling the model after
+    # the client was told "cancelled". Checked before every call, including
+    # the first, so a run cancelled while it waited in the queue spends
+    # nothing. No wrap-up call either — the caller asked for silence.
+    if await ctx.progress.is_cancelled():
+      return ToolLoopResult(
+        text="Cancelled before an answer was reached.",
+        rows=last_rows,
+        cypher=last_cypher,
+        tools_called=tools_called,
+        iterations=model_calls,
+        cancelled=True,
+        error_retries=error_retries,
+      )
+
     # Between-calls credit check: the first call always runs (its cost is
     # unknowable up front and the pre-flight already gated the run).
     if (
