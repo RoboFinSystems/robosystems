@@ -72,6 +72,7 @@ class TrackedAIClient:
     operation_description: str = "Operator AI call",
     tools: list[dict[str, Any]] | None = None,
     tool_choice: dict[str, Any] | None = None,
+    cache_conversation: bool = False,
   ) -> AIResponse:
     """Call the model and consume credits for it.
 
@@ -98,6 +99,7 @@ class TrackedAIClient:
       operator_type=operator_type,
       tools=tools,
       tool_choice=tool_choice,
+      cache_conversation=cache_conversation,
     )
 
     self.total_tokens["input"] += response.input_tokens

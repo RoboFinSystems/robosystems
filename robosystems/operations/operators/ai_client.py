@@ -132,6 +132,7 @@ class AIClient:
     operator_type: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: dict[str, Any] | None = None,
+    cache_conversation: bool = False,
   ) -> AIResponse:
     """Send one Bedrock request.
 
@@ -141,10 +142,22 @@ class AIClient:
     tool_choice object (e.g. ``{"type": "none"}`` to keep the tool definitions
     — required while the transcript carries tool_use blocks — but forbid
     further calls). Only meaningful alongside `tools`.
+
+    `cache_conversation` adds a cache breakpoint on the trailing user turn.
+    Only worth it for multi-call loops over a growing transcript, where the
+    next call re-reads everything up to that turn; a single-shot caller would
+    pay the 1.25x cache-write premium with nothing ever reading the entry.
     """
     model_id = self._get_model_id(model, operator_type)
     return await self._bedrock_create_message(
-      messages, system, max_tokens, temperature, model_id, tools, tool_choice
+      messages,
+      system,
+      max_tokens,
+      temperature,
+      model_id,
+      tools,
+      tool_choice,
+      cache_conversation,
     )
 
   def _invoke_model_sync(
@@ -165,8 +178,28 @@ class AIClient:
     model: str,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: dict[str, Any] | None = None,
+    cache_conversation: bool = False,
   ) -> AIResponse:
-    message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+    message_dicts: list[dict[str, Any]] = [
+      {"role": msg.role, "content": msg.content} for msg in messages
+    ]
+
+    if cache_conversation and message_dicts:
+      # Cache breakpoint on the trailing user turn. Markers are applied here
+      # at request build, never persisted into the caller's transcript — a
+      # marker left on every past turn would exceed the 4-breakpoint limit.
+      # The moved breakpoint still hits: the lookup resolves the longest
+      # previously cached prefix, so each call reads the entry the previous
+      # one wrote and extends it.
+      last = message_dicts[-1]
+      content = last["content"]
+      if isinstance(content, str):
+        content = [{"type": "text", "text": content}] if content else []
+      else:
+        content = list(content)
+      if content:
+        content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+        message_dicts[-1] = {"role": last["role"], "content": content}
 
     request_body: dict[str, Any] = {
       "anthropic_version": "bedrock-2023-05-31",
@@ -184,7 +217,14 @@ class AIClient:
       request_body["thinking"] = {"type": "disabled"}
 
     if system:
-      request_body["system"] = system
+      # One cache breakpoint at the end of `system` caches the tool
+      # definitions and the system prompt together (the request renders
+      # tools -> system -> messages). Below Sonnet's 1,024-token minimum
+      # cacheable prefix the marker is accepted and silently caches nothing,
+      # which costs nothing extra.
+      request_body["system"] = [
+        {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+      ]
     if tools:
       request_body["tools"] = tools
       if tool_choice:

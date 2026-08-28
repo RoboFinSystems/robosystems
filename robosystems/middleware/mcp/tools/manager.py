@@ -202,9 +202,10 @@ class GraphMCPTools:
       self.financial_statement_analysis_tool = FinancialStatementAnalysisTool(
         graph_client
       )
-      # OLTP-backed live statement — tenant entity graphs only. Skipped
-      # on shared repos (no OLTP tenant schema) and on read-only graphs.
-      if not self._is_shared_repository() and not read_only:
+      # OLTP-backed live statement — tenant entity graphs only. Skipped on
+      # shared repos (no OLTP tenant schema). A pure read, so it stays
+      # available on read-only surfaces (graph viewers, read-only operators).
+      if not self._is_shared_repository():
         self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
 
       # Semantic enrichment tools (roboledger + manifest flag)
@@ -254,6 +255,8 @@ class GraphMCPTools:
     # Layer 2: Materialization — `materialize` + `get-graph-sync-status`.
     # User entity graphs only (shared repos use their own pipeline and
     # don't track staleness). `materialize` mirrors the REST body shape.
+    # The pair splits on read_only: sync status is a pure read and stays
+    # available on read-only surfaces; materialize is the write half.
     self.get_graph_sync_status_tool = None
     self.materialize_tool = None
     if (
@@ -261,10 +264,10 @@ class GraphMCPTools:
       and env.ROBOLEDGER_ENABLED
       and not self._is_shared_repository()
       and not self._is_subgraph()
-      and not read_only
     ):
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
-      self.materialize_tool = MaterializeTool(graph_client)
+      if not read_only:
+        self.materialize_tool = MaterializeTool(graph_client)
 
     # Connection write-policy — the outbound write-back opt-in. Platform-DB,
     # writable user graphs only: shared repos have no editable connections,
@@ -296,7 +299,11 @@ class GraphMCPTools:
     # Information Block read tools (get/list-information-block)
     self.get_information_block_tool = None
     self.list_information_blocks_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .fiscal_calendar_tools import (
         BackfillPlanHistoryTool,
         ClosePeriodTool,
@@ -313,12 +320,18 @@ class GraphMCPTools:
       # `list-information-blocks` with block_type='schedule' and written
       # through the registrar-generated create/update/delete-information-block
       # ops; see `schedule_tools.py` for the full routing.
+      #
+      # The reads (period status, drafts, fiscal calendar) stay available on
+      # read-only surfaces; only the writes (close/reopen/backfill) require a
+      # writable graph. All read the extensions OLTP DB, which has no schema
+      # for a shared repo — hence the shared-repository exclusion above.
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
       self.list_period_drafts_tool = ListPeriodDraftsTool(graph_client)
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
-      self.close_period_tool = ClosePeriodTool(graph_client)
-      self.reopen_period_tool = ReopenPeriodTool(graph_client)
-      self.backfill_plan_history_tool = BackfillPlanHistoryTool(graph_client)
+      if not read_only:
+        self.close_period_tool = ClosePeriodTool(graph_client)
+        self.reopen_period_tool = ReopenPeriodTool(graph_client)
+        self.backfill_plan_history_tool = BackfillPlanHistoryTool(graph_client)
 
     # Information Block reads stay available on read-only *tenant* graphs (no
     # read_only guard) but are excluded on shared repos: they read the
@@ -405,7 +418,11 @@ class GraphMCPTools:
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
     self.get_mapping_summary_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .taxonomy_tools import (
         GetMappingSummaryTool,
         GetUnmappedElementsTool,
@@ -413,6 +430,10 @@ class GraphMCPTools:
         SuggestMappingTool,
       )
 
+      # All four are extensions-OLTP reads (suggest-mapping computes its
+      # suggestions heuristically — no writes, no AI), so they stay available
+      # on read-only surfaces; the shared-repo exclusion is because the OLTP
+      # DB has no per-graph schema for a shared repository.
       self.list_mapping_structures_tool = ListMappingStructuresTool(graph_client)
       self.get_unmapped_elements_tool = GetUnmappedElementsTool(graph_client)
       self.suggest_mapping_tool = SuggestMappingTool(graph_client)
