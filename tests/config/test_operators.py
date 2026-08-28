@@ -189,4 +189,6 @@ class TestModelFamilyRequestShaping:
       OperatorConfig.BEDROCK_MODELS[BedrockModel.SONNET_5]
       == "us.anthropic.claude-sonnet-5"
     )
-    assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_model == BedrockModel.SONNET_4_6
+    assert OperatorConfig.DEFAULT_MODEL_CONFIG.default_model == BedrockModel.SONNET_5
+    assert OperatorConfig.DEFAULT_MODEL_CONFIG.fallback_model == BedrockModel.SONNET_4_6
+    assert OperatorConfig.get_bedrock_model_id() == "us.anthropic.claude-sonnet-5"
