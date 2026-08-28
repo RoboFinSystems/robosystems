@@ -1125,7 +1125,6 @@ Resources:
         - !Ref DagsterAlertTopic
       TreatMissingData: notBreaching
 
-
 Outputs:
   ClusterName:
     Description: Name of the ECS Cluster
