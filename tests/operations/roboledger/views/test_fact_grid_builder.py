@@ -210,18 +210,30 @@ class TestFactGridBuilder:
 class TestSummarizeByElement:
   def test_aggregates_per_element(self):
     facts = [
-      _fact("us-gaap:Assets", "Assets", 1000000, "2024-12-31"),
-      _fact("us-gaap:Assets", "Assets", 1500000, "2023-12-31"),
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        1000000,
+        "2024-12-31",
+        period_start="2024-01-01",
+      ),
+      _fact(
+        "us-gaap:Revenues",
+        "Revenues",
+        1500000,
+        "2023-12-31",
+        period_start="2023-01-01",
+      ),
       _fact("us-gaap:Cash", "Cash", 100000, "2024-12-31"),
     ]
 
     summary = summarize_by_element(facts)
 
-    assert summary["us-gaap:Assets"]["count"] == 2
-    assert summary["us-gaap:Assets"]["total"] == 2500000
-    assert summary["us-gaap:Assets"]["average"] == 1250000
-    assert summary["us-gaap:Assets"]["min"] == 1000000
-    assert summary["us-gaap:Assets"]["max"] == 1500000
+    assert summary["us-gaap:Revenues"]["count"] == 2
+    assert summary["us-gaap:Revenues"]["total"] == 2500000
+    assert summary["us-gaap:Revenues"]["average"] == 1250000
+    assert summary["us-gaap:Revenues"]["min"] == 1000000
+    assert summary["us-gaap:Revenues"]["max"] == 1500000
     assert summary["us-gaap:Cash"]["count"] == 1
 
   def test_keyed_on_qname_not_local_name(self):
@@ -322,7 +334,56 @@ class TestSummarizeByElement:
     summary = summarize_by_element(facts)
 
     assert summary["us-gaap:Assets"]["count"] == 2
-    assert summary["us-gaap:Assets"]["total"] == 1900
+    assert summary["us-gaap:Assets"]["min"] == 900
+    assert summary["us-gaap:Assets"]["max"] == 1000
 
   def test_empty_input(self):
     assert summarize_by_element([]) == {}
+
+
+class TestSummarizeInstants:
+  """A balance is a point in time. Summed or averaged across periods it is a
+  number that looks authoritative and means nothing — and this is the field
+  a model quotes. Instants keep count / min / max only."""
+
+  def test_instants_omit_total_and_average(self):
+    facts = [
+      _fact("us-gaap:Assets", "Assets", 1_000_000, "2024-12-31"),
+      _fact("us-gaap:Assets", "Assets", 1_500_000, "2023-12-31"),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert summary["us-gaap:Assets"] == {
+      "count": 2,
+      "min": 1_000_000,
+      "max": 1_500_000,
+    }
+
+  def test_explicit_instant_period_type_is_honoured(self):
+    facts = [
+      {
+        **_fact("us-gaap:Cash", "Cash", 100, "2024-12-31", period_start="2024-12-31"),
+        "period_type": "instant",
+      },
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert "total" not in summary["us-gaap:Cash"]
+    assert "average" not in summary["us-gaap:Cash"]
+
+  def test_durations_keep_the_aggregates(self):
+    facts = [
+      _fact(
+        "us-gaap:Revenues", "Revenues", 300, "2024-12-31", period_start="2024-10-01"
+      ),
+      _fact(
+        "us-gaap:Revenues", "Revenues", 200, "2024-09-30", period_start="2024-07-01"
+      ),
+    ]
+
+    summary = summarize_by_element(facts)
+
+    assert summary["us-gaap:Revenues"]["total"] == 500
+    assert summary["us-gaap:Revenues"]["average"] == 250

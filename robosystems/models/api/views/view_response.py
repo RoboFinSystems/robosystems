@@ -36,8 +36,20 @@ class FactRecord(BaseModel):
 
 class ElementSummary(BaseModel):
   count: int = Field(..., description="Number of facts for this element")
-  total: float = Field(..., description="Sum of values across the returned facts")
-  average: float = Field(..., description="Mean value across the returned facts")
+  total: float | None = Field(
+    None,
+    description=(
+      "Sum of values across the returned facts. Duration elements only — "
+      "a balance summed across periods is not a balance, so instants omit it."
+    ),
+  )
+  average: float | None = Field(
+    None,
+    description=(
+      "Mean value across the returned facts. Duration elements only; "
+      "omitted for instants."
+    ),
+  )
   min: float = Field(..., description="Minimum value across the returned facts")
   max: float = Field(..., description="Maximum value across the returned facts")
 
