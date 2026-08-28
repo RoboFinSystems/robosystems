@@ -448,6 +448,120 @@ class TestTotalsFoot:
     foot_warnings = [w for w in result.warnings if "does not match" in w]
     assert foot_warnings == []
 
+  def test_mixed_balance_children_foot_by_calc_weight(self):
+    """Harbinger FY2025, verbatim: the calc DAG subtracts the debit-nature
+    interest expense under the credit-nature nonoperating subtotal. A plain
+    sum reported a 7,511.40 difference on a subtotal that was right."""
+    rows = [
+      _row("Revenues", 96062.5, depth=1, qname="us-gaap:Revenues"),
+      _row(
+        "Investment Income, Interest",
+        250.87,
+        classification="revenue",
+        depth=2,
+        balance_type="credit",
+      ),
+      _row(
+        "Interest Expense",
+        3755.7,
+        classification="expense",
+        depth=2,
+        balance_type="debit",
+      ),
+      _row(
+        "Other Nonoperating Income (Expense)",
+        -979.62,
+        classification="revenue",
+        depth=2,
+        balance_type="credit",
+      ),
+      _row(
+        "Nonoperating Income (Expense)",
+        -4484.45,
+        classification="revenue",
+        is_subtotal=True,
+        depth=1,
+        balance_type="credit",
+      ),
+      _row("Net Income", 10612.03, depth=1, qname="us-gaap:NetIncomeLoss"),
+    ]
+    result = validate_report("income_statement", rows)
+    assert not any("does not match" in w for w in result.warnings)
+
+  def test_mixed_balance_children_still_flag_a_real_mismatch(self):
+    rows = [
+      _row("Interest Income", 250.87, depth=2, balance_type="credit"),
+      _row(
+        "Interest Expense",
+        3755.7,
+        classification="expense",
+        depth=2,
+        balance_type="debit",
+      ),
+      # Should be -3504.83; reports -3000.
+      _row(
+        "Nonoperating Income (Expense)",
+        -3000.0,
+        is_subtotal=True,
+        depth=1,
+        balance_type="credit",
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    foot = [w for w in result.warnings if "does not match" in w]
+    assert len(foot) == 1
+    assert "(-3000.00) does not match sum of children (-3504.83)" in foot[0]
+
+  def test_contra_revenue_under_revenues_foots(self):
+    rows = [
+      _row("Gross Sales", 1000.0, depth=1, balance_type="credit"),
+      _row("Sales Returns", 100.0, depth=1, balance_type="debit"),
+      _row("Revenues", 900.0, is_subtotal=True, depth=0, balance_type="credit"),
+    ]
+    result = validate_report("income_statement", rows)
+    assert not any("does not match" in w for w in result.warnings)
+
+  def test_contra_asset_under_net_ppe_foots(self):
+    rows = [
+      _row("PP&E Gross", 10000.0, classification="asset", depth=2),
+      _row(
+        "Accumulated Depreciation",
+        2500.0,
+        classification="asset",
+        depth=2,
+        balance_type="credit",
+      ),
+      _row("PP&E Net", 7500.0, classification="asset", is_subtotal=True, depth=1),
+      _row("Assets", 7500.0, classification="asset", is_subtotal=True, depth=0),
+      _row("Liabilities", 0.0, classification="liability", is_subtotal=True),
+      _row("Equity", 7500.0, classification="equity", is_subtotal=True),
+    ]
+    result = validate_report("balance_sheet", rows)
+    assert not any("does not match" in w for w in result.warnings)
+
+  def test_cash_flow_sections_foot_as_a_plain_sum(self):
+    """CF rows are cash-effect signed: net income (credit) and the
+    working-capital deltas add straight into the debit-nature operating
+    subtotal. Harbinger July 2026, verbatim."""
+    rows = [
+      _row("Net Income", -545.19, depth=2, balance_type="credit"),
+      _row("D&A", 205.32, classification="expense", depth=2, balance_type="debit"),
+      _row("Δ Receivables", -8279.54, depth=2, balance_type="credit"),
+      _row("Δ Prepaids", 2724.29, depth=2, balance_type="credit"),
+      _row("Δ Payables", 350.0, depth=2, balance_type="debit"),
+      _row("Other operating capital, net", 4153.73, depth=2, balance_type="debit"),
+      _row(
+        "Operating",
+        -1391.39,
+        is_subtotal=True,
+        depth=1,
+        balance_type="debit",
+        qname="rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+      ),
+    ]
+    result = validate_report("cash_flow_statement", rows)
+    assert not any("does not match" in w for w in result.warnings)
+
   def test_valueless_abstract_header_is_skipped(self):
     """A multi-subtotal abstract header renders value-less (all None) and
     must not warn when the backward scan reaches its depth-1 children."""
