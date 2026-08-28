@@ -171,7 +171,7 @@ class TestAdaptersRunThePreflight:
         side_effect=InsufficientOperatorCreditsError("Test Operator", 10.0, 1.0),
       ),
       patch.object(worker, "SessionFactory"),
-      patch.object(worker, "DirectToolAccess") as tool_access,
+      patch.object(worker, "HttpToolAccess") as tool_access,
       patch.object(worker, "get_ai_client"),
       patch.object(worker, "TrackedAIClient"),
       patch.object(worker, "FactoryCreditConsumer"),

@@ -12,8 +12,9 @@ Candidates are narrowed by the CoA element's EFS trait and (for
 assets/liabilities) its liquidity trait, so the AI chooses among a tight,
 section-correct candidate set rather than guessing current-vs-noncurrent.
 
-Uses the same MCP tool classes as cowork (Claude Desktop) — instantiated
-in-process via DirectToolAccess.
+Uses the same MCP tools as cowork (Claude Desktop): the adapter's tool access
+(`HttpToolAccess` on both the API and worker paths) hands `get_tool_instance`
+back as a name-bound handle that dispatches through `GraphMCPTools`.
 """
 
 from __future__ import annotations

@@ -126,7 +126,7 @@ class TestAdaptersEnforceBeforeToolAccess:
         "enforce_operator_write_role",
         side_effect=HTTPException(status_code=403, detail="read-only"),
       ),
-      patch.object(worker, "DirectToolAccess") as tool_access,
+      patch.object(worker, "HttpToolAccess") as tool_access,
       patch.object(worker, "get_ai_client"),
       patch.object(worker, "TrackedAIClient"),
       patch.object(worker, "FactoryCreditConsumer"),
