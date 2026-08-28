@@ -12,7 +12,7 @@ Usage:
     just sec-dump                    # ~35 GiB download, ~128 GiB on disk afterwards
     just sec-dump --force            # replace an existing data/lbug-dbs/sec.lbug
     just sec-dump --keep-archive     # keep the .zst after decompression
-    just sec-dump --no-restart       # recipe-level: skip the graph-api restart afterwards
+    just sec-dump-no-restart         # same, without the graph-api restart afterwards
 
 The `just` recipe restarts the graph-api container after a successful run (it
 holds a replaced file open until restarted); this script never touches the

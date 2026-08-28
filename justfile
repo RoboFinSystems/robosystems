@@ -59,6 +59,11 @@ restart profile="robosystems":
 restart-container container="worker":
     docker compose -f compose.yaml restart robosystems-{{container}}
 
+# Restart graph-api if it is running (it holds replaced .lbug files open) and wait until it is healthy
+graph-api-restart:
+    @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || docker compose -f compose.yaml restart graph-api
+    @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || (curl -fs --retry 30 --retry-delay 2 --retry-all-errors -o /dev/null http://localhost:8001/health && echo "graph-api healthy")
+
 # Show running containers
 ps:
     docker compose -f compose.yaml ps
@@ -531,24 +536,14 @@ duckdb-query graph_id query format="table":
 
 # --- Dump (the prebuilt corpus, no pipeline) ---
 
-# Download the public SEC .lbug dump from Hugging Face into data/lbug-dbs (~35 GiB down, ~128 GiB on disk), then restart graph-api if running (--no-restart to skip)
+# Download the public SEC .lbug dump from Hugging Face into data/lbug-dbs (~35 GiB down, ~128 GiB on disk), then restart graph-api if running
 sec-dump *flags="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    restart=yes; args=()
-    for arg in {{flags}}; do
-        case "$arg" in
-            --no-restart) restart=no ;;
-            *) args+=("$arg") ;;
-        esac
-    done
-    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_dump "${args[@]}"
-    if [ "$restart" = "yes" ] && [ -n "$(docker ps --filter name=^robosystems-graph-api$ -q 2>/dev/null)" ]; then
-        echo "Restarting graph-api so it drops the replaced file..."
-        docker compose -f compose.yaml restart graph-api
-        curl -fs --retry 30 --retry-delay 2 --retry-all-errors -o /dev/null http://localhost:8001/health \
-            && echo "graph-api healthy" || echo "graph-api not healthy yet - check: just logs graph-api"
-    fi
+    @just sec-dump-no-restart {{flags}}
+    @just graph-api-restart
+
+# Same download without the graph-api restart (a running graph-api keeps serving the replaced file until restarted)
+sec-dump-no-restart *flags="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_dump {{flags}}
 
 # --- Full Pipeline (convenience) ---
 
