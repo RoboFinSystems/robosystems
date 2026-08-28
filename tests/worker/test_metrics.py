@@ -3,15 +3,30 @@
 from unittest.mock import MagicMock, patch
 
 from robosystems.config import env
-from robosystems.worker.metrics import DLQ_KEY, QUEUE_KEY, QueueDepthPublisher
+from robosystems.worker.metrics import (
+  DLQ_KEY,
+  INFLIGHT_KEY_PATTERN,
+  QUEUE_KEY,
+  QueueDepthPublisher,
+)
 
 
-def test_publish_once_emits_queue_and_dlq_depth_to_cloudwatch():
-  """Outside dev, _publish_once publishes both QueueDepth and DLQDepth."""
+def _queue_with(depth: int, inflight: dict[str, int], dlq: int) -> MagicMock:
+  """A sync Valkey mock whose llen answers per key and whose scan finds the
+  given per-worker inflight lists."""
+  queue = MagicMock()
+  lengths = {QUEUE_KEY: depth, DLQ_KEY: dlq, **inflight}
+  queue.llen.side_effect = lambda key: lengths[key]
+  queue.scan_iter.return_value = iter(inflight.keys())
+  return queue
+
+
+def test_publish_once_emits_queue_inflight_backlog_and_dlq_to_cloudwatch():
+  """Outside dev, _publish_once publishes QueueDepth, InFlight, Backlog, DLQDepth."""
   publisher = QueueDepthPublisher()
-  publisher._queue = MagicMock()
-  # First llen → queue depth, second → DLQ depth.
-  publisher._queue.llen.side_effect = [7, 2]
+  publisher._queue = _queue_with(
+    depth=7, inflight={"worker:inflight:a": 1, "worker:inflight:b": 1}, dlq=2
+  )
   cloudwatch = MagicMock()
   publisher._cloudwatch_client = cloudwatch
 
@@ -20,21 +35,43 @@ def test_publish_once_emits_queue_and_dlq_depth_to_cloudwatch():
 
   publisher._queue.llen.assert_any_call(QUEUE_KEY)
   publisher._queue.llen.assert_any_call(DLQ_KEY)
+  publisher._queue.scan_iter.assert_called_once_with(
+    match=INFLIGHT_KEY_PATTERN, count=100
+  )
   cloudwatch.put_metric_data.assert_called_once()
   kwargs = cloudwatch.put_metric_data.call_args.kwargs
   assert kwargs["Namespace"] == "RoboSystems/Worker/prod"
   metrics = {m["MetricName"]: m for m in kwargs["MetricData"]}
   assert metrics["QueueDepth"]["Value"] == 7
   assert metrics["QueueDepth"]["Unit"] == "Count"
+  assert metrics["InFlight"]["Value"] == 2
+  assert metrics["Backlog"]["Value"] == 9
   assert metrics["DLQDepth"]["Value"] == 2
   assert metrics["DLQDepth"]["Unit"] == "Count"
+
+
+def test_two_waiting_behind_one_busy_reads_as_backlog_three():
+  """The scale-out alarm fires above 2; queue depth alone would report 2 here."""
+  publisher = QueueDepthPublisher()
+  publisher._queue = _queue_with(depth=2, inflight={"worker:inflight:a": 1}, dlq=0)
+  cloudwatch = MagicMock()
+  publisher._cloudwatch_client = cloudwatch
+
+  with patch.object(env, "ENVIRONMENT", "prod"):
+    publisher._publish_once()
+
+  metrics = {
+    m["MetricName"]: m["Value"]
+    for m in cloudwatch.put_metric_data.call_args.kwargs["MetricData"]
+  }
+  assert metrics["QueueDepth"] == 2
+  assert metrics["Backlog"] == 3
 
 
 def test_publish_once_skips_cloudwatch_in_dev():
   """In dev, depths are read but never published to CloudWatch."""
   publisher = QueueDepthPublisher()
-  publisher._queue = MagicMock()
-  publisher._queue.llen.side_effect = [3, 1]
+  publisher._queue = _queue_with(depth=3, inflight={}, dlq=1)
   cloudwatch = MagicMock()
   publisher._cloudwatch_client = cloudwatch
 

@@ -25,6 +25,10 @@ class EventType(str, Enum):
   OPERATION_ERROR = "operation_error"
   OPERATION_COMPLETED = "operation_completed"
   OPERATION_CANCELLED = "operation_cancelled"
+  # A run stopped at a checkpoint and needs a decision before it can go on;
+  # the matching resume puts it back on the queue with the answer.
+  OPERATION_AWAITING_INPUT = "operation_awaiting_input"
+  OPERATION_RESUMED = "operation_resumed"
 
   # Custom event types for specific operations
   GRAPH_CREATION_PROGRESS = "graph_creation_progress"
@@ -38,6 +42,9 @@ class OperationStatus(str, Enum):
 
   PENDING = "pending"
   RUNNING = "running"
+  # Paused at a checkpoint, off the queue, waiting for a human answer.
+  # Not terminal: a resume moves it back to RUNNING, a cancel ends it.
+  AWAITING_INPUT = "awaiting_input"
   COMPLETED = "completed"
   FAILED = "failed"
   CANCELLED = "cancelled"
@@ -101,6 +108,9 @@ class OperationMetadata:
   updated_at: str
   error_message: str | None = None
   result_data: dict[str, Any] | None = None
+  # Set while AWAITING_INPUT: the prompt for the human, the task's own
+  # checkpoint, and the queue payload needed to re-enqueue it on resume.
+  input_request: dict[str, Any] | None = None
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization."""
@@ -120,6 +130,9 @@ _TERMINAL_STATUSES = _TERMINAL_FAILURE_STATUSES | {OperationStatus.COMPLETED}
 _STATUS_PRIORITY = {
   OperationStatus.PENDING: 0,
   OperationStatus.RUNNING: 1,
+  # Same rung as RUNNING so a run can pause and resume any number of times;
+  # the terminal rung still wins over both.
+  OperationStatus.AWAITING_INPUT: 1,
   OperationStatus.COMPLETED: 2,
   OperationStatus.FAILED: 2,
   OperationStatus.CANCELLED: 2,
@@ -135,7 +148,35 @@ def _next_status(event_type: EventType) -> OperationStatus | None:
     return OperationStatus.FAILED
   if event_type == EventType.OPERATION_CANCELLED:
     return OperationStatus.CANCELLED
+  if event_type == EventType.OPERATION_AWAITING_INPUT:
+    return OperationStatus.AWAITING_INPUT
+  if event_type == EventType.OPERATION_RESUMED:
+    return OperationStatus.RUNNING
   return None
+
+
+_STATUS_CHANGING_EVENTS = frozenset(
+  {
+    EventType.OPERATION_STARTED,
+    EventType.OPERATION_COMPLETED,
+    EventType.OPERATION_ERROR,
+    EventType.OPERATION_CANCELLED,
+    EventType.OPERATION_AWAITING_INPUT,
+    EventType.OPERATION_RESUMED,
+  }
+)
+
+
+def _apply_input_request(
+  metadata: "OperationMetadata", event_type: EventType, data: dict[str, Any]
+) -> None:
+  """Record the pause's request on the metadata, and clear it once the run
+  is going again — on the resume, and on a worker pickup (the two share a
+  rung, so a started event can follow a pause directly)."""
+  if event_type == EventType.OPERATION_AWAITING_INPUT:
+    metadata.input_request = data.get("input_request")
+  elif event_type in (EventType.OPERATION_RESUMED, EventType.OPERATION_STARTED):
+    metadata.input_request = None
 
 
 def _transition_allowed(current: OperationStatus, new: OperationStatus) -> bool:
@@ -381,13 +422,7 @@ class SSEEventStorage:
     """Sync counterpart to `_update_operation_metadata`."""
     # Progress events carry no status and would race a concurrent
     # completed/failed event, overwriting the terminal status.
-    status_changing_events = {
-      EventType.OPERATION_STARTED,
-      EventType.OPERATION_COMPLETED,
-      EventType.OPERATION_ERROR,
-      EventType.OPERATION_CANCELLED,
-    }
-    if event_type not in status_changing_events:
+    if event_type not in _STATUS_CHANGING_EVENTS:
       return
 
     redis = self._get_sync_redis()
@@ -430,6 +465,8 @@ class SSEEventStorage:
               metadata.result_data = new_result
           elif event_type == EventType.OPERATION_ERROR:
             metadata.error_message = data.get("error", "Unknown error")
+          else:
+            _apply_input_request(metadata, event_type, data)
 
           pipe.multi()
           pipe.setex(metadata_key, self.default_ttl, json.dumps(metadata.to_dict()))
@@ -515,13 +552,7 @@ class SSEEventStorage:
     """
     # Progress events carry no status and would race a concurrent
     # completed/failed event, overwriting the terminal status.
-    status_changing_events = {
-      EventType.OPERATION_STARTED,
-      EventType.OPERATION_COMPLETED,
-      EventType.OPERATION_ERROR,
-      EventType.OPERATION_CANCELLED,
-    }
-    if event_type not in status_changing_events:
+    if event_type not in _STATUS_CHANGING_EVENTS:
       return
 
     redis = await self._get_redis()
@@ -559,6 +590,8 @@ class SSEEventStorage:
             metadata.result_data = new_result
         elif event_type == EventType.OPERATION_ERROR:
           metadata.error_message = data.get("error", "Unknown error")
+        else:
+          _apply_input_request(metadata, event_type, data)
 
         ttl = await redis.ttl(metadata_key)
         if ttl > 0:

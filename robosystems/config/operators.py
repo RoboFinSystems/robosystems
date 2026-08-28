@@ -87,8 +87,8 @@ class OperatorConfig:
 
   # Default Model Configuration
   DEFAULT_MODEL_CONFIG = ModelConfig(
-    default_model=BedrockModel.SONNET_4_6,
-    fallback_model=BedrockModel.SONNET_4_5,
+    default_model=BedrockModel.SONNET_5,
+    fallback_model=BedrockModel.SONNET_4_6,
     region=env.AWS_BEDROCK_REGION,
     temperature=0.7,
     max_retries=3,

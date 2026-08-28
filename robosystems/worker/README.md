@@ -16,11 +16,14 @@ Worker consumer loop
   → BLMOVE atomically moves the task from "worker:tasks" to a per-worker
     inflight list
   → Looks up the handler in the task registry
-  → Marks itself protected from ECS scale-in, then executes with progress
-    streaming through OperationManager
+  → Marks the operation RUNNING (until then /status reports it PENDING with
+    its queue position), marks itself protected from ECS scale-in, then
+    executes with progress streaming through OperationManager
   → Removes the task from inflight on success
   → Disposes DB connection pools before the next task
 ```
+
+The AI Operator endpoints (`POST /v1/graphs/{graph_id}/operator[/{operator_type}]`) are the main producer: every operator run is queued here, and the API answers 202 with the operation links (or waits a bounded time under `?mode=sync`). Nothing AI-driven runs in the API process.
 
 RPUSH plus BLMOVE gives FIFO ordering. The inflight list is the reliability half: if a worker crashes mid-task, the task stays there until the `worker_inflight_reaper_sensor` in the Dagster daemon finds it and requeues it. A task that stays stale past its attempt budget is moved to `worker:dlq` with a `dlq_reason`; inspect and drain it with `just admin <env> worker dlq list|retry|clear`.
 
@@ -83,6 +86,27 @@ Registration happens through side-effect imports at module load — add the impo
 
 AI Operator work does not need a new task class: `OperatorWorkerTask` already handles `task_type="operator"` and dispatches on `params["operator_type"]`.
 
+## Pausing for input
+
+A task that reaches a decision only a human should make stops there rather than guessing:
+
+```python
+async def execute(self) -> dict[str, Any]:
+    if self.resume is None:
+        drafts = await self.run_blocking(self._draft_entries)
+        await self.pause_for_input(
+            "Post 34 drafted entries and close 2026-07?",
+            checkpoint={"drafts": [d.id for d in drafts]},
+            details={"period": "2026-07", "count": len(drafts)},
+        )
+    # Re-entered through the resume: pick up from the checkpoint
+    if self.resume["input"].get("approved"):
+        return await self.run_blocking(self._post, self.resume["checkpoint"]["drafts"])
+    return {"posted": 0, "declined": True}
+```
+
+`pause_for_input` records the prompt, the checkpoint and this task's queue payload on the operation (status `awaiting_input`), then raises `TaskPaused` so `execute` unwinds without a result — the consumer neither completes nor fails it. `/v1/operations/{id}/status` shows the prompt and a `resume` link; `POST /v1/operations/{id}/resume` with `{"input": {...}}` puts the same operation back on the queue with `params["resume"] = {"checkpoint", "input"}`, which the task reads back through `self.resume`. A paused operation's stream replays and closes; reconnect after the resume to follow the rest. Cancelling a paused operation works like cancelling a running one.
+
 ## Layout
 
 | Module | Contents |
@@ -93,15 +117,19 @@ AI Operator work does not need a new task class: `OperatorWorkerTask` already ha
 | `client.py` | `enqueue_task()` — used by API routes |
 | `constants.py` | Per-task-type timeouts, shared with the reaper sensor |
 | `cleanup.py` | Disposes SQLAlchemy connection pools between tasks |
-| `metrics.py` | Daemon thread publishing queue depth to CloudWatch, independent of the consume loop |
+| `metrics.py` | Daemon thread publishing `QueueDepth`, `InFlight`, `Backlog` (queued + in flight — what the scaling alarms read) and `DLQDepth` to CloudWatch, independent of the consume loop |
 | `task_protection.py` | ECS scale-in protection while a task is in flight |
 | `tasks/__init__.py` | `TASK_REGISTRY`, `@register_task`, `get_task_handler()` |
-| `tasks/base.py` | `BaseTask` ABC with progress and cancellation helpers |
+| `tasks/base.py` | `BaseTask` ABC with progress, cancellation and pause-for-input helpers |
 | `tasks/dagster_monitoring.py` | `DagsterJobMonitorTask` |
 
 ## Tenant isolation
 
 `cleanup.py` disposes every SQLAlchemy connection pool between tasks. Correctly written tasks already use `extensions_session()` and close platform sessions in `finally` blocks, but this catches what slips through: a pooled connection carrying a leaked `search_path` into the next task would read another tenant's schema.
+
+## Scaling
+
+The ECS service scales on `Backlog` — queued plus in-flight tasks — published once a minute by every worker's metrics thread. Queue depth alone counted only the waiting tasks, so one worker busy on a ten-minute close with two questions queued behind it never crossed the scale-out threshold; with backlog that reads 3 and adds a worker. Scale-in waits for a backlog of zero for five minutes, so a worker mid-task is never the one removed (and is protected regardless, below).
 
 ## Scale-in protection
 

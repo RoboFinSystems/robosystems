@@ -310,6 +310,9 @@ async def create_sse_stream_starlette(
       OperationStatus.COMPLETED,
       OperationStatus.FAILED,
       OperationStatus.CANCELLED,
+      # Paused runs are off the queue: nothing more arrives until a resume,
+      # and the resumed run is streamed by reconnecting.
+      OperationStatus.AWAITING_INPUT,
     ]:
       # Already terminal: replay the whole history and close.
       all_events = await event_storage.get_events(operation_id, from_sequence=0)
@@ -369,6 +372,7 @@ async def create_sse_stream_starlette(
           EventType.OPERATION_COMPLETED,
           EventType.OPERATION_ERROR,
           EventType.OPERATION_CANCELLED,
+          EventType.OPERATION_AWAITING_INPUT,
         ]:
           yield {
             "event": "stream_end",

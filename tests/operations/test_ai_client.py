@@ -717,7 +717,11 @@ class TestAIClientCreateMessage:
       AIMessage(role="user", content="Follow up"),
     ]
 
-    await client.create_message(messages=messages, max_tokens=1000, temperature=0.3)
+    # Pinned to the sampling-param family: the default model (Sonnet 5)
+    # rejects `temperature`, and the family gate is tested on its own.
+    await client.create_message(
+      messages=messages, max_tokens=1000, temperature=0.3, model="claude-sonnet-4-6"
+    )
 
     call_args = mock_bedrock.invoke_model.call_args
     request_body = json.loads(call_args[1]["body"])
@@ -842,9 +846,12 @@ class TestAIClientCreateMessage:
 
     call_args = mock_bedrock.invoke_model.call_args
     request_body = json.loads(call_args[1]["body"])
-    # Defaults: max_tokens=4000, temperature=0.7
+    # Defaults: max_tokens=4000 on the default model (Sonnet 5), which takes
+    # no sampling params — the family gate sends `thinking: disabled` instead.
+    assert call_args[1]["modelId"] == "us.anthropic.claude-sonnet-5"
     assert request_body["max_tokens"] == 4000
-    assert request_body["temperature"] == 0.7
+    assert "temperature" not in request_body
+    assert request_body["thinking"] == {"type": "disabled"}
 
 
 class TestAIClientBedrockEndpoint:

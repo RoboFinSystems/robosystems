@@ -7,6 +7,7 @@ events without hand-rolling the status transitions.
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from robosystems.logger import logger
@@ -53,6 +54,20 @@ class OperationManager:
       f"Started operation {op_id} of type {operation_type} for user {user_id}"
     )
     return op_id
+
+  async def mark_running(self, operation_id: str, message: str = "Starting..."):
+    """Move a queued operation to RUNNING when a worker picks it up.
+
+    Queued work is registered PENDING by `create_operation_response` and,
+    until this event, nothing distinguished "waiting in the queue" from
+    "executing" — `/status` reported pending for the whole run. The started
+    event carries the first progress frame so streams see it as one.
+    """
+    await self.event_storage.store_event(
+      operation_id,
+      EventType.OPERATION_STARTED,
+      {"message": message, "progress_percent": 0},
+    )
 
   async def emit_progress(
     self,
@@ -105,6 +120,50 @@ class OperationManager:
     """Cancel an operation."""
     await self.event_storage.cancel_operation(operation_id, reason)
     logger.info(f"Cancelled operation {operation_id}: {reason}")
+
+  async def await_input(
+    self,
+    operation_id: str,
+    prompt: str,
+    task: dict[str, Any],
+    checkpoint: dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
+  ):
+    """Pause an operation at a checkpoint until a human answers.
+
+    `task` is the queue payload (task_type, graph_id, user_id, params) the
+    resume needs to re-enqueue the run; `checkpoint` is whatever the task
+    needs to pick up where it stopped. Both travel back to the task under
+    `params["resume"]` — the operation store is the only place they live
+    while the run is off the queue.
+    """
+    input_request = {
+      "prompt": prompt,
+      "details": details or {},
+      "checkpoint": checkpoint or {},
+      "task": task,
+      "requested_at": datetime.now(UTC).isoformat(),
+    }
+    await self.event_storage.store_event(
+      operation_id,
+      EventType.OPERATION_AWAITING_INPUT,
+      {"message": prompt, "details": details or {}, "input_request": input_request},
+    )
+    logger.info(f"Operation {operation_id} is awaiting input: {prompt}")
+
+  async def resume_operation(self, operation_id: str, user_input: dict[str, Any]):
+    """Record the answer and move the operation back to RUNNING.
+
+    Called after the task payload is back on the queue: a failed push then
+    leaves the pause — and its resume link — in place for a retry, whereas
+    flipping the status first would strand an unqueued operation as RUNNING.
+    """
+    await self.event_storage.store_event(
+      operation_id,
+      EventType.OPERATION_RESUMED,
+      {"message": "Resumed with input", "input": user_input},
+    )
+    logger.info(f"Resumed operation {operation_id}")
 
   async def get_operation_status(self, operation_id: str) -> OperationStatus | None:
     """Get current status of an operation."""
@@ -249,6 +308,7 @@ def emit_sse_event(
     OperationStatus.COMPLETED: EventType.OPERATION_COMPLETED,
     OperationStatus.FAILED: EventType.OPERATION_ERROR,
     OperationStatus.CANCELLED: EventType.OPERATION_CANCELLED,
+    OperationStatus.AWAITING_INPUT: EventType.OPERATION_AWAITING_INPUT,
   }
 
   event_type = status_to_event_type.get(status, EventType.OPERATION_PROGRESS)

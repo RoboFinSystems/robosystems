@@ -34,6 +34,7 @@ def _clean_registry():
 @pytest.fixture
 def mock_manager():
   manager = AsyncMock()
+  manager.mark_running = AsyncMock()
   manager.emit_progress = AsyncMock()
   manager.complete_operation = AsyncMock()
   manager.fail_operation = AsyncMock()
@@ -108,10 +109,8 @@ async def test_happy_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
   task_data = _make_task_data()
   await _call_process_task(task_data, mock_queue, mock_manager)
 
-  # Progress emitted at start
-  mock_manager.emit_progress.assert_called_once_with(
-    "op_01TEST", "Starting...", progress_percent=0
-  )
+  # The pickup moves the operation from PENDING (queued) to RUNNING
+  mock_manager.mark_running.assert_called_once_with("op_01TEST")
 
   # Operation completed with result
   mock_manager.complete_operation.assert_called_once()
@@ -337,3 +336,31 @@ async def test_a_thread_abandoned_past_its_grace_is_reported_as_still_running(
   mock_cleanup.assert_called_once()
   # Let the released thread finish before the loop closes.
   await asyncio.sleep(0.1)
+
+
+class PausingTask(BaseTask):
+  async def execute(self) -> dict[str, Any]:
+    from robosystems.worker.tasks.base import TaskPaused
+
+    raise TaskPaused("Need a decision")
+
+
+@pytest.mark.asyncio
+@patch("robosystems.worker.consumer.cleanup_connections")
+@patch("robosystems.worker.consumer.get_tracer")
+async def test_paused_task_is_neither_completed_nor_failed(
+  mock_tracer, mock_cleanup, mock_manager, mock_queue
+):
+  """A pause leaves the operation AWAITING_INPUT for the resume endpoint."""
+  mock_tracer.return_value = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__enter__ = MagicMock()
+  mock_tracer.return_value.start_as_current_span.return_value.__exit__ = MagicMock()
+  register_task("test_pausing")(PausingTask)
+
+  await _call_process_task(_make_task_data("test_pausing"), mock_queue, mock_manager)
+
+  mock_manager.complete_operation.assert_not_called()
+  mock_manager.fail_operation.assert_not_called()
+  # It still leaves the inflight list and the worker is cleaned up
+  mock_queue.lrem.assert_called_once()
+  mock_cleanup.assert_called_once()

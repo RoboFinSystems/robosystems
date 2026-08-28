@@ -15,6 +15,16 @@ from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 logger = get_logger(__name__)
 
 
+class TaskPaused(Exception):
+  """Raised by ``BaseTask.pause_for_input`` to leave ``execute`` without a
+  result: the consumer neither completes nor fails the operation, and the
+  resume endpoint puts it back on the queue with the answer."""
+
+  def __init__(self, prompt: str) -> None:
+    super().__init__(prompt)
+    self.prompt = prompt
+
+
 class BaseTask(ABC):
   """Base class for all worker tasks.
 
@@ -149,6 +159,46 @@ class BaseTask(ABC):
     """Check if the user has requested cancellation."""
     status = await self.manager.get_operation_status(self.task_id)
     return status == OperationStatus.CANCELLED
+
+  @property
+  def resume(self) -> dict[str, Any] | None:
+    """The answer a paused run was resumed with: ``{"checkpoint", "input"}``.
+
+    None on a first run. A task that pauses reads its own checkpoint back
+    from here and continues from it rather than starting over.
+    """
+    return self.params.get("resume")
+
+  async def pause_for_input(
+    self,
+    prompt: str,
+    checkpoint: dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
+  ) -> None:
+    """Stop at a checkpoint and wait for a human decision.
+
+    Records the prompt, ``checkpoint`` and this task's queue payload on the
+    operation (status ``awaiting_input``), then raises ``TaskPaused`` so
+    ``execute`` unwinds without a result. ``POST /v1/operations/{id}/resume``
+    re-enqueues the same operation with ``params["resume"]`` set.
+
+    The checkpoint must be JSON-serializable and must not carry the original
+    ``resume`` (a second pause records a fresh one).
+    """
+    params = {key: value for key, value in self.params.items() if key != "resume"}
+    await self.manager.await_input(
+      self.task_id,
+      prompt=prompt,
+      checkpoint=checkpoint,
+      details=details,
+      task={
+        "task_type": self.task_type,
+        "graph_id": self.graph_id,
+        "user_id": self.user_id,
+        "params": params,
+      },
+    )
+    raise TaskPaused(prompt)
 
   def release_lock(self, lock_key: str | None, lock_id: str | None = None) -> None:
     """Release the distributed lock the enqueuing API call took for this task.

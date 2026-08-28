@@ -462,6 +462,7 @@ Resources:
                 Condition:
                   ForAnyValue:StringEquals:
                     aws-marketplace:ProductId:
+                      - prod-4ezhkeia6k2cs # Claude Sonnet 5
                       - prod-5ukwuglpt66kg # Claude Sonnet 4.6
                       - prod-mxcfnwvpd6kb4 # Claude Sonnet 4.5
                       - prod-4pmewlybdftbs # Claude Sonnet 4
