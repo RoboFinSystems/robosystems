@@ -602,3 +602,36 @@ async def test_a_run_cancelled_while_queued_spends_nothing():
   assert result.cancelled is True
   assert result.iterations == 0
   ai.create_message.assert_not_awaited()
+
+
+async def test_cancel_at_the_cap_skips_the_wrap_up_call():
+  """The post-loop nudge is the loop's only other model call; a cancel that
+  lands as the cap is hit must stop it too."""
+  ai = MagicMock()
+  ai.total_credits = 0.0
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _final("the nudge answer that must not be requested"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+  ctx.progress = MagicMock()
+  ctx.progress.report = AsyncMock()
+  # Not cancelled at the top of the only iteration; cancelled by the time the
+  # cap is reached and the wrap-up would run.
+  ctx.progress.is_cancelled = AsyncMock(side_effect=[False, True])
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=1,
+    max_tokens=100,
+  )
+
+  assert result.cancelled is True
+  assert result.hit_cap is False
+  assert ai.create_message.await_count == 1
+  assert result.rows == [{"n": 1}]

@@ -277,11 +277,25 @@ async def run_tool_loop(
     else:
       error_retries += 1
 
-  # Iteration cap or credit ceiling reached. Nudge for a final answer,
-  # appending the nudge to the trailing user turn (a second consecutive user
-  # message would be rejected). Keep `tools` defined so the tool_use/
-  # tool_result transcript stays valid, but disable tool choice so the answer
-  # can't come back as a tool_use block that nobody would execute.
+  # Iteration cap or credit ceiling reached. The wrap-up below is the loop's
+  # only other model call, and hitting the cap is exactly when a run has been
+  # going long enough for a client to cancel — so it gets the same guard.
+  if await ctx.progress.is_cancelled():
+    return ToolLoopResult(
+      text="Cancelled before an answer was reached.",
+      rows=last_rows,
+      cypher=last_cypher,
+      tools_called=tools_called,
+      iterations=model_calls,
+      cancelled=True,
+      error_retries=error_retries,
+    )
+
+  # Nudge for a final answer, appending the nudge to the trailing user turn
+  # (a second consecutive user message would be rejected). Keep `tools`
+  # defined so the tool_use/tool_result transcript stays valid, but disable
+  # tool choice so the answer can't come back as a tool_use block that nobody
+  # would execute.
   answer_now = _ANSWER_NOW_CREDITS if hit_ceiling else _ANSWER_NOW
   final_messages = list(messages)
   last = final_messages[-1]
