@@ -50,7 +50,7 @@ def _patched_adapter(stack: ExitStack, tracked: MagicMock, tools: MagicMock) -> 
   ):
     stack.enter_context(patch.object(adapter, name))
   stack.enter_context(patch.object(adapter, "SessionFactory", return_value=MagicMock()))
-  stack.enter_context(patch.object(adapter, "DirectToolAccess", return_value=tools))
+  stack.enter_context(patch.object(adapter, "HttpToolAccess", return_value=tools))
   stack.enter_context(patch.object(adapter, "TrackedAIClient", return_value=tracked))
 
 
@@ -145,3 +145,35 @@ async def test_worker_task_without_operator_type_fails_rather_than_completing():
 
   with pytest.raises(ValueError, match="operator_type"):
     await task.execute()
+
+
+@pytest.mark.asyncio
+async def test_worker_uses_the_full_tool_surface_gated_by_read_only():
+  """The model-driven loop needs the tools a graph actually exposes.
+
+  DirectToolAccess only reports tool classes registered by hand, so a loop
+  operator on it saw no tools at all in prod (it narrated a tool call as
+  text). The worker builds HttpToolAccess with the operator's read_only flag,
+  exactly as the API path did.
+  """
+  operator = _operator(OperatorResult(content="ok"))
+  tools = MagicMock()
+  tools.close = AsyncMock()
+
+  with ExitStack() as stack:
+    _patched_adapter(stack, _tracked_ai(), tools)
+    http_access = stack.enter_context(
+      patch.object(adapter, "HttpToolAccess", return_value=tools)
+    )
+    await adapter.run_operator_worker(
+      operator=operator,
+      task_id="op_01TEST",
+      graph_id=GRAPH_ID,
+      user_id=USER_ID,
+      params={"operator_type": "cypher", "query": "q"},
+      manager=AsyncMock(),
+    )
+
+  http_access.assert_called_once_with(GRAPH_ID, read_only=True, user_id=USER_ID)
+  ctx = operator.run.call_args[0][0]
+  assert ctx.tools is tools
