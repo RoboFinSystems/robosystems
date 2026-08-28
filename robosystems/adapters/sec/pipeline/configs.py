@@ -285,3 +285,23 @@ class SECiXBRLIndexConfig(Config):
     default=False,
     description="Index without embeddings (BM25 only). Reduces memory pressure on OpenSearch.",
   )
+
+
+class SECHFPublishConfig(Config):
+  """Configuration for the manual Hugging Face dataset publish.
+
+  The copy runs as a Hugging Face Job on the Hub's side (R2 -> Job -> Hub),
+  so the flavor is HF hardware, not ECS. cpu-basic has a 50 GB disk; move up
+  to cpu-xl if the compressed snapshot outgrows it.
+  """
+
+  job_flavor: str = Field(
+    default="cpu-basic", description="Hugging Face Job hardware flavor"
+  )
+  job_timeout: str = Field(
+    default="6h", description="Hugging Face Job timeout (download + upload)"
+  )
+  prune_previous: bool = Field(
+    default=True,
+    description="Delete superseded snapshots' LFS objects after a verified upload",
+  )
