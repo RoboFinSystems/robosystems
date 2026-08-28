@@ -18,16 +18,12 @@ from ...models.api.billing.checkout import (
 from ...models.api.common import AUTHENTICATED_ERROR_RESPONSES, RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingCustomer, BillingSubscription
+from ...operations.graph.capacity import (
+  tier_capacity_status as _tier_capacity_status,
+)
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
-
-
-# The same refuse-the-sale rule guards change-tier; the helper lives in the
-# ops layer so both paths read one definition of "capacity".
-from ...operations.graph.capacity import (  # noqa: E402
-  tier_capacity_status as _tier_capacity_status,
-)
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
