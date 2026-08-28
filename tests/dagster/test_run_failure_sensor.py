@@ -23,6 +23,17 @@ from robosystems.dagster.sensors.run_failure import (
 )
 
 
+def _env(environment: str) -> type[EnvConfig]:
+  """A stand-in for the sensor module's ``env`` with one ENVIRONMENT.
+
+  Patched in as a class so ``ENVIRONMENT`` and the real
+  ``is_aws_environment()`` classmethod resolve from the same place. Patching
+  the shared instance is not enough: an earlier test's monkeypatch can leave
+  an instance attribute shadowing the class one, and the two then disagree.
+  """
+  return type("StubEnv", (EnvConfig,), {"ENVIRONMENT": environment})
+
+
 def _failed_run_context(job_name: str = "backup_graph_job"):
   run = DagsterRun(job_name=job_name, run_id="run-1", status=DagsterRunStatus.FAILURE)
   event = DagsterEvent(
@@ -58,7 +69,7 @@ def test_alarm_point_is_dimensionless_and_triage_point_names_the_job():
 def test_failed_run_publishes_to_the_dagster_namespace():
   cloudwatch = MagicMock()
   with (
-    patch.object(EnvConfig, "ENVIRONMENT", "prod"),
+    patch("robosystems.dagster.sensors.run_failure.env", _env("prod")),
     patch("boto3.client", return_value=cloudwatch) as client,
   ):
     run_failure_metric_sensor(_failed_run_context("extensions_materialize_job"))
@@ -73,7 +84,7 @@ def test_failed_run_publishes_to_the_dagster_namespace():
 @pytest.mark.unit
 def test_no_cloudwatch_outside_aws():
   with (
-    patch.object(EnvConfig, "ENVIRONMENT", "dev"),
+    patch("robosystems.dagster.sensors.run_failure.env", _env("dev")),
     patch("boto3.client") as client,
   ):
     run_failure_metric_sensor(_failed_run_context())
@@ -86,7 +97,7 @@ def test_publish_error_never_fails_the_tick():
   cloudwatch = MagicMock()
   cloudwatch.put_metric_data.side_effect = RuntimeError("cloudwatch down")
   with (
-    patch.object(EnvConfig, "ENVIRONMENT", "staging"),
+    patch("robosystems.dagster.sensors.run_failure.env", _env("staging")),
     patch("boto3.client", return_value=cloudwatch),
   ):
     assert run_failure_metric_sensor(_failed_run_context()) is None
