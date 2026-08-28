@@ -20,9 +20,10 @@ operations anyway, and that is load-bearing rather than duplication.
 **There are two dispatchers, and only one of them knows about the
 registrar.** `GraphMCPTools.call_tool` resolves registrar tools first
 (Layer 0), so a remote MCP client never reaches the class. But
-`DirectToolAccess` — the worker path, used by `MappingOperator` and hence
-by `auto-map-elements` — instantiates tool classes in process and calls
-`.execute()` on them directly, never consulting the registrar at all.
+`DirectToolAccess` — the in-process dispatcher (tests and any caller that
+instantiates tool classes by hand; the worker adapter no longer does, it
+dispatches through `GraphMCPTools` like the API path) — calls `.execute()`
+on tool classes directly, never consulting the registrar at all.
 
 So "the registrar publishes this name" does **not** imply "this class is
 dead". Check `operations/operators/tool_access.py` before deleting a tool
@@ -401,10 +402,11 @@ class CreateMappingAssociationTool:
   operation, and that is deliberate rather than duplication: the two serve
   different dispatchers. On the MCP wire, ``GraphMCPTools.call_tool``
   resolves registrar tools at Layer 0, so *this* class is not what a remote
-  client reaches. On the worker path, ``DirectToolAccess`` instantiates tool
-  classes in process and executes them directly — it never consults the
-  registrar — so this class is the live write path for ``auto-map-elements``
-  and every MappingOperator run.
+  client reaches — and since the worker adapter dispatches through
+  ``GraphMCPTools`` too (``HttpToolAccess``, on both the API and worker
+  paths), neither is it what a MappingOperator run reaches. It is the live
+  write path only for ``DirectToolAccess``, which instantiates tool classes
+  in process and executes them directly without consulting the registrar.
 
   Consequence worth keeping: the ``mark_graph_stale`` call below is not
   redundant with the spec's ``mark_stale_reason``. That only fires on the
