@@ -9,6 +9,7 @@ This guide shows you how to load SEC financial data locally and query it using t
 The SEC local pipeline allows you to:
 
 - Load company financial filings (10-K, 10-Q) by ticker symbol
+- Or pull the entire prebuilt corpus from Hugging Face with `just sec-dump`
 - Store XBRL data in a local Ladybug graph database
 - Query financial data using Cypher or the MCP client
 - Inspect staged data in DuckDB before ingestion
@@ -69,6 +70,26 @@ just demo-sec --plan sec-advanced
 **Note:** Setup and loading takes 1-5 minutes depending on the number of years of data.
 
 **Your credentials are saved** to `.local/config.json` with your API key and user information.
+
+### The full corpus, prebuilt: `just sec-dump`
+
+`just demo-sec` builds a graph for one ticker and year from EDGAR. If you want the **entire corpus** — every XBRL filing since January 2024, ~8,400 filers and 77 million facts — the same file that backs the hosted `sec` graph is published monthly as one LadybugDB file on Hugging Face: [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs).
+
+```bash
+just sec-dump                # ~35 GiB download → data/lbug-dbs/sec.lbug (~128 GiB); restarts graph-api if it is running
+just sec-dump --force        # replace an existing sec.lbug (for example one built by demo-sec)
+just sec-dump-no-restart     # same, without the graph-api restart
+```
+
+It downloads `sec.lbug.zst` (resumable), verifies the archive's checksum and recorded size while decompressing, lands `sec.lbug` in the directory the stack mounts, removes a stale `.wal`, deletes the archive, and warns if the engine that wrote the dump differs from the `ladybug` version this checkout pins. Budget ~165 GiB free during decompression, and real time — it is 128 GiB on disk.
+
+Then subscribe and query exactly as elsewhere in this guide — `just demo-sec-subscribe` grants access without loading anything — or read the file directly, no services needed:
+
+```bash
+just lbug-query sec "MATCH (e:Entity) RETURN count(e)"
+```
+
+The dataset card carries the snapshot date, engine version, sizes, and further example queries.
 
 ### Advanced: Manual Loading
 
