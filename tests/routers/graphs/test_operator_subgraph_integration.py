@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.api.graphs.operator import OperatorMessage
 from robosystems.models.core import Graph, GraphCredits, User
+
+EXECUTE = "robosystems.routers.graphs.operator.execute"
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +24,28 @@ def _bypass_graph_lifecycle_gate():
     return_value=None,
   ):
     yield
+
+
+@pytest.fixture
+def queued_worker():
+  """The worker seam: gates pass and the enqueue returns a 202 envelope."""
+
+  def _envelope(task_type, graph_id, user_id, params):
+    return {
+      "operation_id": "op_01SUBGRAPHTEST0000000000000",
+      "status": "pending",
+      "operation_type": task_type,
+      "graph_id": graph_id,
+      "_links": {},
+    }
+
+  with (
+    patch(f"{EXECUTE}.enqueue_task", new=AsyncMock(side_effect=_envelope)) as enqueue,
+    patch(f"{EXECUTE}.enforce_operator_write_role"),
+    patch(f"{EXECUTE}.enforce_operator_graph_scope"),
+    patch(f"{EXECUTE}.enforce_operator_credits"),
+  ):
+    yield enqueue
 
 
 @pytest.fixture
@@ -63,7 +87,7 @@ def parent_graph_with_credits(db_session: Session) -> tuple[Graph, GraphCredits,
 
 
 class TestOperatorSubgraphIntegration:
-  """Integration tests for agent execution with subgraph IDs"""
+  """Operator runs on subgraph ids are accepted and queued against that id."""
 
   @pytest.mark.asyncio
   @pytest.mark.integration
@@ -71,39 +95,19 @@ class TestOperatorSubgraphIntegration:
     self,
     client_with_mocked_auth: TestClient,
     parent_graph_with_credits: tuple[Graph, GraphCredits, User],
-    db_session: Session,
+    queued_worker: AsyncMock,
   ):
-    """Operator endpoint accepts subgraph IDs"""
-    parent_graph, parent_credits, user = parent_graph_with_credits
+    parent_graph, _, _ = parent_graph_with_credits
     subgraph_id = f"{parent_graph.graph_id}_dev"
 
-    with patch(
-      "robosystems.routers.graphs.operator.handlers.OperatorOrchestrator"
-    ) as mock_orchestrator_class:
-      mock_orchestrator_instance = MagicMock()
-      mock_agent_response = MagicMock()
-      mock_agent_response.content = "Test response from agent on subgraph"
-      mock_agent_response.operator_name = "financial"
-      mock_agent_response.mode_used.value = "standard"
-      mock_agent_response.metadata = {"graph_id": subgraph_id}
-      mock_agent_response.tokens_used = {"input": 100, "output": 50}
-      mock_agent_response.confidence_score = 0.95
-      mock_agent_response.error_details = None
-      mock_agent_response.execution_time = 1.5
+    response = client_with_mocked_auth.post(
+      f"/v1/graphs/{subgraph_id}/operator",
+      json={"message": "Test query on subgraph"},
+    )
 
-      mock_orchestrator_instance.route_query = AsyncMock(
-        return_value=mock_agent_response
-      )
-      mock_orchestrator_class.return_value = mock_orchestrator_instance
-
-      response = client_with_mocked_auth.post(
-        f"/v1/graphs/{subgraph_id}/operator",
-        json={"message": "Test query on subgraph"},
-      )
-
-      assert response.status_code == 200
-      data = response.json()
-      assert "content" in data
+    assert response.status_code == 202
+    assert response.json()["graph_id"] == subgraph_id
+    assert queued_worker.call_args[0][1] == subgraph_id
 
   @pytest.mark.asyncio
   @pytest.mark.integration
@@ -111,44 +115,25 @@ class TestOperatorSubgraphIntegration:
     self,
     client_with_mocked_auth: TestClient,
     parent_graph_with_credits: tuple[Graph, GraphCredits, User],
-    db_session: Session,
+    queued_worker: AsyncMock,
   ):
-    """Multiple subgraphs can all execute agent queries"""
-    parent_graph, parent_credits, user = parent_graph_with_credits
+    parent_graph, _, _ = parent_graph_with_credits
     subgraph_dev = f"{parent_graph.graph_id}_dev"
     subgraph_prod = f"{parent_graph.graph_id}_prod"
 
-    with patch(
-      "robosystems.routers.graphs.operator.handlers.OperatorOrchestrator"
-    ) as mock_orchestrator_class:
-      mock_orchestrator_instance = MagicMock()
-      mock_agent_response = MagicMock()
-      mock_agent_response.content = "Response"
-      mock_agent_response.operator_name = "financial"
-      mock_agent_response.mode_used.value = "standard"
-      mock_agent_response.metadata = {}
-      mock_agent_response.tokens_used = {"input": 50, "output": 25}
-      mock_agent_response.confidence_score = 0.95
-      mock_agent_response.error_details = None
-      mock_agent_response.execution_time = 1.0
+    response1 = client_with_mocked_auth.post(
+      f"/v1/graphs/{subgraph_dev}/operator",
+      json={"message": "Query on dev subgraph"},
+    )
+    response2 = client_with_mocked_auth.post(
+      f"/v1/graphs/{subgraph_prod}/operator",
+      json={"message": "Query on prod subgraph"},
+    )
 
-      mock_orchestrator_instance.route_query = AsyncMock(
-        return_value=mock_agent_response
-      )
-      mock_orchestrator_class.return_value = mock_orchestrator_instance
-
-      response1 = client_with_mocked_auth.post(
-        f"/v1/graphs/{subgraph_dev}/operator",
-        json={"message": "Query on dev subgraph"},
-      )
-
-      response2 = client_with_mocked_auth.post(
-        f"/v1/graphs/{subgraph_prod}/operator",
-        json={"message": "Query on prod subgraph"},
-      )
-
-      assert response1.status_code == 200
-      assert response2.status_code == 200
+    assert response1.status_code == 202
+    assert response2.status_code == 202
+    queued_ids = [call[0][1] for call in queued_worker.call_args_list]
+    assert queued_ids == [subgraph_dev, subgraph_prod]
 
   @pytest.mark.asyncio
   @pytest.mark.integration
@@ -156,9 +141,9 @@ class TestOperatorSubgraphIntegration:
     self,
     client_with_mocked_auth: TestClient,
     parent_graph_with_credits: tuple[Graph, GraphCredits, User],
+    queued_worker: AsyncMock,
   ):
-    """Operator should handle conversation history on subgraphs"""
-    parent_graph, parent_credits, user = parent_graph_with_credits
+    parent_graph, _, _ = parent_graph_with_credits
     subgraph_id = f"{parent_graph.graph_id}_test"
 
     history = [
@@ -166,36 +151,15 @@ class TestOperatorSubgraphIntegration:
       OperatorMessage(role="assistant", content="Previous answer", timestamp=None),
     ]
 
-    with patch(
-      "robosystems.routers.graphs.operator.handlers.OperatorOrchestrator"
-    ) as mock_orchestrator_class:
-      mock_orchestrator_instance = MagicMock()
-      mock_agent_response = MagicMock()
-      mock_agent_response.content = "Response with context from history"
-      mock_agent_response.operator_name = "financial"
-      mock_agent_response.mode_used.value = "standard"
-      mock_agent_response.metadata = {"has_history": True}
-      mock_agent_response.tokens_used = {"input": 150, "output": 75}
-      mock_agent_response.confidence_score = 0.9
-      mock_agent_response.error_details = None
-      mock_agent_response.execution_time = 2.0
+    response = client_with_mocked_auth.post(
+      f"/v1/graphs/{subgraph_id}/operator",
+      json={
+        "message": "Follow-up question",
+        "history": [h.model_dump() for h in history],
+      },
+    )
 
-      mock_orchestrator_instance.route_query = AsyncMock(
-        return_value=mock_agent_response
-      )
-      mock_orchestrator_class.return_value = mock_orchestrator_instance
-
-      response = client_with_mocked_auth.post(
-        f"/v1/graphs/{subgraph_id}/operator",
-        json={
-          "message": "Follow-up question",
-          "history": [h.model_dump() for h in history],
-        },
-      )
-
-      assert response.status_code == 200
-      data = response.json()
-      assert "content" in data
-
-      orchestrator_call = mock_orchestrator_instance.route_query.call_args
-      assert orchestrator_call is not None
+    assert response.status_code == 202
+    params = queued_worker.call_args[0][3]
+    assert len(params["history"]) == 2
+    assert params["history"][0] == {"role": "user", "content": "Previous question"}

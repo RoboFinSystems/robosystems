@@ -8,6 +8,7 @@ HTTP), `FactoryCreditConsumer` (a session per call), and
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from robosystems.db.platform import SessionFactory
@@ -38,17 +39,27 @@ async def run_operator_worker(
   params: dict[str, Any],
   manager: OperationManager,
 ) -> dict[str, Any]:
-  """Run an operator in worker context for a long-running background task.
+  """Run an operator in worker context.
 
-  `params` carries the operator-specific arguments and an optional `mode`
-  (an unrecognized value falls back to STANDARD). Returns the operator's
-  content and metadata merged with a credit/token summary.
+  `params` carries the operator-specific arguments: `query`, an optional
+  `mode` (an unrecognized value falls back to STANDARD), the conversation
+  `history`, and a `context` dict that lands in `ctx.extra` beside the
+  params themselves (so `mapping_id` and `max_credits` both resolve).
+
+  Returns the response envelope the operator endpoint and the SSE
+  `operation_completed` event hand to callers — content, operator_used,
+  mode_used, metadata, tokens_used, confidence_score, execution_time — with
+  the operator's own metadata keys also merged flat, which is what the
+  mapping operation's consumers read.
   """
   mode_str = params.get("mode", "standard")
   try:
     mode = OperatorMode(mode_str)
   except ValueError:
     mode = OperatorMode.STANDARD
+  context = params.get("context") or {}
+  if not isinstance(context, dict):
+    context = {}
 
   # Both gates are re-checked here rather than trusted from the enqueuing
   # request: a task can sit in the queue, and the role that authorized it may
@@ -79,20 +90,37 @@ async def run_operator_worker(
     user_id=user_id,
     query=params.get("query", ""),
     mode=mode,
-    history=[],
-    extra=params,
+    history=list(params.get("history") or []),
+    extra={**params, **context},
     ai=tracked_ai,
     tools=tools,
     progress=OperationManagerProgress(task_id, manager),
   )
 
   try:
+    started = time.monotonic()
     result = await operator.run(ctx)
+    execution_time = time.monotonic() - started
+    tokens_used = tracked_ai.total_tokens.copy()
+    metadata = {
+      **result.metadata,
+      "credits_consumed": tracked_ai.total_credits,
+      "has_credit_tracking": True,
+      "tokens_used": tokens_used,
+      "call_count": tracked_ai.call_count,
+    }
     return {
       "content": result.content,
       **result.metadata,
+      "operator_used": operator.spec.name,
+      "mode_used": mode.value,
+      "metadata": metadata,
+      "tokens_used": tokens_used,
+      "confidence_score": result.confidence_score,
+      "execution_time": execution_time,
+      "tools_called": list(result.tools_called),
       "total_credits_consumed": tracked_ai.total_credits,
-      "total_tokens": tracked_ai.total_tokens.copy(),
+      "total_tokens": tokens_used,
     }
 
   except Exception as e:

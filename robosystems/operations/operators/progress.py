@@ -57,11 +57,14 @@ class OperationManagerProgress:
     percent: float | None = None,
     details: dict[str, Any] | None = None,
   ) -> None:
+    # The SDK facades read `progress_percentage` off progress events (the
+    # name the old in-process operator stream used); the manager writes
+    # `progress_percent`. Carry both so a console progress bar moves.
     await self._manager.emit_progress(
       self._task_id,
       message=message,
       progress_percent=percent,
-      details=details,
+      details={"progress_percentage": percent, **(details or {})},
     )
 
   async def is_cancelled(self) -> bool:
