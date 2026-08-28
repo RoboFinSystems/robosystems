@@ -125,6 +125,34 @@ async def validate_mcp_access(
     )
 
 
+# Core tools whose authored description gets the graph scope prepended.
+SCOPED_TOOL_NAMES = ("read-graph-cypher", "get-graph-schema")
+
+
+def _graph_scope_line(graph_id: str, is_shared_repo: bool) -> str:
+  if is_shared_repo:
+    return f"**GRAPH:** shared repository `{graph_id}` — public, read-only data."
+  return f"**GRAPH:** private graph `{graph_id}`."
+
+
+def _graph_info_tool_definition(graph_id: str, is_shared_repo: bool) -> dict[str, Any]:
+  kind = "shared repository" if is_shared_repo else "private graph"
+  return {
+    "name": "get-graph-info",
+    "description": (
+      f"Basic facts about {kind} `{graph_id}`: graph id, approximate node "
+      "count, node labels, relationship types, and whether it is read-only.\n\n"
+      "**WHEN TO USE:**\n"
+      "- To confirm which graph you are connected to and what it holds before "
+      "`get-graph-schema`\n"
+      "- To size a query from the node count and label list without reading the "
+      "full schema\n\n"
+      "**RETURNS:** A small JSON object. Takes no arguments."
+    ),
+    "inputSchema": {"type": "object", "properties": {}},
+  }
+
+
 class MCPHandler:
   """Handle MCP protocol operations using Graph API with proper lifecycle management."""
 
@@ -203,49 +231,43 @@ class MCPHandler:
     return "ladybug"
 
   async def get_tools(self) -> list[dict[str, Any]]:
-    """Get available MCP tools with backend-specific customizations."""
+    """Get available MCP tools, scoped to this graph.
+
+    The authored descriptions are kept whole: the core tools get a one-line
+    graph scope prepended, and a shared repository's manifest can append
+    query guidance to ``read-graph-cypher``. Replacing the description with
+    the scope sentence deletes the prompt every MCP client writes its query
+    from — on the SEC graph that produced plausible, wrong revenue series.
+    """
     self._ensure_not_closed()
     await self._ensure_initialized()
     assert self.mcp_tools is not None, "MCP tools not initialized"
-    tools = self.mcp_tools.get_tool_definitions_as_dict()
+    tools = [dict(tool) for tool in self.mcp_tools.get_tool_definitions_as_dict()]
 
-    from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
-
-    is_shared_repo = is_shared_repository_or_subgraph(self.graph_id)
-    backend_name = "Graph Database"
-
-    for tool in tools:
-      cypher_tool_names = ["read-graph-cypher"]
-      schema_tool_names = ["get-graph-schema"]
-
-      if tool["name"] in cypher_tool_names:
-        if is_shared_repo:
-          tool["description"] = (
-            f"Execute a Cypher query on shared {self.graph_id.upper()} repository with public data (via {backend_name})"
-          )
-        else:
-          tool["description"] = (
-            f"Execute a Cypher query on private graph {self.graph_id} (via {backend_name})"
-          )
-      elif tool["name"] in schema_tool_names:
-        if is_shared_repo:
-          tool["description"] = (
-            f"List all node types, attributes and relationships in shared {self.graph_id.upper()} repository (via {backend_name})"
-          )
-        else:
-          tool["description"] = (
-            f"List all node types, attributes and relationships in private graph {self.graph_id} (via {backend_name})"
-          )
-
-    graph_type = "shared repository" if is_shared_repo else "private graph"
-    tools.append(
-      {
-        "name": "get-graph-info",
-        "description": f"Get basic information about {graph_type} {self.graph_id} (via {backend_name})",
-        "inputSchema": {"type": "object", "properties": {}},
-      }
+    from robosystems.config.shared_repositories import (
+      get_manifest,
+      is_shared_repository_or_subgraph,
+      resolve_shared_repository_parent,
     )
 
+    is_shared_repo = is_shared_repository_or_subgraph(self.graph_id)
+    scope = _graph_scope_line(self.graph_id, is_shared_repo)
+
+    query_guidance: str | None = None
+    if is_shared_repo:
+      try:
+        manifest = get_manifest(resolve_shared_repository_parent(self.graph_id))
+      except ValueError:
+        manifest = None
+      query_guidance = getattr(manifest, "cypher_query_guidance", None)
+
+    for tool in tools:
+      if tool["name"] in SCOPED_TOOL_NAMES:
+        tool["description"] = f"{scope}\n\n{tool['description']}"
+      if tool["name"] == "read-graph-cypher" and query_guidance:
+        tool["description"] = f"{tool['description']}\n\n{query_guidance}"
+
+    tools.append(_graph_info_tool_definition(self.graph_id, is_shared_repo))
     return tools
 
   def get_instructions(self, tools: list[dict[str, Any]]) -> str | None:
