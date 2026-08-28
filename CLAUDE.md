@@ -156,6 +156,7 @@ just lbug-query GRAPH_ID "CYPHER_QUERY"        # Direct LadybugDB query (bypass 
 just sec-load NVDA 2025    # Load company filings
 just sec-health            # SEC database health
 just sec-reset             # Reset SEC database
+just sec-dump              # Pull the public SEC .lbug dump from Hugging Face (~35 GiB down, ~128 GiB on disk)
 ```
 
 ### Demo Scripts

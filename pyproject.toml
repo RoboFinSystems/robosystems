@@ -42,6 +42,7 @@ dependencies = [
     "boto3>=1.42.0,<2.0",
     # Hugging Face Hub (SEC dataset publish: launches the Hub-side Job, verifies the upload)
     "huggingface-hub>=1.19,<2",
+    "zstandard>=0.23,<1",  # decompress the .lbug.zst dumps on the host (no zstd binary needed)
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01

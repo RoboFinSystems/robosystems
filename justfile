@@ -527,6 +527,13 @@ duckdb-query graph_id query format="table":
 #   just sec-process all=1                    # Process all pending files
 #   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
+#   just sec-dump                             # Pull the prebuilt public dump instead of running the pipeline
+
+# --- Dump (the prebuilt corpus, no pipeline) ---
+
+# Download the public SEC .lbug dump from Hugging Face and decompress into data/lbug-dbs (~35 GiB down, ~128 GiB on disk)
+sec-dump *flags="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_dump {{flags}}
 
 # --- Full Pipeline (convenience) ---
 
