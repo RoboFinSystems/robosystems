@@ -427,8 +427,12 @@ def _build_statement_rendering(
     hierarchy, period_balances, calculations, pre_signed=True
   )
 
-  # 7) Validation — guard-rail checks on the rendered rows.
-  validation_result = validate_report(block_type, rows)
+  # 7) Validation — guard-rail checks on every rendered column. Columns
+  # carry no display label here (the frontend formats the dates), so a
+  # finding names its column by period end.
+  validation_result = validate_report(
+    block_type, rows, period_labels=[p.end.isoformat() for p in periods]
+  )
 
   return RenderingLite(
     rows=[
@@ -450,6 +454,7 @@ def _build_statement_rendering(
     ],
     validation=ValidationLite(
       passed=validation_result.passed,
+      status=validation_result.status,
       checks=list(validation_result.checks),
       failures=list(validation_result.failures),
       warnings=list(validation_result.warnings),

@@ -670,6 +670,7 @@ class TestRenderingComposesCalcsCrossStructure:
 
     assert rendering.validation is not None
     assert rendering.validation.passed is True
+    assert rendering.validation.status == "passed"
     assert not any("Net Income mismatch" in f for f in rendering.validation.failures)
 
   def test_non_arithmetic_block_keeps_envelope_associations(self) -> None:

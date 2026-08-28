@@ -23,6 +23,9 @@ from robosystems.operations.roboledger.reads.reports import (
   resolve_reporting_window,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
+  FactRow,
+)
+from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
 
@@ -554,3 +557,124 @@ class TestSavedCashFlowRendersCurrentOnly:
 
     assert resp is not None
     assert [p.label for p in resp.periods] == ["Current", "Prior"]
+
+
+def _fact_row(
+  name: str,
+  values: list[float | None],
+  *,
+  classification: str = "revenue",
+  balance_type: str | None = None,
+  is_subtotal: bool = False,
+  depth: int = 0,
+  qname: str | None = None,
+) -> FactRow:
+  return FactRow(
+    element_id=f"e_{name}",
+    element_qname=qname or f"rs-gaap:{name}",
+    element_name=name,
+    classification=classification,
+    balance_type=balance_type
+    or ("credit" if classification in ("revenue", "liability", "equity") else "debit"),
+    values=values,
+    is_subtotal=is_subtotal,
+    depth=depth,
+  )
+
+
+def _live(session, statement_type, grid):
+  with (
+    patch(
+      "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
+      return_value=(grid, 0),
+    ),
+    patch(
+      "robosystems.operations.roboledger.reports.network_picker.load_primary_reporting_style",
+      return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
+    ),
+  ):
+    return get_live_financial_statement(
+      session,
+      graph_id="kg_test",
+      statement_type=statement_type,
+      period_start=date(2026, 7, 1),
+      period_end=date(2026, 7, 31),
+    )
+
+
+class TestLiveStatementValidation:
+  """The live statement — the surface the app renders and the MCP tool
+  returns — carries the guard-rail outcome for exactly its rendered columns."""
+
+  @pytest.mark.unit
+  def test_validation_runs_on_both_rendered_columns(self):
+    grid = MagicMock()
+    grid.rows = [
+      _fact_row("Assets", [100.0, 100.0], classification="asset", is_subtotal=True),
+      _fact_row(
+        "Liabilities", [40.0, 40.0], classification="liability", is_subtotal=True
+      ),
+      # Balances in Current, not in Prior.
+      _fact_row("Equity", [60.0, 55.0], classification="equity", is_subtotal=True),
+    ]
+    resp = _live(MagicMock(), "balance_sheet", grid)
+
+    assert resp.validation is not None
+    assert resp.validation.status == "failed"
+    assert resp.validation.passed is False
+    assert "accounting_equation" in resp.validation.checks
+    assert len(resp.validation.failures) == 1
+    assert resp.validation.failures[0].startswith(
+      "[Prior] Balance sheet does not balance"
+    )
+
+  @pytest.mark.unit
+  def test_clean_statement_passes(self):
+    grid = MagicMock()
+    grid.rows = [
+      _fact_row("Assets", [100.0, 90.0], classification="asset", is_subtotal=True),
+      _fact_row(
+        "Liabilities", [40.0, 30.0], classification="liability", is_subtotal=True
+      ),
+      _fact_row("Equity", [60.0, 60.0], classification="equity", is_subtotal=True),
+    ]
+    resp = _live(MagicMock(), "balance_sheet", grid)
+    assert resp.validation is not None
+    assert (resp.validation.status, resp.validation.passed) == ("passed", True)
+    assert resp.validation.failures == []
+
+  @pytest.mark.unit
+  def test_cash_flow_validates_only_the_rendered_column(self):
+    """The prior period rides the pivot as the delta basis and is not a
+    statement; its plug must not be reported against the rendered column."""
+    op = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+    plug = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+    grid = MagicMock()
+    grid.rows = [
+      _fact_row("Operating", [1000.0, 100.0], qname=op),
+      # Quiet in Current (10%), loud in the basis column (500%).
+      _fact_row("OtherOperatingCapital", [100.0, 500.0], qname=plug),
+    ]
+    resp = _live(MagicMock(), "cash_flow_statement", grid)
+
+    assert [p.label for p in resp.periods] == ["Current"]
+    assert resp.validation is not None
+    assert resp.validation.status == "passed"
+    assert "operating_plug" in resp.validation.checks
+    assert not any("Other operating capital" in w for w in resp.validation.warnings)
+
+  @pytest.mark.unit
+  def test_cash_flow_plug_in_the_rendered_column_warns(self):
+    op = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+    plug = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+    grid = MagicMock()
+    grid.rows = [
+      _fact_row("Operating", [-1391.39, 0.0], qname=op),
+      _fact_row("OtherOperatingCapital", [4153.73, 0.0], qname=plug),
+    ]
+    resp = _live(MagicMock(), "cash_flow_statement", grid)
+
+    assert resp.validation is not None
+    warnings = [w for w in resp.validation.warnings if "Other operating capital" in w]
+    assert len(warnings) == 1
+    assert "4153.73" in warnings[0] and "-1391.39" in warnings[0]

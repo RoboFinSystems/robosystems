@@ -62,6 +62,8 @@ class LiveFinancialStatementTool(BaseTool):
 
 **RETURNS:**
 Facts with element qnames, names, classifications, and values aligned with `periods` — current + prior (equal duration) for income_statement and balance_sheet, current only for cash_flow_statement. Abstract scaffolding rows and all-zero rows are filtered out; subtotals are kept and flagged `is_subtotal`. Capped at `limit` rows (default 1000 — the whole statement).
+
+`validation` is the guard-rail outcome for the rendered columns (`status`: passed | failed | inconclusive; `failures`; `warnings`). Read it before quoting a number: a `failed` status means the statement does not foot or balance, and a warning about 'Other operating capital, net' means the cash flow was made to foot by a reconciling plug — say so rather than presenting the figure as clean.
 """,
       "inputSchema": {
         "type": "object",

@@ -479,10 +479,41 @@ class TestSemanticChecks:
     result = validate_report("income_statement", rows)
     assert any("no data" in w for w in result.warnings)
 
-  def test_unknown_report_type(self):
+  def test_unknown_report_type_is_inconclusive_not_passed(self):
+    """A block type with no rules was not checked — that is not a pass."""
     result = validate_report("unknown_type", [])
-    assert result.passed is True
+    assert result.passed is False
+    assert result.status == "inconclusive"
+    assert result.failures == []
     assert "no_validation_rules" in result.checks
+    assert any("nothing was checked" in w for w in result.warnings)
+
+  def test_equity_statement_is_inconclusive(self):
+    rows = [_row("Total Equity", 500.0, classification="equity", is_subtotal=True)]
+    result = validate_report("equity_statement", rows)
+    assert result.status == "inconclusive"
+    assert result.passed is False
+
+  def test_status_tracks_failures(self):
+    passing = validate_report(
+      "balance_sheet",
+      [
+        _row("Assets", 100.0, classification="asset", is_subtotal=True),
+        _row("Liabilities", 40.0, classification="liability", is_subtotal=True),
+        _row("Equity", 60.0, classification="equity", is_subtotal=True),
+      ],
+    )
+    assert (passing.status, passing.passed) == ("passed", True)
+
+    failing = validate_report(
+      "balance_sheet",
+      [
+        _row("Assets", 100.0, classification="asset", is_subtotal=True),
+        _row("Liabilities", 40.0, classification="liability", is_subtotal=True),
+        _row("Equity", 50.0, classification="equity", is_subtotal=True),
+      ],
+    )
+    assert (failing.status, failing.passed) == ("failed", False)
 
 
 class TestCashFlowOperatingPlug:
@@ -521,3 +552,152 @@ class TestCashFlowOperatingPlug:
       "cash_flow_statement", [_row("Operating", 1000.0, qname=self._OP)]
     )
     assert not any("Other operating capital" in w for w in result.warnings)
+
+
+class TestPerColumnValidation:
+  """Every rule runs on every rendered column, and names the column it fails in.
+
+  Before this, each structural check read ``values[0]`` only: the envelope
+  path (ascending sort) validated the oldest column and the saved-report
+  path validated ``Current`` — two surfaces, one boolean, different columns.
+  """
+
+  def _balance_sheet(self, current_equity: float, prior_equity: float):
+    return [
+      _row("Assets", 100.0, classification="asset", is_subtotal=True, prior=100.0),
+      _row(
+        "Liabilities", 40.0, classification="liability", is_subtotal=True, prior=40.0
+      ),
+      _row(
+        "Equity",
+        current_equity,
+        classification="equity",
+        is_subtotal=True,
+        prior=prior_equity,
+      ),
+    ]
+
+  def test_prior_column_imbalance_fails_and_names_the_column(self):
+    result = validate_report(
+      "balance_sheet",
+      self._balance_sheet(60.0, 55.0),
+      period_labels=["Current", "Prior"],
+    )
+    assert result.passed is False
+    assert result.status == "failed"
+    assert len(result.failures) == 1
+    assert result.failures[0].startswith("[Prior] Balance sheet does not balance")
+    assert "difference: 5.00" in result.failures[0]
+
+  def test_current_column_imbalance_names_current(self):
+    result = validate_report(
+      "balance_sheet",
+      self._balance_sheet(55.0, 60.0),
+      period_labels=["Current", "Prior"],
+    )
+    assert [f[: len("[Current]")] for f in result.failures] == ["[Current]"]
+
+  def test_both_columns_balanced_passes(self):
+    result = validate_report(
+      "balance_sheet",
+      self._balance_sheet(60.0, 60.0),
+      period_labels=["Current", "Prior"],
+    )
+    assert result.passed is True
+    assert result.failures == []
+
+  def test_missing_labels_fall_back_to_column_numbers(self):
+    result = validate_report("balance_sheet", self._balance_sheet(60.0, 55.0))
+    assert result.failures[0].startswith("[column 2] ")
+
+  def test_single_column_messages_carry_no_prefix(self):
+    rows = [
+      _row("Assets", 100.0, classification="asset", is_subtotal=True),
+      _row("Liabilities", 40.0, classification="liability", is_subtotal=True),
+      _row("Equity", 55.0, classification="equity", is_subtotal=True),
+    ]
+    result = validate_report("balance_sheet", rows, period_labels=["Current"])
+    assert result.failures[0].startswith("Balance sheet does not balance")
+
+  def test_checks_are_recorded_once_across_columns(self):
+    result = validate_report(
+      "balance_sheet",
+      self._balance_sheet(60.0, 60.0),
+      period_labels=["Current", "Prior"],
+    )
+    assert result.checks.count("accounting_equation") == 1
+    assert result.checks.count("totals_foot") == 1
+    assert result.checks.count("zero_subtotals") == 1
+    assert result.checks.count("comparative_data") == 1
+
+  def test_column_independent_inconclusive_failure_is_stated_once(self):
+    rows = [
+      _row("Assets", 100.0, classification="asset", is_subtotal=True, prior=90.0),
+    ]
+    result = validate_report("balance_sheet", rows, period_labels=["Current", "Prior"])
+    assert len(result.failures) == 1
+    assert "inconclusive" in result.failures[0]
+
+  def test_net_income_mismatch_in_prior_column_only(self):
+    rows = [
+      _row("Revenue", 1000.0, depth=1, qname="us-gaap:Revenues", prior=900.0),
+      _row("Cost", 700.0, classification="expense", depth=1, prior=600.0),
+      # Correct in Current (300), wrong in Prior (should be 300, reports 250).
+      _row("Net Income", 300.0, qname="us-gaap:NetIncomeLoss", prior=250.0),
+    ]
+    result = validate_report(
+      "income_statement", rows, period_labels=["Current", "Prior"]
+    )
+    assert result.passed is False
+    assert len(result.failures) == 1
+    assert result.failures[0].startswith("[Prior] Net Income mismatch")
+
+  def test_totals_foot_warning_names_the_column(self):
+    rows = [
+      _row("R&D", 200.0, classification="expense", depth=1, prior=200.0),
+      _row("SG&A", 200.0, classification="expense", depth=1, prior=200.0),
+      # Foots in Current (400), not in Prior (410 vs 400).
+      _row(
+        "Operating Expenses",
+        400.0,
+        classification="expense",
+        is_subtotal=True,
+        depth=0,
+        prior=410.0,
+      ),
+      _row("Revenue", 1000.0, depth=0, qname="us-gaap:Revenues", prior=1000.0),
+      _row("Net Income", 600.0, qname="us-gaap:NetIncomeLoss", prior=600.0),
+    ]
+    result = validate_report(
+      "income_statement", rows, period_labels=["Current", "Prior"]
+    )
+    foot = [w for w in result.warnings if "does not match" in w]
+    assert len(foot) == 1
+    assert foot[0].startswith("[Prior] Subtotal 'Operating Expenses'")
+
+  def test_empty_prior_column_is_reported_once_not_per_section(self):
+    rows = [
+      _row("Assets", 100.0, classification="asset", is_subtotal=True, prior=0.0),
+      _row(
+        "Liabilities", 40.0, classification="liability", is_subtotal=True, prior=None
+      ),
+      _row("Equity", 60.0, classification="equity", is_subtotal=True, prior=0.0),
+    ]
+    result = validate_report("balance_sheet", rows, period_labels=["Current", "Prior"])
+    assert result.passed is True
+    assert result.warnings == ["Period 'Prior' has no data — column will be empty"]
+
+  def test_operating_plug_warns_per_column(self):
+    op = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+    plug = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+    rows = [
+      _row("Operating", 1000.0, qname=op, prior=100.0),
+      # 10% of operating in Current (quiet), 500% in Prior (loud).
+      _row("Other operating capital net", 100.0, qname=plug, prior=500.0),
+    ]
+    result = validate_report(
+      "cash_flow_statement", rows, period_labels=["Current", "Prior"]
+    )
+    plug_warnings = [w for w in result.warnings if "Other operating capital" in w]
+    assert len(plug_warnings) == 1
+    assert plug_warnings[0].startswith("[Prior] ")
