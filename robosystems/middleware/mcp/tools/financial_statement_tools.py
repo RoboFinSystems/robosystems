@@ -24,7 +24,7 @@ from robosystems.db.extensions import extensions_session
 from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
-  LIVE_STATEMENT_TYPES,
+  MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   get_live_financial_statement,
   resolve_reporting_window,
@@ -51,18 +51,17 @@ class LiveFinancialStatementTool(BaseTool):
 - Only available on RoboLedger tenant entity graphs (not SEC shared repo)
 
 **PARAMETERS:**
-- `statement_type` (required) — one of the four below
+- `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
-- equity_statement — Equity components and changes
-- cash_flow_statement — Operating (indirect: net income + non-cash add-backs + working-capital deltas), investing, financing. Investing/financing leaves resolve from each line's explicit flow tag when present, else from the mapped rs-gaap element's default-flow derivation arc — so untagged QB data renders too, provided the relevant accounts are mapped at the grain the arcs key on (e.g. PP&E Gross for capex). Needs ≥2 periods (current + prior) for the indirect deltas.
+- cash_flow_statement — Operating (indirect: net income + non-cash add-backs + working-capital deltas), investing, financing. Investing/financing leaves resolve from each line's explicit flow tag when present, else from the mapped rs-gaap element's default-flow derivation arc — so untagged QB data renders too, provided the relevant accounts are mapped at the grain the arcs key on (e.g. PP&E Gross for capex). Needs ≥2 periods (current + prior) for the indirect deltas, so the prior period is pivoted as the delta basis and only the current period is rendered.
 - Explicit `period_start` / `period_end` (YYYY-MM-DD) win over everything else
 - `period_type="annual"` + `fiscal_year=2025` → window anchored on the graph's FiscalCalendar
 - `period_type="quarterly"` → current calendar quarter
 - `period_type="instant"` / unset → current calendar month
 
 **RETURNS:**
-Facts with element qnames, names, classifications, values across current + prior periods (equal duration). Subtotal rows and all-zero rows are filtered out. Capped at `limit` rows.
+Facts with element qnames, names, classifications, and values aligned with `periods` — current + prior (equal duration) for income_statement and balance_sheet, current only for cash_flow_statement. Abstract scaffolding rows and all-zero rows are filtered out; subtotals are kept and flagged `is_subtotal`. Capped at `limit` rows (default 1000 — the whole statement).
 """,
       "inputSchema": {
         "type": "object",
@@ -70,7 +69,7 @@ Facts with element qnames, names, classifications, values across current + prior
           "statement_type": {
             "type": "string",
             "description": "Type of financial statement to generate",
-            "enum": list(LIVE_STATEMENT_TYPES),
+            "enum": list(MCP_LIVE_STATEMENT_TYPES),
           },
           "period_start": {
             "type": "string",
@@ -91,8 +90,8 @@ Facts with element qnames, names, classifications, values across current + prior
           },
           "limit": {
             "type": "integer",
-            "description": "Max fact rows returned",
-            "default": 50,
+            "description": "Max fact rows returned (1-1000). Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
+            "default": 1000,
           },
         },
         "required": ["statement_type"],
@@ -109,11 +108,20 @@ Facts with element qnames, names, classifications, values across current + prior
     statement_type = (arguments.get("statement_type") or "").strip()
     if not statement_type:
       return {"error": "statement_type is required"}
-    if statement_type not in LIVE_STATEMENT_TYPES:
+    if statement_type == "equity_statement":
+      return {
+        "error": (
+          "equity_statement is not offered on this surface yet: the live "
+          "path renders equity balances, not a rollforward, so the result "
+          "would read as a statement it is not. Use balance_sheet for the "
+          "equity section."
+        ),
+      }
+    if statement_type not in MCP_LIVE_STATEMENT_TYPES:
       return {
         "error": (
           f"Unknown statement_type '{statement_type}'. "
-          f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}. "
+          f"Valid types: {', '.join(MCP_LIVE_STATEMENT_TYPES)}. "
           "For graph-backed (materialized / SEC) statements, see "
           "financial-statement-analysis."
         ),
@@ -123,7 +131,7 @@ Facts with element qnames, names, classifications, values across current + prior
     period_end = _parse_date(arguments.get("period_end"))
     period_type = arguments.get("period_type")
     fiscal_year = arguments.get("fiscal_year")
-    limit = max(1, min(int(arguments.get("limit", 50)), 1000))
+    limit = max(1, min(int(arguments.get("limit", 1000)), 1000))
 
     graph_id = self.client.graph_id
 
@@ -221,8 +229,8 @@ class FinancialStatementAnalysisTool(BaseTool):
           },
           "limit": {
             "type": "integer",
-            "description": "Max fact rows returned",
-            "default": 50,
+            "description": "Max fact rows returned (1-1000). Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
+            "default": 1000,
           },
         },
         "required": ["statement_type"],
@@ -248,7 +256,7 @@ class FinancialStatementAnalysisTool(BaseTool):
     report_id = (arguments.get("report_id") or "").strip() or None
     fiscal_year = arguments.get("fiscal_year")
     period_type = arguments.get("period_type")
-    limit = max(1, min(int(arguments.get("limit", 50)), 1000))
+    limit = max(1, min(int(arguments.get("limit", 1000)), 1000))
 
     graph_id = self.client.graph_id
     is_shared = is_shared_repository_or_subgraph(graph_id)

@@ -78,6 +78,16 @@ LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "equity_statement",
 )
 
+# The subset offered to an AI operator. ``equity_statement`` stays servable
+# on REST (the app's Statement of Equity tab) but is not advertised on the
+# MCP surface until it articulates: today it renders equity balances, not a
+# rollforward, and a model reading two rows under a passing validation
+# presents them as the statement — on a live tenant a capital contribution
+# appeared nowhere in it.
+MCP_LIVE_STATEMENT_TYPES: tuple[str, ...] = tuple(
+  t for t in LIVE_STATEMENT_TYPES if t != "equity_statement"
+)
+
 # Statement types accepted by the graph-backed analysis path. The graph
 # hypercube carries cash-flow facts from XBRL filings, so it's valid here.
 ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
@@ -548,6 +558,11 @@ def _materialize_and_presign_xbrl(
     content_type="application/zip",
     format=flavor.value,
     generation_count=generation_count,
+    # The emitter strips tenant-authored notes on every generation
+    # (``xbrl_21._strip_disclosure_content``); a property of the flavor, so
+    # it is declared on cache hits too. The file is valid and would
+    # otherwise be silently incomplete next to the notes shown on screen.
+    omitted_content=["disclosure_notes"],
   )
 
 
@@ -774,6 +789,10 @@ def get_statement(
     report_def.comparative,
     report_def.periods,
   )
+  # A comparative or multi-period report pivots every period, but the
+  # earliest column of a cash flow statement is the delta basis, not a
+  # statement — same rule as the live path.
+  periods = [periods[i] for i in rendered_period_indexes(block_type, periods)]
 
   if not periods:
     return StatementResponse(
@@ -974,6 +993,28 @@ def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSp
   ]
 
 
+def rendered_period_indexes(
+  statement_type: str, periods: list[FactPeriodSpec]
+) -> list[int]:
+  """Column indexes a statement renders, in the order ``periods`` was built.
+
+  Every period renders, except the earliest on a cash flow statement when
+  two or more were pivoted. The indirect method derives working-capital
+  deltas and the cash reconciliation from period-over-period balance
+  changes, so ``_derive_cash_flow_facts`` / ``_reconcile_operating_to_cash``
+  populate every period but the first — it rides the pivot only as the
+  delta basis. Rendered, that column is a fully formed statement that
+  foots and is economically wrong (net income and add-backs, no deltas, no
+  cash tie). The close-time stamp already keeps only the close month's
+  facts (``statement_sets``); this applies the same rule on the read paths.
+  """
+  indexes = list(range(len(periods)))
+  if statement_type != "cash_flow_statement" or len(periods) < 2:
+    return indexes
+  earliest = min(indexes, key=lambda i: periods[i].end)
+  return [i for i in indexes if i != earliest]
+
+
 def get_live_financial_statement(
   session: Session,
   *,
@@ -981,14 +1022,16 @@ def get_live_financial_statement(
   statement_type: str,
   period_start: date,
   period_end: date,
-  limit: int = 50,
+  limit: int = 1000,
   reporting_style_id: str | None = None,
 ) -> LiveFinancialStatementResponse:
   """Generate an OLTP-backed ad-hoc statement and format the response.
 
   Thin wrapper around ``generate_adhoc_private_statement`` that:
   - builds current+prior periods of matching duration
-  - filters subtotal rows and all-zero rows
+  - renders both columns, except on a cash flow statement, which renders
+    the current period only (``rendered_period_indexes``)
+  - filters abstract scaffolding rows and all-zero rows
   - caps at ``limit`` rows (marking ``truncated=True`` when capped)
 
   ``reporting_style_id`` resolves the reporting entity's active Style. When
@@ -1007,6 +1050,8 @@ def get_live_financial_statement(
     periods=periods,
     reporting_style_id=reporting_style_id,
   )
+  columns = rendered_period_indexes(statement_type, periods)
+  rendered_periods = [periods[i] for i in columns]
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
@@ -1025,14 +1070,19 @@ def get_live_financial_statement(
     # Disclosure DAG, but their value is the calc-DAG result the reader
     # most wants to see. The UI distinguishes them via the `is_subtotal`
     # flag on the response.
-    if not any(v != 0.0 for v in row.values):
+    values = (
+      row.values
+      if len(rendered_periods) == len(periods)
+      else [row.values[i] for i in columns]
+    )
+    if not any(v != 0.0 for v in values):
       continue
     facts.append(
       LiveStatementFactRow(
         qname=row.element_qname,
         name=row.element_name,
         trait=row.classification,
-        values=row.values,
+        values=values,
         depth=row.depth,
         is_subtotal=row.is_subtotal,
       )
@@ -1045,7 +1095,9 @@ def get_live_financial_statement(
   return LiveFinancialStatementResponse(
     graph_id=graph_id,
     statement_type=statement_type,
-    periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
+    periods=[
+      PeriodSpec(start=p.start, end=p.end, label=p.label) for p in rendered_periods
+    ],
     facts=facts,
     fact_count=len(facts),
     unmapped_count=unmapped_count,
