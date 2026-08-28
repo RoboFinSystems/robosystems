@@ -145,3 +145,59 @@ async def test_oversized_orientation_is_truncated_deterministically():
   text = CypherOperator._serialize_orientation(big)
   assert len(text) <= 48000 + len("\n… [truncated]")
   assert text.endswith("[truncated]")
+
+
+async def test_curated_tools_are_routed_ahead_of_cypher():
+  """Where the graph exposes the curated financial reads, the prompt routes
+  statement/balance/period questions to them first, and the loop offers
+  them."""
+  tools = _tools(
+    [
+      "get-graph-schema",
+      "read-graph-cypher",
+      "live-financial-statement",
+      "get-fiscal-calendar",
+    ],
+    {"get-graph-schema": SCHEMA},
+  )
+  kwargs = await _run(tools)
+
+  system = kwargs["system"]
+  assert "CURATED TOOLS" in system
+  assert "`live-financial-statement`" in system
+  assert "`get-fiscal-calendar`" in system
+  # Hints only for tools this graph actually exposes.
+  assert "`build-fact-grid`" not in system
+  assert "Call a curated tool where one fits" in system
+  assert "live-financial-statement" in kwargs["tool_names"]
+
+
+async def test_no_curated_section_without_curated_tools():
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher"],
+    {"get-graph-schema": SCHEMA},
+  )
+  kwargs = await _run(tools)
+  assert "CURATED TOOLS" not in kwargs["system"]
+
+
+async def test_max_credits_reaches_the_loop_and_garbage_is_ignored():
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher"],
+    {"get-graph-schema": SCHEMA},
+  )
+  with patch(
+    "robosystems.operations.operators.implementations.cypher.run_tool_loop",
+    AsyncMock(return_value=_loop_result()),
+  ) as loop:
+    ctx = _ctx(tools)
+    ctx.extra["max_credits"] = 25
+    await CypherOperator().run(ctx)
+  assert loop.await_args.kwargs["max_credits"] == 25.0
+
+  # Tenant-supplied garbage must not shape the loop.
+  assert CypherOperator._get_max_credits(_ctx(tools)) is None
+  for bad in ("abc", -5, 0, None, {"x": 1}):
+    ctx = _ctx(tools)
+    ctx.extra["max_credits"] = bad
+    assert CypherOperator._get_max_credits(ctx) is None, bad

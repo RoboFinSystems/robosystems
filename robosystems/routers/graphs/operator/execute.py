@@ -98,6 +98,14 @@ def _check_operator_post_enabled():
     )
 
 
+def _request_context(request: OperatorRequest) -> dict | None:
+  """The free-form context dict handed to the operator as ctx.extra, with the
+  typed per-question credit ceiling folded in when the caller set one."""
+  if request.max_credits is None:
+    return request.context
+  return {**(request.context or {}), "max_credits": request.max_credits}
+
+
 def _convert_operator_mode(mode: OperatorMode | None) -> BaseOperatorMode:
   """Convert API OperatorMode to base OperatorMode."""
   if mode is None:
@@ -241,7 +249,7 @@ async def auto_operator(
       "message": request.message,
       "mode": request.mode.value if request.mode else "standard",
       "history": history,
-      "context": request.context,
+      "context": _request_context(request),
       "enable_rag": request.enable_rag,
       "force_extended_analysis": request.force_extended_analysis,
     }
@@ -395,7 +403,7 @@ async def specific_operator(
       "message": request.message,
       "mode": request.mode.value if request.mode else "standard",
       "history": history,
-      "context": request.context,
+      "context": _request_context(request),
       "enable_rag": request.enable_rag,
       "force_extended_analysis": request.force_extended_analysis,
     }

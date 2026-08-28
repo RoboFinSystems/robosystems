@@ -409,6 +409,69 @@ async def test_mixed_turn_with_one_success_is_charged():
   assert ai.create_message.call_args_list[1].kwargs["tool_choice"] == {"type": "none"}
 
 
+async def test_credit_ceiling_stops_the_loop_between_calls():
+  """Once accumulated spend reaches max_credits, no further tool turn starts;
+  the model is nudged to answer from what it has, with the credit-limit
+  wording rather than the step-limit one."""
+  ai = MagicMock()
+  ai.total_credits = 50.0
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (n) RETURN n LIMIT 1"),
+      _final("best effort within budget"),
+    ]
+  )
+  tools = _tools_mock(call_results=[[{"n": 1}]])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=100,
+    max_credits=10.0,
+  )
+
+  assert result.hit_credit_ceiling is True
+  assert result.hit_cap is False
+  assert result.text == "best effort within budget"
+  assert ai.create_message.await_count == 2  # first turn + the nudge only
+  final_kwargs = ai.create_message.call_args_list[1].kwargs
+  assert final_kwargs["tool_choice"] == {"type": "none"}
+  last_user = final_kwargs["messages"][-1]
+  assert any(
+    isinstance(b, dict)
+    and b.get("type") == "text"
+    and "credit limit" in b.get("text", "")
+    for b in last_user.content
+  )
+
+
+async def test_first_model_call_runs_even_over_the_ceiling():
+  """The first call's cost is unknowable up front (the pre-flight gates the
+  run); the ceiling is checked between calls, so a model that answers on its
+  first turn is unaffected by a tiny ceiling."""
+  ai = MagicMock()
+  ai.total_credits = 999.0
+  ai.create_message = AsyncMock(side_effect=[_final("direct answer")])
+  tools = _tools_mock(call_results=[])
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=100,
+    max_credits=1.0,
+  )
+
+  assert result.text == "direct answer"
+  assert result.hit_credit_ceiling is False
+  assert ai.create_message.await_count == 1
+
+
 async def test_every_model_call_requests_conversation_caching():
   """The transcript grows monotonically, so every call — loop turns and the
   nudge alike — marks the trailing turn for caching; the next call reads the

@@ -148,8 +148,11 @@ class TestGetToolDefinitionHelpers:
     assert tools.graphql_query_tool is not None
     assert {"get-graphql-schema", "query-graphql"} <= names
 
-  def test_live_statement_tool_absent_on_read_only(self, mock_client):
-    """Read-only graphs must NOT get the OLTP live-statement tool."""
+  def test_read_only_tenant_keeps_the_read_half_of_each_pair(self, mock_client):
+    """Pure reads that were historically bundled with their write siblings —
+    live statement, sync status, the period workflow, the mapping reads —
+    stay available on a read-only surface (graph viewers, read-only
+    operators); only the writes require a writable graph."""
     with (
       patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
@@ -157,13 +160,58 @@ class TestGetToolDefinitionHelpers:
       mock_env.MCP_WORKSPACE_ENABLED = False
       mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
       tools = GraphMCPTools(
         mock_client, schema_extensions=["roboledger"], read_only=True
       )
 
-    # Analysis tool stays (read-only is fine for graph-backed reads)
     assert tools.financial_statement_analysis_tool is not None
+    assert tools.live_financial_statement_tool is not None
+    assert tools.get_graph_sync_status_tool is not None
+    assert tools.get_fiscal_calendar_tool is not None
+    assert tools.get_period_close_status_tool is not None
+    assert tools.list_period_drafts_tool is not None
+    assert tools.list_mapping_structures_tool is not None
+    assert tools.get_unmapped_elements_tool is not None
+    assert tools.get_mapping_summary_tool is not None
+    assert tools.suggest_mapping_tool is not None
+
+    # The write siblings stay off.
+    assert tools.materialize_tool is None
+    assert tools.close_period_tool is None
+    assert tools.reopen_period_tool is None
+    assert tools.backfill_plan_history_tool is None
+    assert tools.set_write_policy_tool is None
+    assert tools.sync_connection_tool is None
+    assert tools.bind_text_block_tool is None
+
+  def test_split_oltp_reads_stay_off_shared_repos(self, mock_client):
+    """The unbundled reads are extensions-OLTP-backed, and the OLTP DB has no
+    per-graph schema for a shared repo — the new gates must exclude SEC even
+    though read_only no longer does."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.ROBOLEDGER_ENABLED = True
+      tools = GraphMCPTools(
+        mock_client, schema_extensions=["roboledger"], read_only=True
+      )
+
     assert tools.live_financial_statement_tool is None
+    assert tools.get_graph_sync_status_tool is None
+    assert tools.get_fiscal_calendar_tool is None
+    assert tools.get_period_close_status_tool is None
+    assert tools.list_period_drafts_tool is None
+    assert tools.list_mapping_structures_tool is None
+    assert tools.get_unmapped_elements_tool is None
+    assert tools.get_mapping_summary_tool is None
+    assert tools.suggest_mapping_tool is None
 
   def test_oltp_read_tools_absent_on_shared_repo(self, mock_client):
     """Roboledger OLTP read tools (information blocks, agents, event handlers,
@@ -511,8 +559,9 @@ class TestTaxonomyToolRegistration:
     assert "create-mapping-association" in tool_names
     assert "get-mapping-summary" in tool_names
 
-  def test_taxonomy_tools_not_in_readonly(self, mock_client):
-    """Taxonomy tools should NOT appear for read-only graphs."""
+  def test_taxonomy_reads_advertised_on_readonly_but_writes_are_not(self, mock_client):
+    """The mapping READS stay available on read-only graphs; the registrar
+    write tools require a writable surface."""
     with (
       patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
@@ -530,7 +579,9 @@ class TestTaxonomyToolRegistration:
 
     definitions = tools.get_tool_definitions_as_dict()
     tool_names = {d["name"] for d in definitions}
-    assert "get-unmapped-elements" not in tool_names
+    assert "get-unmapped-elements" in tool_names
+    assert "suggest-mapping" in tool_names
+    assert "get-mapping-summary" in tool_names
     assert "create-mapping-association" not in tool_names
 
   def test_taxonomy_tools_not_without_extension(self, mock_client):
