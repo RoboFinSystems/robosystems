@@ -528,6 +528,15 @@ class ReportBundleDownloadResponse(BaseModel):
   generation_count: int = Field(
     ..., description="Bundle generation number stamped on the Report."
   )
+  omitted_content: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Content the Report carries that this flavor does not. "
+      "``disclosure_notes``: the XBRL 2.1 zip ships statements only — "
+      "tenant-authored disclosure notes render on screen and ride the "
+      "JSON-LD and holon flavors, but are excluded from this file."
+    ),
+  )
 
 
 # ── Live financial statement (OLTP) ──────────────────────────────────────────
@@ -539,7 +548,9 @@ class LiveFinancialStatementRequest(BaseModel):
   statement_type: str = Field(
     ...,
     description=(
-      "income_statement | balance_sheet | cash_flow_statement | equity_statement"
+      "income_statement | balance_sheet | cash_flow_statement | equity_statement. "
+      "``equity_statement`` is provisional — equity balances, not a rollforward "
+      "— and is not offered on the MCP surface until it articulates."
     ),
   )
   period_start: date | None = Field(
@@ -554,7 +565,16 @@ class LiveFinancialStatementRequest(BaseModel):
   fiscal_year: int | None = Field(
     None, description="Fiscal year for annual window (anchored on FiscalCalendar)"
   )
-  limit: int = Field(50, ge=1, le=1000, description="Max fact rows returned")
+  limit: int = Field(
+    1000,
+    ge=1,
+    le=1000,
+    description=(
+      "Max fact rows returned. Defaults to the ceiling so a statement is "
+      "never cut mid-section — visible rows would stop footing to visible "
+      "subtotals. Lower it only for a preview."
+    ),
+  )
 
 
 class LiveStatementFactRow(BaseModel):
@@ -573,7 +593,15 @@ class LiveFinancialStatementResponse(BaseModel):
 
   graph_id: str
   statement_type: str
-  periods: list[PeriodSpec]
+  periods: list[PeriodSpec] = Field(
+    ...,
+    description=(
+      "Rendered columns, aligned with each row's ``values``. Current and "
+      "prior for income_statement and balance_sheet; current only for "
+      "cash_flow_statement — the prior period is pivoted as the "
+      "indirect-method delta basis and not rendered."
+    ),
+  )
   facts: list[LiveStatementFactRow]
   fact_count: int
   unmapped_count: int = 0
@@ -602,7 +630,7 @@ class FinancialStatementAnalysisRequest(BaseModel):
     None, description="Filter by fiscal year focus when auto-resolving the report"
   )
   period_type: str | None = Field(None, description="annual | quarterly | instant")
-  limit: int = Field(50, ge=1, le=1000)
+  limit: int = Field(1000, ge=1, le=1000)
 
 
 class ResolvedReportInfo(BaseModel):

@@ -46,7 +46,15 @@ class TestLiveFinancialStatementToolDefinition:
     assert "income_statement" in enum
     assert "balance_sheet" in enum
     assert "cash_flow_statement" in enum
-    assert "equity_statement" in enum
+    # Served on REST for the app's tab, not offered to an operator until it
+    # articulates — today it is equity balances, not a rollforward.
+    assert "equity_statement" not in enum
+
+  @pytest.mark.unit
+  def test_limit_defaults_to_the_whole_statement(self):
+    tool = LiveFinancialStatementTool(_make_client())
+    d = tool.get_tool_definition()
+    assert d["inputSchema"]["properties"]["limit"]["default"] == 1000
 
 
 @pytest.mark.asyncio
@@ -84,6 +92,47 @@ class TestLiveFinancialStatementToolExecute:
     assert result["statement_type"] == "income_statement"
     assert result["fact_count"] == 0
     assert "tip" in result  # empty results trigger the tip
+
+  @pytest.mark.unit
+  async def test_default_limit_is_the_ceiling(self):
+    """A real chart of accounts exceeds 50 non-zero rows routinely, and a
+    cut statement's visible rows stop footing to its subtotals."""
+    tool = LiveFinancialStatementTool(_make_client("kg_123"))
+    from robosystems.models.api.extensions.reports import (
+      LiveFinancialStatementResponse,
+    )
+
+    mock_response = LiveFinancialStatementResponse(
+      graph_id="kg_123",
+      statement_type="balance_sheet",
+      periods=[],
+      facts=[],
+      fact_count=0,
+    )
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 4, 1), date(2026, 4, 30)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement", return_value=mock_response
+      ) as live,
+    ):
+      await tool.execute({"statement_type": "balance_sheet"})
+
+    assert live.call_args.kwargs["limit"] == 1000
+
+  @pytest.mark.unit
+  async def test_equity_statement_is_refused_with_a_reason(self):
+    tool = LiveFinancialStatementTool(_make_client())
+    result = await tool.execute({"statement_type": "equity_statement"})
+    assert "rollforward" in result["error"]
+    assert "balance_sheet" in result["error"]
 
   @pytest.mark.unit
   async def test_missing_statement_type(self):

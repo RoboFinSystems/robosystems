@@ -32,8 +32,12 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
   """Per-element aggregates over the returned facts.
 
   Shared by the REST and MCP surfaces so both report the same numbers.
-  `total` sums across every returned period — meaningful for duration facts,
-  not for instants (summing a balance across time is not a balance).
+  `total` and `average` span every returned period, so they are emitted for
+  duration facts only. A balance is a point-in-time measure: summed or
+  averaged across periods it yields a figure that looks authoritative and
+  means nothing, and a model reading the field quotes it. Instants (no
+  `period_start`, or an explicit `period_type` of `instant`) carry
+  `count` / `min` / `max` only.
 
   Overlapping duration windows that share a `period_end` (a 10-Q reports the
   same element for both the quarter and the year-to-date window ending the
@@ -48,6 +52,7 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
   # is the narrowest window ending that day. Instants have no period_start
   # and arrive one-per-end after dedup, so they pass through unchanged.
   narrowest: dict[tuple[str, Any, Any], tuple[str, float]] = {}
+  instant_elements: set[str] = set()
   for fact in facts:
     element = fact.get("element_id")
     value = fact.get("value")
@@ -55,6 +60,8 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
       continue
     key = (str(element), fact.get("entity_ticker"), fact.get("period_end"))
     start = str(fact.get("period_start") or "")
+    if not start or fact.get("period_type") == "instant":
+      instant_elements.add(str(element))
     prev = narrowest.get(key)
     if prev is None or start > prev[0]:
       narrowest[key] = (start, float(value))
@@ -64,13 +71,13 @@ def summarize_by_element(facts: list[dict[str, Any]]) -> dict[str, dict[str, flo
     by_element.setdefault(element, []).append(value)
 
   for element, values in by_element.items():
-    summary[element] = {
-      "count": len(values),
-      "total": sum(values),
-      "average": sum(values) / len(values),
-      "min": min(values),
-      "max": max(values),
-    }
+    stats: dict[str, float] = {"count": len(values)}
+    if element not in instant_elements:
+      stats["total"] = sum(values)
+      stats["average"] = sum(values) / len(values)
+    stats["min"] = min(values)
+    stats["max"] = max(values)
+    summary[element] = stats
 
   return summary
 

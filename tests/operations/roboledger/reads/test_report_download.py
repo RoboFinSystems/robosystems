@@ -168,6 +168,8 @@ class TestJsonLd:
     assert resp.content_type == "application/ld+json"
     assert resp.format == "jsonld"
     assert resp.generation_count == 3
+    # JSON-LD carries the disclosure notes; nothing is omitted.
+    assert resp.omitted_content == []
     # Presigns the bucket/key parsed from the stored bundle_url.
     _, kwargs = s3.generate_presigned_url.call_args
     assert kwargs["bucket"] == "bkt"
@@ -209,6 +211,10 @@ class TestXbrl:
     # Cache hit → never rebuilds or uploads.
     build.assert_not_called()
     s3.upload_bytes.assert_not_called()
+    # The emitter strips tenant-authored notes on every generation, so the
+    # omission is declared on a cache hit too — the file is valid and would
+    # otherwise be silently incomplete next to the notes shown on screen.
+    assert resp.omitted_content == ["disclosure_notes"]
 
   @pytest.mark.unit
   def test_cache_miss_materializes_then_presigns(self):
@@ -228,6 +234,7 @@ class TestXbrl:
       resp = get_report_download_url(session, "kg1", "rpt_1", flavor="xbrl-2.1")
 
     assert resp is not None
+    assert resp.omitted_content == ["disclosure_notes"]
     build.assert_called_once()
     serialize.assert_called_once()
     _, up_kwargs = s3.upload_bytes.call_args

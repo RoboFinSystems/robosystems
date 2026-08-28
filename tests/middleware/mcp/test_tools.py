@@ -223,6 +223,7 @@ class TestBuildFactGridTool:
       {
         "element_id": "us-gaap:Revenues",
         "element_name": "Revenues",
+        "period_start": "2024-01-01",
         "period_end": "2024-12-31",
         "value": 1000.0,
         "unit": "USD",
@@ -230,6 +231,7 @@ class TestBuildFactGridTool:
       {
         "element_id": "us-gaap:Revenues",
         "element_name": "Revenues",
+        "period_start": "2023-01-01",
         "period_end": "2023-12-31",
         "value": 2000.0,
         "unit": "USD",
@@ -237,6 +239,7 @@ class TestBuildFactGridTool:
       {
         "element_id": "us-gaap:CostOfRevenue",
         "element_name": "CostOfRevenue",
+        "period_start": "2024-01-01",
         "period_end": "2024-12-31",
         "value": 500.0,
         "unit": "USD",
@@ -260,3 +263,49 @@ class TestBuildFactGridTool:
     assert result["summary"]["us-gaap:Revenues"]["count"] == 2
     assert result["summary"]["us-gaap:Revenues"]["total"] == 3000.0
     assert result["summary"]["us-gaap:CostOfRevenue"]["total"] == 500.0
+
+  async def test_include_summary_omits_total_for_instants(self, mock_graph_client):
+    """A balance summed across periods is not a balance, and a model reading
+    `total` quotes it. Instants (no period_start) carry count/min/max only;
+    the tool description says so."""
+    tool = BuildFactGridTool(mock_graph_client)
+
+    facts = [
+      {
+        "element_id": "us-gaap:Assets",
+        "element_name": "Assets",
+        "period_start": None,
+        "period_end": "2024-12-31",
+        "value": 1000.0,
+        "unit": "USD",
+      },
+      {
+        "element_id": "us-gaap:Assets",
+        "element_name": "Assets",
+        "period_start": None,
+        "period_end": "2023-12-31",
+        "value": 900.0,
+        "unit": "USD",
+      },
+    ]
+
+    with patch(
+      "robosystems.middleware.mcp.tools.fact_grid_tool.query_fact_grid",
+      new_callable=AsyncMock,
+      return_value=(facts, False),
+    ):
+      result = await tool.execute(
+        {
+          "elements": ["us-gaap:Assets"],
+          "periods": ["2024-12-31", "2023-12-31"],
+          "include_summary": True,
+        }
+      )
+
+    assert result["summary"]["us-gaap:Assets"] == {
+      "count": 2,
+      "min": 900.0,
+      "max": 1000.0,
+    }
+    description = tool.get_tool_definition()["description"]
+    assert "duration elements only" in description

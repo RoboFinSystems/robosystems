@@ -241,6 +241,7 @@ class TestBuildFactGridOperation:
       {
         "element_id": "us-gaap:Revenues",
         "element_name": "Revenues",
+        "period_start": "2024-01-01",
         "period_end": "2024-12-31",
         "value": 1000.0,
         "unit": "USD",
@@ -248,6 +249,7 @@ class TestBuildFactGridOperation:
       {
         "element_id": "us-gaap:Revenues",
         "element_name": "Revenues",
+        "period_start": "2023-01-01",
         "period_end": "2023-12-31",
         "value": 2000.0,
         "unit": "USD",
@@ -255,6 +257,7 @@ class TestBuildFactGridOperation:
       {
         "element_id": "us-gaap:CostOfRevenue",
         "element_name": "CostOfRevenue",
+        "period_start": "2024-01-01",
         "period_end": "2024-12-31",
         "value": 500.0,
         "unit": "USD",
