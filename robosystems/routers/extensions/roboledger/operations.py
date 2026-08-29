@@ -210,6 +210,7 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.core import User
 from robosystems.operations.event_block import (
   DuplicateEventError,
+  EventEffectsAlreadyLandedError,
   EventNotFoundError,
   EventNotPublishableError,
   InvalidEventTransitionError,
@@ -1584,6 +1585,10 @@ update_event_block_op = _registrar.register(
     error_map={
       EventNotFoundError: 404,
       InvalidEventTransitionError: 422,
+      # A retraction, from any status, of an event whose rows already posted
+      # (or which already published to QuickBooks). The caller has to
+      # reverse instead, so this is a 422 they can act on, not a 500.
+      EventEffectsAlreadyLandedError: 422,
       HandlerMetadataValidationError: 422,
       ElementResolutionError: 422,
       ClosedPeriodError: 422,

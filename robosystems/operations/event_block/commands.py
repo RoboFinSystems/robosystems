@@ -15,9 +15,10 @@ Functions are pure: ``(Session, RequestModel, created_by) → ResponseModel``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,9 @@ from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import (
   RowLockedError,
   bounded_lock_wait,
@@ -90,6 +93,33 @@ class EventNotPublishableError(Exception):
     self.status = status
 
 
+class EventEffectsAlreadyLandedError(Exception):
+  """Raised when a retraction would orphan effects the books already hold.
+
+  Retracting an event drops it from `is_live`, which is what materialization,
+  QuickBooks write-back, and every reporting read filter on. That is the right
+  answer while the event's ledger rows are still drafts — nothing has hit the
+  books, so removing the event removes the whole story. It is the wrong answer
+  once a row has posted or the event has published to QuickBooks: the effect
+  stays where it landed while the event that explains it disappears, leaving a
+  GL balance no query can attribute and a QuickBooks entry with no local
+  counterpart.
+
+  Past that line the correction is a reversal, not a retraction — the same
+  split `JournalEntryNotDraftError` draws for entries.
+  """
+
+  def __init__(self, event_id: str, status: str, reason: str) -> None:
+    super().__init__(
+      f"Event {event_id} cannot be retracted from {status!r}: {reason}. "
+      "Reverse the posted entries instead — `create-event-block("
+      "event_type='journal_entry_reversed', metadata={entry_id: ...})`."
+    )
+    self.event_id = event_id
+    self.status = status
+    self.reason = reason
+
+
 class DuplicateEventError(Exception):
   """Raised when (source, external_id) already names an event on this graph.
 
@@ -110,9 +140,23 @@ class DuplicateEventError(Exception):
 
 
 # Valid outbound transitions from each status.
-# Terminal states (fulfilled, voided, superseded) have empty sets — no further
-# transitions allowed. `superseded` is reachable from any non-terminal state
-# so corrections can replace an event regardless of how far it has progressed.
+# `voided` and `superseded` are the retracted states and have empty sets — a
+# retraction is final. `superseded` is reachable from every other state so
+# corrections can replace an event regardless of how far it has progressed.
+#
+# `fulfilled` is the *end of the work*, not the end of the record. A handler
+# can target it while its ledger rows are still `draft`, because drafts post
+# at close — `asset_disposed` does. That left the pair unretractable:
+# `delete_journal_entry` refuses to delete the last draft of a live event and
+# tells the caller to void or supersede it, while an empty transition set
+# made that impossible — so a disposal draft could never be discarded, only
+# posted and then reversed. (`journal_entry_reversed` also targets
+# `fulfilled` but posts its reversing entry immediately, so the guard below
+# refuses it from the start — the correction there is another reversal.)
+#
+# What gates a retraction is `_assert_retractable`, which asks whether the
+# event's rows have landed — never which status it is being retracted from.
+# The table decides reachability; the guard decides safety.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "captured": frozenset({"committed", "voided", "superseded"}),
   "classified": frozenset(
@@ -120,14 +164,100 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   ),
   "committed": frozenset({"pending", "fulfilled", "voided", "superseded"}),
   "pending": frozenset({"fulfilled", "voided", "superseded"}),
-  "fulfilled": frozenset(),
+  "fulfilled": frozenset({"voided", "superseded"}),
   "voided": frozenset(),
   "superseded": frozenset(),
 }
 
-# Execute must not post these. ``fulfilled`` is also terminal, but a
-# repeat execute of an already-published event is an idempotent no-op
-# (see ``qb_external_id`` / status checks in ``execute_event_block``).
+# Retracted statuses — `Event.is_live` is `status NOT IN` this set.
+_RETRACTED_STATUSES = frozenset({"voided", "superseded"})
+
+# Entry/Transaction statuses that mean the effect is in the books to stay.
+# `reversed` counts: the original posted, and a reversing entry stands against
+# it. Retracting the event would strand both halves of that pair.
+_LANDED_ENTRY_STATUSES = frozenset({"posted", "reversed"})
+_LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
+
+
+def _retraction_fence_dates(session: Session, event_id: str) -> list[date]:
+  """Posting dates of every ledger row a retraction of this event would strand.
+
+  Read before the event row lock so the caller can take the shared period
+  fence in the order the rest of the module uses — fence, then rows.
+  """
+  entry_dates = session.execute(
+    select(Entry.posting_date).where(Entry.triggered_by_event_id == event_id).distinct()
+  ).scalars()
+  transaction_dates = session.execute(
+    select(Transaction.date)
+    .where(Transaction.triggered_by_event_id == event_id)
+    .distinct()
+  ).scalars()
+  return sorted({d for d in (*entry_dates, *transaction_dates) if d is not None})
+
+
+def _assert_retractable(session: Session, event: Event) -> None:
+  """Refuse a retraction that would orphan posted or published effects.
+
+  Consulted for every retraction, not just from `fulfilled`. An earlier
+  status is not evidence that nothing is behind the event: `classified` and
+  `committed` handlers (`schedule_entry_due`, `journal_entry_recorded`,
+  `schedule_created`) write their ledger rows when they fire, and close
+  promotes any draft in the period whose event is not already retracted —
+  it filters on `voided`/`superseded`, not on `fulfilled`. So a `committed`
+  event can sit across a close, collect posted entries, and reach here
+  looking retractable. What decides is whether anything landed, which is
+  what this reads; the status never did.
+
+  Correctness depends on the caller having taken the shared period fence
+  (`_retraction_fence_dates` → `assert_period_not_closed`) *before* the
+  event row lock. The row lock alone is not enough: close promotes drafts
+  with a bulk `UPDATE` over `entries` filtered by posting date, and never
+  touches the owning `Event` row — so it does not contend on that lock, and
+  a count taken under it can read zero while close is mid-flight. The fence
+  is the only thing that serializes the two.
+  """
+  if event.metadata_ and event.metadata_.get("qb_external_id"):
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      "it has published to QuickBooks",
+    )
+
+  posted_entries = session.execute(
+    select(func.count())
+    .select_from(Entry)
+    .where(
+      Entry.triggered_by_event_id == event.id,
+      Entry.status.in_(_LANDED_ENTRY_STATUSES),
+    )
+  ).scalar_one()
+  if posted_entries:
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      f"{posted_entries} of its journal entries have posted",
+    )
+
+  posted_transactions = session.execute(
+    select(func.count())
+    .select_from(Transaction)
+    .where(
+      Transaction.triggered_by_event_id == event.id,
+      Transaction.status.in_(_LANDED_TRANSACTION_STATUSES),
+    )
+  ).scalar_one()
+  if posted_transactions:
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      f"{posted_transactions} of its transactions have posted",
+    )
+
+
+# Execute must not post these. A repeat execute of an already-``fulfilled``
+# event is an idempotent no-op instead (see ``qb_external_id`` / status
+# checks in ``execute_event_block``), so it stays out of this set.
 _UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
 
 
@@ -512,6 +642,18 @@ def update_event_block(
         )
       )
     assert_period_not_closed(session, *sorted(fence_dates))
+  # A retraction drops the event from `is_live` while close is separately
+  # promoting its drafts to posted. Close excludes only events already
+  # retracted, and reaches the entries through a bulk `UPDATE` that never
+  # locks the `Event` row — so nothing but this fence orders the two, and
+  # without it the guard below can read zero posted rows in the window where
+  # close is about to post them. Fenced on the rows' own posting dates, not
+  # the event's: an event with no ledger rows has nothing to strand and
+  # stays retractable even where its date falls in a closed period.
+  if body.transition_to in _RETRACTED_STATUSES:
+    retraction_dates = _retraction_fence_dates(session, peek.id)
+    if retraction_dates:
+      assert_period_not_closed(session, *retraction_dates)
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -554,6 +696,13 @@ def update_event_block(
         f"Cannot transition event from '{event.status}' to '{body.transition_to}'. "
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
+
+    # A retraction is allowed only while nothing the event wrote has landed —
+    # see `_assert_retractable`, which also explains why the status it is
+    # retracted *from* does not narrow this. Runs under the row lock taken
+    # above and the period fence taken before it, ahead of any field write.
+    if body.transition_to in _RETRACTED_STATUSES:
+      _assert_retractable(session, event)
 
     if body.transition_to == "superseded":
       if body.superseded_by_id is None:

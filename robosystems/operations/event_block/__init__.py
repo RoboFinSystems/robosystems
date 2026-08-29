@@ -8,6 +8,7 @@ from robosystems.operations.locking import RowLockedError
 
 from .commands import (
   DuplicateEventError,
+  EventEffectsAlreadyLandedError,
   EventNotFoundError,
   EventNotPublishableError,
   InvalidEventTransitionError,
@@ -24,6 +25,7 @@ EventLockedError = RowLockedError
 
 __all__ = [
   "DuplicateEventError",
+  "EventEffectsAlreadyLandedError",
   "EventLockedError",  # deprecated alias for RowLockedError
   "EventNotFoundError",
   "EventNotPublishableError",

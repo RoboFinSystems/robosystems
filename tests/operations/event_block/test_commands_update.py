@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
+  EventEffectsAlreadyLandedError,
   EventNotFoundError,
   HandlerMetadataValidationError,
   InvalidEventTransitionError,
@@ -67,6 +68,9 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   locked_q.all.return_value = list(events)
   # _load_dimension_ids issues a select via session.execute → return [].
   session.execute.return_value.scalars.return_value.all.return_value = []
+  # `_assert_retractable` counts landed entries/transactions through the same
+  # execute. Default to "nothing has landed"; the guard's own tests override.
+  session.execute.return_value.scalar_one.return_value = 0
   return session
 
 
@@ -144,8 +148,34 @@ class TestSupersedeChain:
     assert predecessor.replaced_by_event_id is None
     session.commit.assert_not_called()
 
-  def test_supersede_from_terminal_state_rejected(self) -> None:
-    """Terminal states (fulfilled, voided, superseded) cannot be superseded."""
+  def test_supersede_from_retracted_state_rejected(self) -> None:
+    """Retraction is final — voided/superseded have no outbound transitions."""
+    for source_status in ("voided", "superseded"):
+      predecessor = _event("evt_a", status=source_status)
+      successor = _event("evt_b")
+      session = _session_with_events(predecessor, successor)
+
+      body = UpdateEventBlockRequest(
+        event_id="evt_a",
+        transition_to="superseded",
+        superseded_by_id="evt_b",
+      )
+      with pytest.raises(InvalidEventTransitionError, match="terminal"):
+        update_event_block(
+          session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+        )
+
+      assert predecessor.status == source_status, f"failed from {source_status}"
+      assert predecessor.replaced_by_event_id is None
+      assert successor.replaces_event_id is None
+      session.commit.assert_not_called()
+
+  def test_supersede_from_fulfilled_allowed_while_nothing_landed(self) -> None:
+    """`fulfilled` is the end of the work, not the end of the record.
+
+    A handler like `asset_disposed` lands its event here with the ledger rows
+    still drafts. Until one posts, the event is still correctable.
+    """
     predecessor = _event("evt_a", status="fulfilled")
     successor = _event("evt_b")
     session = _session_with_events(predecessor, successor)
@@ -155,15 +185,13 @@ class TestSupersedeChain:
       transition_to="superseded",
       superseded_by_id="evt_b",
     )
-    with pytest.raises(InvalidEventTransitionError, match="terminal"):
-      update_event_block(
-        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
-      )
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
-    assert predecessor.status == "fulfilled"
-    assert predecessor.replaced_by_event_id is None
-    assert successor.replaces_event_id is None
-    session.commit.assert_not_called()
+    assert predecessor.status == "superseded"
+    assert predecessor.replaced_by_event_id == "evt_b"
+    assert successor.replaces_event_id == "evt_a"
 
   def test_supersede_allowed_from_non_terminal_states(self) -> None:
     """captured / classified / committed / pending all permit supersede."""
@@ -184,6 +212,138 @@ class TestSupersedeChain:
       assert predecessor.status == "superseded", f"failed from {source_status}"
       assert predecessor.replaced_by_event_id == "evt_b"
       assert successor.replaces_event_id == "evt_a"
+
+
+class TestRetractFulfilled:
+  """Retracting a `fulfilled` event, and the line where it stops being allowed.
+
+  Retraction drops the event from `is_live`, which materialization, QuickBooks
+  write-back and every reporting read filter on. Harmless while its rows are
+  drafts; a stranded balance once one has posted.
+  """
+
+  def test_void_allowed_while_rows_are_drafts(self) -> None:
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
+
+    assert event.status == "voided"
+    session.commit.assert_called_once()
+
+  def test_void_refused_once_an_entry_has_posted(self) -> None:
+    """The entry stays in the books; voiding would leave nothing explaining it."""
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+    session.execute.return_value.scalar_one.return_value = 1
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    with pytest.raises(EventEffectsAlreadyLandedError, match="have posted"):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert event.status == "fulfilled"
+    session.commit.assert_not_called()
+
+  def test_void_refused_once_published_to_quickbooks(self) -> None:
+    """A local void would desync the QuickBooks entry it already wrote."""
+    event = _event("evt_a", status="fulfilled")
+    event.metadata_ = {"qb_external_id": "qb_123"}
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    with pytest.raises(EventEffectsAlreadyLandedError, match="QuickBooks"):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert event.status == "fulfilled"
+    session.commit.assert_not_called()
+
+  def test_guard_applies_to_every_status_not_just_fulfilled(self) -> None:
+    """An earlier status is not evidence that nothing is behind the event.
+
+    `classified` and `committed` handlers write their ledger rows when they
+    fire, and close promotes any draft whose event is not already retracted.
+    So a `committed` event can sit across a close and collect posted entries
+    while still looking retractable by status alone.
+    """
+    for source_status in ("captured", "classified", "committed", "pending"):
+      event = _event("evt_a", status=source_status)
+      session = _session_with_events(event)
+      session.execute.return_value.scalar_one.return_value = 1
+
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      with pytest.raises(EventEffectsAlreadyLandedError):
+        update_event_block(
+          session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+        )
+
+      assert event.status == source_status, f"failed from {source_status}"
+      session.commit.assert_not_called()
+
+  def test_retraction_takes_the_period_fence_before_the_row_lock(self) -> None:
+    """The row lock alone cannot order a retraction against a close.
+
+    Close promotes drafts with a bulk UPDATE over `entries` and never touches
+    the owning Event row, so it does not contend on that lock — the shared
+    period fence is the only thing that serializes the two, and it has to be
+    taken before the lock to match close's own fence-then-rows order.
+    """
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+    calls: list[str] = []
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[date(2026, 7, 31)],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda *a, **k: calls.append("fence"),
+      ),
+      patch("robosystems.operations.event_block.commands.bounded_lock_wait") as lock,
+    ):
+      lock.return_value.__enter__ = lambda _self: calls.append("lock") or None
+      lock.return_value.__exit__ = lambda *_a: None
+
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert calls == ["fence", "lock"], calls
+
+  def test_retraction_without_ledger_rows_takes_no_fence(self) -> None:
+    """Nothing to strand, nothing to fence.
+
+    Keeps a `captured` event that never produced rows retractable even where
+    its date falls in a closed period.
+    """
+    event = _event("evt_a", status="captured")
+    session = _session_with_events(event)
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed"
+      ) as fence,
+    ):
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    fence.assert_not_called()
+    assert event.status == "voided"
 
 
 class TestDualityLateBinding:
