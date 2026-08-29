@@ -227,11 +227,16 @@ framework-validate *args="":
 
 ## Demo Scripts ##
 
-# Run all demos
+# Run all demos except SEC, in dependency order (long)
 demo:
+    @just demo-user
     @just demo-roboledger
+    @just demo-coffee-roaster
+    @just demo-saas-startup
+    @just demo-roboinvestor
     @just demo-custom-graph
-    @just demo-sec
+    @just demo-seattle-method
+    @just demo-world-online
 
 # Create or reuse demo user (uses shared .local/config.json)
 demo-user *args="":

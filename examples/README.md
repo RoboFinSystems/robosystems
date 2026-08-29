@@ -20,7 +20,7 @@ need AWS Bedrock configured; without it, use the default hardcoded mappings.
 ## Quick Start
 
 ```bash
-# Run the core three in sequence (roboledger → custom-graph → sec)
+# Run the whole suite in sequence. Long — the World Online GL ingest dominates.
 just demo
 
 # Or pick one
@@ -29,6 +29,20 @@ just demo-roboinvestor
 just demo-custom-graph
 just demo-sec --ticker NVDA --year 2025
 ```
+
+`just demo` runs `demo-user` first, so it is self-contained on a fresh
+checkout, and orders the rest so each demo can reuse what the previous one
+built — `demo-saas-startup` runs before `demo-roboinvestor`, which adopts the
+cached Cadence Labs graph as its issuer instead of provisioning a second one.
+Every demo caches its graph in `.local/config.json` under its own slot, so
+re-running is idempotent rather than additive.
+
+**The SEC demo is deliberately not in `just demo`.** It drops and recreates the
+whole local `sec` graph, which would silently discard a corpus that took hours
+to build or 35 GiB to download. Populate that graph on its own terms —
+`just sec-dump` for the prebuilt public dump, or the `sec-*` pipeline recipes to
+build it from scratch — and run `just demo-sec` by itself when you want the
+walkthrough.
 
 ## The Demos
 
