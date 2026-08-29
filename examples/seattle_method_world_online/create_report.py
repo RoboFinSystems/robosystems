@@ -22,9 +22,9 @@ movement over the full span.
 Prerequisites: ``just demo-world-online`` has loaded the CoA, seeded the
 mappings and ingested the GL.
 
-Run it (the orchestrator runs this as step 8):
-    just demo-world-online-create-report <graph_id>
-    just demo-world-online-create-report          # cached graph slot
+Run it (step 8 of the orchestrator; --graph defaults to the cached slot):
+    just demo-world-online --step create-report
+    just demo-world-online --step create-report --graph <graph_id>
 
 Writes ``output/world-online-four-statements.md``.
 """
@@ -186,8 +186,8 @@ number.
 ### Reproduce
 
 ```bash
-just demo-world-online                         # full pipeline
-just demo-world-online-create-report {graph_id}  # this report only
+just demo-world-online                        # full pipeline
+just demo-world-online --step create-report   # this report only
 ```
 """
   return body

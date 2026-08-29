@@ -41,7 +41,7 @@ stop profile="robosystems":
 teardown profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
-# Upgrade to the latest images - pulls published images, or rebuilds in build mode (scope="all" also refreshes postgres/valkey/opensearch)
+# Fetch latest images (or rebuild) and recreate what changed
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
 
@@ -59,7 +59,7 @@ restart profile="robosystems":
 restart-container container="worker":
     docker compose -f compose.yaml restart robosystems-{{container}}
 
-# Restart graph-api if it is running (it holds replaced .lbug files open) and wait until it is healthy
+# Restart graph-api if running and wait until it is healthy
 graph-api-restart:
     @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || docker compose -f compose.yaml restart graph-api
     @[ -z "$(docker ps --filter name=^robosystems-graph-api$ -q)" ] || (curl -fs --retry 30 --retry-delay 2 --retry-all-errors -o /dev/null http://localhost:8001/health && echo "graph-api healthy")
@@ -133,10 +133,7 @@ test-all:
     @just cf-lint-all
     @just lint-actions
 
-# Run tests (exclude slow tests). Parallel across cores: each xdist worker
-# gets its own platform test database (tests/xdist_workers.py); `loadfile`
-# keeps a file's tests on one worker so module-scoped tenant schemas in the
-# shared extensions DB never race themselves.
+# Run tests, excluding slow ones — optional module path
 test module="":
     uv run pytest \
         {{ if module != "" { "tests/" + module } else { "" } }} \
@@ -185,11 +182,7 @@ format:
 typecheck module="":
     @uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
 
-# CloudFormation linting and validation
-# validate-template only accepts a template body up to 51,200 bytes. Templates
-# that deploy from S3 (api.yaml) are allowed to exceed that, so validate is
-# skipped for them rather than failing — cfn-lint above has no size limit and
-# does the static analysis that matters here.
+# Lint + validate one CloudFormation template
 cf-lint template:
     @uv run cfn-lint -t cloudformation/{{template}}.yaml
     @size=$(wc -c < cloudformation/{{template}}.yaml | tr -d ' '); \
@@ -203,16 +196,7 @@ cf-lint template:
 cf-lint-all:
     @uv run cfn-lint -t cloudformation/*.yaml
 
-# Lint GitHub Actions workflows and composite actions.
-#
-# GitHub does not validate a workflow file until it is triggered, so a malformed
-# expression is invisible until it breaks a run — and for a reusable workflow like
-# service-refresh.yml, the run it breaks is a deploy. Accepted pre-existing
-# findings are baselined in .github/actionlint.yaml, so any output here is new.
-#
-# shellcheck integration is off: it reports dozens of info-level SC2086 quoting
-# notes across workflows that predate this recipe, which would drown the errors
-# that actually invalidate a file. Run `just lint-actions-shell` to see them.
+# Lint GitHub Actions workflows and composite actions
 lint-actions:
     @uv run actionlint -shellcheck=
 
@@ -220,28 +204,33 @@ lint-actions:
 lint-actions-shell:
     @uv run actionlint
 
-# Validate the rs-gaap framework: structure + package integrity + CoA coverage (--summary terse, --coverage-only for just coverage)
+# Validate the rs-gaap framework: structure, package integrity, CoA coverage
 framework-validate *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.framework_validate {{args}}
 
 
 ## Demo Scripts ##
 
-# Run all demos
+# Run all demos except SEC, in dependency order (long)
 demo:
+    @just demo-user
     @just demo-roboledger
+    @just demo-coffee-roaster
+    @just demo-saas-startup
+    @just demo-roboinvestor
     @just demo-custom-graph
-    @just demo-sec
+    @just demo-seattle-method
+    @just demo-world-online
 
 # Create or reuse demo user (uses shared .local/config.json)
 demo-user *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.credentials.main {{args}}
 
-# Setup SEC repository demo (pass any flags: --ticker NVDA, --year 2025, --skip-queries, --subscribe-only, --plan starter)
+# Set up the SEC repository demo — load filings, subscribe, run queries
 demo-sec *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.main {{args}}
 
-# Create SEC subscription only (no data loading) - plan: sec-starter (default) | sec-advanced (5x rate limits, more credits)
+# Create the SEC subscription only, no data load
 demo-sec-subscribe plan="sec-starter":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.main --subscribe-only --plan {{plan}}
 
@@ -249,57 +238,33 @@ demo-sec-subscribe plan="sec-starter":
 demo-sec-query *args:
     UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.query_examples {{args}}
 
-# Run RoboLedger demo (flags: --skeleton (empty graph, no data), --ai (MappingOperator; needs Bedrock), --dry-run, [graph_id])
+# Run the RoboLedger demo — Cascade Advisory, the full accounting arc
 demo-roboledger *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
 
-# Run Coffee Roaster showcase demo — Driftline Coffee (profitable-but-cash-poor). Flags: --ai (MappingOperator; needs Bedrock), --dry-run, [graph_id]
+# Run the Coffee Roaster showcase — Driftline, profitable but cash-poor
 demo-coffee-roaster *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.coffee_roaster_demo.main {{args}}
 
-# Run SaaS Startup showcase demo — Cadence Labs (burning cash, deferred-revenue runway). Flags: --ai (MappingOperator; needs Bedrock), --dry-run, [graph_id]
+# Run the SaaS Startup showcase — Cadence Labs, burn behind deferred revenue
 demo-saas-startup *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.saas_startup_demo.main {{args}}
 
-# Run RoboInvestor demo — Meridian Ventures Fund I, incl. the cross-graph report share (flags: --issuer <id>, --reload-issuer, --skip-share, --revoke, --dry-run, [graph_id])
+# Run the RoboInvestor demo — Meridian fund, incl. the cross-graph report share
 demo-roboinvestor *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.roboinvestor_demo.main {{args}}
 
-# Run custom graph demo end-to-end (pass any flags: --new-user, --new-graph, --skip-queries)
+# Run the custom graph demo end-to-end — your own schema
 demo-custom-graph *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}
 
-# Run Seattle Method cross-taxonomy demo (Test Case 1 — Charlie Hoffman's mini, 14 JEs). Flags: --dry-run, --step <name>, --graph <id>
+# Run the Seattle Method cross-taxonomy demo — Charlie Hoffman's mini, 14 JEs
 demo-seattle-method *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.main {{args}}
 
-# Render the Seattle Method reconciliation report for a graph after the main demo has run
-demo-seattle-method-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.reconcile {{args}}
-
-# Materialize the Seattle Method 4-IB rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
-demo-seattle-method-create-report *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.create_report {{args}}
-
-# Run "The World Online" demo (Seattle Method MINI 2026 — Charlie Hoffman's 22,288-line GL). Flags: --dry-run, --step <name>, --graph <id>, --limit <n>
+# Run The World Online demo — Seattle Method at scale, 22,288 GL lines
 demo-world-online *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.main {{args}}
-
-# Render the World Online reconciliation report (mini pivot vs SummaryOfTransactions.csv) for a graph after the main demo has run
-demo-world-online-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.reconcile {{args}}
-
-# Materialize the World Online 4-statement rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
-demo-world-online-create-report *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.create_report {{args}}
-
-# Render the World Online trial balance for a graph after the main demo has run
-demo-world-online-trial-balance *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.trial_balance {{args}}
-
-# Statement-level reconcile of the World Online four-statement anchors vs Charlie's reference instance.xml (after the main demo has written the bundle)
-demo-world-online-statement-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.statement_reconcile {{args}}
 
 
 ## CI/CD ##
@@ -324,18 +289,10 @@ tunnel environment service="all":
 ## Bootstrap ##
 
 # Bootstrap AWS OIDC federation for GitHub Actions
-# Usage: just bootstrap [profile] [region]
-#   profile: AWS SSO profile name (default: robosystems-sso)
-#   region:  AWS region (default: us-east-1)
 bootstrap profile="robosystems-sso" region="us-east-1":
     @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
 
-# Re-apply the GitHub OIDC stack only (the deploy roles) — after editing
-# cloudformation/bootstrap-oidc.yaml. Previews the change set and asks before
-# applying; a stack that already matches the template is reported, not touched.
-# Refreshes AWS_ROLE_ARN / AWS_ACCOUNT_ID / AWS_REGION if they drifted. No ECR,
-# SES, secrets or other variables are touched.
-# Usage: just bootstrap-oidc [profile] [region]
+# Re-apply the GitHub OIDC stack only — previews the change set, asks before applying
 bootstrap-oidc profile="robosystems-sso" region="us-east-1":
     @bin/setup/bootstrap.sh --oidc "{{profile}}" "{{region}}"
 
@@ -347,16 +304,11 @@ setup-aws:
 setup-gha:
     @bin/setup/gha.sh
 
-# Bedrock local development setup (creates IAM user, updates .env)
-# Pass "rotate" to rotate the access key: just setup-bedrock rotate
+# Bedrock local dev setup — creates IAM user, updates .env; pass "rotate" to rotate the key
 setup-bedrock *args:
     @bin/setup/bedrock.sh {{ args }}
 
-# Apply the operational ECR image lifecycle policy (idempotent reconcile)
-# Single source of truth: bin/setup/ecr-lifecycle-policy.json (also applied by
-# bootstrap when the robust option is chosen). Use this recipe to reconcile the
-# live repo after editing that file, without re-running full bootstrap.
-# Usage: just bootstrap-ecr-lifecycle [repo] [region]
+# Reconcile the ECR image lifecycle policy from bin/setup/ecr-lifecycle-policy.json
 bootstrap-ecr-lifecycle repo="robosystems" region="us-east-1":
     @echo "Applying ECR lifecycle policy to {{repo}} ({{region}})..."
     @aws ecr put-lifecycle-policy \
@@ -437,12 +389,7 @@ gha-list-org filter="":
 
 ## Admin CLI ##
 
-# For staging/prod: start tunnel first with ./bin/tools/tunnels.sh <env> all
-# Examples: just admin dev stats                    (local dev, no tunnel needed)
-#           just admin prod stats                   (requires tunnel running)
-#           just admin prod subscriptions list
-#           just admin prod credits health
-# Admin CLI for remote administration via admin API — environment: dev | staging | prod
+# Admin CLI via the admin API — dev | staging | prod (staging/prod need a tunnel)
 admin environment="dev" *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.admin.cli -e {{environment}} {{args}}
 
@@ -536,12 +483,12 @@ duckdb-query graph_id query format="table":
 
 # --- Dump (the prebuilt corpus, no pipeline) ---
 
-# Download the public SEC .lbug dump from Hugging Face into data/lbug-dbs (~35 GiB down, ~128 GiB on disk), then restart graph-api if running
+# Download the public SEC .lbug dump from Hugging Face (~128 GiB), restart graph-api
 sec-dump *flags="":
     @just sec-dump-no-restart {{flags}}
     @just graph-api-restart
 
-# Same download without the graph-api restart (a running graph-api keeps serving the replaced file until restarted)
+# Same download, without the graph-api restart
 sec-dump-no-restart *flags="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_dump {{flags}}
 
@@ -569,7 +516,6 @@ sec-download count="10" year="":
 
 # --- Phase 2: Process ---
 
-# Triggers sec_process runs for each quarter with pending files. Use --reset-errors to retry failed files.
 # Process pending SEC filings by quarter
 sec-process reset_errors="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline process \
@@ -582,15 +528,13 @@ sec-materialize:
     @just sec-stage ""
     @just sec-materialize-graph
 
-# Use this to save 2+ hours of work that persists if materialization fails
-# Stage to persistent DuckDB only (decoupled Stage 1)
+# Stage SEC filings to persistent DuckDB only (decoupled Stage 1)
 sec-stage year="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline stage \
         --graph-id sec \
         {{ if year != "" { "--year " + year } else { "" } }}
 
-# Use this to retry materialization without re-staging
-# Materialize graph from existing DuckDB staging (decoupled Stage 2)
+# Materialize the graph from existing DuckDB staging (decoupled Stage 2)
 sec-materialize-graph:
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
         --graph-id sec
@@ -604,13 +548,7 @@ sec-index quarter:
 
 # --- Phase 5: Text Search Query ---
 
-# Examples:
-#   just search sec "revenue growth"
-#   just search sec "risk factors" --entity NVDA
-#   just search sec "inventory" --form-type 10-K --fiscal-year 2025
-#   just search sec "revenue" --size 3
-#   just search sec "revenue" --no-semantic
-# Search OpenSearch for filing text content (semantic search enabled by default)
+# Search OpenSearch for filing text content (semantic search on by default)
 search graph_id query *flags:
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.search_query \
         --graph-id {{graph_id}} \
@@ -672,7 +610,7 @@ clean-data:
     rm -rf ./data/valkey
     rm -rf ./.local/config.json
 
-# Full local reset — tears down containers, wipes local data (artifacts + lbug-dbs), then rebuilds the stack from scratch
+# Full local reset — tear down, wipe local data, rebuild the stack
 reset-local:
     @just teardown
     @just clean-data

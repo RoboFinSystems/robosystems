@@ -29,9 +29,10 @@ Prerequisites: ``just demo-world-online`` has ingested the GL, and
 ``EXTENSIONS_DATABASE_URL`` is set — the ``just`` recipe loads it from
 ``.env.local``; export it yourself when invoking the module directly.
 
-Run it (the orchestrator runs this as step 7):
-    just demo-world-online-reconcile <graph_id>
-    just demo-world-online-reconcile <graph_id> --no-diff   # print the pivot only
+Run it (step 7 of the orchestrator; --graph defaults to the cached slot):
+    just demo-world-online --step reconcile
+    just demo-world-online --step reconcile --graph <graph_id>
+    just demo-world-online --step reconcile --no-diff   # print the pivot only
 
 Writes ``output/world-online-reconciliation.md``.
 """
@@ -124,7 +125,7 @@ def _open_session(graph_id: str) -> Iterator[Session]:
   if not EXTENSIONS_DB_URL:
     raise SystemExit(
       "EXTENSIONS_DATABASE_URL is not set. Run via "
-      "`just demo-world-online-reconcile <graph_id>` (which loads "
+      "`just demo-world-online --step reconcile` (which loads "
       ".env.local), or export the env var manually."
     )
   engine = create_engine(EXTENSIONS_DB_URL)
@@ -401,8 +402,8 @@ def render_markdown(
     "## How to reproduce",
     "",
     "```bash",
-    "just demo-world-online                       # full pipeline",
-    "just demo-world-online-reconcile <graph_id>  # this report only",
+    "just demo-world-online                     # full pipeline",
+    "just demo-world-online --step reconcile    # this report only",
     "```",
   ]
   return "\n".join(lines)

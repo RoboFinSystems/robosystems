@@ -32,12 +32,15 @@ just demo-world-online
 # Smoke-test the whole pipeline on a 50-entry subset first
 just demo-world-online --limit 50
 
-# Single step (after provisioning)
+# Single step (after provisioning). --graph is optional — it falls back to
+# the cached world_online_test slot.
 just demo-world-online --step ingest --graph <graph_id>
 
-# Re-run just the artifacts against an existing graph
-just demo-world-online-reconcile <graph_id>
-just demo-world-online-create-report <graph_id>
+# Re-run just the artifacts against the cached graph
+just demo-world-online --step reconcile
+just demo-world-online --step create-report
+just demo-world-online --step trial-balance
+just demo-world-online --step statement-reconcile
 ```
 
 ## What Gets Created

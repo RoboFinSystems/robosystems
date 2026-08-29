@@ -22,9 +22,9 @@ published artifact is what gets reconciled — not an internal query behind it.
 Prerequisites: ``just demo-world-online`` has run through the download-bundles
 step, which writes ``output/world-online.jsonld``.
 
-Run it (the orchestrator runs this as step 11):
-    just demo-world-online-statement-reconcile
-    just demo-world-online-statement-reconcile --no-fetch   # use the cached reference
+Run it (step 11 of the orchestrator):
+    just demo-world-online --step statement-reconcile
+    just demo-world-online --step statement-reconcile --no-fetch   # cached reference
 
 Writes ``output/world-online-statement-reconciliation.md``.
 """
@@ -254,8 +254,8 @@ def render(graph_bundle: Path, rows: list[Row]) -> str:
     "## How to reproduce",
     "",
     "```bash",
-    "just demo-world-online                                 # full pipeline",
-    "just demo-world-online-statement-reconcile             # this report only",
+    "just demo-world-online                               # full pipeline",
+    "just demo-world-online --step statement-reconcile    # this report only",
     "```",
   ]
   return "\n".join(lines) + "\n"
