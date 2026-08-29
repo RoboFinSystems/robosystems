@@ -89,7 +89,7 @@ Then subscribe and query exactly as elsewhere in this guide — `just demo-sec-s
 just lbug-query sec "MATCH (e:Entity) RETURN count(e)"
 ```
 
-The dataset card carries the snapshot date, engine version, sizes, and further example queries.
+The file opens with the LadybugDB release that wrote it — the `ladybug==` version this repo pinned in `pyproject.toml` when the snapshot was built (0.18.1 today). The dataset card states it (the Engine row and its *Engine version* section), each snapshot's commit title carries it, and `just sec-dump` warns when your checkout pins something else. The card also carries the snapshot date, sizes, and further example queries.
 
 ### Advanced: Manual Loading
 
