@@ -15,6 +15,16 @@ from robosystems.operations.operators.base import Operator
 _OPERATORS: dict[str, type[Operator]] = {}
 _adapter_operators_loaded: list[bool] = []
 
+# Former names. An operator's registry key is public surface — the URL
+# segment, the `operator_type` in queued tasks and stored operations, and
+# whatever client code hardcoded — so a rename keeps the old key resolving
+# here rather than breaking those. A direct registration always beats an
+# alias, and the listing shows canonical names only.
+_ALIASES: dict[str, str] = {
+  # The analyst shipped as `cypher` when Cypher was its only tool.
+  "cypher": "analyst",
+}
+
 
 def register_operator(operator_type: str):
   """Register an Operator class under `operator_type`.
@@ -23,8 +33,8 @@ def register_operator(operator_type: str):
 
   Example::
 
-      @register_operator("cypher")
-      class CypherOperator(Operator):
+      @register_operator("analyst")
+      class AnalystOperator(Operator):
           spec = OperatorSpec(...)
           async def run(self, ctx): ...
   """
@@ -42,13 +52,20 @@ def register_operator(operator_type: str):
   return decorator
 
 
+def resolve_operator_type(operator_type: str) -> str:
+  """Map a former name to its canonical registry key; unknown names pass through."""
+  if operator_type in _OPERATORS:
+    return operator_type
+  return _ALIASES.get(operator_type, operator_type)
+
+
 def get_operator(operator_type: str) -> Operator:
-  """Instantiate a registered operator, or raise KeyError.
+  """Instantiate a registered operator (by canonical name or alias), or raise KeyError.
 
   A fresh instance per call — operators are stateless, and their per-run state
   lives on the `OperatorContext` the adapter injects.
   """
-  cls = _OPERATORS.get(operator_type)
+  cls = _OPERATORS.get(resolve_operator_type(operator_type))
   if cls is None:
     registered = ", ".join(_OPERATORS.keys()) or "(none)"
     raise KeyError(
@@ -59,7 +76,7 @@ def get_operator(operator_type: str) -> Operator:
 
 def get_operator_class(operator_type: str) -> type[Operator] | None:
   """Get the operator class without instantiation."""
-  return _OPERATORS.get(operator_type)
+  return _OPERATORS.get(resolve_operator_type(operator_type))
 
 
 def list_operators() -> dict[str, dict[str, Any]]:
@@ -91,8 +108,8 @@ def _serialize_scope(scope: Any) -> dict[str, str] | None:
 
 
 def is_registered(operator_type: str) -> bool:
-  """Check if an operator type is registered."""
-  return operator_type in _OPERATORS
+  """Check if an operator type (canonical or alias) is registered."""
+  return resolve_operator_type(operator_type) in _OPERATORS
 
 
 def load_adapter_operators() -> None:

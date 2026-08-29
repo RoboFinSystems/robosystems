@@ -296,7 +296,7 @@ robosystems/
 4. **Two-database split**: Platform (`robosystems`) for IAM/billing/metadata; extensions (`extensions`) for per-graph OLTP. Different `DeclarativeBase` classes, independent migration histories, same shared RDS instance
 5. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
 6. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
-7. **Two `Agent` concepts, disambiguated**: `Agent` (REA party — customer/vendor/employee counterparty) lives in `models/extensions/roboledger/agent.py` and is the canonical ontology term. The AI executor layer (Claude/MCP-driven) is named **Operator** throughout the codebase: `routers/graphs/operator/`, `operations/operators/`, classes like `CypherOperator` / `MappingOperator`, endpoint `/v1/graphs/{g}/operator`. Marketing-facing copy can still say "AI agent" / "AI assistant" — that's decoupled from internal naming.
+7. **Two `Agent` concepts, disambiguated**: `Agent` (REA party — customer/vendor/employee counterparty) lives in `models/extensions/roboledger/agent.py` and is the canonical ontology term. The AI executor layer (Claude/MCP-driven) is named **Operator** throughout the codebase: `routers/graphs/operator/`, `operations/operators/`, classes like `AnalystOperator` / `MappingOperator`, endpoint `/v1/graphs/{g}/operator`. Marketing-facing copy can still say "AI agent" / "AI assistant" — that's decoupled from internal naming.
 
 ## Testing
 

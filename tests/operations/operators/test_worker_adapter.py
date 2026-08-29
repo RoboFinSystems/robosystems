@@ -23,7 +23,7 @@ USER_ID = "usr_test123"
 def _operator(result: OperatorResult) -> MagicMock:
   operator = MagicMock()
   operator.spec = OperatorSpec(
-    name="Cypher Operator",
+    name="Analyst Operator",
     description="test",
     capabilities=[OperatorCapability.CUSTOM],
     read_only=True,
@@ -76,7 +76,7 @@ async def test_run_operator_worker_returns_the_response_envelope():
       graph_id=GRAPH_ID,
       user_id=USER_ID,
       params={
-        "operator_type": "cypher",
+        "operator_type": "analyst",
         "query": "How many nodes?",
         "mode": "standard",
         "history": [{"role": "user", "content": "hi"}],
@@ -87,7 +87,7 @@ async def test_run_operator_worker_returns_the_response_envelope():
 
   # The envelope the endpoint and the SSE completion event hand to callers
   assert result["content"] == "42"
-  assert result["operator_used"] == "Cypher Operator"
+  assert result["operator_used"] == "Analyst Operator"
   assert result["mode_used"] == "standard"
   assert result["tokens_used"] == tracked.total_tokens
   assert result["confidence_score"] == 0.9
@@ -107,7 +107,7 @@ async def test_run_operator_worker_returns_the_response_envelope():
   assert ctx.query == "How many nodes?"
   assert ctx.history == [{"role": "user", "content": "hi"}]
   assert ctx.extra["max_credits"] == 50
-  assert ctx.extra["operator_type"] == "cypher"
+  assert ctx.extra["operator_type"] == "analyst"
 
 
 @pytest.mark.asyncio
@@ -170,7 +170,7 @@ async def test_worker_uses_the_full_tool_surface_gated_by_read_only():
       task_id="op_01TEST",
       graph_id=GRAPH_ID,
       user_id=USER_ID,
-      params={"operator_type": "cypher", "query": "q"},
+      params={"operator_type": "analyst", "query": "q"},
       manager=AsyncMock(),
     )
 

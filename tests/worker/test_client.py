@@ -335,7 +335,7 @@ async def test_requeue_task_pushes_the_same_operation_with_the_answer():
         "task_type": "operator",
         "graph_id": "kg0123456789abcdef",
         "user_id": "user_01TEST",
-        "params": {"operator_type": "cypher", "query": "close?"},
+        "params": {"operator_type": "analyst", "query": "close?"},
       },
       resume={"checkpoint": {"step": 2}, "input": {"approved": True}},
     )
@@ -347,7 +347,7 @@ async def test_requeue_task_pushes_the_same_operation_with_the_answer():
   assert data["task_id"] == "op_01PAUSED"
   assert data["task_type"] == "operator"
   assert data["attempt"] == 1
-  assert data["params"]["operator_type"] == "cypher"
+  assert data["params"]["operator_type"] == "analyst"
   assert data["params"]["resume"] == {
     "checkpoint": {"step": 2},
     "input": {"approved": True},

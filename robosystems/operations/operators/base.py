@@ -5,7 +5,7 @@ Two protocols coexist:
 - ``Operator`` / ``OperatorSpec`` / ``OperatorResult`` — the unified protocol.
   Write new operators against this one.
 - ``BaseOperator`` / ``OperatorMetadata`` / ``OperatorResponse`` — the older
-  protocol still driving ``CypherOperator`` and the orchestrator.
+  protocol still driving ``AnalystOperator`` and the orchestrator.
 
 "Operator" is the AI-executor concept (Claude/MCP), distinct from the REA
 ``Agent`` (counterparty) modeled in ``models/extensions/roboledger/agent.py``.
@@ -265,7 +265,7 @@ class OperatorResponse:
 
 
 class BaseOperator(ABC):
-  """Base class for the older operator protocol, used by ``CypherOperator``
+  """Base class for the older operator protocol, used by ``AnalystOperator``
   and the orchestrator. New operators inherit from :class:`Operator`.
   """
 

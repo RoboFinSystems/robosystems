@@ -2,7 +2,7 @@
 
 The model chooses which read-only MCP tools to call; every tool error comes
 back as an ``is_error`` tool_result so it can correct itself and retry. The
-loop is the shared harness behind `CypherOperator` and any other read/analysis
+loop is the shared harness behind `AnalystOperator` and any other read/analysis
 operator — the Claude-via-MCP tool loop run in-process on Bedrock, with
 per-call credit tracking supplied by `TrackedAIClient`.
 """

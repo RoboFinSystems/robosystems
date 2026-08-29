@@ -48,7 +48,7 @@ def queued_worker():
 
   orchestrator = MagicMock()
   orchestrator.get_operator_recommendations.return_value = [
-    {"operator_type": "cypher", "confidence": 0.9}
+    {"operator_type": "analyst", "confidence": 0.9}
   ]
 
   with (

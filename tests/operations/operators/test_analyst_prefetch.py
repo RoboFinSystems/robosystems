@@ -1,4 +1,4 @@
-"""CypherOperator prefetches — schema/examples in the system prefix, memories
+"""AnalystOperator prefetches — schema/examples in the system prefix, memories
 in the user turn.
 
 Schema and example queries are deterministic per graph, so the operator
@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.operations.operators.base import OperatorMode
-from robosystems.operations.operators.implementations.cypher import CypherOperator
+from robosystems.operations.operators.implementations.analyst import AnalystOperator
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import NoOpProgress
 from robosystems.operations.operators.tool_loop import ToolLoopResult
@@ -75,10 +75,10 @@ def _loop_result() -> ToolLoopResult:
 async def _run(tools: MagicMock):
   """Run the operator with the loop patched out; return the loop's kwargs."""
   with patch(
-    "robosystems.operations.operators.implementations.cypher.run_tool_loop",
+    "robosystems.operations.operators.implementations.analyst.run_tool_loop",
     AsyncMock(return_value=_loop_result()),
   ) as loop:
-    await CypherOperator().run(_ctx(tools))
+    await AnalystOperator().run(_ctx(tools))
   return loop.await_args.kwargs
 
 
@@ -99,7 +99,7 @@ async def test_orientation_is_prefetched_into_the_system_prompt():
   # ...and the loop no longer offers them.
   assert kwargs["tool_names"] == [
     t
-    for t in CypherOperator.READ_ONLY_TOOLS
+    for t in AnalystOperator.READ_ONLY_TOOLS
     if t not in ("get-graph-schema", "get-example-queries")
   ]
 
@@ -116,7 +116,7 @@ async def test_prefetch_failure_falls_back_to_tool_driven_orientation():
 
   assert "GRAPH SCHEMA" not in kwargs["system"]
   assert "call `get-graph-schema` first" in kwargs["system"]
-  assert kwargs["tool_names"] == CypherOperator.READ_ONLY_TOOLS
+  assert kwargs["tool_names"] == AnalystOperator.READ_ONLY_TOOLS
 
 
 async def test_error_dict_schema_falls_back():
@@ -129,7 +129,7 @@ async def test_error_dict_schema_falls_back():
   kwargs = await _run(tools)
 
   assert "GRAPH SCHEMA" not in kwargs["system"]
-  assert kwargs["tool_names"] == CypherOperator.READ_ONLY_TOOLS
+  assert kwargs["tool_names"] == AnalystOperator.READ_ONLY_TOOLS
 
 
 async def test_graph_without_examples_gets_schema_only():
@@ -148,7 +148,7 @@ async def test_graph_without_examples_gets_schema_only():
 
 async def test_oversized_orientation_is_truncated_deterministically():
   big = [{"label": "N" * 1000} for _ in range(100)]
-  text = CypherOperator._serialize_orientation(big)
+  text = AnalystOperator._serialize_orientation(big)
   assert len(text) <= 48000 + len("\n… [truncated]")
   assert text.endswith("[truncated]")
 
@@ -193,20 +193,20 @@ async def test_max_credits_reaches_the_loop_and_garbage_is_ignored():
     {"get-graph-schema": SCHEMA},
   )
   with patch(
-    "robosystems.operations.operators.implementations.cypher.run_tool_loop",
+    "robosystems.operations.operators.implementations.analyst.run_tool_loop",
     AsyncMock(return_value=_loop_result()),
   ) as loop:
     ctx = _ctx(tools)
     ctx.extra["max_credits"] = 25
-    await CypherOperator().run(ctx)
+    await AnalystOperator().run(ctx)
   assert loop.await_args.kwargs["max_credits"] == 25.0
 
   # Tenant-supplied garbage must not shape the loop.
-  assert CypherOperator._get_max_credits(_ctx(tools)) is None
+  assert AnalystOperator._get_max_credits(_ctx(tools)) is None
   for bad in ("abc", -5, 0, None, {"x": 1}):
     ctx = _ctx(tools)
     ctx.extra["max_credits"] = bad
-    assert CypherOperator._get_max_credits(ctx) is None, bad
+    assert AnalystOperator._get_max_credits(ctx) is None, bad
 
 
 # ── Semantic memory prefetch ─────────────────────────────────────────────
@@ -302,7 +302,7 @@ async def test_graph_without_recall_gets_no_memory_prefetch():
 
 def test_oversized_memories_are_capped_per_hit():
   hits = [{"id": str(i), "text": "x" * 5000, "tags": None} for i in range(5)]
-  message = CypherOperator._build_user_message("q", hits)
+  message = AnalystOperator._build_user_message("q", hits)
   assert message is not None
   assert message.count("x" * 800 + "…") == 5
   assert "x" * 801 not in message

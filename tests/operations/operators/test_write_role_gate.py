@@ -151,10 +151,10 @@ class TestRegisteredOperatorDeclarations:
   """
 
   def test_cypher_operator_is_read_only(self) -> None:
-    from robosystems.operations.operators.implementations.cypher import CypherOperator
+    from robosystems.operations.operators.implementations.analyst import AnalystOperator
 
-    assert CypherOperator.spec.read_only is True, (
-      "CypherOperator is viewer-accessible because READ_ONLY_TOOLS contains no "
+    assert AnalystOperator.spec.read_only is True, (
+      "AnalystOperator is viewer-accessible because READ_ONLY_TOOLS contains no "
       "write tool; adding one means this flag must go"
     )
 

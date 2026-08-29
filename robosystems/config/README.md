@@ -146,7 +146,7 @@ from robosystems.config import BedrockModel, OperatorConfig, OperatorExecutionMo
 
 OperatorConfig.get_bedrock_model_id()                          # default (Sonnet 4.6)
 OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4_5)
-OperatorConfig.get_bedrock_model_id(operator_type="cypher")    # honors OPERATOR_MODEL_OVERRIDES
+OperatorConfig.get_bedrock_model_id(operator_type="analyst")   # honors OPERATOR_MODEL_OVERRIDES
 
 profile = OperatorConfig.get_execution_profile(OperatorExecutionMode.STANDARD)
 # max_tool_calls=5, timeout_seconds=60, max_input_tokens=100_000

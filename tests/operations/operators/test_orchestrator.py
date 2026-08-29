@@ -77,7 +77,7 @@ class TestOrchestratorConfig:
     assert config.enable_rag is False
     assert config.enable_caching is False
     assert config.enable_fallback is True
-    assert config.fallback_operator == "cypher"
+    assert config.fallback_operator == "analyst"
 
 
 # ── Mock agents for testing ──────────────────────────────────────────────────

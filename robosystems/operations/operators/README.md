@@ -4,7 +4,7 @@ AI executors: Claude-via-MCP running against a graph, for natural-language query
 
 ## Naming: Operator is not Agent
 
-**"Operator" is the AI-executor concept.** It is deliberately distinct from **`Agent`**, the REA counterparty model in `models/extensions/roboledger/agent.py` — a customer, vendor, or employee. `Agent` is the canonical ontology term and it is not available for the AI layer, so everything in the executor layer is named Operator: this package, `routers/graphs/operator/`, `CypherOperator`, `MappingOperator`, and the endpoint `/v1/graphs/{graph_id}/operator`.
+**"Operator" is the AI-executor concept.** It is deliberately distinct from **`Agent`**, the REA counterparty model in `models/extensions/roboledger/agent.py` — a customer, vendor, or employee. `Agent` is the canonical ontology term and it is not available for the AI layer, so everything in the executor layer is named Operator: this package, `routers/graphs/operator/`, `AnalystOperator`, `MappingOperator`, and the endpoint `/v1/graphs/{graph_id}/operator`.
 
 This is the most confusable naming in the repo. When you read `Agent`, it is a business counterparty; when you read `Operator`, it is an AI executor.
 
@@ -63,7 +63,7 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 
 | Operator | Context | Purpose |
 | -------- | ------- | ------- |
-| `cypher` | Worker, `run_operator_worker()` — queued by `POST /v1/graphs/{g}/operator[/cypher]` | Natural language → Cypher graph queries |
+| `analyst` (alias: `cypher`, its former name) | Worker, `run_operator_worker()` — queued by `POST /v1/graphs/{g}/operator[/analyst]` | Natural-language questions over the graph — curated financial reads, documents, memory, GraphQL, read-only Cypher as the fallback |
 | `mapping` | Worker, `run_operator_worker()` — queued by `auto-map-elements` and the QuickBooks first sync | Autonomous CoA → US GAAP taxonomy mapping |
 
 ## Module layout
@@ -83,7 +83,7 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `adapters/api.py` | `run_operator_api()` — builds an in-process context (the orchestrator's `route_query` and tests; no endpoint runs an operator in the API process) |
 | `adapters/worker.py` | `run_operator_worker()` — builds the context for worker tasks and returns the response envelope |
 | `adapters/worker_task.py` | `@register_task("operator")` bridge into the worker consumer |
-| `implementations/` | `cypher.py`, `mapping/` (operator, prompt, constants) |
+| `implementations/` | `analyst.py`, `mapping/` (operator, prompt, constants) |
 
 ## Execution paths
 
