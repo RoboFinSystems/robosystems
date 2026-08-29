@@ -351,7 +351,7 @@ class TestAwaitingInput:
         "task_type": "operator",
         "graph_id": "kg01234567890abcdef",
         "user_id": "usr_test123",
-        "params": {"operator_type": "cypher"},
+        "params": {"operator_type": "analyst"},
       },
       "requested_at": "2024-01-01T00:02:00Z",
     }

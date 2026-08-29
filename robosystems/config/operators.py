@@ -139,12 +139,12 @@ class OperatorConfig:
   # Allows different operators to use different models if needed
   OPERATOR_MODEL_OVERRIDES: dict[str, BedrockModel] = {
     # Example: "financial": BedrockModel.SONNET_4_5,
-    # Example: "cypher": BedrockModel.SONNET_4,
+    # Example: "analyst": BedrockModel.SONNET_4,
   }
 
   # Orchestrator Configuration
   ORCHESTRATOR_CONFIG = {
-    "fallback_operator": "cypher",
+    "fallback_operator": "analyst",
     "confidence_threshold": 0.7,
     "max_routing_attempts": 3,
     "enable_rag": False,
@@ -153,7 +153,7 @@ class OperatorConfig:
 
   # Operator Capabilities Configuration
   OPERATOR_CAPABILITIES = {
-    "cypher": {
+    "analyst": {
       "supported_modes": ["quick", "standard", "extended", "streaming"],
       "requires_credits": True,
       "max_concurrent_requests": 10,

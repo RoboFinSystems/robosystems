@@ -57,7 +57,7 @@ def _metadata(
 
 COMPLETED_RESULT = {
   "content": "Revenue was 1.2M",
-  "operator_used": "Cypher Operator",
+  "operator_used": "Analyst Operator",
   "mode_used": "standard",
   "metadata": {"credits_consumed": 116.7, "rows": [{"total": 1200000}]},
   "tokens_used": {"input": 4, "output": 600, "cache_read": 22881, "cache_write": 0},
@@ -213,6 +213,16 @@ class TestQueuedExecution:
     assert params["operator_type"] == "research"
     assert params["mode"] == "extended"
 
+  def test_former_operator_name_queues_the_canonical_one(self, client, mock_enqueue):
+    """`cypher` was the analyst's name until 2026-08; the path still works and
+    the queued task carries the canonical `analyst`."""
+    response = client.post(
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator/cypher",
+      json={"message": "Total expenses in July?"},
+    )
+    assert response.status_code == 202
+    assert mock_enqueue.call_args[0][3]["operator_type"] == "analyst"
+
   def test_history_and_credit_ceiling_travel_with_the_task(self, client, mock_enqueue):
     response = client.post(
       f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator",
@@ -352,7 +362,7 @@ class TestSyncWait:
     assert response.status_code == 200
     data = response.json()
     assert data["content"] == "Revenue was 1.2M"
-    assert data["operator_used"] == "Cypher Operator"
+    assert data["operator_used"] == "Analyst Operator"
     assert data["mode_used"] == "standard"
     assert data["metadata"]["credits_consumed"] == 116.7
     assert data["tokens_used"]["cache_read"] == 22881

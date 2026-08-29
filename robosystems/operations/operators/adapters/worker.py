@@ -78,7 +78,7 @@ async def run_operator_worker(
   # The full GraphMCPTools surface, gated by the operator's read_only flag —
   # the same tool access the API path used. DirectToolAccess only reports
   # tool classes registered by hand, so a model-driven loop on it sees no
-  # tools at all: on the first worker deploy the Cypher operator narrated
+  # tools at all: on the first worker deploy the analyst operator narrated
   # "Tool: get-graph-schema" as text and stopped.
   tools = HttpToolAccess(graph_id, read_only=operator.spec.read_only, user_id=user_id)
   ai_client = get_ai_client()

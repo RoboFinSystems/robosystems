@@ -32,7 +32,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `event_block/` | Cross-domain Event Block registry, engine, and Python handlers |
 | `roboledger/` | RoboLedger domain kernel — `reads/`, `commands/`, `views/`, plus `fiscal_calendar/`, `reports/`, `schedules/`, `fact_set.py` |
 | `roboinvestor/` | RoboInvestor domain kernel — `reads/`, `commands/` |
-| `operators/` | AI Operator system (`CypherOperator`, `MappingOperator`) — see [its README](operators/README.md) |
+| `operators/` | AI Operator system (`AnalystOperator`, `MappingOperator`) — see [its README](operators/README.md) |
 | `graph/` | Platform graph lifecycle: creation, subscriptions, credits, pricing, tiers, subgraphs, deprovisioning, storage reclaim, backup/ingestion under `engine/`, worker tasks under `tasks/` |
 | `extensions/` | OLTP→OLAP materialization (`materialize.py`, `loader.py`, `staleness.py`) |
 | `billing/` | Subscription billing lifecycle shared by routers and off-boarding |

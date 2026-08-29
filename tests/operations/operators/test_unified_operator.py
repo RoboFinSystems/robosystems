@@ -285,6 +285,43 @@ class TestOperatorRegistry:
     with pytest.raises(KeyError, match="not registered"):
       get_operator("nonexistent")
 
+  def test_former_name_resolves_to_the_canonical_operator(self):
+    """`cypher` is the name the analyst shipped under; stored operator_type
+    values (queued tasks, saved operations, client code) keep resolving, and
+    the listing shows canonical names only."""
+    from robosystems.operations.operators.operator_registry import (
+      is_registered,
+      resolve_operator_type,
+    )
+
+    @register_operator("analyst")
+    class Analyst(Operator):
+      spec = OperatorSpec(name="Analyst", description="a", capabilities=[])
+
+      async def run(self, ctx):
+        return OperatorResult(content="a")
+
+    assert resolve_operator_type("cypher") == "analyst"
+    assert isinstance(get_operator("cypher"), Analyst)
+    assert is_registered("cypher")
+    assert "cypher" not in list_operators()
+    assert resolve_operator_type("nonexistent") == "nonexistent"
+
+  def test_direct_registration_beats_the_alias(self):
+    from robosystems.operations.operators.operator_registry import (
+      resolve_operator_type,
+    )
+
+    @register_operator("cypher")
+    class Legacy(Operator):
+      spec = OperatorSpec(name="Legacy", description="l", capabilities=[])
+
+      async def run(self, ctx):
+        return OperatorResult(content="l")
+
+    assert resolve_operator_type("cypher") == "cypher"
+    assert isinstance(get_operator("cypher"), Legacy)
+
   def test_list_agents(self):
     @register_operator("test_a")
     class A(Operator):

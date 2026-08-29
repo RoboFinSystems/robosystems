@@ -1,13 +1,18 @@
-"""CypherOperator — natural-language querying of the graph.
+"""AnalystOperator — natural-language questions answered from the graph.
 
-Drives a bounded tool-use loop (`run_tool_loop`): the schema and example
-queries are fetched up front into the (cached) system prompt, the model
-writes read-only Cypher against them, sees query errors and retries, then
-answers in natural language. Seeing its own errors is the point — a
+Registered as ``analyst``; ``cypher`` is kept as an alias, the name it
+shipped under when Cypher was its only tool. Drives a bounded tool-use loop
+(`run_tool_loop`) over the graph's read-only surface: curated financial
+reads (live statements, fact grids, close status, mapping state), document
+search, semantic memory, GraphQL, and read-only Cypher as the general
+fallback. The schema and example queries are fetched up front into the
+(cached) system prompt and the memories most similar to the question into
+the user turn; the model then calls tools, sees its own errors and retries,
+and answers in natural language. Seeing its own errors is the point — a
 single-shot pipeline that generates one query and formats whatever comes
-back fails on questions this handles. The last non-empty result set is
-returned as structured ``rows`` so the console renders a real table instead
-of scraping the prose.
+back fails on questions this handles. The last non-empty Cypher result set
+is returned as structured ``rows`` so the console renders a real table
+instead of scraping the prose.
 """
 
 from __future__ import annotations
@@ -50,9 +55,9 @@ _RECALL_K = 5
 _MAX_MEMORY_CHARS = 800
 
 
-@register_operator("cypher")
-class CypherOperator(Operator):
-  """Answers a question by writing and running read-only Cypher."""
+@register_operator("analyst")
+class AnalystOperator(Operator):
+  """Answers a question from the graph's read-only tool surface."""
 
   # Read-only tool allowlist. The loop intersects this with the tools the
   # graph actually exposes (generic graphs get only schema + cypher; SEC and
@@ -121,8 +126,11 @@ class CypherOperator(Operator):
   }
 
   spec = OperatorSpec(
-    name="Cypher Operator",
-    description="Answers natural-language questions by querying the graph with Cypher",
+    name="Analyst Operator",
+    description=(
+      "Answers natural-language questions over the graph: curated financial "
+      "reads, documents, memory, GraphQL, and read-only Cypher as the fallback"
+    ),
     capabilities=[
       OperatorCapability.RAG_SEARCH,
       OperatorCapability.ENTITY_ANALYSIS,
@@ -221,8 +229,8 @@ class CypherOperator(Operator):
       max_iterations=max_iterations,
       max_tokens=max_tokens,
       temperature=0.3,
-      operator_type="cypher",
-      operation_description="Cypher query loop",
+      operator_type="analyst",
+      operation_description="Analyst tool loop",
       max_credits=self._get_max_credits(ctx),
     )
 
@@ -271,7 +279,7 @@ class CypherOperator(Operator):
       return orientation
     except Exception as e:
       logger.warning(
-        "Cypher operator orientation prefetch failed on %s; "
+        "Analyst operator orientation prefetch failed on %s; "
         "falling back to tool-driven orientation: %s",
         ctx.graph_id,
         e,
@@ -295,7 +303,7 @@ class CypherOperator(Operator):
       )
     except Exception as e:
       logger.warning(
-        "Cypher operator memory prefetch failed on %s: %s", ctx.graph_id, e
+        "Analyst operator memory prefetch failed on %s: %s", ctx.graph_id, e
       )
       return None
     if not isinstance(result, dict) or "error" in result:
@@ -408,7 +416,7 @@ STEP BUDGET: you have {tool_turns} tool-calling turns before you must answer fro
       ", and you do NOT need `get-graph-schema` first" if orientation is None else ""
     )
 
-    prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
+    prompt = f"""You are a financial-graph analyst for RoboSystems. You answer the user's question from a LadybugDB graph with the tools offered: curated reads where one fits, documents and memory where the graph has them, and read-only Cypher for everything else.
 
 {workflow}
 

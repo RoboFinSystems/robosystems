@@ -52,6 +52,7 @@ from robosystems.operations.operators.credit_preflight import (
 from robosystems.operations.operators.operator_registry import (
   get_operator,
   list_operators,
+  resolve_operator_type,
 )
 from robosystems.operations.operators.orchestrator import (
   OperatorOrchestrator,
@@ -273,6 +274,9 @@ async def _dispatch(
   db: Session,
 ) -> OperatorResponse | JSONResponse:
   """Gate, enqueue, and answer — 202 with links, or 200 under a sync wait."""
+  # A former name resolves here so the queued task and `operator_used` carry
+  # the canonical one.
+  operator_type = resolve_operator_type(operator_type)
   operator = get_operator(operator_type)
   base_mode = (
     BaseOperatorMode.EXTENDED
@@ -348,10 +352,12 @@ async def list_operators_endpoint(
   response_model=OperatorResponse,
   summary="Auto-select Operator for Query",
   description=(
-    "Routes to the best operator for your query. Operators: `cypher` "
-    "(answers natural-language questions by querying the graph; supports "
-    "`quick`, `standard`, `extended`) and `mapping` (autonomous Chart of "
-    "Accounts → rs-gaap mapping; roboledger graphs only, `extended` only). "
+    "Routes to the best operator for your query. Operators: `analyst` "
+    "(answers natural-language questions over the graph — curated financial "
+    "reads, documents, memory, and read-only Cypher; supports `quick`, "
+    "`standard`, `extended`; `cypher` is accepted as its former name) and "
+    "`mapping` (autonomous Chart of Accounts → rs-gaap mapping; roboledger "
+    "graphs only, `extended` only). "
     "`GET /v1/graphs/{graph_id}/operator` lists what is registered. Credits "
     "are consumed by actual token usage, not a fixed price per mode. "
     "The run executes on the background worker: the default answer is 202 "
@@ -415,14 +421,14 @@ async def get_operator_metadata(
   ),
   operator_type: str = Path(
     ...,
-    description="Operator type identifier (e.g., 'financial', 'research', 'rag')",
+    description="Operator type identifier (e.g., 'analyst', 'mapping')",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,32}$",
   ),
   _current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OperatorMetadataResponse:
   operators = list_operators()
-  metadata = operators.get(operator_type)
+  metadata = operators.get(resolve_operator_type(operator_type))
 
   if not metadata:
     raise HTTPException(status_code=404, detail=f"Operator '{operator_type}' not found")
@@ -435,10 +441,11 @@ async def get_operator_metadata(
   response_model=OperatorResponse,
   summary="Execute Specific Operator",
   description=(
-    "Available: `cypher` (natural-language questions answered by querying the "
-    "graph; RAG retrieval is one of its capabilities, not a separate operator) "
-    "and `mapping` (Chart of Accounts → rs-gaap mapping, roboledger graphs "
-    "only). `GET /v1/graphs/{graph_id}/operator` lists what is registered. "
+    "Available: `analyst` (natural-language questions over the graph — "
+    "curated financial reads, documents, memory, and read-only Cypher; RAG "
+    "retrieval is one of its capabilities, not a separate operator; `cypher` "
+    "is accepted as its former name) and `mapping` (Chart of Accounts → "
+    "rs-gaap mapping, roboledger graphs only). `GET /v1/graphs/{graph_id}/operator` lists what is registered. "
     "The run executes on the background worker: the default answer is 202 "
     "with the operation's `_links` (stream, status, cancel); `?mode=sync` "
     "waits up to 50s and answers 200 with the result."

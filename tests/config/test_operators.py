@@ -49,7 +49,7 @@ class TestGetBedrockModelId:
 
   def test_agent_type_override(self):
     # Currently empty overrides, so it falls through to default
-    model_id = OperatorConfig.get_bedrock_model_id(operator_type="cypher")
+    model_id = OperatorConfig.get_bedrock_model_id(operator_type="analyst")
     assert isinstance(model_id, str)
 
   def test_agent_override_takes_precedence(self):
@@ -108,7 +108,7 @@ class TestGetOperatorCapabilities:
   """Tests for OperatorConfig.get_operator_capabilities."""
 
   def test_known_agent(self):
-    caps = OperatorConfig.get_operator_capabilities("cypher")
+    caps = OperatorConfig.get_operator_capabilities("analyst")
     assert "supported_modes" in caps
     assert "requires_credits" in caps
     assert "max_concurrent_requests" in caps
