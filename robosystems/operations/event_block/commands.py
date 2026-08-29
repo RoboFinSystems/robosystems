@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,9 @@ from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import (
   RowLockedError,
   bounded_lock_wait,
@@ -90,6 +93,33 @@ class EventNotPublishableError(Exception):
     self.status = status
 
 
+class EventEffectsAlreadyLandedError(Exception):
+  """Raised when a retraction would orphan effects the books already hold.
+
+  Retracting an event drops it from `is_live`, which is what materialization,
+  QuickBooks write-back, and every reporting read filter on. That is the right
+  answer while the event's ledger rows are still drafts — nothing has hit the
+  books, so removing the event removes the whole story. It is the wrong answer
+  once a row has posted or the event has published to QuickBooks: the effect
+  stays where it landed while the event that explains it disappears, leaving a
+  GL balance no query can attribute and a QuickBooks entry with no local
+  counterpart.
+
+  Past that line the correction is a reversal, not a retraction — the same
+  split `JournalEntryNotDraftError` draws for entries.
+  """
+
+  def __init__(self, event_id: str, status: str, reason: str) -> None:
+    super().__init__(
+      f"Event {event_id} cannot be retracted from {status!r}: {reason}. "
+      "Reverse the posted entries instead — `create-event-block("
+      "event_type='journal_entry_reversed', metadata={entry_id: ...})`."
+    )
+    self.event_id = event_id
+    self.status = status
+    self.reason = reason
+
+
 class DuplicateEventError(Exception):
   """Raised when (source, external_id) already names an event on this graph.
 
@@ -110,9 +140,19 @@ class DuplicateEventError(Exception):
 
 
 # Valid outbound transitions from each status.
-# Terminal states (fulfilled, voided, superseded) have empty sets — no further
-# transitions allowed. `superseded` is reachable from any non-terminal state
-# so corrections can replace an event regardless of how far it has progressed.
+# `voided` and `superseded` are the retracted states and have empty sets — a
+# retraction is final. `superseded` is reachable from every other state so
+# corrections can replace an event regardless of how far it has progressed.
+#
+# `fulfilled` is the *end of the work*, not the end of the record. A handler
+# that targets it (`asset_disposed`, `journal_entry_reversed`) lands the event
+# there with its ledger rows still `draft`, because drafts post at close. That
+# left the pair unretractable: `delete_journal_entry` refuses to delete the
+# last draft of a live event and tells the caller to void or supersede it,
+# while an empty transition set made that impossible — so a disposal draft
+# could never be discarded, only posted and then reversed. Retraction is
+# allowed from `fulfilled` for exactly as long as nothing has landed;
+# `_assert_retractable` is the half that decides when it has.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "captured": frozenset({"committed", "voided", "superseded"}),
   "classified": frozenset(
@@ -120,14 +160,70 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   ),
   "committed": frozenset({"pending", "fulfilled", "voided", "superseded"}),
   "pending": frozenset({"fulfilled", "voided", "superseded"}),
-  "fulfilled": frozenset(),
+  "fulfilled": frozenset({"voided", "superseded"}),
   "voided": frozenset(),
   "superseded": frozenset(),
 }
 
-# Execute must not post these. ``fulfilled`` is also terminal, but a
-# repeat execute of an already-published event is an idempotent no-op
-# (see ``qb_external_id`` / status checks in ``execute_event_block``).
+# Retracted statuses — `Event.is_live` is `status NOT IN` this set.
+_RETRACTED_STATUSES = frozenset({"voided", "superseded"})
+
+# Entry/Transaction statuses that mean the effect is in the books to stay.
+# `reversed` counts: the original posted, and a reversing entry stands against
+# it. Retracting the event would strand both halves of that pair.
+_LANDED_ENTRY_STATUSES = frozenset({"posted", "reversed"})
+_LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
+
+
+def _assert_retractable(session: Session, event: Event) -> None:
+  """Refuse a retraction that would orphan posted or published effects.
+
+  Only consulted for `fulfilled` — every earlier status is retractable by
+  definition, because a handler has not run and there is nothing behind the
+  event yet. Reads run under the event's row lock (taken by the caller), so
+  a concurrent close cannot post a draft between this check and the write.
+  """
+  if event.metadata_ and event.metadata_.get("qb_external_id"):
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      "it has published to QuickBooks",
+    )
+
+  posted_entries = session.execute(
+    select(func.count())
+    .select_from(Entry)
+    .where(
+      Entry.triggered_by_event_id == event.id,
+      Entry.status.in_(_LANDED_ENTRY_STATUSES),
+    )
+  ).scalar_one()
+  if posted_entries:
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      f"{posted_entries} of its journal entries have posted",
+    )
+
+  posted_transactions = session.execute(
+    select(func.count())
+    .select_from(Transaction)
+    .where(
+      Transaction.triggered_by_event_id == event.id,
+      Transaction.status.in_(_LANDED_TRANSACTION_STATUSES),
+    )
+  ).scalar_one()
+  if posted_transactions:
+    raise EventEffectsAlreadyLandedError(
+      str(event.id),
+      str(event.status),
+      f"{posted_transactions} of its transactions have posted",
+    )
+
+
+# Execute must not post these. A repeat execute of an already-``fulfilled``
+# event is an idempotent no-op instead (see ``qb_external_id`` / status
+# checks in ``execute_event_block``), so it stays out of this set.
 _UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
 
 
@@ -554,6 +650,12 @@ def update_event_block(
         f"Cannot transition event from '{event.status}' to '{body.transition_to}'. "
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
+
+    # Retracting a `fulfilled` event is allowed only while nothing it wrote
+    # has landed — see `_assert_retractable`. Checked under the row lock
+    # taken above, before any field on the event is touched.
+    if body.transition_to in _RETRACTED_STATUSES and event.status == "fulfilled":
+      _assert_retractable(session, event)
 
     if body.transition_to == "superseded":
       if body.superseded_by_id is None:

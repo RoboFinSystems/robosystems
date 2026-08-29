@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
+  EventEffectsAlreadyLandedError,
   EventNotFoundError,
   HandlerMetadataValidationError,
   InvalidEventTransitionError,
@@ -67,6 +68,9 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   locked_q.all.return_value = list(events)
   # _load_dimension_ids issues a select via session.execute → return [].
   session.execute.return_value.scalars.return_value.all.return_value = []
+  # `_assert_retractable` counts landed entries/transactions through the same
+  # execute. Default to "nothing has landed"; the guard's own tests override.
+  session.execute.return_value.scalar_one.return_value = 0
   return session
 
 
@@ -144,8 +148,34 @@ class TestSupersedeChain:
     assert predecessor.replaced_by_event_id is None
     session.commit.assert_not_called()
 
-  def test_supersede_from_terminal_state_rejected(self) -> None:
-    """Terminal states (fulfilled, voided, superseded) cannot be superseded."""
+  def test_supersede_from_retracted_state_rejected(self) -> None:
+    """Retraction is final — voided/superseded have no outbound transitions."""
+    for source_status in ("voided", "superseded"):
+      predecessor = _event("evt_a", status=source_status)
+      successor = _event("evt_b")
+      session = _session_with_events(predecessor, successor)
+
+      body = UpdateEventBlockRequest(
+        event_id="evt_a",
+        transition_to="superseded",
+        superseded_by_id="evt_b",
+      )
+      with pytest.raises(InvalidEventTransitionError, match="terminal"):
+        update_event_block(
+          session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+        )
+
+      assert predecessor.status == source_status, f"failed from {source_status}"
+      assert predecessor.replaced_by_event_id is None
+      assert successor.replaces_event_id is None
+      session.commit.assert_not_called()
+
+  def test_supersede_from_fulfilled_allowed_while_nothing_landed(self) -> None:
+    """`fulfilled` is the end of the work, not the end of the record.
+
+    A handler like `asset_disposed` lands its event here with the ledger rows
+    still drafts. Until one posts, the event is still correctable.
+    """
     predecessor = _event("evt_a", status="fulfilled")
     successor = _event("evt_b")
     session = _session_with_events(predecessor, successor)
@@ -155,15 +185,13 @@ class TestSupersedeChain:
       transition_to="superseded",
       superseded_by_id="evt_b",
     )
-    with pytest.raises(InvalidEventTransitionError, match="terminal"):
-      update_event_block(
-        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
-      )
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
 
-    assert predecessor.status == "fulfilled"
-    assert predecessor.replaced_by_event_id is None
-    assert successor.replaces_event_id is None
-    session.commit.assert_not_called()
+    assert predecessor.status == "superseded"
+    assert predecessor.replaced_by_event_id == "evt_b"
+    assert successor.replaces_event_id == "evt_a"
 
   def test_supersede_allowed_from_non_terminal_states(self) -> None:
     """captured / classified / committed / pending all permit supersede."""
@@ -184,6 +212,75 @@ class TestSupersedeChain:
       assert predecessor.status == "superseded", f"failed from {source_status}"
       assert predecessor.replaced_by_event_id == "evt_b"
       assert successor.replaces_event_id == "evt_a"
+
+
+class TestRetractFulfilled:
+  """Retracting a `fulfilled` event, and the line where it stops being allowed.
+
+  Retraction drops the event from `is_live`, which materialization, QuickBooks
+  write-back and every reporting read filter on. Harmless while its rows are
+  drafts; a stranded balance once one has posted.
+  """
+
+  def test_void_allowed_while_rows_are_drafts(self) -> None:
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    update_event_block(
+      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+    )
+
+    assert event.status == "voided"
+    session.commit.assert_called_once()
+
+  def test_void_refused_once_an_entry_has_posted(self) -> None:
+    """The entry stays in the books; voiding would leave nothing explaining it."""
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+    session.execute.return_value.scalar_one.return_value = 1
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    with pytest.raises(EventEffectsAlreadyLandedError, match="have posted"):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert event.status == "fulfilled"
+    session.commit.assert_not_called()
+
+  def test_void_refused_once_published_to_quickbooks(self) -> None:
+    """A local void would desync the QuickBooks entry it already wrote."""
+    event = _event("evt_a", status="fulfilled")
+    event.metadata_ = {"qb_external_id": "qb_123"}
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+    with pytest.raises(EventEffectsAlreadyLandedError, match="QuickBooks"):
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    assert event.status == "fulfilled"
+    session.commit.assert_not_called()
+
+  def test_guard_does_not_apply_to_earlier_statuses(self) -> None:
+    """Only `fulfilled` consults the guard — nothing has run before it.
+
+    A posted-entry count is stubbed high to prove the guard is skipped rather
+    than merely passing.
+    """
+    for source_status in ("captured", "classified", "committed", "pending"):
+      event = _event("evt_a", status=source_status)
+      session = _session_with_events(event)
+      session.execute.return_value.scalar_one.return_value = 99
+
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+      assert event.status == "voided", f"failed from {source_status}"
 
 
 class TestDualityLateBinding:

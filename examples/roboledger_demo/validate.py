@@ -351,6 +351,7 @@ class _Validator:
         f"status={payload.status}",
       )
       self._check("event id returned", bool(payload.id), payload.id or "")
+      disposal_event_id = payload.id
     except Exception as exc:
       self._check("dispose_schedule call", False, str(exc))
       return
@@ -375,12 +376,27 @@ class _Validator:
     except Exception as exc:
       self._check("SumEquals rule deleted after dispose", False, str(exc))
 
-    # Delete the disposal entry this smoke test drafted into close_target.
+    # Retract the disposal this smoke test drafted into close_target.
     # The asset_disposed handler posts a real (draft) disposal entry dated on
     # the last day of close_target; the queued delete_schedule cleanup removes
     # the throwaway schedule but NOT this entry. Left behind, it lingers as an
     # orphan draft in the very period the demo then tells the user to close, so
-    # it would post as a spurious extra closing entry. Clean it up here.
+    # it would post as a spurious extra closing entry.
+    #
+    # Two steps, in this order. The draft is the only ledger row of its event,
+    # so deleting it first is refused — that would leave a live event with
+    # nothing behind it in the books. The retraction belongs on the event; its
+    # drafts are deletable once it is voided. Voiding is allowed here precisely
+    # because nothing has posted yet.
+    try:
+      client.update_event_block(
+        self.graph_id,
+        {"event_id": disposal_event_id, "transition_to": "voided"},
+      )
+      self._check("disposal event voided", True, disposal_event_id)
+    except Exception as exc:
+      self._check("disposal event voided", False, str(exc))
+
     try:
       drafts = client.list_period_drafts(self.graph_id, close_target)
       disposal_ids = [
@@ -397,6 +413,23 @@ class _Validator:
       )
     except Exception as exc:
       self._check("disposal draft cleaned up", False, str(exc))
+
+    # The close target has to be empty of this smoke test's residue — the
+    # demo's next instruction to the user is to close it.
+    try:
+      remaining = client.list_period_drafts(self.graph_id, close_target)
+      leftover = [
+        d.entry_id
+        for d in (remaining.drafts if remaining else [])
+        if d.memo == "Validation disposal"
+      ]
+      self._check(
+        "close target clear of validation drafts",
+        not leftover,
+        f"{len(leftover)} left in {close_target}",
+      )
+    except Exception as exc:
+      self._check("close target clear of validation drafts", False, str(exc))
 
   # ── Ad-hoc rollforward ───────────────────────────────────────────────────
 
