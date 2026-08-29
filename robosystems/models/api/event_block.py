@@ -504,8 +504,11 @@ class UpdateEventBlockRequest(BaseModel):
       "captured → committed | voided | superseded; "
       "classified → committed | pending | fulfilled | voided | superseded; "
       "committed → pending | fulfilled | voided | superseded; "
-      "pending → fulfilled | voided | superseded. Terminal states "
-      "(fulfilled, voided, superseded) accept no further transitions. "
+      "pending → fulfilled | voided | superseded; "
+      "fulfilled → voided | superseded. A retraction (voided, superseded) "
+      "is final and is refused from any status once the event's ledger "
+      "rows have posted or it has published to QuickBooks — reverse the "
+      "posted entries instead. "
       "Note: classified and fulfilled are usually set by handlers, not by "
       "callers, but the transition is allowed for corrections."
     ),

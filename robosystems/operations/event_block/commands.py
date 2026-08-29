@@ -145,12 +145,14 @@ class DuplicateEventError(Exception):
 # corrections can replace an event regardless of how far it has progressed.
 #
 # `fulfilled` is the *end of the work*, not the end of the record. A handler
-# that targets it (`asset_disposed`, `journal_entry_reversed`) lands the event
-# there with its ledger rows still `draft`, because drafts post at close. That
-# left the pair unretractable: `delete_journal_entry` refuses to delete the
-# last draft of a live event and tells the caller to void or supersede it,
-# while an empty transition set made that impossible — so a disposal draft
-# could never be discarded, only posted and then reversed.
+# can target it while its ledger rows are still `draft`, because drafts post
+# at close — `asset_disposed` does. That left the pair unretractable:
+# `delete_journal_entry` refuses to delete the last draft of a live event and
+# tells the caller to void or supersede it, while an empty transition set
+# made that impossible — so a disposal draft could never be discarded, only
+# posted and then reversed. (`journal_entry_reversed` also targets
+# `fulfilled` but posts its reversing entry immediately, so the guard below
+# refuses it from the start — the correction there is another reversal.)
 #
 # What gates a retraction is `_assert_retractable`, which asks whether the
 # event's rows have landed — never which status it is being retracted from.

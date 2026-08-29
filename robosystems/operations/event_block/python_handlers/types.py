@@ -38,8 +38,9 @@ class EventBlockPythonHandler:
   - `event_type`: the discriminator matched against CreateEventBlockRequest.event_type
   - `metadata_schema`: Pydantic model that validates event.metadata before dispatch
   - `target_status`: the event status after a successful dispatch
-    (e.g., 'fulfilled' for terminal events like asset_disposed, 'classified'
-     for events that produce further work)
+    (e.g., 'fulfilled' for events whose work is done, like asset_disposed —
+     still retractable while their rows are drafts; 'classified' for events
+     that produce further work)
   - `dispatch`: the real execution path — reads, computes, writes
   - `dispatch_preview`: the dry-run path — reads, computes, returns plan only
   """
