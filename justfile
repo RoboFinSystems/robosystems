@@ -269,37 +269,13 @@ demo-roboinvestor *args="":
 demo-custom-graph *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}
 
-# Run Seattle Method cross-taxonomy demo (Test Case 1 — Charlie Hoffman's mini, 14 JEs). Flags: --dry-run, --step <name>, --graph <id>
+# Run Seattle Method cross-taxonomy demo (Test Case 1 — Charlie Hoffman's mini, 14 JEs). Flags: --step <name> (re-run one step; see --help), --graph <id>, --dry-run, --no-diff
 demo-seattle-method *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.main {{args}}
 
-# Render the Seattle Method reconciliation report for a graph after the main demo has run
-demo-seattle-method-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.reconcile {{args}}
-
-# Materialize the Seattle Method 4-IB rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
-demo-seattle-method-create-report *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.create_report {{args}}
-
-# Run "The World Online" demo (Seattle Method MINI 2026 — Charlie Hoffman's 22,288-line GL). Flags: --dry-run, --step <name>, --graph <id>, --limit <n>
+# Run "The World Online" demo (Seattle Method MINI 2026 — Charlie Hoffman's 22,288-line GL). Flags: --step <name> (re-run one step; see --help), --graph <id>, --limit <n>, --dry-run, --no-diff, --no-fetch
 demo-world-online *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.main {{args}}
-
-# Render the World Online reconciliation report (mini pivot vs SummaryOfTransactions.csv) for a graph after the main demo has run
-demo-world-online-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.reconcile {{args}}
-
-# Materialize the World Online 4-statement rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
-demo-world-online-create-report *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.create_report {{args}}
-
-# Render the World Online trial balance for a graph after the main demo has run
-demo-world-online-trial-balance *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.trial_balance {{args}}
-
-# Statement-level reconcile of the World Online four-statement anchors vs Charlie's reference instance.xml (after the main demo has written the bundle)
-demo-world-online-statement-reconcile *args="":
-    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.statement_reconcile {{args}}
 
 
 ## CI/CD ##

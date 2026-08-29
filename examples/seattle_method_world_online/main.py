@@ -303,7 +303,9 @@ def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:
   print(f"  {action} {created} rollforward IB(s)")
 
 
-def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
+def step_reconcile(
+  graph_id: str, dry_run: bool = False, no_diff: bool = False
+) -> None:
   """Step 7 — reconcile the graph pivot against SummaryOfTransactions.csv."""
   print("─" * 70)
   print(f"Step 7 — reconcile vs SummaryOfTransactions.csv → graph {graph_id}")
@@ -311,18 +313,17 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
   if dry_run:
     print("  (dry-run — skipping reconcile)")
     return
-  result = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples.seattle_method_world_online.reconcile",
-      graph_id,
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
+  cmd = [
+    "uv",
+    "run",
+    "python",
+    "-m",
+    "examples.seattle_method_world_online.reconcile",
+    graph_id,
+  ]
+  if no_diff:
+    cmd.append("--no-diff")
+  result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
   if result.returncode != 0:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
@@ -409,7 +410,9 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"download_bundles exited with code {result.returncode}")
 
 
-def step_statement_reconcile(graph_id: str, dry_run: bool = False) -> None:
+def step_statement_reconcile(
+  graph_id: str, dry_run: bool = False, no_fetch: bool = False
+) -> None:
   """Step 11 — statement-level reconcile vs the published reference instance.
 
   Reads the four-statement anchor totals out of the JSON-LD bundle step 10
@@ -423,19 +426,33 @@ def step_statement_reconcile(graph_id: str, dry_run: bool = False) -> None:
   if dry_run:
     print("  (dry-run — skipping statement reconcile)")
     return
-  result = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples.seattle_method_world_online.statement_reconcile",
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
+  cmd = [
+    "uv",
+    "run",
+    "python",
+    "-m",
+    "examples.seattle_method_world_online.statement_reconcile",
+  ]
+  if no_fetch:
+    cmd.append("--no-fetch")
+  result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
   if result.returncode != 0:
     raise SystemExit(f"statement_reconcile exited with code {result.returncode}")
+
+
+def _resolve_step_graph_id(cli_graph: str | None) -> str:
+  """Resolve the target graph for a single-step run.
+
+  An explicit ``--graph`` wins; otherwise fall back to the
+  ``world_online_test`` slot the provision step cached, so re-running one
+  step never requires remembering the id.
+  """
+  if cli_graph:
+    return cli_graph
+
+  from examples._common.config import require_cached_graph_id, require_config
+
+  return require_cached_graph_id(require_config(), DEMO_NAME, "just demo-world-online")
 
 
 # ── Step registry ──────────────────────────────────────────────────────────
@@ -483,6 +500,16 @@ def main() -> None:
   parser.add_argument(
     "--dry-run", action="store_true", help="Validate + report; no API writes."
   )
+  parser.add_argument(
+    "--no-diff",
+    action="store_true",
+    help="reconcile step only: print the graph pivot; skip the comparison.",
+  )
+  parser.add_argument(
+    "--no-fetch",
+    action="store_true",
+    help="statement-reconcile step only: use the cached reference instance.",
+  )
   args = parser.parse_args()
 
   # Single-step mode.
@@ -495,15 +522,15 @@ def main() -> None:
       print(f"\nProvisioned graph: {graph_id}")
       print(f"To continue: --graph {graph_id} --step <next>")
     else:
-      if not args.graph:
-        raise SystemExit(
-          f"--step {args.step} requires --graph <id> "
-          "(or run end-to-end without --step to provision one)."
-        )
+      graph_id = _resolve_step_graph_id(args.graph)
       if args.step == "ingest":
-        fn(args.graph, dry_run=args.dry_run, limit=args.limit)
+        fn(graph_id, dry_run=args.dry_run, limit=args.limit)
+      elif args.step == "reconcile":
+        fn(graph_id, dry_run=args.dry_run, no_diff=args.no_diff)
+      elif args.step == "statement-reconcile":
+        fn(graph_id, dry_run=args.dry_run, no_fetch=args.no_fetch)
       else:
-        fn(args.graph, dry_run=args.dry_run)
+        fn(graph_id, dry_run=args.dry_run)
     return
 
   # Full end-to-end run.

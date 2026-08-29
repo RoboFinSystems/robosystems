@@ -17,9 +17,9 @@ opening balances are included rather than assumed.
 
 Prerequisites: ``just demo-world-online`` has ingested the GL.
 
-Run it (the orchestrator runs this as step 9):
-    just demo-world-online-trial-balance <graph_id>
-    just demo-world-online-trial-balance          # cached graph slot
+Run it (step 9 of the orchestrator; --graph defaults to the cached slot):
+    just demo-world-online --step trial-balance
+    just demo-world-online --step trial-balance --graph <graph_id>
 
 Writes ``output/world-online-trial-balance.md``.
 """
@@ -150,7 +150,8 @@ def render(graph_id: str, rows: list) -> str:
     "### Reproduce",
     "",
     "```bash",
-    f"just demo-world-online-trial-balance {graph_id}",
+    "just demo-world-online                        # full pipeline",
+    f"just demo-world-online --step trial-balance --graph {graph_id}",
     "```",
   ]
   return "\n".join(lines)

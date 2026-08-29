@@ -21,9 +21,10 @@ pull step has fetched the reference instance. ``EXTENSIONS_DATABASE_URL`` must
 be set — the ``just`` recipe below loads it from ``.env.local``; export it
 yourself when invoking the module directly.
 
-Run it (the orchestrator runs this as step 7):
-    just demo-seattle-method-reconcile <graph_id>
-    just demo-seattle-method-reconcile <graph_id> --no-diff   # skip the diff
+Run it (step 7 of the orchestrator; --graph defaults to the cached slot):
+    just demo-seattle-method --step reconcile
+    just demo-seattle-method --step reconcile --graph <graph_id>
+    just demo-seattle-method --step reconcile --no-diff   # skip the diff
 
 Writes ``output/seattle-method-case-1.md``.
 """
@@ -59,8 +60,8 @@ EXPECTED_INSTANCE_PATH = (
 )
 # The filter engine needs a direct SQLAlchemy session, so
 # ``EXTENSIONS_DATABASE_URL`` must be in the process env. The
-# ``just demo-seattle-method-reconcile`` recipe loads ``.env.local``, which
-# sets it; export it yourself when invoking this module directly.
+# ``just demo-seattle-method`` recipe loads ``.env.local``, which sets it;
+# export it yourself when invoking this module directly.
 EXTENSIONS_DB_URL = os.environ.get("EXTENSIONS_DATABASE_URL")
 SAFE_GRAPH_ID = re.compile(r"^kg[a-zA-Z0-9_]+$")
 
@@ -287,7 +288,7 @@ def _open_session(graph_id: str) -> Session:
   if not EXTENSIONS_DB_URL:
     raise SystemExit(
       "EXTENSIONS_DATABASE_URL is not set. Run via "
-      "`just demo-seattle-method-reconcile <graph_id>` (which loads "
+      "`just demo-seattle-method --step reconcile` (which loads "
       ".env.local), or export the env var manually."
     )
   engine = create_engine(EXTENSIONS_DB_URL)

@@ -209,13 +209,13 @@ reconciled against his published figures (18/18 concepts; balance sheet balances
 at $14,450).
 
 ```bash
-just demo-seattle-method                      # new graph + every step
-just demo-seattle-method --graph <id>         # against an existing graph
-just demo-seattle-method --step <name>        # re-run a single step
-just demo-seattle-method --dry-run            # validate + report, no writes
+just demo-seattle-method                            # new graph + every step
+just demo-seattle-method --graph <id>               # against an existing graph
+just demo-seattle-method --dry-run                  # validate + report, no writes
 
-just demo-seattle-method-reconcile            # reconciliation report only
-just demo-seattle-method-create-report        # materialize the 4-statement report
+# Re-run one step against the cached graph (--help lists every step name)
+just demo-seattle-method --step reconcile           # reconciliation report only
+just demo-seattle-method --step create-report       # materialize the 4-statement report
 ```
 
 Artifacts land in `examples/seattle_method_demo/output/`: two markdown reports
@@ -237,16 +237,16 @@ reconcile line-for-line against the source pivot (22/23; balance sheet balances
 to $0.00; trial balance balances).
 
 ```bash
-just demo-world-online                          # new graph + every step
-just demo-world-online --graph <id>             # against an existing graph
-just demo-world-online --step <name>            # re-run a single step
-just demo-world-online --limit 50               # smoke-test on a GL subset
-just demo-world-online --dry-run                # validate + report, no writes
+just demo-world-online                                 # new graph + every step
+just demo-world-online --graph <id>                    # against an existing graph
+just demo-world-online --limit 50                      # smoke-test on a GL subset
+just demo-world-online --dry-run                       # validate + report, no writes
 
-just demo-world-online-reconcile                # pivot vs SummaryOfTransactions.csv
-just demo-world-online-create-report            # materialize the 4-statement report
-just demo-world-online-trial-balance            # render the trial balance
-just demo-world-online-statement-reconcile      # statement anchors vs the reference instance
+# Re-run one step against the cached graph (--help lists every step name)
+just demo-world-online --step reconcile                # pivot vs SummaryOfTransactions.csv
+just demo-world-online --step create-report            # materialize the 4-statement report
+just demo-world-online --step trial-balance            # render the trial balance
+just demo-world-online --step statement-reconcile      # statement anchors vs the reference instance
 ```
 
 ## Credentials

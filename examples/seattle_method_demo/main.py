@@ -321,7 +321,9 @@ def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:
   print(f"  {action} {created} rollforward IB(s)")
 
 
-def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
+def step_reconcile(
+  graph_id: str, dry_run: bool = False, no_diff: bool = False
+) -> None:
   """Step 7 — Reconcile against Charlie Hoffman's published mini facts.
 
   Writes ``output/seattle-method-case-1.md`` — the source-vocabulary
@@ -334,18 +336,17 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
   if dry_run:
     print("  (dry-run — skipping reconcile)")
     return
-  result = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples.seattle_method_demo.reconcile",
-      graph_id,
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
+  cmd = [
+    "uv",
+    "run",
+    "python",
+    "-m",
+    "examples.seattle_method_demo.reconcile",
+    graph_id,
+  ]
+  if no_diff:
+    cmd.append("--no-diff")
+  result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
   if result.returncode != 0:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
@@ -414,6 +415,21 @@ def step_create_report(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"create_report exited with code {result.returncode}")
 
 
+def _resolve_step_graph_id(cli_graph: str | None) -> str:
+  """Resolve the target graph for a single-step run.
+
+  An explicit ``--graph`` wins; otherwise fall back to the
+  ``seattle_method_test`` slot the provision step cached, so re-running one
+  step never requires remembering the id.
+  """
+  if cli_graph:
+    return cli_graph
+
+  from examples._common.config import require_cached_graph_id, require_config
+
+  return require_cached_graph_id(require_config(), DEMO_NAME, "just demo-seattle-method")
+
+
 # ── Step registry ────────────────────────────────────────────────────────
 
 STEPS = {
@@ -465,6 +481,11 @@ def main() -> None:
     action="store_true",
     help="Validate + report; do not write to the API.",
   )
+  parser.add_argument(
+    "--no-diff",
+    action="store_true",
+    help="reconcile step only: skip the diff against the published instance.",
+  )
   args = parser.parse_args()
 
   # Single-step mode.
@@ -476,13 +497,14 @@ def main() -> None:
       graph_id = fn()
       print(f"\nProvisioned graph: {graph_id}")
       print(f"To continue: --graph {graph_id} --step <next>")
+    elif args.step == "reconcile":
+      fn(
+        _resolve_step_graph_id(args.graph),
+        dry_run=args.dry_run,
+        no_diff=args.no_diff,
+      )
     else:
-      if not args.graph:
-        raise SystemExit(
-          f"--step {args.step} requires --graph <id> "
-          "(or run end-to-end without --step to provision one)."
-        )
-      fn(args.graph, dry_run=args.dry_run)
+      fn(_resolve_step_graph_id(args.graph), dry_run=args.dry_run)
     return
 
   # Full end-to-end run.

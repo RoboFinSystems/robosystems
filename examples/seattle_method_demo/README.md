@@ -47,10 +47,12 @@ just demo-seattle-method --graph <id> --step reconcile          # mini reconcili
 just demo-seattle-method --graph <id> --step create-report      # rs-gaap 4-IB Report only
 just demo-seattle-method --graph <id> --step download-bundles   # export + validate + DataBook
 
-# Reconcile + create-report can also be run via their dedicated recipes
-# (handy when iterating on the markdown rendering without re-provisioning):
-just demo-seattle-method-reconcile <graph_id>
-just demo-seattle-method-create-report <graph_id>
+# --graph is optional on a single step: it falls back to the cached
+# seattle_method_test slot, so iterating on the markdown rendering needs
+# no graph id and no re-provisioning.
+just demo-seattle-method --step reconcile
+just demo-seattle-method --step reconcile --no-diff   # skip the published-instance diff
+just demo-seattle-method --step create-report
 ```
 
 ## What Gets Created

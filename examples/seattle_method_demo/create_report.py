@@ -19,9 +19,9 @@ Three steps:
 Prerequisites: ``just demo-seattle-method`` has run against the graph, so the
 CoA, mappings and journal entries are in place.
 
-Run it (the orchestrator runs this as step 8):
-    just demo-seattle-method-create-report <graph_id>
-    just demo-seattle-method-create-report          # cached graph slot
+Run it (step 8 of the orchestrator; --graph defaults to the cached slot):
+    just demo-seattle-method --step create-report
+    just demo-seattle-method --step create-report --graph <graph_id>
 
 Writes ``output/seattle-method-case-1-four-statements.md``.
 """
