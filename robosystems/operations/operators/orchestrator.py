@@ -59,7 +59,6 @@ class OrchestratorConfig:
 
   routing_strategy: RoutingStrategy = RoutingStrategy.BEST_MATCH
   enable_rag: bool = False
-  enable_caching: bool = False
   enable_fallback: bool = True
   fallback_operator: str | None = None
   max_retries: int = 2
@@ -84,9 +83,8 @@ from robosystems.operations.operators.base import OperatorResponse  # noqa: E402
 class OperatorOrchestrator:
   """Selects and runs operators for one graph and user.
 
-  Instances hold routing state (round-robin position, per-operator metrics, an
-  optional response cache), so one orchestrator serves a conversation rather
-  than the whole process.
+  Instances hold routing state (round-robin position, per-operator metrics),
+  so one orchestrator serves a conversation rather than the whole process.
   """
 
   def __init__(
@@ -105,14 +103,9 @@ class OperatorOrchestrator:
       "total_queries": 0,
       "operator_usage": {},
       "total_response_time": 0.0,
-      "cache_hits": 0,
-      "cache_misses": 0,
       "errors": 0,
     }
 
-    self._cache: dict[str, OperatorResponse] | None = (
-      {} if config and config.enable_caching else None
-    )
     self._round_robin_index = 0
     self._schema_extensions: list[str] | None = None
 
@@ -170,32 +163,19 @@ class OperatorOrchestrator:
     history: list[dict[str, Any]] | None = None,
     context: dict[str, Any] | None = None,
     selection_criteria: OperatorSelectionCriteria | None = None,
-    force_extended: bool = False,
     stream_callback: Callable | None = None,
     ensemble_size: int | None = None,
   ) -> OperatorResponse:
     """Route a query to an operator and return its response.
 
-    An explicit `operator_type` bypasses routing entirely. `force_extended`
-    skips the cache in both directions, so a deliberate re-run is never served
-    a stale answer. Failures are returned as an error-bearing response rather
-    than raised — this is the boundary the API renders directly.
+    An explicit `operator_type` bypasses routing entirely. Failures are
+    returned as an error-bearing response rather than raised — this is the
+    boundary the API renders directly.
     """
     start_time = time.time()
     self._metrics["total_queries"] += 1
 
     try:
-      if self._cache is not None and not force_extended:
-        cache_key = self._get_cache_key(query, operator_type, mode)
-        if cache_key in self._cache:
-          self._metrics["cache_hits"] += 1
-          cached = self._cache[cache_key]
-          if cached.metadata is None:
-            cached.metadata = {}
-          cached.metadata["from_cache"] = True
-          return cached
-        self._metrics["cache_misses"] += 1
-
       context = context or {}
       if history:
         context["has_history"] = True
@@ -248,10 +228,6 @@ class OperatorOrchestrator:
         self._metrics["operator_usage"][operator_name] = {"calls": 0, "total_time": 0.0}
       self._metrics["operator_usage"][operator_name]["calls"] += 1
       self._metrics["operator_usage"][operator_name]["total_time"] += execution_time
-
-      if self._cache is not None and not force_extended:
-        cache_key = self._get_cache_key(query, operator_type, mode)
-        self._cache[cache_key] = response
 
       return response
 
@@ -666,15 +642,8 @@ class OperatorOrchestrator:
       "total_queries": self._metrics["total_queries"],
       "operator_usage": self._metrics["operator_usage"],
       "average_response_time": avg_time,
-      "cache_hits": self._metrics.get("cache_hits", 0),
-      "cache_misses": self._metrics.get("cache_misses", 0),
       "errors": self._metrics["errors"],
     }
-
-  def _get_cache_key(
-    self, query: str, operator_type: str | None, mode: OperatorMode
-  ) -> str:
-    return f"{operator_type or 'auto'}:{mode.value}:{hash(query)}"
 
   def _sum_tokens(self, responses: list[OperatorResponse]) -> dict[str, int]:
     total = {"input": 0, "output": 0}

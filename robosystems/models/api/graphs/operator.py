@@ -268,8 +268,6 @@ class OperatorMetricsResponse(BaseModel):
   average_response_time: float = Field(
     ..., description="Average response time in seconds"
   )
-  cache_hits: int = Field(0, description="Number of cache hits")
-  cache_misses: int = Field(0, description="Number of cache misses")
   errors: int = Field(0, description="Number of errors")
   timestamp: datetime = Field(
     default_factory=datetime.utcnow, description="Metrics timestamp"

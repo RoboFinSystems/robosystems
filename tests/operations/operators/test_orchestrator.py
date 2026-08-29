@@ -61,7 +61,6 @@ class TestOrchestratorConfig:
     config = OrchestratorConfig(
       routing_strategy=RoutingStrategy.CAPABILITY_BASED,
       enable_rag=True,
-      enable_caching=True,
       enable_fallback=True,
       fallback_operator="financial",
       max_retries=3,
@@ -75,7 +74,6 @@ class TestOrchestratorConfig:
     config = OrchestratorConfig()
     assert config.routing_strategy == RoutingStrategy.BEST_MATCH
     assert config.enable_rag is False
-    assert config.enable_caching is False
     assert config.enable_fallback is True
     assert config.fallback_operator == "analyst"
 
@@ -363,20 +361,6 @@ class TestOperatorOrchestrator:
       query="Stream this response", mode=OperatorMode.STREAMING
     )
     assert response.mode_used == OperatorMode.STREAMING
-
-  @pytest.mark.asyncio
-  async def test_caching_enabled(self, orchestrator):
-    orchestrator.config.enable_caching = True
-    orchestrator._cache = {}
-
-    response1 = await orchestrator.route_query(
-      query="Cached query", mode=OperatorMode.QUICK
-    )
-    response2 = await orchestrator.route_query(
-      query="Cached query", mode=OperatorMode.QUICK
-    )
-    assert response1.content == response2.content
-    assert response2.metadata.get("from_cache") is True
 
   @pytest.mark.asyncio
   async def test_load_balanced_routing(self, orchestrator):
