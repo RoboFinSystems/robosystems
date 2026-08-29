@@ -2811,7 +2811,8 @@ def _build_rows(
       # rolled-up sum of all descendants for parent nodes, so subtotal
       # rows get the correct aggregate instead of zeros.
       vals = [
-        computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)
+        _unsigned_zero(computed_per_period[i].get(node.element_id, 0.0))
+        for i in range(n_periods)
       ]
     # A row is a subtotal if it aggregates other rows by either path:
     # (a) it has child summands in the disclosure DAG, or (b) it is a
@@ -2869,5 +2870,14 @@ def _natural_sign(net_balance: float, balance_type: str) -> float:
   and Net Income = Revenue - Expenses works correctly.
   """
   if balance_type == "credit":
-    return -net_balance
+    # A zero balance has no sign: ``-(0.0)`` is ``-0.0``, which compares
+    # equal to zero but formats as "-$0.00" on a statement.
+    return -net_balance if net_balance else 0.0
   return net_balance
+
+
+def _unsigned_zero(value: float | None) -> float | None:
+  """Normalize ``-0.0`` to ``0.0`` at the point rows leave the renderer, so
+  no sign-flipping path upstream (natural sign, cash-flow deltas, equity
+  reducers) can put "-$0.00" on a statement."""
+  return 0.0 if value == 0.0 else value
