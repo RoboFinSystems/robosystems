@@ -15,7 +15,7 @@ Functions are pure: ``(Session, RequestModel, created_by) → ResponseModel``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -150,9 +150,11 @@ class DuplicateEventError(Exception):
 # left the pair unretractable: `delete_journal_entry` refuses to delete the
 # last draft of a live event and tells the caller to void or supersede it,
 # while an empty transition set made that impossible — so a disposal draft
-# could never be discarded, only posted and then reversed. Retraction is
-# allowed from `fulfilled` for exactly as long as nothing has landed;
-# `_assert_retractable` is the half that decides when it has.
+# could never be discarded, only posted and then reversed.
+#
+# What gates a retraction is `_assert_retractable`, which asks whether the
+# event's rows have landed — never which status it is being retracted from.
+# The table decides reachability; the guard decides safety.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "captured": frozenset({"committed", "voided", "superseded"}),
   "classified": frozenset(
@@ -175,13 +177,43 @@ _LANDED_ENTRY_STATUSES = frozenset({"posted", "reversed"})
 _LANDED_TRANSACTION_STATUSES = frozenset({"posted"})
 
 
+def _retraction_fence_dates(session: Session, event_id: str) -> list[date]:
+  """Posting dates of every ledger row a retraction of this event would strand.
+
+  Read before the event row lock so the caller can take the shared period
+  fence in the order the rest of the module uses — fence, then rows.
+  """
+  entry_dates = session.execute(
+    select(Entry.posting_date).where(Entry.triggered_by_event_id == event_id).distinct()
+  ).scalars()
+  transaction_dates = session.execute(
+    select(Transaction.date)
+    .where(Transaction.triggered_by_event_id == event_id)
+    .distinct()
+  ).scalars()
+  return sorted({d for d in (*entry_dates, *transaction_dates) if d is not None})
+
+
 def _assert_retractable(session: Session, event: Event) -> None:
   """Refuse a retraction that would orphan posted or published effects.
 
-  Only consulted for `fulfilled` — every earlier status is retractable by
-  definition, because a handler has not run and there is nothing behind the
-  event yet. Reads run under the event's row lock (taken by the caller), so
-  a concurrent close cannot post a draft between this check and the write.
+  Consulted for every retraction, not just from `fulfilled`. An earlier
+  status is not evidence that nothing is behind the event: `classified` and
+  `committed` handlers (`schedule_entry_due`, `journal_entry_recorded`,
+  `schedule_created`) write their ledger rows when they fire, and close
+  promotes any draft in the period whose event is not already retracted —
+  it filters on `voided`/`superseded`, not on `fulfilled`. So a `committed`
+  event can sit across a close, collect posted entries, and reach here
+  looking retractable. What decides is whether anything landed, which is
+  what this reads; the status never did.
+
+  Correctness depends on the caller having taken the shared period fence
+  (`_retraction_fence_dates` → `assert_period_not_closed`) *before* the
+  event row lock. The row lock alone is not enough: close promotes drafts
+  with a bulk `UPDATE` over `entries` filtered by posting date, and never
+  touches the owning `Event` row — so it does not contend on that lock, and
+  a count taken under it can read zero while close is mid-flight. The fence
+  is the only thing that serializes the two.
   """
   if event.metadata_ and event.metadata_.get("qb_external_id"):
     raise EventEffectsAlreadyLandedError(
@@ -608,6 +640,18 @@ def update_event_block(
         )
       )
     assert_period_not_closed(session, *sorted(fence_dates))
+  # A retraction drops the event from `is_live` while close is separately
+  # promoting its drafts to posted. Close excludes only events already
+  # retracted, and reaches the entries through a bulk `UPDATE` that never
+  # locks the `Event` row — so nothing but this fence orders the two, and
+  # without it the guard below can read zero posted rows in the window where
+  # close is about to post them. Fenced on the rows' own posting dates, not
+  # the event's: an event with no ledger rows has nothing to strand and
+  # stays retractable even where its date falls in a closed period.
+  if body.transition_to in _RETRACTED_STATUSES:
+    retraction_dates = _retraction_fence_dates(session, peek.id)
+    if retraction_dates:
+      assert_period_not_closed(session, *retraction_dates)
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -651,10 +695,11 @@ def update_event_block(
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
 
-    # Retracting a `fulfilled` event is allowed only while nothing it wrote
-    # has landed — see `_assert_retractable`. Checked under the row lock
-    # taken above, before any field on the event is touched.
-    if body.transition_to in _RETRACTED_STATUSES and event.status == "fulfilled":
+    # A retraction is allowed only while nothing the event wrote has landed —
+    # see `_assert_retractable`, which also explains why the status it is
+    # retracted *from* does not narrow this. Runs under the row lock taken
+    # above and the period fence taken before it, ahead of any field write.
+    if body.transition_to in _RETRACTED_STATUSES:
       _assert_retractable(session, event)
 
     if body.transition_to == "superseded":

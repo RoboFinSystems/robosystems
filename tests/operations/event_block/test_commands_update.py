@@ -264,23 +264,86 @@ class TestRetractFulfilled:
     assert event.status == "fulfilled"
     session.commit.assert_not_called()
 
-  def test_guard_does_not_apply_to_earlier_statuses(self) -> None:
-    """Only `fulfilled` consults the guard — nothing has run before it.
+  def test_guard_applies_to_every_status_not_just_fulfilled(self) -> None:
+    """An earlier status is not evidence that nothing is behind the event.
 
-    A posted-entry count is stubbed high to prove the guard is skipped rather
-    than merely passing.
+    `classified` and `committed` handlers write their ledger rows when they
+    fire, and close promotes any draft whose event is not already retracted.
+    So a `committed` event can sit across a close and collect posted entries
+    while still looking retractable by status alone.
     """
     for source_status in ("captured", "classified", "committed", "pending"):
       event = _event("evt_a", status=source_status)
       session = _session_with_events(event)
-      session.execute.return_value.scalar_one.return_value = 99
+      session.execute.return_value.scalar_one.return_value = 1
+
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      with pytest.raises(EventEffectsAlreadyLandedError):
+        update_event_block(
+          session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+        )
+
+      assert event.status == source_status, f"failed from {source_status}"
+      session.commit.assert_not_called()
+
+  def test_retraction_takes_the_period_fence_before_the_row_lock(self) -> None:
+    """The row lock alone cannot order a retraction against a close.
+
+    Close promotes drafts with a bulk UPDATE over `entries` and never touches
+    the owning Event row, so it does not contend on that lock — the shared
+    period fence is the only thing that serializes the two, and it has to be
+    taken before the lock to match close's own fence-then-rows order.
+    """
+    event = _event("evt_a", status="fulfilled")
+    session = _session_with_events(event)
+    calls: list[str] = []
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[date(2026, 7, 31)],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed",
+        side_effect=lambda *a, **k: calls.append("fence"),
+      ),
+      patch("robosystems.operations.event_block.commands.bounded_lock_wait") as lock,
+    ):
+      lock.return_value.__enter__ = lambda _self: calls.append("lock") or None
+      lock.return_value.__exit__ = lambda *_a: None
 
       body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
       update_event_block(
         session, body, created_by="usr_test", graph_id="kg00000000000000aa"
       )
 
-      assert event.status == "voided", f"failed from {source_status}"
+    assert calls == ["fence", "lock"], calls
+
+  def test_retraction_without_ledger_rows_takes_no_fence(self) -> None:
+    """Nothing to strand, nothing to fence.
+
+    Keeps a `captured` event that never produced rows retractable even where
+    its date falls in a closed period.
+    """
+    event = _event("evt_a", status="captured")
+    session = _session_with_events(event)
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands._retraction_fence_dates",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.assert_period_not_closed"
+      ) as fence,
+    ):
+      body = UpdateEventBlockRequest(event_id="evt_a", transition_to="voided")
+      update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
+
+    fence.assert_not_called()
+    assert event.status == "voided"
 
 
 class TestDualityLateBinding:
