@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -54,6 +55,12 @@ class TestNaturalSign:
   def test_zero(self):
     assert _natural_sign(0.0, "debit") == 0.0
     assert _natural_sign(0.0, "credit") == 0.0
+
+  def test_zero_credit_balance_is_not_negative_zero(self):
+    # ``-0.0 == 0.0`` is True, so the equality above cannot see the sign;
+    # a zero Accounts Payable rendered as "-$0.00" on a live balance sheet.
+    result = _natural_sign(0.0, "credit")
+    assert math.copysign(1.0, result) == 1.0
 
 
 class TestComputePriorPeriod:
@@ -225,6 +232,41 @@ class TestBuildRows:
     assert rows[2].element_name == "Revenues"
     assert rows[2].values == [500.0]
     assert rows[2].is_subtotal is True
+
+  def test_zero_credit_leaf_carries_no_sign(self):
+    """A credit-normal leaf whose current balance is exactly zero (debits
+    equal credits) rendered as ``-0.0`` — "-$0.00" on the balance sheet —
+    while its prior-period value kept the row visible."""
+    hierarchy = [
+      _HierarchyNode(
+        element_id="ap",
+        qname="rs-gaap:AccountsPayableCurrent",
+        name="Accounts Payable, Current",
+        classification="liability",
+        balance_type="credit",
+        is_abstract=False,
+        depth=0,
+      )
+    ]
+    current = {
+      "ap": _Balance(
+        element_id="ap",
+        qname="rs-gaap:AccountsPayableCurrent",
+        name="Accounts Payable, Current",
+        classification="liability",
+        balance_type="credit",
+        total_debits=195.94,
+        total_credits=195.94,
+        net_balance=0.0,
+      )
+    }
+    prior = self._make_balances({"ap": 195.94})
+
+    rows = _build_rows(hierarchy, [current, prior], {})
+
+    assert len(rows) == 1
+    assert rows[0].values == [0.0, 195.94]
+    assert math.copysign(1.0, rows[0].values[0]) == 1.0
 
   def test_nested_hierarchy(self):
     """Two-level nesting: root → abstract parent → leaves."""
