@@ -253,7 +253,7 @@ Because operators call the same `middleware/mcp/tools/` classes as the external 
 
 Two operators ship today:
 
-- **CypherOperator** — translates natural-language questions into Cypher over the analytical graph, calling `get-graph-schema` and `read-graph-cypher`. It answers questions like "What are my five largest expense accounts this year?".
+- **AnalystOperator** (`analyst`; `cypher` is accepted as its former name) — answers natural-language questions over the graph from its read-only tool surface: curated financial reads (`live-financial-statement`, `build-fact-grid`, close and mapping status), `search-documents`, `recall`, GraphQL, and read-only Cypher as the general fallback. It answers questions like "What are my five largest expense accounts this year?".
 - **MappingOperator** — assists with chart-of-accounts mapping; scoped to graphs carrying the `roboledger` schema extension (it will not run on a graph without it).
 
 An operator declares its capabilities through an `OperatorSpec` (`name`, `description`, `capabilities`, `supported_modes`, `requires_credits`, `execution_profile`, and a `graph_scope`). The `graph_scope` restricts which graphs the operator runs on — by `shared_repo` or by `schema_extension` — which is how MappingOperator is confined to ledger graphs.
