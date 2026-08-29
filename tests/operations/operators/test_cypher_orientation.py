@@ -1,4 +1,5 @@
-"""CypherOperator orientation prefetch — schema/examples in the system prefix.
+"""CypherOperator prefetches — schema/examples in the system prefix, memories
+in the user turn.
 
 Schema and example queries are deterministic per graph, so the operator
 fetches them once up front and renders them into the (cached) system prompt
@@ -6,6 +7,11 @@ instead of leaving them as tools: the model gets a complete schema rather
 than a truncated tool result, and a standard question loses two orientation
 model calls. The tool-driven path survives as the fallback when the
 prefetch fails.
+
+Semantic memory is prefetched the same way but lands in the opposite place:
+the hits depend on the question, and they are tenant data, so they are
+rendered ahead of the question in the user turn and never enter the cached
+prefix.
 """
 
 from __future__ import annotations
@@ -201,3 +207,113 @@ async def test_max_credits_reaches_the_loop_and_garbage_is_ignored():
     ctx = _ctx(tools)
     ctx.extra["max_credits"] = bad
     assert CypherOperator._get_max_credits(ctx) is None, bad
+
+
+# ── Semantic memory prefetch ─────────────────────────────────────────────
+
+MEMORIES = {
+  "total": 2,
+  "results": [
+    {
+      "id": "m1",
+      "score": 0.82,
+      "text": "Software subscriptions are coded to 6200 Dues & Subscriptions,\nnot 6100.",
+      "tags": ["coa"],
+    },
+    {
+      "id": "m2",
+      "score": 0.71,
+      "text": "July 2026 close: Amex feed lagged.",
+      "tags": None,
+    },
+  ],
+}
+
+
+async def test_memories_are_prefetched_into_the_user_turn_not_the_prefix():
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher", "recall"],
+    {"get-graph-schema": SCHEMA, "recall": MEMORIES},
+  )
+  kwargs = await _run(tools)
+
+  user_message = kwargs["user_message"]
+  assert user_message.startswith("REMEMBERED CONTEXT")
+  # Whitespace is collapsed, tags ride along, the question closes the turn.
+  assert (
+    "- Software subscriptions are coded to 6200 Dues & Subscriptions, not 6100. (tags: coa)"
+    in user_message
+  )
+  assert "- July 2026 close: Amex feed lagged.\n" in user_message
+  assert user_message.endswith("QUESTION: Total expenses in July?")
+  # Tenant data never enters the cached system prefix; the routing note does.
+  assert "6200 Dues" not in kwargs["system"]
+  assert "MEMORY (" in kwargs["system"]
+  # The question was recalled with the question, and `recall` stays offered
+  # for a follow-up on a term that surfaces mid-investigation.
+  tools.call_tool.assert_any_await(
+    "recall", {"query": "Total expenses in July?", "k": 5}, return_raw=True
+  )
+  assert "recall" in kwargs["tool_names"]
+
+
+async def test_empty_memory_store_sends_the_bare_question():
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher", "recall"],
+    {"get-graph-schema": SCHEMA, "recall": {"total": 0, "results": []}},
+  )
+  kwargs = await _run(tools)
+  assert kwargs["user_message"] is None
+  assert "MEMORY (" in kwargs["system"]
+
+
+@pytest.mark.parametrize(
+  "failure",
+  [
+    RuntimeError("memory store down"),
+    {"error": "disabled", "message": "Semantic memory is not enabled."},
+    {"results": [{"id": "m", "text": "   "}]},
+    "not a dict",
+  ],
+)
+async def test_memory_prefetch_failure_is_silent(failure):
+  """A failed or empty recall must never cost the question — orientation
+  still lands and the question goes in bare."""
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher", "recall"],
+    {"get-graph-schema": SCHEMA, "recall": failure},
+  )
+  kwargs = await _run(tools)
+  assert kwargs["user_message"] is None
+  assert "GRAPH SCHEMA" in kwargs["system"]
+
+
+async def test_graph_without_recall_gets_no_memory_prefetch():
+  """SEC and memory-disabled deployments expose no `recall`: no call, no note."""
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher"],
+    {"get-graph-schema": SCHEMA},
+  )
+  kwargs = await _run(tools)
+  assert kwargs["user_message"] is None
+  assert "MEMORY (" not in kwargs["system"]
+  assert all(c.args[0] != "recall" for c in tools.call_tool.await_args_list)
+
+
+def test_oversized_memories_are_capped_per_hit():
+  hits = [{"id": str(i), "text": "x" * 5000, "tags": None} for i in range(5)]
+  message = CypherOperator._build_user_message("q", hits)
+  assert message is not None
+  assert message.count("x" * 800 + "…") == 5
+  assert "x" * 801 not in message
+
+
+async def test_document_search_prompt_says_when_to_go_semantic():
+  """`search-documents` is BM25 unless told otherwise; the prompt has to say so
+  or meaning-shaped questions under-retrieve on keyword matching."""
+  tools = _tools(
+    ["get-graph-schema", "read-graph-cypher", "search-documents"],
+    {"get-graph-schema": SCHEMA},
+  )
+  kwargs = await _run(tools)
+  assert "keyword (BM25) search by default; pass `semantic=true`" in kwargs["system"]

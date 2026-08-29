@@ -635,3 +635,43 @@ async def test_cancel_at_the_cap_skips_the_wrap_up_call():
   assert result.hit_cap is False
   assert ai.create_message.await_count == 1
   assert result.rows == [{"n": 1}]
+
+
+async def test_user_message_override_replaces_the_opening_turn():
+  """Per-request context (recalled memories) is prefixed onto the question in
+  the transcript, never in the cached system prefix."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(return_value=_final("42"))
+  ctx = _ctx(ai, _tools_mock([]))
+
+  await run_tool_loop(
+    ctx,
+    system="sys",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=1000,
+    user_message="REMEMBERED CONTEXT:\n- x\n\nQUESTION: How many companies?",
+  )
+
+  kwargs = ai.create_message.await_args.kwargs
+  assert kwargs["system"] == "sys"
+  opening = kwargs["messages"][-1]
+  assert opening.role == "user"
+  assert opening.content == "REMEMBERED CONTEXT:\n- x\n\nQUESTION: How many companies?"
+
+
+async def test_opening_turn_defaults_to_the_question():
+  ai = MagicMock()
+  ai.create_message = AsyncMock(return_value=_final("42"))
+  ctx = _ctx(ai, _tools_mock([]), query="How many companies?")
+
+  await run_tool_loop(
+    ctx,
+    system="sys",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=1000,
+  )
+  assert (
+    ai.create_message.await_args.kwargs["messages"][-1].content == "How many companies?"
+  )

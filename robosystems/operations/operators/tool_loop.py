@@ -109,6 +109,7 @@ async def run_tool_loop(
   operation_description: str = "Tool-use loop",
   max_error_retries: int = DEFAULT_MAX_ERROR_RETRIES,
   max_credits: float | None = None,
+  user_message: str | None = None,
 ) -> ToolLoopResult:
   """Run a bounded tool-use loop and return the model's final answer.
 
@@ -128,6 +129,11 @@ async def run_tool_loop(
   what it has — so the wrap-up turn itself can carry the total somewhat past
   the ceiling, but a runaway run stops at a number the caller chose rather
   than at the iteration cap.
+
+  ``user_message`` replaces ``ctx.query`` as the opening user turn, for a
+  caller that prefixes the question with per-request context (recalled
+  memories). That context is tenant data and varies per question, so it
+  belongs here in the transcript, never in the cached system prefix.
   """
   tools = await ctx.tools.get_tool_schemas(tool_names)
   if not tools:
@@ -140,7 +146,7 @@ async def run_tool_loop(
   advertised = {t["name"] for t in tools}
 
   messages: list[AIMessage] = _seed_history(ctx)
-  messages.append(AIMessage(role="user", content=ctx.query))
+  messages.append(AIMessage(role="user", content=user_message or ctx.query))
 
   tools_called: list[str] = []
   last_rows: list[dict[str, Any]] | None = None
