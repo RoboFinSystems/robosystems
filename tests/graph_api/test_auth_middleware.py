@@ -48,6 +48,27 @@ class TestLadybugAuthMiddleware:
       call_next.assert_called_with(mock_request)
 
   @pytest.mark.asyncio
+  async def test_cluster_probes_require_key_in_prod(self, mock_app, mock_request):
+    """Cluster inventory and metrics are not ALB probes — they need the key."""
+    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = None
+
+      middleware = LadybugAuthMiddleware(mock_app, api_key="secret-key")
+      call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
+
+      for path in ("/info", "/metrics", "/openapi.json", "/docs", "/redoc", "/"):
+        mock_request.url.path = path
+        mock_request.headers = Headers({})
+        response = await middleware.dispatch(mock_request, call_next)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED, path
+        call_next.assert_not_called()
+
+      mock_request.url.path = "/health"
+      response = await middleware.dispatch(mock_request, call_next)
+      assert response.status_code == 200
+
+  @pytest.mark.asyncio
   async def test_middleware_development_bypass(self, mock_app, mock_request):
     """Test that authentication is bypassed in development."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:

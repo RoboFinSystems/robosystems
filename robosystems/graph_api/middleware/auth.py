@@ -2,7 +2,7 @@
 Authentication middleware for Graph API with environment-based security.
 
 Provides API key authentication for production/staging environments while
-allowing unrestricted access in development and from bastion hosts.
+allowing unrestricted access in development.
 """
 
 import time
@@ -21,20 +21,11 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
   """API key authentication for the Graph API.
 
   Enforced in production and staging only; development runs unauthenticated.
-  Health, docs and metrics paths are always exempt so probes and the ALB do
-  not need a key. Repeated failures from one IP are locked out.
+  ``/health`` is the only exempt path so ALB and container probes do not
+  need a key. Repeated failures from one IP are locked out.
   """
 
-  EXEMPT_PATHS = {
-    "/health",
-    "/status",
-    "/info",
-    "/metrics",
-    "/openapi.json",
-    "/docs",
-    "/redoc",
-    "/",
-  }
+  EXEMPT_PATHS = frozenset({"/health"})
 
   def __init__(self, app, api_key: str | None = None, key_type: str = "writer"):
     super().__init__(app)
