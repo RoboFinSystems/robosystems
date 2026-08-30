@@ -187,14 +187,13 @@ class TestGraphMCPClient:
   @pytest.mark.unit
   async def test_get_graph_info(self, mock_async_graph_client, mock_httpx_client):
     """Test graph info retrieval (optimized, no relationship counts)."""
-    # Mock API info response
-    info_response = MagicMock()
-    info_response.raise_for_status = MagicMock()
-    info_response.json.return_value = {
-      "database_path": "/path/to/db",
-      "read_only": True,
-      "uptime_seconds": 3600,
-    }
+    mock_async_graph_client.get_info = AsyncMock(
+      return_value={
+        "database_path": "/path/to/db",
+        "read_only": True,
+        "uptime_seconds": 3600,
+      }
+    )
 
     # Mock the queries responses - no relationship counts for performance
     query_responses = [
@@ -211,7 +210,6 @@ class TestGraphMCPClient:
       ],
     ]
 
-    mock_httpx_client.get.return_value = info_response
     mock_async_graph_client.query.side_effect = [
       {"data": response, "execution_time_ms": 10} for response in query_responses
     ]
@@ -224,6 +222,7 @@ class TestGraphMCPClient:
       client.graph_client = mock_async_graph_client
 
       info = await client.get_graph_info()
+      mock_async_graph_client.get_info.assert_awaited_once()
 
       assert info["graph_id"] == "test"
       assert info["total_nodes"] == 150  # Sum of Entity (100) + Report (50)

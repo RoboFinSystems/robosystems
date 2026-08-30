@@ -223,16 +223,7 @@ def create_app() -> FastAPI:
         }
       }
 
-      exempt_paths = {
-        "/health",
-        "/status",
-        "/info",
-        "/metrics",
-        "/openapi.json",
-        "/docs",
-        "/redoc",
-        "/",
-      }
+      exempt_paths = {"/health"}
       for path, methods in openapi_schema["paths"].items():
         if path not in exempt_paths:
           for method in methods.values():
@@ -314,7 +305,7 @@ def create_app() -> FastAPI:
 
   app.include_router(health.router)  # /health for load balancer health checks
   app.include_router(info.router)  # /info for cluster info
-  app.include_router(metrics.router)  # /metrics for monitoring systems
+  app.include_router(metrics.router)  # /metrics (cluster key in prod/staging)
 
   # Database routers
   app.include_router(databases.management.router)

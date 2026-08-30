@@ -644,10 +644,9 @@ class GraphMCPClient:
         Dictionary with graph statistics
     """
     try:
-      # Get API info
-      response = await self.client.get(f"{self.api_base_url}/info")
-      response.raise_for_status()
-      api_info = response.json()
+      # Cluster probe rides GraphClient so it carries X-Graph-API-Key in
+      # prod/staging the same way every other Graph API call does.
+      api_info = await self.graph_client.get_info()
 
       # Get table information from database
       node_labels = []
