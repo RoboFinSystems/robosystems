@@ -363,6 +363,7 @@ async def delete_graph_op(
     BillingSubscription,
     SubscriptionStatus,
   )
+  from robosystems.models.core.graph import Graph, GraphStatus
   from robosystems.models.core.graph.graph_user import GraphUser
   from robosystems.operations.providers.payment_provider import get_payment_provider
   from robosystems.security import SecurityAuditLogger, SecurityEventType
@@ -538,6 +539,27 @@ async def delete_graph_op(
     )
 
     if immediate:
+      # Suspend here rather than waiting for expired_graph_subscription_sensor
+      # to notice. The cancel above already wrote everything that sensor keys
+      # off (status=canceled, ends_at=now, cancellation_type=immediate), so the
+      # graph is irreversibly gone the moment it commits — but Graph.status is
+      # a projection of billing state reconciled on a 300s tick, so until then
+      # every read still reports "active" and the graph stays fully usable.
+      # Measured in production: one teardown reported active for 2m50s after
+      # the call returned, another for roughly five minutes — an unpredictable
+      # 0-300s window in which a destroyed graph looks perfectly healthy and
+      # still answers queries. There is no undo past this point, so the status
+      # must not lag the fact.
+      #
+      # The sensor stays as the backstop: it still owns period-end expiry,
+      # payment failures, provider-originated cancels, and any run that dies
+      # between the cancel commit and this write. Its query filters on
+      # status == ACTIVE, so once this lands it simply stops matching. Guarded
+      # on ACTIVE because transition_status rejects suspended -> suspended.
+      graph_row = Graph.get_by_id(graph_id, db)
+      if graph_row and graph_row.status == GraphStatus.ACTIVE.value:
+        graph_row.transition_status(GraphStatus.SUSPENDED, db)
+
       return {
         "graph_id": graph_id,
         "subscription_id": subscription.id,

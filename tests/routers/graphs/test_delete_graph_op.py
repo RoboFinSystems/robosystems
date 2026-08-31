@@ -484,3 +484,151 @@ class TestDeleteGraphRunner:
     assert exc.value.status_code == 502
     sub.cancel.assert_not_called()
     mock_log_event.assert_not_called()
+
+
+class TestDeleteGraphImmediateSuspend:
+  """An immediate teardown must mark the graph suspended before returning.
+
+  `subscription.cancel(immediate=True)` writes everything
+  `expired_graph_subscription_sensor` keys off, so the graph is irreversibly
+  gone the moment it commits. Leaving `Graph.status` for the sensor to
+  reconcile on its 300s tick meant every read reported "active" — and the
+  graph stayed fully usable — for an unpredictable 0-300s afterwards.
+  """
+
+  _setup_admin_membership = TestDeleteGraphRunner._setup_admin_membership
+  # `_patch_org_owner` is a staticmethod on the source class; accessing it
+  # there yields the bare function, so re-wrap it or `self` binds as its
+  # first positional argument.
+  _patch_org_owner = staticmethod(TestDeleteGraphRunner._patch_org_owner)
+
+  @staticmethod
+  def _graph_row(status: str = "active") -> MagicMock:
+    row = MagicMock()
+    row.graph_id = "kg_x"
+    row.status = status
+    return row
+
+  async def _run(self, db: MagicMock, body: DeleteGraphOp):
+    with self._patch_org_owner("OWNER"):
+      return await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(user_id="usr_admin"),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
+
+  @staticmethod
+  def _sub() -> MagicMock:
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = None
+    return sub
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.graph.Graph.get_by_id")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_immediate_suspends_graph_before_returning(
+    self,
+    mock_get_sub: MagicMock,
+    mock_get_graph: MagicMock,
+    _mock_log_event: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    from robosystems.models.core.graph import GraphStatus
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+    mock_get_sub.return_value = self._sub()
+    graph_row = self._graph_row(status="active")
+    mock_get_graph.return_value = graph_row
+
+    envelope = await self._run(db, DeleteGraphOp(confirm="kg_x"))
+
+    graph_row.transition_status.assert_called_once_with(GraphStatus.SUSPENDED, db)
+    assert envelope.result["status"] == "deprovisioning_queued"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.graph.Graph.get_by_id")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_at_period_end_leaves_graph_active(
+    self,
+    mock_get_sub: MagicMock,
+    mock_get_graph: MagicMock,
+    _mock_log_event: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """The customer has paid through the period — suspending now would cut off
+    service they are still owed. Only the sensor may suspend this one, once
+    `ends_at` actually passes."""
+    from datetime import UTC, datetime
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+    sub = self._sub()
+    sub.ends_at = datetime(2026, 6, 1, tzinfo=UTC)
+    mock_get_sub.return_value = sub
+    graph_row = self._graph_row(status="active")
+    mock_get_graph.return_value = graph_row
+
+    envelope = await self._run(db, DeleteGraphOp(confirm="kg_x", at_period_end=True))
+
+    graph_row.transition_status.assert_not_called()
+    assert envelope.result["status"] == "scheduled_for_deprovision"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.graph.Graph.get_by_id")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_non_active_graph_is_not_transitioned(
+    self,
+    mock_get_sub: MagicMock,
+    mock_get_graph: MagicMock,
+    _mock_log_event: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """`transition_status` raises on suspended -> suspended, so a graph the
+    sensor already picked up must be left alone rather than 500 the op."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+    mock_get_sub.return_value = self._sub()
+    graph_row = self._graph_row(status="suspended")
+    mock_get_graph.return_value = graph_row
+
+    envelope = await self._run(db, DeleteGraphOp(confirm="kg_x"))
+
+    graph_row.transition_status.assert_not_called()
+    assert envelope.result["status"] == "deprovisioning_queued"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.graph.Graph.get_by_id")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_missing_graph_row_still_completes(
+    self,
+    mock_get_sub: MagicMock,
+    mock_get_graph: MagicMock,
+    _mock_log_event: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """The billing cancel already committed. A missing registry row must not
+    turn a successful teardown into a 500 — the sensor is the backstop."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+    mock_get_sub.return_value = self._sub()
+    mock_get_graph.return_value = None
+
+    envelope = await self._run(db, DeleteGraphOp(confirm="kg_x"))
+
+    assert envelope.status == "completed"
+    assert envelope.result["status"] == "deprovisioning_queued"
