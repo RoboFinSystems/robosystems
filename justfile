@@ -483,7 +483,7 @@ duckdb-query graph_id query format="table":
 
 # --- Dump (the prebuilt corpus, no pipeline) ---
 
-# Download the public SEC .lbug dump from Hugging Face (~128 GiB), restart graph-api
+# Download the public SEC .lbug dump from Hugging Face (tens of GiB down, >100 GiB on disk), restart graph-api
 sec-dump *flags="":
     @just sec-dump-no-restart {{flags}}
     @just graph-api-restart
