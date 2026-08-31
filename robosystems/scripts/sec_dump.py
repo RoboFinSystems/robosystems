@@ -8,8 +8,13 @@ checksum is verified on the way through), lands ``sec.lbug`` in the graph
 directory the local stack mounts, and warns if the engine that wrote the file
 differs from the ``ladybug`` version pinned in this checkout.
 
+Both sizes — the archive and what it expands to — are read from the dataset at
+run time and checked against free space before each step, so no figure is
+repeated here; the dataset card carries the current ones. Expect tens of GiB to
+download and well over 100 GiB on disk.
+
 Usage:
-    just sec-dump                    # ~35 GiB download, ~128 GiB on disk afterwards
+    just sec-dump                    # see the dataset card for current sizes
     just sec-dump --force            # replace an existing data/lbug-dbs/sec.lbug
     just sec-dump --keep-archive     # keep the .zst after decompression
     just sec-dump-no-restart         # same, without the graph-api restart afterwards
