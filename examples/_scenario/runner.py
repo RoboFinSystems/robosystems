@@ -375,7 +375,6 @@ def create_agents(graph_id: str, agents: list[dict]) -> dict[str, str]:
   """
   client = _get_ledger_client()
   lookup: dict[str, str] = {}
-  skipped = 0
 
   for body in agents:
     # No idempotency_key: reset_demo wipes the agents table per-run, but
@@ -386,13 +385,16 @@ def create_agents(graph_id: str, agents: list[dict]) -> dict[str, str]:
     try:
       resp = client.create_agent(graph_id, body)
     except Exception as e:
-      print(f"  WARNING: create-agent failed for {body['name']} — {e}")
-      skipped += 1
-      continue
+      # Same reasoning as the event loop: a dropped agent is invisible
+      # downstream, because `agent_lookup.get(name)` then returns None and
+      # every event for that counterparty posts with no `agent_id` — the
+      # REA linkage the episode exists to demonstrate, silently absent.
+      raise RuntimeError(
+        f"create-agent failed for {body['name']} — {e}\n"
+        f"  Created {len(lookup)} agents before the failure; events posted "
+        f"against the rest would carry no counterparty."
+      ) from e
     lookup[body["name"]] = resp.id
-
-  if skipped:
-    print(f"  WARNING: Skipped {skipped} agents")
 
   return lookup
 
@@ -488,7 +490,7 @@ def create_business_events(
     "journal_entry_recorded": 0,
   }
   line_item_count = 0
-  skipped = 0
+  unmapped = 0
 
   cash_id = element_lookup.get(_CASH_CODE)
   ap_id = element_lookup.get(_AP_CODE)
@@ -496,7 +498,7 @@ def create_business_events(
   for txn_date, txn_type, description, agent_name, lines in txns:
     li_list = _build_line_items(lines, element_lookup)
     if li_list is None or len(li_list) < 2:
-      skipped += 1
+      unmapped += 1
       continue
 
     agent_id = agent_lookup.get(agent_name) if agent_name else None
@@ -616,12 +618,22 @@ def create_business_events(
         line_item_count += len(li_list)
 
     except Exception as e:
-      print(f"  WARNING: create-event-block failed for {txn_date} {txn_type} — {e}")
-      skipped += 1
-      continue
+      # Abort rather than continue. A dropped event does not just cost a
+      # row: `bill_payment` posts two linked events, and a failure between
+      # them strands an AP balance with no discharge, while a dropped
+      # invoice leaves its later payment with no obligation to discharge.
+      # Carrying on would then close periods and materialize the graph on
+      # top of a ledger that is quietly wrong — which is exactly how a run
+      # that lost 25 events to rate limiting still exited green.
+      raise RuntimeError(
+        f"create-event-block failed for {txn_date} {txn_type} — {e}\n"
+        f"  Loaded {sum(counts.values())} events before the failure; the "
+        f"ledger is incomplete, so the run stops here rather than closing "
+        f"periods over it."
+      ) from e
 
-  if skipped:
-    print(f"  WARNING: Skipped {skipped} events (missing elements or errors)")
+  if unmapped:
+    print(f"  WARNING: Skipped {unmapped} transactions (no CoA element)")
 
   return {
     "entries": sum(counts.values()),
