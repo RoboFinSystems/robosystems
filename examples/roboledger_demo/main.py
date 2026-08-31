@@ -204,11 +204,10 @@ def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") 
   from robosystems_client.api.graphs.create_graph import (
     sync_detailed as api_create_graph,
   )
-  from robosystems_client.api.operations.get_operation_status import (
-    sync_detailed as api_get_operation_status,
-  )
   from robosystems_client.client import AuthenticatedClient
   from robosystems_client.models import CreateGraphRequest, GraphMetadata
+
+  from examples._common.sdk import operation_status
 
   client = AuthenticatedClient(
     base_url=BASE_URL,
@@ -280,20 +279,11 @@ def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") 
     print(f"  Queued (operation: {operation_id}), waiting...")
     for _ in range(30):
       time.sleep(2)
-      status_resp = api_get_operation_status(operation_id=operation_id, client=client)
-      if not status_resp.parsed:
+      status_data = operation_status(client, operation_id)
+      if not status_data:
         continue
-      status_data = status_resp.parsed
-      if isinstance(status_data, dict):
-        status = status_data.get("status")
-        result = status_data.get("result", {})
-      elif hasattr(status_data, "additional_properties"):
-        props = status_data.additional_properties
-        status = props.get("status")
-        result = props.get("result", {})
-      else:
-        status = getattr(status_data, "status", None)
-        result = getattr(status_data, "result", {})
+      status = status_data.get("status")
+      result = status_data.get("result", {})
 
       if status == "completed":
         graph_id = result.get("graph_id") if isinstance(result, dict) else None

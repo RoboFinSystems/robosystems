@@ -29,9 +29,6 @@ from robosystems_client.clients import (
 from robosystems_client.clients.graph_client import GraphClient
 from robosystems_client.client import AuthenticatedClient
 from robosystems_client.api.graphs.create_graph import sync_detailed as api_create_graph
-from robosystems_client.api.operations.get_operation_status import (
-  sync_detailed as api_get_operation_status,
-)
 from robosystems_client.models import (
   CreateGraphRequest,
   GraphMetadata as APIGraphMetadata,
@@ -43,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
 from examples._common.config import get_graph_id, save_graph_id
+from examples._common.sdk import operation_status
 
 DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
@@ -128,24 +126,13 @@ def create_graph_with_custom_schema(
   for _ in range(max_attempts):
     time.sleep(poll_interval)
 
-    status_response = api_get_operation_status(operation_id=operation_id, client=client)
-    if not status_response.parsed:
+    status_data = operation_status(client, operation_id)
+    if not status_data:
       continue
 
-    status_data = status_response.parsed
-    if isinstance(status_data, dict):
-      status = status_data.get("status")
-      result = status_data.get("result")
-      error = status_data.get("error") or status_data.get("message")
-    elif hasattr(status_data, "additional_properties"):
-      props = status_data.additional_properties
-      status = props.get("status")
-      result = props.get("result")
-      error = props.get("error") or props.get("message")
-    else:
-      status = getattr(status_data, "status", None)
-      result = getattr(status_data, "result", None)
-      error = getattr(status_data, "message", None)
+    status = status_data.get("status")
+    result = status_data.get("result")
+    error = status_data.get("error") or status_data.get("message")
 
     if status == "completed":
       graph_id = None
