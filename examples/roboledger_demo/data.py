@@ -22,6 +22,17 @@ from datetime import date
 
 DEMO_MONTHS = 16  # rolling window of synthetic data
 
+# First offset whose schedule-covered entries the Schedule blocks own.
+# `initialize_fiscal_calendar` sets closed_through to the month before last,
+# leaving the close target (offset DEMO_MONTHS - 2) and the current month
+# open; `create_schedules` then tags its facts for the closed range
+# `historical` and leaves the rest in scope, so from this offset onward the
+# obligation register is the sole source of depreciation and the stream must
+# not book it. Booking both makes each open obligation a duplicate of an
+# already-posted entry, and the close silently doubles the expense.
+# Mirrors `schedule_owned_from` in examples/_scenario/engine.py.
+SCHEDULE_OWNED_FROM = DEMO_MONTHS - 2
+
 
 def add_months(d: date, months: int) -> date:
   """Return the first day of the month that is `months` after d."""
@@ -491,16 +502,18 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
   # starts depreciating the month after purchase (offset 0); Office
   # Furniture ($1,500 cost / 60 mo = $25/mo) starts after offset 2.
   # Posting DR 7000 Depreciation Expense / CR 1350 Accumulated Depreciation.
-  # The synthetic history posts these directly so the loaded books already
-  # balance; a tenant running the schedule workflow gets the identical
-  # posting from close-period instead.
+  # The closed history posts these directly so the loaded books already
+  # balance. From SCHEDULE_OWNED_FROM on, the schedule workflow supplies the
+  # identical posting at close-period, so the stream stops — the two must
+  # never both book the same month.
   dep_lines: list[tuple[str, int, int]] = []
-  if offset >= 1:
-    dep_lines.append(("7000", 133_33, 0))
-    dep_lines.append(("1350", 0, 133_33))
-  if offset >= 3:
-    dep_lines.append(("7000", 25_00, 0))
-    dep_lines.append(("1350", 0, 25_00))
+  if offset < SCHEDULE_OWNED_FROM:
+    if offset >= 1:
+      dep_lines.append(("7000", 133_33, 0))
+      dep_lines.append(("1350", 0, 133_33))
+    if offset >= 3:
+      dep_lines.append(("7000", 25_00, 0))
+      dep_lines.append(("1350", 0, 25_00))
   if dep_lines:
     # Collapse to one balanced entry: sum DR 7000 / sum CR 1350.
     total_dr = sum(d for c, d, _ in dep_lines if c == "7000")
