@@ -85,6 +85,23 @@ def month_windows(start: date, months: int) -> list[tuple[date, date]]:
   ]
 
 
+def schedule_owned_from(months: int) -> int:
+  """First offset whose schedule-covered entries the Schedule block owns.
+
+  ``months - 2`` — the close target. Provisioning closes offsets
+  ``0 .. months - 3`` and leaves the close target (``months - 2``) and the
+  current month (``months - 1``) open; a Schedule created afterwards voids
+  its obligations for the closed range as historical and keeps the rest
+  ``pending``. So from this offset onward the obligation register is the
+  sole source of depreciation and prepaid amortization, and the
+  transaction stream must not book them: booking both makes every open
+  obligation a duplicate of an entry that is already posted, which
+  double-counts on draft and turns the close gate's blocker into one that
+  can only be cleared by voiding the obligation.
+  """
+  return max(months - 2, 0)
+
+
 # ---------------------------------------------------------------------------
 # Curve builders — author driver curves as intent, not 16 literals
 # ---------------------------------------------------------------------------
@@ -372,7 +389,9 @@ def _emit_capex(cx: CapexItem, start: date, months: int) -> list[Txn]:
     )
   monthly = cx.cost // cx.life_months
   first = 0 if cx.in_opening else cx.purchase_offset + 1
-  for off in range(max(first, 0), months):
+  # Stops at the close target: the depreciation Schedule owns every period
+  # from there on (see `schedule_owned_from`).
+  for off in range(max(first, 0), schedule_owned_from(months)):
     d = month_date(start, off, 31)
     out.append(
       (
@@ -399,7 +418,9 @@ def _emit_prepaid(pp: PrepaidItem, start: date, months: int) -> list[Txn]:
       )
     )
   monthly = pp.cost // pp.life_months
-  last = min(pp.purchase_offset + pp.life_months, months)
+  # Same boundary as depreciation: the amortization Schedule owns the close
+  # target onward (see `schedule_owned_from`).
+  last = min(pp.purchase_offset + pp.life_months, schedule_owned_from(months))
   for off in range(max(pp.purchase_offset, 0), last):
     out.append(
       (
