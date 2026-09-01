@@ -54,9 +54,12 @@ handle_termination() {
         --expression-attribute-values "{\":status\": {\"S\": \"terminating\"}, \":time\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}" \
         --region "$REGION" || log "WARNING: Failed to update instance status"
 
-    # 2. Stop accepting new connections through Graph API
+    # 2. Stop accepting new connections through Graph API.
+    # Called from the host (the container publishes its port and no longer ships
+    # curl). Note: the Graph API does not currently expose /admin/drain or
+    # /admin/connections, so both calls fall through to their fallbacks today.
     log "Draining connections via Graph API..."
-    docker exec ${CONTAINER_NAME} curl -X POST ${DRAIN_ENDPOINT} 2>/dev/null || {
+    curl -s -f -X POST ${DRAIN_ENDPOINT} >/dev/null 2>&1 || {
         log "WARNING: Failed to drain connections via Graph API"
     }
 
@@ -93,7 +96,7 @@ handle_termination() {
     TIMEOUT=300
     ELAPSED=0
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        ACTIVE_CONNECTIONS=$(docker exec ${CONTAINER_NAME} curl -s ${CONNECTIONS_ENDPOINT} 2>/dev/null | jq '.active_connections // 0' || echo "0")
+        ACTIVE_CONNECTIONS=$(curl -s -f ${CONNECTIONS_ENDPOINT} 2>/dev/null | jq '.active_connections // 0' || echo "0")
 
         if [ "$ACTIVE_CONNECTIONS" = "0" ] || [ "$ACTIVE_CONNECTIONS" -eq 0 ]; then
             log "All connections closed"

@@ -17,7 +17,7 @@ services:
     volumes:
       - ./robosystems:/app/robosystems
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://robosystems-api:8000/v1/status"]
+      test: ["CMD", "python3", "/app/bin/healthcheck.py", "http://robosystems-api:8000/v1/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -61,7 +61,7 @@ services:
       - ./data/artifacts:/app/data/artifacts
       - ./data/lance:/app/data/lance
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python3", "/app/bin/healthcheck.py", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
