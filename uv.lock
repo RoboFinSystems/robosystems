@@ -6,9 +6,6 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 
-[manifest]
-overrides = [{ name = "sqlparse", specifier = ">=0.6.0" }]
-
 [[package]]
 name = "actionlint-py"
 version = "1.7.12.24"
@@ -922,7 +919,7 @@ wheels = [
 
 [[package]]
 name = "dbt-core"
-version = "1.11.11"
+version = "1.11.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agate" },
@@ -948,14 +945,14 @@ dependencies = [
     { name = "sqlparse" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/61/62/af8f4ab1e3e979b5677e876444f3a9c1b1021c2d4e77143e80f421bdc1f7/dbt_core-1.11.11.tar.gz", hash = "sha256:e53cfccc8c9c13a082e518bf80cf3bb33c2f1fdc3cab48ec822ef93737eccb81", size = 973079, upload-time = "2026-05-20T11:10:01.8Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/5f/65360669232d60c4fa59d6ca0528b77f5f8ed31736b70477575c1e8897cb/dbt_core-1.11.14.tar.gz", hash = "sha256:d7fd94c398b26fbcbb34ee6b9ff136963d3184ca1ed052685c855fcf333561b2", size = 974842, upload-time = "2026-08-20T15:49:54.061Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/d2/9e1eb5d3c8f375d4e5523b9123b2ae25ea21d85abb044db2eff2e3ee9c1d/dbt_core-1.11.11-py3-none-any.whl", hash = "sha256:7f9e11f3f5400e20f40f544440800ace23fa0755086f87b08e9446181f8720e1", size = 1061938, upload-time = "2026-05-20T11:09:59.856Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/98/a8850a5275eeb6929734bcd24fd66f679023b034d0d71ffcaaceb227f8c6/dbt_core-1.11.14-py3-none-any.whl", hash = "sha256:98f7b7b13dada6347439ac44855601e58d482d177be22431fd7f92200d115dcd", size = 1063972, upload-time = "2026-08-20T15:49:52.625Z" },
 ]
 
 [[package]]
 name = "dbt-duckdb"
-version = "1.10.1"
+version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dbt-adapters" },
@@ -963,9 +960,9 @@ dependencies = [
     { name = "dbt-core" },
     { name = "duckdb" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/d3/0f9f6a4de94e0f95dcfabbba5e8ef7670de695483345edd9e5b36e93d024/dbt_duckdb-1.10.1.tar.gz", hash = "sha256:5d6df1589d4ba21fe20ac08454a32763d3263798c9f5914280eabd1dc285cbc0", size = 145907, upload-time = "2026-02-17T17:29:04.283Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/2e/cd495dbdee474eefb431156055dd7142b893258567e2167e414fceac0641/dbt_duckdb-1.11.0.tar.gz", hash = "sha256:4b087557e8559e2c141a8daae28f4a832a06f425d0b4567eca7c8ffb635cd0fe", size = 170805, upload-time = "2026-08-07T16:08:10.453Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/26/0ce2b1aeecdd1a18a9fac6f02d08f60c95944f036866f3fe37146298d4e4/dbt_duckdb-1.10.1-py3-none-any.whl", hash = "sha256:90658ecb367082786c5ea2ffbf9e35bb4116fa5ad1bc2f287c4dc1f3984bafa1", size = 85089, upload-time = "2026-02-17T17:29:03.117Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/79/52cf57da07b05ff2e6a055c44b249d6fde200af340641995daea22ed6e2c/dbt_duckdb-1.11.0-py3-none-any.whl", hash = "sha256:bac8c77771de890efa1af5b003af7c74de50c5ef67dba5891894e78348f7091b", size = 91227, upload-time = "2026-08-07T16:08:09.004Z" },
 ]
 
 [[package]]
@@ -3769,7 +3766,7 @@ requires-dist = [
     { name = "dagster-aws", specifier = ">=0.29.15,<1.0" },
     { name = "dagster-postgres", specifier = ">=0.29.15,<1.0" },
     { name = "dagster-webserver", specifier = ">=1.13.15,<2.0" },
-    { name = "dbt-core", specifier = ">=1.11.0,<2.0" },
+    { name = "dbt-core", specifier = ">=1.11.14,<1.12" },
     { name = "dbt-duckdb", specifier = ">=1.10.0,<2.0" },
     { name = "duckdb", specifier = "==1.4.4" },
     { name = "email-validator", specifier = ">=2.2.0,<3.0" },
@@ -3811,7 +3808,7 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6,<4.0" },
     { name = "python-multipart", specifier = ">=0.0.27,<1.0" },
     { name = "python-quickbooks", specifier = ">=0.9.0,<1.0" },
-    { name = "python-ulid", specifier = ">=3.0.0" },
+    { name = "python-ulid", specifier = ">=3.0.0,<4.0" },
     { name = "pyyaml", specifier = ">=6.0.0,<7.0" },
     { name = "rdflib", specifier = ">=7.0.0,<8.0" },
     { name = "redis", specifier = ">=8.0.1,<9.0" },

@@ -7,6 +7,10 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
+    ignore:
+      # hold: v9's prune-cache flip bloats the cache; v10's guard covers events we don't use
+      - dependency-name: "astral-sh/setup-uv"
+        update-types: ["version-update:semver-major"]
 
   # Python — uv dependencies in pyproject.toml and uv.lock
   - package-ecosystem: "uv"
@@ -47,3 +51,5 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "lambda/python"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Must move in lockstep with [tool.uv] required-version in pyproject.toml
+      - dependency-name: "ghcr.io/astral-sh/uv"

@@ -19,9 +19,10 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     curl \
     unzip \
     file \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && mv /root/.local/bin/uv /usr/local/bin/uv
+    && rm -rf /var/lib/apt/lists/*
+
+# uv pinned to [tool.uv] required-version in pyproject.toml
+COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Copy LadybugDB extensions from official extension repository
 # Extensions pulled from ghcr.io/ladybugdb/extension-repo:latest
@@ -136,9 +137,10 @@ RUN echo "os-refresh ${CACHE_DATE}" && apt-get update && apt-get upgrade -y && a
     curl \
     git \
     zstd \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && mv /root/.local/bin/uv /usr/local/bin/uv
+    && rm -rf /var/lib/apt/lists/*
+
+# uv pinned to [tool.uv] required-version in pyproject.toml
+COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Copy virtual environment from builder stage
 COPY --from=builder /build/.venv /build/.venv

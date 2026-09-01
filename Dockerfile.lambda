@@ -21,7 +21,7 @@ RUN echo "os-refresh ${CACHE_DATE}" && dnf update -y --releasever=latest && dnf 
 RUN rm -f /usr/local/bin/aws-lambda-rie
 
 # Install uv for dependency export
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Set working directory to Lambda task root
 WORKDIR ${LAMBDA_TASK_ROOT}
