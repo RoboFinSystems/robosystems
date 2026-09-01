@@ -26,14 +26,15 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values:
-                - Asset
-                - Liability
-                - Equity
-                - Revenue
-                - Expense
-                - Other Income
-                - Other Expense
+              arguments:
+                values:
+                  - Asset
+                  - Liability
+                  - Equity
+                  - Revenue
+                  - Expense
+                  - Other Income
+                  - Other Expense
 
   - name: stg_qb_journal_entries
     description: Cleaned QuickBooks journal entries
@@ -62,9 +63,10 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values:
-                - Debit
-                - Credit
+              arguments:
+                values:
+                  - Debit
+                  - Credit
       - name: account_ref_id
         tests:
           - not_null
@@ -79,7 +81,8 @@ models:
       - name: agent_type
         tests:
           - accepted_values:
-              values: [customer]
+              arguments:
+                values: [customer]
 
   - name: stg_qb_vendors
     description: QuickBooks Vendor entities — purchase counterparties
@@ -91,7 +94,8 @@ models:
       - name: agent_type
         tests:
           - accepted_values:
-              values: [vendor]
+              arguments:
+                values: [vendor]
 
   - name: stg_qb_employees
     description: QuickBooks Employee entities
@@ -103,7 +107,8 @@ models:
       - name: agent_type
         tests:
           - accepted_values:
-              values: [employee]
+              arguments:
+                values: [employee]
 
   - name: stg_qb_invoice_headers
     description: QuickBooks Invoice headers (no line items — those still come from JournalReport)

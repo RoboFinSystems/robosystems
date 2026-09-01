@@ -148,7 +148,12 @@ lambda = [
 ]
 
 [tool.uv]
-required-version = "==0.12.8"  # setup-uv auto-reads this; Dockerfiles pin the matching tag
+# Deliberately NO required-version here. Dependabot's updater bundles its own uv
+# (0.12.7 as of 2026-09), and an exact required-version makes it refuse to parse this
+# manifest at all — every Python update job dies with tool_version_not_supported and
+# the ecosystem goes silent, security updates included. Pin uv where it actually runs
+# instead: the `version` input on setup-uv in test.yml + create-release.yml, and the
+# ghcr.io/astral-sh/uv tag in Dockerfile + Dockerfile.lambda. Move all four together.
 
 [tool.setuptools]
 packages = ["robosystems"]
