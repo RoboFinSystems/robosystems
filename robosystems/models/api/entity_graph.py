@@ -121,6 +121,10 @@ class EntityWithGraphResponse(BaseModel):
 
 class AvailableExtension(BaseModel):
   name: str
+  # The name to show a user. `name` is the schema slug the create path takes
+  # ("roboledger"), which is not what a tier or extension picker should be
+  # rendering — clients fall back to the slug only when this is absent.
+  display_name: str | None = None
   description: str
   enabled: bool = False
 
