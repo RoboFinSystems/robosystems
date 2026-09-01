@@ -40,9 +40,7 @@ dependencies = [
     "uvloop>=0.21.0,<1.0; sys_platform != 'win32'",
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
-    # Hugging Face Hub (SEC dataset publish: launches the Hub-side Job, verifies the upload)
     "huggingface-hub>=1.19,<2",
-    "zstandard>=0.23,<1",  # decompress the .lbug.zst dumps on the host (no zstd binary needed)
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
@@ -61,7 +59,7 @@ dependencies = [
     "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.15,<1.0",
     # Data Transformation (dbt)
-    "dbt-core>=1.11.0,<2.0",
+    "dbt-core>=1.11.14,<1.12",  # hold: 1.12 adds a beta parser dep + the metricflow subtree we don't use; 1.11.14 has the sqlparse<0.7.0 lift
     "dbt-duckdb>=1.10.0,<2.0",
     # Data Processing & Analytics
     "arelle-release==2.39.5",
@@ -99,14 +97,15 @@ dependencies = [
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.13.4,<3.0",
     "pyjwt>=2.10.0,<3.0",
+    "pyshacl>=0.26,<0.31",
     "python-multipart>=0.0.27,<1.0",
-    "python-ulid>=3.0.0",
+    "python-ulid>=3.0.0,<4.0",  # hold: 4.0 only reworks generation customization; we use ULID()/from_str/.timestamp/.bytes
     "pyyaml>=6.0.0,<7.0",
     "requests>=2.34.2,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
     "webauthn>=2.7.0,<3.0",
-    "pyshacl>=0.26,<0.31",
+    "zstandard>=0.23,<1"
 ]
 
 [project.optional-dependencies]
@@ -149,12 +148,7 @@ lambda = [
 ]
 
 [tool.uv]
-# sqlparse 0.6.0 (2026-08-13) fixes CVE-2026-59893 / CVE-2026-54284 /
-# CVE-2026-71491 (lexer and grouping DoS). dbt-core pins sqlparse<0.6.0 even
-# at its latest release, and it is the only consumer here (robosystems does not
-# import sqlparse; dbt parses only its own compiled SQL). Override until
-# dbt-core lifts the ceiling, then delete this block.
-override-dependencies = ["sqlparse>=0.6.0"]
+required-version = "==0.12.8"  # setup-uv auto-reads this; Dockerfiles pin the matching tag
 
 [tool.setuptools]
 packages = ["robosystems"]
