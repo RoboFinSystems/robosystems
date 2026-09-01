@@ -51,5 +51,6 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "lambda/python"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # Must move in lockstep with [tool.uv] required-version in pyproject.toml
+      # Pinned in four places that must move together: this tag, the same tag in
+      # Dockerfile.lambda, and setup-uv's `version` in test.yml + create-release.yml.
       - dependency-name: "ghcr.io/astral-sh/uv"

@@ -21,7 +21,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     file \
     && rm -rf /var/lib/apt/lists/*
 
-# uv pinned to [tool.uv] required-version in pyproject.toml
+# uv pinned here and via setup-uv's `version` input in test.yml + create-release.yml
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Copy LadybugDB extensions from official extension repository
@@ -139,7 +139,7 @@ RUN echo "os-refresh ${CACHE_DATE}" && apt-get update && apt-get upgrade -y && a
     zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# uv pinned to [tool.uv] required-version in pyproject.toml
+# uv pinned here and via setup-uv's `version` input in test.yml + create-release.yml
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 
 # Copy virtual environment from builder stage

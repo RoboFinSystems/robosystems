@@ -148,6 +148,7 @@ jobs:
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
+          version: "0.12.8" # keep in step with the ghcr.io/astral-sh/uv tag in both Dockerfiles
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
