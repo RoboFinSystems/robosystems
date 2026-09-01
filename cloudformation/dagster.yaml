@@ -831,8 +831,10 @@ Resources:
           HealthCheck:
             Command:
               [
-                "CMD-SHELL",
-                "curl -f http://localhost:3000/server_info || exit 1",
+                "CMD",
+                "python3",
+                "/app/bin/healthcheck.py",
+                "http://localhost:3000/server_info",
               ]
             Interval: 30
             Timeout: 10

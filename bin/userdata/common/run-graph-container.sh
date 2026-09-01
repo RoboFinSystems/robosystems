@@ -100,7 +100,7 @@ EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
     -e LBUG_PORT=${CONTAINER_PORT} \
     -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
     -e LBUG_ACCESS_PATTERN=api_writer"
-HEALTH_CMD="timeout 10 curl -s -o /dev/null http://localhost:${CONTAINER_PORT}/health || exit 1"
+HEALTH_CMD="python3 /app/bin/healthcheck.py http://localhost:${CONTAINER_PORT}/health 10"
 
 # Build optional volume mounts
 VOLUME_MOUNTS="-v ${DATA_MOUNT_SOURCE}:${DATA_MOUNT_TARGET} -v ${LOGS_MOUNT_SOURCE}:${LOGS_MOUNT_TARGET}"

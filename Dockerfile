@@ -129,13 +129,15 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies, apply security patches, and install uv.
 # CACHE_DATE (set per-build in build.yml) busts this layer so the upgrade
 # re-runs despite GHA layer caching — a cached layer keeps stale OS packages.
+# No curl or git here: git is only needed in the builder (EDGAR subtree), and
+# health probes use bin/healthcheck.py — curl would drag libcurl and libssh2
+# into the image, which the container-image scanners then flag.
+# postgresql-client stays: entrypoint.sh waits on the database with psql.
 ARG CACHE_DATE
 RUN echo "os-refresh ${CACHE_DATE}" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     libatomic1 \
     postgresql-client \
-    curl \
-    git \
     zstd \
     && rm -rf /var/lib/apt/lists/*
 
