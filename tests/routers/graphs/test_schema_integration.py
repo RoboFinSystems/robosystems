@@ -360,6 +360,19 @@ class TestSchemaManagementIntegration:
       extensions = extensions_response.json()
       assert len(extensions["extensions"]) == 2
 
+      # `name` is the slug the create path takes; `display_name` is what a
+      # picker renders. The display name used to be computed and then dropped
+      # when the response model was built, leaving clients with "roboledger".
+      by_name = {ext["name"]: ext for ext in extensions["extensions"]}
+      assert (
+        by_name["roboledger"]["display_name"]
+        == "RoboLedger - Accounting & Financial Reporting"
+      )
+      assert (
+        by_name["roboinvestor"]["display_name"]
+        == "RoboInvestor - Investment Management"
+      )
+
     # Now create a schema that should be compatible with roboledger
     financial_schema = {
       "name": "custom_financial",

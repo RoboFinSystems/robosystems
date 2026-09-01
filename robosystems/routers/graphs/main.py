@@ -54,8 +54,14 @@ from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUse
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
 # Surfaced to prospects at graph-creation time, so these describe only what is
-# built. Both are read twice below — the schema-loading path and its fallback —
-# and single-sourcing them here is what keeps the two copies from diverging.
+# built. All three are read twice below — the schema-loading path and its
+# fallback — and single-sourcing them here is what keeps the copies from
+# diverging.
+_DISPLAY_NAMES = {
+  "roboledger": "RoboLedger - Accounting & Financial Reporting",
+  "roboinvestor": "RoboInvestor - Investment Management",
+}
+
 _ROBOLEDGER_DESCRIPTION = (
   "Complete accounting system with XBRL reporting and GL transactions. "
   "Context-aware: SEC repositories get reporting-only tables, "
@@ -538,12 +544,6 @@ async def get_available_extensions(
         f"Extension {ext_info['name']}: available={ext_info.get('available', False)}"
       )
       if ext_info["available"]:
-        # Get display names for extensions
-        display_names = {
-          "roboledger": "RoboLedger - Accounting & Financial Reporting",
-          "roboinvestor": "RoboInvestor - Investment Management",
-        }
-
         # Try to get actual node/relationship counts
         try:
           from robosystems.schemas.loader import (
@@ -577,7 +577,7 @@ async def get_available_extensions(
         available_extensions.append(
           {
             "name": ext_info["name"],
-            "display_name": display_names.get(
+            "display_name": _DISPLAY_NAMES.get(
               ext_info["name"], ext_info["name"].title()
             ),
             "description": description,  # Use the correctly set description
@@ -589,7 +589,10 @@ async def get_available_extensions(
     # Convert dictionaries to AvailableExtension objects
     extension_objects = [
       AvailableExtension(
-        name=str(ext["name"]), description=str(ext["description"]), enabled=False
+        name=str(ext["name"]),
+        display_name=str(ext["display_name"]),
+        description=str(ext["description"]),
+        enabled=False,
       )
       for ext in available_extensions
     ]
@@ -605,11 +608,13 @@ async def get_available_extensions(
       extensions=[
         AvailableExtension(
           name="roboledger",
+          display_name=_DISPLAY_NAMES["roboledger"],
           description=_ROBOLEDGER_DESCRIPTION,
           enabled=False,
         ),
         AvailableExtension(
           name="roboinvestor",
+          display_name=_DISPLAY_NAMES["roboinvestor"],
           description=_ROBOINVESTOR_DESCRIPTION,
           enabled=False,
         ),
