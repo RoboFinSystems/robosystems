@@ -47,3 +47,27 @@ jobs:
     with:
       runner_config: ${{ needs.runner.outputs.runner_config }}
     secrets: inherit
+
+  # Records the change class on every pull request, whoever opened it, and for
+  # code changes requests the automated review and waits for it. Standard
+  # changes (dependency bumps, manifests, docs) ride the test gate alone. This
+  # is the documented second reader that stands in for a human approver in a
+  # single-maintainer repository (change-management compensating control).
+  change-classification:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Classify the change and request the review
+        uses: ./.github/actions/classify-change
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          github_token: ${{ github.token }}
+          review_token: ${{ secrets.ACTIONS_TOKEN }}

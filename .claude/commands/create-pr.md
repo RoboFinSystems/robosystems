@@ -78,22 +78,23 @@ gh pr create \
 
 Print the resulting PR URL.
 
-### 5. Request the Claude review — always
+### 5. The Claude review — requested by the workflow, not by you
 
-Every pull request gets a `@claude` review. This is a change-management control, not a convenience: this is a single-maintainer repository where GitHub forbids self-approval, so an automated second reader on every change is the compensating control that stands in for independent human review. Skipping it on a given PR puts a hole in the control.
+Every pull request that changes code gets a `@claude` review. This is a change-management control, not a convenience: this is a single-maintainer repository where GitHub forbids self-approval, so an automated second reader on every code change is the compensating control that stands in for independent human review.
 
-```bash
-gh pr comment <number> --body "@claude please review this PR"
-```
+**Do not post the review request yourself.** The test workflow's `change-classification` job runs on every pull request, whoever opened it, and does this deterministically:
 
-Post it unconditionally, immediately after creating the PR. Do not ask first, and do not skip it for small or mechanical changes — a control that only runs on changes deemed interesting is not a control.
+- It records the change class on the PR: `change:standard` for dependency bumps, manifests and lockfiles, documentation and release notes (test gate only, no review); `change:normal` for anything that touches platform or application code.
+- For a normal change it posts `@claude please review this PR` **once**, if no such request exists, and waits for the review before the job passes.
+
+Posting the request here as well would trigger a second review of the same change, which doubles the cost for nothing. After creating the PR, confirm the job ran and applied a label; that is the whole of your part. Post the request by hand only if the job is absent in the repository you are in (the rollout is per repository) or it failed before requesting.
 
 Two things this is **not**:
 
 - **Not an approval.** The review posts as a comment from `claude[bot]`, not as an approving review, and it must stay that way. An unconditional bot approval on every PR is a rubber stamp, and it would be worse evidence than the documented exception it replaced. The reviewer's job is to find problems, not to sign off.
 - **Not a substitute for `/pr-review`.** That command runs locally with full session context and is the deeper pass. This is the standing automatic one.
 
-If the workflow does not fire (it is gated to `OWNER`/`MEMBER`/`COLLABORATOR` authors, so fork PRs are excluded by design), say so in the output rather than silently moving on.
+If the review workflow does not fire (it is gated to `OWNER`/`MEMBER`/`COLLABORATOR` authors, so fork PRs are excluded by design and get a maintainer's own review), say so in the output rather than silently moving on.
 
 **One expected exception — a PR that edits `.github/workflows/claude.yml` will not be reviewed.** `claude-code-action` refuses to run whenever the workflow file on the PR branch differs from the version on the default branch. That is an anti-tampering guard: without it, a pull request could rewrite the reviewer to exfiltrate secrets. The run still completes green and posts nothing, logging `Workflow validation failed... your workflow will begin working once you merge your PR`.
 
@@ -106,7 +107,7 @@ After creating the PR, report:
 1. The PR URL.
 2. A one-line summary of the title.
 3. Target ← source branches.
-4. Confirmation that the `@claude` review was requested — or, if it wasn't, why.
+4. The change class the workflow applied (`change:standard` or `change:normal`), and for a normal change that the review request is on the PR — or, if the job did not run, why.
 
 ## Arguments
 
@@ -115,6 +116,6 @@ After creating the PR, report:
 - A target branch (default `main`).
 - Freeform guidance on what to emphasize in the description.
 
-`review` / `--review` is accepted and ignored — the review is now unconditional (§5).
+`review` / `--review` is accepted and ignored — the review is requested by the workflow (§5).
 
 $ARGUMENTS

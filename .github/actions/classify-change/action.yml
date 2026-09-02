@@ -1,0 +1,166 @@
+name: Classify Change
+description: >-
+  Records the change class of a pull request on the pull request itself, and for
+  code changes requests the automated review and waits for it to land. Standard
+  changes (dependency bumps, manifests and lockfiles, documentation, generated
+  output) ride the test gate alone; every other change carries a documented
+  second review before merge. Cross-repository pull requests are only logged.
+
+inputs:
+  pr_number:
+    description: Pull request number
+    required: true
+  github_token:
+    description: Token for labels and comments (the workflow GITHUB_TOKEN with pull-requests and issues write)
+    required: true
+  review_token:
+    description: >-
+      Token used to post the review request so it is attributed to a repository
+      owner and triggers the review workflow. Optional; without it a code change
+      that has no review request yet fails with instructions.
+    required: false
+    default: ""
+  reviewer_login:
+    description: Login of the account that posts the automated review
+    required: false
+    default: "claude[bot]"
+  review_request:
+    description: Comment text that triggers the automated review
+    required: false
+    default: "@claude please review this PR"
+  review_timeout_minutes:
+    description: How long to wait for the review to be posted before failing
+    required: false
+    default: "12"
+  extra_standard_regex:
+    description: >-
+      Extended regex of additional paths that count as standard for this
+      repository (for example generated SDK output). Empty by default.
+    required: false
+    default: ""
+
+outputs:
+  classification:
+    description: standard, normal, or external
+    value: ${{ steps.classify.outputs.classification }}
+
+runs:
+  using: composite
+  steps:
+    - name: Classify the change and record it on the pull request
+      id: classify
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REVIEW_TOKEN: ${{ inputs.review_token }}
+        PR: ${{ inputs.pr_number }}
+        REVIEWER: ${{ inputs.reviewer_login }}
+        REVIEW_REQUEST: ${{ inputs.review_request }}
+        TIMEOUT_MIN: ${{ inputs.review_timeout_minutes }}
+        EXTRA_STANDARD: ${{ inputs.extra_standard_regex }}
+      run: |
+        set -euo pipefail
+        REPO="${GITHUB_REPOSITORY}"
+        MARKER="<!-- change-classification -->"
+
+        # Paths that never carry executable platform change: dependency
+        # manifests and lockfiles, documentation, curated release notes,
+        # Dependabot configuration, agent command files, and the git-ignored
+        # local vault. CI workflows and Dockerfiles are deliberately NOT here:
+        # they change the deployment path and the runtime image.
+        STANDARD='(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|uv\.lock|poetry\.lock|requirements[^/]*\.txt|\.nvmrc|\.python-version|\.tool-versions)$|(^|/)\.github/(dependabot\.yml|release-notes/)|(^|/)\.claude/|(^|/)local/|(^|/)docs?/|\.(md|mdx|txt|rst)$|(^|/)(LICENSE|CHANGELOG|NOTICE)'
+        if [ -n "${EXTRA_STANDARD}" ]; then
+          STANDARD="${STANDARD}|${EXTRA_STANDARD}"
+        fi
+
+        meta=$(gh pr view "$PR" --repo "$REPO" --json author,isCrossRepository,changedFiles)
+        author=$(jq -r '.author.login' <<<"$meta")
+        cross=$(jq -r '.isCrossRepository' <<<"$meta")
+        nfiles=$(jq -r '.changedFiles' <<<"$meta")
+
+        if [ "$cross" = "true" ]; then
+          echo "classification=external" >> "$GITHUB_OUTPUT"
+          echo "External contribution (#$PR by $author): a maintainer reviews and merges; nothing to record from this job."
+          exit 0
+        fi
+
+        classification="normal"
+        reason="platform or application code changed"
+        if [[ "$author" == dependabot* ]]; then
+          classification="standard"
+          reason="opened by Dependabot: a dependency version bump gated by the test suite"
+        else
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          if [ -z "$files" ]; then
+            reason="no file list available for the pull request"
+          elif [ "$nfiles" -le 300 ] && ! grep -Ev "$STANDARD" <<<"$files" >/dev/null; then
+            classification="standard"
+            reason="only dependency manifests, lockfiles, documentation, release notes or generated output changed"
+          fi
+        fi
+        echo "classification=$classification" >> "$GITHUB_OUTPUT"
+        echo "Change #$PR by $author: $classification ($reason; $nfiles files)"
+
+        # Labels: one of the pair, never both.
+        gh label create "change:standard" --repo "$REPO" --color "c2e0c6" --description "Standard change: test gate only, no secondary review required" --force >/dev/null
+        gh label create "change:normal"   --repo "$REPO" --color "fbca04" --description "Normal change: automated review documented on the pull request before merge" --force >/dev/null
+        if [ "$classification" = "standard" ]; then
+          gh pr edit "$PR" --repo "$REPO" --add-label "change:standard" --remove-label "change:normal" >/dev/null
+        else
+          gh pr edit "$PR" --repo "$REPO" --add-label "change:normal" --remove-label "change:standard" >/dev/null
+        fi
+
+        # One classification comment per pull request, edited in place on later pushes.
+        if [ "$classification" = "standard" ]; then
+          body="$MARKER
+        **Change classification: standard** — $reason.
+
+        Under the change standard a standard change is gated by the required test check alone; no secondary review is required. Recorded by the \`change-classification\` job."
+        else
+          body="$MARKER
+        **Change classification: normal** — $reason.
+
+        A normal change carries a documented automated review on this pull request before merge, in place of a second human approver. The \`change-classification\` job requests that review and passes once it has been posted. Recorded by the \`change-classification\` job."
+        fi
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" >/dev/null
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+        fi
+
+        if [ "$classification" = "standard" ]; then
+          exit 0
+        fi
+
+        # Normal change: make sure the review has been requested, then wait for it.
+        has_review() {
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | test(\"is working\") | not)] | length"
+        }
+        has_request() {
+          gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | contains(\"$REVIEW_REQUEST\"))] | length"
+        }
+        if [ "$(has_review)" -gt 0 ]; then
+          echo "Review by $REVIEWER already on the pull request."
+          exit 0
+        fi
+        if [ "$(has_request)" -eq 0 ]; then
+          if [ -z "$REVIEW_TOKEN" ]; then
+            echo "::error::No review request on #$PR and no review token available to post one. Comment '$REVIEW_REQUEST' on the pull request, then re-run this job."
+            exit 1
+          fi
+          GH_TOKEN="$REVIEW_TOKEN" gh pr comment "$PR" --repo "$REPO" --body "$REVIEW_REQUEST" >/dev/null
+          echo "Requested the automated review on #$PR."
+        fi
+        deadline=$(( $(date +%s) + TIMEOUT_MIN * 60 ))
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+          if [ "$(has_review)" -gt 0 ]; then
+            echo "Review by $REVIEWER posted on #$PR."
+            exit 0
+          fi
+          sleep 30
+        done
+        echo "::error::The automated review has not been posted on #$PR within $TIMEOUT_MIN minutes. Re-run this job once it lands (check the Claude Code Review workflow if it never does)."
+        exit 1
