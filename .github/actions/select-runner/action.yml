@@ -31,6 +31,10 @@ runs:
     - name: Check if self-hosted runners are available
       id: check-runners
       shell: bash
+      # Pass the token via env rather than inline ${{ }} in the run body, so the
+      # credential is never spliced into the rendered script source.
+      env:
+        GH_API_TOKEN: ${{ inputs.github_token }}
       run: |
         RUNNER_LABELS="${{ inputs.runner_labels }}"
         RUNNER_SCOPE="${{ inputs.runner_scope }}"
@@ -81,7 +85,7 @@ runs:
           local scope_name="$2"
 
           echo "📡 Checking ${scope_name} runners: ${endpoint}"
-          local response=$(curl -s -w "HTTP_CODE:%{http_code}" -H "Authorization: token ${{ inputs.github_token }}" "${endpoint}")
+          local response=$(curl -s -w "HTTP_CODE:%{http_code}" -H "Authorization: token ${GH_API_TOKEN}" "${endpoint}")
 
           local http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
           response=$(echo "$response" | sed 's/HTTP_CODE:[0-9]*$//')
