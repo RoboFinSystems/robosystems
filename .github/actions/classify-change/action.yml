@@ -29,9 +29,9 @@ inputs:
     required: false
     default: "@claude please review this PR"
   review_timeout_minutes:
-    description: How long to wait for the review to be posted before failing
+    description: How long to wait for the finished review to be posted before failing
     required: false
-    default: "12"
+    default: "15"
   extra_standard_regex:
     description: >-
       Extended regex of additional paths that count as standard for this
@@ -134,9 +134,13 @@ runs:
         fi
 
         # Normal change: make sure the review has been requested, then wait for it.
+        # The reviewer first posts a placeholder and edits it in place into the
+        # finished review, whose body begins "**Claude finished"; a failed run
+        # begins "**Claude encountered an error". Anchor on those openings, so
+        # that a review which quotes these very words in its text still counts.
         has_review() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | test(\"is working\") | not)] | length"
+            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"**Claude finished\"))] | length"
         }
         has_request() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
