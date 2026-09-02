@@ -134,15 +134,13 @@ runs:
         fi
 
         # Normal change: make sure the review has been requested, then wait for it.
-        # The reviewer first posts a placeholder (a spinner image and a
-        # checklist) and edits it in place into the finished review, whose
-        # first line reads "Claude finished …". The finished body keeps the
-        # checklist wording, so the positive signal is the only reliable one:
-        # count a comment when it carries that line, or when it carries no
-        # spinner image at all; never count an error report.
+        # The reviewer first posts a placeholder and edits it in place into the
+        # finished review, whose body begins "**Claude finished"; a failed run
+        # begins "**Claude encountered an error". Anchor on those openings, so
+        # that a review which quotes these very words in its text still counts.
         has_review() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select((.body | test(\"Claude finished\")) or ((.body | test(\"<img \")) | not)) | select(.body | test(\"encountered an error|Claude failed\"; \"i\") | not)] | length"
+            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"**Claude finished\"))] | length"
         }
         has_request() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
