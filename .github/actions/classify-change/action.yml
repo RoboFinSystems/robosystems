@@ -29,9 +29,9 @@ inputs:
     required: false
     default: "@claude please review this PR"
   review_timeout_minutes:
-    description: How long to wait for the review to be posted before failing
+    description: How long to wait for the finished review to be posted before failing
     required: false
-    default: "12"
+    default: "15"
   extra_standard_regex:
     description: >-
       Extended regex of additional paths that count as standard for this
@@ -134,9 +134,13 @@ runs:
         fi
 
         # Normal change: make sure the review has been requested, then wait for it.
+        # The reviewer first posts a placeholder ("Reviewing PR…", "Review in
+        # progress…", with a spinner image) and edits it in place into the
+        # finished review, which opens with "Claude finished". Count only the
+        # finished form, and never an error report.
         has_review() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | test(\"is working\") | not)] | length"
+            --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(((.body | test(\"<img \")) and (.body | test(\"is working|in progress|Reviewing PR\"; \"i\"))) | not) | select(.body | test(\"encountered an error|Claude failed\"; \"i\") | not)] | length"
         }
         has_request() {
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
