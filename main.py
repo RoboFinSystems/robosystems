@@ -282,6 +282,10 @@ def create_app() -> FastAPI:
       # Auth endpoints read X-App-Source for email branding when Referer-based
       # detection can't identify the originating product app.
       "X-App-Source",
+      # Browser MCP clients (the Holon viewer) echo the negotiated revision on
+      # every request after initialize, per Streamable HTTP — without this the
+      # preflight for POST /v1/graphs/{graph_id}/mcp fails cross-origin.
+      "MCP-Protocol-Version",
     ],
     expose_headers=["X-Request-ID", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600,  # Cache preflight requests for 1 hour
