@@ -235,7 +235,7 @@ jobs:
             --arg content "$PROMPT" \
             '{
               "model": $model,
-              "max_tokens": 3000,
+              "max_tokens": 8000,
               "messages": [
                 {
                   "role": "user",
@@ -252,7 +252,7 @@ jobs:
             # its own, and curl parses the config at startup so --retry resends the
             # header correctly.
           RESPONSE=$(printf 'header = "x-api-key: %s"\n' "$ANTHROPIC_API_KEY" \
-            | curl -s --config - --max-time 60 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
+            | curl -s --config - --max-time 180 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
               -H "Content-Type: application/json" \
               -H "anthropic-version: 2023-06-01" \
               -d "$PAYLOAD")
@@ -261,19 +261,27 @@ jobs:
           if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
             ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown error"')
             ERROR_TYPE=$(echo "$RESPONSE" | jq -r '.error.type // "unknown"')
-            echo "❌ Claude API error [$ERROR_TYPE]: $ERROR_MSG"
+            echo "::error::Claude API error [$ERROR_TYPE]: $ERROR_MSG - falling back to commit stats"
             echo "Full response: $RESPONSE" >&2  # Log to stderr for debugging
             echo "Using fallback changelog"
             CHANGELOG="## What's Changed\n\n- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed\n- ${{ steps.analyze-changes.outputs.additions }} additions and ${{ steps.analyze-changes.outputs.deletions }} deletions\n\nSee commit history for detailed changes."
           else
-            # Extract changelog from Claude's response
-            CHANGELOG=$(echo "$RESPONSE" | jq -r '.content[0].text')
+            # Concatenate every text block. Indexing content[0] assumed the
+            # first block is text, which stopped being true once CLAUDE_MODEL
+            # moved to a model that thinks by default - a leading thinking block
+            # made this return null and silently downgraded every release to
+            # commit stats.
+            CHANGELOG=$(echo "$RESPONSE" | jq -r '[.content[]? | select(.type == "text") | .text] | join("")')
+            STOP_REASON=$(echo "$RESPONSE" | jq -r '.stop_reason // "unknown"')
 
             # Validate that Claude returned meaningful content
             if [ -z "$CHANGELOG" ] || [ "$CHANGELOG" = "null" ]; then
-              echo "❌ Claude returned empty changelog, using fallback"
+              echo "::error::Claude returned no text block (stop_reason=$STOP_REASON, blocks=$(echo "$RESPONSE" | jq -c '[.content[]?.type]')) - falling back to commit stats"
               CHANGELOG="## What's Changed\n\n- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed\n- ${{ steps.analyze-changes.outputs.additions }} additions and ${{ steps.analyze-changes.outputs.deletions }} deletions\n\nSee commit history for detailed changes."
             else
+              if [ "$STOP_REASON" = "max_tokens" ]; then
+                echo "::warning::Changelog hit max_tokens and may be truncated"
+              fi
               echo "✅ Claude changelog generated successfully"
             fi
           fi
