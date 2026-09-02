@@ -1,4 +1,4 @@
-name: Claude Code (shared)
+name: Claude Review (shared)
 
 # Shared implementation behind each repo's claude.yml. Callers keep only their
 # event triggers and the permissions grant; the author gate, runner selection,

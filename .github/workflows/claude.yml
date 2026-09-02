@@ -1,7 +1,7 @@
 name: Claude Code Review
 
 # Triggers only. The implementation - author gate, runner selection, action
-# pins - lives in claude-code.yml, which the other repos in the org call too.
+# pins - lives in claude-review.yml, which the other repos in the org call too.
 
 on:
   issue_comment:
@@ -23,5 +23,5 @@ jobs:
       issues: read
       actions: read
       id-token: write
-    uses: ./.github/workflows/claude-code.yml
+    uses: ./.github/workflows/claude-review.yml
     secrets: inherit
