@@ -7,6 +7,26 @@ on:
         description: 'Branch or commit ref to create tag from'
         required: true
         type: string
+      product_name:
+        description: 'Name used in the release title, e.g. "RoboSystems Service", "RoboLedger App"'
+        required: false
+        type: string
+        default: 'RoboSystems Service'
+      product_description:
+        description: 'One line saying what this repo is. Given to Claude so the notes describe the right product.'
+        required: false
+        type: string
+        default: ''
+      project_kind:
+        description: 'Kind of release, used in the prompt, e.g. "software", "Next.js frontend application", "Python SDK"'
+        required: false
+        type: string
+        default: 'software'
+      live_url:
+        description: 'Public URL for the product; adds a Live link to the release body. Omit for libraries and SDKs.'
+        required: false
+        type: string
+        default: ''
     secrets:
       ANTHROPIC_API_KEY:
         description: 'API key for Claude changelog generation'
@@ -162,12 +182,23 @@ jobs:
           COMMIT_MESSAGES: ${{ steps.analyze-changes.outputs.commit_messages }}
           DETAILED_CHANGES: ${{ steps.analyze-changes.outputs.detailed_changes }}
           PR_REFS: ${{ steps.analyze-changes.outputs.pr_refs }}
+          PRODUCT_NAME: ${{ inputs.product_name }}
+          PRODUCT_DESCRIPTION: ${{ inputs.product_description }}
+          PROJECT_KIND: ${{ inputs.project_kind }}
         run: |
+          # Identity line is built before the heredoc so the description stays optional.
+          if [ -n "$PRODUCT_DESCRIPTION" ]; then
+            PRODUCT_LINE="- Product: $PRODUCT_NAME ($PRODUCT_DESCRIPTION)"
+          else
+            PRODUCT_LINE="- Product: $PRODUCT_NAME"
+          fi
+
           # Create analysis prompt for Claude
           cat > /tmp/changelog_prompt.txt << PROMPT_EOF
-          I need you to generate a concise but informative changelog for a software release.
+          I need you to generate a concise but informative changelog for a $PROJECT_KIND release.
 
           **Release Info:**
+          $PRODUCT_LINE
           - Version: $VERSION
           - Previous Version: $LAST_TAG
           - Files Changed: $FILES_CHANGED
@@ -308,6 +339,8 @@ jobs:
           FILES_CHANGED: ${{ steps.analyze-changes.outputs.files_changed }}
           ADDITIONS: ${{ steps.analyze-changes.outputs.additions }}
           DELETIONS: ${{ steps.analyze-changes.outputs.deletions }}
+          PRODUCT_NAME: ${{ inputs.product_name }}
+          LIVE_URL: ${{ inputs.live_url }}
         run: |
           if [ "$CURATED_FOUND" = "true" ]; then
             cp "$CURATED_PATH" /tmp/release_changelog.md
@@ -316,7 +349,7 @@ jobs:
           fi
 
           {
-            echo "# RoboSystems Service v${VERSION}"
+            echo "# ${PRODUCT_NAME} v${VERSION}"
             echo ""
             cat /tmp/release_changelog.md
             echo ""
@@ -336,6 +369,9 @@ jobs:
             echo ""
             echo "- **Full Changelog:** [${LAST_TAG}...v${VERSION}](https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${VERSION})"
             echo "- **All Releases:** [View all releases](https://github.com/${{ github.repository }}/releases)"
+            if [ -n "$LIVE_URL" ]; then
+              echo "- **Live App:** [${LIVE_URL#https://}](${LIVE_URL})"
+            fi
             if [ "$CURATED_FOUND" != "true" ]; then
               echo ""
               echo "---"
