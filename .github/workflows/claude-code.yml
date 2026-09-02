@@ -1,0 +1,99 @@
+name: Claude Code (shared)
+
+# Shared implementation behind each repo's claude.yml. Callers keep only their
+# event triggers and the permissions grant; the author gate, runner selection,
+# and the claude-code-action / checkout pins live here so a version bump is one
+# PR instead of one per repo.
+#
+# Runner selection needs no input: select-runner treats an unset RUNNER_LABELS
+# as "github-hosted" and returns ["ubuntu-latest"] without an API call, so repos
+# with no self-hosted fleet get GitHub-hosted runners for free. vars.* resolve
+# from the CALLER's repository, so each repo keeps its own RUNNER_LABELS.
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: 'OAuth token for claude-code-action'
+        required: true
+      ACTIONS_TOKEN:
+        description: 'PAT for org-level runner queries; falls back to github.token'
+        required: false
+
+jobs:
+  check-runner-availability:
+    runs-on: ubuntu-latest
+    outputs:
+      runners_available: ${{ steps.check.outputs.runners_available }}
+      runner_type: ${{ steps.check.outputs.runner_type }}
+      runner_config: ${{ steps.check.outputs.runner_config }}
+    steps:
+      # Referenced by full path, not "./" - inside a called workflow a relative
+      # action path is resolved against the caller's checkout, which does not
+      # have this action.
+      - name: Check runner availability
+        id: check
+        uses: RoboFinSystems/robosystems/.github/actions/select-runner@main
+        with:
+          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
+          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
+          # ACTIONS_TOKEN needed for org runner API access; falls back to github.token
+          # which has limited permissions but action handles this gracefully
+          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+
+  claude:
+    needs: [check-runner-availability]
+    # Defense-in-depth author gate: on top of the action's own permission check,
+    # only run when the triggering actor is a repo OWNER/MEMBER/COLLABORATOR, so a
+    # drive-by comment/issue from an outside account cannot invoke Claude with
+    # repo secrets in scope. These repos are public, so the gate is load-bearing,
+    # not decorative.
+    if: |
+      (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+      ) ||
+      (
+        github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+      )
+    runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      actions: read # Required for Claude to read CI results on PRs
+      id-token: write # Required: claude-code-action mints a GitHub OIDC token to
+        # authenticate to GitHub (setupGitHubToken → getOidcToken), independent of
+        # any cloud role. Without it the action fails: "Could not fetch an OIDC
+        # token." (This is GitHub auth, not AWS — do not drop it as "unused".)
+        # The caller must also grant id-token: write on its calling job; a called
+        # workflow cannot exceed the caller's token permissions.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
