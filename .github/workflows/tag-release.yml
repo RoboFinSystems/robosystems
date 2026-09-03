@@ -62,12 +62,28 @@ jobs:
           token: ${{ secrets.ACTIONS_TOKEN || github.token }}
           fetch-depth: 0
 
-      - name: Get Version from pyproject.toml
+      - name: Get version
         id: get-version
         run: |
-          VERSION=$(grep "^version = " pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          # Every RoboFinSystems repo calls this workflow. The Python repos keep the
+          # version in pyproject.toml, the JavaScript ones in package.json; read
+          # whichever is present and refuse to continue on an empty version, so a
+          # mismatch can never produce a tag named "v" again (robosystems-core, 2026-09-02).
+          VERSION=""
+          SOURCE=""
+          if [ -f pyproject.toml ]; then
+            VERSION=$(grep "^version = " pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+            SOURCE="pyproject.toml"
+          elif [ -f package.json ]; then
+            VERSION=$(jq -r '.version // empty' package.json)
+            SOURCE="package.json"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::No version found in pyproject.toml or package.json at ${{ inputs.branch_ref }}; refusing to tag."
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Found version: $VERSION"
+          echo "Found version $VERSION in $SOURCE"
 
       - name: Check If Tag Exists
         id: check-tag
