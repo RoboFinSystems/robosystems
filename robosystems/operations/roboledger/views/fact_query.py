@@ -30,6 +30,7 @@ from typing import Any
 
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
+from robosystems.operations.roboledger.views.fact_dedup import keep_most_precise
 
 # Pre-compiled patterns for inline Cypher node filter sanitization.
 _SAFE_STR_RE = re.compile(r"[\w:\-]+")
@@ -122,8 +123,8 @@ def _build_entity_match(
 
 
 def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-  """Dedup on the full period signature, keeping the first occurrence,
-  then sort by ``period_end`` DESC.
+  """Dedup on the full period signature, keeping the most precise
+  occurrence, then sort by ``period_end`` DESC.
 
   DISTINCT + ORDER BY returns empty results in LadybugDB, so the query
   omits both and we handle dedup + sort here.
@@ -136,19 +137,21 @@ def _deduplicate_fact_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
   handing back year-to-date to a caller who asked for a quarter. Entity is
   in the key for the same reason: without it two filers reporting the same
   element for the same period collapse into one row.
+
+  Within one key the most precise fact by ``decimals`` survives (see
+  ``fact_dedup``): a figure reported on the statement face and again,
+  rounded, in the narrative shares every key field, and keeping the first
+  row the engine returned handed back the rounded one about half the time.
   """
-  seen: set[tuple] = set()
-  deduped: list[dict[str, Any]] = []
-  for row in rows:
-    key = (
+  deduped = keep_most_precise(
+    rows,
+    key=lambda row: (
       row.get("element_id", ""),
       row.get("period_start", ""),
       row.get("period_end", ""),
       row.get("entity_ticker") or row.get("entity_name", ""),
-    )
-    if key not in seen:
-      seen.add(key)
-      deduped.append(row)
+    ),
+  )
   deduped.sort(key=lambda r: r.get("period_end", "") or "", reverse=True)
   return deduped
 
@@ -255,6 +258,7 @@ async def query_fact_grid(
     "        p.end_date as period_end,\n"
     "        p.duration_type as duration_type,\n"
     "        f.numeric_value as value,\n"
+    "        f.decimals as decimals,\n"
     "        u.value as unit,\n"
     "        ent.ticker as entity_ticker,\n"
     "        ent.name as entity_name\n      "

@@ -9,13 +9,17 @@ ARE the disclosure sections. They wrap the narrative content and contain nested
 `ix:nonFraction` numeric facts. By extracting both the text and the element names,
 we enable bidirectional navigation between graph facts and their filing context.
 
-iXBRL continuation pattern:
+iXBRL continuation pattern (a note that spans pages is a chain, and each
+link's pointer to the next is an attribute on its own tag):
   <ix:nonNumeric name="us-gaap:GoodwillDisclosureTextBlock" continuedAt="f-571-1">
     Goodwill
   </ix:nonNumeric>
-  <ix:continuation id="f-571-1">
+  <ix:continuation id="f-571-1" continuedAt="f-571-2">
     <p>The following table summarizes changes in goodwill...</p>
     <ix:nonFraction name="us-gaap:Goodwill">32,431</ix:nonFraction>
+  </ix:continuation>
+  <ix:continuation id="f-571-2">
+    <p>...and the rest of the note after the page break.</p>
   </ix:continuation>
 """
 
@@ -199,7 +203,7 @@ class iXBRLParser:
     Tag matching goes through `_find_tag_blocks` (string-find, not regex) —
     see that function for why regex is unusable on filings this size.
     """
-    # Build continuation lookup: id → content
+    # Build continuation lookup: id → (attrs, content)
     continuations = self._build_continuation_map(html)
 
     # Find all TextBlock ix:nonNumeric elements using string-find
@@ -267,35 +271,47 @@ class iXBRLParser:
     )
     return sections
 
-  def _build_continuation_map(self, html: str) -> dict[str, str]:
-    """Build a lookup of continuation id → HTML content."""
-    continuations: dict[str, str] = {}
+  def _build_continuation_map(self, html: str) -> dict[str, tuple[str, str]]:
+    """Build a lookup of continuation id → (tag attrs, HTML content).
+
+    The attrs are kept because the chain pointer lives on the tag: an
+    ``ix:continuation`` that continues further carries its own
+    ``continuedAt`` attribute, and only the tag's attributes can say so.
+    """
+    continuations: dict[str, tuple[str, str]] = {}
     for attrs, inner_html in _find_nested_blocks(
       html, "<ix:continuation", "</ix:continuation"
     ):
-      id_match = re.search(r'id="([^"]+)"', attrs)
+      id_match = re.search(r'\bid="([^"]+)"', attrs)
       if id_match:
-        continuations[id_match.group(1)] = inner_html
+        continuations[id_match.group(1)] = (attrs, inner_html)
     return continuations
 
   def _resolve_continuation_chain(
-    self, start_id: str, continuations: dict[str, str]
+    self, start_id: str, continuations: dict[str, tuple[str, str]]
   ) -> str:
-    """Follow a chain of continuedAt references to build full content."""
+    """Follow a chain of continuedAt references to build full content.
+
+    Each hop's pointer is read from the continuation's own tag attributes,
+    never from its content. Until 2026-09-03 the pointer was searched for
+    in the content, where it is absent (so every chain stopped after one
+    hop and every multi-page note lost its tail) or, worse, belongs to an
+    element nested inside the continuation (so the chain spliced in a
+    different note's text).
+    """
     parts: list[str] = []
-    current_id = start_id
+    current_id: str | None = start_id
     visited: set[str] = set()
 
     while current_id and current_id not in visited:
       visited.add(current_id)
-      content = continuations.get(current_id, "")
-      if not content:
+      entry = continuations.get(current_id)
+      if entry is None:
         break
-
-      # Check if this continuation itself continues
-      next_match = re.search(r'continuedAt="([^"]+)"', content)
+      attrs, content = entry
       parts.append(content)
 
+      next_match = re.search(r'continuedAt="([^"]+)"', attrs)
       current_id = next_match.group(1) if next_match else None
 
     return "".join(parts)
