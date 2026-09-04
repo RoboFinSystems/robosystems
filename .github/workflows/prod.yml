@@ -800,14 +800,14 @@ jobs:
             cat >> $GITHUB_STEP_SUMMARY << EOF
           - **Mode**: Public (HTTPS)
           - **URL**: https://${API_DOMAIN}
-          - **Admin CLI**: \`just admin prod --tunnel <command>\` (requires \`just tunnel prod api-internal\`)
+          - **Admin CLI**: \`just admin prod <command>\` (requires \`just tunnel prod api-internal\`; the CLI targets the tunnel on :18000)
           EOF
           else
             cat >> $GITHUB_STEP_SUMMARY << EOF
           - **Mode**: Internal (SSM tunnel required)
           - **Connect**: \`just tunnel prod all\`
-          - **API**: http://localhost:8000
-          - **Admin CLI**: \`just admin prod --tunnel <command>\`
+          - **API**: http://localhost:18000
+          - **Admin CLI**: \`just admin prod <command>\`
           EOF
           fi
 
@@ -843,10 +843,10 @@ jobs:
 
           | Service | Local Port |
           |---------|------------|
-          | API | http://localhost:8000 |
-          | Dagster UI | http://localhost:8002 |
-          | PostgreSQL | localhost:5432 |
-          | Valkey | localhost:6379 |
+          | API | http://localhost:18000 |
+          | Dagster UI | http://localhost:18002 |
+          | PostgreSQL | localhost:15432 |
+          | Valkey | localhost:16379 |
 
           ### Next Steps
 

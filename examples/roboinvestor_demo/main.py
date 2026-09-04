@@ -887,8 +887,10 @@ def main(argv: list[str] | None = None) -> None:
 
   # Local targets only (F10): the reset issues raw DELETEs against whatever
   # EXTENSIONS_DATABASE_URL points at, which is *not* necessarily the same
-  # system as DEMO_API_URL — with an SSM tunnel open, localhost:5432 can be a
-  # remote RDS. The import lives inside the local-only branch so the route is
+  # system as DEMO_API_URL — an SSM tunnel makes a remote RDS look local
+  # (on an offset port, localhost:15432, so the default port is never prod by
+  # accident, but a URL can still name it). The import lives inside the
+  # local-only branch so the route is
   # unreachable off-local, not merely skipped; and because the API host proves
   # nothing about the database, the reset itself re-checks on the DB side
   # (``examples/_common/local_db.py``: local host + not-RDS) before deleting.

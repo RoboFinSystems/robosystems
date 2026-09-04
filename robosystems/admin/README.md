@@ -24,7 +24,10 @@ just admin dev stats
 
 ### Staging / production
 
-Open a tunnel in one terminal, run commands in another:
+Open a tunnel in one terminal, run commands in another. The tunnel binds
+`localhost:18000` — offset from the local stack's 8000 — so `just start` can stay
+up while you work against staging or prod, and the CLI targets that port
+automatically for those environments:
 
 ```bash
 # Terminal 1

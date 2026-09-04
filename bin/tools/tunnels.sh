@@ -11,6 +11,15 @@ set -euo pipefail
 DEFAULT_ENVIRONMENT="prod"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Local bind ports for the tunnels. Each is the service's real port with a "1"
+# prefixed, so a tunnel never collides with the local dev stack (postgres 5432,
+# valkey 6379, api 8000, dagster 8002) — the stack can stay up while a tunnel is
+# open, and a command left on a default port can't silently hit production.
+LOCAL_PORT_POSTGRES="${LOCAL_PORT_POSTGRES:-15432}"
+LOCAL_PORT_VALKEY="${LOCAL_PORT_VALKEY:-16379}"
+LOCAL_PORT_API="${LOCAL_PORT_API:-18000}"
+LOCAL_PORT_DAGSTER="${LOCAL_PORT_DAGSTER:-18002}"
+
 # Dynamic configuration (populated by discover_infrastructure)
 BASTION_INSTANCE_ID=""
 POSTGRES_ENDPOINT=""
@@ -128,11 +137,11 @@ print_usage() {
     echo -e "${GREEN}======================================================================"
     echo "SSM Tunnels - Access internal services via AWS Systems Manager"
     echo "======================================================================${NC}"
-    echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
-    echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
-    echo "  dagster       - Dagster webserver tunnel (localhost:8002)"
-    echo "  api           - API ALB tunnel (localhost:8000)"
-    echo "  api-internal  - API direct tunnel (localhost:8000, bypasses ALB)"
+    echo "  postgres      - PostgreSQL tunnel (localhost:$LOCAL_PORT_POSTGRES)"
+    echo "  valkey        - Valkey ElastiCache tunnel (localhost:$LOCAL_PORT_VALKEY)"
+    echo "  dagster       - Dagster webserver tunnel (localhost:$LOCAL_PORT_DAGSTER)"
+    echo "  api           - API ALB tunnel (localhost:$LOCAL_PORT_API)"
+    echo "  api-internal  - API direct tunnel (localhost:$LOCAL_PORT_API, bypasses ALB)"
     echo "  all           - All service tunnels (runs in background)"
     echo ""
     echo -e "${GREEN}======================================================================"
@@ -478,12 +487,12 @@ setup_postgres_tunnel() {
 
     echo ""
     echo -e "${YELLOW}Connect to PostgreSQL with:${NC}"
-    echo "psql -h localhost -p 5432 -U postgres -d robosystems"
+    echo "psql -h localhost -p $LOCAL_PORT_POSTGRES -U postgres -d robosystems"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$POSTGRES_ENDPOINT" "5432" "5432" "PostgreSQL"
+    start_ssm_tunnel "$POSTGRES_ENDPOINT" "5432" "$LOCAL_PORT_POSTGRES" "PostgreSQL"
 }
 
 setup_valkey_tunnel() {
@@ -494,12 +503,12 @@ setup_valkey_tunnel() {
 
     echo ""
     echo -e "${YELLOW}Connect to Valkey with:${NC}"
-    echo "redis-cli -h localhost -p 6379"
+    echo "redis-cli -h localhost -p $LOCAL_PORT_VALKEY"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$VALKEY_ENDPOINT" "6379" "6379" "Valkey"
+    start_ssm_tunnel "$VALKEY_ENDPOINT" "6379" "$LOCAL_PORT_VALKEY" "Valkey"
 }
 
 setup_dagster_tunnel() {
@@ -510,12 +519,12 @@ setup_dagster_tunnel() {
 
     echo ""
     echo -e "${YELLOW}Access Dagster UI:${NC}"
-    echo "Open http://127.0.0.1:8002 in your browser"
+    echo "Open http://127.0.0.1:$LOCAL_PORT_DAGSTER in your browser"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$DAGSTER_ENDPOINT" "3000" "8002" "Dagster"
+    start_ssm_tunnel "$DAGSTER_ENDPOINT" "3000" "$LOCAL_PORT_DAGSTER" "Dagster"
 }
 
 setup_api_tunnel() {
@@ -545,13 +554,13 @@ setup_api_tunnel() {
 
     echo ""
     echo -e "${YELLOW}Access API (via ALB):${NC}"
-    echo "curl http://localhost:8000/v1/status"
-    echo "Open http://127.0.0.1:8000/docs in your browser for API docs"
+    echo "curl http://localhost:$LOCAL_PORT_API/v1/status"
+    echo "Open http://127.0.0.1:$LOCAL_PORT_API/docs in your browser for API docs"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$API_ENDPOINT" "80" "8000" "API"
+    start_ssm_tunnel "$API_ENDPOINT" "80" "$LOCAL_PORT_API" "API"
 }
 
 setup_api_internal_tunnel() {
@@ -571,16 +580,16 @@ setup_api_internal_tunnel() {
     echo -e "${YELLOW}Use this for admin operations when ALB IP restrictions apply.${NC}"
     echo ""
     echo -e "${YELLOW}Access API:${NC}"
-    echo "curl http://localhost:8000/v1/status"
+    echo "curl http://localhost:$LOCAL_PORT_API/v1/status"
     echo ""
     echo -e "${YELLOW}Admin API (requires this tunnel):${NC}"
     echo "just admin $environment stats"
-    echo "Open http://127.0.0.1:8000/docs in your browser for API docs"
+    echo "Open http://127.0.0.1:$LOCAL_PORT_API/docs in your browser for API docs"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    start_ssm_tunnel "$API_INTERNAL_ENDPOINT" "8000" "8000" "API-Internal"
+    start_ssm_tunnel "$API_INTERNAL_ENDPOINT" "8000" "$LOCAL_PORT_API" "API-Internal"
 }
 
 setup_all_tunnels() {
@@ -592,26 +601,26 @@ setup_all_tunnels() {
 
     # Start tunnels in background
     if [[ "$POSTGRES_ENDPOINT" != "NOT_FOUND" ]]; then
-        start_ssm_tunnel_background "$POSTGRES_ENDPOINT" "5432" "5432" "PostgreSQL"
+        start_ssm_tunnel_background "$POSTGRES_ENDPOINT" "5432" "$LOCAL_PORT_POSTGRES" "PostgreSQL"
         ((tunnel_count++))
         sleep 1
     fi
 
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
-        start_ssm_tunnel_background "$VALKEY_ENDPOINT" "6379" "6379" "Valkey"
+        start_ssm_tunnel_background "$VALKEY_ENDPOINT" "6379" "$LOCAL_PORT_VALKEY" "Valkey"
         ((tunnel_count++))
         sleep 1
     fi
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
-        start_ssm_tunnel_background "$DAGSTER_ENDPOINT" "3000" "8002" "Dagster"
+        start_ssm_tunnel_background "$DAGSTER_ENDPOINT" "3000" "$LOCAL_PORT_DAGSTER" "Dagster"
         ((tunnel_count++))
         sleep 1
     fi
 
     # API tunnel: use ALB for internal mode, Service Discovery for public modes
     if [[ -n "$API_ENDPOINT" && "$API_ENDPOINT" != "NOT_FOUND" && "$API_ACCESS_MODE" == "internal" ]]; then
-        start_ssm_tunnel_background "$API_ENDPOINT" "80" "8000" "API"
+        start_ssm_tunnel_background "$API_ENDPOINT" "80" "$LOCAL_PORT_API" "API"
         ((tunnel_count++))
         sleep 1
     elif [[ "$API_ACCESS_MODE" == "public" ]]; then
@@ -619,7 +628,7 @@ setup_all_tunnels() {
         # This allows admin CLI access since ALB blocks /admin/v1/* in public mode
         if [[ -n "$API_INTERNAL_ENDPOINT" ]]; then
             echo -e "${YELLOW}API is in $API_ACCESS_MODE mode - using api-internal tunnel (bypasses ALB)${NC}"
-            start_ssm_tunnel_background "$API_INTERNAL_ENDPOINT" "8000" "8000" "API-Internal"
+            start_ssm_tunnel_background "$API_INTERNAL_ENDPOINT" "8000" "$LOCAL_PORT_API" "API-Internal"
             ((tunnel_count++))
             sleep 1
         fi
@@ -636,21 +645,21 @@ setup_all_tunnels() {
     echo -e "${YELLOW}Connection commands:${NC}"
 
     if [[ "$POSTGRES_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "PostgreSQL: psql -h localhost -p 5432 -U postgres -d robosystems"
+        echo "PostgreSQL: psql -h localhost -p $LOCAL_PORT_POSTGRES -U postgres -d robosystems"
     fi
 
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "Valkey:     redis-cli -h localhost -p 6379"
+        echo "Valkey:     redis-cli -h localhost -p $LOCAL_PORT_VALKEY"
     fi
 
     if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "Dagster:    Open http://127.0.0.1:8002 in your browser"
+        echo "Dagster:    Open http://127.0.0.1:$LOCAL_PORT_DAGSTER in your browser"
     fi
 
     if [[ "$API_ACCESS_MODE" == "internal" ]]; then
-        echo "API:        curl http://localhost:8000/v1/status"
+        echo "API:        curl http://localhost:$LOCAL_PORT_API/v1/status"
     elif [[ "$API_ACCESS_MODE" == "public" ]]; then
-        echo "API:        curl http://localhost:8000/v1/status (via api-internal)"
+        echo "API:        curl http://localhost:$LOCAL_PORT_API/v1/status (via api-internal)"
         echo "Admin CLI:  just admin $environment stats"
     fi
 

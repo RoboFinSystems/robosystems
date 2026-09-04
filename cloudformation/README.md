@@ -331,9 +331,11 @@ just tunnel prod postgres
 # Raw equivalents
 aws ssm start-session --target i-0123456789abcdef0
 
+# Local ports are the service port with a "1" prefixed (postgres 15432, valkey
+# 16379, api 18000, dagster 18002) so tunnels never collide with the local stack
 aws ssm start-session --target i-0123456789abcdef0 \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters '{"host":["mydb.xxx.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5432"]}'
+  --parameters '{"host":["mydb.xxx.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["15432"]}'
 ```
 
 ---
