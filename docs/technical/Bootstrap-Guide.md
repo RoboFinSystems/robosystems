@@ -288,11 +288,15 @@ The OIDC stack creates three roles:
 | `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app`, `robosystems-holon-viewer` | Limited frontend |
 | `RoboSystemsAppSuperAdminRole` | SSO users (via IAM Identity Center) | Application admin only (no infra) |
 
-After bootstrapping the backend, set up frontend apps:
+The frontend repos hold no AWS access of their own. `just bootstrap` in the
+backend sets each one's `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID` and `AWS_REGION`
+directly — the repository names come from the OIDC stack's own parameters, so a
+fork that renamed its apps stays consistent with the trust policy. Only the
+deployment variables remain to set in each app repo:
 
 ```bash
 # In robosystems-app, roboledger-app, or roboinvestor-app
-npm run setup:bootstrap
+npm run setup:gha
 ```
 
 **Allowed deployment branches:** `main`, `release/*`, `v*` tags
@@ -361,13 +365,19 @@ Configured via `APP_ACCESS_MODE_PROD` / `APP_ACCESS_MODE_STAGING`:
 
 ### Bootstrap
 
-From the frontend app repository:
+Run from the **backend** repo. It deploys the OIDC stack and pushes the identity
+variables to every frontend repo named in that stack's parameters:
 
 ```bash
-npm run setup:bootstrap    # Sets AWS_ROLE_ARN, prompts for gha-setup
+just bootstrap         # full
+just bootstrap-oidc    # re-apply the roles and identity variables only
 ```
 
-This checks for the OIDC infrastructure (deployed by the main robosystems repo) and configures GitHub variables.
+Then, from the frontend app repository:
+
+```bash
+npm run setup:gha      # Deployment variables: domains, access mode, scaling
+```
 
 ### Custom Domain Setup
 
