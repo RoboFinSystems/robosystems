@@ -15,14 +15,17 @@
 #   1. Configures AWS CLI SSO profile (if not exists)
 #   2. Deploys the GitHub OIDC CloudFormation stack (the deploy roles)
 #   3. Sets GitHub variables (role ARN, etc.)
-#   4. First run only: ECR repository, SES identity, application secrets
+#   4. Sets the same identity variables on the frontend app repos, which own
+#      no AWS access of their own — the repos come from the stack parameters
+#   5. First run only: ECR repository, SES identity, application secrets
 #
 # MODES:
 #   full (default)  Everything above. On a re-run the application-config
 #                   step (Secrets Manager, GitHub variables) is skipped unless
 #                   --with-app-config is given — those are the two steps that
 #                   can rewrite a live account, so they never run by accident.
-#   --oidc          Only the OIDC stack + the three identity variables. Use this
+#   --oidc          Only the OIDC stack + the identity variables, here and on
+#                   the frontend app repos. Use this
 #                   after editing cloudformation/bootstrap-oidc.yaml. The stack
 #                   update is previewed as a change set: you see exactly which
 #                   resources change before anything is applied, and a stack
@@ -601,15 +604,28 @@ deploy_oidc_update() {
 # GITHUB CONFIGURATION
 # =============================================================================
 
+# The optional third argument targets another repository (owner/name); with it
+# omitted the variable is set on the current one. Written without arrays so the
+# script still runs on a stock macOS bash 3.2.
 set_variable_if_changed() {
-    local name="$1" value="$2" current
-    current=$(gh variable get "$name" 2>/dev/null || echo "")
+    local name="$1" value="$2" repo="${3:-}" current
+    if [ -n "$repo" ]; then
+        current=$(gh variable get "$name" --repo "$repo" 2>/dev/null || echo "")
+    else
+        current=$(gh variable get "$name" 2>/dev/null || echo "")
+    fi
+
     if [ "$current" = "$value" ]; then
         print_success "${name} already set"
+        return 0
+    fi
+
+    if [ -n "$repo" ]; then
+        gh variable set "$name" --body "$value" --repo "$repo"
     else
         gh variable set "$name" --body "$value"
-        print_success "Set ${name}"
     fi
+    print_success "Set ${name}"
 }
 
 configure_github() {
@@ -633,6 +649,85 @@ configure_github() {
     echo ""
     print_step "Note: No AWS secrets needed with OIDC!"
     print_info "Workflows will use role assumption instead of access keys"
+}
+
+# =============================================================================
+# FRONTEND REPOSITORY CONFIGURATION
+# =============================================================================
+
+# The frontend apps deploy through the stack this script owns, assuming the
+# separate frontend role. Nothing they need is per-repo — one role ARN, one
+# account, one region, all three known here the moment the stack is up. So the
+# identity variables are pushed from this side, and the app repos need no AWS
+# access, no aws CLI and no SSO profile of their own.
+configure_frontend_repos() {
+    print_header "Configuring Frontend Repositories"
+
+    local frontend_role_arn
+    frontend_role_arn=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].Outputs[?OutputKey==`GitHubActionsFrontendRoleArn`].OutputValue' \
+        --output text 2>/dev/null) || frontend_role_arn=""
+
+    if [ -z "$frontend_role_arn" ] || [ "$frontend_role_arn" = "None" ]; then
+        print_warning "Stack exposes no GitHubActionsFrontendRoleArn — skipping frontends"
+        print_info "Run 'just bootstrap-oidc' to update the stack from the current template"
+        return 0
+    fi
+
+    # Repo names are stack parameters, so a fork that renamed its apps stays
+    # consistent: take the trusted names from the stack rather than a list
+    # hardcoded here that would silently drift from the trust policy.
+    local params
+    params=$(aws cloudformation describe-stacks \
+        --stack-name "${OIDC_STACK_NAME}" \
+        --profile "${SSO_PROFILE}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].Parameters' \
+        --output json 2>/dev/null) || params="[]"
+
+    local repo_names="" key name
+    for key in GitHubAppRepoName GitHubLedgerAppRepoName \
+        GitHubInvestorAppRepoName GitHubHolonViewerRepoName; do
+        name=$(echo "$params" | jq -r --arg k "$key" \
+            '.[] | select(.ParameterKey == $k) | .ParameterValue')
+        if [ -n "$name" ] && [ "$name" != "null" ]; then
+            repo_names="${repo_names}${name}
+"
+        fi
+    done
+
+    if [ -z "$repo_names" ]; then
+        print_warning "Stack carries no frontend repository parameters — skipping frontends"
+        return 0
+    fi
+
+    print_info "Frontend role: ${frontend_role_arn}"
+
+    local repo_name target
+    while IFS= read -r repo_name; do
+        [ -z "$repo_name" ] && continue
+        target="${GITHUB_ORG}/${repo_name}"
+
+        echo ""
+        print_step "${target}"
+
+        if ! gh repo view "$target" &>/dev/null; then
+            print_warning "Not accessible to this gh account — skipping"
+            continue
+        fi
+
+        set_variable_if_changed AWS_ROLE_ARN "$frontend_role_arn" "$target"
+        set_variable_if_changed AWS_ACCOUNT_ID "$AWS_ACCOUNT_ID" "$target"
+        set_variable_if_changed AWS_REGION "$AWS_REGION" "$target"
+    done <<EOF
+${repo_names}
+EOF
+
+    echo ""
+    print_info "Each app's remaining setup is GitHub-only: bin/gha-setup.sh"
 }
 
 # =============================================================================
@@ -1358,6 +1453,9 @@ main() {
 
     # Configure GitHub
     configure_github
+
+    # Push the identity variables to the frontend app repos
+    configure_frontend_repos
 
     if [ "$BOOTSTRAP_MODE" = "oidc" ]; then
         show_summary
