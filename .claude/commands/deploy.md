@@ -62,7 +62,7 @@ A green workflow means the pipeline finished, not that the app is serving. Confi
 
 ```bash
 curl -sf https://<api-host>/v1/status && echo OK      # public API over HTTPS
-# if the API is in internal mode: tunnel first, then curl http://localhost:8000/v1/status
+# if the API is in internal mode: tunnel first, then curl http://localhost:18000/v1/status
 ```
 
 `/v1/status` is a **liveness** probe — it returns healthy whenever the process is up; it does **not** check the database, cache, or graph. A 200 means "the API is serving HTTP," not "the stack is healthy." Confirm the rest yourself: the app service (running vs desired count), recent errors in its log group, and — if the deploy carried a migration — the orchestrator boot logs (`/migrate`).

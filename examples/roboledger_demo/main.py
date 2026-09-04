@@ -321,7 +321,8 @@ def reset_demo(graph_id: str) -> None:
   **Local targets only (F10).** ``reset_demo_state`` issues raw DELETEs against
   whatever ``EXTENSIONS_DATABASE_URL`` points at, which is *not* necessarily the
   same system as ``DEMO_API_URL`` — an SSM tunnel makes a remote database look
-  local, so with tunnels open ``localhost:5432`` can be prod RDS. A remote /
+  local (tunnels bind offset ports, ``localhost:15432`` for postgres, so the
+  default port is never prod by accident, but a URL can still name it). A remote /
   integration target has no business reaching Postgres at all, so the reset is
   simply not run off-local — and ``reset_demo_state`` is imported *inside* the
   local-only branch so the route is unreachable there, not merely skipped. The

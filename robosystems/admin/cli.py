@@ -5,9 +5,10 @@ cache, instances, search, and worker operations. Commands are thin wrappers
 over HTTP calls; the API key comes from `ADMIN_API_KEY` in dev, otherwise from
 AWS Secrets Manager.
 
-Requests go to localhost:8000 by default, which serves both local dev and an
-SSM tunnel. Against staging or prod a tunnel is required — the ALB blocks
-`/admin/v1/*` whenever the API is publicly reachable.
+Requests go to localhost:8000 in dev and to the tunnel's port (localhost:18000)
+against staging or prod. A tunnel is required there — the ALB blocks
+`/admin/v1/*` whenever the API is publicly reachable — and the offset port lets
+the local dev stack keep running alongside it.
 
 Examples:
     # Local dev (Docker, no tunnel)
@@ -47,6 +48,11 @@ from .commands.worker import worker
 logger = get_logger(__name__)
 console = Console()
 
+# Local dev serves the API on 8000; the SSM tunnel binds 18000 so both can be up
+# at once (see LOCAL_PORT_API in bin/tools/tunnels.sh).
+LOCAL_API_URL = "http://localhost:8000"
+TUNNEL_API_URL = "http://localhost:18000"
+
 
 class AdminAPIClient:
   """Client for interacting with the RoboSystems admin API."""
@@ -60,9 +66,10 @@ class AdminAPIClient:
   ):
     """Resolve the API base URL and fetch the admin key.
 
-    `api_base_url` defaults to localhost:8000, which reaches the API through
-    an SSM tunnel. `use_direct` swaps in the environment's public URL instead,
-    which the ALB only permits while the API is in 'internal' mode.
+    `api_base_url` defaults to localhost:8000 in dev and to localhost:18000 for
+    staging and prod, where the API is reached through an SSM tunnel (see
+    `bin/tools/tunnels.sh`). `use_direct` swaps in the environment's public URL
+    instead, which the ALB only permits while the API is in 'internal' mode.
     """
     self.environment = environment
     self.aws_profile = aws_profile
@@ -76,9 +83,11 @@ class AdminAPIClient:
       elif environment == "prod":
         self.api_base_url = "https://api.robosystems.ai"
       else:
-        self.api_base_url = "http://localhost:8000"
+        self.api_base_url = LOCAL_API_URL
+    elif environment == "dev":
+      self.api_base_url = LOCAL_API_URL
     else:
-      self.api_base_url = "http://localhost:8000"
+      self.api_base_url = TUNNEL_API_URL
 
     if use_direct and environment != "dev":
       self._check_api_access_mode()
@@ -247,7 +256,7 @@ class AdminAPIClient:
 )
 @click.option(
   "--api-url",
-  help="Override API base URL (default: localhost:8000)",
+  help="Override API base URL (default: localhost:8000 in dev, localhost:18000 via tunnel)",
 )
 @click.option(
   "--aws-profile",
@@ -267,9 +276,9 @@ def cli(ctx, environment, api_url, aws_profile, direct):
   This CLI provides access to subscription management, customer management,
   credit management, graph management, and user management.
 
-  By default, connects to localhost:8000 which works with:
-    - Local dev (Docker): just admin dev stats
-    - SSM tunnel: ./bin/tools/tunnels.sh prod all && just admin prod stats
+  By default, connects to:
+    - Local dev (Docker), localhost:8000: just admin dev stats
+    - SSM tunnel, localhost:18000: ./bin/tools/tunnels.sh prod all && just admin prod stats
 
   Direct mode (--direct / -d):
     Connects to public API URLs. Only works if API is in 'internal' mode.
