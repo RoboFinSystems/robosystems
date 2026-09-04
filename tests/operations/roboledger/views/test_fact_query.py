@@ -516,3 +516,36 @@ class TestDeduplicateFactRows:
       "2024-12-31",
       "2023-12-31",
     ]
+
+  @pytest.mark.unit
+  def test_same_period_reported_at_two_precisions_keeps_the_precise_one(self):
+    """3M FY2024 R&D: 1,085 (decimals -6) on the income statement and 1,100
+    (decimals -8) in the narrative share the element, period and entity.
+    The statement figure must win in either row order."""
+    statement = {
+      "element_id": "us-gaap:ResearchAndDevelopmentExpense",
+      "period_start": "2024-01-01",
+      "period_end": "2024-12-31",
+      "duration_type": "annual",
+      "entity_ticker": "MMM",
+      "value": 1_085_000_000,
+      "decimals": "-6",
+    }
+    narrative = {**statement, "value": 1_100_000_000, "decimals": "-8"}
+    assert [r["value"] for r in _deduplicate_fact_rows([statement, narrative])] == [
+      1_085_000_000
+    ]
+    assert [r["value"] for r in _deduplicate_fact_rows([narrative, statement])] == [
+      1_085_000_000
+    ]
+
+
+class TestProjectsDecimals:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_decimals_is_projected_for_the_dedup(self, mock_repository):
+    """The dedup ranks survivors by decimals, so the query must project it."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "f.decimals as decimals" in query

@@ -308,3 +308,77 @@ class TestiXBRLParser:
     sections = parser.parse(html)
     # Should not hang — visited set breaks the cycle
     assert len(sections) == 1
+
+  def test_resolves_multi_hop_continuation_chain(self):
+    """A note that spans pages is a chain: nonNumeric → continuation →
+    continuation → …, each link pointing to the next via its own
+    ``continuedAt`` attribute. Every link's text and elements must land in
+    the section. Until 2026-09-03 the parser looked for the pointer inside
+    the continuation's content, so every chain stopped after one hop and
+    every multi-page note lost its tail (3M FY2024 Note 6 lost the PFAS
+    exit-actions paragraph; Note 19 kept 570 of 129,803 characters).
+    """
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:RestructuringAndRelatedActivitiesDisclosureTextBlock" id="f-1" continuedAt="f-1-a">
+      <p>Restructuring overview with enough words to clear the minimum word count filter for a section.</p>
+    </ix:nonNumeric>
+    <p>Page footer text that is not part of the note.</p>
+    <ix:continuation id="f-1-a" continuedAt="f-1-b">
+      <p>SECOND HOP: charges of
+      <ix:nonFraction name="us-gaap:RestructuringCharges" contextRef="c1">300</ix:nonFraction>
+      million were recorded.</p>
+    </ix:continuation>
+    <ix:continuation id="f-1-b" continuedAt="f-1-c">
+      <p>THIRD HOP: the reserve balance was
+      <ix:nonFraction name="us-gaap:RestructuringReserve" contextRef="c2">120</ix:nonFraction>
+      million.</p>
+    </ix:continuation>
+    <ix:continuation id="f-1-c">
+      <p>FOURTH HOP: PFAS Exit Actions paragraph with
+      <ix:nonFraction name="us-gaap:BusinessExitCosts1" contextRef="c3">45</ix:nonFraction>
+      million.</p>
+    </ix:continuation>
+    </body></html>
+    """
+    sections = iXBRLParser().parse(html)
+
+    assert len(sections) == 1
+    s = sections[0]
+    for marker in ("SECOND HOP", "THIRD HOP", "FOURTH HOP", "PFAS Exit Actions"):
+      assert marker in s.content
+    assert "Page footer" not in s.content
+    assert s.xbrl_elements == [
+      "us-gaap:BusinessExitCosts1",
+      "us-gaap:RestructuringCharges",
+      "us-gaap:RestructuringReserve",
+    ]
+
+  def test_chain_pointer_is_read_from_the_tag_not_the_content(self):
+    """A continuation may wrap an element that itself continues elsewhere.
+    That nested pointer belongs to the nested element's chain, not to the
+    enclosing note: following it would splice another note's text into
+    this one. The chain ends where the continuation's own tag says it ends.
+    """
+    html = """
+    <html><body>
+    <ix:nonNumeric contextRef="c-1" name="us-gaap:DebtDisclosureTextBlock" id="f-1" continuedAt="f-1-a">
+      <p>Debt overview with enough words to clear the minimum word count filter for a section.</p>
+    </ix:nonNumeric>
+    <ix:continuation id="f-1-a">
+      <p>Debt detail, and a nested policy that continues on its own:
+      <ix:nonNumeric name="us-gaap:DebtPolicyTextBlock" contextRef="c-1" id="f-2" continuedAt="f-2-a">policy start</ix:nonNumeric>
+      </p>
+    </ix:continuation>
+    <ix:continuation id="f-2-a">
+      <p>OTHER NOTE TEXT that belongs to the nested policy, not to the debt note.</p>
+    </ix:continuation>
+    </body></html>
+    """
+    sections = iXBRLParser().parse(html)
+
+    debt = next(
+      s for s in sections if s.section_id == "us-gaap:DebtDisclosureTextBlock"
+    )
+    assert "Debt detail" in debt.content
+    assert "OTHER NOTE TEXT" not in debt.content

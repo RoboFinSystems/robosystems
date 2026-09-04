@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.operations.roboledger.views.fact_dedup import keep_most_precise
 
 
 async def query_financial_statement(
@@ -123,7 +124,8 @@ async def query_financial_statement(
     "RETURN DISTINCT e.canonical_concept AS canonical_concept, e.qname AS qname, "
     "e.name AS name, f.numeric_value AS value, "
     "p.start_date AS start_date, p.end_date AS end_date, "
-    "p.period_type AS period_type, p.duration_type AS duration_type "
+    "p.period_type AS period_type, p.duration_type AS duration_type, "
+    "f.decimals AS decimals "
     "ORDER BY end_date DESC "
     "LIMIT $limit"
   )
@@ -154,18 +156,21 @@ def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
   rather than the instance; the sibling ``fact_query._deduplicate_fact_rows``
   keys the same way. ``start_date`` is NULL for instants, which is fine —
   an instant's identity is its ``end_date``.
+
+  Within one key the survivor is the most precise fact by ``decimals``
+  (see ``fact_dedup``). Until 2026-09-03 it was the first row the engine
+  returned, and a figure a filer reports both on the statement face and,
+  rounded, in the narrative — the same element, period, and context —
+  came back as the rounded one about half the time (3M FY2024 R&D:
+  1,100 for 1,085). Equal precision keeps the first row seen.
   """
-  seen: set[tuple[str, str, str, str, str]] = set()
-  deduped: list[dict[str, Any]] = []
-  for row in rows:
-    key = (
+  return keep_most_precise(
+    rows,
+    key=lambda row: (
       row.get("qname", "") or "",
       row.get("start_date", "") or "",
       row.get("end_date", "") or "",
       row.get("period_type", "") or "",
       row.get("duration_type", "") or "",
-    )
-    if key not in seen:
-      seen.add(key)
-      deduped.append(row)
-  return deduped
+    ),
+  )
