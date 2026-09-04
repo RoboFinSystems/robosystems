@@ -57,7 +57,7 @@ restart profile="robosystems":
 
 # Restart specific service(s) without stopping everything
 restart-container container="worker":
-    docker compose -f compose.yaml restart robosystems-{{container}}
+    docker compose -f compose.yaml restart {{container}}
 
 # Restart graph-api if running and wait until it is healthy
 graph-api-restart:
