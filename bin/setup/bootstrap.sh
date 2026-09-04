@@ -688,6 +688,15 @@ configure_frontend_repos() {
         --query 'Stacks[0].Parameters' \
         --output json 2>/dev/null) || params="[]"
 
+    # A stack with no Parameters block answers this query with a literal null,
+    # which the || above does not catch: the call succeeded. Iterating null in
+    # jq exits 5, and under set -e that kills the whole bootstrap run instead
+    # of reaching the skip below. Written as an if, never `[ ... ] && ...`,
+    # which would itself trip errexit on the far more common non-null case.
+    if [ "$params" = "null" ]; then
+        params="[]"
+    fi
+
     local repo_names="" key name
     for key in GitHubAppRepoName GitHubLedgerAppRepoName \
         GitHubInvestorAppRepoName GitHubHolonViewerRepoName; do
