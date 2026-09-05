@@ -8,6 +8,7 @@ Tests cover:
 - delete_journal_entry — draft-only gate, hard delete mechanics
 - reverse_journal_entry — posted-only gate, debit↔credit flip, reversal_of FK,
   original marked reversed, closed-period gate on reversal date
+- provenance_for_source — the entry's origin, derived rather than hardcoded
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
   create_journal_entry,
   delete_journal_entry,
+  provenance_for_source,
   resolve_flow_element_id,
   reverse_journal_entry,
   update_journal_entry,
@@ -900,3 +902,42 @@ class TestReverseJournalEntry:
     reverse_journal_entry(session, self._body(), "usr_1")
 
     assert original.status == "reversed"
+
+
+class TestProvenanceForSource:
+  """`Entry.provenance` answers "where did this come from".
+
+  It was hardcoded to `manual_entry` for every entry regardless of origin,
+  so entries that arrived over a connection claimed to be hand-entered and
+  `source_sync` was never written by anything — on one live tenant that was
+  1726 QuickBooks-synced entries. The write already receives the origin;
+  these pin the mapping that uses it.
+  """
+
+  @pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+      ("manual", "manual_entry"),
+      ("native", "manual_entry"),
+      ("system", "system_computed"),
+      ("schedule", "schedule_derived"),
+    ],
+  )
+  def test_platform_sources_map_to_their_own_provenance(self, source, expected):
+    assert provenance_for_source(source) == expected
+
+  @pytest.mark.parametrize("source", ["quickbooks", "xero", "plaid", "hubspot"])
+  def test_any_connection_source_is_a_sync(self, source):
+    # `Event.source` is open on the adapter side — registering a connection
+    # opens a source name with no schema change — so the adapter half of
+    # this mapping has to be open by default, not an enumerated list.
+    assert provenance_for_source(source) == "source_sync"
+
+  def test_absent_source_falls_back_to_manual(self):
+    assert provenance_for_source(None) == "manual_entry"
+    assert provenance_for_source("") == "manual_entry"
+
+  def test_a_synced_entry_is_no_longer_labelled_manual(self):
+    # The regression itself: before this, every branch returned
+    # "manual_entry" and "what came from QuickBooks?" was unanswerable.
+    assert provenance_for_source("quickbooks") != "manual_entry"

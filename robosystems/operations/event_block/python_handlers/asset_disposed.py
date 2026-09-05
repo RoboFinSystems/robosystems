@@ -182,6 +182,7 @@ def dispatch(
     memo=memo,
     created_by=created_by,
     entry_type="closing",
+    provenance="event_handler",
   )
 
   # 5. Link the entry to the event (audit chain)

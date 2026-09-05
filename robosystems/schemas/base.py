@@ -176,7 +176,7 @@ BASE_NODES = [
       Property(
         name="event_category", type="STRING"
       ),  # economic: sales|purchase|... ; support: control|approval|...
-      Property(name="event_class", type="STRING"),  # economic | support
+      Property(name="event_class", type="STRING"),  # economic | support | operational
       Property(
         name="event_action", type="STRING"
       ),  # Canonical 19-verb action vocabulary (see EVENT_ACTIONS in models)
