@@ -8,6 +8,7 @@ from robosystems.logger import logger
 
 from .base_tool import BaseTool
 from .constants import (
+  LEDGER_ANCHOR_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
   PERIOD_TYPE_GUIDANCE,
   QUERY_PATTERN_GUIDANCE,
@@ -214,7 +215,13 @@ LIMIT 10""",
           [
             {
               "category": "ledger",
-              "description": "⚠️ READ FIRST — ledger status filtering",
+              "description": "⚠️ READ FIRST — where a ledger query must start",
+              "info": LEDGER_ANCHOR_GUIDANCE,
+              "explanation": "Transaction is a partial layer; anchoring a traversal on it silently drops every entry that has no parent transaction, which is every period-close adjusting entry.",
+            },
+            {
+              "category": "ledger",
+              "description": "⚠️ READ SECOND — ledger status filtering",
               "info": LEDGER_STATUS_GUIDANCE,
               "explanation": "The graph keeps voided/superseded/draft rows for audit; the examples below show the required live-row filters.",
             },

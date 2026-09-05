@@ -8,7 +8,7 @@ from robosystems.logger import logger
 
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
-from .constants import LEDGER_STATUS_GUIDANCE
+from .constants import LEDGER_ANCHOR_GUIDANCE, LEDGER_STATUS_GUIDANCE
 
 if TYPE_CHECKING:
   from ..client import GraphMCPClient
@@ -87,6 +87,9 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
 `get-example-queries` for patterns that already work against it."""
 
     if self._has_ledger_spine():
+      # Anchor first, then status: a query anchored on the wrong node loses
+      # rows outright, which no amount of correct status filtering recovers.
+      description += "\n\n" + LEDGER_ANCHOR_GUIDANCE
       description += "\n\n" + LEDGER_STATUS_GUIDANCE
 
     return {

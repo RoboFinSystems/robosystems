@@ -6,9 +6,9 @@ under the three cases that matter: a write-back connection with an
 eligible draft, the same drafts with NO write-back connection (all
 local-only), and an ineligible draft (already in QB / synced).
 
-Mock-based: the read does a raw-SQL drafts query (`session.execute`) and
-an ORM eligibility query (`session.query(...)`), so the mock session
-serves both.
+Mock-based: the read does a raw-SQL entry query (`session.execute`, via
+the shared projection in `reads.journal_entries`) and an ORM eligibility
+query (`session.query(...)`), so the mock session serves both.
 """
 
 from __future__ import annotations
@@ -24,15 +24,22 @@ from robosystems.operations.roboledger.reads.period_drafts import list_period_dr
 
 
 def _line_row(entry_id: str, line_item_id: str, debit: int, credit: int):
-  """One draft line-item row in the shape `_DRAFT_ENTRIES_SQL` returns."""
+  """One draft line-item row in the shape the shared entry projection
+  (`journal_entries._ENTRY_ROWS_TEMPLATE`) returns."""
   return SimpleNamespace(
     entry_id=entry_id,
+    number=None,
+    transaction_id=None,
     posting_date=date(2026, 1, 15),
     entry_type="closing",
+    status="draft",
     memo=f"memo-{entry_id}",
     provenance="schedule",
     source_structure_id=None,
     source_structure_name=None,
+    triggered_by_event_id=None,
+    reversal_of=None,
+    posted_at=None,
     line_item_id=line_item_id,
     element_id=f"el-{line_item_id}",
     element_code="1000",
@@ -40,6 +47,7 @@ def _line_row(entry_id: str, line_item_id: str, debit: int, credit: int):
     debit_amount=debit,
     credit_amount=credit,
     line_description=None,
+    line_order=1,
   )
 
 
