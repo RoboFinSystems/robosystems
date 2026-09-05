@@ -7,12 +7,8 @@ from typing import Any
 from arelle import Cntlr, ModelXbrl
 from arelle.Version import __version__ as ARELLE_VERSION
 from arelle.WebCache import WebCache
-from xbrlkit.parse.arelle_load import (
-  SEC_IXT_NAMESPACE,
-)
-from xbrlkit.parse.arelle_load import (
-  _register_sec_transforms as register_sec_transforms,
-)
+from xbrlkit.parse import register_sec_transforms
+from xbrlkit.parse.arelle_load import SEC_IXT_NAMESPACE
 
 from robosystems.adapters.sec.config import (
   ARELLE_DOWNLOAD_TIMEOUT,
