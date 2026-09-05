@@ -83,13 +83,14 @@ def sec_raw_filings(
   async def run_efts_download():
     # Import here to avoid circular imports at module load time
     import aiohttp
+    from xbrlkit.edgar import EftsClient, EftsHit
 
-    from robosystems.adapters.sec.client.efts import EFTSClient, EFTSHit
+    from robosystems.adapters.sec.client.edgar import edgar_client
     from robosystems.adapters.sec.client.rate_limiter import (
       AsyncRateLimiter,
       RateMonitor,
     )
-    from robosystems.adapters.sec.config import SEC_CONFIG
+    from robosystems.adapters.sec.config import SEC_CONFIG, xbrlkit_config
 
     SEC_BASE_URL = SEC_CONFIG["base_url"]
     SEC_HEADERS = SEC_CONFIG["headers"]
@@ -97,53 +98,52 @@ def sec_raw_filings(
     # Phase 1: Discover filings via EFTS
     context.log.info("Phase 1: Discovering filings via EFTS...")
 
-    async with EFTSClient(requests_per_second=5.0) as efts:
-      # Build CIK filter if specified
-      cik_filter = None
-      if config.ciks:
-        cik_filter = config.ciks
-      elif config.tickers:
-        # Resolve tickers to CIKs using company list
-        from robosystems.adapters.sec import SECClient
+    # EFTS discovery and the submissions header are xbrlkit's synchronous
+    # clients (their own spacing and Retry-After handling); they run in a
+    # thread so the event loop that drives the parallel downloads stays free.
+    efts = EftsClient(xbrlkit_config(), per_sec=5.0)
+    # Build CIK filter if specified
+    cik_filter = None
+    if config.ciks:
+      cik_filter = config.ciks
+    elif config.tickers:
+      # Resolve tickers to CIKs using company list
+      companies_raw = await asyncio.to_thread(edgar_client().company_tickers)
+      cik_filter = []
+      for _, company in companies_raw.items():
+        ticker = company.get("ticker", "")
+        if ticker in config.tickers:
+          cik = str(company.get("cik_str", company.get("cik", "")))
+          cik_filter.append(cik)
 
-        sec_client = SECClient()
-        companies_raw = sec_client.get_companies()
-        cik_filter = []
-        for _, company in companies_raw.items():
-          ticker = company.get("ticker", "")
-          if ticker in config.tickers:
-            cik = str(company.get("cik_str", company.get("cik", "")))
-            cik_filter.append(cik)
+    # Split form types into batches to avoid EFTS 10k limit (especially Q2 proxy season)
+    # Each batch is queried separately and results are combined
+    requested_forms = set(config.form_types)
+    form_batches = []
+    for batch in SEC_FORM_TYPE_BATCHES:
+      batch_forms = [f for f in batch if f in requested_forms]
+      if batch_forms:
+        form_batches.append(batch_forms)
 
-      # Split form types into batches to avoid EFTS 10k limit (especially Q2 proxy season)
-      # Each batch is queried separately and results are combined
-      requested_forms = set(config.form_types)
-      form_batches = []
-      for batch in SEC_FORM_TYPE_BATCHES:
-        batch_forms = [f for f in batch if f in requested_forms]
-        if batch_forms:
-          form_batches.append(batch_forms)
+    # Also include any forms not in predefined batches (custom forms)
+    known_forms = {f for batch in SEC_FORM_TYPE_BATCHES for f in batch}
+    custom_forms = [f for f in config.form_types if f not in known_forms]
+    if custom_forms:
+      form_batches.append(custom_forms)
 
-      # Also include any forms not in predefined batches (custom forms)
-      known_forms = {f for batch in SEC_FORM_TYPE_BATCHES for f in batch}
-      custom_forms = [f for f in config.form_types if f not in known_forms]
-      if custom_forms:
-        form_batches.append(custom_forms)
-
-      # Query each batch and combine results
-      hits = []
-      for batch_idx, batch_forms in enumerate(form_batches):
-        context.log.info(
-          f"EFTS batch {batch_idx + 1}/{len(form_batches)}: {batch_forms}"
-        )
-        batch_hits = await efts.query_by_quarter(
-          year=year,
-          quarter=quarter,
-          form_types=batch_forms,
-          ciks=cik_filter,
-        )
-        context.log.info(f"  Batch {batch_idx + 1} found {len(batch_hits)} filings")
-        hits.extend(batch_hits)
+    # Query each batch and combine results
+    hits = []
+    for batch_idx, batch_forms in enumerate(form_batches):
+      context.log.info(f"EFTS batch {batch_idx + 1}/{len(form_batches)}: {batch_forms}")
+      batch_hits = await asyncio.to_thread(
+        efts.query_by_quarter,
+        year,
+        quarter,
+        forms=batch_forms,
+        ciks=cik_filter,
+      )
+      context.log.info(f"  Batch {batch_idx + 1} found {len(batch_hits)} filings")
+      hits.extend(batch_hits)
 
     context.log.info(f"EFTS discovered {len(hits)} filings for {year}-Q{quarter}")
 
@@ -184,16 +184,13 @@ def sec_raw_filings(
         import json
         from datetime import UTC, datetime
 
-        from robosystems.adapters.sec import SECClient
-
         # Rate limiter and semaphore for parallel fetching (configurable)
         submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
         submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
 
         def build_complete_submissions_sync(cik: str) -> dict:
           """Build complete master submissions file (all pagination files)."""
-          client = SECClient(cik=cik)
-          return client.get_complete_submissions()
+          return edgar_client().complete_submissions(cik)
 
         def incremental_update_submissions(
           existing: dict, cik: str, new_recent: dict
@@ -264,19 +261,7 @@ def sec_raw_filings(
                   )
                 else:
                   # Existing file - do incremental update from recent page only
-                  url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-                  async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
-                    async with session.get(url) as response:
-                      if response.status == 429:
-                        retry_after = int(response.headers.get("Retry-After", 60))
-                        context.log.warning(
-                          f"Rate limited on submissions, waiting {retry_after}s"
-                        )
-                        await asyncio.sleep(retry_after)
-                        return await fetch_submission(cik)
-
-                      response.raise_for_status()
-                      new_recent = await response.json()
+                  new_recent = await asyncio.to_thread(edgar_client().submissions, cik)
 
                   submissions_data = incremental_update_submissions(
                     existing_data, cik, new_recent
@@ -321,7 +306,7 @@ def sec_raw_filings(
     if config.dry_run:
       context.log.info(f"[DRY RUN] Would download {len(hits)} filings:")
       for hit in hits[:10]:
-        context.log.info(f"  - {hit.cik}/{hit.accession_number} ({hit.form_type})")
+        context.log.info(f"  - {hit.cik}/{hit.accession} ({hit.form})")
       if len(hits) > 10:
         context.log.info(f"  ... and {len(hits) - 10} more")
       return {
@@ -350,7 +335,7 @@ def sec_raw_filings(
     # Track files for SourceFile creation
     source_file_records: list[dict] = []
 
-    async def download_filing(hit: EFTSHit) -> bool:
+    async def download_filing(hit: EftsHit) -> bool:
       nonlocal downloaded, skipped, no_xbrl, failed, source_file_records
 
       # Construct S3 key
@@ -358,7 +343,7 @@ def sec_raw_filings(
         DataSourceType.SEC,
         f"year={year}",
         hit.cik,
-        f"{hit.accession_number}.zip",
+        f"{hit.accession}.zip",
       )
 
       # Skip if exists
@@ -368,11 +353,11 @@ def sec_raw_filings(
           skipped += 1
           # Track for SourceFile creation (existing file)
           # Include quarter in partition_key for accurate batch processing
-          partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession_number}"
+          partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession}"
           source_file_records.append(
             {
               "storage_key": s3_key,
-              "source_id": hit.accession_number,
+              "source_id": hit.accession,
               "partition_key": partition_key,
               "file_size_bytes": head_response.get("ContentLength"),
             }
@@ -383,8 +368,8 @@ def sec_raw_filings(
 
       # Construct XBRL ZIP URL
       cik_no_zeros = str(int(hit.cik))
-      accno_no_dash = hit.accession_number.replace("-", "")
-      url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{hit.accession_number}-xbrl.zip"
+      accno_no_dash = hit.accession.replace("-", "")
+      url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{hit.accession}-xbrl.zip"
 
       async with semaphore:
         async with limiter:
@@ -394,7 +379,7 @@ def sec_raw_filings(
                 if response.status == 404:
                   # No XBRL ZIP for this filing
                   no_xbrl += 1
-                  no_xbrl_filings.append(f"{hit.cik}/{hit.accession_number}")
+                  no_xbrl_filings.append(f"{hit.cik}/{hit.accession}")
                   return True
 
                 if response.status == 429:
@@ -413,7 +398,7 @@ def sec_raw_filings(
                 await monitor.record(len(content))
 
           except Exception as e:
-            context.log.debug(f"Download failed for {hit.accession_number}: {e}")
+            context.log.debug(f"Download failed for {hit.accession}: {e}")
             failed += 1
             return False
 
@@ -428,18 +413,18 @@ def sec_raw_filings(
         downloaded += 1
         # Track for SourceFile creation (newly downloaded)
         # Include quarter in partition_key for accurate batch processing
-        partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession_number}"
+        partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession}"
         source_file_records.append(
           {
             "storage_key": s3_key,
-            "source_id": hit.accession_number,
+            "source_id": hit.accession,
             "partition_key": partition_key,
             "file_size_bytes": len(content),
           }
         )
         return True
       except Exception as e:
-        context.log.warning(f"S3 upload failed for {hit.accession_number}: {e}")
+        context.log.warning(f"S3 upload failed for {hit.accession}: {e}")
         failed += 1
         return False
 

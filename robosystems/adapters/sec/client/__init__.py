@@ -1,14 +1,17 @@
-"""SEC EDGAR API clients."""
+"""SEC EDGAR access.
+
+The clients themselves — EDGAR, EFTS, the Arelle load with its cache policy —
+are xbrlkit's; this package binds them to the platform (``edgar_client``,
+``load_filing``) and keeps what needs the platform: the async bulk downloader
+to S3 and its rate limiter.
+"""
 
 _LAZY_IMPORTS = {
-  "ArelleClient": "robosystems.adapters.sec.client.arelle",
   "SEC_BASE_URL": "robosystems.adapters.sec.client.edgar",
-  "SECClient": "robosystems.adapters.sec.client.edgar",
-  "enable_test_mode": "robosystems.adapters.sec.client.edgar",
-  "EFTSClient": "robosystems.adapters.sec.client.efts",
-  "EFTSHit": "robosystems.adapters.sec.client.efts",
-  "query_efts": "robosystems.adapters.sec.client.efts",
-  "query_efts_sync": "robosystems.adapters.sec.client.efts",
+  "edgar_client": "robosystems.adapters.sec.client.edgar",
+  "load_filing": "robosystems.adapters.sec.client.arelle",
+  "close_filing": "robosystems.adapters.sec.client.arelle",
+  "arelle_cache_dir": "robosystems.adapters.sec.client.arelle",
   "SECDownloader": "robosystems.adapters.sec.client.downloader",
   "DownloadStats": "robosystems.adapters.sec.client.downloader",
   "download_sec_filings": "robosystems.adapters.sec.client.downloader",

@@ -23,9 +23,9 @@ from ..config import SEC_CONFIG
 from .rate_limiter import AsyncRateLimiter, RateMonitor
 
 if TYPE_CHECKING:
-  from robosystems.operations.aws.s3 import S3Client
+  from xbrlkit.edgar import EftsHit
 
-  from .efts import EFTSHit
+  from robosystems.operations.aws.s3 import S3Client
 SEC_BASE_URL = SEC_CONFIG["base_url"]
 SEC_HEADERS = SEC_CONFIG["headers"]
 
@@ -87,20 +87,20 @@ class SECDownloader:
       await self._session.close()
       self._session = None
 
-  def _get_xbrl_zip_url(self, hit: EFTSHit) -> str:
+  def _get_xbrl_zip_url(self, hit: EftsHit) -> str:
     """Construct XBRL ZIP URL from EFTS hit."""
     cik_no_leading_zeros = str(int(hit.cik))
-    accno_no_dash = hit.accession_number.replace("-", "")
-    filename = f"{hit.accession_number}-xbrl.zip"
+    accno_no_dash = hit.accession.replace("-", "")
+    filename = f"{hit.accession}-xbrl.zip"
     return f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_leading_zeros}/{accno_no_dash}/{filename}"
 
-  def _get_s3_key(self, hit: EFTSHit, year: int) -> str:
+  def _get_s3_key(self, hit: EftsHit, year: int) -> str:
     """Construct S3 key for filing."""
     from robosystems.config.storage.shared import DataSourceType, get_raw_key
 
     # Format: sec/year=2024/CIK/accession.zip
     return get_raw_key(
-      DataSourceType.SEC, f"year={year}", hit.cik, f"{hit.accession_number}.zip"
+      DataSourceType.SEC, f"year={year}", hit.cik, f"{hit.accession}.zip"
     )
 
   async def _file_exists(self, bucket: str, key: str) -> bool:
@@ -113,7 +113,7 @@ class SECDownloader:
 
   async def _download_filing(
     self,
-    hit: EFTSHit,
+    hit: EftsHit,
     year: int,
     bucket: str,
     retry_count: int = 0,
@@ -142,13 +142,13 @@ class SECDownloader:
           async with self._session.get(url) as response:
             if response.status == 404:
               # No XBRL ZIP available for this filing
-              logger.debug(f"No XBRL ZIP for {hit.accession_number}")
+              logger.debug(f"No XBRL ZIP for {hit.accession}")
               self._stats.skipped += 1
               return True
 
             if response.status == 429:
               if retry_count >= MAX_RETRIES:
-                logger.error(f"Max retries exceeded for {hit.accession_number}")
+                logger.error(f"Max retries exceeded for {hit.accession}")
                 self._stats.failed += 1
                 return False
               retry_after = min(
@@ -165,14 +165,14 @@ class SECDownloader:
             content = await response.read()
 
             if not content or len(content) == 0:
-              logger.warning(f"Empty response for {hit.accession_number}")
+              logger.warning(f"Empty response for {hit.accession}")
               self._stats.failed += 1
               return False
 
             await self._monitor.record(len(content))
 
         except aiohttp.ClientError as e:
-          logger.error(f"Download failed for {hit.accession_number}: {e}")
+          logger.error(f"Download failed for {hit.accession}: {e}")
           self._stats.failed += 1
           return False
 
@@ -188,13 +188,13 @@ class SECDownloader:
         self._stats.bytes_downloaded += len(content)
         return True
       except Exception as e:
-        logger.error(f"S3 upload failed for {hit.accession_number}: {e}")
+        logger.error(f"S3 upload failed for {hit.accession}: {e}")
         self._stats.failed += 1
         return False
 
   async def download_filings(
     self,
-    hits: list[EFTSHit],
+    hits: list[EftsHit],
     year: int,
     bucket: str | None = None,
   ) -> DownloadStats:
@@ -246,13 +246,17 @@ class SECDownloader:
         async with SECDownloader() as downloader:
             stats = await downloader.download_year(2024)
     """
-    from .efts import EFTSClient
+    from xbrlkit.edgar import EftsClient
+
+    from ..config import xbrlkit_config
 
     form_types = form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"]
 
-    # Discover filings via EFTS
-    async with EFTSClient(requests_per_second=self.requests_per_second) as efts:
-      hits = await efts.query_by_year(year, form_types=form_types, ciks=ciks)
+    # Discover filings via EFTS (xbrlkit's synchronous client, in a thread)
+    efts = EftsClient(xbrlkit_config(), per_sec=self.requests_per_second)
+    hits = await asyncio.to_thread(
+      efts.query_by_year, year, forms=form_types, ciks=ciks
+    )
 
     if not hits:
       logger.warning(f"No filings found for {year}")

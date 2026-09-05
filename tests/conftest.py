@@ -695,17 +695,6 @@ def setup_database(test_db):
 
 # SEC XBRL Testing Fixtures
 @pytest.fixture
-def mock_sec_client():
-  """Mock SEC client for testing."""
-  with patch("robosystems.adapters.sec.SECClient") as mock_client:
-    client_instance = Mock()
-    mock_client.return_value = client_instance
-    # Ensure get_report_url returns a string
-    client_instance.get_report_url.return_value = "http://example.com/report.xml"
-    yield client_instance
-
-
-@pytest.fixture
 def sample_sec_submissions():
   """Sample SEC submissions data for testing."""
   data = {

@@ -13,8 +13,6 @@ AWS infrastructure services are in robosystems.operations.aws
 
 _LAZY_IMPORTS = {
   # SEC
-  "ArelleClient": "robosystems.adapters.sec",
-  "SECClient": "robosystems.adapters.sec",
   "XBRLDuckDBGraphProcessor": "robosystems.adapters.sec",
   "XBRLGraphProcessor": "robosystems.adapters.sec",
   # QuickBooks

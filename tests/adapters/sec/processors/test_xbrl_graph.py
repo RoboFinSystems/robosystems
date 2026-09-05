@@ -310,18 +310,20 @@ def _processor(tmp_path, sec_filer, sec_report, **overrides) -> XBRLGraphProcess
 
 
 class _Arelle:
-  """``ArelleClient`` and the ``ModelXbrl`` it returns, as one patch."""
+  """The platform's ``load_filing`` / ``close_filing`` and the ``ModelXbrl``
+  they hand around, as one patch."""
 
   def __init__(self):
-    self.client = MagicMock(name="ArelleClient")
     self.model_xbrl = MagicMock(name="ModelXbrl")
-    self.client.controller.return_value = self.model_xbrl
+    self.load = MagicMock(name="load_filing", return_value=self.model_xbrl)
+    self.close = MagicMock(name="close_filing")
 
 
 def _run(processor: XBRLGraphProcessor, model: XbrlModel) -> _Arelle:
   arelle = _Arelle()
   with (
-    patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+    patch(f"{MODULE}.load_filing", arelle.load),
+    patch(f"{MODULE}.close_filing", arelle.close),
     patch(f"{MODULE}.to_xbrl_model", return_value=model) as to_model,
   ):
     processor.process()
@@ -499,10 +501,10 @@ class TestInstancePath:
     processor = _processor(
       tmp_path, sec_filer, sec_report, local_file_path=str(tmp_path / "missing.htm")
     )
-    with patch(f"{MODULE}.ArelleClient") as arelle:
+    with patch(f"{MODULE}.load_filing") as load:
       processor.process()
     assert processor.failed is True
-    arelle.assert_not_called()
+    load.assert_not_called()
     assert not (processor.output_dir / "nodes").exists()
 
 
@@ -512,7 +514,7 @@ class TestProjection:
     processor = _processor(tmp_path, sec_filer, sec_report)
     arelle = _run(processor, model)
 
-    arelle.client.controller.assert_called_once_with(processor.local_file_path)
+    arelle.load.assert_called_once_with(processor.local_file_path)
     arelle.to_model.assert_called_once()
     assert arelle.to_model.call_args.kwargs["entity"].cik == CIK
 
@@ -642,13 +644,13 @@ class TestProjection:
     processor = _processor(tmp_path, sec_filer, sec_report)
     arelle = _Arelle()
     with (
-      patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+      patch(f"{MODULE}.load_filing", arelle.load),
+      patch(f"{MODULE}.close_filing", arelle.close),
       patch(f"{MODULE}.to_xbrl_model", side_effect=RuntimeError("bad DTS")),
       pytest.raises(RuntimeError, match="bad DTS"),
     ):
       processor.process()
-    arelle.model_xbrl.close.assert_called_once()
-    arelle.client.close.assert_called_once()
+    arelle.close.assert_called_once_with(arelle.model_xbrl)
 
   def test_process_async_runs_process(self, tmp_path, sec_filer, sec_report, model):
     import asyncio
@@ -656,7 +658,8 @@ class TestProjection:
     processor = _processor(tmp_path, sec_filer, sec_report)
     arelle = _Arelle()
     with (
-      patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+      patch(f"{MODULE}.load_filing", arelle.load),
+      patch(f"{MODULE}.close_filing", arelle.close),
       patch(f"{MODULE}.to_xbrl_model", return_value=model),
     ):
       asyncio.run(processor.process_async())
@@ -863,3 +866,21 @@ class TestClassification:
       classifier_cls.return_value.classify.side_effect = RuntimeError("no ladybug")
       _run(processor, model)
     assert len(_rows(processor, "Fact")) == 3
+
+
+@pytest.mark.unit
+def test_unresolved_dts_fails_the_filing(tmp_path, sec_filer, sec_report):
+  from xbrlkit.parse import DtsResolutionError
+
+  processor = _processor(tmp_path, sec_filer, sec_report)
+  error = DtsResolutionError(
+    processor.local_file_path, ["https://www.xbrl.org/gone.xsd"]
+  )
+  with (
+    patch(f"{MODULE}.load_filing", side_effect=error),
+    patch(f"{MODULE}.close_filing") as close,
+    pytest.raises(DtsResolutionError),
+  ):
+    processor.process()
+  close.assert_called_once_with(None)
+  assert not (processor.output_dir / "nodes").exists()

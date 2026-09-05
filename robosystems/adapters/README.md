@@ -51,10 +51,10 @@ taxonomy mappings, and a full Dagster pipeline. See
 [`sec/README.md`](sec/README.md).
 
 ```python
-from robosystems.adapters.sec import SECClient, XBRLGraphProcessor
+from robosystems.adapters.sec import XBRLGraphProcessor
+from robosystems.adapters.sec.client.edgar import edgar_client
 
-client = SECClient()
-filings = client.get_filings(cik="0000320193", form_type="10-K")
+filings = edgar_client().list_filings("0000320193", forms=["10-K"])
 ```
 
 ```bash

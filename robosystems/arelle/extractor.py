@@ -444,7 +444,7 @@ def extract_taxonomy(model_xbrl: Any) -> Graph:
   consumes.
 
   Args:
-      model_xbrl: Arelle ModelXbrl returned from `ArelleClient.controller(url)`
+      model_xbrl: Arelle ModelXbrl returned from `load_filing(path)`
 
   Returns:
       rdflib.Graph populated with the taxonomy content.
