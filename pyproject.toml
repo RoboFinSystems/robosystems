@@ -59,7 +59,7 @@ dependencies = [
     "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.15,<1.0",
     # XBRL Toolkit
-    "xbrlkit>=0.4",
+    "xbrlkit>=0.4.1",
     # Data Transformation (dbt)
     "dbt-core>=1.11.14,<1.12",  # hold: 1.12 adds a beta parser dep + the metricflow subtree we don't use; 1.11.14 has the sqlparse<0.7.0 lift
     "dbt-duckdb>=1.10.0,<2.0",
