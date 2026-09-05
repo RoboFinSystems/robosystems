@@ -187,7 +187,7 @@ wheels = [
 
 [[package]]
 name = "arelle-release"
-version = "2.39.5"
+version = "2.44.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bottle" },
@@ -206,9 +206,9 @@ dependencies = [
     { name = "truststore" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/be/3a8decc18b6a8488b680affd613b7a390b82f29a20a1f40478bbda048744/arelle_release-2.39.5.tar.gz", hash = "sha256:324bc21ba15ae6f76eedb16232bd080733525621e9178f40a60233238db05648", size = 5346588, upload-time = "2026-03-25T03:39:24.697Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/e1/fefdc9b3f05a3aa00a9319fad4ecea3c95f05fdd7f805155306635a9c33c/arelle_release-2.44.7.tar.gz", hash = "sha256:fb5eb329e3450e4e13fa6af14c0ee9a2d725c0400fe008834862da140e6baab1", size = 5684638, upload-time = "2026-09-03T16:14:34.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/a0/22a53949afa12bed0441f30ddfad0baef0247a0a2a71c3e3cb1c5c7efcf2/arelle_release-2.39.5-py3-none-any.whl", hash = "sha256:0725d5eaa018d5bbcf64ab18c21f3d40bfc27fc2adb30e0cd13459c79dddee7f", size = 5756918, upload-time = "2026-03-25T03:39:21.945Z" },
+    { url = "https://files.pythonhosted.org/packages/71/a4/b1fabd82a2bd13a417d0036864fb2b256241355b86409b52e229c559cd96/arelle_release-2.44.7-py3-none-any.whl", hash = "sha256:c5215befa9c4ebb3724df869c03c6a3eee6ce3a3e16d280c4f63f1e54c3e35b9", size = 6099687, upload-time = "2026-09-03T16:14:31.751Z" },
 ]
 
 [[package]]
@@ -3646,7 +3646,6 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "alembic" },
-    { name = "arelle-release" },
     { name = "authlib" },
     { name = "bcrypt" },
     { name = "beautifulsoup4" },
@@ -3742,7 +3741,6 @@ lambda = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "alembic", specifier = ">=1.18.5,<2.0" },
-    { name = "arelle-release", specifier = "==2.39.5" },
     { name = "authlib", specifier = ">=1.6.5,<2.0" },
     { name = "awscli-local", marker = "extra == 'dev'", specifier = ">=0.22.0,<1.0" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.22.0,<2.0" },
