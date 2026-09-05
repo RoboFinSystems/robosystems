@@ -279,6 +279,7 @@ class TestMakeFact:
       processor.textblock_externalizer.queue_value_for_s3 = MagicMock(
         return_value={
           "url": "https://cdn.example.com/fact.html",
+          "stored_value": "https://cdn.example.com/fact.html",
           "value_type": "external",
           "content_type": "text/html",
         }

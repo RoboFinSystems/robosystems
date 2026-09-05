@@ -20,12 +20,16 @@ class TextBlockExternalizer:
     cdn_url: str | None,
     threshold: int,
     enabled: bool = True,
+    keep_inline: bool = False,
   ):
     self.s3_client = s3_client
     self.bucket = bucket
     self.cdn_url = cdn_url
     self.threshold = threshold
     self.enabled = enabled
+    # Store the value in the graph as well as uploading it. A local control
+    # experiment's switch (env.XBRL_KEEP_TEXTBLOCKS_INLINE); never on for real.
+    self.keep_inline = keep_inline
 
     self.upload_queue: list[tuple[str, str, str]] = []
     self.upload_map: dict[str, dict[str, Any]] = {}
@@ -85,11 +89,7 @@ class TextBlockExternalizer:
         )
         external_url = get_public_data_url(self.bucket, s3_key, self.cdn_url)
 
-        result = {
-          "url": external_url,
-          "value_type": "external",
-          "content_type": content_type,
-        }
+        result = self._result(external_url, value_str, content_type)
 
         self.content_cache[content_hash] = result
         return result
@@ -104,11 +104,7 @@ class TextBlockExternalizer:
         "content_type": content_type,
       }
 
-      result = {
-        "url": external_url,
-        "value_type": "external",
-        "content_type": content_type,
-      }
+      result = self._result(external_url, value_str, content_type)
 
       self.content_cache[content_hash] = result
 
@@ -117,6 +113,18 @@ class TextBlockExternalizer:
     except Exception as e:
       logger.error(f"Error queueing value for S3: {e}")
       return None
+
+  def _result(
+    self, external_url: str, value_str: str, content_type: str
+  ) -> dict[str, Any]:
+    """What the processor stores for the fact: the URL, or the text itself when the
+    value is kept inline. ``url`` is the CDN copy either way."""
+    return {
+      "url": external_url,
+      "stored_value": value_str if self.keep_inline else external_url,
+      "value_type": "inline" if self.keep_inline else "external",
+      "content_type": content_type,
+    }
 
   def process_batch_uploads(self) -> None:
     if not self.upload_queue:

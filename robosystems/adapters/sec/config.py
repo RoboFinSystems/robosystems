@@ -65,6 +65,10 @@ XBRL_EXTERNALIZE_LARGE_VALUES = True
 # Character threshold for externalizing values
 XBRL_EXTERNALIZATION_THRESHOLD = 1024
 
+# Keep the externalized value in the graph too (local control experiments only;
+# see env.XBRL_KEEP_TEXTBLOCKS_INLINE for why it is off everywhere real)
+XBRL_KEEP_TEXTBLOCKS_INLINE = env.XBRL_KEEP_TEXTBLOCKS_INLINE
+
 # Skip textblock facts entirely (for historical data where text isn't needed)
 XBRL_SKIP_TEXTBLOCK_FACTS = False
 

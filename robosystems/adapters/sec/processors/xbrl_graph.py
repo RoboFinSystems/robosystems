@@ -14,6 +14,7 @@ from robosystems.adapters.sec.config import (
   XBRL_COLUMN_STANDARDIZATION,
   XBRL_EXTERNALIZATION_THRESHOLD,
   XBRL_EXTERNALIZE_LARGE_VALUES,
+  XBRL_KEEP_TEXTBLOCKS_INLINE,
   XBRL_SEMANTIC_ENRICHMENT,
   XBRL_SKIP_TEXTBLOCK_FACTS,
   XBRL_STANDARDIZED_FILENAMES,
@@ -93,6 +94,7 @@ class XBRLGraphProcessor:
       cdn_url=env.PUBLIC_DATA_CDN_URL,
       threshold=XBRL_EXTERNALIZATION_THRESHOLD,
       enabled=XBRL_EXTERNALIZE_LARGE_VALUES,
+      keep_inline=XBRL_KEEP_TEXTBLOCKS_INLINE,
     )
 
     # Feature flags for upstream simplification
@@ -1050,11 +1052,12 @@ class XBRLGraphProcessor:
       )
 
       if external_result:
-        # Use the expected URL (will be uploaded in batch)
-        fact_value = external_result["url"]
+        # The URL (uploaded in batch) — or the text itself, when a local control
+        # experiment keeps text blocks in the graph as well.
+        fact_value = external_result["stored_value"]
         value_type = external_result["value_type"]
         content_type = external_result["content_type"]
-        logger.debug(f"Queued for externalization: {fact_value}")
+        logger.debug(f"Queued for externalization: {external_result['url']}")
       else:
         logger.warning("Failed to queue large value, storing inline")
 

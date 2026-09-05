@@ -427,3 +427,56 @@ class TestProcessBatchUploads:
     externalizer.process_batch_uploads()
 
     assert len(externalizer.upload_queue) == 1
+
+
+class TestKeepInline:
+  """XBRL_KEEP_TEXTBLOCKS_INLINE: the value stays in the graph AND is uploaded.
+
+  The local control for the Filing Ladder's rung 7b — raw Cypher on a graph that still
+  holds the note text. Off everywhere real, so the default path must be unchanged.
+  """
+
+  def _externalizer(self, mock_s3_client, keep_inline):
+    return TextBlockExternalizer(
+      s3_client=mock_s3_client,
+      bucket="test-bucket",
+      cdn_url="https://cdn.example.com",
+      threshold=100,
+      enabled=True,
+      keep_inline=keep_inline,
+    )
+
+  def test_default_stores_the_url_as_external(
+    self, mock_s3_client, entity_data, report_data
+  ):
+    ext = self._externalizer(mock_s3_client, keep_inline=False)
+    text = "<div>" + "narrative " * 40 + "</div>"
+    result = ext.queue_value_for_s3(text, "fact-1", entity_data, report_data)
+    assert result is not None
+    assert result["value_type"] == "external"
+    assert result["stored_value"] == result["url"]
+    assert result["url"].startswith("https://cdn.example.com/")
+    assert len(ext.upload_queue) == 1
+
+  def test_keep_inline_stores_the_text_and_still_uploads(
+    self, mock_s3_client, entity_data, report_data
+  ):
+    ext = self._externalizer(mock_s3_client, keep_inline=True)
+    text = "<div>" + "narrative " * 40 + "</div>"
+    result = ext.queue_value_for_s3(text, "fact-1", entity_data, report_data)
+    assert result is not None
+    assert result["value_type"] == "inline"
+    assert result["stored_value"] == text
+    assert result["url"].startswith("https://cdn.example.com/")
+    assert len(ext.upload_queue) == 1  # the CDN copy is still made
+
+  def test_keep_inline_survives_the_content_cache(
+    self, mock_s3_client, entity_data, report_data
+  ):
+    ext = self._externalizer(mock_s3_client, keep_inline=True)
+    text = "<p>" + "same note " * 30 + "</p>"
+    first = ext.queue_value_for_s3(text, "fact-1", entity_data, report_data)
+    second = ext.queue_value_for_s3(text, "fact-2", entity_data, report_data)
+    assert first is not None and second is not None
+    assert second["stored_value"] == text and second["value_type"] == "inline"
+    assert len(ext.upload_queue) == 1  # identical content is uploaded once
