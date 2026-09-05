@@ -1351,7 +1351,15 @@ class ScheduleService:
     else:
       regenerated = False
 
-    # Create draft entry
+    # No `transaction_id`, deliberately. A schedule-derived entry has no
+    # source-system record behind it, and the schema supports a standalone
+    # entry on purpose — `Entry.transaction_id` is nullable and
+    # `Entry.triggered_by_event_id` exists precisely so an entry with no
+    # parent can still carry its event chain (see the comment on that
+    # column). `create_journal_entry` mints a Transaction when none is
+    # supplied; that is right for its callers and wrong here. Do not
+    # "fix" this by synthesizing one — it would manufacture rows in the
+    # adapter mirror to satisfy a read, and reads anchor on Entry.
     entry = Entry(
       type=template.get("entry_type", "closing"),
       status="draft",
