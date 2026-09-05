@@ -26,7 +26,7 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   writeback_eligible_entry_ids,
 )
 from robosystems.operations.roboledger.reads.journal_entries import (
-  ORDER_PERIOD_REVIEW,
+  EntryOrder,
   fetch_entry_rows,
 )
 
@@ -65,7 +65,7 @@ def list_period_drafts(
     start_date=period_start,
     end_date=period_end,
     status="draft",
-    order_by=ORDER_PERIOD_REVIEW,
+    order_by=EntryOrder.PERIOD_REVIEW,
   )
 
   drafts: list[DraftEntryResponse] = []

@@ -22,6 +22,7 @@ close-review query and the journal query cannot drift apart.
 from __future__ import annotations
 
 from datetime import date
+from enum import StrEnum
 from typing import Any, NamedTuple
 
 from sqlalchemy import text
@@ -75,11 +76,17 @@ _ENTRY_ROWS_TEMPLATE = """
     li.credit_amount      AS credit_amount,
     li.description        AS line_description,
     li.line_order         AS line_order
+  -- LEFT, not INNER, on line_items: `matched` already picked this page of
+  -- entries, so an entry with no line items would be dropped here after
+  -- being counted and after consuming a LIMIT slot — a page silently
+  -- shorter than it claims, and a total that disagrees with the rows.
+  -- Double-entry should make that impossible; if a bug elsewhere ever
+  -- breaks the invariant, the entry shows up empty rather than vanishing.
   FROM entries e
   JOIN matched m ON m.id = e.id
   LEFT JOIN structures s ON s.id = e.source_structure_id
-  JOIN line_items li ON li.entry_id = e.id
-  JOIN elements el ON el.id = li.element_id
+  LEFT JOIN line_items li ON li.entry_id = e.id
+  LEFT JOIN elements el ON el.id = li.element_id
   ORDER BY {order_by}, li.line_order, li.id
 """
 
@@ -94,15 +101,26 @@ _COUNT_SQL = text("""
     AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
 """)
 
-# Close review reads chronologically, grouped by schedule — the order a
-# reviewer walks the outbox in. The journal reads newest first, matching
-# the transaction list it sits beside.
-ORDER_PERIOD_REVIEW = "e.posting_date, s.name NULLS LAST, e.id"
-ORDER_RECENT_FIRST = "e.posting_date DESC, e.id"
+
+class EntryOrder(StrEnum):
+  """The orderings this projection supports, and the only values that ever
+  reach the interpolated ORDER BY.
+
+  An enum rather than a bare string so a bad caller is a type error at
+  check time instead of a KeyError at request time — and so nothing can
+  wire a client-supplied ordering through by accident if this ever grows
+  a public ``orderBy`` argument.
+  """
+
+  # Close review reads chronologically, grouped by schedule — the order a
+  # reviewer walks the outbox in.
+  PERIOD_REVIEW = "e.posting_date, s.name NULLS LAST, e.id"
+  # The journal reads newest first, matching the transaction list beside it.
+  RECENT_FIRST = "e.posting_date DESC, e.id"
+
 
 _SQL_BY_ORDER = {
-  ORDER_PERIOD_REVIEW: text(_ENTRY_ROWS_TEMPLATE.format(order_by=ORDER_PERIOD_REVIEW)),
-  ORDER_RECENT_FIRST: text(_ENTRY_ROWS_TEMPLATE.format(order_by=ORDER_RECENT_FIRST)),
+  order: text(_ENTRY_ROWS_TEMPLATE.format(order_by=order.value)) for order in EntryOrder
 }
 
 # A limit is always bound (the CTE needs one), so "no pagination" is a
@@ -145,7 +163,7 @@ def fetch_entry_rows(
   transaction_id: str | None = None,
   limit: int | None = None,
   offset: int = 0,
-  order_by: str = ORDER_RECENT_FIRST,
+  order_by: EntryOrder = EntryOrder.RECENT_FIRST,
 ) -> list[EntryRow]:
   """Fetch entries with their line items, grouped, in raw cents.
 
@@ -190,6 +208,8 @@ def fetch_entry_rows(
         "posted_at": row.posted_at,
         "line_items": [],
       }
+    if row.line_item_id is None:
+      continue
     by_entry[entry_id]["line_items"].append(
       {
         "line_item_id": row.line_item_id,
@@ -238,7 +258,7 @@ def list_journal_entries(
     session,
     limit=limit,
     offset=offset,
-    order_by=ORDER_RECENT_FIRST,
+    order_by=EntryOrder.RECENT_FIRST,
     **params,
   )
 

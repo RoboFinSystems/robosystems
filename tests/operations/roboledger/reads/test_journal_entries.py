@@ -64,6 +64,23 @@ def _line_row(
   )
 
 
+def _empty_line_row(entry_id: str):
+  """The row shape a LEFT JOIN produces when an entry has no line items:
+  the entry columns populated, every line-item column NULL."""
+  row = _line_row(entry_id, "unused", 0, 0)
+  for field in (
+    "line_item_id",
+    "element_id",
+    "element_code",
+    "element_name",
+    "debit_amount",
+    "credit_amount",
+    "line_order",
+  ):
+    setattr(row, field, None)
+  return row
+
+
 def _session(rows, total=None):
   """Mock session serving the count query then the entry query."""
   session = MagicMock()
@@ -180,6 +197,33 @@ class TestProjection:
     assert (
       resp.entries[0].source_structure_name == 'MacBook Pro 14" (2022) Depreciation'
     )
+
+
+class TestLineItemJoin:
+  """The projection LEFT JOINs line_items on purpose."""
+
+  def test_an_entry_with_no_line_items_still_appears(self):
+    # `matched` already picked this entry and it already consumed a LIMIT
+    # slot and a count. An INNER JOIN would drop it here, making the page
+    # silently shorter than it claims and the total disagree with the rows
+    # — the same silent-short-answer failure this whole read exists to fix.
+    # Double-entry should make it impossible; a bug elsewhere should not
+    # turn into a vanishing row.
+    rows = [
+      # What a LEFT JOIN yields for an entry with no line items.
+      _empty_line_row("je_empty"),
+      _line_row("je_ok", "li1", 1000, 0),
+      _line_row("je_ok", "li2", 0, 1000, line_order=2),
+    ]
+
+    resp = list_journal_entries(_session(rows, total=2))
+
+    by_id = {e.id: e for e in resp.entries}
+    assert set(by_id) == {"je_empty", "je_ok"}
+    assert by_id["je_empty"].line_items == []
+    assert by_id["je_empty"].total_debit == 0.0
+    assert by_id["je_empty"].balanced is True
+    assert len(by_id["je_ok"].line_items) == 2
 
 
 class TestFilters:
