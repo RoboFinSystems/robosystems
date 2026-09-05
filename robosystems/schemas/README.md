@@ -17,6 +17,7 @@ the top level is side-effect free and touches no database.
 | File | Contents |
 | --- | --- |
 | `base.py` | `BASE_NODES` and `BASE_RELATIONSHIPS` |
+| `xbrl.py` | The XBRL tables' columns, sourced from `xbrlkit.schema` — one asset shared with `xbrlkit build --format lpg`; `tests/schemas/test_xbrlkit_parity.py` asserts the two DDLs are equal |
 | `models.py` | `Node` / `Property` / `Relationship` / `Schema` dataclasses and their `to_cypher()` |
 | `loader.py` | `LadybugSchemaLoader` — composition and introspection |
 | `aliases.py` | Extension-name aliases |
