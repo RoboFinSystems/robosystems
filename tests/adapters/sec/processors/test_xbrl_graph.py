@@ -329,15 +329,21 @@ def _run(processor: XBRLGraphProcessor, model: XbrlModel) -> _Arelle:
   return arelle
 
 
-def _rows(processor: XBRLGraphProcessor, table: str) -> list[dict]:
+def _read(processor: XBRLGraphProcessor, table: str):
+  """The written parquet table, read through an open handle: resolving a
+  path goes through pyarrow's filesystem registry, which a forked test
+  worker can find already claimed by another library."""
   subdir = "nodes" if table[0].isupper() and not table.isupper() else "relationships"
-  path = processor.output_dir / subdir / f"{table}.parquet"
-  return pq.read_table(path).to_pylist()
+  with open(processor.output_dir / subdir / f"{table}.parquet", "rb") as handle:
+    return pq.read_table(handle)
+
+
+def _rows(processor: XBRLGraphProcessor, table: str) -> list[dict]:
+  return _read(processor, table).to_pylist()
 
 
 def _columns(processor: XBRLGraphProcessor, table: str) -> list[str]:
-  subdir = "nodes" if table[0].isupper() and not table.isupper() else "relationships"
-  return pq.read_table(processor.output_dir / subdir / f"{table}.parquet").column_names
+  return _read(processor, table).column_names
 
 
 @pytest.mark.unit
