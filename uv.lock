@@ -3706,6 +3706,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "webauthn" },
+    { name = "xbrlkit" },
     { name = "zstandard" },
 ]
 
@@ -3814,6 +3815,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
     { name = "webauthn", specifier = ">=2.7.0,<3.0" },
+    { name = "xbrlkit", specifier = ">=0.3" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
 provides-extras = ["dev"]
@@ -4636,6 +4638,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ab/31/2a7dc5f6abb2fca0b6e1610e120419f603650aceb4f1d3ac4cae0354e162/wrapt-2.2.1-cp314-cp314t-win_amd64.whl", hash = "sha256:fd0135d34387f5fd087d9be368ea77ea89cf2451dc1cd1c622d35021bcb3ab50", size = 83835, upload-time = "2026-05-22T14:49:21.634Z" },
     { url = "https://files.pythonhosted.org/packages/9f/c0/782b86e28d1ceebeb74cccea12d2cd3d2ba0bd68e3dec20b1bc5873f6127/wrapt-2.2.1-cp314-cp314t-win_arm64.whl", hash = "sha256:f70db64e8266d7c45d3b735f2e08eeb434b5e03da9a479ae42b2e2e486a21a00", size = 80722, upload-time = "2026-05-22T14:49:23.59Z" },
     { url = "https://files.pythonhosted.org/packages/53/46/29ac9daf11a86c22a8c38cd9236c62928ccae83f7ceb06bd3b0467cf9d05/wrapt-2.2.1-py3-none-any.whl", hash = "sha256:3aafea2975caef8ca49400640dde02cc7426e798f24870ed01f490bc3cffd32f", size = 61000, upload-time = "2026-05-22T14:49:41.593Z" },
+]
+
+[[package]]
+name = "xbrlkit"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "arelle-release" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pyshacl" },
+    { name = "python-dotenv" },
+    { name = "rdflib" },
+    { name = "regex" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/ac/6bdef5adb6ab263037cce05c2956e85dabdd3517536152a1e99d94a73142/xbrlkit-0.3.0.tar.gz", hash = "sha256:df941f5b454bdbc8d5cfd0a380dac39b7996f543d57c63fa11f09439074d156f", size = 1876244, upload-time = "2026-09-05T04:35:02.97Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/1f/64093d3ae019c41e2ab0d622f785152dd79f900d2ab2921b92635bf1d0cd/xbrlkit-0.3.0-py3-none-any.whl", hash = "sha256:facd800c4b248ead0da7772aa7a5d711c412908ff2629f5ecb697f599249f77a", size = 1884939, upload-time = "2026-09-05T04:35:00.959Z" },
 ]
 
 [[package]]

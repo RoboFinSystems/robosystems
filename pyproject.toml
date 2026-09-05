@@ -105,7 +105,8 @@ dependencies = [
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
     "webauthn>=2.7.0,<3.0",
-    "zstandard>=0.23,<1"
+    "zstandard>=0.23,<1",
+    "xbrlkit>=0.3",
 ]
 
 [project.optional-dependencies]
