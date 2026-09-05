@@ -249,8 +249,10 @@ class SECNarrativeIndexConfig(Config):
   """
 
   graph_id: str = "sec"
-  max_section_length: int = Field(
-    default=50000, description="Truncate sections longer than this (chars)"
+  part_size: int = Field(
+    default=25000,
+    description="Split a section longer than this into parts of about this many "
+    "characters, cut at paragraph boundaries (0 = never split)",
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract narratives from"
@@ -272,8 +274,10 @@ class SECiXBRLIndexConfig(Config):
   """
 
   graph_id: str = "sec"
-  max_section_length: int = Field(
-    default=50000, description="Truncate sections longer than this (chars)"
+  part_size: int = Field(
+    default=25000,
+    description="Split a section longer than this into parts of about this many "
+    "characters, cut at paragraph boundaries (0 = never split)",
   )
   form_types: list[str] = Field(
     default=["10-K", "10-Q"], description="Form types to extract iXBRL disclosures from"

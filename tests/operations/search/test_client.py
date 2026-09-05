@@ -358,3 +358,87 @@ class TestHealth:
     mock_opensearch.cluster.health.side_effect = ConnectionError("timeout")
     result = client.health()
     assert result["status"] == "unavailable"
+
+
+class TestSectionParts:
+  """A long SEC section is indexed in parts; the mapping and the section
+  filter know about them."""
+
+  def test_mapping_carries_part_fields(self):
+    from robosystems.operations.search.client import PART_FIELDS
+
+    properties = INDEX_MAPPING["mappings"]["properties"]
+    for name, spec in PART_FIELDS.items():
+      assert properties[name] == spec
+
+  def test_adds_part_fields_to_an_existing_index(self, client, mock_opensearch):
+    from robosystems.operations.search.client import PART_FIELDS
+
+    mock_opensearch.indices.exists.return_value = True
+    client.create_index_if_not_exists()
+    mock_opensearch.indices.create.assert_not_called()
+    mock_opensearch.indices.put_mapping.assert_called_once_with(
+      index="test-documents", body={"properties": PART_FIELDS}
+    )
+
+  def test_mapping_failure_does_not_block_startup(self, client, mock_opensearch):
+    mock_opensearch.indices.exists.return_value = True
+    mock_opensearch.indices.put_mapping.side_effect = RuntimeError("read only")
+    client.create_index_if_not_exists()
+    mock_opensearch.http.put.assert_called_once()
+
+  def test_section_filter_matches_item_ids_and_element_qnames(
+    self, client, mock_opensearch
+  ):
+    """A narrative's id is lower case; a disclosure's id is its element qname,
+    whose case is significant. Lower-casing the filter could never match a
+    disclosure."""
+    mock_opensearch.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+
+    client.search("test", graph_id="sec", filters={"section": "Item_1A"})
+    filter_clauses = mock_opensearch.search.call_args.kwargs["body"]["query"]["bool"][
+      "filter"
+    ]
+    assert {"terms": {"section_id": ["Item_1A", "item_1a"]}} in filter_clauses
+
+    client.search(
+      "test",
+      graph_id="sec",
+      filters={"section": "us-gaap:GoodwillDisclosureTextBlock"},
+    )
+    filter_clauses = mock_opensearch.search.call_args.kwargs["body"]["query"]["bool"][
+      "filter"
+    ]
+    assert {
+      "terms": {
+        "section_id": [
+          "us-gaap:GoodwillDisclosureTextBlock",
+          "us-gaap:goodwilldisclosuretextblock",
+        ]
+      }
+    } in filter_clauses
+
+    client.search("test", graph_id="sec", filters={"section": "item_7"})
+    filter_clauses = mock_opensearch.search.call_args.kwargs["body"]["query"]["bool"][
+      "filter"
+    ]
+    assert {"terms": {"section_id": ["item_7"]}} in filter_clauses
+
+
+class TestDeleteByAccession:
+  def test_deletes_one_filing_of_one_source_type(self, client, mock_opensearch):
+    mock_opensearch.delete_by_query.return_value = {"deleted": 7}
+
+    deleted = client.delete_by_accession(
+      "sec", "narrative_section", "0000066740-25-000006"
+    )
+
+    assert deleted == 7
+    call = mock_opensearch.delete_by_query.call_args
+    assert call.kwargs["index"] == "test-documents"
+    assert call.kwargs["conflicts"] == "proceed"
+    assert call.kwargs["body"]["query"]["bool"]["filter"] == [
+      {"term": {"graph_id": "sec"}},
+      {"term": {"source_type": "narrative_section"}},
+      {"term": {"accession_number": "0000066740-25-000006"}},
+    ]

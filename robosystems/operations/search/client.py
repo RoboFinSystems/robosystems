@@ -37,6 +37,17 @@ HYBRID_PIPELINE_BODY: dict[str, Any] = {
   ],
 }
 
+# A long SEC section is indexed as consecutive parts (see
+# adapters/sec/pipeline/text_index.py): 1-based part, the section's part count,
+# the id its parts share, and the next part's id. Added to an existing index
+# on startup (an additive mapping change).
+PART_FIELDS: dict[str, Any] = {
+  "part": {"type": "integer"},
+  "part_count": {"type": "integer"},
+  "parent_document_id": {"type": "keyword"},
+  "next_document_id": {"type": "keyword"},
+}
+
 # Index mapping — faiss engine for better normalized embedding performance.
 # For normalized embeddings (bge-small-en-v1.5), innerproduct is equivalent
 # to cosine similarity and avoids the per-query normalization overhead.
@@ -64,6 +75,7 @@ INDEX_MAPPING = {
         "type": "text",
         "fields": {"keyword": {"type": "keyword"}},
       },
+      **PART_FIELDS,
       # XBRL element metadata (for ixbrl_disclosure source type)
       "xbrl_elements": {"type": "keyword"},  # Element qnames in this section
       "xbrl_element_count": {"type": "integer"},
@@ -176,11 +188,25 @@ class OpenSearchClient:
         logger.info(f"Created OpenSearch index: {self.index_name}")
       else:
         logger.debug(f"OpenSearch index already exists: {self.index_name}")
+        self._ensure_part_fields()
     except Exception as e:
       logger.error(f"Failed to create OpenSearch index: {e}")
       raise
 
     self._create_hybrid_pipeline()
+
+  def _ensure_part_fields(self) -> None:
+    """Add the section-part fields to an index created before they existed.
+
+    Adding a field to a mapping is allowed and idempotent; changing one is
+    not, and none of these existed before, so the call is safe to repeat.
+    """
+    try:
+      self.client.indices.put_mapping(
+        index=self.index_name, body={"properties": PART_FIELDS}
+      )
+    except Exception as e:
+      logger.warning(f"Failed to add section-part fields to the mapping: {e}")
 
   def _create_hybrid_pipeline(self) -> None:
     """Create or update the hybrid search pipeline for score normalization.
@@ -312,7 +338,12 @@ class OpenSearchClient:
       if filters.get("form_type"):
         filter_clauses.append({"term": {"form_type": filters["form_type"].upper()}})
       if filters.get("section"):
-        filter_clauses.append({"term": {"section_id": filters["section"].lower()}})
+        # A narrative's id is lower case ("item_1a"); a disclosure's id is its
+        # element qname, whose case is significant ("us-gaap:GoodwillDisclosureTextBlock")
+        section = filters["section"]
+        filter_clauses.append(
+          {"terms": {"section_id": sorted({section, section.lower()})}}
+        )
       if filters.get("fiscal_year"):
         filter_clauses.append({"term": {"fiscal_year": filters["fiscal_year"]}})
       if filters.get("element"):
@@ -532,6 +563,29 @@ class OpenSearchClient:
     except Exception as e:
       logger.error(f"Error deleting document {document_id}: {e}")
       raise
+
+  def delete_by_accession(self, graph_id: str, source_type: str, accession: str) -> int:
+    """Delete every document of one source type for one filing.
+
+    A re-index writes the filing's documents afresh; their ids depend on how
+    each section was split into parts, so the previous set is removed first.
+    """
+    result = self.client.delete_by_query(
+      index=self.index_name,
+      body={
+        "query": {
+          "bool": {
+            "filter": [
+              {"term": {"graph_id": graph_id}},
+              {"term": {"source_type": source_type}},
+              {"term": {"accession_number": accession}},
+            ]
+          }
+        }
+      },
+      conflicts="proceed",
+    )
+    return result.get("deleted", 0)
 
   def delete_by_document_prefix(self, graph_id: str, prefix: str) -> int:
     """Delete all documents matching a document_id prefix within a graph.

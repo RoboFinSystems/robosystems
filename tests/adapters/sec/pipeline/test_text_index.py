@@ -2,14 +2,18 @@
 
 Covers:
 - _get_indexed_accessions() composite aggregation pagination
+- _part_document_ids() for unsplit sections and for parts
 """
 
+import hashlib
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
 
 from robosystems.adapters.sec.pipeline.text_index import (
   _get_indexed_accessions,
+  _part_document_ids,
 )
 
 
@@ -140,3 +144,44 @@ class TestGetIndexedAccessions:
     call_body = os_client.client.search.call_args.kwargs["body"]
     filters = call_body["query"]["bool"]["filter"]
     assert len(filters) == 1  # Only graph_id
+
+
+@dataclass
+class _Section:
+  section_id: str
+  part: int = 1
+  part_count: int = 1
+
+
+def _legacy_id(*keys: str) -> str:
+  return hashlib.sha256(":".join(keys).encode()).hexdigest()[:16]
+
+
+@pytest.mark.unit
+class TestPartDocumentIds:
+  """Document ids for section parts."""
+
+  def test_unsplit_section_keeps_the_id_it_always_had(self):
+    doc_id, parent, next_id = _part_document_ids(
+      "sec", "narr", "0000066740-25-000006", _Section("item_7")
+    )
+    assert doc_id == _legacy_id("sec", "narr", "0000066740-25-000006", "item_7")
+    assert parent is None and next_id is None
+
+  def test_parts_share_the_unsplit_id_as_parent_and_chain_by_next(self):
+    parts = [_Section("item_7", part=i, part_count=3) for i in (1, 2, 3)]
+    ids = [_part_document_ids("sec", "narr", "acc", s) for s in parts]
+
+    unsplit = _legacy_id("sec", "narr", "acc", "item_7")
+    assert {parent for _, parent, _ in ids} == {unsplit}
+    assert len({doc_id for doc_id, _, _ in ids}) == 3
+    assert unsplit not in {doc_id for doc_id, _, _ in ids}
+    assert ids[0][2] == ids[1][0]
+    assert ids[1][2] == ids[2][0]
+    assert ids[2][2] is None
+
+  def test_sources_and_sections_do_not_collide(self):
+    narr = _part_document_ids("sec", "narr", "acc", _Section("item_7"))[0]
+    ixbrl = _part_document_ids("sec", "ixbrl", "acc", _Section("item_7"))[0]
+    other = _part_document_ids("sec", "narr", "acc", _Section("item_7a"))[0]
+    assert len({narr, ixbrl, other}) == 3

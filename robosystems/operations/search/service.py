@@ -105,10 +105,11 @@ class SearchService:
         # section_label is the only context available.
         snippet = source.get("section_label", "")
 
-      # Extract PG document ID for user docs: "udoc_{pg_doc_id}_{idx}" → pg_doc_id
       doc_id = hit.get("_id", source.get("document_id", ""))
-      parent_doc_id = None
-      if doc_id.startswith("udoc_"):
+      # A part of a long SEC section carries the id its parts share; a user
+      # doc's section is "udoc_{pg_doc_id}_{idx}" and its parent is the PG doc
+      parent_doc_id = source.get("parent_document_id")
+      if parent_doc_id is None and doc_id.startswith("udoc_"):
         parent_doc_id = doc_id.rsplit("_", 1)[0].removeprefix("udoc_") or None
 
       hits.append(
@@ -117,6 +118,9 @@ class SearchService:
           score=hit.get("_score", 0.0),
           source_type=source.get("source_type", ""),
           parent_document_id=parent_doc_id,
+          part=source.get("part") or 1,
+          part_count=source.get("part_count") or 1,
+          next_document_id=source.get("next_document_id"),
           entity_ticker=source.get("entity_ticker"),
           entity_name=source.get("entity_name"),
           section_label=source.get("section_label"),
@@ -157,6 +161,10 @@ class SearchService:
       document_id=document_id,
       graph_id=doc.get("graph_id", graph_id),
       source_type=doc.get("source_type", ""),
+      parent_document_id=doc.get("parent_document_id"),
+      part=doc.get("part") or 1,
+      part_count=doc.get("part_count") or 1,
+      next_document_id=doc.get("next_document_id"),
       entity_ticker=doc.get("entity_ticker"),
       entity_name=doc.get("entity_name"),
       entity_cik=doc.get("entity_cik"),

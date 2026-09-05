@@ -211,3 +211,79 @@ class TestGetDocumentSection:
 
     result = service.get_document_section("sec", "nonexistent")
     assert result is None
+
+
+class TestSectionParts:
+  """Parts of a long SEC section carry part, part_count, the shared parent
+  id and the next part's id through both the hit and the section."""
+
+  def test_hit_carries_part_fields(self, service, mock_client):
+    mock_client.search.return_value = {
+      "hits": {
+        "total": {"value": 1},
+        "hits": [
+          {
+            "_id": "3f1c2a9b8d7e6f50",
+            "_score": 0.9,
+            "_source": {
+              "source_type": "narrative_section",
+              "section_id": "item_7",
+              "section_label": "MD&A (2/6)",
+              "part": 2,
+              "part_count": 6,
+              "parent_document_id": "a1b2c3d4e5f60718",
+              "next_document_id": "9e8d7c6b5a493827",
+            },
+            "highlight": {"content": ["...liquidity..."]},
+          }
+        ],
+      }
+    }
+
+    hit = service.search_documents("sec", SearchRequest(query="liquidity")).hits[0]
+
+    assert (hit.part, hit.part_count) == (2, 6)
+    assert hit.parent_document_id == "a1b2c3d4e5f60718"
+    assert hit.next_document_id == "9e8d7c6b5a493827"
+    assert hit.section_label == "MD&A (2/6)"
+
+  def test_unsplit_section_has_defaults(self, service, mock_client):
+    mock_client.search.return_value = {
+      "hits": {
+        "total": {"value": 1},
+        "hits": [
+          {
+            "_id": "doc1",
+            "_score": 0.9,
+            "_source": {"source_type": "ixbrl_disclosure", "section_label": "Goodwill"},
+          }
+        ],
+      }
+    }
+
+    hit = service.search_documents("sec", SearchRequest(query="goodwill")).hits[0]
+
+    assert (hit.part, hit.part_count) == (1, 1)
+    assert hit.parent_document_id is None
+    assert hit.next_document_id is None
+
+  def test_section_carries_part_fields(self, service, mock_client):
+    mock_client.get_document.return_value = {
+      "graph_id": "sec",
+      "source_type": "ixbrl_disclosure",
+      "section_id": "us-gaap:CommitmentsAndContingenciesDisclosureTextBlock",
+      "section_label": "Commitments And Contingencies Disclosure (3/6)",
+      "part": 3,
+      "part_count": 6,
+      "parent_document_id": "a1b2c3d4e5f60718",
+      "next_document_id": "9e8d7c6b5a493827",
+      "content": "PFAS litigation...",
+      "content_length": 24000,
+    }
+
+    section = service.get_document_section("sec", "3f1c2a9b8d7e6f50")
+
+    assert section is not None
+    assert (section.part, section.part_count) == (3, 6)
+    assert section.parent_document_id == "a1b2c3d4e5f60718"
+    assert section.next_document_id == "9e8d7c6b5a493827"

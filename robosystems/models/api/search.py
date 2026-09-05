@@ -12,7 +12,9 @@ class SearchRequest(BaseModel):
     None, description="Filter by SEC form type (10-K, 10-Q)"
   )
   section: str | None = Field(
-    None, description="Filter by section ID (item_1, item_1a, item_7, etc.)"
+    None,
+    description="Filter by section ID: an Item (item_1, item_1a, item_7, ...) or, "
+    "for iXBRL disclosures, the element qname (us-gaap:GoodwillDisclosureTextBlock)",
   )
   element: str | None = Field(
     None,
@@ -42,12 +44,20 @@ class SearchRequest(BaseModel):
 
 
 class SearchHit(BaseModel):
-  """A single search result with snippet."""
+  """A single search result with snippet.
+
+  A long SEC section (an MD&A, a commitments note) is indexed in parts, each
+  a document of its own: ``part`` of ``part_count``, ``parent_document_id``
+  shared by the section's parts, ``next_document_id`` to read on.
+  """
 
   document_id: str
   score: float
   source_type: str
   parent_document_id: str | None = None
+  part: int = 1
+  part_count: int = 1
+  next_document_id: str | None = None
   entity_ticker: str | None = None
   entity_name: str | None = None
   section_label: str | None = None
@@ -75,11 +85,16 @@ class SearchResponse(BaseModel):
 
 
 class DocumentSection(BaseModel):
-  """Full document section retrieved by ID."""
+  """Full document section retrieved by ID — one part of it when the section
+  is long; ``next_document_id`` continues it."""
 
   document_id: str
   graph_id: str
   source_type: str
+  parent_document_id: str | None = None
+  part: int = 1
+  part_count: int = 1
+  next_document_id: str | None = None
   entity_ticker: str | None = None
   entity_name: str | None = None
   entity_cik: str | None = None

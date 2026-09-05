@@ -12,6 +12,12 @@ Two assets for indexing SEC filing text content into OpenSearch:
    bidirectional navigation between knowledge graph and document search.
    Also resolves CDN content_url from externalized Fact data for full HTML retrieval.
 
+Both parsers come from ``xbrlkit.text``. A section longer than ``part_size``
+is indexed as consecutive parts: each part is its own document carrying
+``part`` / ``part_count``, a ``parent_document_id`` shared by the section's
+parts, and the ``next_document_id`` to read on. An unsplit section keeps the
+document id it always had.
+
 All depend on sec_processed_filings (need Entity/Report metadata from parquets).
 All run parallel to the DuckDB staging branch.
 """
@@ -72,6 +78,31 @@ def _embed_document_batch(enricher, documents: list[dict]) -> bool:
   except Exception as e:
     logger.warning(f"Embedding generation failed, indexing without vectors: {e}")
     return False
+
+
+def _part_document_ids(
+  graph_id: str, source: str, accession: str, section: Any
+) -> tuple[str, str | None, str | None]:
+  """(document_id, parent_document_id, next_document_id) for one section part.
+
+  An unsplit section's id is ``sha256(graph:source:accession:section_id)``,
+  as it always was, with no parent and no next. A part's id adds its part
+  number; every part of the section shares the unsplit id as its parent.
+  """
+
+  def _id(*keys: str) -> str:
+    return hashlib.sha256(":".join(keys).encode()).hexdigest()[:16]
+
+  section_key = (graph_id, source, accession, section.section_id)
+  if section.part_count <= 1:
+    return _id(*section_key), None, None
+  own = _id(*section_key, str(section.part))
+  next_id = (
+    _id(*section_key, str(section.part + 1))
+    if section.part < section.part_count
+    else None
+  )
+  return own, _id(*section_key), next_id
 
 
 def _get_s3_client():
@@ -313,7 +344,8 @@ def sec_narratives_indexed(
   3. Upload clean text to public data S3 bucket (CDN-served)
   4. Index into OpenSearch with content + content_url
   """
-  from robosystems.adapters.sec.narrative_extractor import NarrativeExtractor
+  from xbrlkit.text import NarrativeExtractor
+
   from robosystems.operations.search.client import OpenSearchClient
 
   s3 = _get_s3_client()
@@ -322,7 +354,7 @@ def sec_narratives_indexed(
   public_bucket = _get_public_data_bucket()
   cdn_url = _get_public_data_cdn_url()
 
-  extractor = NarrativeExtractor(max_section_length=config.max_section_length)
+  extractor = NarrativeExtractor(part_size=config.part_size or None)
 
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
@@ -445,8 +477,8 @@ def sec_narratives_indexed(
   gc.collect()
 
   # List raw ZIPs and process those matching our target accessions
-  # Narrative sections can be up to 50KB each (max_section_length).
-  # Batch of 100 x 50KB = 5MB, safely under OpenSearch's 10MB bulk request limit.
+  # A section part is about part_size chars (25K by default, at most ~1.3x that).
+  # Batch of 100 x ~32KB = ~3MB, safely under OpenSearch's 10MB bulk request limit.
   batch_size = 100
   documents: list[dict[str, Any]] = []
   total_indexed = 0
@@ -511,6 +543,11 @@ def sec_narratives_indexed(
           )
           continue
 
+        # A re-index replaces the accession's documents: the part count of a
+        # section, and so its document ids, can change between parser versions.
+        if config.force_reindex:
+          os_client.delete_by_accession(config.graph_id, "narrative_section", accession)
+
         # Extract narrative sections
         sections = extractor.extract(html_content, ixbrl_doc_type or meta["form_type"])
         filings_processed += 1
@@ -521,8 +558,11 @@ def sec_narratives_indexed(
         for section in sections:
           sections_extracted += 1
 
-          # Externalize clean text to public S3 bucket
-          narrative_key = f"{year}/{cik}/{accession}/narrative_{section.section_id}.txt"
+          # Externalize clean text to public S3 bucket, one object per part
+          part_suffix = f"_part{section.part}" if section.part_count > 1 else ""
+          narrative_key = (
+            f"{year}/{cik}/{accession}/narrative_{section.section_id}{part_suffix}.txt"
+          )
           content_url_value = ""
 
           if public_bucket:
@@ -539,9 +579,9 @@ def sec_narratives_indexed(
             except Exception as e:
               context.log.debug(f"Failed to externalize {narrative_key}: {e}")
 
-          doc_id = hashlib.sha256(
-            f"{config.graph_id}:narr:{accession}:{section.section_id}".encode()
-          ).hexdigest()[:16]
+          doc_id, parent_id, next_id = _part_document_ids(
+            config.graph_id, "narr", accession, section
+          )
 
           documents.append(
             {
@@ -552,7 +592,11 @@ def sec_narratives_indexed(
               "entity_name": meta.get("entity_name"),
               "entity_cik": cik,
               "section_id": section.section_id,
-              "section_label": section.section_label,
+              "section_label": section.label,
+              "part": section.part,
+              "part_count": section.part_count,
+              "parent_document_id": parent_id,
+              "next_document_id": next_id,
               "content": section.content,
               "content_url": content_url_value,
               "content_length": len(section.content),
@@ -644,14 +688,15 @@ def sec_ixbrl_disclosures_indexed(
   Enables bidirectional navigation: search → graph (find facts in a disclosure)
   and graph → search (find the disclosure discussing a fact).
   """
-  from robosystems.adapters.sec.ixbrl_parser import iXBRLParser
+  from xbrlkit.text import iXBRLParser
+
   from robosystems.operations.search.client import OpenSearchClient
 
   s3 = _get_s3_client()
   raw_bucket = _get_raw_bucket()
   processed_bucket = _get_processed_bucket()
 
-  parser = iXBRLParser(max_section_length=config.max_section_length)
+  parser = iXBRLParser(part_size=config.part_size or None)
 
   os_client = OpenSearchClient(env.OPENSEARCH_URL, env.OPENSEARCH_INDEX)
   os_client.create_index_if_not_exists()
@@ -872,8 +917,8 @@ def sec_ixbrl_disclosures_indexed(
   gc.collect()
 
   # Scan raw ZIPs
-  # iXBRL disclosures can be up to 50KB each (max_section_length).
-  # Batch of 100 x 50KB = 5MB, safely under OpenSearch's 10MB bulk request limit.
+  # A section part is about part_size chars (25K by default, at most ~1.3x that).
+  # Batch of 100 x ~32KB = ~3MB, safely under OpenSearch's 10MB bulk request limit.
   batch_size = 100
   documents: list[dict[str, Any]] = []
   total_indexed = 0
@@ -930,6 +975,11 @@ def sec_ixbrl_disclosures_indexed(
           )
           continue
 
+        # A re-index replaces the accession's documents: the part count of a
+        # section, and so its document ids, can change between parser versions.
+        if config.force_reindex:
+          os_client.delete_by_accession(config.graph_id, "ixbrl_disclosure", accession)
+
         # Parse iXBRL disclosure sections
         sections = parser.parse(html_content)
         filings_processed += 1
@@ -939,11 +989,12 @@ def sec_ixbrl_disclosures_indexed(
 
         for section in sections:
           sections_extracted += 1
-          total_elements += section.element_count
+          if section.part == 1:
+            total_elements += section.element_count
 
-          doc_id = hashlib.sha256(
-            f"{config.graph_id}:ixbrl:{accession}:{section.section_id}".encode()
-          ).hexdigest()[:16]
+          doc_id, parent_id, next_id = _part_document_ids(
+            config.graph_id, "ixbrl", accession, section
+          )
 
           documents.append(
             {
@@ -954,7 +1005,11 @@ def sec_ixbrl_disclosures_indexed(
               "entity_name": meta.get("entity_name"),
               "entity_cik": cik,
               "section_id": section.section_id,
-              "section_label": section.section_label,
+              "section_label": section.label,
+              "part": section.part,
+              "part_count": section.part_count,
+              "parent_document_id": parent_id,
+              "next_document_id": next_id,
               "content": section.content,
               "content_url": cdn_url_lookup.get((accession, section.section_id), ""),
               "content_length": len(section.content),
