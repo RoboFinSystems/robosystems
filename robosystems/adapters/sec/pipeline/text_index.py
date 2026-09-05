@@ -105,6 +105,19 @@ def _part_document_ids(
   return own, _id(*section_key), next_id
 
 
+def _cell(value: Any) -> str:
+  """A parquet cell as text; a missing value is an empty string.
+
+  ``str()`` on a pandas missing value is the truthy ``"<NA>"``, which once
+  reached the index as the ticker of every filer without one.
+  """
+  import pandas as pd
+
+  if value is None or pd.isna(value):
+    return ""
+  return str(value)
+
+
 def _get_s3_client():
   """Get S3 client (handles LocalStack for dev)."""
   kwargs: dict[str, Any] = {"region_name": env.AWS_REGION}
@@ -441,9 +454,9 @@ def sec_narratives_indexed(
     entities_df = entity_table.to_pandas()
     for _, row in entities_df.iterrows():
       entity_lookup[row.get("identifier")] = {
-        "ticker": str(row.get("ticker", "")),
-        "name": str(row.get("name", "")),
-        "cik": str(row.get("cik", "")),
+        "ticker": _cell(row.get("ticker")),
+        "name": _cell(row.get("name")),
+        "cik": _cell(row.get("cik")),
       }
   if ehr_table is not None:
     ehr_df = ehr_table.to_pandas()
@@ -789,9 +802,9 @@ def sec_ixbrl_disclosures_indexed(
     entities_df = entity_table.to_pandas()
     for _, row in entities_df.iterrows():
       entity_lookup[row.get("identifier")] = {
-        "ticker": str(row.get("ticker", "")),
-        "name": str(row.get("name", "")),
-        "cik": str(row.get("cik", "")),
+        "ticker": _cell(row.get("ticker")),
+        "name": _cell(row.get("name")),
+        "cik": _cell(row.get("cik")),
       }
   if ehr_table is not None:
     ehr_df = ehr_table.to_pandas()

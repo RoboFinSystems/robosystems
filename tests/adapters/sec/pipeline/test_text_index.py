@@ -185,3 +185,26 @@ class TestPartDocumentIds:
     ixbrl = _part_document_ids("sec", "ixbrl", "acc", _Section("item_7"))[0]
     other = _part_document_ids("sec", "narr", "acc", _Section("item_7a"))[0]
     assert len({narr, ixbrl, other}) == 3
+
+
+@pytest.mark.unit
+class TestCell:
+  """The entity lookup's cells: a missing ticker must fall through to the CIK,
+  not index as the string "<NA>" (U.S. Steel, and every ticker-less filer)."""
+
+  def test_missing_values_are_empty(self):
+    import numpy as np
+    import pandas as pd
+
+    from robosystems.adapters.sec.pipeline.text_index import _cell
+
+    assert _cell(None) == ""
+    assert _cell(pd.NA) == ""
+    assert _cell(np.nan) == ""
+    assert _cell(float("nan")) == ""
+
+  def test_values_are_text(self):
+    from robosystems.adapters.sec.pipeline.text_index import _cell
+
+    assert _cell("MMM") == "MMM"
+    assert _cell(66740) == "66740"
