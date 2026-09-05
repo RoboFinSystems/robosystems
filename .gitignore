@@ -140,8 +140,7 @@ CLAUDE.local.md
 .gemini/
 GEMINI.md
 
-# Arelle EDGAR data - fetched as needed
-robosystems/adapters/sec/arelle/EDGAR/
+
 # Arelle schema cache - downloaded during build
 robosystems/adapters/sec/arelle/cache/
 

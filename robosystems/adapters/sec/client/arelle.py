@@ -7,6 +7,12 @@ from typing import Any
 from arelle import Cntlr, ModelXbrl
 from arelle.Version import __version__ as ARELLE_VERSION
 from arelle.WebCache import WebCache
+from xbrlkit.parse.arelle_load import (
+  SEC_IXT_NAMESPACE,
+)
+from xbrlkit.parse.arelle_load import (
+  _register_sec_transforms as register_sec_transforms,
+)
 
 from robosystems.adapters.sec.config import (
   ARELLE_DOWNLOAD_TIMEOUT,
@@ -147,51 +153,29 @@ class ArelleClient:
     self._register_sec_transformations()
 
   def _load_plugins(self):
-    """Load required plugins including EFM validation."""
+    """Load the inline-XBRL document-set plugin and the SEC transforms.
+
+    ``inlineXbrlDocumentSet`` is load-bearing: without it Arelle treats an
+    inline 10-K as plain HTML and every fact silently drops. The SEC
+    ``ixt-sec`` transforms come from xbrlkit's vendored EDGAR transform
+    registry (``_setup_sec_transforms``). EFM validation is not loaded: the
+    validator left arelle-release for the Arelle/EDGAR repository, and
+    nothing in the pipeline consumes its findings.
+    """
     if not self.cntlr:
       return
 
     logger.debug("Loading Arelle plugins")
 
-    import sys
-
     from arelle import PluginManager
-
-    # The EDGAR plugin is vendored under adapters/sec/arelle/, so both it and
-    # its parent must be importable before PluginManager can resolve them.
-    edgar_path = os.path.join(os.path.dirname(__file__), "..", "arelle", "EDGAR")
-    edgar_path = os.path.abspath(edgar_path)
-    if edgar_path not in sys.path:
-      sys.path.insert(0, edgar_path)
-      logger.debug(f"Added EDGAR plugin path: {edgar_path}")
-
-    arelle_plugin_path = os.path.join(os.path.dirname(__file__), "..", "arelle")
-    arelle_plugin_path = os.path.abspath(arelle_plugin_path)
-    if arelle_plugin_path not in sys.path:
-      sys.path.insert(0, arelle_plugin_path)
 
     PluginManager.init(self.cntlr, loadPluginConfig=False)
 
-    plugins_to_load = [
-      "inlineXbrlDocumentSet",  # For inline XBRL support
-      "validate/EFM",  # EFM validation (from base Arelle)
-    ]
-
-    for plugin in plugins_to_load:
-      try:
-        PluginManager.addPluginModule(plugin)
-        logger.debug(f"Added plugin module: {plugin}")
-      except Exception as e:
-        logger.warning(f"Could not load plugin {plugin}: {e}")
-
-    # Only EDGAR.transform, not the whole EDGAR plugin: the top-level module
-    # pulls in EDGAR/render, which requires matplotlib. The SEC inline-XBRL
-    # transforms are all this pipeline needs.
     try:
-      PluginManager.addPluginModule("EDGAR.transform")
-      logger.debug("Added EDGAR.transform module")
+      PluginManager.addPluginModule("inlineXbrlDocumentSet")
+      logger.debug("Added plugin module: inlineXbrlDocumentSet")
     except Exception as e:
-      logger.warning(f"Could not load EDGAR.transform module: {e}")
+      logger.warning(f"Could not load plugin inlineXbrlDocumentSet: {e}")
 
     # reset() is what actually activates everything added above.
     try:
@@ -511,70 +495,31 @@ class ArelleClient:
     pass
 
   def _setup_sec_transforms(self):
-    """Register the SEC inline-XBRL transform functions with Arelle.
+    """Register the SEC inline-XBRL transforms (``ixt-sec``) with Arelle.
 
-    Loading `EDGAR.transform` does not always populate
-    `FunctionIxt.ixtNamespaceFunctions`, and without those entries every
-    `ix:` transform in an SEC filing fails to resolve, so they are wired in
-    by hand here. Idempotent — an already-registered namespace is left alone.
+    Standalone arelle-release does not carry the SEC ``2015-08-31``
+    transforms (``stateprovnameen``, ``numwordsen``, ``durwordsen``, …);
+    without them every SEC-formatted cover-page fact parses to
+    ``(ixTransformValueError)``. xbrlkit vendors the EDGAR plugin's transform
+    registry and registers it directly into the namespace map Arelle
+    resolves ``ix:`` transforms against. Idempotent.
     """
     if not self.cntlr:
       return
 
-    try:
-      from arelle import FunctionIxt
+    from arelle import FunctionIxt
 
-      sec_namespace = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
+    register_sec_transforms()
 
-      try:
-        import EDGAR.transform as edgar_transform  # type: ignore[import]
-
-        sec_transforms = {
-          "duryear": edgar_transform.duryear,
-          "durmonth": edgar_transform.durmonth,
-          "durweek": edgar_transform.durweek,
-          "durday": edgar_transform.durday,
-          "durhour": edgar_transform.durhour,
-          "datequarterend": edgar_transform.datequarterend,
-          "numwordsen": edgar_transform.numwordsen,
-          "durwordsen": edgar_transform.durwordsen,
-          "boolballotbox": edgar_transform.boolballotbox,
-          "yesnoballotbox": edgar_transform.yesnoballotbox,
-          "numinf": edgar_transform.numinf,
-          "numneginf": edgar_transform.numneginf,
-          "numnan": edgar_transform.numnan,
-          "stateprovnameen": edgar_transform.stateprovnameen,
-          "exchnameen": edgar_transform.exchnameen,
-          "entityfilercategoryen": edgar_transform.entityfilercategoryen,
-          "countrynameen": edgar_transform.countrynameen,
-          "edgarprovcountryen": edgar_transform.edgarprovcountryen,
-        }
-
-        if not hasattr(FunctionIxt, "ixtNamespaceFunctions"):
-          FunctionIxt.ixtNamespaceFunctions = {}
-
-        if sec_namespace not in FunctionIxt.ixtNamespaceFunctions:
-          FunctionIxt.ixtNamespaceFunctions[sec_namespace] = sec_transforms
-          logger.debug(f"Manually registered {len(sec_transforms)} SEC transformations")
-        else:
-          logger.debug("SEC transformations already registered")
-
-      except ImportError as e:
-        logger.warning(f"Could not import EDGAR transform module: {e}")
-
-      if hasattr(FunctionIxt, "ixtNamespaceFunctions"):
-        if sec_namespace in FunctionIxt.ixtNamespaceFunctions:
-          transform_count = len(FunctionIxt.ixtNamespaceFunctions[sec_namespace])
-          logger.debug(
-            f"SEC transformations successfully registered: {transform_count} transforms"
-          )
-        else:
-          logger.warning(f"SEC transformation namespace not found: {sec_namespace}")
-      else:
-        logger.warning("FunctionIxt does not have ixtNamespaceFunctions attribute")
-
-    except Exception as e:
-      logger.warning(f"Error setting up SEC transforms: {e}")
+    registered = getattr(FunctionIxt, "ixtNamespaceFunctions", {}).get(
+      SEC_IXT_NAMESPACE
+    )
+    if registered:
+      logger.debug(f"SEC transformations registered: {len(registered)} transforms")
+    else:
+      logger.warning(
+        f"SEC transformation namespace not registered: {SEC_IXT_NAMESPACE}"
+      )
 
   def controller(self, url: str) -> ModelXbrl.ModelXbrl:
     """Load an XBRL document (URL or local path) into a ModelXbrl.
