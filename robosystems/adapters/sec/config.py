@@ -37,22 +37,30 @@ SEC_CONFIG = {
 # =============================================================================
 # ARELLE CONFIGURATION
 # =============================================================================
-# Arelle is the XBRL processing library
+# The load itself is xbrlkit's (cache-first, per-host spacing, Retry-After
+# backoff, no re-validation of cached files); these are the platform's
+# settings for it. The cache directory is env.ARELLE_CACHE_DIR.
 
-# Logging configuration
-ARELLE_LOG_FILE = "logToBuffer"
-
-# Timeout for Arelle operations (seconds)
+# Per-fetch timeout for a DTS document (seconds)
 ARELLE_TIMEOUT = 30
 
-# Timeout for individual schema downloads (seconds)
-ARELLE_DOWNLOAD_TIMEOUT = 10
-
-# Work offline mode - use cached schemas only
+# Work offline: serve the DTS from the cache only, never fetch. A miss is then
+# a DtsResolutionError, not a fetch.
 ARELLE_WORK_OFFLINE = False
 
-# Minimum number of cached schemas required for offline operation
-ARELLE_MIN_SCHEMA_COUNT = 10
+
+def xbrlkit_config():
+  """xbrlkit's :class:`~xbrlkit.config.Config` with the platform's settings:
+  the SEC User-Agent, the request timeout, and the Arelle fetch policy."""
+  from xbrlkit.config import Config
+
+  return Config(
+    user_agent=SEC_CONFIG["user_agent"],
+    request_timeout=SEC_CONFIG["timeout"],
+    arelle_timeout=ARELLE_TIMEOUT,
+    arelle_offline=ARELLE_WORK_OFFLINE,
+  )
+
 
 # =============================================================================
 # XBRL PROCESSING CONFIGURATION

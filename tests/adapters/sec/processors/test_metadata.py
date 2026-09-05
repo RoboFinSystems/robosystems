@@ -159,9 +159,9 @@ class TestGetMetadataCacheHitMiss:
     assert sec_report["form"] == "10-K"
     assert "320193" in loader._cache
 
-  @patch("robosystems.adapters.sec.SECClient")
-  def test_api_fallback_when_no_s3(self, mock_sec_client_cls):
-    """Falls back to SEC API when S3 snapshot doesn't exist."""
+  @patch("robosystems.adapters.sec.client.edgar.edgar_client")
+  def test_api_fallback_when_no_s3(self, mock_edgar_client):
+    """Falls back to EDGAR (xbrlkit's client) when S3 snapshot doesn't exist."""
     from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
 
     loader = SECMetadataLoader()
@@ -169,40 +169,35 @@ class TestGetMetadataCacheHitMiss:
     mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
     mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey("Not found")
 
-    mock_client_instance = MagicMock()
-    mock_client_instance.get_submissions.return_value = {
+    mock_edgar_client.return_value.submissions.return_value = {
       "name": "Test Corp",
       "tickers": [],
       "filings": {"recent": {}},
     }
-    mock_sec_client_cls.return_value = mock_client_instance
 
     sec_filer, sec_report = loader.get_metadata(
       "999999", "0000999999-24-000001", s3_client=mock_s3, bucket="bucket"
     )
 
-    mock_sec_client_cls.assert_called_once_with(cik="999999")
-    mock_client_instance.get_submissions.assert_called_once()
+    mock_edgar_client.return_value.submissions.assert_called_once_with("999999")
     assert sec_filer["name"] == "Test Corp"
     assert "999999" in loader._cache
 
-  @patch("robosystems.adapters.sec.SECClient")
-  def test_api_fallback_when_no_s3_client(self, mock_sec_client_cls):
-    """Falls back to SEC API when no S3 client is provided."""
+  @patch("robosystems.adapters.sec.client.edgar.edgar_client")
+  def test_api_fallback_when_no_s3_client(self, mock_edgar_client):
+    """Falls back to EDGAR when no S3 client is provided."""
     from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
 
     loader = SECMetadataLoader()
-    mock_client_instance = MagicMock()
-    mock_client_instance.get_submissions.return_value = {
+    mock_edgar_client.return_value.submissions.return_value = {
       "name": "No S3 Corp",
       "tickers": [],
       "filings": {},
     }
-    mock_sec_client_cls.return_value = mock_client_instance
 
     sec_filer, sec_report = loader.get_metadata("888888", "0000888888-24-000001")
 
-    mock_sec_client_cls.assert_called_once_with(cik="888888")
+    mock_edgar_client.return_value.submissions.assert_called_once_with("888888")
     assert sec_filer["name"] == "No S3 Corp"
 
 

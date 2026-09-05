@@ -130,10 +130,9 @@ def get_top_companies(count: int, use_sec_api: bool = False) -> list[str]:
   """Get top N companies by market cap."""
   if use_sec_api:
     try:
-      from robosystems.adapters.sec import SECClient
+      from robosystems.adapters.sec.client.edgar import edgar_client
 
-      client = SECClient()
-      companies = client.get_companies()
+      companies = edgar_client().company_tickers()
       tickers = []
       for idx in sorted(companies.keys(), key=lambda x: int(x)):
         ticker = companies[idx].get("ticker", "")

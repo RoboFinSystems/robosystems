@@ -6,6 +6,7 @@ metadata from S3 snapshots with fallback to SEC API.
 """
 
 import json
+from typing import Any, cast
 
 from robosystems.config.storage.shared import DataSourceType, get_raw_key
 from robosystems.logger import get_logger
@@ -55,9 +56,9 @@ class SECMetadataLoader:
     live SEC API call only when no snapshot exists. `accession` carries dashes.
     Returns `(sec_filer, sec_report)`.
     """
-    from robosystems.adapters.sec import SECClient
+    from robosystems.adapters.sec.client.edgar import edgar_client
 
-    submissions = None
+    submissions: dict[str, Any] | None = None
 
     # Check in-memory cache first
     if cik in self._cache:
@@ -72,8 +73,7 @@ class SECMetadataLoader:
     # Fallback to SEC API if no snapshot
     if submissions is None:
       logger.warning("No S3 snapshot for CIK %s, falling back to SEC API", cik)
-      client = SECClient(cik=cik)
-      submissions = client.get_submissions()
+      submissions = cast(dict[str, Any], edgar_client().submissions(cik))
       self._cache[cik] = submissions
 
     # Build sec_filer from company-level data

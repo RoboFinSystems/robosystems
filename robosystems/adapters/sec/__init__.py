@@ -10,9 +10,8 @@ EASTERN = ZoneInfo("America/New_York")
 
 _LAZY_IMPORTS = {
   "SEC_BASE_URL": "robosystems.adapters.sec.client",
-  "SECClient": "robosystems.adapters.sec.client",
-  "enable_test_mode": "robosystems.adapters.sec.client",
-  "ArelleClient": "robosystems.adapters.sec.client.arelle",
+  "edgar_client": "robosystems.adapters.sec.client",
+  "load_filing": "robosystems.adapters.sec.client",
   "XBRL_GRAPH_PROCESSOR_VERSION": "robosystems.adapters.sec.processors",
   "IngestTableInfo": "robosystems.adapters.sec.processors",
   "MaterializeResult": "robosystems.adapters.sec.processors",

@@ -1,8 +1,8 @@
 """One XBRL filing to graph parquet, on xbrlkit's model and projection.
 
-The load is the platform's — ``ArelleClient`` brings the pre-cached schema
-bundle, the fail-fast WebCache and the EFM disclosure system — and everything
-that reads the loaded filing is xbrlkit's: ``to_xbrl_model`` walks the
+The load and everything that reads the loaded filing are xbrlkit's — the
+platform supplies the cache directory and its settings
+(``client/arelle.py``); ``to_xbrl_model`` walks the
 ``ModelXbrl`` into the neutral ``XbrlModel`` and ``to_graph_tables`` projects
 it into the property graph's rows with the platform's own ids, so a filing
 projected by ``xbrlkit build --format lpg`` and a filing processed here are
@@ -29,7 +29,7 @@ from xbrlkit.serialize.lpg import (
   to_graph_tables,
 )
 
-from robosystems.adapters.sec.client.arelle import ArelleClient
+from robosystems.adapters.sec.client.arelle import close_filing, load_filing
 from robosystems.adapters.sec.config import (
   XBRL_COLUMN_STANDARDIZATION,
   XBRL_EXTERNALIZATION_THRESHOLD,
@@ -171,12 +171,10 @@ class XBRLGraphProcessor:
       logger.warning("Not outputting parquet files for failed report")
       return
 
-    arelle_client = None
     model_xbrl = None
     try:
-      logger.debug("Initializing Arelle controller")
-      arelle_client = ArelleClient()
-      model_xbrl = arelle_client.controller(self.instance_path)
+      logger.debug("Loading the filing through Arelle")
+      model_xbrl = load_filing(self.instance_path)
 
       logger.info("Parsing the filing into the xbrlkit model")
       model = to_xbrl_model(
@@ -209,16 +207,7 @@ class XBRLGraphProcessor:
       raise
     finally:
       # ModelXbrl and the controller accumulate memory across filings.
-      if model_xbrl is not None:
-        try:
-          model_xbrl.close()
-        except Exception as e:
-          logger.warning(f"Error closing ModelXbrl: {e}")
-      if arelle_client is not None:
-        try:
-          arelle_client.close()
-        except Exception as e:
-          logger.warning(f"Error closing ArelleClient: {e}")
+      close_filing(model_xbrl)
       # Release Arelle's C extension objects.
       gc.collect()
 

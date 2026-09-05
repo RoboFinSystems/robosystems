@@ -83,20 +83,22 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY robosystems/ ./robosystems/
 COPY main.py ./
 
-# Copy pre-built cache bundles and cache manager script (required for build)
+# Copy the schema bundle that seeds the Arelle cache (required for build)
 COPY robosystems/adapters/sec/arelle/bundles/ ./robosystems/adapters/sec/arelle/bundles/
-COPY robosystems/scripts/arelle_cache_manager.py ./robosystems/scripts/
 
 # Validate that required bundles exist before attempting extraction
 RUN if [ ! -f "./robosystems/adapters/sec/arelle/bundles/arelle-schemas-latest.tar.gz" ]; then \
         echo "ERROR: Schema bundle (arelle-schemas-latest.tar.gz) is missing!" && \
-        echo "Run 'uv run python robosystems/scripts/arelle_cache_manager.py update' to generate it" && \
+        echo "Build one with 'xbrlkit cache download' + 'xbrlkit cache bundle' (see adapters/sec/README.md)" && \
         exit 1; \
     fi
 
-# Extract the pre-cached XBRL schemas from the bundle. The SEC inline-XBRL
-# transforms ship inside the xbrlkit package, so nothing is fetched here.
-RUN python robosystems/scripts/arelle_cache_manager.py extract
+# Seed the Arelle cache from the bundle, in Arelle's own layout, through xbrlkit
+# (installed by the sync above). Nothing is fetched here; the SEC inline-XBRL
+# transforms ship inside xbrlkit too.
+RUN .venv/bin/xbrlkit cache extract \
+    --bundle robosystems/adapters/sec/arelle/bundles/arelle-schemas-latest.tar.gz \
+    --cache-dir robosystems/adapters/sec/arelle/cache
 RUN uv sync --frozen --no-dev
 
 # Pre-cache fastembed model (BAAI/bge-small-en-v1.5) for XBRL semantic enrichment

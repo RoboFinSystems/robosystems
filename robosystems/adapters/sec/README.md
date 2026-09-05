@@ -27,10 +27,9 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 
 | Class | Purpose |
 |-------|---------|
-| `SECClient` (`edgar.py`) | EDGAR API — company lookup, filing metadata, submissions |
-| `ArelleClient` (`arelle.py`) | Loads a filing through Arelle: the pre-cached schema bundle, a fail-fast WebCache, and the SEC inline-XBRL transforms from xbrlkit's vendored registry |
-| `SECDownloader` (`downloader.py`) | Bulk download of XBRL ZIPs to S3, rate-limited |
-| `EFTSClient` (`efts.py`) | EFTS full-text filing discovery |
+| `edgar_client()` (`edgar.py`) | xbrlkit's `EdgarClient` on the platform's User-Agent: the ticker map, the submissions header and its paged history, EDGAR's throttle ridden out |
+| `load_filing()` (`arelle.py`) | xbrlkit's cache-first Arelle load on the platform's cache directory (`ARELLE_CACHE_DIR`, seeded from the schema bundle at image build) |
+| `SECDownloader` (`downloader.py`) | Bulk download of XBRL ZIPs to S3, rate-limited; discovery through xbrlkit's `EftsClient` |
 
 **Processors** (`processors/`)
 
@@ -48,7 +47,7 @@ materialization must not discard hours of DuckDB staging work — and
 There is no path from S3 straight into LadybugDB; staging is always in between.
 
 **The graph tables are xbrlkit's.** `XBRLGraphProcessor` loads the filing with
-`ArelleClient`, parses it with `xbrlkit.parse.to_xbrl_model`, and projects it with
+`load_filing` (xbrlkit's loader), parses it with `xbrlkit.parse.to_xbrl_model`, and projects it with
 `xbrlkit.serialize.lpg.to_graph_tables` — the same ids, columns and DDL that
 `xbrlkit build --format lpg` writes into a single-filing `.lbug`, so a filing
 projected there and a filing ingested here are the same rows. What stays in the
@@ -162,6 +161,30 @@ In practice the adapter runs through Dagster:
 just sec-load NVDA 2025
 just sec-health
 just sec-reset
+```
+
+## Schema cache
+
+Arelle resolves a filing's DTS by fetching a few hundred schemas and linkbases,
+and the two smallest hosts (xbrl.org, w3.org) throttle a cold cache within a few
+dozen filings. The load is xbrlkit's, which serves the DTS from a persistent
+cache in Arelle's layout, spaces fetches per host, waits out a `Retry-After`,
+never re-validates a cached file (Arelle's weekly recheck, one request per file
+per process on a warm cache, was the throttle generator), and fails a filing
+loudly with `DtsResolutionError` when a document cannot be resolved — the
+pipeline records it and retries later rather than indexing a filing missing the
+concepts a schema declared.
+
+The image seeds `ARELLE_CACHE_DIR` from `arelle/bundles/arelle-schemas-latest.tar.gz`
+at build (`xbrlkit cache extract`). The bundle carries every file from the
+throttling hosts (about 125 files, 120 KB); the tolerant hosts (xbrl.sec.gov,
+xbrl.fasb.org) fill in on first use. To refresh it:
+
+```bash
+uv run xbrlkit cache download --cache-dir /tmp/arelle-seed --years 2022-2026
+uv run xbrlkit cache bundle --cache-dir /tmp/arelle-seed --host www.xbrl.org --host www.w3.org \
+  --out robosystems/adapters/sec/arelle/bundles/arelle-schemas-$(date +%Y%m%d).tar.gz
+# then repoint the arelle-schemas-latest.tar.gz symlink
 ```
 
 ## Configuration

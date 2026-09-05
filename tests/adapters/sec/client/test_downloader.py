@@ -4,12 +4,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from xbrlkit.edgar import EftsHit
 
 from robosystems.adapters.sec.client.downloader import (
   DownloadStats,
   SECDownloader,
 )
-from robosystems.adapters.sec.client.efts import EFTSHit
 
 
 class TestDownloadStats:
@@ -86,10 +86,10 @@ class TestSECDownloaderS3Keys:
   def test_get_s3_key(self):
     """Test S3 key construction for filing."""
     downloader = SECDownloader()
-    hit = EFTSHit(
+    hit = EftsHit(
       cik="0000320193",
-      accession_number="0000320193-24-000001",
-      form_type="10-K",
+      accession="0000320193-24-000001",
+      form="10-K",
       file_number=None,
       filing_date=None,
       primary_document=None,
@@ -109,10 +109,10 @@ class TestSECDownloaderS3Keys:
   def test_get_xbrl_zip_url(self):
     """Test XBRL ZIP URL construction."""
     downloader = SECDownloader()
-    hit = EFTSHit(
+    hit = EftsHit(
       cik="0000320193",
-      accession_number="0000320193-24-000001",
-      form_type="10-K",
+      accession="0000320193-24-000001",
+      form="10-K",
       file_number=None,
       filing_date=None,
       primary_document=None,
@@ -166,10 +166,10 @@ class TestSECDownloaderDownloadFiling:
   @pytest.fixture
   def mock_hit(self):
     """Create mock EFTS hit."""
-    return EFTSHit(
+    return EftsHit(
       cik="0000320193",
-      accession_number="0000320193-24-000001",
-      form_type="10-K",
+      accession="0000320193-24-000001",
+      form="10-K",
       file_number=None,
       filing_date=None,
       primary_document=None,
@@ -328,10 +328,10 @@ class TestSECDownloaderDownloadFilings:
   def mock_hits(self):
     """Create list of mock EFTS hits."""
     return [
-      EFTSHit(
+      EftsHit(
         cik=f"000032019{i}",
-        accession_number=f"000032019{i}-24-000001",
-        form_type="10-K",
+        accession=f"000032019{i}-24-000001",
+        form="10-K",
         file_number=None,
         filing_date=None,
         primary_document=None,
