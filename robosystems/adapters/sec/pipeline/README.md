@@ -166,8 +166,8 @@ All in `configs.py`:
 | `SECHistoricalStageConfig` | historical staging | year range |
 | `SECMaterializeConfig` | `sec_graph_materialized` | `rebuild_graph`, `batch_materialization`, `materialization_batch_size` |
 | `SECArtifactConfig` | `sec_knowledge_artifacts` | artifact build options |
-| `SECNarrativeIndexConfig` | `sec_narratives_indexed` | `graph_id`, `max_section_length`, `start_year` |
-| `SECiXBRLIndexConfig` | `sec_ixbrl_disclosures_indexed` | `graph_id`, `max_section_length`, `start_year` |
+| `SECNarrativeIndexConfig` | `sec_narratives_indexed` | `graph_id`, `part_size`, `form_types`, `force_reindex`, `skip_embeddings` |
+| `SECiXBRLIndexConfig` | `sec_ixbrl_disclosures_indexed` | `graph_id`, `part_size`, `form_types`, `force_reindex`, `skip_embeddings` |
 
 Partitioning and corpus bounds are also here: `sec_quarter_partitions`,
 `SEC_QUARTERS`, `SEC_START_YEAR`, `SEC_PRIMARY_START_YEAR`,

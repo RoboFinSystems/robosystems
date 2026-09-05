@@ -58,8 +58,8 @@ for oversized text), `classify.py`.
 
 | Class | Purpose |
 |-------|---------|
-| `NarrativeExtractor` (`narrative_extractor.py`) | Item sections (Business, Risk Factors, MD&A, Cybersecurity) from 10-K/10-Q HTML via heuristic section detection |
-| `iXBRLParser` (`ixbrl_parser.py`) | iXBRL disclosure sections (`ix:nonNumeric` TextBlock elements) with XBRL element metadata for graph cross-reference |
+| `NarrativeExtractor` (`xbrlkit.text`) | Item sections (Business, Risk Factors, MD&A, Cybersecurity) from 10-K/10-Q HTML via heading detection; a long section comes back as parts. Lives in the public `xbrlkit` package since 2026-09 so the toolkit and the platform read a filing with one parser |
+| `iXBRLParser` (`xbrlkit.text`) | iXBRL disclosure sections (`ix:nonNumeric` TextBlock elements, continuation chains resolved) with XBRL element metadata for graph cross-reference; a long section comes back as parts |
 
 **MCP resolvers** (`mcp/`) — `report_resolver.py` resolves ticker plus form code
 to the latest relevant filing, backing `financial-statement-analysis`'s

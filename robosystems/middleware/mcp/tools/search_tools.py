@@ -69,6 +69,9 @@ class SearchDocumentsTool(_SearchToolMixin):
 **RETURNS:**
 - Ranked results with relevance scores and text snippets
 - Each result includes a document_id — use get-document-section for the full section text
+- A long section (an MD&A, a commitments note) is indexed in parts of about 25K
+  characters; a hit carries part / part_count and the parts share a
+  parent_document_id. get-document-section returns one part and its next_document_id
 - For user docs, use get-document to retrieve the complete document
 - iXBRL results include xbrl_elements for graph cross-reference
 
@@ -81,7 +84,9 @@ class SearchDocumentsTool(_SearchToolMixin):
   is only published on graphs with semantic enrichment
 - Natural language queries work well ("depreciation policy", "month end close procedures")
 - Use entity filter to focus on one company's filings
-- Use section filter (item_1a, item_7) to target specific filing sections""",
+- Use section filter (item_1a, item_7) to target specific filing sections, or an
+  element qname (us-gaap:CommitmentsAndContingenciesDisclosureTextBlock) to
+  target one iXBRL disclosure across filings""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -99,7 +104,7 @@ class SearchDocumentsTool(_SearchToolMixin):
           },
           "section": {
             "type": "string",
-            "description": "Optional: filter by section ID (item_1, item_1a, item_1c, item_2, item_7, item_7a)",
+            "description": "Optional: filter by section ID — an Item (item_1, item_1a, item_1c, item_2, item_7, item_7a) or an iXBRL disclosure's element qname (us-gaap:GoodwillDisclosureTextBlock)",
           },
           "element": {
             "type": "string",
@@ -181,7 +186,11 @@ class GetDocumentSectionTool(_SearchToolMixin):
 - To read the full context around a search snippet
 
 **RETURNS:**
-- Complete section text with entity, filing, and section metadata
+- The section text with entity, filing, and section metadata
+- A long section is stored in parts of about 25K characters: the result is one
+  part (part of part_count, section_label like "MD&A (2/6)") and carries
+  next_document_id — call again with it to read on; parent_document_id is shared
+  by the section's parts
 - content_url for the CDN-hosted clean text (when available)
 - For iXBRL disclosures: xbrl_elements list of XBRL fact tags in this section — use resolve-element or read-graph-cypher to cross-reference with the knowledge graph""",
       "inputSchema": {
@@ -189,7 +198,7 @@ class GetDocumentSectionTool(_SearchToolMixin):
         "properties": {
           "document_id": {
             "type": "string",
-            "description": "Document ID from a search-documents result",
+            "description": "Document ID from a search-documents result, or the next_document_id of a part",
           },
         },
         "required": ["document_id"],

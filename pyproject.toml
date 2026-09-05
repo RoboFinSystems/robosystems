@@ -58,11 +58,13 @@ dependencies = [
     "dagster-webserver>=1.13.15,<2.0",
     "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.15,<1.0",
+    # XBRL Toolkit
+    "xbrlkit>=0.3",
+    "arelle-release==2.39.5",
     # Data Transformation (dbt)
     "dbt-core>=1.11.14,<1.12",  # hold: 1.12 adds a beta parser dep + the metricflow subtree we don't use; 1.11.14 has the sqlparse<0.7.0 lift
     "dbt-duckdb>=1.10.0,<2.0",
     # Data Processing & Analytics
-    "arelle-release==2.39.5",
     "fastembed>=0.8.0,<1.0",
     "icebug>=12.0,<13.0",
     "numpy>=2.4.0,<3.0",
@@ -105,7 +107,7 @@ dependencies = [
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
     "webauthn>=2.7.0,<3.0",
-    "zstandard>=0.23,<1"
+    "zstandard>=0.23,<1",
 ]
 
 [project.optional-dependencies]
