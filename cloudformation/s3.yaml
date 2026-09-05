@@ -410,6 +410,37 @@ Resources:
         SigningProtocol: sigv4
         Description: "Origin Access Control for Public Data Repository"
 
+  # Filed documents are served but never indexed: sec.gov's copy has ranked
+  # for years, a second copy is duplicate content, and a crawler fetching
+  # ten-megabyte filings is the one real egress risk. The externalized
+  # text-block fragments share the extension and the header. The holon, the
+  # Tavi model and the filer catalog carry no such header and stay indexable.
+  PublicDataNoIndexHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-${Environment}-public-data-noindex
+        Comment: CORS with preflight plus X-Robots-Tag noindex for filed documents
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - "*"
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - "*"
+          OriginOverride: true
+        CustomHeadersConfig:
+          Items:
+            - Header: X-Robots-Tag
+              Value: noindex
+              Override: true
+
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -448,6 +479,35 @@ Resources:
           Compress: true
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
           ResponseHeadersPolicyId: 5cc3b908-e619-4b99-88e5-2cf7f45965bd # Managed-CORS-with-preflight
+        CacheBehaviors:
+          - PathPattern: "*.htm"
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+            ResponseHeadersPolicyId: !Ref PublicDataNoIndexHeadersPolicy
+          - PathPattern: "*.html"
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+            ResponseHeadersPolicyId: !Ref PublicDataNoIndexHeadersPolicy
         CustomErrorResponses:
           - ErrorCode: 404
             ResponseCode: 404

@@ -291,6 +291,40 @@ class SECiXBRLIndexConfig(Config):
   )
 
 
+class SECFilingCatalogConfig(Config):
+  """Configuration for the per-filer catalog on the public CDN.
+
+  Partitioned by quarter. A run rewrites the catalog file of every filer
+  with a filing in its partitions and the corpus index always; the corpus
+  view it folds spans every partition from ``start_year`` on.
+  """
+
+  graph_id: str = "sec"
+  start_year: int = Field(
+    default=SEC_PRIMARY_START_YEAR,
+    description="First filing year in the catalog (the shared sec graph's range)",
+  )
+  form_types: list[str] = Field(
+    default=["10-K", "10-Q", "20-F", "40-F"],
+    description="Forms listed per filer; other forms carry no statements",
+  )
+  require_ticker: bool = Field(
+    default=True,
+    description="List only filers with a ticker (the pages are keyed by ticker)",
+  )
+  full_rebuild: bool = Field(
+    default=False,
+    description="Rewrite every filer's catalog file, not only the partition's",
+  )
+  manifest_workers: int = Field(
+    default=16, description="Concurrent manifest reads from the public bucket"
+  )
+  viewer_url: str = Field(
+    default="https://holon.robosystems.ai",
+    description="The holon viewer the catalog's viewer links open",
+  )
+
+
 class SECHFPublishConfig(Config):
   """Configuration for the manual Hugging Face dataset publish.
 

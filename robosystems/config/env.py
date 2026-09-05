@@ -1090,6 +1090,12 @@ class EnvConfig:
   # be able to reach the note text. Filings processed this way carry
   # value_type=inline, so the search index resolves no content_url for them.
   XBRL_KEEP_TEXTBLOCKS_INLINE = get_bool_env("XBRL_KEEP_TEXTBLOCKS_INLINE", False)
+  # Publish each processed filing's portable representations — the holon, the
+  # Tavi compiled model, the primary document and a manifest — to the public
+  # data bucket beside its externalized text blocks, and keep the per-filer
+  # catalog there (adapters/sec/processors/artifacts.py, pipeline/catalog.py).
+  # Off only where there is no public bucket to write to.
+  SEC_FILING_ARTIFACTS_ENABLED = get_bool_env("SEC_FILING_ARTIFACTS_ENABLED", True)
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")

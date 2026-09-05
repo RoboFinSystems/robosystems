@@ -115,6 +115,40 @@ s3://robosystems-user-{env}/
     {graph_id}/{report_id}/g{generation}.jsonld
 ```
 
+### Public data bucket
+
+CDN-served. One folder per SEC filing holds the externalized text blocks the
+processor writes and, since the filing artifacts landed, the filing's portable
+representations and a manifest naming them; `companies/` beside them is the
+derived filer catalog the public pages and the holon viewer read.
+
+```
+s3://robosystems-public-data-{env}/
+  {year}/{cik}/{accession}/
+    fact_{hash}.html               # externalized text blocks (as today)
+    holon.jsonld                   # the filing as a dataset-form JSON-LD holon
+    tavi.json                      # the Project Tavi compiled model
+    tavi.gaps.json                 # what the Tavi draft could not hold
+    {primary_document}             # the filing as filed (noindex at the CDN)
+    manifest.json                  # what was written, with sizes and URLs
+  companies/
+    index.json                     # every filer with its latest filing
+    {ticker}.json                  # one filer: filings + representations
+  robots.txt                       # filed documents disallowed
+```
+
+```python
+from robosystems.config.storage import shared
+
+shared.get_filing_artifact_key(2025, "0000066740", "0000066740-25-000006", "holon.jsonld")
+# '2025/0000066740/0000066740-25-000006/holon.jsonld'
+shared.get_filing_catalog_key("MMM")
+# 'companies/mmm.json'
+```
+
+The year is the filing year; the CIK is the Entity row's; the accession keeps
+its dashes. `get_public_data_url` turns any of these keys into the CDN URL.
+
 ## Adding a data source
 
 1. Add the member to `DataSourceType` in `shared.py`.

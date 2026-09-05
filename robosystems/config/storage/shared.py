@@ -254,3 +254,56 @@ def get_staging_duckdb_path(graph_id: str = "sec") -> str:
 
   base = env.DUCKDB_STAGING_PATH
   return f"{base}/{graph_id}.duckdb"
+
+
+# =============================================================================
+# Public filing artifacts and the filer catalog (public-data bucket)
+# =============================================================================
+#
+# One folder per SEC filing, the key family the externalized text blocks
+# already use (``{year}/{cik}/{accession}/fact_*``): the filing's portable
+# representations, written by the processor at process time, plus a manifest
+# naming what was written. ``companies/`` beside them is the derived catalog
+# the public pages and the viewer read — a fold over the processed Report and
+# Entity tables, regenerated whole by the catalog asset, never patched.
+
+FILING_ARTIFACT_HOLON = "holon.jsonld"
+FILING_ARTIFACT_TAVI = "tavi.json"
+FILING_ARTIFACT_TAVI_GAPS = "tavi.gaps.json"
+FILING_ARTIFACT_MANIFEST = "manifest.json"
+FILING_CATALOG_PREFIX = "companies/"
+FILING_CATALOG_INDEX_KEY = "companies/index.json"
+FILING_ROBOTS_KEY = "robots.txt"
+
+
+def get_filing_artifact_prefix(year: str | int, cik: str, accession: str) -> str:
+  """A filing's public folder: filing year, the filer's CIK as the Entity row
+  carries it, the dashed accession number.
+
+  Example:
+      >>> get_filing_artifact_prefix(2025, "0000066740", "0000066740-25-000006")
+      '2025/0000066740/0000066740-25-000006'
+  """
+  return f"{year}/{cik}/{accession}"
+
+
+def get_filing_artifact_key(
+  year: str | int, cik: str, accession: str, name: str
+) -> str:
+  """Key of one artifact in a filing's public folder.
+
+  Example:
+      >>> get_filing_artifact_key(2025, "0000066740", "0000066740-25-000006", "holon.jsonld")
+      '2025/0000066740/0000066740-25-000006/holon.jsonld'
+  """
+  return f"{get_filing_artifact_prefix(year, cik, accession)}/{name}"
+
+
+def get_filing_catalog_key(ticker: str) -> str:
+  """Key of one filer's catalog file, by lower-cased ticker.
+
+  Example:
+      >>> get_filing_catalog_key("MMM")
+      'companies/mmm.json'
+  """
+  return f"{FILING_CATALOG_PREFIX}{ticker.strip().lower()}.json"

@@ -77,6 +77,10 @@ XBRL_EXTERNALIZATION_THRESHOLD = 1024
 # see env.XBRL_KEEP_TEXTBLOCKS_INLINE for why it is off everywhere real)
 XBRL_KEEP_TEXTBLOCKS_INLINE = env.XBRL_KEEP_TEXTBLOCKS_INLINE
 
+# Publish the filing's public artifacts (holon, Tavi, primary document, manifest)
+# to the public-data bucket at process time; see processors/artifacts.py
+XBRL_FILING_ARTIFACTS = env.SEC_FILING_ARTIFACTS_ENABLED
+
 # Skip textblock facts entirely (for historical data where text isn't needed)
 XBRL_SKIP_TEXTBLOCK_FACTS = False
 
