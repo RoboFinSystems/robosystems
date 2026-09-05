@@ -140,10 +140,10 @@ without confidence refinement.
 ## Usage
 
 ```python
-from robosystems.adapters.sec import SECClient, XBRLGraphProcessor
+from robosystems.adapters.sec import XBRLGraphProcessor
+from robosystems.adapters.sec.client.edgar import edgar_client
 
-client = SECClient(cik="0000320193")
-submissions = client.get_submissions()
+submissions = edgar_client().submissions("0000320193")
 
 processor = XBRLGraphProcessor(
     report_uri="https://www.sec.gov/Archives/...",

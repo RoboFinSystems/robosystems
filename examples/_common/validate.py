@@ -109,7 +109,10 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
   """
   import tempfile
 
-  from robosystems.adapters.sec.client.arelle import ArelleClient
+  from arelle import ValidateXbrl
+  from xbrlkit.parse import DtsResolutionError
+
+  from robosystems.adapters.sec.client.arelle import close_filing, load_filing
 
   with zipfile.ZipFile(io.BytesIO(zip_path.read_bytes())) as zf:
     files = sorted(zf.namelist())
@@ -124,12 +127,25 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
       raise SystemExit(f"No XBRL instance (.xml) found in {zip_path.name}: {files}")
     with tempfile.TemporaryDirectory(prefix="xbrl-validate-") as tmp:
       zf.extractall(tmp)
-      client = ArelleClient()
-      model = client.controller(str(Path(tmp) / entry))
-      load_errors = [str(e) for e in (model.errors or [])]
-      fact_count = len(model.facts) if hasattr(model, "facts") else 0
-      result = client.validate(model)
-      val_errors = [e for e in result.get("errors", []) if e not in load_errors]
+      # The platform's load (xbrlkit's cache-first Arelle loader on the repo's
+      # schema cache); a DTS the loader cannot resolve is a load error here,
+      # not a crash — the report should say so.
+      fact_count = 0
+      val_errors: list[str] = []
+      try:
+        model = load_filing(str(Path(tmp) / entry))
+      except DtsResolutionError as exc:
+        load_errors = [f"unresolved DTS document: {url}" for url in exc.unresolved]
+      else:
+        try:
+          load_errors = [str(e) for e in (model.errors or [])]
+          fact_count = len(model.facts) if hasattr(model, "facts") else 0
+          ValidateXbrl.ValidateXbrl(model).validate(model)
+          val_errors = [
+            str(e) for e in (model.errors or []) if str(e) not in load_errors
+          ]
+        finally:
+          close_filing(model)
 
   valid = not (load_errors or val_errors)
   verdict = "✅ **Valid XBRL 2.1**" if valid else "❌ **Validation failed**"
