@@ -427,6 +427,7 @@ CYPHER RULES:
 {anchor_rule}
 
 LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
+- ANCHOR ON `Entry`, NOT `Transaction`. Transaction is a partial layer — it exists only where a source system had a record, and `Entry.transaction_id` is nullable by design. Every period-close adjusting entry (depreciation, amortization, accruals) has NO parent Transaction, so `MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(e:Entry)` silently drops them and returns a short answer with no error. Start at `(e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)` and OPTIONAL MATCH up to Transaction only if you need source-system fields (merchant, due date, reference). For "how many X happened" questions anchor on `Event` — events are canonical and many have no Transaction and no Entry.
 - The graph keeps cancelled/replaced rows for audit. When counting or summing ledger data, restrict to live rows using the materialized `is_live` boolean — it exists on every spine node (`Entry`, `LineItem`, `Event`, `Transaction`) and is the one rule to remember: `WHERE e.is_live`, `WHERE li.is_live`, `WHERE ev.is_live`, `WHERE t.is_live`. For balances/debit-credit sums, aggregate through live Entry/LineItem (`e.is_live`, ⇔ status = 'posted'), not by summing Transaction.amount. `is_live` keeps open obligations (pending/committed/fulfilled events); for a specific realized set, filter `status` explicitly.
 """
     if curated_tools:
