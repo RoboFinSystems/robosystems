@@ -238,6 +238,10 @@ demo-sec-subscribe plan="sec-starter":
 demo-sec-query *args:
     UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.query_examples {{args}}
 
+# Load a filing corpus through the pipeline and audit the text index (see examples/sec_corpus_check)
+sec-corpus-check *args:
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_corpus_check.main {{args}}
+
 # Run the RoboLedger demo — Cascade Advisory, the full accounting arc
 demo-roboledger *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
