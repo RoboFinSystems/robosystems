@@ -31,6 +31,7 @@ import zipfile
 from typing import Any
 
 import boto3
+import pandas as pd
 from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
 
 from robosystems.config import env
@@ -111,8 +112,6 @@ def _cell(value: Any) -> str:
   ``str()`` on a pandas missing value is the truthy ``"<NA>"``, which once
   reached the index as the ticker of every filer without one.
   """
-  import pandas as pd
-
   if value is None or pd.isna(value):
     return ""
   return str(value)
@@ -474,7 +473,7 @@ def sec_narratives_indexed(
     fy = report.get("fiscal_year_focus")
     accession_metadata[accession] = {
       "form_type": report.get("form", ""),
-      "filing_date": str(report.get("filing_date", "")),
+      "filing_date": _cell(report.get("filing_date")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
       "cik": entity_info.get("cik", ""),
@@ -822,7 +821,7 @@ def sec_ixbrl_disclosures_indexed(
     fy = report.get("fiscal_year_focus")
     accession_metadata[accession] = {
       "form_type": report.get("form", ""),
-      "filing_date": str(report.get("filing_date", "")),
+      "filing_date": _cell(report.get("filing_date")),
       "fiscal_year": int(fy) if fy is not None and not math.isnan(fy) else None,
       "fiscal_period": report.get("fiscal_period_focus", ""),
       "cik": entity_info.get("cik", ""),
