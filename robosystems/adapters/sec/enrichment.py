@@ -12,6 +12,9 @@ import re
 from typing import TYPE_CHECKING
 
 import numpy as np
+from xbrlkit.serialize.lpg import (
+  parse_structure_definition as parse_structure_definition,
+)
 
 from robosystems.logger import logger
 
@@ -63,43 +66,6 @@ def compose_structure_text(name: str | None, definition: str | None) -> str:
   if definition:
     parts.append(definition)
   return " | ".join(parts) if parts else ""
-
-
-def parse_structure_definition(
-  definition: str,
-) -> tuple[str | None, str | None, str | None]:
-  """Parse an XBRL structure definition string into (number, type, name).
-
-  Handles various formats:
-    "0001001 - Statement - CONSOLIDATED BALANCE SHEETS"
-    "0001003 - Disclosure - Organization"
-    "995410 - Disclosure - Disclosure - Supplemental Balance Sheet ..."  (doubled type)
-    "0001001 - Statement - CONSOLIDATED BALANCE SHEETS [Parenthetical]"
-    ""  (empty)
-
-  Returns:
-      (number, type, name) — any may be None if parsing fails.
-  """
-  if not definition or not definition.strip():
-    return (None, None, None)
-
-  # Split on " - " (space-dash-space) to avoid splitting on hyphens inside names
-  parts = definition.split(" - ")
-  if len(parts) < 3:
-    # Can't parse — return definition as name
-    return (None, None, definition.strip() or None)
-
-  number = parts[0].strip() or None
-  type_part = parts[1].strip() or None
-
-  # Everything after the first two splits is the name.
-  # If the type is repeated (doubled), skip it.
-  remaining = parts[2:]
-  if remaining and type_part and remaining[0].strip() == type_part:
-    remaining = remaining[1:]
-
-  name = " - ".join(remaining).strip() or None
-  return (number, type_part, name)
 
 
 def classify_structure_heuristic(
