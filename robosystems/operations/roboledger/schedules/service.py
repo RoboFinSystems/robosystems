@@ -760,8 +760,12 @@ class ScheduleService:
       Event(
         id=schedule_created_event_id,
         event_type="schedule_created",
-        event_category="other",
-        event_class="economic",
+        # Setting up a schedule moves no resource — it is the operational
+        # act that arranges future recognition, not the recognition. Filed
+        # as economic/other until 2026-09-05 because no other class would
+        # take it; the recognition events it later emits stay economic.
+        event_category="schedule",
+        event_class="operational",
         occurred_at=now,
         source="schedule",
         status="committed",
@@ -1347,7 +1351,15 @@ class ScheduleService:
     else:
       regenerated = False
 
-    # Create draft entry
+    # No `transaction_id`, deliberately. A schedule-derived entry has no
+    # source-system record behind it, and the schema supports a standalone
+    # entry on purpose — `Entry.transaction_id` is nullable and
+    # `Entry.triggered_by_event_id` exists precisely so an entry with no
+    # parent can still carry its event chain (see the comment on that
+    # column). `create_journal_entry` mints a Transaction when none is
+    # supplied; that is right for its callers and wrong here. Do not
+    # "fix" this by synthesizing one — it would manufacture rows in the
+    # adapter mirror to satisfy a read, and reads anchor on Entry.
     entry = Entry(
       type=template.get("entry_type", "closing"),
       status="draft",
@@ -1458,15 +1470,22 @@ class ScheduleService:
     memo: str,
     created_by: str,
     entry_type: str = "closing",
+    provenance: str = "manual_entry",
   ) -> ClosingEntryResult:
     """Create a manual (non-schedule) draft closing entry.
 
     Used for one-off adjustments that aren't derived from a schedule:
     asset disposals, impairments, reclassifications, correcting entries.
 
+    ``provenance`` defaults to ``manual_entry`` — a person made this
+    adjustment — but every caller today is an event handler, which should
+    pass ``event_handler`` so the entry says what actually produced it.
+    "Manual" here means *not schedule-derived*, which is a different
+    question from who wrote it.
+
     The resulting entry has:
     - `source_structure_id = None` (not tied to any schedule)
-    - `provenance = 'manual_entry'`
+    - `provenance` as given (see above)
     - `status = 'draft'` (posted by close-period like any other draft)
 
     Unlike schedule-derived entries which have exactly 2 line items (DR/CR
@@ -1535,7 +1554,7 @@ class ScheduleService:
       posting_date=posting_date,
       memo=memo,
       source_structure_id=None,
-      provenance="manual_entry",
+      provenance=provenance,
       created_by=created_by,
     )
     session.add(entry)

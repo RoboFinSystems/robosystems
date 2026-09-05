@@ -359,6 +359,35 @@ def _raise_if_posting_date_moved(entry: Entry, peeked_date) -> None:
 # ── Create ───────────────────────────────────────────────────────────────
 
 
+# `Event.source` is an open vocabulary: the platform emits `manual`, `system`
+# and `schedule`, and every other value is a connection provider validated at
+# the ops layer against the graph's registered Connections (see the comment on
+# `Event.source` — it deliberately carries no CHECK so registering a connection
+# opens a source name without a schema change). So the mapping is closed on the
+# platform side and open-by-default on the adapter side: anything not emitted
+# by the platform came in over a connection, which is a sync.
+_PLATFORM_SOURCE_PROVENANCE = {
+  "manual": "manual_entry",
+  "native": "manual_entry",
+  "system": "system_computed",
+  "schedule": "schedule_derived",
+}
+
+
+def provenance_for_source(source: str | None) -> str:
+  """Map a Transaction/Event source onto `Entry.provenance`.
+
+  `create_journal_entry` hardcoded `manual_entry` regardless of origin,
+  so every QuickBooks-synced entry claimed to be hand-entered and
+  `source_sync` — a value the constraint allows — was never written by
+  anything. `Entry.provenance` is meant to answer "where did this come
+  from", and the entry write already receives the answer.
+  """
+  if not source:
+    return "manual_entry"
+  return _PLATFORM_SOURCE_PROVENANCE.get(source, "source_sync")
+
+
 def create_journal_entry(
   session: Session,
   body: CreateJournalEntryRequest,
@@ -411,7 +440,7 @@ def create_journal_entry(
     status=status,
     posting_date=body.posting_date,
     memo=body.memo,
-    provenance="manual_entry",
+    provenance=provenance_for_source(body.source),
     posted_at=now,
     created_by=created_by,
   )
@@ -658,6 +687,9 @@ def reverse_journal_entry(
     status="posted",
     posting_date=posting_date,
     memo=memo,
+    # Deliberately not inherited from the original. A reversal is an act by
+    # whoever asked for it, not a re-sync — reversing a QuickBooks-sourced
+    # entry is still a decision someone made here.
     provenance="manual_entry",
     reversal_of=original.id,
     posted_at=now,

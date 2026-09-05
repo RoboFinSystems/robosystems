@@ -928,7 +928,16 @@ class TestCreateScheduleMaterializesObligations:
     assert len(pending) == 3
     assert creators[0].status == "committed"
     assert all(e.status == "pending" for e in pending)
-    assert all(e.event_class == "economic" for e in events)
+
+    # The two event types are classified differently on purpose, and the
+    # previous single `all(... == "economic")` assertion hid that.
+    # Setting a schedule up moves no resource and posts nothing — it is the
+    # operational act that arranges future recognition. The entries it
+    # later emits are the recognition, and those are economic.
+    assert creators[0].event_class == "operational"
+    assert creators[0].event_category == "schedule"
+    assert all(e.event_class == "economic" for e in pending)
+    assert all(e.event_category == "recognition" for e in pending)
 
   def test_pending_events_link_back_to_schedule_created(self):
     session = _mock_session()

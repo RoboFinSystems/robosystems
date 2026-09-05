@@ -132,11 +132,13 @@ class Event(ExtensionsBase):
       "'sales', 'purchase', 'financing', 'payroll', "
       "'treasury', 'adjustment', 'recognition', 'other')) "
       "OR (event_class = 'support' AND event_category IN ("
-      "'control', 'approval', 'reconciliation', 'inquiry'))",
+      "'control', 'approval', 'reconciliation', 'inquiry')) "
+      "OR (event_class = 'operational' AND event_category IN ("
+      "'pipeline', 'engagement', 'schedule', 'other'))",
       name="check_event_category",
     ),
     CheckConstraint(
-      "event_class IN ('economic', 'support')",
+      "event_class IN ('economic', 'support', 'operational')",
       name="check_event_class",
     ),
     CheckConstraint(
@@ -172,6 +174,18 @@ class Event(ExtensionsBase):
   # Event identity
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)
+  # economic  — a resource flows (REA economic event); drives the GL.
+  # support   — supports an economic event: controls, approvals,
+  #             reconciliations, inquiries. Audit-side, non-posting.
+  # operational — a business occurrence that is neither. It precedes or
+  #             surrounds economic activity without being it: a lead, a
+  #             lifecycle change, an outreach, a schedule being set up.
+  #             Added 2026-09-05 because there was nowhere honest to put
+  #             one — `schedule_created` had been filed as economic/other
+  #             despite producing no GL at all, and a CRM lead had no legal
+  #             category under either existing class. Filing a non-economic
+  #             occurrence as `economic` asserts a resource flow that did
+  #             not happen, which is the thing this column exists to say.
   event_class = Column(String, nullable=False, default="economic")
 
   # Canonical action verb — finer-grained than event_category. See EVENT_ACTIONS.
