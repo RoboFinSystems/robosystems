@@ -44,6 +44,7 @@ from robosystems.graphql.types.ledger import (
   EventBlock,
   FiscalCalendar,
   LedgerEntity,
+  LedgerJournalEntryList,
   LedgerSummary,
   LedgerTransactionDetail,
   LedgerTransactionList,
@@ -95,6 +96,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   fiscal_calendar as reads_fiscal_calendar,
+)
+from robosystems.operations.roboledger.reads import (
+  journal_entries as reads_journal_entries,
 )
 from robosystems.operations.roboledger.reads import (
   period_drafts as reads_period_drafts,
@@ -543,6 +547,52 @@ class LedgerQuery:
     if response is None:
       return None
     return LedgerTransactionDetail.from_pydantic(response)
+
+  # ── Journal entries ─────────────────────────────────────────────────────
+
+  @strawberry.field
+  def journal_entries(
+    self,
+    info: Info[GraphQLContext, None],
+    start_date: date | None = None,
+    end_date: date | None = None,
+    status: str | None = None,
+    type: str | None = None,
+    provenance: str | None = None,
+    transaction_id: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+  ) -> LedgerJournalEntryList | None:
+    """Paginated journal — entries with their line items, newest first.
+
+    The entry-centric read. `transactions` lists transactions and hangs
+    entries off them, so it cannot show an entry with no parent; the
+    schedule engine and event handlers create exactly those, which is
+    why everything the close posts is absent from that list. Here an
+    entry stands on its own and `transactionId` is projected, null for a
+    standalone one.
+
+    Filter by `provenance` (`schedule_derived` for what the close
+    posted), `type` (`adjusting` / `closing`), `status`, or a parent
+    `transactionId`.
+    """
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_journal_entries.list_journal_entries(
+          session,
+          start_date=start_date,
+          end_date=end_date,
+          status=status,
+          type=type,
+          provenance=provenance,
+          transaction_id=transaction_id,
+          limit=limit,
+          offset=offset,
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return LedgerJournalEntryList.from_pydantic(response)
 
   # ── Taxonomies ──────────────────────────────────────────────────────────
 

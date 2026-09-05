@@ -71,6 +71,8 @@ from .summary import LedgerSummaryResponse
 from .text_blocks import BindTextBlockRequest, BindTextBlockResponse
 from .transactions import (
   LedgerEntryResponse,
+  LedgerJournalEntryListResponse,
+  LedgerJournalEntryResponse,
   LedgerLineItemResponse,
   LedgerTransactionDetailResponse,
   LedgerTransactionListResponse,
@@ -105,6 +107,8 @@ __all__ = [
   "HoldingSecuritySummary",
   "HoldingsListResponse",
   "LedgerEntryResponse",
+  "LedgerJournalEntryListResponse",
+  "LedgerJournalEntryResponse",
   "LedgerLineItemResponse",
   "LedgerSummaryResponse",
   "LedgerTransactionDetailResponse",

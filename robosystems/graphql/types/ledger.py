@@ -190,6 +190,12 @@ from robosystems.models.api.extensions.transactions import (
   LedgerEntryResponse as PydanticLedgerEntryResponse,
 )
 from robosystems.models.api.extensions.transactions import (
+  LedgerJournalEntryListResponse as PydanticLedgerJournalEntryListResponse,
+)
+from robosystems.models.api.extensions.transactions import (
+  LedgerJournalEntryResponse as PydanticLedgerJournalEntryResponse,
+)
+from robosystems.models.api.extensions.transactions import (
   LedgerLineItemResponse as PydanticLedgerLineItemResponse,
 )
 from robosystems.models.api.extensions.transactions import (
@@ -508,6 +514,19 @@ class LedgerEntry:
 @pydantic_type(model=PydanticLedgerTransactionDetailResponse, all_fields=True)
 class LedgerTransactionDetail:
   """Transaction with all entries and line items fully expanded."""
+
+
+# ── Journal entries ───────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticLedgerJournalEntryResponse, all_fields=True)
+class LedgerJournalEntry:
+  """A journal entry read on its own terms, parent transaction or not."""
+
+
+@pydantic_type(model=PydanticLedgerJournalEntryListResponse, all_fields=True)
+class LedgerJournalEntryList:
+  """Paginated journal listing."""
 
 
 # ── Taxonomies / elements / structures / mappings ────────────────────────
