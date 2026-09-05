@@ -1083,6 +1083,13 @@ class EnvConfig:
   SEC_GOV_USER_AGENT = get_secret_value(
     "SEC_GOV_USER_AGENT", "YourCompany your-email@example.com"
   )
+  # Keep externalized text-block values in the graph as well as on S3/CDN. Off in
+  # every real environment: text blocks are most of a filing's bytes, and moving
+  # them out of the graph into the document index is what keeps the shared SEC
+  # graph its size. On only for a local control experiment where raw Cypher must
+  # be able to reach the note text. Filings processed this way carry
+  # value_type=inline, so the search index resolves no content_url for them.
+  XBRL_KEEP_TEXTBLOCKS_INLINE = get_bool_env("XBRL_KEEP_TEXTBLOCKS_INLINE", False)
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
