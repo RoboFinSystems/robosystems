@@ -105,6 +105,7 @@ def job_config(op: str, config: dict[str, Any]) -> str:
     check=True,
     capture_output=True,
   )
+  Path(host_path).unlink()
   return container_path
 
 
@@ -252,6 +253,13 @@ def audit_accession(
     by_source[SOURCE.get(d.get("source_type", ""), d.get("source_type", ""))].append(d)
 
   summary: dict[str, Any] = {"docs": len(docs)}
+  unexpected = {
+    k: len(v) for k, v in by_source.items() if k not in ("narrative", "ixbrl")
+  }
+  if unexpected:
+    problems.append(
+      f"documents of a source type this audit does not check: {unexpected}"
+    )
   for source in ("narrative", "ixbrl"):
     sections: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for d in by_source.get(source, []):
@@ -403,9 +411,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
   bad = 0
   for filing in corpus_filings(args.corpus):
     cik = filing["cik"].zfill(10)
-    entity = (
-      filing["ticker"] or cik
-    )  # the entity filter matches a ticker, a CIK or a name
+    # The entity filter matches a ticker, a CIK or a name. A hit reports the
+    # ticker (the CIK for a ticker-less filer) and the name, not the CIK, so a
+    # hit is the filer's when either matches — the name also covers an index
+    # written before #1357, where a ticker-less filer's ticker reads "<NA>".
+    entity = filing["ticker"] or cik
+    name = filing["name"].upper()
     is_10k = filing["form"].upper().startswith("10-K")
     probes = [
       (
@@ -433,7 +444,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
         print(f"{entity:10} {name}: search failed: {e}")
         bad += 1
         continue
-      mine = [h for h in hits if h.get("entity_ticker") == entity]
+      mine = [
+        h
+        for h in hits
+        if h.get("entity_ticker") == entity
+        or (name and (h.get("entity_name") or "").upper() == name)
+      ]
       if not mine:
         print(f"{entity:10} {name}: no hit for the filer ({len(hits)} hits)")
         bad += 1
