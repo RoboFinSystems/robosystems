@@ -413,8 +413,9 @@ Resources:
   # Filed documents are served but never indexed: sec.gov's copy has ranked
   # for years, a second copy is duplicate content, and a crawler fetching
   # ten-megabyte filings is the one real egress risk. The externalized
-  # text-block fragments share the extension and the header. The holon, the
-  # Tavi model and the filer catalog carry no such header and stay indexable.
+  # text-block fragments (.html/.txt) and the narrative extracts (.txt) get the
+  # same header. The holon, the Tavi model and the filer catalog carry no such
+  # header and stay indexable.
   PublicDataNoIndexHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
@@ -495,6 +496,20 @@ Resources:
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
             ResponseHeadersPolicyId: !Ref PublicDataNoIndexHeadersPolicy
           - PathPattern: "*.html"
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+            ResponseHeadersPolicyId: !Ref PublicDataNoIndexHeadersPolicy
+          - PathPattern: "*.txt"
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods:

@@ -47,9 +47,10 @@ CATALOG_MEDIA_TYPE = "application/json"
 CATALOG_CACHE_CONTROL = "public, max-age=60"
 ROBOTS_CACHE_CONTROL = "public, max-age=3600"
 
-# Filed documents and the text-block fragments are served, never indexed —
-# the CDN adds the X-Robots-Tag on the same extensions (cloudformation/s3.yaml).
-ROBOTS_TXT = "User-agent: *\nDisallow: /*.htm$\nDisallow: /*.html$\n"
+# Filed documents, the text-block fragments and the narrative extracts are
+# served, never indexed — the CDN adds the X-Robots-Tag on the same extensions
+# (cloudformation/s3.yaml). The holon, the Tavi and the catalog stay indexable.
+ROBOTS_TXT = "User-agent: *\nDisallow: /*.htm$\nDisallow: /*.html$\nDisallow: /*.txt$\n"
 
 REPORT_COLUMNS = [
   "identifier",
@@ -347,10 +348,19 @@ def read_corpus(
       )
     )
   return (
-    pd.concat(reports, ignore_index=True),
-    pd.concat(entities, ignore_index=True),
-    pd.concat(relationships, ignore_index=True),
+    _concat(reports, REPORT_COLUMNS),
+    _concat(entities, ENTITY_COLUMNS),
+    _concat(relationships, RELATIONSHIP_COLUMNS),
   )
+
+
+def _concat(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
+  """Concatenate the non-empty frames (an empty one would only warn), else an
+  empty frame with the expected columns."""
+  present = [f for f in frames if not f.empty]
+  if not present:
+    return pd.DataFrame(columns=[*columns, "partition"])
+  return pd.concat(present, ignore_index=True)
 
 
 def read_manifests(
