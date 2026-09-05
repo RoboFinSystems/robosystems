@@ -28,7 +28,7 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 | Class | Purpose |
 |-------|---------|
 | `SECClient` (`edgar.py`) | EDGAR API — company lookup, filing metadata, submissions |
-| `ArelleClient` (`arelle.py`) | XBRL processing via the Arelle library |
+| `ArelleClient` (`arelle.py`) | Loads a filing through Arelle: the pre-cached schema bundle, a fail-fast WebCache, and the SEC inline-XBRL transforms from xbrlkit's vendored registry |
 | `SECDownloader` (`downloader.py`) | Bulk download of XBRL ZIPs to S3, rate-limited |
 | `EFTSClient` (`efts.py`) | EFTS full-text filing discovery |
 
@@ -36,7 +36,7 @@ throttled. Treat 5 req/s as the ceiling in practice, not the floor.
 
 | Class | Purpose |
 |-------|---------|
-| `XBRLGraphProcessor` | One XBRL filing → parquet files |
+| `XBRLGraphProcessor` | One XBRL filing → parquet files, on xbrlkit's model and property-graph projection |
 | `XBRLDuckDBGraphProcessor` | Unified staging + materialization |
 | `DuckDBStager` | S3 Parquet → DuckDB (stage 1) |
 | `LadybugMaterializer` | DuckDB → LadybugDB (stage 2) |
@@ -47,10 +47,21 @@ materialization must not discard hours of DuckDB staging work — and
 `XBRLDuckDBGraphProcessor` subclasses both for callers that run them together.
 There is no path from S3 straight into LadybugDB; staging is always in between.
 
+**The graph tables are xbrlkit's.** `XBRLGraphProcessor` loads the filing with
+`ArelleClient`, parses it with `xbrlkit.parse.to_xbrl_model`, and projects it with
+`xbrlkit.serialize.lpg.to_graph_tables` — the same ids, columns and DDL that
+`xbrlkit build --format lpg` writes into a single-filing `.lbug`, so a filing
+projected there and a filing ingested here are the same rows. What stays in the
+adapter is what needs the platform: text-block externalization to the CDN
+(`textblock.py`), semantic enrichment (`enrichment.py`), the schema-aware parquet
+writer (`parquet.py`) and association classification (`classify.py`), all of
+which run on top of the projected tables.
+
 Supporting modules: `constants.py` (`SHARED_NODE_TABLES`, `QUARTER_END_DAYS`),
 `processing.py` (`process_single_filing_to_memory()`), `consolidation.py`
 (`consolidate_parquet_from_disk()`, `merge_with_existing_s3()`,
-`atomic_s3_upload()`), `ids.py` (`create_entity_id()`, `create_fact_id()`, …),
+`atomic_s3_upload()`), `ids.py` (naming helpers — graph ids are minted by the
+xbrlkit projection),
 `schema.py`, `dataframe.py`, `parquet.py`, `textblock.py` (S3 externalization
 for oversized text), `classify.py`.
 

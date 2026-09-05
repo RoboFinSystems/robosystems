@@ -1,5 +1,4 @@
-# Ignore EDGAR and cache in Docker context (will be fetched/extracted in builder)
-robosystems/adapters/sec/arelle/EDGAR/
+# The Arelle schema cache is extracted from its bundle in the builder stage
 robosystems/adapters/sec/arelle/cache/
 
 # Ignore other common files

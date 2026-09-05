@@ -1,20 +1,21 @@
 #!/usr/bin/env python
 """
-Arelle Cache Manager - Download, bundle, and manage Arelle schemas and EDGAR plugin.
+Arelle Cache Manager - Download, bundle, and manage the Arelle schema cache.
 
 This script handles:
 1. Downloading XBRL schemas for offline processing
-2. Fetching the EDGAR plugin from GitHub
-3. Creating tar.gz bundles for fast Docker builds
-4. Extracting bundles during Docker build
-5. Checking if cache needs updating
+2. Creating a tar.gz bundle for fast Docker builds
+3. Extracting the bundle during the Docker build
+4. Checking if the cache needs updating
+
+The SEC inline-XBRL transforms are no longer fetched here: xbrlkit vendors the
+EDGAR plugin's transform registry and the Arelle client registers it from there.
 """
 
 import argparse
 import json
 import logging
 import shutil
-import subprocess
 import sys
 import tarfile
 import time
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class ArelleCacheManager:
-  """Manages Arelle schema cache and EDGAR plugin bundles."""
+  """Manages the Arelle schema cache and its bundle."""
 
   # Core XBRL schemas that must be cached
   SCHEMAS = [
@@ -284,9 +285,6 @@ class ArelleCacheManager:
     self.cache_dir = (
       self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "cache"
     )
-    self.edgar_dir = (
-      self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "EDGAR"
-    )
     self.bundles_dir = (
       self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "bundles"
     )
@@ -359,186 +357,70 @@ class ArelleCacheManager:
     )
     return downloaded + skipped
 
-  # Pin EDGAR plugin to a specific commit for reproducible builds
-  # Update this SHA to pull in new EDGAR changes
-  EDGAR_COMMIT_SHA = "4c280cd2bf688dcf4aac59ecca385632e54aebe7"
+  def create_bundle(self) -> Path | None:
+    """Create the tar.gz bundle of the schema cache."""
+    logger.info("Creating cache bundle...")
 
-  def fetch_edgar_plugin(self) -> bool:
-    """Fetch EDGAR plugin from GitHub at a pinned commit."""
-    logger.info(
-      f"Fetching EDGAR plugin from GitHub (commit: {self.EDGAR_COMMIT_SHA[:8]})"
-    )
-
-    # Clean existing EDGAR directory
-    if self.edgar_dir.exists():
-      shutil.rmtree(self.edgar_dir)
-
-    # Work in the parent directory (arelle/) and let git create EDGAR/
-    parent_dir = self.edgar_dir.parent
-    parent_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-      # Use git to fetch EDGAR plugin at specific commit
-      # The --prefix=EDGAR will create the EDGAR subdirectory
-      # Fetch the exact commit SHA with --depth=1 to guarantee availability
-      # regardless of how old the commit is relative to master
-      commands = [
-        ["git", "init"],
-        [
-          "git",
-          "remote",
-          "add",
-          "edgar-upstream",
-          "https://github.com/Arelle/EDGAR.git",
-        ],
-        ["git", "fetch", "edgar-upstream", self.EDGAR_COMMIT_SHA, "--depth=1"],
-        ["git", "read-tree", "--prefix=EDGAR", "-u", self.EDGAR_COMMIT_SHA],
-      ]
-
-      for cmd in commands:
-        result = subprocess.run(cmd, cwd=parent_dir, capture_output=True, text=True)
-        if result.returncode != 0:
-          logger.error(f"Git command failed: {' '.join(cmd)}")
-          logger.error(f"Error: {result.stderr}")
-          return False
-
-      # Remove git metadata from parent directory
-      git_dir = parent_dir / ".git"
-      if git_dir.exists():
-        shutil.rmtree(git_dir)
-
-      logger.info(
-        f"EDGAR plugin fetched successfully (commit: {self.EDGAR_COMMIT_SHA[:8]})"
-      )
-      return True
-
-    except Exception as e:
-      logger.error(f"Failed to fetch EDGAR plugin: {e}")
-      return False
-
-  def create_bundles(self) -> tuple[Path | None, Path | None]:
-    """Create tar.gz bundles for schemas and EDGAR plugin."""
-    logger.info("Creating cache bundles...")
-
-    # Create bundles directory
     self.bundles_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get current date for versioning
     date_str = datetime.now().strftime("%Y%m%d")
 
-    schema_bundle = None
-    edgar_bundle = None
-
-    # Create schemas bundle
-    if self.cache_dir.exists() and list(self.cache_dir.iterdir()):
-      schema_bundle_path = self.bundles_dir / f"arelle-schemas-{date_str}.tar.gz"
-      logger.info(f"  Creating schema bundle: {schema_bundle_path.name}")
-
-      with tarfile.open(schema_bundle_path, "w:gz") as tar:
-        tar.add(self.cache_dir, arcname="cache")
-
-      # Create symlink to latest
-      latest_link = self.bundles_dir / "arelle-schemas-latest.tar.gz"
-      if latest_link.exists() or latest_link.is_symlink():
-        latest_link.unlink()
-      latest_link.symlink_to(schema_bundle_path.name)
-
-      size_mb = schema_bundle_path.stat().st_size / (1024 * 1024)
-      logger.info(f"  Schema bundle created: {size_mb:.1f}MB")
-      schema_bundle = schema_bundle_path
-    else:
+    if not (self.cache_dir.exists() and list(self.cache_dir.iterdir())):
       logger.warning("  No schemas found to bundle")
+      return None
 
-    # Create EDGAR bundle
-    edgar_path = self.edgar_dir / "EDGAR"
-    if edgar_path.exists() and list(edgar_path.iterdir()):
-      edgar_bundle_path = self.bundles_dir / f"edgar-plugin-{date_str}.tar.gz"
-      logger.info(f"  Creating EDGAR bundle: {edgar_bundle_path.name}")
+    schema_bundle_path = self.bundles_dir / f"arelle-schemas-{date_str}.tar.gz"
+    logger.info(f"  Creating schema bundle: {schema_bundle_path.name}")
 
-      with tarfile.open(edgar_bundle_path, "w:gz") as tar:
-        tar.add(edgar_path, arcname="EDGAR")
+    with tarfile.open(schema_bundle_path, "w:gz") as tar:
+      tar.add(self.cache_dir, arcname="cache")
 
-      # Create symlink to latest
-      latest_link = self.bundles_dir / "edgar-plugin-latest.tar.gz"
-      if latest_link.exists() or latest_link.is_symlink():
-        latest_link.unlink()
-      latest_link.symlink_to(edgar_bundle_path.name)
+    # Create symlink to latest
+    latest_link = self.bundles_dir / "arelle-schemas-latest.tar.gz"
+    if latest_link.exists() or latest_link.is_symlink():
+      latest_link.unlink()
+    latest_link.symlink_to(schema_bundle_path.name)
 
-      size_mb = edgar_bundle_path.stat().st_size / (1024 * 1024)
-      logger.info(f"  EDGAR bundle created: {size_mb:.1f}MB")
-      edgar_bundle = edgar_bundle_path
-    else:
-      logger.warning("  No EDGAR plugin found to bundle")
+    size_mb = schema_bundle_path.stat().st_size / (1024 * 1024)
+    logger.info(f"  Schema bundle created: {size_mb:.1f}MB")
 
-    # Show bundle summary
     logger.info("\nBundle Summary:")
     for bundle in self.bundles_dir.glob("*.tar.gz"):
       if not bundle.is_symlink():
         size_mb = bundle.stat().st_size / (1024 * 1024)
         logger.info(f"  {bundle.name}: {size_mb:.1f}MB")
 
-    return schema_bundle, edgar_bundle
+    return schema_bundle_path
 
-  def extract_bundles(self) -> bool:
-    """Extract cache bundles for Docker build."""
-    logger.info("Extracting cache bundles...")
+  def extract_bundle(self) -> bool:
+    """Extract the schema bundle for the Docker build."""
+    logger.info("Extracting cache bundle...")
 
-    success = True
-
-    # Extract schemas
     schema_bundle = self.bundles_dir / "arelle-schemas-latest.tar.gz"
-    if schema_bundle.exists():
-      logger.info("  Extracting schema bundle...")
-      with tarfile.open(schema_bundle, "r:gz") as tar:
-        tar.extractall(self.cache_dir.parent)
-      logger.info("  Schemas extracted")
-    else:
+    if not schema_bundle.exists():
       logger.warning("  No schema bundle found")
-      success = False
+      return False
 
-    # Extract EDGAR
-    edgar_bundle = self.bundles_dir / "edgar-plugin-latest.tar.gz"
-    if edgar_bundle.exists():
-      logger.info("  Extracting EDGAR bundle...")
-      # Extract to parent directory since tar contains EDGAR/ as root
-      edgar_parent = self.edgar_dir.parent
-      edgar_parent.mkdir(parents=True, exist_ok=True)
-      with tarfile.open(edgar_bundle, "r:gz") as tar:
-        tar.extractall(edgar_parent)
-      logger.info("  EDGAR extracted")
-    else:
-      logger.warning("  No EDGAR bundle found")
-      success = False
-
-    return success
+    logger.info("  Extracting schema bundle...")
+    with tarfile.open(schema_bundle, "r:gz") as tar:
+      tar.extractall(self.cache_dir.parent)
+    logger.info("  Schemas extracted")
+    return True
 
   def check_update_needed(self) -> bool:
-    """Check if cache bundles need updating (>30 days old)."""
+    """Check if the schema bundle needs updating (>30 days old)."""
     logger.info("Checking if cache update is needed...")
 
-    # Check schema bundle age
     schema_bundle = self.bundles_dir / "arelle-schemas-latest.tar.gz"
-    if schema_bundle.exists():
-      age = datetime.now() - datetime.fromtimestamp(schema_bundle.stat().st_mtime)
-      if age > timedelta(days=30):
-        logger.warning(f"  Schema bundle is {age.days} days old")
-        return True
-    else:
+    if not schema_bundle.exists():
       logger.warning("  No schema bundle found")
       return True
 
-    # Check EDGAR bundle age
-    edgar_bundle = self.bundles_dir / "edgar-plugin-latest.tar.gz"
-    if edgar_bundle.exists():
-      age = datetime.now() - datetime.fromtimestamp(edgar_bundle.stat().st_mtime)
-      if age > timedelta(days=30):
-        logger.warning(f"  EDGAR bundle is {age.days} days old")
-        return True
-    else:
-      logger.warning("  No EDGAR bundle found")
+    age = datetime.now() - datetime.fromtimestamp(schema_bundle.stat().st_mtime)
+    if age > timedelta(days=30):
+      logger.warning(f"  Schema bundle is {age.days} days old")
       return True
 
-    logger.info("  Bundles are up to date")
+    logger.info("  Bundle is up to date")
     return False
 
   def clean(self):
@@ -549,24 +431,16 @@ class ArelleCacheManager:
       shutil.rmtree(self.cache_dir)
       logger.info(f"  Removed: {self.cache_dir}")
 
-    if self.edgar_dir.exists():
-      shutil.rmtree(self.edgar_dir)
-      logger.info(f"  Removed: {self.edgar_dir}")
-
     logger.info("Cleaned")
 
   def update(self):
-    """Full update: download schemas, fetch EDGAR, create bundles."""
+    """Full update: download schemas, create the bundle."""
     logger.info("Updating all caches...")
 
     # Download schemas
     self.download_schemas()
 
-    # Fetch EDGAR plugin
-    self.fetch_edgar_plugin()
-
-    # Create bundles
-    self.create_bundles()
+    self.create_bundle()
 
     logger.info("\nCache update complete!")
     logger.info("\nNext steps:")
@@ -585,29 +459,21 @@ def main():
   subparsers = parser.add_subparsers(dest="command", help="Commands")
 
   # Update command
-  subparsers.add_parser(
-    "update", help="Download schemas, fetch EDGAR, and create bundles"
-  )
+  subparsers.add_parser("update", help="Download schemas and create the bundle")
 
   # Download command
   subparsers.add_parser("download", help="Download XBRL schemas only")
 
-  # Fetch-edgar command
-  subparsers.add_parser("fetch-edgar", help="Fetch EDGAR plugin only")
-
-  # Dev-init command
+  # Bundle command
   subparsers.add_parser(
-    "dev-init", help="Initialize EDGAR for dev environment if missing"
+    "bundle", help="Create the tar.gz bundle from the existing cache"
   )
 
-  # Bundle command
-  subparsers.add_parser("bundle", help="Create tar.gz bundles from existing cache")
-
   # Extract command
-  subparsers.add_parser("extract", help="Extract bundles (used in Docker build)")
+  subparsers.add_parser("extract", help="Extract the bundle (used in the Docker build)")
 
   # Check command
-  subparsers.add_parser("check", help="Check if bundles need updating")
+  subparsers.add_parser("check", help="Check if the bundle needs updating")
 
   # Clean command
   subparsers.add_parser("clean", help="Remove cache directories")
@@ -630,35 +496,16 @@ def main():
     manager.update()
   elif args.command == "download":
     manager.download_schemas()
-  elif args.command == "fetch-edgar":
-    manager.fetch_edgar_plugin()
-  elif args.command == "dev-init":
-    # Only run in dev environment
-    import os
-
-    if os.getenv("ENVIRONMENT") != "dev":
-      sys.exit(0)
-
-    # Check if EDGAR already exists
-    if not manager.edgar_dir.exists():
-      logger.info("EDGAR plugin not found in dev environment, fetching from GitHub...")
-      if manager.fetch_edgar_plugin():
-        logger.info("EDGAR plugin fetched successfully")
-      else:
-        logger.warning(
-          "Warning: Failed to fetch EDGAR plugin, XBRL processing may fail"
-        )
-        sys.exit(1)
-    else:
-      logger.info("EDGAR plugin already exists")
   elif args.command == "bundle":
-    manager.create_bundles()
+    manager.create_bundle()
   elif args.command == "extract":
-    if not manager.extract_bundles():
+    if not manager.extract_bundle():
       sys.exit(1)
   elif args.command == "check":
     if manager.check_update_needed():
-      logger.info("\nRun: just cache-arelle-update")
+      logger.info(
+        "\nRun: uv run python robosystems/scripts/arelle_cache_manager.py update"
+      )
       sys.exit(0)
     else:
       sys.exit(1)

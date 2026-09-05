@@ -75,10 +75,6 @@ WORKDIR /build
 # Copy dependency files first for better layer caching
 COPY pyproject.toml uv.lock ./
 
-# Install git for fetching EDGAR subtree
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
 # Install dependencies into project .venv (uv handles this automatically)
 # Note: Cache mount disabled due to intermittent download issues
 RUN uv sync --frozen --no-dev --no-install-project
@@ -94,14 +90,13 @@ COPY robosystems/scripts/arelle_cache_manager.py ./robosystems/scripts/
 # Validate that required bundles exist before attempting extraction
 RUN if [ ! -f "./robosystems/adapters/sec/arelle/bundles/arelle-schemas-latest.tar.gz" ]; then \
         echo "ERROR: Schema bundle (arelle-schemas-latest.tar.gz) is missing!" && \
-        echo "Run 'just cache-arelle-update' to generate bundles before building" && \
+        echo "Run 'uv run python robosystems/scripts/arelle_cache_manager.py update' to generate it" && \
         exit 1; \
     fi
 
-# Extract schemas from bundle and fetch EDGAR plugin from GitHub
-# EDGAR is pinned to a specific commit in arelle_cache_manager.py for reproducible builds
-RUN python robosystems/scripts/arelle_cache_manager.py extract && \
-    python robosystems/scripts/arelle_cache_manager.py fetch-edgar
+# Extract the pre-cached XBRL schemas from the bundle. The SEC inline-XBRL
+# transforms ship inside the xbrlkit package, so nothing is fetched here.
+RUN python robosystems/scripts/arelle_cache_manager.py extract
 RUN uv sync --frozen --no-dev
 
 # Pre-cache fastembed model (BAAI/bge-small-en-v1.5) for XBRL semantic enrichment
@@ -129,7 +124,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies, apply security patches, and install uv.
 # CACHE_DATE (set per-build in build.yml) busts this layer so the upgrade
 # re-runs despite GHA layer caching — a cached layer keeps stale OS packages.
-# No curl or git here: git is only needed in the builder (EDGAR subtree), and
+# No curl or git here: nothing in the build fetches from a repository, and
 # health probes use bin/healthcheck.py — curl would drag libcurl and libssh2
 # into the image, which the container-image scanners then flag.
 # postgresql-client stays: entrypoint.sh waits on the database with psql.
@@ -150,19 +145,12 @@ COPY --from=builder /build/.venv /build/.venv
 # Set working directory
 WORKDIR /app
 
-# Copy application code first (includes arelle/bundles but not EDGAR/cache)
+# Copy application code first (includes arelle/bundles but not the cache)
 COPY robosystems/ /app/robosystems/
 # Remove the incomplete arelle directory and replace with builder's complete version
 RUN rm -rf /app/robosystems/adapters/sec/arelle
-# Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
+# Copy builder's complete arelle directory (the extracted schema cache + bundles)
 COPY --from=builder /build/robosystems/adapters/sec/arelle/ /app/robosystems/adapters/sec/arelle/
-# Strip vendored Node manifests from the bundled SEC EDGAR iXViewer. node_modules is
-# never installed or executed in this Python image — only the compiled viewer assets
-# are served — so these lockfiles serve only to trip Inspector's SBOM scanner on inert
-# third-party deps (e.g. lodash, flatted). Removing them clears those container-image
-# findings with no functional impact.
-RUN find /app/robosystems/adapters/sec/arelle -type f \
-    \( -name package-lock.json -o -name package.json -o -name yarn.lock \) -delete
 # Copy reporting-framework library (top-level, peer to robosystems/;
 # loaded by extensions migrations at provision time). Resolved via
 # FRAMEWORKS_DIR in robosystems/taxonomy/discovery.py.

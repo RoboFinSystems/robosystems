@@ -1,89 +1,66 @@
-"""Tests for XBRL Graph Processor.
+"""XBRLGraphProcessor on xbrlkit's model and projection.
 
-Tests XBRLGraphProcessor initialization with various configs, helper methods
-for dimension/unit/period/context processing, name standardization,
-column mapping, and error handling for malformed inputs.
+The parse is stubbed with a synthetic ``XbrlModel`` (Arelle never runs), so
+these tests cover what the processor owns: the filing's coordinates from the
+EDGAR metadata, the projected rows bound as DataFrames and written as
+parquet, and the platform steps that run on top — externalization,
+enrichment, classification — reading the rows the projection wrote.
 """
 
-import shutil
-import tempfile
+import os
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
+from arelle.UrlUtil import IXDS_DOC_SEPARATOR, IXDS_SURROGATE
+from xbrlkit.model import (
+  Arc,
+  Concept,
+  DimQualifier,
+  EntityIdentity,
+  FilingMeta,
+  Label,
+  Network,
+  Period,
+  Unit,
+  XbrlFact,
+  XbrlModel,
+)
+from xbrlkit.schema import node_table, rel_table
+from xbrlkit.serialize.lpg import PARENT_CHILD, graph_id
 
+from robosystems.adapters.sec.processors import xbrl_graph
 from robosystems.adapters.sec.processors.xbrl_graph import (
   XBRL_GRAPH_PROCESSOR_VERSION,
   XBRLGraphProcessor,
 )
 
+MODULE = "robosystems.adapters.sec.processors.xbrl_graph"
 
-def _make_mock_schema_adapter():
-  """Create a mock XBRLSchemaAdapter that returns empty DataFrames."""
-  mock = MagicMock()
-  mock.create_schema_compatible_dataframe.return_value = pd.DataFrame()
-  mock.process_dataframe_for_schema.return_value = pd.DataFrame()
-  mock.print_schema_summary.return_value = None
-  return mock
+SCHEMA_CONFIG = {
+  "name": "SEC Database Schema",
+  "description": "base + roboledger",
+  "base_schema": "base",
+  "extensions": ["roboledger"],
+}
 
-
-def _make_mock_ingest_adapter():
-  """Create a mock XBRLSchemaConfigGenerator."""
-  return MagicMock()
-
-
-def _make_mock_df_manager():
-  """Create a mock DataFrameManager that initializes empty DataFrames."""
-  mock = MagicMock()
-  # Return a dict of empty dataframes
-  mock.initialize_all_dataframes.return_value = {
-    "entities_df": pd.DataFrame(),
-    "reports_df": pd.DataFrame(),
-    "facts_df": pd.DataFrame(),
-    "units_df": pd.DataFrame(),
-    "labels_df": pd.DataFrame(),
-    "elements_df": pd.DataFrame(),
-    "dimensions_df": pd.DataFrame(),
-    "structures_df": pd.DataFrame(),
-    "references_df": pd.DataFrame(),
-    "taxonomies_df": pd.DataFrame(),
-    "periods_df": pd.DataFrame(),
-    "entity_reports_df": pd.DataFrame(),
-    "report_facts_df": pd.DataFrame(),
-    "fact_units_df": pd.DataFrame(),
-    "fact_has_dimension_rel_df": pd.DataFrame(),
-    "dimension_has_axis_element_rel_df": pd.DataFrame(),
-    "dimension_has_member_element_rel_df": pd.DataFrame(),
-    "structure_associations_df": pd.DataFrame(),
-    "association_to_elements_df": pd.DataFrame(),
-  }
-  mock.create_dynamic_dataframe_mapping.return_value = {}
-  return mock
+REPORT_URI = (
+  "https://www.sec.gov/Archives/edgar/data/1045810/000104581024000029/nvda-20240128.htm"
+)
+CIK = "0001045810"
+US_GAAP = "http://fasb.org/us-gaap/2023"
+SRT = "http://fasb.org/srt/2023"
+NVDA = "http://www.nvidia.com/20240128"
+XBRLI = "http://www.xbrl.org/2003/instance"
+STANDARD_LABEL = "http://www.xbrl.org/2003/role/label"
+TEXT_BLOCK_HTML = "<p>" + "Revenue recognition policy. " * 80 + "</p>"
 
 
 @pytest.fixture
-def temp_output_dir():
-  """Create and cleanup a temporary output directory."""
-  tmpdir = tempfile.mkdtemp()
-  yield tmpdir
-  shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-@pytest.fixture
-def basic_schema_config():
-  """Basic schema configuration for tests."""
-  return {
-    "name": "SEC Database Schema",
-    "description": "Test schema",
-    "base_schema": "base",
-    "extensions": ["roboledger"],
-  }
-
-
-@pytest.fixture
-def sec_filer_data():
-  """Sample SEC filer data."""
+def sec_filer():
   return {
     "cik": "1045810",
     "name": "NVIDIA CORP",
@@ -103,8 +80,7 @@ def sec_filer_data():
 
 
 @pytest.fixture
-def sec_report_data():
-  """Sample SEC report data."""
+def sec_report():
   return {
     "accessionNumber": "0001045810-24-000029",
     "form": "10-K",
@@ -116,676 +92,774 @@ def sec_report_data():
   }
 
 
-def _create_processor(
-  temp_output_dir, basic_schema_config, sec_filer=None, sec_report=None
-):
-  """Create an XBRLGraphProcessor with all heavy dependencies mocked."""
-  with (
-    patch(
-      "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter"
-    ) as mock_schema_cls,
-    patch(
-      "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator"
-    ) as mock_ingest_cls,
-    patch(
-      "robosystems.adapters.sec.processors.xbrl_graph.DataFrameManager"
-    ) as mock_df_cls,
-    patch("robosystems.adapters.sec.processors.xbrl_graph.ParquetWriter"),
-    patch("robosystems.adapters.sec.processors.xbrl_graph.TextBlockExternalizer"),
-    patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client"),
-    patch("robosystems.adapters.sec.processors.xbrl_graph.env") as mock_env,
-  ):
-    mock_env.PUBLIC_DATA_BUCKET = None
-    mock_env.PUBLIC_DATA_CDN_URL = None
-
-    mock_schema_cls.return_value = _make_mock_schema_adapter()
-    mock_ingest_cls.return_value = _make_mock_ingest_adapter()
-    mock_df_cls.return_value = _make_mock_df_manager()
-
-    processor = XBRLGraphProcessor(
-      report_uri="https://www.sec.gov/Archives/edgar/data/1045810/000104581024000029/nvda-20240128.htm",
-      entityId="1045810",
-      sec_filer=sec_filer,
-      sec_report=sec_report,
-      output_dir=temp_output_dir,
-      schema_config=basic_schema_config,
-    )
-
-  return processor
+def _concept(qname, namespace, **kwargs):
+  name = qname.split(":")[1]
+  return Concept(
+    qname=qname,
+    namespace=namespace,
+    name=name,
+    substitution_group="xbrli:item",
+    substitution_group_namespace=XBRLI,
+    labels=[Label(value=name, role=STANDARD_LABEL, language="en-US")],
+    **kwargs,
+  )
 
 
-@pytest.mark.unit
-class TestXBRLGraphProcessorVersion:
-  """Tests for version constant."""
-
-  def test_version_is_string(self):
-    assert isinstance(XBRL_GRAPH_PROCESSOR_VERSION, str)
-
-  def test_version_format(self):
-    parts = XBRL_GRAPH_PROCESSOR_VERSION.split(".")
-    assert len(parts) == 3
-    for part in parts:
-      assert part.isdigit()
-
-
-@pytest.mark.unit
-class TestXBRLGraphProcessorInit:
-  """Tests for XBRLGraphProcessor initialization."""
-
-  def test_basic_init(self, temp_output_dir, basic_schema_config):
-    """Processor initializes with required parameters."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-
-    assert processor.report_uri.endswith("nvda-20240128.htm")
-    assert processor.entityId == "1045810"
-    assert processor.version == XBRL_GRAPH_PROCESSOR_VERSION
-    assert processor.output_dir == Path(temp_output_dir)
-
-  def test_init_without_schema_config_raises(self, temp_output_dir):
-    """Initialization without schema_config raises ValueError."""
-    with pytest.raises(ValueError, match="Schema configuration is required"):
-      with (
-        patch("robosystems.adapters.sec.processors.xbrl_graph.TextBlockExternalizer"),
-        patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client"),
-        patch("robosystems.adapters.sec.processors.xbrl_graph.env") as mock_env,
-      ):
-        mock_env.PUBLIC_DATA_BUCKET = None
-        mock_env.PUBLIC_DATA_CDN_URL = None
-        XBRLGraphProcessor(
-          report_uri="file:///tmp/test.xml",
-          output_dir=temp_output_dir,
-          schema_config=None,
+def _model(sec_report) -> XbrlModel:
+  """A filing with three facts, one dimension and one presentation network."""
+  filing = FilingMeta(
+    accession=sec_report["accessionNumber"],
+    cik=CIK,
+    form="10-K",
+    filing_date=date(2024, 2, 21),
+    report_date=date(2024, 1, 28),
+    acceptance_datetime="2024-02-21T16:06:47.000Z",
+    is_inline_xbrl=True,
+    primary_document="nvda-20240128.htm",
+    report_uri=REPORT_URI,
+    extension_namespace=NVDA,
+    fiscal_year_focus="2024",
+    fiscal_period_focus="FY",
+    fiscal_year_end_month="1",
+  )
+  entity = EntityIdentity(cik=CIK, name="NVIDIA CORP", ticker="NVDA", ein="943177549")
+  concepts = {
+    "us-gaap:Assets": _concept(
+      "us-gaap:Assets",
+      US_GAAP,
+      period_type="instant",
+      balance="debit",
+      is_numeric=True,
+      nice_type="Monetary",
+    ),
+    "us-gaap:Revenues": _concept(
+      "us-gaap:Revenues",
+      US_GAAP,
+      period_type="duration",
+      balance="credit",
+      is_numeric=True,
+      nice_type="Monetary",
+    ),
+    "nvda:RevenueRecognitionPolicyTextBlock": _concept(
+      "nvda:RevenueRecognitionPolicyTextBlock",
+      NVDA,
+      period_type="duration",
+      is_textblock=True,
+      nice_type="Text Block",
+    ),
+    "us-gaap:StatementLineItems": _concept(
+      "us-gaap:StatementLineItems", US_GAAP, period_type="duration", is_abstract=True
+    ),
+    "srt:ProductOrServiceAxis": _concept(
+      "srt:ProductOrServiceAxis",
+      SRT,
+      period_type="duration",
+      is_abstract=True,
+      is_dimension_item=True,
+      nice_type="Axis",
+    ),
+    "srt:ProductMember": _concept(
+      "srt:ProductMember",
+      SRT,
+      period_type="duration",
+      is_abstract=True,
+      is_domain_member=True,
+    ),
+  }
+  periods = [
+    Period(
+      id="instant-2024-01-28",
+      period_type="instant",
+      end=date(2024, 1, 28),
+      calendar_year=2024,
+      calendar_quarter="Q1",
+      calendar_period_key="2024-01-28",
+    ),
+    Period(
+      id="duration-fy2024",
+      period_type="duration",
+      start=date(2023, 1, 30),
+      end=date(2024, 1, 28),
+      duration_type="annual",
+      calendar_year=2024,
+      calendar_quarter="FY",
+      calendar_period_key="2024",
+    ),
+  ]
+  units = [
+    Unit(id="usd", measure="iso4217:USD", uri="http://www.xbrl.org/2003/iso4217#USD")
+  ]
+  context = {
+    "entity_cik": CIK,
+    "entity_scheme": "http://www.sec.gov/CIK",
+    "entity_identifier": CIK,
+  }
+  facts = [
+    XbrlFact(
+      id="f-assets",
+      concept_qname="us-gaap:Assets",
+      period_id="instant-2024-01-28",
+      unit_id="usd",
+      value_str="65728000000",
+      raw_value="65728000000",
+      source_hash="a1",
+      numeric_value=65728000000.0,
+      decimals="-6",
+      **context,
+    ),
+    XbrlFact(
+      id="f-revenues",
+      concept_qname="us-gaap:Revenues",
+      period_id="duration-fy2024",
+      unit_id="usd",
+      value_str="47405000000",
+      raw_value="47405000000",
+      source_hash="a2",
+      numeric_value=47405000000.0,
+      decimals="-6",
+      dims=[
+        DimQualifier(
+          axis_qname="srt:ProductOrServiceAxis",
+          member_qname="srt:ProductMember",
+          is_explicit=True,
+          axis_type="segment",
         )
-
-  def test_init_with_sec_filer(
-    self, temp_output_dir, basic_schema_config, sec_filer_data
-  ):
-    """Processor stores sec_filer data."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_filer=sec_filer_data
+      ],
+      **context,
+    ),
+    XbrlFact(
+      id="f-policy",
+      concept_qname="nvda:RevenueRecognitionPolicyTextBlock",
+      period_id="duration-fy2024",
+      value_str=TEXT_BLOCK_HTML,
+      raw_value=TEXT_BLOCK_HTML,
+      source_hash="a3",
+      value_kind="text",
+      **context,
+    ),
+  ]
+  networks = [
+    Network(
+      role_uri=f"{NVDA}/role/BalanceSheet",
+      definition="0001001 - Statement - CONSOLIDATED BALANCE SHEETS",
+      kind="presentation",
+      role_id="BalanceSheet",
+      arcs=[
+        Arc(
+          from_qname="us-gaap:StatementLineItems",
+          to_qname="us-gaap:Assets",
+          arcrole=PARENT_CHILD,
+          order=1.0,
+          is_root=True,
+        ),
+        Arc(
+          from_qname="us-gaap:StatementLineItems",
+          to_qname="us-gaap:Revenues",
+          arcrole=PARENT_CHILD,
+          order=2.0,
+          is_root=True,
+        ),
+      ],
     )
-    assert processor.sec_filer == sec_filer_data
+  ]
+  return XbrlModel(
+    filing=filing,
+    entity=entity,
+    concepts=concepts,
+    periods=periods,
+    units=units,
+    facts=facts,
+    networks=networks,
+  )
 
-  def test_init_with_sec_report(
-    self, temp_output_dir, basic_schema_config, sec_report_data
+
+@pytest.fixture
+def model(sec_report):
+  return _model(sec_report)
+
+
+@pytest.fixture(autouse=True)
+def platform_steps_off(monkeypatch):
+  """Externalization, enrichment and classification are opt-in per test."""
+  monkeypatch.setattr(xbrl_graph, "XBRL_EXTERNALIZE_LARGE_VALUES", False)
+  monkeypatch.setattr(xbrl_graph, "XBRL_SEMANTIC_ENRICHMENT", False)
+  monkeypatch.setattr(xbrl_graph, "XBRL_SKIP_TEXTBLOCK_FACTS", False)
+  monkeypatch.setattr(
+    "robosystems.adapters.sec.config.XBRL_ASSOCIATION_CLASSIFICATION", False
+  )
+
+
+def _instance(tmp_path: Path) -> str:
+  instance = tmp_path / "nvda-20240128.htm"
+  instance.write_text("<html/>")
+  return str(instance)
+
+
+def _processor(tmp_path, sec_filer, sec_report, **overrides) -> XBRLGraphProcessor:
+  kwargs = {
+    "report_uri": REPORT_URI,
+    "entityId": "1045810",
+    "sec_filer": sec_filer,
+    "sec_report": sec_report,
+    "output_dir": str(tmp_path / "out"),
+    "schema_config": SCHEMA_CONFIG,
+    "local_file_path": _instance(tmp_path),
+  }
+  kwargs.update(overrides)
+  return XBRLGraphProcessor(**kwargs)
+
+
+class _Arelle:
+  """``ArelleClient`` and the ``ModelXbrl`` it returns, as one patch."""
+
+  def __init__(self):
+    self.client = MagicMock(name="ArelleClient")
+    self.model_xbrl = MagicMock(name="ModelXbrl")
+    self.client.controller.return_value = self.model_xbrl
+
+
+def _run(processor: XBRLGraphProcessor, model: XbrlModel) -> _Arelle:
+  arelle = _Arelle()
+  with (
+    patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+    patch(f"{MODULE}.to_xbrl_model", return_value=model) as to_model,
   ):
-    """Processor stores sec_report data."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_report=sec_report_data
-    )
-    assert processor.sec_report == sec_report_data
+    processor.process()
+  arelle.to_model = to_model
+  return arelle
 
-  def test_init_with_enricher(self, temp_output_dir, basic_schema_config):
-    """Processor accepts shared enricher."""
-    mock_enricher = MagicMock()
-    with (
-      patch(
-        "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter"
-      ) as mock_schema_cls,
-      patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator"),
-      patch(
-        "robosystems.adapters.sec.processors.xbrl_graph.DataFrameManager"
-      ) as mock_df_cls,
-      patch("robosystems.adapters.sec.processors.xbrl_graph.ParquetWriter"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.TextBlockExternalizer"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.env") as mock_env,
-    ):
-      mock_env.PUBLIC_DATA_BUCKET = None
-      mock_env.PUBLIC_DATA_CDN_URL = None
-      mock_schema_cls.return_value = _make_mock_schema_adapter()
-      mock_df_cls.return_value = _make_mock_df_manager()
 
-      processor = XBRLGraphProcessor(
-        report_uri="file:///tmp/test.xml",
-        output_dir=temp_output_dir,
-        schema_config=basic_schema_config,
-        enricher=mock_enricher,
-      )
-    assert processor._enricher is mock_enricher
+def _read(processor: XBRLGraphProcessor, table: str):
+  """The written parquet table, read through an open handle: resolving a
+  path goes through pyarrow's filesystem registry, which a forked test
+  worker can find already claimed by another library."""
+  subdir = "nodes" if table[0].isupper() and not table.isupper() else "relationships"
+  with open(processor.output_dir / subdir / f"{table}.parquet", "rb") as handle:
+    return pq.read_table(handle)
 
-  def test_init_sets_local_file_path(self, temp_output_dir, basic_schema_config):
-    """Processor stores local_file_path."""
-    with (
-      patch(
-        "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter"
-      ) as mock_schema_cls,
-      patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator"),
-      patch(
-        "robosystems.adapters.sec.processors.xbrl_graph.DataFrameManager"
-      ) as mock_df_cls,
-      patch("robosystems.adapters.sec.processors.xbrl_graph.ParquetWriter"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.TextBlockExternalizer"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client"),
-      patch("robosystems.adapters.sec.processors.xbrl_graph.env") as mock_env,
-    ):
-      mock_env.PUBLIC_DATA_BUCKET = None
-      mock_env.PUBLIC_DATA_CDN_URL = None
-      mock_schema_cls.return_value = _make_mock_schema_adapter()
-      mock_df_cls.return_value = _make_mock_df_manager()
 
-      processor = XBRLGraphProcessor(
-        report_uri="file:///tmp/test.xml",
-        output_dir=temp_output_dir,
-        schema_config=basic_schema_config,
-        local_file_path="/tmp/test.xml",
-      )
-    assert processor.local_file_path == "/tmp/test.xml"
+def _rows(processor: XBRLGraphProcessor, table: str) -> list[dict]:
+  return _read(processor, table).to_pylist()
+
+
+def _columns(processor: XBRLGraphProcessor, table: str) -> list[str]:
+  return _read(processor, table).column_names
 
 
 @pytest.mark.unit
-class TestMakeEntity:
-  """Tests for make_entity method."""
+class TestConstruction:
+  def test_version_is_xbrlkits(self):
+    from xbrlkit.serialize.lpg import XBRL_GRAPH_PROCESSOR_VERSION as kit_version
 
-  def test_no_entity_id(self, temp_output_dir, basic_schema_config):
-    """Returns None when no entityId is provided."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.entityId = None
-    result = processor.make_entity()
-    assert result is None
-    assert processor.entity_data is None
+    assert kit_version == XBRL_GRAPH_PROCESSOR_VERSION
 
-  def test_entity_with_cik(self, temp_output_dir, basic_schema_config, sec_filer_data):
-    """Creates entity with normalized CIK."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_filer=sec_filer_data
-    )
-    # Re-init schema adapter for make_entity
-    processor.schema_adapter = _make_mock_schema_adapter()
+  def test_schema_config_is_required(self, tmp_path):
+    with pytest.raises(ValueError, match="Schema configuration is required"):
+      XBRLGraphProcessor(report_uri=REPORT_URI, output_dir=str(tmp_path))
 
-    result = processor.make_entity()
+  def test_binds_an_empty_dataframe_per_schema_table(self, tmp_path, sec_filer):
+    processor = _processor(tmp_path, sec_filer, None)
+    assert processor.facts_df.empty
+    assert list(processor.facts_df.columns) == list(node_table("Fact").columns)
+    assert processor.report_facts_df.empty
+    assert processor.entity_data is None and processor.report_data is None
+    assert processor.failed is False
 
-    assert result is not None
-    assert result["cik"] == "0001045810"  # Padded to 10 digits
-    assert result["name"] == "NVIDIA CORP"
-    assert result["ticker"] == "NVDA"
-    assert result["sic"] == "3674"
-    assert result["sic_description"] == "Semiconductors & Related Devices"
-    assert result["status"] == "active"
-    assert result["is_parent"] is True
 
-  def test_entity_cik_normalization(self, temp_output_dir, basic_schema_config):
-    """CIK is normalized to 10-digit padded format."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.entityId = "320193"  # Apple's unpadded CIK
-    processor.sec_filer = {"cik": "320193"}
-    processor.schema_adapter = _make_mock_schema_adapter()
+@pytest.mark.unit
+class TestFilingCoordinates:
+  def test_filing_meta_from_the_edgar_record(self, tmp_path, sec_filer, sec_report):
+    meta = _processor(tmp_path, sec_filer, sec_report)._filing_meta()
+    assert meta.accession == "0001045810-24-000029"
+    assert meta.cik == CIK
+    assert meta.form == "10-K"
+    assert meta.filing_date == date(2024, 2, 21)
+    assert meta.report_date == date(2024, 1, 28)
+    assert meta.acceptance_datetime == "2024-02-21T16:06:47.000Z"
+    assert meta.is_inline_xbrl is True
+    assert meta.primary_document == "nvda-20240128.htm"
+    assert meta.report_uri == REPORT_URI
+    # The fiscal context is the parse's to fill from the DEI facts.
+    assert meta.fiscal_year_focus is None
 
-    result = processor.make_entity()
+  def test_filing_meta_without_a_record(self, tmp_path, sec_filer):
+    meta = _processor(tmp_path, sec_filer, None)._filing_meta()
+    assert meta.accession == ""
+    assert meta.form is None
+    assert meta.filing_date is None
+    assert meta.is_inline_xbrl is False
 
-    assert result["cik"] == "0000320193"  # Padded
+  def test_malformed_dates_become_null(self, tmp_path, sec_filer, sec_report):
+    sec_report = {
+      **sec_report,
+      "filingDate": "21/02/2024",
+      "reportDate": "",
+      "acceptanceDateTime": "yesterday",
+    }
+    meta = _processor(tmp_path, sec_filer, sec_report)._filing_meta()
+    assert meta.filing_date is None
+    assert meta.report_date is None
+    assert meta.acceptance_datetime is None
 
-  def test_entity_uri_format(self, temp_output_dir, basic_schema_config):
-    """Entity URI follows canonical SEC format."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.schema_adapter = _make_mock_schema_adapter()
+  def test_entity_identity_from_the_submissions_header(
+    self, tmp_path, sec_filer, sec_report
+  ):
+    entity = _processor(tmp_path, sec_filer, sec_report)._entity_identity()
+    assert entity.cik == CIK
+    assert entity.name == "NVIDIA CORP" and entity.legal_name == "NVIDIA CORP"
+    assert entity.ein == "943177549"
+    assert entity.ticker == "NVDA" and entity.exchange == "Nasdaq"
+    assert entity.sic == "3674"
+    assert entity.sic_description == "Semiconductors & Related Devices"
+    assert entity.state_of_incorporation == "DE"
+    assert entity.fiscal_year_end == "0128"
+    assert entity.entity_type == "operating"
+    assert entity.category == "Large accelerated filer"
+    assert entity.website == "https://www.nvidia.com"
+    assert entity.phone == "408-486-2000"
 
-    result = processor.make_entity()
+  def test_header_cik_wins_over_entity_id_and_is_padded(self, tmp_path):
+    processor = _processor(tmp_path, {"cik": "320193"}, None, entityId="0000000001")
+    assert processor._normalized_cik() == "0000320193"
+    assert processor._entity_identity().cik == "0000320193"
 
-    assert result["uri"].startswith("http://www.sec.gov/CIK#")
-    assert result["scheme"] == "http://www.sec.gov/CIK"
+  def test_entity_id_alone_is_enough(self, tmp_path):
+    processor = _processor(tmp_path, None, None, entityId="320193")
+    assert processor._normalized_cik() == "0000320193"
 
-  def test_entity_ein_padding(self, temp_output_dir, basic_schema_config):
-    """EIN is padded to 9 digits."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.sec_filer = {"cik": "12345", "ein": "123"}
-    processor.schema_adapter = _make_mock_schema_adapter()
+  def test_a_cik_is_required(self, tmp_path):
+    processor = _processor(tmp_path, {}, None, entityId=None)
+    with pytest.raises(ValueError, match="CIK"):
+      processor._entity_identity()
 
-    result = processor.make_entity()
-
-    assert result["tax_id"] == "000000123"
-
-  def test_entity_ein_none(self, temp_output_dir, basic_schema_config):
-    """EIN is None when not provided."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.sec_filer = {"cik": "12345", "ein": None}
-    processor.schema_adapter = _make_mock_schema_adapter()
-
-    result = processor.make_entity()
-
-    assert result["tax_id"] is None
-
-  def test_entity_ein_empty_string(self, temp_output_dir, basic_schema_config):
-    """EIN empty string is treated as None."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.sec_filer = {"cik": "12345", "ein": ""}
-    processor.schema_adapter = _make_mock_schema_adapter()
-
-    result = processor.make_entity()
-
-    assert result["tax_id"] is None
-
-  def test_entity_website_fallback_investor(self, temp_output_dir, basic_schema_config):
-    """Uses investorWebsite as fallback when website missing."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.sec_filer = {
-      "cik": "12345",
+  def test_empty_header_strings_are_kept_except_the_website(self, tmp_path):
+    filer = {
+      "cik": "1",
+      "name": "X",
+      "ein": "",
+      "sic": "",
+      "stateOfIncorporation": "",
+      "website": "",
       "investorWebsite": "https://ir.example.com",
     }
-    processor.schema_adapter = _make_mock_schema_adapter()
-
-    result = processor.make_entity()
-
-    assert result["website"] == "https://ir.example.com"
-
-
-@pytest.mark.unit
-class TestMakeReport:
-  """Tests for make_report method."""
-
-  def test_basic_report(self, temp_output_dir, basic_schema_config, sec_report_data):
-    """Creates report with expected fields."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_report=sec_report_data
-    )
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
-
-    processor.make_report()
-
-    assert processor.report_data is not None
-    assert processor.report_data["form"] == "10-K"
-    assert processor.report_data["filing_date"] == "2024-02-21"
-    assert processor.report_data["report_date"] == "2024-01-28"
-    assert processor.report_data["is_inline_xbrl"] is True
+    entity = _processor(tmp_path, filer, None)._entity_identity()
+    assert entity.ein is None
+    assert entity.sic == "" and entity.state_of_incorporation == ""
+    assert entity.website == "https://ir.example.com"
     assert (
-      processor.report_data["xbrl_processor_version"] == XBRL_GRAPH_PROCESSOR_VERSION
+      _processor(tmp_path, {"cik": "1", "website": ""}, None)._entity_identity().website
+      is None
     )
 
-  def test_report_without_sec_report(self, temp_output_dir, basic_schema_config):
-    """Creates minimal report when no sec_report is provided."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
+  def test_numeric_header_values_become_strings(self, tmp_path):
+    entity = _processor(
+      tmp_path, {"cik": 1045810, "ein": 943177549, "sic": 3674}, None
+    )._entity_identity()
+    assert entity.cik == CIK
+    assert entity.ein == "943177549" and entity.sic == "3674"
 
-    processor.make_report()
 
-    assert processor.report_data is not None
-    assert processor.report_data["form"] is None
-    assert processor.report_data["filing_date"] is None
-    assert processor.report_data["is_inline_xbrl"] is False
+@pytest.mark.unit
+class TestInstancePath:
+  def test_local_file_path(self, tmp_path, sec_filer):
+    processor = _processor(tmp_path, sec_filer, None)
+    assert processor._resolve_instance_path() == processor.local_file_path
 
-  def test_report_invalid_filing_date(self, temp_output_dir, basic_schema_config):
-    """Handles invalid filingDate format gracefully."""
-    processor = _create_processor(
-      temp_output_dir,
-      basic_schema_config,
-      sec_report={"filingDate": "not-a-date", "form": "10-K"},
+  def test_file_uri_when_no_local_path(self, tmp_path, sec_filer):
+    instance = _instance(tmp_path)
+    processor = _processor(
+      tmp_path, sec_filer, None, report_uri=f"file://{instance}", local_file_path=None
     )
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
+    assert processor._resolve_instance_path() == instance
 
-    processor.make_report()
+  def test_http_uri_without_local_path_fails(self, tmp_path, sec_filer):
+    processor = _processor(tmp_path, sec_filer, None, local_file_path=None)
+    assert processor._resolve_instance_path() is None
 
-    assert processor.report_data["filing_date"] is None
-
-  def test_report_invalid_report_date(self, temp_output_dir, basic_schema_config):
-    """Handles invalid reportDate format gracefully."""
-    processor = _create_processor(
-      temp_output_dir,
-      basic_schema_config,
-      sec_report={"reportDate": "invalid", "form": "10-Q"},
+  def test_missing_file_fails(self, tmp_path, sec_filer):
+    processor = _processor(
+      tmp_path, sec_filer, None, local_file_path=str(tmp_path / "missing.htm")
     )
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
+    assert processor._resolve_instance_path() is None
 
-    processor.make_report()
+  def test_inline_document_set_checks_every_member(self, tmp_path, sec_filer):
+    first = _instance(tmp_path)
+    second = tmp_path / "nvda-20240128_d2.htm"
+    second.write_text("<html/>")
+    surrogate = os.path.join(str(tmp_path), IXDS_SURROGATE) + IXDS_DOC_SEPARATOR.join(
+      [first, str(second)]
+    )
+    processor = _processor(tmp_path, sec_filer, None, local_file_path=surrogate)
+    assert processor._resolve_instance_path() == surrogate
 
-    assert processor.report_data["report_date"] is None
+    second.unlink()
+    assert processor._resolve_instance_path() is None
 
-  def test_report_acceptance_date(
-    self, temp_output_dir, basic_schema_config, sec_report_data
+  def test_failed_filing_writes_nothing(self, tmp_path, sec_filer, sec_report, model):
+    processor = _processor(
+      tmp_path, sec_filer, sec_report, local_file_path=str(tmp_path / "missing.htm")
+    )
+    with patch(f"{MODULE}.ArelleClient") as arelle:
+      processor.process()
+    assert processor.failed is True
+    arelle.assert_not_called()
+    assert not (processor.output_dir / "nodes").exists()
+
+
+@pytest.mark.unit
+class TestProjection:
+  def test_writes_every_projected_table(self, tmp_path, sec_filer, sec_report, model):
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    arelle = _run(processor, model)
+
+    arelle.client.controller.assert_called_once_with(processor.local_file_path)
+    arelle.to_model.assert_called_once()
+    assert arelle.to_model.call_args.kwargs["entity"].cik == CIK
+
+    assert len(_rows(processor, "Entity")) == 1
+    assert len(_rows(processor, "Report")) == 1
+    assert len(_rows(processor, "Fact")) == 3
+    assert len(_rows(processor, "Element")) == 6
+    assert len(_rows(processor, "Label")) == 6
+    assert len(_rows(processor, "Period")) == 2
+    assert len(_rows(processor, "Unit")) == 1
+    assert len(_rows(processor, "Dimension")) == 1
+    assert len(_rows(processor, "Taxonomy")) == 1
+    assert len(_rows(processor, "Structure")) == 1
+    assert len(_rows(processor, "Association")) == 2
+    assert len(_rows(processor, "REPORT_HAS_FACT")) == 3
+    assert len(_rows(processor, "FACT_HAS_ELEMENT")) == 3
+    assert len(_rows(processor, "FACT_HAS_PERIOD")) == 3
+    assert len(_rows(processor, "FACT_HAS_ENTITY")) == 3
+    assert len(_rows(processor, "FACT_HAS_UNIT")) == 2
+    assert len(_rows(processor, "FACT_HAS_DIMENSION")) == 1
+    assert len(_rows(processor, "DIMENSION_HAS_AXIS_ELEMENT")) == 1
+    assert len(_rows(processor, "DIMENSION_HAS_MEMBER_ELEMENT")) == 1
+    assert len(_rows(processor, "STRUCTURE_HAS_ASSOCIATION")) == 2
+    assert len(_rows(processor, "ASSOCIATION_HAS_FROM_ELEMENT")) == 2
+    assert len(_rows(processor, "ASSOCIATION_HAS_TO_ELEMENT")) == 2
+    assert len(_rows(processor, "STRUCTURE_HAS_TAXONOMY")) == 1
+    assert len(_rows(processor, "REPORT_USES_TAXONOMY")) == 1
+    assert len(_rows(processor, "ENTITY_HAS_REPORT")) == 1
+    assert len(_rows(processor, "ELEMENT_HAS_LABEL")) == 6
+    assert len(_rows(processor, "TAXONOMY_HAS_LABEL")) == 6
+    # Tables the filing does not fill are not written.
+    assert not (processor.output_dir / "nodes" / "FactSet.parquet").exists()
+    assert not (processor.output_dir / "nodes" / "Classification.parquet").exists()
+
+  def test_columns_follow_xbrlkits_order(self, tmp_path, sec_filer, sec_report, model):
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    _run(processor, model)
+    for table in ("Entity", "Report", "Fact", "Element", "Period", "Association"):
+      assert _columns(processor, table) == list(node_table(table).columns)
+    for table in ("TAXONOMY_HAS_LABEL", "FACT_HAS_DIMENSION"):
+      assert _columns(processor, table) == list(rel_table(table).columns)
+
+  def test_ids_are_the_platforms(self, tmp_path, sec_filer, sec_report, model):
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    _run(processor, model)
+
+    report = _rows(processor, "Report")[0]
+    assert report["identifier"] == graph_id("report", REPORT_URI)
+    facts = {row["uri"]: row for row in _rows(processor, "Fact")}
+    assets = facts[f"{REPORT_URI}#fact-a1"]
+    assert assets["identifier"] == graph_id("fact", f"{REPORT_URI}#fact-a1")
+    assert assets["numeric_value"] == 65728000000.0
+    assert assets["fact_type"] == "Numeric" and assets["decimals"] == "-6"
+    assert assets["has_dimensions"] is False and assets["dimension_count"] == 0
+    elements = {row["qname"]: row for row in _rows(processor, "Element")}
+    assert elements["us-gaap:Assets"]["identifier"] == graph_id(
+      "element", f"{US_GAAP}#Assets"
+    )
+    assert elements["us-gaap:Assets"]["balance"] == "debit"
+
+  def test_entity_and_report_rows_carry_the_filing(
+    self, tmp_path, sec_filer, sec_report, model
   ):
-    """Acceptance date is extracted from acceptanceDateTime."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_report=sec_report_data
-    )
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    _run(processor, model)
 
-    processor.make_report()
+    entity = processor.entity_data
+    assert entity["cik"] == CIK
+    assert entity["uri"] == f"http://www.sec.gov/CIK#{CIK}"
+    assert entity["name"] == "NVIDIA CORP" and entity["ticker"] == "NVDA"
+    assert entity["tax_id"] == "943177549"
+    assert entity["is_parent"] is True and entity["status"] == "active"
+    assert _rows(processor, "Entity")[0]["identifier"] == entity["identifier"]
 
-    assert processor.report_data["acceptance_date"] == "2024-02-21"
+    report = processor.report_data
+    assert report["accession_number"] == "0001045810-24-000029"
+    assert report["form"] == "10-K" and report["name"] == "10-K"
+    assert report["filing_date"] == "2024-02-21"
+    assert report["report_date"] == "2024-01-28"
+    assert report["acceptance_date"] == "2024-02-21"
+    assert report["is_inline_xbrl"] is True
+    assert report["xbrl_processor_version"] == XBRL_GRAPH_PROCESSOR_VERSION
+    assert report["fiscal_year_focus"] == 2024
+    assert report["fiscal_period_focus"] == "FY"
+    assert report["fiscal_year_end_month"] == 1
+    assert report["processed"] is False and report["failed"] is False
 
-  def test_report_creates_entity_relationship(
-    self, temp_output_dir, basic_schema_config, sec_report_data
+  def test_text_blocks_stay_inline_without_externalization(
+    self, tmp_path, sec_filer, sec_report, model
   ):
-    """Creates entity-report relationship when entity_data exists."""
-    processor = _create_processor(
-      temp_output_dir, basic_schema_config, sec_report=sec_report_data
-    )
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = {"identifier": "entity-123"}
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    _run(processor, model)
+    policy = {r["uri"]: r for r in _rows(processor, "Fact")}[f"{REPORT_URI}#fact-a3"]
+    assert policy["value"] == TEXT_BLOCK_HTML
+    assert policy["value_type"] == "inline" and policy["content_type"] is None
+    assert policy["fact_type"] == "Nonnumeric"
 
-    processor.make_report()
-
-    # entity_reports_df should have been updated via safe_concat
-    assert processor.report_data is not None
-
-
-@pytest.mark.unit
-class TestSafeConcat:
-  """Tests for safe_concat method."""
-
-  def test_concat_both_empty(self, temp_output_dir, basic_schema_config):
-    """Returns existing when new is empty."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    existing = pd.DataFrame({"a": [1]})
-    new = pd.DataFrame()
-    result = processor.safe_concat(existing, new)
-    assert len(result) == 1
-
-  def test_concat_existing_empty(self, temp_output_dir, basic_schema_config):
-    """Returns copy of new when existing is empty."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    existing = pd.DataFrame()
-    new = pd.DataFrame({"a": [1]})
-    result = processor.safe_concat(existing, new)
-    assert len(result) == 1
-
-  def test_concat_both_have_data(self, temp_output_dir, basic_schema_config):
-    """Concatenates both DataFrames."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    existing = pd.DataFrame({"a": [1, 2]})
-    new = pd.DataFrame({"a": [3, 4]})
-    result = processor.safe_concat(existing, new)
-    assert len(result) == 4
-
-  def test_concat_mixed_dtypes(self, temp_output_dir, basic_schema_config):
-    """Handles mixed dtypes between DataFrames."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    existing = pd.DataFrame({"a": [1, 2]})
-    new = pd.DataFrame({"a": ["x", "y"]})
-    result = processor.safe_concat(existing, new)
-    assert len(result) == 4
-
-
-@pytest.mark.unit
-class TestProcessNoInstanceFile:
-  """Tests for process method when instance file is missing."""
-
-  def test_process_no_local_file_path_and_non_file_uri(
-    self, temp_output_dir, basic_schema_config
+  def test_skip_textblock_facts(
+    self, tmp_path, sec_filer, sec_report, model, monkeypatch
   ):
-    """Process handles missing instance file without raising."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.local_file_path = None
-    # Set report_uri to non-file:// URI
-    processor.report_uri = "https://www.sec.gov/test.htm"
-
-    # Needs make_entity and make_report to set entity_data and report_data
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
-    processor.report_data = {"identifier": "test-id", "failed": False}
-
-    # process() should return without raising
-    processor.process()
-    # Report should be marked as failed
-    assert processor.report_data["failed"] is True
-
-  def test_process_file_not_found(self, temp_output_dir, basic_schema_config):
-    """Process handles nonexistent local file path."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.local_file_path = "/nonexistent/path/to/file.xml"
-
-    processor.schema_adapter = _make_mock_schema_adapter()
-    processor.entity_data = None
-    processor.report_data = {"identifier": "test-id", "failed": False}
-
-    processor.process()
-    assert processor.report_data["failed"] is True
-
-
-@pytest.mark.unit
-class TestExtractDeiFiscalInfo:
-  """Tests for extract_dei_fiscal_info method."""
-
-  def test_no_arelle_controller(self, temp_output_dir, basic_schema_config):
-    """Returns early when arelle controller is not initialized."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.arelle_cntlr = None
-    processor.report_data = {"identifier": "test-id"}
-
-    # Should not raise
-    processor.extract_dei_fiscal_info()
-
-  def test_extracts_fiscal_info(self, temp_output_dir, basic_schema_config):
-    """Extracts DEI fiscal context from Arelle facts."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.report_data = {
-      "identifier": "test-id",
-      "fiscal_year_focus": None,
-      "fiscal_period_focus": None,
-      "fiscal_year_end_month": None,
+    monkeypatch.setattr(xbrl_graph, "XBRL_SKIP_TEXTBLOCK_FACTS", True)
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    _run(processor, model)
+    uris = {r["uri"] for r in _rows(processor, "Fact")}
+    assert uris == {f"{REPORT_URI}#fact-a1", f"{REPORT_URI}#fact-a2"}
+    assert len(_rows(processor, "REPORT_HAS_FACT")) == 2
+    # The text block's element was reachable only through its fact.
+    assert "nvda:RevenueRecognitionPolicyTextBlock" not in {
+      r["qname"] for r in _rows(processor, "Element")
     }
-    processor.reports_df = pd.DataFrame(
-      {
-        "identifier": ["test-id"],
-        "fiscal_year_focus": [None],
-        "fiscal_period_focus": [None],
-        "fiscal_year_end_month": [None],
-      }
+
+  def test_base_only_schema_skips_undeclared_tables(
+    self, tmp_path, sec_filer, sec_report, model
+  ):
+    processor = _processor(
+      tmp_path, sec_filer, sec_report, schema_config={**SCHEMA_CONFIG, "extensions": []}
     )
+    _run(processor, model)
+    assert "Fact" not in processor.schema_to_dataframe_mapping
+    assert len(_rows(processor, "Element")) == 6
+    assert not (processor.output_dir / "nodes" / "Fact.parquet").exists()
+    assert processor.report_data["accession_number"] == "0001045810-24-000029"
 
-    # Mock Arelle facts
-    mock_fact_fy = MagicMock()
-    mock_fact_fy.concept.qname = MagicMock()
-    mock_fact_fy.concept.qname.__str__ = lambda self: "dei:DocumentFiscalYearFocus"
-    mock_fact_fy.value = "2024"
+  def test_arelle_resources_close_even_when_the_parse_fails(
+    self, tmp_path, sec_filer, sec_report
+  ):
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    arelle = _Arelle()
+    with (
+      patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+      patch(f"{MODULE}.to_xbrl_model", side_effect=RuntimeError("bad DTS")),
+      pytest.raises(RuntimeError, match="bad DTS"),
+    ):
+      processor.process()
+    arelle.model_xbrl.close.assert_called_once()
+    arelle.client.close.assert_called_once()
 
-    mock_fact_fp = MagicMock()
-    mock_fact_fp.concept.qname = MagicMock()
-    mock_fact_fp.concept.qname.__str__ = lambda self: "dei:DocumentFiscalPeriodFocus"
-    mock_fact_fp.value = "Q3"
-
-    mock_fact_fye = MagicMock()
-    mock_fact_fye.concept.qname = MagicMock()
-    mock_fact_fye.concept.qname.__str__ = lambda self: "dei:CurrentFiscalYearEndDate"
-    mock_fact_fye.value = "--12-31"
-
-    mock_cntlr = MagicMock()
-    mock_cntlr.facts = [mock_fact_fy, mock_fact_fp, mock_fact_fye]
-    processor.arelle_cntlr = mock_cntlr
-
-    processor.extract_dei_fiscal_info()
-
-    assert processor.report_data["fiscal_year_focus"] == 2024
-    assert processor.report_data["fiscal_period_focus"] == "Q3"
-    assert processor.report_data["fiscal_year_end_month"] == 12
-
-  def test_handles_invalid_fiscal_year(self, temp_output_dir, basic_schema_config):
-    """Handles non-numeric fiscal year value."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.report_data = {
-      "identifier": "test-id",
-      "fiscal_year_focus": None,
-      "fiscal_period_focus": None,
-      "fiscal_year_end_month": None,
-    }
-    processor.reports_df = pd.DataFrame(
-      {
-        "identifier": ["test-id"],
-        "fiscal_year_focus": [None],
-        "fiscal_period_focus": [None],
-        "fiscal_year_end_month": [None],
-      }
-    )
-
-    mock_fact = MagicMock()
-    mock_fact.concept.qname = MagicMock()
-    mock_fact.concept.qname.__str__ = lambda self: "dei:DocumentFiscalYearFocus"
-    mock_fact.value = "not-a-number"
-
-    mock_cntlr = MagicMock()
-    mock_cntlr.facts = [mock_fact]
-    processor.arelle_cntlr = mock_cntlr
-
-    processor.extract_dei_fiscal_info()
-
-    # Should remain None due to parse failure
-    assert processor.report_data["fiscal_year_focus"] is None
-
-  def test_skips_facts_with_no_concept(self, temp_output_dir, basic_schema_config):
-    """Skips facts where concept or qname is None."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.report_data = {
-      "identifier": "test-id",
-      "fiscal_year_focus": None,
-      "fiscal_period_focus": None,
-      "fiscal_year_end_month": None,
-    }
-    processor.reports_df = pd.DataFrame(
-      {
-        "identifier": ["test-id"],
-        "fiscal_year_focus": [None],
-        "fiscal_period_focus": [None],
-        "fiscal_year_end_month": [None],
-      }
-    )
-
-    mock_fact_no_concept = MagicMock()
-    mock_fact_no_concept.concept = None
-
-    mock_fact_no_qname = MagicMock()
-    mock_fact_no_qname.concept = MagicMock()
-    mock_fact_no_qname.concept.qname = None
-
-    mock_cntlr = MagicMock()
-    mock_cntlr.facts = [mock_fact_no_concept, mock_fact_no_qname]
-    processor.arelle_cntlr = mock_cntlr
-
-    # Should not raise
-    processor.extract_dei_fiscal_info()
-    assert processor.report_data["fiscal_year_focus"] is None
-
-
-@pytest.mark.unit
-class TestProcessAsyncWrapper:
-  """Tests for process_async method."""
-
-  def test_process_async_calls_process(self, temp_output_dir, basic_schema_config):
-    """process_async delegates to synchronous process."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.process = MagicMock()
-
+  def test_process_async_runs_process(self, tmp_path, sec_filer, sec_report, model):
     import asyncio
 
-    asyncio.run(processor.process_async())
-
-    processor.process.assert_called_once()
-
-
-@pytest.mark.unit
-class TestOutputParquetFiles:
-  """Tests for output_parquet_files method."""
-
-  def test_delegates_to_parquet_writer(self, temp_output_dir, basic_schema_config):
-    """output_parquet_files calls parquet_writer.write_all_dataframes."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.parquet_writer = MagicMock()
-
-    processor.output_parquet_files()
-
-    processor.parquet_writer.write_all_dataframes.assert_called_once()
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    arelle = _Arelle()
+    with (
+      patch(f"{MODULE}.ArelleClient", return_value=arelle.client),
+      patch(f"{MODULE}.to_xbrl_model", return_value=model),
+    ):
+      asyncio.run(processor.process_async())
+    assert len(_rows(processor, "Fact")) == 3
 
 
-@pytest.mark.unit
-class TestInitProcessedElements:
-  """Tests for processed_elements tracking set."""
+class _FakeExternalizer:
+  """Externalizes HTML values; records what it was asked to upload."""
 
-  def test_starts_empty(self, temp_output_dir, basic_schema_config):
-    """processed_elements starts as an empty set."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    assert processor.processed_elements == set()
+  enabled = True
 
+  def __init__(self, fail=False):
+    self.fail = fail
+    self.queued: list[tuple[str, dict | None, dict | None]] = []
+    self.batches = 0
 
-@pytest.mark.unit
-class TestTaxonomyLabelElementUri:
-  """make_element_labels tags each TAXONOMY_HAS_LABEL edge with element_uri.
+  def should_externalize(self, value):
+    return "<" in str(value) and ">" in str(value)
 
-  On the SEC shared repo the taxonomy is the filer's per-report extension
-  taxonomy, so the edge is report-scoped; element_uri re-attaches the element a
-  label belongs to, which is what makes "this report's label for element X" an
-  exact lookup against the content-addressed shared Label pool.
-  """
-
-  @staticmethod
-  def _label_rel(role, text, lang="en-US"):
-    rel = MagicMock()
-    rel.toModelObject.role = role
-    rel.toModelObject.text = text
-    rel.toModelObject.xmlLang = lang
-    return rel
-
-  def _run(self, temp_output_dir, basic_schema_config, rels):
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.labels_df = pd.DataFrame()
-    processor.element_labels_df = pd.DataFrame()
-    processor.taxonomy_labels_df = pd.DataFrame()
-    processor.taxonomy_data = {
-      "identifier": "tax-1",
-      "uri": "http://filer.example.com/20240101",
+  def queue_value_for_s3(self, value, fact_id, entity_data, report_data):
+    self.queued.append((fact_id, entity_data, report_data))
+    if self.fail:
+      return None
+    url = f"https://cdn.example.com/{fact_id}.html"
+    return {
+      "url": url,
+      "stored_value": url,
+      "value_type": "external",
+      "content_type": "text/html",
     }
 
-    mock_cntlr = MagicMock()
-    mock_cntlr.relationshipSet.return_value.fromModelObject.return_value = rels
-    processor.arelle_cntlr = mock_cntlr
+  def process_batch_uploads(self):
+    self.batches += 1
 
-    element_data = {
-      "identifier": "el-ppe",
-      "uri": "http://fasb.org/us-gaap/2024#PropertyPlantAndEquipmentNet",
-      "qname": "us-gaap:PropertyPlantAndEquipmentNet",
-    }
-    processor.make_element_labels(element_data, MagicMock())
-    return processor
 
-  def test_taxonomy_label_carries_element_uri(
-    self, temp_output_dir, basic_schema_config
+@pytest.mark.unit
+class TestExternalization:
+  def test_large_values_are_replaced_by_their_url(
+    self, tmp_path, sec_filer, sec_report, model
   ):
-    rels = [
-      self._label_rel(
-        "http://www.xbrl.org/2003/role/label", "Property and equipment, net"
-      ),
-      self._label_rel(
-        "http://www.xbrl.org/2003/role/totalLabel", "Total property and equipment"
-      ),
-    ]
-    processor = self._run(temp_output_dir, basic_schema_config, rels)
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    externalizer = _FakeExternalizer()
+    processor.textblock_externalizer = externalizer
+    _run(processor, model)
 
-    tax_df = processor.taxonomy_labels_df
-    assert len(tax_df) == 2
-    # every taxonomy→label edge is attributed to the element it labels
-    assert set(tax_df["element_uri"]) == {
-      "http://fasb.org/us-gaap/2024#PropertyPlantAndEquipmentNet"
-    }
-    assert set(tax_df["from"]) == {"tax-1"}
-    # the (report-scoped) taxonomy label + role pair is recoverable per element
-    labels_df = processor.labels_df
-    by_id = dict(zip(labels_df["identifier"], labels_df["value"], strict=True))
-    resolved = {by_id[to] for to in tax_df["to"]}
-    assert resolved == {"Property and equipment, net", "Total property and equipment"}
+    facts = {r["uri"]: r for r in _rows(processor, "Fact")}
+    policy = facts[f"{REPORT_URI}#fact-a3"]
+    assert policy["value"] == f"https://cdn.example.com/{policy['identifier']}.html"
+    assert policy["value_type"] == "external"
+    assert policy["content_type"] == "text/html"
+    assets = facts[f"{REPORT_URI}#fact-a1"]
+    assert assets["value"] == "65728000000" and assets["value_type"] == "inline"
+    assert externalizer.batches == 1
 
-  def test_no_taxonomy_still_writes_element_labels(
-    self, temp_output_dir, basic_schema_config
+    # The upload key is built from the filing's coordinates on the projected rows.
+    fact_id, entity_data, report_data = externalizer.queued[0]
+    assert fact_id == policy["identifier"]
+    assert entity_data["cik"] == CIK
+    assert report_data["accession_number"] == "0001045810-24-000029"
+    assert report_data["filing_date"] == "2024-02-21"
+
+  def test_a_value_that_cannot_be_queued_stays_inline(
+    self, tmp_path, sec_filer, sec_report, model
   ):
-    """Without a per-report taxonomy, element→label edges still form; the
-    taxonomy edge is simply skipped (no element_qname to anchor)."""
-    processor = _create_processor(temp_output_dir, basic_schema_config)
-    processor.labels_df = pd.DataFrame()
-    processor.element_labels_df = pd.DataFrame()
-    processor.taxonomy_labels_df = pd.DataFrame()
-    # deliberately no processor.taxonomy_data
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    processor.textblock_externalizer = _FakeExternalizer(fail=True)
+    _run(processor, model)
+    policy = {r["uri"]: r for r in _rows(processor, "Fact")}[f"{REPORT_URI}#fact-a3"]
+    assert policy["value"] == TEXT_BLOCK_HTML
+    assert policy["value_type"] == "inline" and policy["content_type"] is None
 
-    mock_cntlr = MagicMock()
-    mock_cntlr.relationshipSet.return_value.fromModelObject.return_value = [
-      self._label_rel("http://www.xbrl.org/2003/role/label", "Assets")
-    ]
-    processor.arelle_cntlr = mock_cntlr
+  def test_disabled_externalizer_is_not_consulted(
+    self, tmp_path, sec_filer, sec_report, model
+  ):
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    externalizer = _FakeExternalizer()
+    externalizer.enabled = False
+    processor.textblock_externalizer = externalizer
+    _run(processor, model)
+    assert externalizer.queued == [] and externalizer.batches == 0
 
-    processor.make_element_labels(
-      {"identifier": "el-a", "uri": "u", "qname": "us-gaap:Assets"}, MagicMock()
+
+@pytest.mark.unit
+class TestEnrichment:
+  def test_enrichment_runs_on_the_projected_tables(
+    self, tmp_path, sec_filer, sec_report, model, monkeypatch
+  ):
+    monkeypatch.setattr("robosystems.adapters.sec.config.XBRL_GRAPH_REFINEMENT", False)
+    enricher = MagicMock(name="SemanticEnricher")
+    enricher.embed_batch.side_effect = lambda texts: [[0.1, 0.2]] * len(texts)
+    enricher.match_canonical.side_effect = lambda embedding, element: (
+      ("Assets", 0.93) if element["qname"] == "us-gaap:Assets" else (None, None)
     )
+    enricher.match_structure_canonical.return_value = ("balance_sheet", 0.8)
 
-    assert len(processor.element_labels_df) == 1
-    assert processor.taxonomy_labels_df.empty
-    assert isinstance(processor.processed_elements, set)
+    processor = _processor(tmp_path, sec_filer, sec_report, enricher=enricher)
+    processor.enable_semantic_enrichment = True
+    _run(processor, model)
+
+    elements = {r["qname"]: r for r in _rows(processor, "Element")}
+    assert elements["us-gaap:Assets"]["canonical_concept"] == "Assets"
+    assert elements["us-gaap:Assets"]["canonical_confidence"] == 0.93
+    assert elements["us-gaap:Revenues"]["canonical_concept"] is None
+    structure = _rows(processor, "Structure")[0]
+    assert structure["name"] == "CONSOLIDATED BALANCE SHEETS"
+    assert structure["type"] == "Statement"
+    assert structure["canonical_type"] == "balance_sheet"
+    assert enricher.embed_batch.call_count == 2
+
+
+@pytest.mark.unit
+class TestClassification:
+  def test_classifier_receives_the_filing_and_its_output_is_written(
+    self, tmp_path, sec_filer, sec_report, model, monkeypatch
+  ):
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.config.XBRL_ASSOCIATION_CLASSIFICATION", True
+    )
+    factset_id = "fs-1"
+    result = MagicMock()
+    result.classifications_df = pd.DataFrame(
+      [
+        {
+          "identifier": "cls-1",
+          "category": "concept_arrangement",
+          "type": "RollUp",
+          "source": "structural",
+          "confidence": 1.0,
+        }
+      ]
+    )
+    result.assoc_classifications_df = pd.DataFrame([{"from": "assoc-1", "to": "cls-1"}])
+    result.factsets_df = pd.DataFrame(
+      [{"identifier": factset_id, "factset_type": "report", "provenance": "{}"}]
+    )
+    result.structure_factset_rels_df = pd.DataFrame(
+      [{"from": "struct-1", "to": factset_id}]
+    )
+    result.factset_fact_rels_df = pd.DataFrame([{"from": factset_id, "to": "fact-1"}])
+    result.report_factset_rels_df = pd.DataFrame(
+      [{"from": "report-1", "to": factset_id}]
+    )
+    result.canonical_hints = {}
+
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    with patch(
+      "robosystems.adapters.sec.processors.classify.AssociationClassifier"
+    ) as classifier_cls:
+      classifier_cls.return_value.classify.return_value = result
+      _run(processor, model)
+
+    (output_dir, filing_meta), _ = classifier_cls.return_value.classify.call_args
+    assert output_dir == processor.output_dir
+    assert filing_meta.report_id == graph_id("report", REPORT_URI)
+    assert filing_meta.accession == "0001045810-24-000029"
+    assert filing_meta.filing_date == "2024-02-21"
+    assert filing_meta.form == "10-K"
+    assert filing_meta.filer_cik == CIK
+
+    assert _rows(processor, "FactSet")[0]["identifier"] == factset_id
+    assert _rows(processor, "Classification")[0]["type"] == "RollUp"
+    assert len(_rows(processor, "REPORT_HAS_FACT_SET")) == 1
+
+  def test_canonical_hints_upgrade_elements(
+    self, tmp_path, sec_filer, sec_report, model, monkeypatch
+  ):
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.config.XBRL_ASSOCIATION_CLASSIFICATION", True
+    )
+    assets_id = graph_id("element", f"{US_GAAP}#Assets")
+    result = MagicMock()
+    for name in (
+      "classifications_df",
+      "assoc_classifications_df",
+      "factsets_df",
+      "structure_factset_rels_df",
+      "factset_fact_rels_df",
+      "report_factset_rels_df",
+    ):
+      setattr(result, name, pd.DataFrame())
+    result.canonical_hints = {assets_id: ("Assets", 0.99)}
+
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    with patch(
+      "robosystems.adapters.sec.processors.classify.AssociationClassifier"
+    ) as classifier_cls:
+      classifier_cls.return_value.classify.return_value = result
+      _run(processor, model)
+
+    elements = {r["qname"]: r for r in _rows(processor, "Element")}
+    assert elements["us-gaap:Assets"]["canonical_concept"] == "Assets"
+    assert elements["us-gaap:Assets"]["canonical_confidence"] == 0.99
+
+  def test_classifier_failure_is_non_critical(
+    self, tmp_path, sec_filer, sec_report, model, monkeypatch
+  ):
+    monkeypatch.setattr(
+      "robosystems.adapters.sec.config.XBRL_ASSOCIATION_CLASSIFICATION", True
+    )
+    processor = _processor(tmp_path, sec_filer, sec_report)
+    with patch(
+      "robosystems.adapters.sec.processors.classify.AssociationClassifier"
+    ) as classifier_cls:
+      classifier_cls.return_value.classify.side_effect = RuntimeError("no ladybug")
+      _run(processor, model)
+    assert len(_rows(processor, "Fact")) == 3

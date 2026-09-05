@@ -19,6 +19,7 @@ Select a context explicitly:
 """
 
 from ..models import Node, Property, Relationship
+from ..xbrl import xbrl_node_properties, xbrl_relationship_properties
 
 # NOTE: Before adding nodes or edges here, review schemas/base.py invariants.
 # Universally-applicable concepts (Entity, Taxonomy, Element, Dimension,
@@ -34,56 +35,20 @@ from ..models import Node, Property, Relationship
 REPORTING_NODES = [
   Node(
     name="Report",
-    description="Financial report filed by a entity",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="uri", type="STRING"),  # indexed
-      Property(name="name", type="STRING"),
-      Property(name="accession_number", type="STRING"),
-      Property(name="form", type="STRING"),
-      Property(name="filing_date", type="STRING"),
-      Property(name="report_date", type="STRING"),  # Period end date for the report
-      Property(name="acceptance_date", type="STRING"),
-      Property(name="is_inline_xbrl", type="BOOLEAN"),
-      Property(name="xbrl_processor_version", type="STRING"),
-      Property(name="processed", type="BOOLEAN"),
-      Property(name="failed", type="BOOLEAN"),
-      Property(name="updated_at", type="STRING"),
-      # Fiscal context from DEI cover page (enables fiscal-aware queries)
-      Property(
-        name="fiscal_year_focus", type="INT32"
-      ),  # From dei:DocumentFiscalYearFocus (e.g., 2024, 2025)
-      Property(
-        name="fiscal_period_focus", type="STRING"
-      ),  # From dei:DocumentFiscalPeriodFocus (FY, Q1, Q2, Q3)
-      Property(
-        name="fiscal_year_end_month", type="INT32"
-      ),  # Parsed from dei:CurrentFiscalYearEndDate (1-12, e.g., 12 for Dec year-end)
-    ],
+    description="Financial report filed by an entity. report_date is the period end; "
+    "fiscal_year_focus, fiscal_period_focus (FY, Q1-Q3) and fiscal_year_end_month "
+    "(1-12) are read from the DEI cover page.",
+    properties=xbrl_node_properties("Report"),
   ),
   Node(
     name="Fact",
-    description="Individual fact/data point from financial reports. Facts may have dimensional breakdowns (segments, geography, products). Use has_dimensions=false or NOT (f)-[:FACT_HAS_DIMENSION]->() to get consolidated totals only.",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="uri", type="STRING"),
-      Property(
-        name="value", type="STRING"
-      ),  # required - may contain URL for externalized content
-      Property(name="numeric_value", type="DOUBLE"),
-      Property(name="fact_type", type="STRING"),  # 'Numeric' or 'Nonnumeric'
-      Property(name="decimals", type="STRING"),
-      Property(name="value_type", type="STRING"),  # 'inline' or 'external_resource'
-      Property(
-        name="content_type", type="STRING"
-      ),  # MIME type for externalized content
-      Property(
-        name="has_dimensions", type="BOOLEAN"
-      ),  # True if fact has dimensional breakdowns (segments, geography, etc.)
-      Property(
-        name="dimension_count", type="INT64"
-      ),  # Number of dimensional qualifiers (0=consolidated, 1=single breakdown, 2+=complex)
-    ],
+    description="Individual fact/data point from financial reports. Facts may have "
+    "dimensional breakdowns (segments, geography, products). Use "
+    "has_dimensions=false or NOT (f)-[:FACT_HAS_DIMENSION]->() to get consolidated "
+    "totals only (dimension_count is 0 for a consolidated total). fact_type is "
+    "Numeric or Nonnumeric; value_type is inline or external, and an externalized "
+    "value holds the CDN URL with content_type its MIME type.",
+    properties=xbrl_node_properties("Fact"),
   ),
   # NOTE: Structure, Association, Classification are now in schemas/base.py
   # because they're base ontology concepts (XBRL taxonomy link networks and
@@ -95,17 +60,11 @@ REPORTING_NODES = [
     "structure produced for one period, as a rendering manifest. The graph "
     "mirror of the OLTP FactSet (models/extensions/roboledger/fact_set.py): "
     "both the tenant materializer and the SEC adapter populate the same "
-    "self-describing fields so provenance reads identically across graphs.",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      # 'report' | 'schedule' | 'custom' (tenant); SEC filings are 'report'.
-      Property(name="factset_type", type="STRING"),
-      # JSON-encoded FactProvenance descriptor (discriminated on `origin`) —
-      # how this FactSet's facts were constructed. Tenant carries the OLTP
-      # fact_sets.provenance blob; SEC stamps a `filed` descriptor. See
-      # models/api/fact_provenance.py.
-      Property(name="provenance", type="STRING"),
-    ],
+    "self-describing fields so provenance reads identically across graphs. "
+    "factset_type is report, schedule or custom (SEC filings are report); "
+    "provenance is the JSON-encoded FactProvenance descriptor "
+    "(models/api/fact_provenance.py).",
+    properties=xbrl_node_properties("FactSet"),
   ),
 ]
 
@@ -115,42 +74,42 @@ REPORTING_RELATIONSHIPS = [
     from_node="Entity",
     to_node="Report",
     description="Entity has filed reports",
-    properties=[],
+    properties=xbrl_relationship_properties("ENTITY_HAS_REPORT"),
   ),
   Relationship(
     name="REPORT_HAS_FACT",
     from_node="Report",
     to_node="Fact",
     description="Report contains facts",
-    properties=[],
+    properties=xbrl_relationship_properties("REPORT_HAS_FACT"),
   ),
   Relationship(
     name="FACT_HAS_ELEMENT",
     from_node="Fact",
     to_node="Element",
     description="Fact references element",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_HAS_ELEMENT"),
   ),
   Relationship(
     name="FACT_HAS_ENTITY",
     from_node="Fact",
     to_node="Entity",
     description="Fact belongs to reporting entity",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_HAS_ENTITY"),
   ),
   Relationship(
     name="FACT_HAS_PERIOD",
     from_node="Fact",
     to_node="Period",
     description="Fact applies to specific period",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_HAS_PERIOD"),
   ),
   Relationship(
     name="FACT_HAS_UNIT",
     from_node="Fact",
     to_node="Unit",
     description="Fact has unit of measurement",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_HAS_UNIT"),
   ),
   # Fact → Dimension relationship (XBRL dimensional qualifiers)
   Relationship(
@@ -158,21 +117,21 @@ REPORTING_RELATIONSHIPS = [
     from_node="Fact",
     to_node="Dimension",
     description="Fact has dimensional qualifiers (segments, geography, products)",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_HAS_DIMENSION"),
   ),
   Relationship(
     name="FACT_SET_CONTAINS_FACT",
     from_node="FactSet",
     to_node="Fact",
     description="Fact set contains facts",
-    properties=[],
+    properties=xbrl_relationship_properties("FACT_SET_CONTAINS_FACT"),
   ),
   Relationship(
     name="STRUCTURE_HAS_FACT_SET",
     from_node="Structure",
     to_node="FactSet",
     description="Structure has a pre-computed set of facts for rendering",
-    properties=[],
+    properties=xbrl_relationship_properties("STRUCTURE_HAS_FACT_SET"),
   ),
   # Report → FactSet (the package-mode container edge). A Report groups
   # N FactSets — one per statement Structure produced for the period.
@@ -183,14 +142,14 @@ REPORTING_RELATIONSHIPS = [
     from_node="Report",
     to_node="FactSet",
     description="Report contains FactSets (one per statement Structure)",
-    properties=[],
+    properties=xbrl_relationship_properties("REPORT_HAS_FACT_SET"),
   ),
   Relationship(
     name="REPORT_USES_TAXONOMY",
     from_node="Report",
     to_node="Taxonomy",
     description="Report uses XBRL taxonomy",
-    properties=[],
+    properties=xbrl_relationship_properties("REPORT_USES_TAXONOMY"),
   ),
   # NOTE: STRUCTURE_HAS_ASSOCIATION, ASSOCIATION_HAS_FROM_ELEMENT,
   # ASSOCIATION_HAS_TO_ELEMENT, ASSOCIATION_HAS_CLASSIFICATION, and

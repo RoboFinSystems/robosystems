@@ -264,39 +264,26 @@ class TestArelleClient:
     # Verify
     assert result is False
 
-  def test_load_plugins(self, temp_dir):
-    """Test plugin loading without errors."""
-    # Setup mocks
-    mock_cntlr = Mock()
-    # The real PluginManager will access this, so make it a string
-    mock_cntlr.pluginDir = str(temp_dir)
+  def test_load_plugins(self):
+    """The document-set plugin is added, and the SEC transforms registered
+    from xbrlkit's vendored registry."""
+    from arelle import FunctionIxt
+    from xbrlkit.parse.arelle_load import SEC_IXT_NAMESPACE
 
     client = ArelleClient.__new__(ArelleClient)
-    client.cntlr = mock_cntlr
+    client.cntlr = Mock()
 
-    # Mock file paths and create required directories
-    edgar_path = temp_dir / "arelle" / "edgar"
-    edgar_path.mkdir(parents=True, exist_ok=True)
+    mock_plugin_manager = MagicMock()
+    with patch("arelle.PluginManager", mock_plugin_manager):
+      client._load_plugins()
 
-    with patch(
-      "robosystems.adapters.sec.client.arelle.__file__", str(temp_dir / "arelle.py")
-    ):
-      # Create a simple mock for PluginManager that does nothing
-      mock_plugin_manager = MagicMock()
-      mock_plugin_manager.init = MagicMock()
-      mock_plugin_manager.addPluginModule = MagicMock()
-      mock_plugin_manager.reset = MagicMock()
-
-      # Patch the PluginManager module directly
-      with patch("arelle.PluginManager", mock_plugin_manager):
-        # Execute - should not raise any exceptions
-        try:
-          client._load_plugins()
-          # If it runs without exception, the test passes
-          assert True
-        except Exception as e:
-          # If we get an exception, verify it's handled gracefully
-          raise AssertionError(f"_load_plugins raised unexpected exception: {e}")
+    mock_plugin_manager.init.assert_called_once_with(
+      client.cntlr, loadPluginConfig=False
+    )
+    mock_plugin_manager.addPluginModule.assert_called_once_with("inlineXbrlDocumentSet")
+    mock_plugin_manager.reset.assert_called_once()
+    registered = FunctionIxt.ixtNamespaceFunctions[SEC_IXT_NAMESPACE]
+    assert {"stateprovnameen", "numwordsen", "durwordsen"} <= set(registered)
 
   @patch("robosystems.adapters.sec.client.arelle.ARELLE_WORK_OFFLINE", False)
   @patch("robosystems.adapters.sec.client.arelle.ARELLE_TIMEOUT", 60)
