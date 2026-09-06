@@ -766,7 +766,7 @@ class TestSecPostStageIndexSensor:
     assert job_names == {
       "sec_narratives_index",
       "sec_ixbrl_index",
-      "sec_filing_catalog",
+      "sec_catalog",
     }
 
     for r in result:

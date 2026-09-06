@@ -120,7 +120,8 @@ per filer and `companies/index.json` for the corpus, on the public CDN.
 Files are regenerated whole — every filer with a filing in the run's
 partitions, all of them on `full_rebuild`, the index always — so overlapping
 runs cannot corrupt one. Also writes `robots.txt` when it is missing.
-Chained off staging by `sec_post_stage_index_sensor`, beside the text index.
+Chained off staging by `sec_post_stage_index_sensor`, beside the text index;
+the job is `sec_catalog` (a job may not share its asset's name).
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster \

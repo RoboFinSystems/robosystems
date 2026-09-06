@@ -862,7 +862,7 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
     "sec_narratives_index": "sec_narratives_indexed",
     "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
     # Not an index, but the same shape: post-stage, per partition, one op config.
-    "sec_filing_catalog": "sec_filing_catalog",
+    "sec_catalog": "sec_filing_catalog",
   }
 
   for job_name, asset_name in index_jobs.items():

@@ -506,8 +506,10 @@ SEC_CATALOG_ECS_TAGS = {
   },
 }
 
+# Named apart from its asset: Dagster requires job and op names to be unique
+# within a repository, and an asset's op carries the asset's name.
 sec_filing_catalog_job = define_asset_job(
-  name="sec_filing_catalog",
+  name="sec_catalog",
   description="Regenerate the per-filer catalog and corpus index on the public CDN (partitioned by quarter).",
   selection=AssetSelection.assets(sec_filing_catalog),
   partitions_def=sec_quarter_partitions,
