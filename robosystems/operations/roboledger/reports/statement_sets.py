@@ -370,6 +370,11 @@ def _pre_create_report_fact_sets(
   session.flush()
 
 
+def to_cents_precision(value: float) -> float:
+  """A dollar amount rounded to cents — the ledger's own precision."""
+  return round(value, 2)
+
+
 def _stamp_facts_into_sets(
   session: Session,
   facts,
@@ -391,6 +396,15 @@ def _stamp_facts_into_sets(
   Fact row per owning structure, each pinned to that structure's
   FactSet. This is what lets the CF block's calc walker resolve
   NetIncome locally without cross-structure fact lookup.
+
+  Every value through here is dollars (the row is stamped ``unit="USD"``)
+  derived from the ledger's integer cents, so it is rounded to cents
+  before it is written. The pivot and the subtotal derivations add in
+  float, and a sum such as ``52585 + 5400.02`` lands on
+  ``57985.020000000004``; ``facts.value`` is ``double precision`` and
+  would keep that tail, and every published flavor prints the stored
+  double faithfully. Rounding here removes float noise, never real
+  precision — the ledger has none below a cent.
   """
   for fact in facts.facts:
     for structure_id in element_to_structures.get(fact.element_id, ()):
@@ -399,7 +413,7 @@ def _stamp_facts_into_sets(
         continue
       rf = Fact(
         element_id=fact.element_id,
-        value=fact.value,
+        value=to_cents_precision(fact.value),
         period_start=fact.period_start,
         period_end=fact.period_end,
         period_type=fact.period_type,
