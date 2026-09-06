@@ -128,7 +128,14 @@ class BundleElement(BaseModel):
 
   id: str
   qname: str
+  # The element's *prefix* — ``taxonomy/loader.py`` writes ``namespace=prefix``
+  # on every seeded Element and keeps the concept IRI on ``Element.uri``. The
+  # name is historical; the IRI is ``namespace_uri`` below.
   namespace: str | None = None
+  # The namespace IRI the concept is declared under, resolved once by the
+  # producer (:func:`namespace_uri_for`) so every encoder reads the same one
+  # instead of each mapping prefixes its own way.
+  namespace_uri: str | None = None
   name: str
   label: str | None = None
   balance_type: Literal["debit", "credit"] | None = None
@@ -735,6 +742,40 @@ def _period_metas_for_report(report: Any, fact_sets: list[Any]) -> list[PeriodMe
   return []
 
 
+# Where a prefix nothing registered resolves: a tenant's own ontology prefix
+# (``custom``) still needs a stable IRI for its concepts to be declared under.
+MINTED_TAXONOMY_BASE = "https://robosystems.ai/taxonomy/"
+
+
+def namespace_uri_for(
+  prefix: str | None,
+  *,
+  concept_iri: str | None = None,
+  local_name: str | None = None,
+) -> str:
+  """The namespace IRI an element's concept is declared under.
+
+  ``Element.namespace`` holds the prefix, not the namespace (the loader writes
+  ``namespace=prefix``), so the IRI has to be recovered. In order: the concept
+  IRI minus its local name, when the IRI ends in it — the loader and the
+  library creator both build it as ``namespace + local``, so this is the
+  namespace the element was seeded under; else the canonical context's binding
+  for the prefix; else a minted ``robosystems.ai/taxonomy/{prefix}/``.
+  """
+  from robosystems.arelle.context import CANONICAL_CONTEXT
+
+  if concept_iri and local_name and concept_iri.endswith(local_name):
+    namespace = concept_iri[: -len(local_name)]
+    if namespace.endswith(("/", "#")):
+      return namespace
+  if not prefix:
+    return f"{MINTED_TAXONOMY_BASE}unqualified/"
+  bound = CANONICAL_CONTEXT.get(prefix)
+  if isinstance(bound, str):
+    return bound
+  return f"{MINTED_TAXONOMY_BASE}{prefix}/"
+
+
 def _wire_item_type(item_type: str | None) -> str | None:
   """OLTP snake_case value domain → wire camelCase ('text_block' → 'textBlock')."""
   if not item_type:
@@ -744,10 +785,17 @@ def _wire_item_type(item_type: str | None) -> str | None:
 
 
 def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleElement:
+  qname = str(e.qname or e.name)
+  prefix = e.namespace or (qname.split(":", 1)[0] if ":" in qname else None)
   return BundleElement(
     id=str(e.id),
-    qname=str(e.qname or e.name),
+    qname=qname,
     namespace=e.namespace,
+    namespace_uri=namespace_uri_for(
+      prefix,
+      concept_iri=getattr(e, "uri", None),
+      local_name=qname.rsplit(":", 1)[-1],
+    ),
     name=str(e.name),
     # The standard label linkbase entry is the authoritative display label
     # (skos:prefLabel / XBRL standard label); fall back to the element's

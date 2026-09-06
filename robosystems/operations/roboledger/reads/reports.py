@@ -357,10 +357,10 @@ def get_report_download_url(
   Every flavor resolves to a short-lived presigned URL pointing at the
   bundle in S3 — the client follows it to fetch the artifact directly
   (the API never streams bytes). JSON-LD is stamped to S3 at publish
-  time, so the read just presigns the stored object. XBRL is
-  materialized on first download and cached under a
-  ``generation_count``-versioned key; every generation is immutable, so
-  the cache never goes stale.
+  time, so the read just presigns the stored object. XBRL, the holon
+  and the Tavi model are materialized on first download and cached
+  under a ``generation_count``-versioned key; every generation is
+  immutable, so the cache never goes stale.
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
   :class:`ReportBundleNotAvailableError` when the report exists but has
@@ -391,6 +391,25 @@ def get_report_download_url(
         f"report to produce a holon."
       )
     return _materialize_and_presign_holon(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      generation_count=generation_count,
+      expires_in=expires_in,
+      source_graph_id=report.source_graph_id,
+    )
+
+  # TAVI is derived the same way — the compiled model of the same bundle — and
+  # shares the holon's gate: publication, not ``bundle_url``, for the same
+  # reason (a received copy carries the sender's Tavi and no flat bundle). It
+  # is a member of XbrlFlavor, so it must also sit above the XBRL arm below.
+  if flavor == XbrlFlavor.TAVI.value:
+    if report.generation_status != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a Tavi model."
+      )
+    return _materialize_and_presign_tavi(
       session=session,
       graph_id=graph_id,
       report_id=report_id,
@@ -634,6 +653,78 @@ def _materialize_and_presign_holon(
     content_type="application/ld+json",
     format=RdfFlavor.HOLON_JSONLD.value,
     generation_count=generation_count,
+  )
+
+
+def _materialize_and_presign_tavi(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  expires_in: int,
+  source_graph_id: str | None = None,
+) -> ReportBundleDownloadResponse:
+  """Presign the **Tavi** compiled model, materializing + caching it on first
+  download.
+
+  The Tavi is the same bundle in the OIM-family standards form the SEC
+  pipeline publishes per filing (see ``operations/serialization/xbrl/tavi.py``),
+  derived and cached exactly as the holon is: on demand, under a
+  ``generation_count``-versioned key that is immutable per generation.
+  Serialization imports are deferred so the reads module stays import-light.
+  """
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=".tavi.json"
+  )
+  s3 = S3Client()
+
+  if not s3.object_exists(bucket, key):
+    _refuse_local_rederivation(report_id, source_graph_id, "Tavi model")
+    from robosystems.operations.serialization import (
+      build_report_bundle,
+      serialize_to_tavi,
+    )
+
+    bundle = build_report_bundle(session, graph_id, report_id)
+    uploaded = s3.upload_bytes(
+      content=serialize_to_tavi(bundle),
+      bucket=bucket,
+      key=key,
+      content_type="application/json",
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      raise BundleSigningError(
+        f"Failed to materialize Tavi model for report '{report_id}' "
+        f"to s3://{bucket}/{key}."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type="application/json",
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}.tavi.json"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' Tavi model."
+    )
+
+  from robosystems.operations.serialization.xbrl.tavi import TAVI_OMITTED_CONTENT
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type="application/json",
+    format=XbrlFlavor.TAVI.value,
+    generation_count=generation_count,
+    # A property of the flavor, declared on cache hits too: the bundle content
+    # the compiled model has no home for (the holon and JSON-LD keep it).
+    omitted_content=list(TAVI_OMITTED_CONTENT),
   )
 
 

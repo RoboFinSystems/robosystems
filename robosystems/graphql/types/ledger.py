@@ -704,19 +704,24 @@ class ReportDownloadFormat(Enum):
   """Serialization flavor for a Report bundle download.
 
   Names map to the operations-layer ``RdfFlavor`` / ``XbrlFlavor``
-  string values (``jsonld``, ``holon-jsonld``, ``xbrl-2.1``). The
-  hyphenated values aren't valid GraphQL enum *names*, so the wire names
-  are ``HOLON_JSONLD`` / ``XBRL_2_1`` while the resolver forwards the
-  ``.value`` to the ops read.
+  string values (``jsonld``, ``holon-jsonld``, ``xbrl-2.1``, ``tavi``).
+  The hyphenated values aren't valid GraphQL enum *names*, so the wire
+  names are ``HOLON_JSONLD`` / ``XBRL_2_1`` while the resolver forwards
+  the ``.value`` to the ops read.
 
   ``JSONLD`` is the flat canonical bundle stamped at publish;
   ``HOLON_JSONLD`` is the dataset-form named-graph holon (scene /
-  boundary / projection), materialized on demand off the same bundle.
+  boundary / projection), materialized on demand off the same bundle;
+  ``TAVI`` is the Project Tavi compiled model — the same report in the
+  standards form the SEC pipeline publishes per filing, materialized on
+  demand the same way and rendered by report-components with no RDF
+  step.
   """
 
   JSONLD = "jsonld"
   HOLON_JSONLD = "holon-jsonld"
   XBRL_2_1 = "xbrl-2.1"
+  TAVI = "tavi"
 
 
 @pydantic_type(model=PydanticReportBundleDownloadResponse, all_fields=True)
