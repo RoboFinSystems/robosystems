@@ -2,11 +2,12 @@
 """Export the latest filed Report in every serialization — step 9 of the
 Seattle Method demo.
 
-One Report, four artifacts, pulled from the report endpoint via the published
+One Report, five artifacts, pulled from the report endpoint via the published
 SDK: the flat JSON-LD bundle, the native holon (``.holon.jsonld``, the holon
-viewer's input), the XBRL 2.1 report package, and the DataBook. Each
-serialization is then validated container-free — SHACL over the JSON-LD,
-Arelle over the XBRL 2.1 — and both verdicts are inlined into the DataBook.
+viewer's input), the Tavi compiled model (``.tavi.json``, what
+report-components renders with no RDF step), the XBRL 2.1 report package, and
+the DataBook. The JSON-LD and the XBRL 2.1 are then validated container-free
+— SHACL and Arelle — and both verdicts are inlined into the DataBook.
 
 Where ``reconcile.py`` checks the *numbers* against Charlie Hoffman's
 reference, this step proves the exported *shape*.
@@ -18,8 +19,8 @@ Run it:
     uv run python -m examples.seattle_method_demo.download_bundles <graph_id>
     uv run python -m examples.seattle_method_demo.download_bundles  # cached slot
 
-Writes ``output/seattle-method-case-1.{jsonld,holon.jsonld,zip}`` plus the two
-validation reports and the DataBook.
+Writes ``output/seattle-method-case-1.{jsonld,holon.jsonld,tavi.json,zip}``
+plus the two validation reports and the DataBook.
 """
 
 from __future__ import annotations

@@ -4,8 +4,9 @@
 Thin wrapper over the shared ``render_report_artifacts``
 (``examples/_common/artifacts.py``) — the single definition of what a report
 demo emits: the flat JSON-LD bundle, the native holon (``.holon.jsonld``), the
-XBRL 2.1 zip, the SHACL + Arelle verdicts, and the DataBook. All flavors are
-pulled from the report endpoint via the published SDK.
+Tavi compiled model (``.tavi.json``), the XBRL 2.1 zip, the SHACL + Arelle
+verdicts, and the DataBook. All flavors are pulled from the report endpoint
+via the published SDK.
 
 Importable as ``download_bundles_for_report(client, graph_id, report_id,
 out_dir)`` so ``main.py`` can reuse it in-process at the end of

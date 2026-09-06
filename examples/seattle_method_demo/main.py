@@ -345,10 +345,10 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
   """Step 9 — Render the latest filed Report's aligned artifact set.
 
   Pulls the flat JSON-LD, the native holon (``.holon.jsonld`` — the viewer's
-  input) and the XBRL 2.1 zip from the report endpoint, validates them
-  container-free (SHACL over the JSON-LD, Arelle over the XBRL 2.1), and
-  writes the DataBook with both verdicts inlined. Where step 7 checks the
-  *numbers*, this step proves the exported *shape*.
+  input), the Tavi compiled model (``.tavi.json``) and the XBRL 2.1 zip from
+  the report endpoint, validates the JSON-LD and the XBRL 2.1 container-free
+  (SHACL, Arelle), and writes the DataBook with both verdicts inlined. Where
+  step 7 checks the *numbers*, this step proves the exported *shape*.
   """
   print("─" * 70)
   print(
@@ -539,6 +539,7 @@ def main() -> None:
   print("  - seattle-method-case-1-four-statements.md   (rs-gaap 4-statement Report)")
   print("  - seattle-method-case-1.jsonld               (flat JSON-LD bundle)")
   print("  - seattle-method-case-1.holon.jsonld         (native holon — viewer input)")
+  print("  - seattle-method-case-1.tavi.json            (Tavi compiled model)")
   print("  - seattle-method-case-1.zip                  (XBRL 2.1 report package)")
   print("  - seattle-method-case-1-shacl-validation.md  (SHACL conformance)")
   print("  - seattle-method-case-1-xbrl-validation.md   (Arelle conformance)")

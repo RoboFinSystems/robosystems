@@ -370,10 +370,10 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
   """Step 10 — Render the latest filed Report's aligned artifact set.
 
   Pulls the flat JSON-LD, the native holon (``.holon.jsonld`` — the viewer's
-  input) and the XBRL 2.1 zip from the report endpoint, validates them
-  container-free (SHACL over the JSON-LD, Arelle over the XBRL 2.1), and
-  writes the DataBook with both verdicts inlined. Step 11 reads the JSON-LD
-  this step writes, so it must run first.
+  input), the Tavi compiled model (``.tavi.json``) and the XBRL 2.1 zip from
+  the report endpoint, validates the JSON-LD and the XBRL 2.1 container-free
+  (SHACL, Arelle), and writes the DataBook with both verdicts inlined. Step
+  11 reads the JSON-LD this step writes, so it must run first.
   """
   print("─" * 70)
   print(
