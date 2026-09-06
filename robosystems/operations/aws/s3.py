@@ -110,6 +110,7 @@ class S3Client:
     key: str,
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
+    cache_control: str | None = None,
   ) -> bool:
     """Upload a UTF-8 string as an S3 object. False on any failure.
 
@@ -128,6 +129,9 @@ class S3Client:
 
     if metadata:
       put_args["Metadata"] = metadata
+
+    if cache_control:
+      put_args["CacheControl"] = cache_control
 
     security_errors = {"AccessDenied"}
 
@@ -160,6 +164,7 @@ class S3Client:
     key: str,
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
+    cache_control: str | None = None,
   ) -> bool:
     """Upload raw bytes as an S3 object. False on any failure.
 
@@ -177,6 +182,9 @@ class S3Client:
 
     if metadata:
       put_args["Metadata"] = metadata
+
+    if cache_control:
+      put_args["CacheControl"] = cache_control
 
     security_errors = {"AccessDenied"}
 
@@ -207,6 +215,7 @@ class S3Client:
     key: str,
     content_type: str | None = None,
     metadata: dict[str, str] | None = None,
+    cache_control: str | None = None,
   ) -> bool:
     """Upload a local file to S3. False on any failure."""
     extra_args = {}
@@ -214,6 +223,8 @@ class S3Client:
       extra_args["ContentType"] = content_type
     if metadata:
       extra_args["Metadata"] = metadata
+    if cache_control:
+      extra_args["CacheControl"] = cache_control
 
     try:
       self.s3_client.upload_file(

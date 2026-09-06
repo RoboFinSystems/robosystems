@@ -43,6 +43,7 @@ from dagster import (
 )
 
 from .artifact import sec_knowledge_artifacts
+from .catalog import sec_filing_catalog
 from .configs import sec_quarter_partitions
 from .download import sec_raw_filings
 from .duckdb_s3_publish import (
@@ -489,6 +490,36 @@ SEC_INDEX_ECS_TAGS = {
     ],
   },
 }
+
+# The filer catalog: a fold over three small processed tables plus one
+# manifest read per filing of a touched filer. Light, and idempotent on retry
+# (every write is a whole file), so Spot is fine.
+SEC_CATALOG_ECS_TAGS = {
+  "dagster/max_retries": 3,
+  "ecs/cpu": "1024",
+  "ecs/memory": "4096",
+  "ecs/run_task_kwargs": {
+    "capacityProviderStrategy": [
+      {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
+      {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+    ],
+  },
+}
+
+# Named apart from its asset: Dagster requires job and op names to be unique
+# within a repository, and an asset's op carries the asset's name.
+sec_filing_catalog_job = define_asset_job(
+  name="sec_catalog",
+  description="Regenerate the per-filer catalog and corpus index on the public CDN (partitioned by quarter).",
+  selection=AssetSelection.assets(sec_filing_catalog),
+  partitions_def=sec_quarter_partitions,
+  tags={
+    "pipeline": "sec",
+    "phase": "catalog",
+    **SEC_CATALOG_ECS_TAGS,
+  },
+)
+
 
 sec_narratives_index_job = define_asset_job(
   name="sec_narratives_index",

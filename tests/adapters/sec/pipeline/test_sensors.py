@@ -744,7 +744,7 @@ class TestSecPostStageIndexSensor:
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_yields_run_requests_for_all_index_jobs(self, mock_env):
-    """Test sensor yields RunRequests for textblocks, narratives, and iXBRL."""
+    """Test sensor yields RunRequests for narratives, iXBRL, and the filer catalog."""
     mock_env.ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
@@ -761,11 +761,12 @@ class TestSecPostStageIndexSensor:
 
       result = list(sec_post_stage_index_sensor(context))
 
-    assert len(result) == 2
+    assert len(result) == 3
     job_names = {r.job_name for r in result}
     assert job_names == {
       "sec_narratives_index",
       "sec_ixbrl_index",
+      "sec_catalog",
     }
 
     for r in result:

@@ -47,6 +47,15 @@ SIGTERM handler stops the loop and attempts a best-effort flush; if the two-minu
 spot window allows, filings are consolidated and marked success, and if it does
 not, the cache covers them on the next run. Nothing is lost either way.
 
+**Public artifacts.** While the model is in hand, the processor also writes
+the filing's portable representations to the public-data bucket, in the
+folder its externalized text blocks use (`{year}/{cik}/{accession}/`): the
+`holon.jsonld` (text blocks as their CDN URLs), the Project Tavi compiled
+model `tavi.json` with its `tavi.gaps.json` sidecar, the primary document as
+filed, and a `manifest.json` naming what was written. Gated by
+`SEC_FILING_ARTIFACTS_ENABLED`; never fails the filing
+(`processors/artifacts.py`). A backfill of the artifacts is a reprocess.
+
 Output layout:
 
 ```
@@ -102,6 +111,23 @@ indexing into OpenSearch for hybrid BM25 + KNN search.
 `sec_knowledge_artifacts` builds the corpus-level artifacts from the published
 DuckDB file.
 
+### 7. Catalog — `sec_filing_catalog`
+
+The public pages' index, without a database. Folds the processed Report,
+Entity and ENTITY_HAS_REPORT parquet of every partition from `start_year`
+on, joined to each filing's `manifest.json`, into `companies/{ticker}.json`
+per filer and `companies/index.json` for the corpus, on the public CDN.
+Files are regenerated whole — every filer with a filing in the run's
+partitions, all of them on `full_rebuild`, the index always — so overlapping
+runs cannot corrupt one. Also writes `robots.txt` when it is missing.
+Chained off staging by `sec_post_stage_index_sensor`, beside the text index;
+the job is `sec_catalog` (a job may not share its asset's name).
+
+```bash
+uv run dagster asset materialize -m robosystems.dagster \
+  --select sec_filing_catalog --partition 2026-Q3
+```
+
 ## Nightly chain
 
 ```
@@ -118,6 +144,7 @@ sec_stage_to_materialize_sensor
 
 sec_post_stage_index_sensor
   → text indexing
+  → filer catalog (companies/*.json + index.json on the public CDN)
 
 sec_post_materialize_publish_sensor
   → lbug S3 publish

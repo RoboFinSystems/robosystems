@@ -50,6 +50,7 @@ from .configs import SEC_HISTORICAL_FORM_TYPES, SEC_PRIMARY_START_YEAR
 from .jobs import (
   sec_download_job,
   sec_duckdb_s3_publish_job,
+  sec_filing_catalog_job,
   sec_incremental_stage_job,
   sec_ixbrl_index_job,
   sec_lbug_s3_publish_job,
@@ -819,10 +820,11 @@ def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
   request_jobs=[
     sec_narratives_index_job,
     sec_ixbrl_index_job,
+    sec_filing_catalog_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,
-  description="Chain: stage → text search indexing (narratives + iXBRL disclosures)",
+  description="Chain: stage → text search indexing (narratives + iXBRL disclosures) + filer catalog",
 )
 def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   """Trigger text search indexing after staging completes.
@@ -859,6 +861,8 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   index_jobs = {
     "sec_narratives_index": "sec_narratives_indexed",
     "sec_ixbrl_index": "sec_ixbrl_disclosures_indexed",
+    # Not an index, but the same shape: post-stage, per partition, one op config.
+    "sec_catalog": "sec_filing_catalog",
   }
 
   for job_name, asset_name in index_jobs.items():
@@ -910,10 +914,12 @@ _INDEX_RETRY_MAX = 3
   monitored_jobs=[
     sec_narratives_index_job,
     sec_ixbrl_index_job,
+    sec_filing_catalog_job,
   ],
   request_jobs=[
     sec_narratives_index_job,
     sec_ixbrl_index_job,
+    sec_filing_catalog_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,
   minimum_interval_seconds=60,

@@ -34,12 +34,14 @@ from robosystems.adapters.sec.config import (
   XBRL_COLUMN_STANDARDIZATION,
   XBRL_EXTERNALIZATION_THRESHOLD,
   XBRL_EXTERNALIZE_LARGE_VALUES,
+  XBRL_FILING_ARTIFACTS,
   XBRL_KEEP_TEXTBLOCKS_INLINE,
   XBRL_SEMANTIC_ENRICHMENT,
   XBRL_SKIP_TEXTBLOCK_FACTS,
   XBRL_STANDARDIZED_FILENAMES,
   XBRL_TYPE_PREFIXES,
 )
+from robosystems.adapters.sec.processors.artifacts import FilingArtifactWriter
 from robosystems.adapters.sec.processors.dataframe import DataFrameManager
 from robosystems.adapters.sec.processors.parquet import ParquetWriter
 from robosystems.adapters.sec.processors.schema import (
@@ -93,11 +95,13 @@ class XBRLGraphProcessor:
     self.report_data: dict[str, Any] | None = None
 
     s3_client = None
-    if XBRL_EXTERNALIZE_LARGE_VALUES and env.PUBLIC_DATA_BUCKET:
+    if (
+      XBRL_EXTERNALIZE_LARGE_VALUES or XBRL_FILING_ARTIFACTS
+    ) and env.PUBLIC_DATA_BUCKET:
       try:
         s3_client = S3Client()
       except Exception as e:
-        logger.warning(f"Failed to initialize S3 client for externalization: {e}")
+        logger.warning(f"Failed to initialize S3 client for the public bucket: {e}")
 
     self.textblock_externalizer = TextBlockExternalizer(
       s3_client=s3_client,
@@ -106,6 +110,12 @@ class XBRLGraphProcessor:
       threshold=XBRL_EXTERNALIZATION_THRESHOLD,
       enabled=XBRL_EXTERNALIZE_LARGE_VALUES,
       keep_inline=XBRL_KEEP_TEXTBLOCKS_INLINE,
+    )
+    self.filing_artifacts = FilingArtifactWriter(
+      s3_client=s3_client,
+      bucket=env.PUBLIC_DATA_BUCKET,
+      cdn_url=env.PUBLIC_DATA_CDN_URL,
+      enabled=XBRL_FILING_ARTIFACTS,
     )
 
     self.enable_standardized_filenames = XBRL_STANDARDIZED_FILENAMES
@@ -180,6 +190,9 @@ class XBRLGraphProcessor:
       model = to_xbrl_model(
         model_xbrl, self._filing_meta(), entity=self._entity_identity()
       )
+      # The public artifacts carry the whole filing, text blocks included,
+      # whatever the graph keeps.
+      full_model = model
       if XBRL_SKIP_TEXTBLOCK_FACTS:
         model = _without_textblock_facts(model)
       self.model = model
@@ -188,6 +201,7 @@ class XBRLGraphProcessor:
       self._bind_tables(to_graph_tables(model))
 
       self._externalize_large_values()
+      self._write_filing_artifacts(full_model)
 
       if self.enable_semantic_enrichment:
         logger.info("Computing semantic enrichments")
@@ -732,6 +746,41 @@ class XBRLGraphProcessor:
     if externalized:
       logger.info(f"Externalized {externalized} large fact values")
     externalizer.process_batch_uploads()
+
+  def _write_filing_artifacts(self, model: XbrlModel) -> None:
+    """Publish the filing's portable representations beside its text blocks.
+
+    Runs after externalization so the holon can carry each moved text
+    block's CDN URL the way the Fact row does. Never fails the filing: the
+    parquet is the product and these are a projection of the same parse; a
+    filing whose artifacts failed has no manifest, so the catalog lists it
+    without representations until it is reprocessed.
+    """
+    writer = self.filing_artifacts
+    if not writer.enabled:
+      return
+    try:
+      external: dict[str, str] = {}
+      attr = self.schema_to_dataframe_mapping.get("Fact")
+      facts: pd.DataFrame | None = getattr(self, attr) if attr else None
+      if facts is not None and not facts.empty and "value_type" in facts.columns:
+        moved = facts[facts["value_type"] == "external"]
+        external = dict(zip(moved["identifier"], moved["value"], strict=True))
+      result = writer.write(
+        model,
+        report_id=self.report_data.get("identifier") if self.report_data else None,
+        instance_path=self.instance_path,
+        external_values=external,
+        processor_version=self.version,
+      )
+      if result is not None:
+        logger.info(
+          f"Filing artifacts: {len(result.representations)} representations "
+          f"under {result.prefix}"
+          + (f", {len(result.errors)} errors" if result.errors else "")
+        )
+    except Exception as e:
+      logger.error(f"Filing artifacts failed (non-fatal for the filing): {e}")
 
 
 def _without_textblock_facts(model: XbrlModel) -> XbrlModel:

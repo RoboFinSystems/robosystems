@@ -37,11 +37,17 @@ Pipeline stages (run independently via separate jobs):
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
 
+7. CATALOG (the public pages' index, no database):
+   - sec_filing_catalog - Per-filer catalog + corpus index on the public CDN, a fold
+     over the processed Report/Entity tables and each filing's artifact manifest
+     (the artifacts themselves are written by the processor at process time)
+
 Nightly incremental chain (sensor-driven):
   download → process (250 batch loop) → stage (DuckDB INSERT)
   → materialize (full LadybugDB rebuild) → lbug S3 publish
   → duckdb S3 publish → replica refresh
   → text index (parallel with materialize: textblocks + narratives → OpenSearch)
+  → filer catalog (parallel with the text index)
 
 Usage:
     from robosystems.adapters.sec.pipeline import get_dagster_components
@@ -57,6 +63,7 @@ from robosystems.adapters.sec.pipeline.artifact import (
   SECArtifactConfig,
   sec_knowledge_artifacts,
 )
+from robosystems.adapters.sec.pipeline.catalog import sec_filing_catalog
 from robosystems.adapters.sec.pipeline.configs import (
   SEC_FORM_TYPE_BATCHES,
   SEC_HISTORICAL_END_YEAR,
@@ -65,6 +72,7 @@ from robosystems.adapters.sec.pipeline.configs import (
   SEC_QUARTERS,
   SEC_START_YEAR,
   SECDownloadConfig,
+  SECFilingCatalogConfig,
   SECHFPublishConfig,
   SECHistoricalStageConfig,
   SECIncrementalStageConfig,
@@ -83,6 +91,7 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
+  sec_filing_catalog_job,
   sec_historical_duckdb_s3_publish_job,
   sec_historical_lbug_s3_publish_job,
   sec_historical_materialize_job,
@@ -159,6 +168,7 @@ def get_dagster_components():
       sec_knowledge_artifacts,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
+      sec_filing_catalog,
     ],
     "jobs": [
       sec_download_job,
@@ -179,6 +189,7 @@ def get_dagster_components():
       sec_historical_lbug_s3_publish_job,
       sec_narratives_index_job,
       sec_ixbrl_index_job,
+      sec_filing_catalog_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -205,6 +216,7 @@ __all__ = [
   "SEC_START_YEAR",
   "SECArtifactConfig",
   "SECDownloadConfig",
+  "SECFilingCatalogConfig",
   "SECHFPublishConfig",
   "SECHistoricalStageConfig",
   "SECIncrementalStageConfig",
@@ -218,6 +230,8 @@ __all__ = [
   "sec_duckdb_s3_publish_job",
   "sec_duckdb_s3_published",
   "sec_duckdb_staged",
+  "sec_filing_catalog",
+  "sec_filing_catalog_job",
   "sec_graph_materialized",
   "sec_historical_duckdb_s3_publish_job",
   "sec_historical_duckdb_s3_published",
