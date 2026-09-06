@@ -1,19 +1,21 @@
 """Cross-encoder fact-equivalence assertion (v1 graph-native).
 
-The ontology claim: *one bundle, two encoders, one fact set*. The JSON-LD
-encoder (graph-native: ``rs:Fact`` referencing ``rs:period``/``rs:unit``) and
-the XBRL 2.1 emitter (which re-derives ``<context>``) share the same
+The ontology claim: *one bundle, three encoders, one fact set*. The JSON-LD
+encoder (graph-native: ``rs:Fact`` referencing ``rs:period``/``rs:unit``), the
+XBRL 2.1 emitter (which re-derives ``<context>``) and the Tavi flavor (xbrlkit's
+emitter, fed through the bundle → ``XbrlModel`` bridge) share the same
 :class:`StatementBundle` and produce semantically equivalent output — every
-fact emerges in both projections with matching
+fact emerges in all three projections with matching
 ``(concept, period, unit, value, decimals)``.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import rdflib
 from lxml import etree
@@ -195,10 +197,46 @@ def _facts_from_xbrl(xbrl_zip: bytes) -> set[_FactTuple]:
   return out
 
 
+def _inclusive(moment: str) -> str:
+  """A Tavi exclusive-end ``xs:dateTime`` back to the inclusive date it stands for."""
+  return (datetime.fromisoformat(moment) - timedelta(days=1)).date().isoformat()
+
+
+def _facts_from_tavi(tavi: bytes) -> set[_FactTuple]:
+  document = json.loads(tavi)
+  out: set[_FactTuple] = set()
+  for fact in document["xbrlModel"]["facts"]:
+    dims = fact["factDimensions"]
+    if "xbrl:unit" not in dims:
+      continue
+    interval = dims["xbrl:period"]
+    if "/" in interval:
+      start, end = interval.split("/", 1)
+      period = ("duration", start[:10], _inclusive(end))
+    else:
+      period = ("instant", _inclusive(interval))
+    (value,) = fact["factValues"]
+    out.add(
+      _FactTuple(
+        concept=dims["xbrl:concept"].rsplit(":", 1)[-1],
+        period=period,
+        unit=_measure_local(dims["xbrl:unit"]),
+        value=float(value["value"]),
+        decimals=str(value["decimals"]) if "decimals" in value else "INF",
+      )
+    )
+  return out
+
+
 def _both(bundle: StatementBundle) -> tuple[set[_FactTuple], set[_FactTuple]]:
+  """The JSON-LD and XBRL projections, after asserting the Tavi matches both."""
   jsonld = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
   xbrl = serialize_to_xbrl(bundle, XbrlFlavor.XBRL_2_1)
-  return _facts_from_jsonld(jsonld), _facts_from_xbrl(xbrl)
+  tavi = serialize_to_xbrl(bundle, XbrlFlavor.TAVI)
+  from_jsonld, from_xbrl = _facts_from_jsonld(jsonld), _facts_from_xbrl(xbrl)
+  assert _facts_from_tavi(tavi) == from_jsonld
+  assert _facts_from_tavi(tavi) == from_xbrl
+  return from_jsonld, from_xbrl
 
 
 # ── Tests ────────────────────────────────────────────────────────────────

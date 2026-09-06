@@ -512,6 +512,7 @@ def test_revoke_withdraws_the_stored_publication_too() -> None:
     s3.iter_object_keys.return_value = [
       f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
       f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+      f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.tavi.json",
     ]
     s3.delete_object.return_value = True
     revoke_report_share(
@@ -528,6 +529,7 @@ def test_revoke_withdraws_the_stored_publication_too() -> None:
   assert deleted == {
     f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.jsonld",
     f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.holon.jsonld",
+    f"report-bundles/{TARGET_GRAPH}/{copy_id}/g1.tavi.json",
   }
 
 

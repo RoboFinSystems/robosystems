@@ -1,9 +1,9 @@
 """Tests for ``get_report_download_url`` — the presigned-URL read that
 replaced the retired ``GET .../reports/{id}/download`` REST endpoint.
 
-Covers both flavors (JSON-LD stamped at publish, XBRL materialized +
-cached on first download), the cache hit/miss split, and the
-not-found / not-available / signing-failure error paths.
+Covers every flavor (JSON-LD stamped at publish; XBRL, the holon and the
+Tavi model materialized + cached on first download), the cache hit/miss
+split, and the not-found / not-available / signing-failure error paths.
 """
 
 from __future__ import annotations
@@ -103,7 +103,11 @@ class TestReceivedReportsAreNeverRederived:
   @pytest.mark.unit
   @pytest.mark.parametrize(
     ("flavor", "artifact"),
-    [("holon-jsonld", "holon"), ("xbrl-2.1", "XBRL bundle")],
+    [
+      ("holon-jsonld", "holon"),
+      ("xbrl-2.1", "XBRL bundle"),
+      ("tavi", "Tavi model"),
+    ],
   )
   def test_a_cache_miss_on_a_received_report_is_a_miss(self, flavor, artifact):
     session = _session(_report(source_graph_id="kg_sender"))
@@ -118,7 +122,7 @@ class TestReceivedReportsAreNeverRederived:
     build.assert_not_called()
 
   @pytest.mark.unit
-  @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1"])
+  @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1", "tavi"])
   def test_a_cached_received_artifact_is_still_served(self, flavor):
     """The refusal is about re-deriving, not about received reports — the
     sender's own artifact serves normally."""
@@ -328,3 +332,80 @@ class TestHolonJsonLd:
       s3.upload_string.return_value = False
       with pytest.raises(BundleSigningError, match="materialize"):
         get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld")
+
+
+class TestTavi:
+  """The Tavi compiled model — derived + cached on demand like the holon,
+  gated on publication rather than ``bundle_url``, written as bytes."""
+
+  @pytest.mark.unit
+  def test_cache_hit_presigns_without_rebuilding(self):
+    session = _session(_report(bundle_url=None))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/tavi"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")
+
+    assert resp is not None
+    assert resp.content_type == "application/json"
+    assert resp.format == "tavi"
+    assert "ib_envelopes" in resp.omitted_content
+    build.assert_not_called()
+    s3.upload_bytes.assert_not_called()
+
+  @pytest.mark.unit
+  def test_cache_miss_materializes_then_presigns(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.serialize_to_tavi",
+        return_value=b'{"documentInfo":{}}',
+      ) as serialize,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.upload_bytes.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/tavi"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")
+
+    assert resp is not None
+    build.assert_called_once()
+    serialize.assert_called_once()
+    _, up_kwargs = s3.upload_bytes.call_args
+    assert up_kwargs["content"] == b'{"documentInfo":{}}'
+    assert up_kwargs["content_type"] == "application/json"
+    assert up_kwargs["key"].endswith("g3.tavi.json")
+    _, sign_kwargs = s3.generate_presigned_url.call_args
+    assert sign_kwargs["response_content_type"] == "application/json"
+    assert (
+      'filename="rpt_1-g3.tavi.json"' in sign_kwargs["response_content_disposition"]
+    )
+
+  @pytest.mark.unit
+  def test_an_unpublished_report_has_no_tavi(self):
+    session = _session(_report(generation_status="draft"))
+    with pytest.raises(ReportBundleNotAvailableError, match="not published"):
+      get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")
+
+  @pytest.mark.unit
+  def test_upload_failure_raises_signing_error(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle"),
+      patch(
+        "robosystems.operations.serialization.serialize_to_tavi",
+        return_value=b"{}",
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.upload_bytes.return_value = False
+      with pytest.raises(BundleSigningError, match="materialize"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")

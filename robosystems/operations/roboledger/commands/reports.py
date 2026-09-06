@@ -79,6 +79,7 @@ from robosystems.operations.serialization import (
   build_report_bundle,
   serialize_to_holon_jsonld,
   serialize_to_rdf,
+  serialize_to_tavi,
 )
 
 # Extensions that give a graph a tenant schema, and so make it a legitimate
@@ -317,7 +318,7 @@ def _stamp_report_bundle(
      version even on regenerate.
   3. Build the ``StatementBundle`` via :func:`build_report_bundle`.
   4. Serialize to JSON-LD via :func:`serialize_to_rdf`.
-  5. Upload to S3 under ``report-bundles/{graph_id}/{report_id}/v{n}.jsonld``.
+  5. Upload to S3 under ``report-bundles/{graph_id}/{report_id}/g{n}.jsonld``.
   6. Stamp ``report_def.bundle_url`` with the full ``s3://`` URI.
 
   Fail-loud: any S3 failure raises :class:`BundleUploadError` so the
@@ -1111,6 +1112,27 @@ def revoke_report_share(
   )
 
 
+# The media type each publication artifact is stored and served under, by the
+# extension of its bundle key.
+PUBLICATION_MEDIA_TYPES: dict[str, str] = {
+  ".jsonld": "application/ld+json",
+  ".holon.jsonld": "application/ld+json",
+  ".tavi.json": "application/json",
+}
+
+# The artifacts derived on demand off the bundle; the flat JSON-LD is stamped
+# at publish and is never rebuilt here.
+DERIVED_ARTIFACT_EXTENSIONS: tuple[str, ...] = (".holon.jsonld", ".tavi.json")
+
+
+def _encode_derived_artifact(extension: str, bundle: StatementBundle) -> str:
+  if extension == ".holon.jsonld":
+    return serialize_to_holon_jsonld(bundle)
+  if extension == ".tavi.json":
+    return serialize_to_tavi(bundle).decode("utf-8")
+  raise ValueError(f"No derived encoder for {extension!r}")
+
+
 def _load_publication_artifacts(
   graph_id: str, report_id: str, generation_count: int
 ) -> dict[str, str]:
@@ -1120,10 +1142,12 @@ def _load_publication_artifacts(
   named graphs — is the intended cross-tenant wire format: one self-contained
   serialization that renders outside the system entirely, and whose partition
   omits the ``#lineage`` graph by construction, so the books never cross with
-  the report. Carrying the sender's *object* rather than re-deriving one from
-  the recipient's copied rows is what makes the recipient's view the
-  publication the sender actually made, byte for byte, instead of a
-  reconstruction that can drift from it.
+  the report. The **Tavi** compiled model travels beside it: the same report in
+  the standards form the report-components adapter renders with no RDF step.
+  Carrying the sender's *objects* rather than re-deriving them from the
+  recipient's copied rows is what makes the recipient's view the publication
+  the sender actually made, byte for byte, instead of a reconstruction that
+  can drift from it.
 
   Returns the artifacts that resolved, keyed by file extension. A miss is
   logged and omitted rather than raised: the row copy is the load-bearing half
@@ -1132,8 +1156,8 @@ def _load_publication_artifacts(
   recipient's renderers rather than failing the delivery outright.
 
   Called after the sender's session closes, so none of this object-store I/O
-  holds a database connection open. The holon build below needs a session and
-  opens its own short-lived one, on the cold path only.
+  holds a database connection open. A derived artifact that has to be built
+  needs a session and opens its own short-lived one, on the cold path only.
   """
   from robosystems.db.extensions import extensions_session
 
@@ -1153,35 +1177,52 @@ def _load_publication_artifacts(
       report_id,
     )
 
-  # The holon is derived on demand, not stamped at publish, so a report nobody
-  # has downloaded in that flavor yet has no object. Build it once here — the
-  # key is immutable per generation, so this also warms the sender's cache.
-  holon_key = get_report_bundle_key(
-    graph_id, report_id, generation_count, extension=".holon.jsonld"
-  )
-  holon = s3.download_string(bucket, holon_key)
-  if holon is None:
+  # The holon and the Tavi are derived on demand, not stamped at publish, so a
+  # report nobody has downloaded in a flavor yet has no object for it. Build
+  # the missing ones once here off one bundle — each key is immutable per
+  # generation, so this also warms the sender's cache.
+  missing: dict[str, str] = {}
+  for extension in DERIVED_ARTIFACT_EXTENSIONS:
+    key = get_report_bundle_key(
+      graph_id, report_id, generation_count, extension=extension
+    )
+    content = s3.download_string(bucket, key)
+    if content is None:
+      missing[extension] = key
+    else:
+      artifacts[extension] = content
+  if not missing:
+    return artifacts
+
+  try:
+    with extensions_session(graph_id) as build_session:
+      bundle = build_report_bundle(build_session, graph_id, report_id)
+  except Exception:
+    logger.exception(
+      "Failed to bundle report %s; the recipient's copy will fall back to the "
+      "package renderer.",
+      report_id,
+    )
+    return artifacts
+  for extension, key in missing.items():
     try:
-      with extensions_session(graph_id) as build_session:
-        holon = serialize_to_holon_jsonld(
-          build_report_bundle(build_session, graph_id, report_id)
-        )
-      s3.upload_string(
-        content=holon,
-        bucket=bucket,
-        key=holon_key,
-        content_type="application/ld+json",
-        metadata={"report-id": report_id, "graph-id": graph_id},
-      )
+      content = _encode_derived_artifact(extension, bundle)
     except Exception:
       logger.exception(
-        "Failed to materialize the holon for report %s; the recipient's copy "
-        "will fall back to the package renderer.",
+        "Failed to materialize the %s artifact for report %s; the recipient's "
+        "copy will carry the others.",
+        extension,
         report_id,
       )
-      holon = None
-  if holon is not None:
-    artifacts[".holon.jsonld"] = holon
+      continue
+    s3.upload_string(
+      content=content,
+      bucket=bucket,
+      key=key,
+      content_type=PUBLICATION_MEDIA_TYPES[extension],
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    artifacts[extension] = content
 
   return artifacts
 
@@ -1212,7 +1253,7 @@ def _copy_publication_artifacts(
       content=content,
       bucket=bucket,
       key=key,
-      content_type="application/ld+json",
+      content_type=PUBLICATION_MEDIA_TYPES.get(extension, "application/octet-stream"),
       metadata={"report-id": shared_report.id, "graph-id": target_graph_id},
     ):
       logger.warning(
@@ -1264,7 +1305,7 @@ def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
   the sender's published report sitting in the recipient's prefix is not the
   exit either control advertises.
 
-  Deletes by prefix, so every generation and both flavors go together.
+  Deletes by prefix, so every generation and every flavor go together.
 
   **Call this after the row deletion commits, never before.** Deleting an
   artifact for a transaction that then rolls back destroys a live report's
